@@ -1,0 +1,17 @@
+&runtime_options
+ debug=0
+/
+
+&mesh_options
+ cad_type=0
+/
+
+&native_mesh_options
+ filename="thincurr_ex-plate.h5"
+/
+
+&thincurr_eig_options
+ direct=T
+ plot_run=F
+ neigs=4
+/

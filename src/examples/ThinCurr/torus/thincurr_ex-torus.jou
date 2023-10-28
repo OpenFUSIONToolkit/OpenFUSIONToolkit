@@ -1,0 +1,25 @@
+reset
+undo off
+
+#{mesh_size=0.1}
+
+# Create simple 1x0.5 torus
+create curve arc radius 0.5 center location 1 0 0  normal 0 1 0  start angle 0 stop angle 360
+sweep curve 1  zaxis angle 360
+
+# Generate mesh
+set trimesher geometry sizing off
+surface all scheme trimesh
+surface all size {mesh_size}
+mesh surface all
+
+# Create mesh blocks
+set duplicate block elements off
+block 1 add surface 1
+nodeset 1 add curve 2
+nodeset 2 add curve 3
+sideset 1 add tri 1
+
+# Export grid
+set large exodus file on
+export Genesis  "thincurr_ex-torus.g" overwrite block 1

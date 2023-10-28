@@ -1,0 +1,24 @@
+reset
+undo off
+
+#{mesh_size=0.1}
+
+# Create simple 1x1 cylinder
+create curve arc radius 1 center location 0 0 0  normal 0 0 1  start angle 0 stop angle 360
+sweep curve 1 vector 0 0 1  distance 1
+move Surface 1 x 0 y 0 z -0.5 include_merged
+
+# Generate mesh
+set trimesher geometry sizing off
+surface all scheme trimesh
+surface all size {mesh_size}
+mesh surface all
+
+# Create mesh blocks
+set duplicate block elements off
+block 1 add surface 1 
+nodeset 1 add vertex 2
+
+# Export grid
+set large exodus file on
+export Genesis  "tw_test-cyl.g" overwrite block 1

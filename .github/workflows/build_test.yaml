@@ -1,0 +1,91 @@
+name: OpenFUSIONToolkit CI build
+
+on:
+  push:
+    branches:
+      - main
+  
+jobs:
+  build:
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+    env:
+      CC: ${{ matrix.config.cc }}
+      CXX: ${{ matrix.config.cxx }}
+      FC: ${{ matrix.config.fc }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - {
+            name: "Ubuntu 20.04 GCC 10",
+            os: ubuntu-20.04,
+            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python", pip: "pip"
+          }
+        - {
+            name: "macOS Monterey GCC 12",
+            os: macos-12,
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", pip: "pip3"
+          }
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install prerequisites
+      run: ${{ matrix.config.pip }} install pytest numpy
+
+    - name: Cache external libraries
+      id: cache-ext-libs
+      uses: actions/cache@v3
+      with:
+        path: libs
+        key: ${{ runner.os }}-build-${{ hashFiles('src/utilities/build_libs.py') }}
+
+    - if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
+      name: Create build dir
+      run: mkdir libs
+
+    - name: Check compilers
+      run: |
+        $CC --version
+        $CXX --version
+        $FC --version
+
+    - name: Build external
+      shell: bash
+      working-directory: libs
+      run: >
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
+        --build_umfpack=1 --build_arpack=1 --oft_build_python --oft_build_tests
+
+    - uses: actions/upload-artifact@v3
+      if: failure()
+      with:
+        name: Library failure log
+        path: libs/build/build_error.log
+    
+    - name: Remove external build directory
+      shell: bash
+      working-directory: libs
+      run: rm -rf build
+
+    - name: Configure OFT
+      shell: bash
+      working-directory: libs
+      run: bash config_cmake.sh
+
+    - name: Build OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: make
+    
+    - name: Install OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: make install
+
+    - name: Test OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: make test

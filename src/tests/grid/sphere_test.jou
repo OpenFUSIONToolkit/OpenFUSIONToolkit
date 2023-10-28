@@ -1,0 +1,18 @@
+reset
+#
+create sphere radius 1
+#
+volume 1 scheme Tetmesh
+set tetmesher interior points on
+set tetmesher optimize level 3  overconstrained  off sliver  off
+set tetmesher boundary recovery  off
+volume 1  tetmesh growth_factor 1.0
+#
+volume 1 size .4
+mesh volume 1
+#
+refine parallel fileroot 'sphere_test' overwrite no_execute
+#
+block 1 volume 1
+block 1 element type tetra10
+refine parallel fileroot 'sphere_test2' overwrite no_execute

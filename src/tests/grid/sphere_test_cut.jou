@@ -1,0 +1,18 @@
+reset
+#
+create sphere radius 1
+webcut volume 1 with plane xplane offset 0 noimprint nomerge
+webcut volume 1 2 with plane yplane offset 0 noimprint nomerge
+imprint all
+merge all
+#
+volume all scheme Tetmesh
+set tetmesher interior points on
+set tetmesher optimize level 3  overconstrained  off sliver  off
+set tetmesher boundary recovery  off
+volume 1  tetmesh growth_factor 1.0
+#
+volume all size .4
+mesh volume all
+#
+refine parallel fileroot 'sphere_test_cut' overwrite no_execute

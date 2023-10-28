@@ -1,0 +1,387 @@
+########################
+# OpenFUSIONToolkit
+########################
+cmake_minimum_required( VERSION 3.12 )
+project( OpeNFUSIONToolkit )
+enable_language( Fortran )
+list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
+
+option(OFT_BUILD_TESTS "Build tests?" OFF)
+option(OFT_BUILD_EXAMPLES "Build Examples?" OFF)
+option(OFT_USE_MPI "Build with MPI support?" OFF)
+option(OFT_USE_OpenMP "Build with OpenMP support?" ON)
+option(OFT_DEBUG_STACK "Build with internal debugging stack?" OFF)
+option(OFT_PROFILE "Build with internal profiling enabled?" OFF)
+option(OFT_BUILD_PYTHON "Build experimental Python wrappers?" OFF)
+option(OFT_BUILD_DOCS "Build documentation?" OFF)
+option(OFT_PACKAGE_BUILD "Perform a destributable package?" OFF)
+option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" OFF)
+
+# Internal variables
+set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")
+set(OFT_PYTHON_BINS CACHE INTERNAL "package_python_binaries")
+
+########################
+# Compiler and flag setup
+########################
+if ("${CMAKE_Fortran_COMPILER_ID}" MATCHES "Intel")
+  set( CMAKE_C_FLAGS_DEBUG "-g -O0" )
+  set( CMAKE_CXX_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
+  set( CMAKE_Fortran_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
+  set( CMAKE_C_FLAGS_RELEASE "" )
+  set( CMAKE_CXX_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} )
+  set( CMAKE_Fortran_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} )
+  if(NOT OFT_PACKAGE_BUILD)
+    set( CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG} -check bounds,pointers,shape,uninit" )
+  endif()
+elseif("${CMAKE_Fortran_COMPILER_ID}" MATCHES "GNU")
+  set( CMAKE_C_FLAGS_DEBUG "-g -O0" )
+  set( CMAKE_CXX_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
+  set( CMAKE_Fortran_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
+  set( CMAKE_C_FLAGS_RELEASE "-O2" )
+  set( CMAKE_CXX_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} )
+  set( CMAKE_Fortran_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} )
+  if(NOT OFT_PACKAGE_BUILD)
+    set( CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG} -fcheck=all" )
+  endif()
+  set( CMAKE_Fortran_FLAGS "-ffree-line-length-none ${CMAKE_Fortran_FLAGS}" )
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 10)
+    set( CMAKE_Fortran_FLAGS "-fallow-argument-mismatch ${CMAKE_Fortran_FLAGS}" )
+  endif()
+endif()
+# Internal profiling
+if( OFT_PROFILE )
+  add_definitions( -DOFT_STACK -DOFT_PROFILE )
+endif()
+# Internal debugging stack
+if( OFT_DEBUG_STACK )
+  add_definitions( -DOFT_STACK )
+endif()
+# OpenMP
+find_package( OpenMP )
+# set( EXT_LIBS "${OpenMP_Fortran_LIBRARIES}")
+if( OFT_USE_OpenMP )
+  set( CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${OpenMP_Fortran_FLAGS}" )
+endif()
+# Use fPIC when building shared library
+if(OFT_BUILD_PYTHON)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+# Use build runtime paths for install unless packaging
+if(OFT_PACKAGE_BUILD)
+  if(NOT APPLE)
+    set(CMAKE_INSTALL_RPATH $ORIGIN)
+  endif()
+else()
+  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+endif()
+
+########################
+# Required library detection and setup
+########################
+# MPI
+if( OFT_USE_MPI )
+  find_package( MPI )
+  if( MPI_FOUND )
+    set( CMAKE_Fortran_COMPILER ${MPI_Fortran_COMPILER} )
+    set( CMAKE_C_COMPILER ${MPI_C_COMPILER} )
+    add_definitions( -DHAVE_MPI )
+  endif()
+endif()
+# BLAS/LAPACK
+find_package( LAPACK REQUIRED )
+list(REMOVE_DUPLICATES LAPACK_LIBRARIES) # Sometimes BLAS and LAPACK are in the same library
+set( EXT_LIBS ${LAPACK_LIBRARIES} ${EXT_LIBS} )
+if( BLA_VENDOR MATCHES "^Intel" )
+  add_definitions( -DHAVE_MKL )
+endif()
+# HDF5
+find_package( HDF5 COMPONENTS C Fortran HL REQUIRED )
+include_directories( ${HDF5_INCLUDE_DIRS} )
+set( OFT_HDF5_LIBS ${HDF5_HL_LIBRARIES} ${HDF5_LIBRARIES} )
+list(REVERSE OFT_HDF5_LIBS)
+list(REMOVE_DUPLICATES OFT_HDF5_LIBS) # HDF5 often provides several duplicates
+list(REVERSE OFT_HDF5_LIBS)
+set( EXT_LIBS ${OFT_HDF5_LIBS} ${EXT_LIBS} )
+if( HDF5_IS_PARALLEL )
+  if( MPI_FOUND )
+    add_definitions( -DHAVE_PHDF5 )
+  else()
+    message( FATAL_ERROR "Parallel HDF5 found, but MPI not available" )
+  endif()
+endif()
+# PETSc
+find_package( OFT_PETSc )
+if( NOT OFT_PETSc_FOUND )
+  # METIS
+  find_package( OFT_METIS REQUIRED )
+  include_directories( ${OFT_METIS_INCLUDE_DIRS} )
+  set( EXT_LIBS ${OFT_METIS_LIBRARIES} ${EXT_LIBS} )
+endif()
+
+########################
+# Optional library detection and setup
+########################
+# ARPACK
+if( OFT_USE_MPI )
+  find_package( OFT_ARPACK COMPONENTS MPI )
+else()
+  find_package( OFT_ARPACK )
+endif()
+if ( OFT_ARPACK_FOUND )
+  set( EXT_LIBS ${OFT_ARPACK_LIBRARIES} ${EXT_LIBS} )
+  add_definitions( -DHAVE_ARPACK )
+endif()
+# NETCDF
+find_package( OFT_NETCDF COMPONENTS Fortran )
+if ( OFT_NETCDF_FOUND )
+  include_directories( ${OFT_NETCDF_INCLUDE_DIRS} )
+  set( EXT_LIBS ${OFT_NETCDF_LIBRARIES} ${EXT_LIBS} )
+  add_definitions( -DHAVE_NCDF )
+endif()
+# FoX XML
+find_package( OFT_FoX )
+if ( OFT_FoX_FOUND )
+  include_directories( ${OFT_FoX_INCLUDE_DIRS} )
+  set( EXT_LIBS ${OFT_FoX_LIBRARIES} ${EXT_LIBS} )
+  add_definitions( -DHAVE_XML )
+endif()
+# OpenNURBS
+find_package( OFT_OpenNURBS )
+if ( OFT_OpenNURBS_FOUND )
+  include_directories( ${OFT_OpenNURBS_INCLUDE_DIRS} )
+  set( EXT_LIBS ${OFT_OpenNURBS_LIBRARIES} ${EXT_LIBS} )
+  add_definitions( -DHAVE_ONURBS )
+endif()
+# PETSc
+if( OFT_PETSc_FOUND )
+  add_definitions( -DHAVE_PETSC )
+  add_definitions( -DPETSC_VERSION_MAJOR=${OFT_PETSc_VER_MAJOR} )
+  add_definitions( -DPETSC_VERSION_MINOR=${OFT_PETSc_VER_MINOR} )
+  include_directories( ${OFT_PETSc_INCLUDE_DIRS} )
+  set( EXT_LIBS ${OFT_PETSc_LIBRARIES} ${EXT_LIBS} )
+else() # Check for packages also provided by PETSc
+  find_package( OFT_SUPERLU )
+  find_package( OFT_SUPERLU_DIST )
+  find_package( OFT_UMFPACK )
+endif()
+# SuperLU
+if( OFT_SUPERLU_FOUND )
+  add_definitions( -DHAVE_SUPERLU )
+  if( OFT_SUPERLU_VER_MAJOR GREATER 4 )
+    add_definitions( -DSUPERLU_VER_MAJOR=${OFT_SUPERLU_VER_MAJOR} )
+  endif()
+  if( NOT OFT_PETSc_FOUND )
+    include_directories( ${OFT_SUPERLU_INCLUDE_DIRS} )
+    set( EXT_LIBS ${OFT_SUPERLU_LIBRARIES} ${EXT_LIBS} )
+  endif()
+endif()
+# SuperLU-DIST
+if( OFT_SUPERLU_DIST_FOUND )
+  add_definitions( -DHAVE_SUPERLU_DIST )
+  if( NOT OFT_PETSc_FOUND )
+    include_directories( ${OFT_SUPERLU_DIST_INCLUDE_DIRS} )
+    set( EXT_LIBS ${OFT_SUPERLU_DIST_LIBRARIES} ${EXT_LIBS} )
+  endif()
+endif()
+# UMFPACK
+if( OFT_UMFPACK_FOUND )
+  add_definitions( -DHAVE_UMFPACK )
+  if( NOT OFT_PETSc_FOUND )
+    include_directories( ${OFT_UMFPACK_INCLUDE_DIRS} )
+    set( EXT_LIBS ${OFT_UMFPACK_LIBRARIES} ${EXT_LIBS} )
+  endif()
+endif()
+# MUMPS
+if( OFT_MUMPS_FOUND )
+  add_definitions( -DHAVE_MUMPS )
+endif()
+
+########################
+# Setup component libraries
+########################
+# Include files
+add_subdirectory( include )
+include_directories( ${CMAKE_BINARY_DIR}/include )
+# 3rd party libraries
+add_subdirectory( ext_libs )
+add_dependencies( oftext oftheaders )
+include_directories( ${CMAKE_BINARY_DIR}/ext_libs )
+# Base runtime
+add_subdirectory( base )
+add_dependencies( oftbase oftext )
+include_directories( ${CMAKE_BINARY_DIR}/base )
+# Grid
+add_subdirectory( grid )
+add_dependencies( oftgrid oftbase )
+include_directories( ${CMAKE_BINARY_DIR}/grid )
+# Linear algebra
+add_subdirectory( lin_alg )
+add_dependencies( oftla oftgrid )
+include_directories( ${CMAKE_BINARY_DIR}/lin_alg )
+# Finite elements
+add_subdirectory( fem )
+add_dependencies( oftfem oftla )
+include_directories( ${CMAKE_BINARY_DIR}/fem )
+# Physics
+add_subdirectory( physics )
+add_dependencies( oftphysics oftfem )
+include_directories( ${CMAKE_BINARY_DIR}/physics )
+set( OFT_LIBS oftphysics oftfem oftla oftgrid oftbase oftext )
+# Utilities
+add_subdirectory( utilities )
+# Build master lib for packaging to reduce size
+if(OFT_PACKAGE_BUILD)
+  file(WRITE null.c "")
+  add_library( oft SHARED null.c )
+  set_target_properties( oft PROPERTIES LINKER_LANGUAGE Fortran )
+  if (WIN32)
+    target_link_libraries( oft PRIVATE ${OFT_LIBS} ${EXT_LIBS} )
+    set_target_properties( oft PROPERTIES
+        LINK_FLAGS "/WHOLEARCHIVE"
+    )
+  elseif (APPLE)
+    foreach(LIB IN LISTS OFT_LIBS EXT_LIBS)
+      target_link_libraries( oft PRIVATE "-Wl,-force_load" ${LIB} )
+    endforeach()
+  else ()
+    target_link_libraries( oft PRIVATE "-Wl,-whole-archive" ${OFT_LIBS} ${EXT_LIBS} "-Wl,-no-whole-archive" )
+    # set_target_properties(oft PROPERTIES
+    #     LINK_FLAGS "-Wl,--allow-multiple-definition"
+    # )
+  endif ()
+  install(
+    TARGETS oft
+    DESTINATION bin
+    COMPONENT app
+  )
+  set( OFT_SHARED_LIBS oft ${OFT_SHARED_LIBS} CACHE INTERNAL "package_shared_libs" )
+  set( OFT_LIBS oft )
+  set( EXT_LIBS "" )
+endif()
+
+########################
+# Python interface
+########################
+if( OFT_BUILD_PYTHON )
+  # Helper function
+  function(oft_add_shared)
+    set(OBJS ${ARGV})
+    list(POP_FRONT OBJS)
+    add_library( ${ARGV0} SHARED ${OBJS} )
+    set_target_properties( ${ARGV0} PROPERTIES LINKER_LANGUAGE Fortran )
+    target_link_libraries( ${ARGV0} ${OFT_LIBS} ${EXT_LIBS} )
+    install(TARGETS ${ARGV0}
+      DESTINATION bin
+      COMPONENT app)
+    set(OFT_SHARED_LIBS ${ARGV0} ${OFT_SHARED_LIBS} CACHE INTERNAL "package_shared_libs")
+  endfunction(oft_add_shared)
+  # Library directories
+  add_subdirectory( python/wrappers )
+  add_subdirectory( python/OpenFUSIONToolkit )
+endif()
+
+########################
+# Build executables
+########################
+# Helper function
+function(oft_add_exe)
+  string( REPLACE ".F90" "" name ${ARGV0} )
+  add_executable( ${name} ${ARGV0} )
+  set_target_properties( ${name} PROPERTIES LINKER_LANGUAGE Fortran )
+  target_link_libraries( ${name} ${OFT_LIBS} ${EXT_LIBS} )
+  install(TARGETS ${name} COMPONENT app)
+endfunction()
+# Example directories
+add_subdirectory( examples )
+# Testing
+if( OFT_BUILD_TESTS )
+  add_subdirectory( tests )
+endif()
+# Binary directories
+add_subdirectory( bin )
+
+########################
+# Build documentation
+########################
+if(OFT_BUILD_DOCS)
+  find_package(Doxygen REQUIRED)
+
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+
+  find_package(Python)
+  add_custom_target( build_ex_docs
+    COMMAND Python::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/utilities/generate_doc.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Building documentation from examples"
+    VERBATIM 
+  )
+
+  add_custom_target( docs ALL
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Generating documentation with Doxygen"
+    VERBATIM
+  )
+  add_dependencies(docs build_ex_docs)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/doc/Documentation.html"
+    "<meta http-equiv=\"REFRESH\" content=\"0;URL=html/index.html\">"
+  )
+
+  install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc"
+    DESTINATION .
+    COMPONENT docs
+  )
+endif()
+
+########################
+# Packaging
+########################
+if(OFT_PACKAGE_BUILD)
+  include(InstallRequiredSystemLibraries)
+  set(CPACK_STRIP_FILES      ON)
+  set(CPACK_PACKAGE_NAME     ${PROJECT_NAME} )
+  set(CPACK_PACKAGE_VERSION  1.0.0-beta)
+  set(CPACK_PACKAGE_CONTACT  "Chris Hansen")
+  set(CPACK_PACKAGE_VENDOR   "Chris Hansen")
+  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "OpenFUSIONToolkit for plasma equilibrium and dynamic simulation.")
+  set(CPACK_PACKAGE_DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION_SUMMARY})
+
+  set(CPACK_RESOURCE_FILE_LICENSE     ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE)
+  set(CPACK_RESOURCE_FILE_README      ${CMAKE_CURRENT_SOURCE_DIR}/../README.md)
+
+  if(APPLE)
+    set(CPACK_SYSTEM_NAME   "MacOS" )
+    set(CPACK_GENERATOR     "productbuild" )
+    set(CPACK_PACKAGING_INSTALL_PREFIX "/Applications/OpenFUSIONToolkit")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_signatures.sh.in ${CMAKE_CURRENT_BINARY_DIR}/fix_signatures.sh @ONLY)
+    set(CPACK_POSTFLIGHT_APP_SCRIPT ${CMAKE_CURRENT_BINARY_DIR}/fix_signatures.sh)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE ${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt COPYONLY)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../README.md ${CMAKE_CURRENT_BINARY_DIR}/README.txt COPYONLY)
+    set(CPACK_RESOURCE_FILE_WELCOME     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MACOS_WELCOME.txt)
+    set(CPACK_RESOURCE_FILE_LICENSE     ${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt)
+    set(CPACK_RESOURCE_FILE_README      ${CMAKE_CURRENT_BINARY_DIR}/README.txt)
+  elseif(UNIX AND NOT APPLE)
+    set(CPACK_SYSTEM_NAME   "Linux" )
+    set(CPACK_GENERATOR       "TGZ" )
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE ${CMAKE_CURRENT_BINARY_DIR}/LICENSE COPYONLY)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../README.md ${CMAKE_CURRENT_BINARY_DIR}/README.md COPYONLY)
+  endif()
+  if(OFT_PACKAGE_NIGHTLY)
+    execute_process(
+      COMMAND git rev-parse --short HEAD
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      OUTPUT_VARIABLE GIT_REV_HASH
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}_${GIT_REV_HASH}-${CPACK_SYSTEM_NAME}_${CMAKE_HOST_SYSTEM_PROCESSOR})
+  else()
+    set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME}_${CMAKE_HOST_SYSTEM_PROCESSOR})
+  endif()
+
+  include(CPack)
+  cpack_add_component( app REQUIRED )
+  cpack_add_component( docs )
+  cpack_add_component( examples )
+endif()

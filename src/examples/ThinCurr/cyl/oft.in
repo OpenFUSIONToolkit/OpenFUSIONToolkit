@@ -1,0 +1,22 @@
+&runtime_options
+ debug=0
+/
+
+&mesh_options
+ cad_type=0
+/
+
+&native_mesh_options
+ filename="thincurr_ex-cyl.h5"
+/
+
+&thincurr_td_options
+ curr_file='curr.drive'
+ dt=2.e-5
+ nsteps=200
+ nplot=10
+ direct=T
+ save_L=F
+ save_Mcoil=F
+ plot_run=F
+/

@@ -1,0 +1,21 @@
+html {
+    --toc-color: #F4F6FA;
+}
+
+.navpath li.navelem a:hover {
+    text-decoration: underline;
+    text-shadow: none;
+}
+
+.contents img {
+    max-height: 30em;
+}
+
+@media screen and (min-width: 999px) {
+    div.contents .toc {
+        background-color: var(--toc-color);
+        border-left: 0;
+        border-radius: var(--border-radius-small);
+        z-index: 10;
+    }
+}

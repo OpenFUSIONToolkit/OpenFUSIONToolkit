@@ -1,0 +1,19 @@
+reset
+undo off
+
+create torus major radius 1 minor radius 0.5 
+webcut volume 1  with plane yplane offset 0 noimprint nomerge
+
+imprint all
+merge all
+
+set trimesher geometry sizing off
+volume all  scheme tetmesh
+volume all size 0.4
+mesh volume all
+block 1 add volume all
+block 1 element type tetra10
+
+set large exodus file on
+export Genesis  "torus_test.g" overwrite block 1
+#refine parallel fileroot 'torus_test' overwrite no_execute

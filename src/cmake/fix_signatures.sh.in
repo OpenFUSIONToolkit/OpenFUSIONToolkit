@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+shopt -s nullglob
+echo "starting"
+for bin_file in @CPACK_PACKAGING_INSTALL_PREFIX@/bin/*
+do
+    codesign --force -s - ${bin_file}
+done
+
+exit 0

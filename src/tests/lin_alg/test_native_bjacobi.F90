@@ -1,0 +1,165 @@
+!---------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+!---------------------------------------------------------------------------
+!> @file test_native_bjacobi.F90
+!
+!> Regression tests for native Block-Jacobi solver. Tests are performed
+!! on a unit cube at different polynomial orders using SuperLU.
+!!
+!! The current test cases are:
+!! - Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$
+!!
+!! @authors Chris Hansen
+!! @date May 2014
+!! @ingroup testing
+!---------------------------------------------------------------------------
+PROGRAM test_native_bjacobi
+USE oft_base
+USE oft_mesh_type, ONLY: mesh
+USE oft_mesh_cube, ONLY: mesh_cube_id
+USE multigrid_build, ONLY: multigrid_construct
+!---LA imports
+USE oft_la_base, ONLY: oft_vector, oft_matrix
+USE oft_native_la, ONLY: oft_native_matrix
+USE oft_native_solvers, ONLY: oft_bjprecond, oft_native_gmres_solver
+USE oft_lu, ONLY: oft_lusolver
+!---FE imports
+USE fem_utils, ONLY: fem_partition
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange
+USE oft_lag_fields, ONLY: oft_lag_create
+USE oft_lag_operators, ONLY: lag_zerob, oft_lag_getlop, oft_lag_getmop
+IMPLICIT NONE
+INTEGER(i4) :: io_unit
+INTEGER(i4), PARAMETER :: order=3
+INTEGER(i4) :: nlocal = 1
+INTEGER(i4) :: sol_type = 1
+INTEGER(i4) :: ierr
+NAMELIST/test_bj_options/nlocal,sol_type
+IF(use_petsc)THEN
+  WRITE(*,*)'SKIP TEST'
+  STOP
+END IF
+!---Initialize enviroment
+CALL oft_init
+!---Read in options
+OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
+READ(io_unit,test_bj_options,IOSTAT=ierr)
+CLOSE(io_unit)
+!---Check available solvers
+#if !defined( HAVE_SUPERLU )
+IF(sol_type==1)THEN
+  WRITE(*,*)'SKIP TEST: 1'
+  CALL oft_finalize
+END IF
+#endif
+#if !defined( HAVE_SUPERLU_DIST )
+IF(sol_type==2)THEN
+  WRITE(*,*)'SKIP TEST: 2'
+  CALL oft_finalize
+END IF
+#endif
+#if !defined( HAVE_MUMPS )
+IF(sol_type==3)THEN
+  WRITE(*,*)'SKIP TEST: 3'
+  CALL oft_finalize
+END IF
+#endif
+#if !defined( HAVE_UMFPACK )
+IF(sol_type==4)THEN
+  WRITE(*,*)'SKIP TEST: 4'
+  CALL oft_finalize
+END IF
+#endif
+!---Setup grid
+CALL multigrid_construct
+IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+!---
+CALL oft_lag_setup(order)
+!---Run tests
+oft_env%pm=.FALSE.
+CALL test_lap(nlocal,sol_type)
+!---Finalize enviroment
+CALL oft_finalize
+CONTAINS
+!------------------------------------------------------------------------------
+! SUBROUTINE: test_lap
+!------------------------------------------------------------------------------
+!> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
+!! required iterataions and final field energy.
+!------------------------------------------------------------------------------
+SUBROUTINE test_lap(nlocal,sol_type)
+INTEGER(i4), INTENT(in) :: nlocal,sol_type
+!---Create solver objects
+TYPE(oft_native_gmres_solver) :: linv
+TYPE(oft_bjprecond), TARGET :: linv_pre
+TYPE(oft_lusolver), TARGET :: linv_pre_lu
+!---Local variables
+INTEGER(i4) :: ierr
+REAL(r8) :: uu
+CLASS(oft_vector), POINTER :: u,v
+CLASS(oft_native_matrix), POINTER :: lop_native
+CLASS(oft_matrix), POINTER :: lop => NULL()
+CLASS(oft_matrix), POINTER :: mop => NULL()
+!---Create solver fields
+CALL oft_lag_create(u)
+CALL oft_lag_create(v)
+!---Get FE operators
+CALL oft_lag_getlop(lop,'zerob')
+CALL oft_lag_getmop(mop,'none')
+!---Setup matrix solver
+linv%A=>lop
+linv%its=-3
+linv%itplot=1
+linv%nrits=20
+linv%pre=>linv_pre
+!---Setup preconditioner
+IF(nlocal>0)THEN
+  linv_pre%nlocal=nlocal
+ELSE
+  linv_pre%nlocal=1
+  SELECT TYPE(this=>lop)
+    CLASS IS(oft_native_matrix)
+      ALLOCATE(this%color(this%nr))
+      CALL fem_partition(oft_lagrange,this%color,ABS(nlocal))
+    CLASS DEFAULT
+      CALL oft_abort("Incorrect matrix type","test_lap",__FILE__)
+  END SELECT
+END IF
+linv_pre%pre=>linv_pre_lu
+SELECT CASE(sol_type)
+  CASE(1)
+    linv_pre_lu%package='super'
+  CASE(2)
+    linv_pre_lu%package='superd'
+  CASE(3)
+    linv_pre_lu%package='mumps'
+  CASE(4)
+    linv_pre_lu%package='umfpack'
+END SELECT
+!---Solve
+CALL u%set(1.d0)
+CALL mop%apply(u,v)
+CALL lag_zerob(v)
+CALL u%set(0.d0)
+CALL linv%apply(u,v)
+uu=SQRT(u%dot(u))
+IF(oft_env%head_proc)THEN
+  OPEN(NEWUNIT=io_unit,FILE='bjacobi.results')
+  WRITE(io_unit,*)linv%cits
+  WRITE(io_unit,*)uu
+  CLOSE(io_unit)
+END IF
+!---Destroy vectors
+CALL u%delete
+CALL v%delete
+DEALLOCATE(u,v)
+!---Destroy matrices
+CALL lop%delete
+CALL mop%delete
+DEALLOCATE(lop,mop)
+!---Destory preconditioner
+CALL linv_pre%delete
+!---Destory solver
+CALL linv%delete
+END SUBROUTINE test_lap
+END PROGRAM test_native_bjacobi

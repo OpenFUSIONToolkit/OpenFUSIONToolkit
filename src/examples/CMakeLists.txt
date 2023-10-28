@@ -1,0 +1,15 @@
+# Add example executables
+if( OFT_BUILD_EXAMPLES )
+    oft_add_exe( example1.F90 )
+    oft_add_exe( example2.F90 )
+    oft_add_exe( example3.F90 )
+    oft_add_exe( example4.F90 )
+    oft_add_exe( example5.F90 )
+    oft_add_exe( example6.F90 )
+endif()
+
+if( OFT_BUILD_PYTHON )
+    add_subdirectory( TokaMaker )
+    add_subdirectory( ThinCurr )
+    add_subdirectory( Marklin )
+endif()

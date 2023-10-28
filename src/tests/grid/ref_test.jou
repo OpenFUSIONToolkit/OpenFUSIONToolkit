@@ -1,0 +1,21 @@
+reset
+#
+create Cylinder height 0.5 radius 1 
+move Volume 1  x 0 y 0 z 0.25 include_merged
+#
+volume 1 scheme Tetmesh
+set tetmesher interior points on
+set tetmesher optimize level 3 optimize overconstrained  off sliver  off
+set tetmesher boundary recovery  off
+volume 1 size .5
+mesh volume 1
+#
+nodeset 1 surface 3
+#
+refine parallel fileroot 'ref_test' overwrite no_execute
+#
+block 1 volume 1
+block 1 element type tetra10
+set large exodus file on
+export Genesis  "ref_test2.in.e" block 1 overwrite
+

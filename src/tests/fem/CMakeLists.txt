@@ -1,0 +1,21 @@
+if( OFT_BUILD_TESTS )
+  # Lagrange tests
+  oft_add_test( test_lag.F90 )
+  file( COPY test_lag.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  oft_add_test( test_vlag.F90 )
+  file( COPY test_vlag.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  oft_add_test( test_blag.F90 )
+  file( COPY test_blag.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  oft_add_test( test_lag_2d.F90 )
+  file( COPY test_lag_2d.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+
+  # Nedelec tests
+  oft_add_test( test_h0.F90 )
+  file( COPY test_h0.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  oft_add_test( test_hcurl.F90 )
+  file( COPY test_hcurl.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  oft_add_test( test_hcurl_sop.F90 )
+  file( COPY test_hcurl_sop.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  oft_add_test( test_h1.F90 )
+  file( COPY test_h1.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+endif()
