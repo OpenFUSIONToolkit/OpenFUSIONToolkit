@@ -1,0 +1,74 @@
+Open FUSION Toolkit Documentation			{#mainpage}
+=======
+
+[TOC]
+
+The Open FUSION Toolkit (OFT) is a finite element framework designed for simulating physical systems relevant to
+plasma and fusion science and engineering in complex 2D and 3D geometries. The code supports
+the use of high order finite element methods on an unstructured hexahedral/quadrilateral and
+tetrahedral/triangular grids.
+
+The code is fully open-source and available on [GitHub](https://github.com/hansec/OpenFUSIONToolkit).
+
+\section doc_main_modules Physics Modules
+
+Currently the framework is used to implement the following physics modules:
+
+ - \ref doc_gs_main "TokaMaker": Free-boundary Grad-Shafranov equilibrium solver (static and time-dependent)
+ - \ref doc_tw_main "ThinCurr": 3D thin-wall electromagnetic simulation package
+ - \ref doc_mhd_main "MUG": 3D linear/nonlinear extended MHD simulation package
+ - \ref doc_taylor_main "Marklin": 3D force-free, uniform \f$ \lambda \f$ equilibrium solver
+
+\section doc_main_build Building OFT
+The documentation for [Building OFT](https://github.com/hansec/OpenFUSIONToolit/wiki) on different platforms
+is maintained on GitHub along with the source code. At present, OFT is actively used both on macOS and Linux.
+
+\section doc_main_api Framework modules and API
+
+This section provides library examples and documentation to describe usage of OFT and its API
+to modify existing or build new physics modules. The framework and API components are also roughly
+grouped by the provided functionality (eg. \ref grid "meshing" modules). Listings of individual
+FORTRAN modules and classes are also included along with an index of all modules, types, and
+functions present in the API.
+
+\warning The detailed documentation is under active development and may contain errors, use with care.
+
+\section doc_main_api_ex Programming Examples
+
+The following is a list of documented examples for using the OFT API
+
+ - \ref doc_gs_main_ex "TokaMaker examples"
+ - \ref doc_tw_main_ex "ThinCurr examples"
+ - \ref doc_mhd_main_ex "MUG examples"
+ - \ref doc_taylor_main "Marklin examples"
+ - **Core API examples**
+  - \ref doc_api_ex1
+  - \ref doc_api_ex2
+
+Further examples exist in the \ref testing "regression tests" sub-folders `src/tests/*`.
+
+\section doc_main_api_docs Detailed API documentation
+
+\ref doc_api_main
+
+For information on using OFT see
+ - \ref doc_input_file
+ - \ref doc_mesh_construction
+ - \ref doc_oft_io
+ - \ref doc_solvers
+ - \ref doc_oft_fem
+  - \ref doc_comp_fem
+ - \ref doc_tests
+
+\section doc_main_writing Writing Documentation
+
+OFT uses [Doxygen](http://www.stack.nl/~dimitri/doxygen/) to create structured and navigable
+documentation from the source code and structured comments. For more information on how to write
+in source documentation blocks, add documentation pages, and create new example programs/modules
+see \ref doc_doxygen.
+
+\section doc_main_git Using GIT
+
+OFT uses [GIT](http://git-scm.com/) for version control. For information on how to use GIT
+see the official [documentation](http://git-scm.com/documentation) or the unofficial example
+based [documentation](http://gitready.com/).

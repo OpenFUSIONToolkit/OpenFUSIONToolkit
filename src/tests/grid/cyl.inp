@@ -1,0 +1,46 @@
+###########
+# hitsi_r #
+###########
+
+# t3d -d .0127
+
+vertex   1  xyz  .0      .0       .0
+vertex   2  xyz  1.      .0       .0
+vertex   3  xyz  1.      .0       1.
+vertex   4  xyz  .0      .0       1.
+
+vertex  11  fixed vertex 1
+vertex  12  xyz  .0      1.	  .0
+vertex  13  xyz  .0      1.       1.
+vertex  14  fixed vertex 4
+
+curve   1  vertex   1   2 output yes size def
+curve   2  vertex   2   3 output yes size def
+curve   3  vertex   3   4 output yes size def
+curve   4  vertex   4   1 output yes size def
+
+curve  11  vertex   11  12 output yes size def
+curve  12  vertex   12  13 output yes size def
+curve  13  vertex   13  14 output yes size def
+
+curve  21  order  3  vertex   1  11 output yes size def
+polygon 1  xyz   .0      .0      .0 weight 0.70710678118655
+curve  22  order  3  vertex   2  12 output yes size def
+polygon 1  xyz   1.      1.      .0 weight 0.70710678118655
+curve  23  order  3  vertex   3  13 output yes size def
+polygon 1  xyz   1.      1.      1. weight 0.70710678118655
+curve  24  order  3  vertex   4  14 output yes size def
+polygon 1  xyz   .0      .0      1. weight 0.70710678118655
+
+
+surface  1 curve  2 23 12 22 output yes size def
+
+patch 1 normal  0 -1 0 boundary curve 1 2 3 4 output yes size def
+patch 2 normal -1 0 0 boundary curve -11 -12 -13 -4 output yes size def
+patch 3 normal 0 0 -1 boundary curve -1 -22 11 21 output yes size def
+patch 4 normal 0 0 1 boundary curve -3 23 13 -24 output yes size def
+
+
+region 1 boundary surface 1 \
+boundary patch 1 2 3 4 size def
+

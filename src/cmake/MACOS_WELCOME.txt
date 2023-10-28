@@ -1,0 +1,9 @@
+Welcome to the Open FUSION Toolkit (TokaMaker, ThinCurr, Marklin, MUG, etc.)!
+
+This program will guide you through the installation of the Open FUSION Toolkit (OFT) on your computer. Following installation OFT will be available at "/Applications/OpenFUSIONToolkit".
+
+After installation the following components will be available (default selections):
+ - bin: Binary executables and libraries
+ - python: Python modules for TokaMaker and Marklin (more interfaces coming soon!)
+ - doc: HTML documentation ("doc/Documentation.html" as entry point)
+ - examples: Examples for python interface (must be moved to a new location to use)

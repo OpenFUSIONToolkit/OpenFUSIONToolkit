@@ -1,0 +1,223 @@
+#---------------------------------------------------------------------------
+# Doxygen configuration file for the Open FUSION Toolkit
+#---------------------------------------------------------------------------
+
+PROJECT_NAME           = The Open FUSION Toolkit
+PROJECT_NUMBER         =
+PROJECT_BRIEF          = "Modeling tools for plasma and fusion research and engineering"
+PROJECT_LOGO           =
+
+DOXYFILE_ENCODING      = UTF-8
+INPUT_ENCODING         = UTF-8
+ALLOW_UNICODE_NAMES    = NO
+TAB_SIZE               = 2
+NUM_PROC_THREADS       = 1
+
+OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/doc
+CREATE_SUBDIRS         = YES
+CREATE_SUBDIRS_LEVEL   = 8
+SHORT_NAMES            = NO
+OUTPUT_LANGUAGE        = English
+LAYOUT_FILE            = @CMAKE_CURRENT_SOURCE_DIR@/docs/OFTLayout.xml
+INPUT                  = @CMAKE_CURRENT_SOURCE_DIR@/docs \
+                         @CMAKE_CURRENT_SOURCE_DIR@/base \
+                         @CMAKE_CURRENT_SOURCE_DIR@/grid \
+                         @CMAKE_CURRENT_SOURCE_DIR@/lin_alg \
+                         @CMAKE_CURRENT_SOURCE_DIR@/fem \
+                         @CMAKE_CURRENT_SOURCE_DIR@/physics \
+                         @CMAKE_CURRENT_SOURCE_DIR@/bin \
+                         @CMAKE_CURRENT_SOURCE_DIR@/python
+IMAGE_PATH             = @CMAKE_CURRENT_SOURCE_DIR@/docs/images \
+                         @CMAKE_CURRENT_SOURCE_DIR@/docs/generated/images
+RECURSIVE              = YES
+EXCLUDE                =
+EXCLUDE_PATTERNS       =
+FILE_PATTERNS          = *.f90 \
+                         *.F90 \
+                         *.cxx \
+                         *.c \
+                         *.md \
+                         *.html \
+                         *.py
+
+OPTIMIZE_FOR_FORTRAN   = NO
+EXTENSION_MAPPING      = F90=FortranFree
+AUTOLINK_SUPPORT       = YES
+
+BRIEF_MEMBER_DESC      = YES
+REPEAT_BRIEF           = YES
+JAVADOC_AUTOBRIEF      = NO
+QT_AUTOBRIEF           = NO
+ABBREVIATE_BRIEF       =
+ALWAYS_DETAILED_SEC    = YES
+
+INLINE_INHERITED_MEMB  = YES
+INHERIT_DOCS           = YES
+
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        =
+STRIP_FROM_INC_PATH    =
+
+MARKDOWN_SUPPORT       = YES
+TOC_INCLUDE_HEADINGS   = 2
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_LOCAL_CLASSES  = YES
+RESOLVE_UNNAMED_PARAMS = YES
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+HIDE_IN_BODY_DOCS      = NO
+CASE_SENSE_NAMES       = NO
+HIDE_SCOPE_NAMES       = YES
+
+SHOW_HEADERFILE        = YES
+SHOW_INCLUDE_FILES     = YES
+
+SORT_MEMBER_DOCS       = YES
+SORT_BRIEF_DOCS        = YES
+SORT_GROUP_NAMES       = NO
+SORT_BY_SCOPE_NAME     = YES
+GROUP_NESTED_COMPOUNDS = NO
+
+GENERATE_TODOLIST      = YES  # Use with \todo
+GENERATE_TESTLIST      = YES  # Use with \test
+GENERATE_BUGLIST       = YES  # Use with \bug
+GENERATE_DEPRECATEDLIST= YES  # Use with \deprecated
+
+MAX_INITIALIZER_LINES  = 10
+
+SHOW_USED_FILES        = YES
+SHOW_FILES             = YES
+SHOW_NAMESPACES        = YES
+ALPHABETICAL_INDEX     = NO
+
+
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC       = NO
+WARN_AS_ERROR          = NO
+WARN_LOGFILE           = @CMAKE_CURRENT_SOURCE_DIR@/doxy_warnings.log
+
+SOURCE_BROWSER         = NO
+
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+HTML_EXTRA_STYLESHEET  = @CMAKE_CURRENT_SOURCE_DIR@/docs/doxygen-awesome.css @CMAKE_CURRENT_SOURCE_DIR@/docs/oft_custom.css
+HTML_EXTRA_FILES       =
+HTML_COLORSTYLE_HUE    = 220
+HTML_COLORSTYLE_SAT    = 100
+HTML_COLORSTYLE_GAMMA  = 80
+HTML_DYNAMIC_MENUS     = YES
+HTML_INDEX_NUM_ENTRIES = 100
+
+GENERATE_DOCSET        = NO
+DOCSET_BUNDLE_ID       = org.doxygen.Project
+DOCSET_PUBLISHER_ID    = org.doxygen.Publisher
+DOCSET_PUBLISHER_NAME  = Publisher
+
+DISABLE_INDEX          = NO
+GENERATE_TREEVIEW      = NO
+FULL_SIDEBAR           = NO
+OBFUSCATE_EMAILS       = YES
+HTML_FORMULA_FORMAT    = png
+FORMULA_FONTSIZE       = 14
+FORMULA_MACROFILE      =
+USE_MATHJAX            = YES
+MATHJAX_VERSION        = MathJax_2
+MATHJAX_FORMAT         = HTML-CSS
+MATHJAX_RELPATH        = https://cdn.jsdelivr.net/npm/mathjax@2 # https://www.mathjax.org
+MATHJAX_EXTENSIONS     =
+MATHJAX_CODEFILE       =
+
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+EXTERNAL_SEARCH        = NO
+SEARCHENGINE_URL       =
+SEARCHDATA_FILE        = searchdata.xml
+EXTERNAL_SEARCH_ID     =
+EXTRA_SEARCH_MAPPINGS  =
+
+GENERATE_LATEX         = NO
+USE_PDFLATEX           = YES
+LATEX_OUTPUT           = latex
+LATEX_CMD_NAME         =
+MAKEINDEX_CMD_NAME     = makeindex
+LATEX_MAKEINDEX_CMD    = makeindex
+COMPACT_LATEX          = NO
+PAPER_TYPE             = a4
+EXTRA_PACKAGES         =
+LATEX_HEADER           =
+LATEX_FOOTER           =
+LATEX_EXTRA_STYLESHEET =
+LATEX_EXTRA_FILES      =
+PDF_HYPERLINKS         = YES
+LATEX_BATCHMODE        = NO
+LATEX_HIDE_INDICES     = NO
+LATEX_BIB_STYLE        = plain
+LATEX_EMOJI_DIRECTORY  =
+
+GENERATE_RTF           = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+GENERATE_DOCBOOK       = NO
+GENERATE_AUTOGEN_DEF   = NO
+GENERATE_PERLMOD       = NO
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+EXPAND_ONLY_PREDEF     = NO
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           =
+INCLUDE_FILE_PATTERNS  =
+PREDEFINED             = HAVE_MPI=1 \
+                         HAVE_XML=1 \
+                         HAVE_PHDF5=1 \
+                         HAVE_ONURBS=1 \
+                         HAVE_ARPACK=1 \
+                         HAVE_NCDF=1 \
+                         HAVE_PETSC=1
+EXPAND_AS_DEFINED      =
+SKIP_FUNCTION_MACROS   = YES
+
+TAGFILES               =
+GENERATE_TAGFILE       =
+ALLEXTERNALS           = NO
+EXTERNAL_GROUPS        = YES
+EXTERNAL_PAGES         = YES
+
+DIA_PATH               =
+HIDE_UNDOC_RELATIONS   = YES
+HAVE_DOT               = YES
+DOT_NUM_THREADS        = 0
+DOT_FONTPATH           =
+CLASS_GRAPH            = YES # NO
+COLLABORATION_GRAPH    = YES
+GROUP_GRAPHS           = YES
+UML_LOOK               = NO
+UML_LIMIT_NUM_FIELDS   = 10
+DOT_UML_DETAILS        = NO
+DOT_WRAP_THRESHOLD     = 17
+TEMPLATE_RELATIONS     = NO
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+DIR_GRAPH_MAX_DEPTH    = 1
+DOT_IMAGE_FORMAT       = png
+INTERACTIVE_SVG        = NO
+#DOT_PATH               = /usr/local/graphviz-2.14/bin
+DOTFILE_DIRS           =
+MSCFILE_DIRS           =
+DIAFILE_DIRS           =
+DOT_GRAPH_MAX_NODES    = 50
+MAX_DOT_GRAPH_DEPTH    = 0
+DOT_MULTI_TARGETS      = YES
+GENERATE_LEGEND        = YES
+DOT_CLEANUP            = YES

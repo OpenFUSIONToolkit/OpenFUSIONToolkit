@@ -1,0 +1,17 @@
+# Non-Source directories
+/build*
+/install*
+/src/docs/generated
+
+# FORTRAN compile objects
+*.o
+*.a
+*.mod
+*.pyc
+
+# Editor Items
+.settings
+.cproject
+.project
+.pydevproject
+.vscode

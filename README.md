@@ -1,7 +1,7 @@
-The Open Flexible Unstructured Simulation Infrastructure with Open Numerics (FUSION) Toolkit (OFT)
+Open Flexible Unstructured Simulation Infrastructure with Open Numerics (FUSION) Toolkit (OFT)
 =====================================
 
-The OpenFUSIONToolkit (OFT) is a suite of modeling tools, and their underlying finite element
+The Open FUSION Toolkit (OFT) is a suite of modeling tools, and their underlying finite element
 framework, for problems in plasma and fusion research and engineering in arbitrary 2D and 3D geometries.
 The underlying framework and its component tools support the use of variable order finite element methods on
 unstructured tetrahedral (triangular) or hexahedral (quadralateral) grids.
