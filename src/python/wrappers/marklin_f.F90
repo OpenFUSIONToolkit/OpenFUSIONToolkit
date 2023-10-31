@@ -122,7 +122,7 @@ CALL oft_lag_vcreate(v)
 ALLOCATE(bvout(3,u%n/3))
 !---Save modes
 DO i=1,taylor_nm
-  ! WRITE(pltnum,'(I3.3)')i
+  WRITE(pltnum,'(I3.3)')i
   ! CALL oft_hcurl%vec_save(taylor_hffa(i,oft_hcurl_level)%f, &
   !                         'taylor.rst','A_'//pltnum, append=(i/=1))
   !---Setup field interpolation
