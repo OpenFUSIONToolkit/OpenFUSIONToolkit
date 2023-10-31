@@ -28,6 +28,9 @@ INTEGER(i4), PARAMETER, PUBLIC :: mesh_native_id = 0
 REAL(r8), ALLOCATABLE, PUBLIC :: r_mem(:,:)
 INTEGER(i4), ALLOCATABLE, PUBLIC :: lc_mem(:,:)
 INTEGER(i4), ALLOCATABLE, PUBLIC :: reg_mem(:)
+INTEGER(i4) :: np_ho
+REAL(r8), ALLOCATABLE :: r_ho(:,:)
+INTEGER(i4), ALLOCATABLE :: le_ho(:,:)
 CONTAINS
 !------------------------------------------------------------------------------
 !> Read in t3d mesh file from file "filename"
@@ -37,7 +40,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 subroutine native_load_mesh
 logical :: success
-integer(i4) :: i,id,lenreflag,ierr,io_unit,ndims,np_mem
+integer(i4) :: i,id,lenreflag,ierr,io_unit,ndims,np_mem,mesh_order
 integer(i4), allocatable, dimension(:) :: dim_sizes
 !---Read in mesh options
 namelist/native_mesh_options/filename!,inpname,reflect,ref_per,zstretch
@@ -50,10 +53,10 @@ IF(oft_env%head_proc)THEN
         OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
         READ(io_unit,native_mesh_options,IOSTAT=ierr)
         CLOSE(io_unit)
-        IF(ierr<0)CALL oft_abort('No "native_mesh_options" found in input file.','native_load_smesh',__FILE__)
-        IF(ierr>0)CALL oft_abort('Error parsing "native_mesh_options" in input file.','native_load_smesh',__FILE__)
-        IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','native_load_smesh',__FILE__)
-        ! IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','native_load_smesh',__FILE__)
+        IF(ierr<0)CALL oft_abort('No "native_mesh_options" found in input file.','native_load_vmesh',__FILE__)
+        IF(ierr>0)CALL oft_abort('Error parsing "native_mesh_options" in input file.','native_load_vmesh',__FILE__)
+        IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','native_load_vmesh',__FILE__)
+        ! IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','native_load_vmesh',__FILE__)
         ! lenreflag=lnblnk(reflect)
         !
         WRITE(*,*)
@@ -96,9 +99,9 @@ IF(np_mem>0)THEN
     dim_sizes=SHAPE(lc_mem)
 ELSE
     CALL hdf5_field_get_sizes(TRIM(filename),"mesh/LC",ndims,dim_sizes)
-    IF(ndims==-1)CALL oft_abort('"mesh/LC" field does not exist in input file', 'native_load_smesh', __FILE__)
+    IF(ndims==-1)CALL oft_abort('"mesh/LC" field does not exist in input file', 'native_load_vmesh', __FILE__)
 END IF
-IF(dim_sizes(2)==0)CALL oft_abort('Zero length cell list','native_load_smesh',__FILE__)
+IF(dim_sizes(2)==0)CALL oft_abort('Zero length cell list','native_load_vmesh',__FILE__)
 !---Allocate mesh
 SELECT CASE(dim_sizes(1))
     CASE(4)
@@ -108,7 +111,7 @@ SELECT CASE(dim_sizes(1))
         ALLOCATE(oft_hexmesh::mg_mesh%meshes(mg_mesh%mgdim))
         ALLOCATE(oft_quadmesh::mg_mesh%smeshes(mg_mesh%mgdim))
     CASE DEFAULT
-        CALL oft_abort('Invalid cell type','native_load_smesh',__FILE__)
+        CALL oft_abort('Invalid cell type','native_load_vmesh',__FILE__)
 END SELECT
 DO i=1,mg_mesh%mgdim
     CALL mg_mesh%meshes(i)%setup(mesh_native_id)
@@ -124,10 +127,10 @@ IF(np_mem>0)THEN
     dim_sizes=SHAPE(r_mem)
 ELSE
     CALL hdf5_field_get_sizes(TRIM(filename),"mesh/R",ndims,dim_sizes)
-    IF(ndims==-1)CALL oft_abort('"mesh/R" field does not exist in input file', 'native_load_smesh', __FILE__)
+    IF(ndims==-1)CALL oft_abort('"mesh/R" field does not exist in input file', 'native_load_vmesh', __FILE__)
 END IF
 mesh%np=dim_sizes(2)
-IF(mesh%np==0)CALL oft_abort('Zero length point list','native_load_smesh',__FILE__)
+IF(mesh%np==0)CALL oft_abort('Zero length point list','native_load_vmesh',__FILE__)
 IF(.NOT.oft_env%head_proc)THEN
     DEBUG_STACK_POP
     RETURN
@@ -139,7 +142,7 @@ IF(np_mem>0)THEN
     DEALLOCATE(r_mem)
 ELSE
     CALL hdf5_read(mesh%r,TRIM(filename),"mesh/R",success)
-    IF(.NOT.success)CALL oft_abort('Error reading points','native_load_smesh',__FILE__)
+    IF(.NOT.success)CALL oft_abort('Error reading points','native_load_vmesh',__FILE__)
 END IF
 !---Read in cells
 ALLOCATE(mesh%lc(mesh%cell_np,mesh%nc))
@@ -148,7 +151,7 @@ IF(np_mem>0)THEN
     DEALLOCATE(lc_mem)
 ELSE
     CALL hdf5_read(mesh%lc,TRIM(filename),"mesh/LC",success)
-    IF(.NOT.success)CALL oft_abort('Error reading cells','native_load_smesh',__FILE__)
+    IF(.NOT.success)CALL oft_abort('Error reading cells','native_load_vmesh',__FILE__)
 END IF
 !---Read in region list
 ALLOCATE(mesh%reg(mesh%nc))
@@ -157,7 +160,22 @@ IF(np_mem>0)THEN
     DEALLOCATE(reg_mem)
 ELSE
     CALL hdf5_read(mesh%reg,TRIM(filename),"mesh/REG",success)
-    IF(.NOT.success)CALL oft_abort('Error reading region list','native_load_smesh',__FILE__)
+    IF(.NOT.success)CALL oft_abort('Error reading region list','native_load_vmesh',__FILE__)
+END IF
+!---Read high-order mesh information (Tetrahedra only)
+IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
+    mesh_order=2
+    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/R",ndims,dim_sizes)
+    IF(ndims==-1)CALL oft_abort('"mesh/ho_info/R" field does not exist in input file', 'native_load_vmesh', __FILE__)
+    np_ho=dim_sizes(2)
+    ALLOCATE(r_ho(3,np_ho))
+    CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
+    IF(.NOT.success)CALL oft_abort('Error reading quadratic points','native_load_vmesh',__FILE__)
+    ALLOCATE(le_ho(2,np_ho))
+    CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
+    IF(.NOT.success)CALL oft_abort('Error reading quadratic edges','native_load_vmesh',__FILE__)
+ELSE
+    mesh_order=1
 END IF
 IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
@@ -316,6 +334,21 @@ ELSE
     CALL hdf5_read(smesh%reg,TRIM(filename),"mesh/REG",success)
     IF(.NOT.success)CALL oft_abort('Error reading region list','native_load_smesh',__FILE__)
 END IF
+!---Read high-order mesh information (Tetrahedra only)
+IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
+    mesh_order=2
+    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/R",ndims,dim_sizes)
+    IF(ndims==-1)CALL oft_abort('"mesh/ho_info/R" field does not exist in input file', 'native_load_smesh', __FILE__)
+    np_ho=dim_sizes(2)
+    ALLOCATE(r_ho(3,np_ho))
+    CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
+    IF(.NOT.success)CALL oft_abort('Error reading quadratic points','native_load_smesh',__FILE__)
+    ALLOCATE(le_ho(2,np_ho))
+    CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
+    IF(.NOT.success)CALL oft_abort('Error reading quadratic edges','native_load_smesh',__FILE__)
+ELSE
+    mesh_order=1
+END IF
 IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
 ! call mesh_t3d_geom
@@ -390,4 +423,57 @@ DO j=1,num_ssets
 END DO
 CALL oft_decrease_indent
 END SUBROUTINE native_read_sidesets
+!------------------------------------------------------------------------------
+!> Add quadratic mesh node points from high order import
+!------------------------------------------------------------------------------
+subroutine native_hobase(self)
+CLASS(oft_amesh), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(np_ho==0)RETURN
+if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Importing quadratic mesh nodes'
+SELECT CASE(self%type)
+CASE(1) ! Tet/Tri
+    CALL native_hobase_simplex(self)
+CASE(3) ! Hex/Quad
+  CALL oft_abort("High-order import not supported for native interface and Hex/Quad meshes", &
+    "native_hobase", __FILE__)
+!   SELECT TYPE(self)
+!   CLASS IS(oft_bmesh)
+!     CALL native_hobase_quad(self)
+!   CLASS IS(oft_mesh)
+!     CALL native_hobase_hex(self)
+!   END SELECT
+CASE DEFAULT
+  CALL oft_abort("Unknown element type", "native_hobase", __FILE__)
+END SELECT
+DEBUG_STACK_POP
+end subroutine native_hobase
+!------------------------------------------------------------------------------
+!> Add quadratic mesh node points to a simplex mesh (Tet/Tri) from high order import
+!------------------------------------------------------------------------------
+subroutine native_hobase_simplex(self)
+CLASS(oft_amesh), INTENT(inout) :: self
+real(r8) :: pt(3)
+integer(i4) :: i,j,k,etmp(2)
+DEBUG_STACK_PUSH
+!---Setup quadratic mesh
+self%order=1
+self%ho_info%nep=1
+ALLOCATE(self%ho_info%r(3,self%ne),self%ho_info%lep(self%ho_info%nep,self%ne))
+!---Initialize high order points with straight edges
+DO i=1,self%ne
+    self%ho_info%lep(1,i)=i
+    self%ho_info%r(:,i)=(self%r(:,self%le(1,i))+self%r(:,self%le(2,i)))/2.d0
+END DO
+!---Set midpoints from imported list
+DO i=1,np_ho
+    etmp=le_ho(:,i)
+    k=ABS(mesh_local_findedge(self,etmp))
+    if(k==0)CALL oft_abort('Unlinked mesh edge','native_hobase',__FILE__)
+    self%ho_info%r(:,k) = r_ho(:,i)
+END DO
+!---Destory temporary storage
+DEALLOCATE(r_ho,le_ho)
+DEBUG_STACK_POP
+end subroutine native_hobase_simplex
 end module oft_mesh_native
