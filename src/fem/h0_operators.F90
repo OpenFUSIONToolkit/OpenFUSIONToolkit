@@ -1021,6 +1021,7 @@ DO i=minlev,oft_h0_nlevels
   !---
   arsolver%A=>lop
   arsolver%M=>md
+  arsolver%mode=2
   arsolver%tol=1.E-5_r8
   arsolver%bc=>h0_zerogrnd
   CALL create_native_pre(arsolver%Minv, "jacobi")
