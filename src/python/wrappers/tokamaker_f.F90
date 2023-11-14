@@ -69,14 +69,17 @@ DO i=1,n
 END DO
 END SUBROUTINE tokamaker_eval_green
 !
-SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta) BIND(C,NAME="tokamaker_setup_regions")
+SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,contig_flag) BIND(C,NAME="tokamaker_setup_regions")
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(80)
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta
-real(r8), POINTER :: eta_tmp(:)
+TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag
+REAL(r8), POINTER :: eta_tmp(:)
+INTEGER(c_int), POINTER :: contig_tmp(:)
 INTEGER(4) :: i
 CALL copy_string_rev(coil_file,gs_global%coil_file)
 IF(TRIM(gs_global%coil_file)=='none')THEN
   CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
+  CALL c_f_pointer(contig_flag, contig_tmp, [smesh%nreg])
   !
   gs_global%ncoil_regs=0
   gs_global%ncond_regs=0
@@ -99,6 +102,7 @@ IF(TRIM(gs_global%coil_file)=='none')THEN
         gs_global%cond_regions(gs_global%ncond_regs)%eta=eta_tmp(i)
       END IF
       gs_global%cond_regions(gs_global%ncond_regs)%id=i
+      gs_global%cond_regions(gs_global%ncond_regs)%contiguous=(contig_tmp(i)==1)
     ELSE
       gs_global%ncoil_regs=gs_global%ncoil_regs+1
       gs_global%coil_regions(gs_global%ncoil_regs)%id=i

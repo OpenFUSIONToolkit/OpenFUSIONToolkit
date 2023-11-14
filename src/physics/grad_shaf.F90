@@ -5067,8 +5067,8 @@ END IF
 dt_in=-1.d0
 IF(PRESENT(dt))dt_in=dt
 ALLOCATE(eta_reg(smesh%nreg))
+eta_reg=-1.d0
 IF(dt_in>0.d0)THEN
-  eta_reg=-1.d0
   DO i=1,self%ncond_regs
     jr=self%cond_regions(i)%id
     eta_reg(jr)=self%cond_regions(i)%eta

@@ -1230,14 +1230,17 @@ class(oft_matrix), pointer, intent(inout) :: rhs_mat,lhs_mat
 class(oft_vector), target, intent(inout) :: a
 real(8), intent(in) :: sigma
 LOGICAL, INTENT(in) :: include_bounds
-integer(i4) :: i,m,jr,jc,rowtmp(1),lim_node,ax_node,cell
-integer(i4), allocatable :: j(:),bnd_nodes(:)
+integer(i4) :: i,m,jr,jc,rowtmp(1),lim_node,ax_node,cell,nnonaxi,block_max
+integer(i4), allocatable :: j(:),bnd_nodes(:),node_mark(:,:)
 real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),eta_source,gs_source,ax_tmp,ftmp(3)
 real(r8) :: psi_lim,psi_max,psi_tmp,max_tmp,lim_tmp,psi_norm,lim_source,ax_source
 real(r8), allocatable :: rop(:),gop(:,:),lhs_vals(:,:),rhs_vals(:,:),lim_loc(:),ax_loc(:)
 real(r8), allocatable :: lim_weights(:),ax_weights(:)
 logical :: curved,in_bounds
+integer(i4), allocatable, dimension(:) :: dense_flag,reg_map
 real(r8), pointer, dimension(:) :: eta_vals,pol_vals,lim_vals,ax_vals
+real(r8), pointer, dimension(:,:) :: nonaxi_vals
+type(oft_1d_int), pointer, dimension(:) :: noaxi_nodes
 CLASS(oft_vector), POINTER :: oft_lag_vec
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
@@ -1261,14 +1264,66 @@ call oft_blagrange%ncdofs(cell,bnd_nodes(oft_blagrange%nce+1:2*oft_blagrange%nce
 do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
   call oft_blag_eval(oft_blagrange,cell,jc,ftmp,ax_weights(jc))
 end do
+!---
+nnonaxi=0
+DO jr=1,tMaker_td_obj%gs_eq%ncond_regs
+    IF(tMaker_td_obj%gs_eq%cond_regions(jr)%contiguous)CYCLE
+    nnonaxi=nnonaxi+1
+END DO
+ALLOCATE(reg_map(smesh%nreg))
+IF(nnonaxi>0)THEN
+    ALLOCATE(node_mark(smesh%nreg,oft_blagrange%ne+1))
+    node_mark=0
+    allocate(j(oft_blagrange%nce))
+    DO i=1,oft_blagrange%mesh%nc
+        call oft_blagrange%ncdofs(i,j)
+        DO jc=1,oft_blagrange%nce
+            IF(node_mark(smesh%reg(i),j(jc))/=0)CYCLE
+            node_mark(smesh%reg(i),oft_blagrange%ne+1)=node_mark(smesh%reg(i),oft_blagrange%ne+1)+1
+            node_mark(smesh%reg(i),j(jc))=node_mark(smesh%reg(i),oft_blagrange%ne+1)
+        END DO
+    END DO
+    deallocate(j)
+END IF
+ALLOCATE(dense_flag(oft_blagrange%ne))
+dense_flag=0
+WRITE(*,*)nnonaxi
+ALLOCATE(noaxi_nodes(nnonaxi+1))
+reg_map=0
+block_max=0
+m=0
+DO jr=1,tMaker_td_obj%gs_eq%ncond_regs
+    IF(tMaker_td_obj%gs_eq%cond_regions(jr)%contiguous)CYCLE
+    i=tMaker_td_obj%gs_eq%cond_regions(jr)%id
+    m=m+1
+    reg_map(i)=m
+    noaxi_nodes(m)%n=node_mark(i,oft_blagrange%ne+1)
+    ALLOCATE(noaxi_nodes(m)%v(noaxi_nodes(m)%n))
+    noaxi_nodes(m)%v=0
+    DO jc=1,oft_blagrange%ne
+        IF(node_mark(i,jc)>0)noaxi_nodes(m)%v(node_mark(i,jc)) = jc
+    END DO
+    dense_flag(noaxi_nodes(m)%v)=m
+    block_max=MAX(block_max,noaxi_nodes(m)%n)
+END DO
+m=m+1
+noaxi_nodes(m)%n=oft_blagrange%nbe
+noaxi_nodes(m)%v=>oft_blagrange%lbe
+dense_flag(noaxi_nodes(m)%v)=m
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(lhs_mat))THEN
-    CALL oft_blagrange%mat_create(rhs_mat)
-    CALL lin_mat_create(2*oft_blagrange%nce,bnd_nodes,lhs_mat)
+    ! CALL oft_blagrange%mat_create(rhs_mat)
+    CALL lin_mat_create(2*oft_blagrange%nce,bnd_nodes,lhs_mat,dense_flag,noaxi_nodes)
     ALLOCATE(lim_vals(a%n),ax_vals(a%n))
     lim_vals=0.d0; ax_vals=0.d0
+    ! Remove boundary points
+    WHERE(dense_flag==m)
+        dense_flag=0
+    END WHERE
+    CALL lin_mat_create(0,bnd_nodes,rhs_mat,dense_flag,noaxi_nodes)
+    DEALLOCATE(dense_flag)
 ELSE
     CALL oft_abort("Matrices should not be allocated","build_linearized",__FILE__)
     ! CALL rhs_mat%zero
@@ -1285,6 +1340,10 @@ psi_norm=tMaker_td_obj%gs_eq%plasma_bounds(2)-tMaker_td_obj%gs_eq%plasma_bounds(
 !---------------------------------------------------------------------------
 ! Operator integration
 !---------------------------------------------------------------------------
+IF(nnonaxi>0)THEN
+    ALLOCATE(nonaxi_vals(block_max+1,nnonaxi))
+    nonaxi_vals=0.d0
+END IF
 !$omp parallel private(j,rop,gop,det,lhs_vals,rhs_vals,curved,goptmp,m,vol,jc,jr,pt,psi_tmp, &
 !$omp in_bounds,eta_source,gs_source,lim_loc,lim_source,ax_source,ax_loc)
 allocate(j(oft_blagrange%nce)) ! Local DOF and matrix indices
@@ -1330,7 +1389,18 @@ do i=1,oft_blagrange%mesh%nc
                     - rop(jr)*rop(jc)*gs_source)*det/(pt(1)+gs_epsilon)
                 rhs_vals(jr,jc) = rhs_vals(jr,jc) + rop(jr)*rop(jc)*eta_source*det/(pt(1)+gs_epsilon)
             end do
+            IF(reg_map(smesh%reg(i))>0)THEN
+                !$omp atomic
+                nonaxi_vals(node_mark(smesh%reg(i),j(jr)),reg_map(smesh%reg(i))) = &
+                  nonaxi_vals(node_mark(smesh%reg(i),j(jr)),reg_map(smesh%reg(i))) &
+                  + rop(jr)*eta_source*det/(pt(1)+gs_epsilon)
+            END IF
         end do
+        IF(reg_map(smesh%reg(i))>0)THEN
+            !$omp atomic
+            nonaxi_vals(block_max+1,reg_map(smesh%reg(i))) = &
+              nonaxi_vals(block_max+1,reg_map(smesh%reg(i))) + det
+        END IF
     end do
     !---Apply bc to local matrix
     DO jr=1,oft_blagrange%nce
@@ -1356,9 +1426,49 @@ do i=1,oft_blagrange%mesh%nc
     END DO
     !!$omp end ordered
 end do
+IF(nnonaxi>0)THEN
+    !$omp do schedule(static,1)
+    !ordered
+    do i=1,oft_blagrange%mesh%nc
+        IF(reg_map(smesh%reg(i))==0)CYCLE
+        !---Get local to global DOF mapping
+        call oft_blagrange%ncdofs(i,j)
+        !---Get local reconstructed operators
+        lim_loc=0.d0
+        do m=1,oft_blagrange%quad%np ! Loop over quadrature points
+            call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
+            det=vol*oft_blagrange%quad%wts(m)
+            do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
+                call oft_blag_eval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),rop(jc))
+            end do
+            !---Compute local matrix contributions
+            do jr=1,oft_blagrange%nce
+                lim_loc(jr) = lim_loc(jr) + rop(jr)*det
+            end do
+        end do
+        lim_loc=-lim_loc/nonaxi_vals(block_max+1,reg_map(smesh%reg(i)))
+        !---Add local values to global matrix
+        m=reg_map(smesh%reg(i))
+        !!$omp ordered
+        do jc=1,oft_blagrange%nce
+            call rhs_mat%atomic_add_values(j(jc:jc),noaxi_nodes(m)%v, &
+              lim_loc(jc)*nonaxi_vals(:,m),1,noaxi_nodes(m)%n)
+            call lhs_mat%atomic_add_values(j(jc:jc),noaxi_nodes(m)%v, &
+              -sigma*lim_loc(jc)*nonaxi_vals(:,m),1,noaxi_nodes(m)%n)
+        end do
+        !!$omp end ordered
+    end do
+END IF
 deallocate(j,rop,gop,lhs_vals,lim_loc,ax_loc,rhs_vals)
 !$omp end parallel
 DEALLOCATE(pol_vals)
+IF(nnonaxi>0)THEN
+    DO i=1,nnonaxi
+        DEALLOCATE(noaxi_nodes(i)%v)
+    END DO
+    DEALLOCATE(reg_map,noaxi_nodes,node_mark)
+    DEALLOCATE(nonaxi_vals)
+END IF
 IF(include_bounds)THEN
   ALLOCATE(j(1),lhs_vals(1,1))
   DO jr=1,oft_blagrange%nce
@@ -1394,11 +1504,12 @@ END IF
 DEBUG_STACK_POP
 contains
 !
-subroutine lin_mat_create(nadd,nodes_add,new)
-INTEGER(4), INTENT(in) :: nadd,nodes_add(nadd)
+subroutine lin_mat_create(nadd,nodes_add,new,dense_flag,dense_nodes)
+INTEGER(4), INTENT(in) :: nadd,nodes_add(nadd),dense_flag(:)
 CLASS(oft_matrix), POINTER, INTENT(out) :: new
+type(oft_1d_int), intent(in) :: dense_nodes(:)
 CLASS(oft_vector), POINTER :: tmp_vec
-INTEGER(4) :: i,j,k,nr,iadd
+INTEGER(4) :: i,j,k,nr,iadd,offset
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: ltmp
 TYPE(oft_graph_ptr) :: graphs(1,1)
 DEBUG_STACK_PUSH
@@ -1413,18 +1524,19 @@ ALLOCATE(graphs(1,1)%g%kr(oft_blagrange%ne+1))
 graphs(1,1)%g%kr=0
 ALLOCATE(ltmp(oft_blagrange%ne))
 DO i=1,oft_blagrange%ne
-    IF(oft_blagrange%be(i))THEN
+    IF(dense_flag(i)/=0)THEN
         ltmp=2*oft_blagrange%ne
-        ltmp(1:oft_blagrange%nbe)=oft_blagrange%lbe
+        offset=dense_nodes(dense_flag(i))%n
+        ltmp(1:offset)=dense_nodes(dense_flag(i))%v
         DO j=oft_blagrange%kee(i),oft_blagrange%kee(i+1)-1
-            ltmp(j-oft_blagrange%kee(i)+oft_blagrange%nbe+1)=oft_blagrange%lee(j)
+            ltmp(j-oft_blagrange%kee(i)+offset+1)=oft_blagrange%lee(j)
         END DO
         DO iadd=1,nadd
-            ltmp(oft_blagrange%kee(i+1)-oft_blagrange%kee(i)+oft_blagrange%nbe+iadd)=nodes_add(iadd)
+            ltmp(oft_blagrange%kee(i+1)-oft_blagrange%kee(i)+offset+iadd)=nodes_add(iadd)
         END DO
-        CALL sort_array(ltmp,oft_blagrange%nbe+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i))
+        CALL sort_array(ltmp,offset+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i))
         graphs(1,1)%g%kr(i)=1
-        DO j=2,oft_blagrange%nbe+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i)
+        DO j=2,offset+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i)
             IF(ltmp(j)>ltmp(j-1))graphs(1,1)%g%kr(i)=graphs(1,1)%g%kr(i)+1
         END DO
     ELSE
@@ -1445,19 +1557,20 @@ IF(graphs(1,1)%g%kr(1)/=1)CALL oft_abort('Bad new graph setup','gs_mat_create', 
 __FILE__)
 ALLOCATE(graphs(1,1)%g%lc(graphs(1,1)%g%nnz))
 DO i=1,oft_blagrange%ne
-    IF(oft_blagrange%be(i))THEN
+    IF(dense_flag(i)/=0)THEN
         ltmp=2*oft_blagrange%ne
-        ltmp(1:oft_blagrange%nbe)=oft_blagrange%lbe
+        offset=dense_nodes(dense_flag(i))%n
+        ltmp(1:offset)=dense_nodes(dense_flag(i))%v
         DO j=oft_blagrange%kee(i),oft_blagrange%kee(i+1)-1
-            ltmp(j-oft_blagrange%kee(i)+oft_blagrange%nbe+1)=oft_blagrange%lee(j)
+            ltmp(j-oft_blagrange%kee(i)+offset+1)=oft_blagrange%lee(j)
         END DO
         DO iadd=1,nadd
-            ltmp(oft_blagrange%kee(i+1)-oft_blagrange%kee(i)+oft_blagrange%nbe+iadd)=nodes_add(iadd)
+            ltmp(oft_blagrange%kee(i+1)-oft_blagrange%kee(i)+offset+iadd)=nodes_add(iadd)
         END DO
-        CALL sort_array(ltmp,oft_blagrange%nbe+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i))
+        CALL sort_array(ltmp,offset+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i))
         nr=0
         graphs(1,1)%g%lc(graphs(1,1)%g%kr(i))=ltmp(1)
-        DO j=2,oft_blagrange%nbe+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i)
+        DO j=2,offset+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i)
             IF(ltmp(j)>ltmp(j-1))THEN
             nr=nr+1
             graphs(1,1)%g%lc(graphs(1,1)%g%kr(i)+nr)=ltmp(j)

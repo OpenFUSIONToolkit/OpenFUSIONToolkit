@@ -48,7 +48,7 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1)])
+    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1)])
 
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
@@ -466,13 +466,17 @@ class TokaMaker():
         self._cond_dict = cond_dict
         if coil_file != 'none':
             eta_vals = numpy.ones((1),dtype=numpy.float64)
+            contig_flag = numpy.ones((1),dtype=numpy.int32)
         else:
             eta_vals = -numpy.ones((self.nregs,),dtype=numpy.float64)
+            contig_flag = numpy.ones((self.nregs,),dtype=numpy.int32)
             eta_vals[1] = 1.E10
             for key in cond_dict:
                 eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
+                if cond_dict[key].get('noncontiguous',False):
+                    contig_flag[cond_dict[key]['reg_id']-1] = 0
         cstring = c_char_p(coil_file.encode())
-        tokamaker_setup_regions(cstring,eta_vals)
+        tokamaker_setup_regions(cstring,eta_vals,contig_flag)
 
     def eval_green(self,x,xc):
         r'''! Evaluate Green's function for a toroidal filament
@@ -1206,6 +1210,12 @@ class TokaMaker():
         # Apply 1/R scale (avoiding divide by zero)
         dpsi_dt = dpsi_dt.copy()
         dpsi_dt[self.r[:,0]>0.0] /= self.r[self.r[:,0]>0.0,0]
+        #
+        area = numpy.zeros((self.lc.shape[0],))
+        for i in range(self.nc):
+            v1 = self.r[self.lc[i,1],:]-self.r[self.lc[i,0],:]
+            v2 = self.r[self.lc[i,2],:]-self.r[self.lc[i,0],:]
+            area[i] = numpy.linalg.norm(numpy.cross(v1,v2))/2.0
         # Loop over conducting regions and get mask/fields
         mesh_currents = numpy.zeros((self.lc.shape[0],))
         mask = numpy.zeros((self.lc.shape[0],), dtype=numpy.int32)
@@ -1215,6 +1225,8 @@ class TokaMaker():
                 mask_tmp = (self.reg == cond_reg['reg_id'])
                 field_tmp = dpsi_dt/eta
                 mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
+                if cond_reg.get('noncontiguous',False):
+                    mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
                 mask = numpy.logical_or(mask,mask_tmp)
         clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],mesh_currents[mask],nlevels,cmap=colormap)
         cb = fig.colorbar(clf,ax=ax)
@@ -1360,7 +1372,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,nTurns=None):
+    def define_region(self,name,dx,reg_type,eta=None,noncontiguous=None,nTurns=None):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -1400,6 +1412,11 @@ class gs_Domain:
         else:
             if reg_type == 'conductor':
                 raise ValueError('Resistivity not specified for "conductor" region')
+        if noncontiguous is not None:
+            if reg_type != 'conductor':
+                raise ValueError('Non-contiguous specification only valid for "conductor" regions')
+            else:
+                self.region_info[name]['noncontiguous'] = noncontiguous
         if nTurns is not None:
             if reg_type != 'coil':
                 raise ValueError('nTurns specification only valid for "coil" regions')
