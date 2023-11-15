@@ -20,8 +20,8 @@ USE oft_tet_quadrature, ONLY: set_quad_2d
 USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
 !---
-USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph_ptr
-USE oft_la_utils, ONLY: create_matrix
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr
+USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks
 USE oft_solver_base, ONLY: oft_solver, oft_eigsolver
 USE oft_solver_utils, ONLY: create_diag_pre, create_cg_solver
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
@@ -1708,12 +1708,13 @@ end subroutine gs_cond_source
 !---------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------
-subroutine gs_wall_source(self,dpsi_dt,b)
+subroutine gs_wall_source(self,dpsi_dt,b,nonaxi_vals)
 class(gs_eq), intent(inout) :: self !< G-S object
 CLASS(oft_vector), intent(inout) :: dpsi_dt,b
+real(8), optional, intent(in) :: nonaxi_vals(:,:)
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:),eta_reg(:)
+real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:),eta_reg(:),reg_source(:)
 real(8), pointer :: psi_vals(:)
 integer(4) :: j,m,l,k,kk,iCond
 integer(4), allocatable :: j_lag(:)
@@ -1725,12 +1726,18 @@ call b%set(0.d0)
 CALL b%get_local(btmp)
 CALL dpsi_dt%get_local(psi_vals)
 !
-ALLOCATE(eta_reg(smesh%nreg))
+ALLOCATE(eta_reg(smesh%nreg),reg_source(smesh%nreg))
+reg_source=0.d0
 eta_reg=-1.d0
 DO l=1,self%ncond_regs
   j=self%cond_regions(l)%id
   eta_reg(j)=self%cond_regions(l)%eta
 END DO
+IF(PRESENT(nonaxi_vals))THEN
+  DO l=1,smesh%nreg
+    reg_source(l)=DOT_PRODUCT(psi_vals,nonaxi_vals(:,l))
+  END DO
+END IF
 !---
 !$omp parallel private(rhs_loc,j_lag,curved,goptmp,v,m,det,pt,psitmp,l,rop)
 allocate(rhs_loc(oft_blagrange%nce))
@@ -1755,7 +1762,7 @@ DO j=1,smesh%nc
     psitmp=psitmp/eta_reg(smesh%reg(j))/(pt(1)+gs_epsilon)
     !$omp simd
     do l=1,oft_blagrange%nce
-      rhs_loc(l)=rhs_loc(l)+rop(l)*psitmp*det
+      rhs_loc(l)=rhs_loc(l)+rop(l)*(psitmp+reg_source(smesh%reg(j)))*det
     end do
   end do
   !---Get local to global DOF mapping
@@ -1768,7 +1775,7 @@ END DO
 deallocate(rhs_loc,j_lag,rop)
 !$omp end parallel
 CALL b%restore_local(btmp,add=.TRUE.)
-DEALLOCATE(btmp,psi_vals,eta_reg)
+DEALLOCATE(btmp,psi_vals,eta_reg,reg_source)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_wall_source
 !---------------------------------------------------------------------------
@@ -2050,6 +2057,7 @@ real(8) :: opoint(2),R0_in,f(3),V0_in,V0_tmp,estored
 REAL(8) :: nl_res,psimax,alamin,alamp,itor,pnorm0,pnormp,itor_alam,itor_press
 REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
 REAL(8) :: param_mat(3,3),param_vec(3),param_rhs(3)
+real(8), allocatable :: nonaxi_vals(:,:)
 integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc
 integer(4), save :: eq_count = 0
 CHARACTER(LEN=40) :: err_reason
@@ -2072,7 +2080,7 @@ IF(.NOT.self%has_plasma)THEN
   CALL self%psi%new(psi_eddy)
   CALL self%psi%new(psip)
   IF(self%dt>0.d0)THEN
-    CALL build_dels(self%dels_dt,self,"free",self%dt)
+    CALL build_dels(self%dels_dt,self,"free",self%dt,nonaxi_vals)
     self%lu_solver_dt%A=>self%dels_dt
     self%lu_solver_dt%refactor=.TRUE.
     CALL self%psi%new(psi_dt)
@@ -2127,7 +2135,7 @@ IF(.NOT.self%has_plasma)THEN
   IF(self%dt>0.d0)THEN
     CALL tmp_vec%set(0.d0)
     CALL tmp_vec%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
-    CALL gs_wall_source(self,tmp_vec,psi_dt)
+    CALL gs_wall_source(self,tmp_vec,psi_dt,nonaxi_vals)
     CALL blag_zerob(psi_dt)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%lu_solver_dt%apply(tmp_vec,psi_dt)
@@ -2191,7 +2199,7 @@ CALL self%p%update(self)
 !---Get J_phi source term
 CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
 IF(self%dt>0.d0)THEN
-  CALL build_dels(self%dels_dt,self,"free",self%dt)
+  CALL build_dels(self%dels_dt,self,"free",self%dt,nonaxi_vals)
   self%lu_solver_dt%A=>self%dels_dt
   self%lu_solver_dt%refactor=.TRUE.
 END IF
@@ -2467,7 +2475,7 @@ DO i=1,self%maxits
   IF(self%dt>0.d0)THEN
     CALL psi_dt%set(0.d0)
     CALL psi_dt%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
-    CALL gs_wall_source(self,psi_dt,tmp_vec)
+    CALL gs_wall_source(self,psi_dt,tmp_vec,nonaxi_vals)
     CALL blag_zerob(tmp_vec)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
@@ -5035,37 +5043,126 @@ end subroutine build_mrop
 !! @param[in,out] mat Matrix object
 !! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
-subroutine build_dels(mat,self,bc,dt)
+subroutine build_dels(mat,self,bc,dt,nonaxi_vals_out)
 class(oft_matrix), pointer, intent(inout) :: mat
 class(gs_eq), intent(inout) :: self
 character(LEN=*), intent(in) :: bc
 real(8), optional, intent(in) :: dt
+real(8), optional, allocatable, intent(out) :: nonaxi_vals_out(:,:)
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time,pt(3),dt_in
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),eta_reg(:)
 logical :: curved
+integer(i4) :: nnonaxi,block_max
+integer(i4), allocatable :: node_mark(:,:),reg_map(:),dense_flag(:)
+real(r8), pointer, dimension(:,:) :: nonaxi_vals
+type(oft_1d_int), pointer, dimension(:) :: noaxi_nodes,bc_nodes
 CLASS(oft_vector), POINTER :: oft_lag_vec
+TYPE(oft_graph_ptr) :: graphs(1,1)
+TYPE(oft_graph), TARGET :: graph1,graph2
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing Boundary LAG::LOP'
   CALL mytimer%tick()
 END IF
+dt_in=-1.d0
+IF(PRESENT(dt))dt_in=dt
+!
+nnonaxi=0
+IF(dt_in>0.d0)THEN
+  DO jr=1,self%ncond_regs
+      IF(self%cond_regions(jr)%contiguous)CYCLE
+      nnonaxi=nnonaxi+1
+  END DO
+END IF
+ALLOCATE(reg_map(smesh%nreg))
+reg_map=0
+IF(nnonaxi>0)THEN
+  ALLOCATE(node_mark(smesh%nreg,oft_blagrange%ne+1))
+  node_mark=0
+  allocate(j(oft_blagrange%nce))
+  DO i=1,oft_blagrange%mesh%nc
+      call oft_blagrange%ncdofs(i,j)
+      DO jc=1,oft_blagrange%nce
+          IF(node_mark(smesh%reg(i),j(jc))/=0)CYCLE
+          node_mark(smesh%reg(i),oft_blagrange%ne+1)=node_mark(smesh%reg(i),oft_blagrange%ne+1)+1
+          node_mark(smesh%reg(i),j(jc))=node_mark(smesh%reg(i),oft_blagrange%ne+1)
+      END DO
+  END DO
+  deallocate(j)
+  ALLOCATE(dense_flag(oft_blagrange%ne))
+  dense_flag=0
+  ALLOCATE(noaxi_nodes(nnonaxi))
+  block_max=0
+  m=0
+  DO jr=1,self%ncond_regs
+      IF(self%cond_regions(jr)%contiguous)CYCLE
+      i=self%cond_regions(jr)%id
+      m=m+1
+      reg_map(i)=m
+      noaxi_nodes(m)%n=node_mark(i,oft_blagrange%ne+1)
+      ALLOCATE(noaxi_nodes(m)%v(noaxi_nodes(m)%n))
+      noaxi_nodes(m)%v=0
+      DO jc=1,oft_blagrange%ne
+          IF(node_mark(i,jc)>0)noaxi_nodes(m)%v(node_mark(i,jc)) = jc
+      END DO
+      dense_flag(noaxi_nodes(m)%v)=m
+      block_max=MAX(block_max,noaxi_nodes(m)%n)
+  END DO
+END IF
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  IF(TRIM(bc)=="free")THEN
-    CALL gs_mat_create(mat)
-  ELSE
-    CALL oft_blagrange%mat_create(mat)
+  !---
+  graph1%nr=oft_blagrange%ne
+  graph1%nrg=oft_blagrange%global%ne
+  graph1%nc=oft_blagrange%ne
+  graph1%ncg=oft_blagrange%global%ne
+  graph1%nnz=oft_blagrange%nee
+  graph1%kr=>oft_blagrange%kee
+  graph1%lc=>oft_blagrange%lee
+  !---Add dense blocks for non-contiguous regions
+  IF(nnonaxi>0)THEN
+    !---Add dense blocks
+    CALL graph_add_dense_blocks(graph1,graph2,dense_flag,noaxi_nodes)
+    NULLIFY(graph1%kr,graph1%lc)
+    graph1%nnz=graph2%nnz
+    graph1%kr=>graph2%kr
+    graph1%lc=>graph2%lc
+    DEALLOCATE(dense_flag)
   END IF
+  !---Add dense block for boundary
+  IF(TRIM(bc)=="free")THEN
+    ! CALL gs_mat_create(mat)
+    ALLOCATE(bc_nodes(1))
+    bc_nodes(1)%n=oft_blagrange%nbe
+    bc_nodes(1)%v=>oft_blagrange%lbe
+    ALLOCATE(dense_flag(oft_blagrange%ne))
+    dense_flag=0
+    dense_flag(bc_nodes(1)%v)=1
+    !---Add dense blocks
+    CALL graph_add_dense_blocks(graph1,graph2,dense_flag,bc_nodes)
+    NULLIFY(graph1%kr,graph1%lc)
+    graph1%nnz=graph2%nnz
+    graph1%kr=>graph2%kr
+    graph1%lc=>graph2%lc
+    DEALLOCATE(dense_flag)
+  ELSE
+  !   CALL oft_blagrange%mat_create(mat)
+  END IF
+  !---Create matrix
+  graphs(1,1)%g=>graph1
+  CALL oft_blagrange%vec_create(oft_lag_vec)
+  CALL create_matrix(mat,graphs,oft_lag_vec,oft_lag_vec)
+  CALL oft_lag_vec%delete
+  DEALLOCATE(oft_lag_vec)
+  NULLIFY(graphs(1,1)%g)
 ELSE
   CALL mat%zero
 END IF
-dt_in=-1.d0
-IF(PRESENT(dt))dt_in=dt
 ALLOCATE(eta_reg(smesh%nreg))
 eta_reg=-1.d0
 IF(dt_in>0.d0)THEN
@@ -5077,12 +5174,18 @@ END IF
 !---------------------------------------------------------------------------
 ! Operator integration
 !---------------------------------------------------------------------------
+IF(nnonaxi>0)THEN
+  ALLOCATE(nonaxi_vals(block_max+1,nnonaxi))
+  nonaxi_vals=0.d0
+END IF
 !$omp parallel private(j,rop,gop,det,lop,curved,goptmp,m,vol,jc,jr,pt)
 allocate(j(oft_blagrange%nce)) ! Local DOF and matrix indices
 allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
 allocate(lop(oft_blagrange%nce,oft_blagrange%nce)) ! Local laplacian matrix
 !$omp do schedule(dynamic,1) ordered
 do i=1,oft_blagrange%mesh%nc
+  !---Get local to global DOF mapping
+  call oft_blagrange%ncdofs(i,j)
   !---Get local reconstructed operators
   lop=0.d0
   do m=1,oft_blagrange%quad%np ! Loop over quadrature points
@@ -5104,11 +5207,22 @@ do i=1,oft_blagrange%mesh%nc
         do jc=1,oft_blagrange%nce
           lop(jr,jc) = lop(jr,jc) + rop(jr)*rop(jc)*det/(pt(1)+gs_epsilon)/(dt_in*eta_reg(smesh%reg(i)))
         end do
+        IF(reg_map(smesh%reg(i))>0)THEN
+          !$omp atomic
+          nonaxi_vals(node_mark(smesh%reg(i),j(jr)),reg_map(smesh%reg(i))) = &
+            nonaxi_vals(node_mark(smesh%reg(i),j(jr)),reg_map(smesh%reg(i))) &
+            + rop(jr)*det/(pt(1)+gs_epsilon)/(dt_in*eta_reg(smesh%reg(i)))
+        END IF
       end do
     END IF
+    IF(reg_map(smesh%reg(i))>0)THEN
+      !$omp atomic
+      nonaxi_vals(block_max+1,reg_map(smesh%reg(i))) = &
+        nonaxi_vals(block_max+1,reg_map(smesh%reg(i))) + det
+    END IF
   end do
-  !---Get local to global DOF mapping
-  call oft_blagrange%ncdofs(i,j)
+  ! !---Get local to global DOF mapping
+  ! call oft_blagrange%ncdofs(i,j)
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("zerob")
@@ -5125,9 +5239,54 @@ do i=1,oft_blagrange%mesh%nc
   call mat%atomic_add_values(j,j,lop,oft_blagrange%nce,oft_blagrange%nce)
   !$omp end ordered
 end do
+IF(nnonaxi>0)THEN
+  !$omp do schedule(dynamic,1)
+  !ordered
+  do i=1,oft_blagrange%mesh%nc
+    IF(reg_map(smesh%reg(i))==0)CYCLE
+    !---Get local to global DOF mapping
+    call oft_blagrange%ncdofs(i,j)
+    !---Get local reconstructed operators
+    lop(:,1)=0.d0
+    do m=1,oft_blagrange%quad%np ! Loop over quadrature points
+      call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
+      det=vol*oft_blagrange%quad%wts(m)
+      do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
+        call oft_blag_eval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),rop(jc))
+        lop(jc,1) = lop(jc,1) + rop(jc)*det
+      end do
+    end do
+    !---Add local values to global matrix
+    m=reg_map(smesh%reg(i))
+    lop(:,1)=-lop(:,1)/nonaxi_vals(block_max+1,m)
+    !!$omp ordered
+    do jc=1,oft_blagrange%nce
+      call mat%atomic_add_values(j(jc:jc),noaxi_nodes(m)%v, &
+        lop(jc,1)*nonaxi_vals(:,m),1,noaxi_nodes(m)%n)
+    end do
+    !!$omp end ordered
+  end do
+END IF
 deallocate(j,rop,gop,lop)
 !$omp end parallel
 ALLOCATE(lop(1,1),j(1))
+IF(nnonaxi>0)THEN
+  IF(PRESENT(nonaxi_vals_out))THEN
+    ALLOCATE(nonaxi_vals_out(oft_blagrange%ne,smesh%nreg))
+    nonaxi_vals_out=0.d0
+    DO i=1,smesh%nreg
+      IF(reg_map(i)==0)CYCLE
+      DO jc=1,noaxi_nodes(reg_map(i))%n
+        nonaxi_vals_out(noaxi_nodes(reg_map(i))%v(jc),i)=-nonaxi_vals(jc,reg_map(i))*dt_in/nonaxi_vals(block_max+1,reg_map(i))
+      END DO
+    END DO
+  END IF
+  DO i=1,nnonaxi
+      DEALLOCATE(noaxi_nodes(i)%v)
+  END DO
+  DEALLOCATE(reg_map,noaxi_nodes,node_mark)
+  DEALLOCATE(nonaxi_vals)
+END IF
 !---Set diagonal entries for dirichlet rows
 SELECT CASE(TRIM(bc))
   CASE("zerob")

@@ -16,8 +16,8 @@ USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
 USE oft_quadrature, ONLY: oft_quad_type
 USE oft_gauss_quadrature, ONLY: set_quad_1d
-USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_graph_ptr, oft_vector_ptr
-USE oft_la_utils, ONLY: create_matrix
+USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_graph, oft_graph_ptr, oft_vector_ptr
+USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks, graph_add_full_col
 USE oft_solver_base, ONLY: oft_solver
 USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
@@ -87,7 +87,7 @@ end type eig_wrapper
 TYPE(oft_mf_matrix), TARGET :: mfmat !< Matrix free operator
 TYPE(tMaker_td_mat), TARGET :: adv_op
 TYPE(oft_tmaker_td), TARGET :: tMaker_td_obj
-TYPE(oft_graph_ptr) :: graphs(1,1)
+! TYPE(oft_graph_ptr) :: graphs(1,1)
 ! TYPE(gs_eq) :: mygs
 CLASS(oft_matrix), POINTER :: mr2op,mrop,dels
 CLASS(oft_solver), POINTER :: mrop_solver
@@ -1287,7 +1287,6 @@ IF(nnonaxi>0)THEN
 END IF
 ALLOCATE(dense_flag(oft_blagrange%ne))
 dense_flag=0
-WRITE(*,*)nnonaxi
 ALLOCATE(noaxi_nodes(nnonaxi+1))
 reg_map=0
 block_max=0
@@ -1440,10 +1439,7 @@ IF(nnonaxi>0)THEN
             det=vol*oft_blagrange%quad%wts(m)
             do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
                 call oft_blag_eval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),rop(jc))
-            end do
-            !---Compute local matrix contributions
-            do jr=1,oft_blagrange%nce
-                lim_loc(jr) = lim_loc(jr) + rop(jr)*det
+                lim_loc(jc) = lim_loc(jc) + rop(jc)*det
             end do
         end do
         lim_loc=-lim_loc/nonaxi_vals(block_max+1,reg_map(smesh%reg(i)))
@@ -1512,94 +1508,29 @@ CLASS(oft_vector), POINTER :: tmp_vec
 INTEGER(4) :: i,j,k,nr,iadd,offset
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: ltmp
 TYPE(oft_graph_ptr) :: graphs(1,1)
+TYPE(oft_graph), TARGET :: graph1,graph2
 DEBUG_STACK_PUSH
-CALL oft_blagrange%vec_create(tmp_vec)
-ALLOCATE(graphs(1,1)%g)
-graphs(1,1)%g%nr=oft_blagrange%ne
-graphs(1,1)%g%nrg=oft_blagrange%global%ne
-graphs(1,1)%g%nc=oft_blagrange%ne
-graphs(1,1)%g%ncg=oft_blagrange%global%ne
-graphs(1,1)%g%nnz=0
-ALLOCATE(graphs(1,1)%g%kr(oft_blagrange%ne+1))
-graphs(1,1)%g%kr=0
-ALLOCATE(ltmp(oft_blagrange%ne))
-DO i=1,oft_blagrange%ne
-    IF(dense_flag(i)/=0)THEN
-        ltmp=2*oft_blagrange%ne
-        offset=dense_nodes(dense_flag(i))%n
-        ltmp(1:offset)=dense_nodes(dense_flag(i))%v
-        DO j=oft_blagrange%kee(i),oft_blagrange%kee(i+1)-1
-            ltmp(j-oft_blagrange%kee(i)+offset+1)=oft_blagrange%lee(j)
-        END DO
-        DO iadd=1,nadd
-            ltmp(oft_blagrange%kee(i+1)-oft_blagrange%kee(i)+offset+iadd)=nodes_add(iadd)
-        END DO
-        CALL sort_array(ltmp,offset+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i))
-        graphs(1,1)%g%kr(i)=1
-        DO j=2,offset+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i)
-            IF(ltmp(j)>ltmp(j-1))graphs(1,1)%g%kr(i)=graphs(1,1)%g%kr(i)+1
-        END DO
-    ELSE
-        graphs(1,1)%g%kr(i)=oft_blagrange%kee(i+1)-oft_blagrange%kee(i)
-        DO iadd=1,nadd
-            j=search_array(nodes_add(iadd),oft_blagrange%lee(oft_blagrange%kee(i):oft_blagrange%kee(i+1)-1), &
-                oft_blagrange%kee(i+1)-oft_blagrange%kee(i))
-            IF(j==0)graphs(1,1)%g%kr(i)=graphs(1,1)%g%kr(i)+1
-        END DO
-    END IF
-END DO
-graphs(1,1)%g%nnz=SUM(graphs(1,1)%g%kr)
-graphs(1,1)%g%kr(oft_blagrange%ne+1)=graphs(1,1)%g%nnz+1
-DO i=oft_blagrange%ne,1,-1
-    graphs(1,1)%g%kr(i)=graphs(1,1)%g%kr(i+1)-graphs(1,1)%g%kr(i)
-END DO
-IF(graphs(1,1)%g%kr(1)/=1)CALL oft_abort('Bad new graph setup','gs_mat_create', &
-__FILE__)
-ALLOCATE(graphs(1,1)%g%lc(graphs(1,1)%g%nnz))
-DO i=1,oft_blagrange%ne
-    IF(dense_flag(i)/=0)THEN
-        ltmp=2*oft_blagrange%ne
-        offset=dense_nodes(dense_flag(i))%n
-        ltmp(1:offset)=dense_nodes(dense_flag(i))%v
-        DO j=oft_blagrange%kee(i),oft_blagrange%kee(i+1)-1
-            ltmp(j-oft_blagrange%kee(i)+offset+1)=oft_blagrange%lee(j)
-        END DO
-        DO iadd=1,nadd
-            ltmp(oft_blagrange%kee(i+1)-oft_blagrange%kee(i)+offset+iadd)=nodes_add(iadd)
-        END DO
-        CALL sort_array(ltmp,offset+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i))
-        nr=0
-        graphs(1,1)%g%lc(graphs(1,1)%g%kr(i))=ltmp(1)
-        DO j=2,offset+nadd+oft_blagrange%kee(i+1)-oft_blagrange%kee(i)
-            IF(ltmp(j)>ltmp(j-1))THEN
-            nr=nr+1
-            graphs(1,1)%g%lc(graphs(1,1)%g%kr(i)+nr)=ltmp(j)
-            END IF
-        END DO
-    ELSE
-        DO j=oft_blagrange%kee(i),oft_blagrange%kee(i+1)-1
-            graphs(1,1)%g%lc(graphs(1,1)%g%kr(i)+j-oft_blagrange%kee(i))=oft_blagrange%lee(j)
-        END DO
-        k=0
-        DO iadd=1,nadd
-            j=search_array(nodes_add(iadd),oft_blagrange%lee(oft_blagrange%kee(i):oft_blagrange%kee(i+1)-1), &
-                oft_blagrange%kee(i+1)-oft_blagrange%kee(i))
-            IF(j==0)THEN
-                k=k+1
-                graphs(1,1)%g%lc(graphs(1,1)%g%kr(i+1)-k)=nodes_add(iadd)
-            END IF
-        END DO
-        IF((graphs(1,1)%g%kr(i+1)-graphs(1,1)%g%kr(i))>(oft_blagrange%kee(i+1)-oft_blagrange%kee(i)))THEN
-            CALL sort_array(graphs(1,1)%g%lc(graphs(1,1)%g%kr(i):graphs(1,1)%g%kr(i+1)-1), &
-                graphs(1,1)%g%kr(i+1)-graphs(1,1)%g%kr(i))
-        END IF
-    END IF
-END DO
+!
+graph1%nr=oft_blagrange%ne
+graph1%nrg=oft_blagrange%global%ne
+graph1%nc=oft_blagrange%ne
+graph1%ncg=oft_blagrange%global%ne
+graph1%nnz=oft_blagrange%nee
+graph1%kr=>oft_blagrange%kee
+graph1%lc=>oft_blagrange%lee
+!---Add dense blocks
+CALL graph_add_dense_blocks(graph1,graph2,dense_flag,dense_nodes)
+NULLIFY(graph1%kr,graph1%lc)
+!---Add full columns
+CALL graph_add_full_col(graph2,graph1,nadd,nodes_add)
+DEALLOCATE(graph2%kr,graph2%lc)
 !---
+graphs(1,1)%g=>graph1
+CALL oft_blagrange%vec_create(tmp_vec)
 CALL create_matrix(new,graphs,tmp_vec,tmp_vec)
 CALL tmp_vec%delete
-DEALLOCATE(ltmp)
-DEALLOCATE(graphs(1,1)%g,tmp_vec)
+DEALLOCATE(tmp_vec)
+NULLIFY(graphs(1,1)%g)
 DEBUG_STACK_POP
 end subroutine lin_mat_create
 end subroutine build_linearized

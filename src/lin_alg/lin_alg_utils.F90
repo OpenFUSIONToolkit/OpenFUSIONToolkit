@@ -12,6 +12,7 @@
 MODULE oft_la_utils
 USE oft_local
 USE oft_base
+USE oft_sort, ONLY: sort_array, search_array
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_global_stitch, &
   oft_stitch_check
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_map, map_list, &
@@ -839,6 +840,134 @@ DO i=1,ni
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE condense_graph
+!------------------------------------------------------------------------------
+!> Modify a CSR graph by adding dense blocks
+!------------------------------------------------------------------------------
+subroutine graph_add_dense_blocks(graph_in,graph_out,dense_flag,dense_nodes)
+TYPE(oft_graph), INTENT(inout) :: graph_in !< Input graph to augment
+TYPE(oft_graph), INTENT(inout) :: graph_out !< Output graph
+INTEGER(4), INTENT(in) :: dense_flag(:) !< Index of dense blocks (0 for elements outside dense blocks)
+TYPE(oft_1d_int), INTENT(in) :: dense_nodes(:) !< Indices for each dense block
+INTEGER(4) :: i,j,k,nr,offset
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: ltmp
+DEBUG_STACK_PUSH
+graph_out%nr=graph_in%nr
+graph_out%nrg=graph_in%nrg
+graph_out%nc=graph_in%nc
+graph_out%ncg=graph_in%ncg
+graph_out%nnz=0
+ALLOCATE(graph_out%kr(graph_out%nr+1))
+graph_out%kr=0
+ALLOCATE(ltmp(graph_in%nc))
+DO i=1,graph_in%nr
+  IF(dense_flag(i)/=0)THEN
+    ltmp=2*graph_in%nc
+    offset=dense_nodes(dense_flag(i))%n
+    ltmp(1:offset)=dense_nodes(dense_flag(i))%v
+    DO j=graph_in%kr(i),graph_in%kr(i+1)-1
+      ltmp(j-graph_in%kr(i)+offset+1)=graph_in%lc(j)
+    END DO
+    CALL sort_array(ltmp,offset+graph_in%kr(i+1)-graph_in%kr(i))
+    graph_out%kr(i)=1
+    DO j=2,offset+graph_in%kr(i+1)-graph_in%kr(i)
+      IF(ltmp(j)>ltmp(j-1))graph_out%kr(i)=graph_out%kr(i)+1
+    END DO
+  ELSE
+    graph_out%kr(i)=graph_in%kr(i+1)-graph_in%kr(i)
+  END IF
+END DO
+graph_out%nnz=SUM(graph_out%kr)
+graph_out%kr(graph_out%nr+1)=graph_out%nnz+1
+DO i=graph_out%nr,1,-1
+  graph_out%kr(i)=graph_out%kr(i+1)-graph_out%kr(i)
+END DO
+IF(graph_out%kr(1)/=1)CALL oft_abort('Bad new graph setup','graph_add_dense_blocks', &
+  __FILE__)
+ALLOCATE(graph_out%lc(graph_out%nnz))
+DO i=1,graph_in%nr
+  IF(dense_flag(i)/=0)THEN
+    ltmp=2*graph_in%nc
+    offset=dense_nodes(dense_flag(i))%n
+    ltmp(1:offset)=dense_nodes(dense_flag(i))%v
+    DO j=graph_in%kr(i),graph_in%kr(i+1)-1
+      ltmp(j-graph_in%kr(i)+offset+1)=graph_in%lc(j)
+    END DO
+    CALL sort_array(ltmp,offset+graph_in%kr(i+1)-graph_in%kr(i))
+    nr=0
+    graph_out%lc(graph_out%kr(i))=ltmp(1)
+    DO j=2,offset+graph_in%kr(i+1)-graph_in%kr(i)
+      IF(ltmp(j)>ltmp(j-1))THEN
+      nr=nr+1
+      graph_out%lc(graph_out%kr(i)+nr)=ltmp(j)
+      END IF
+    END DO
+  ELSE
+    DO j=graph_in%kr(i),graph_in%kr(i+1)-1
+      graph_out%lc(graph_out%kr(i)+j-graph_in%kr(i))=graph_in%lc(j)
+    END DO
+  END IF
+END DO
+!---
+DEALLOCATE(ltmp)
+DEBUG_STACK_POP
+end subroutine graph_add_dense_blocks
+!------------------------------------------------------------------------------
+!> Modify a CSR graph by adding dense columns at specified indices
+!------------------------------------------------------------------------------
+subroutine graph_add_full_col(graph_in,graph_out,nadd,nodes_add)
+TYPE(oft_graph), INTENT(inout) :: graph_in !< Input graph to augment
+TYPE(oft_graph), INTENT(inout) :: graph_out !< Output graph
+INTEGER(4), INTENT(in) :: nadd !< Number of columns to add
+INTEGER(4), INTENT(in) :: nodes_add(nadd) !< Indices of columns to add
+INTEGER(4) :: i,j,k,nr,iadd
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: ltmp
+DEBUG_STACK_PUSH
+graph_out%nr=graph_in%nr
+graph_out%nrg=graph_in%nrg
+graph_out%nc=graph_in%nc
+graph_out%ncg=graph_in%ncg
+graph_out%nnz=0
+ALLOCATE(graph_out%kr(graph_in%nr+1))
+graph_out%kr=0
+ALLOCATE(ltmp(graph_in%nc))
+DO i=1,graph_in%nr
+  graph_out%kr(i)=graph_in%kr(i+1)-graph_in%kr(i)
+  DO iadd=1,nadd
+    j=search_array(nodes_add(iadd),graph_in%lc(graph_in%kr(i):graph_in%kr(i+1)-1), &
+      graph_in%kr(i+1)-graph_in%kr(i))
+    IF(j==0)graph_out%kr(i)=graph_out%kr(i)+1
+  END DO
+END DO
+graph_out%nnz=SUM(graph_out%kr)
+graph_out%kr(graph_in%nr+1)=graph_out%nnz+1
+DO i=graph_in%nr,1,-1
+  graph_out%kr(i)=graph_out%kr(i+1)-graph_out%kr(i)
+END DO
+IF(graph_out%kr(1)/=1)CALL oft_abort('Bad new graph setup','graph_add_full_col', &
+  __FILE__)
+ALLOCATE(graph_out%lc(graph_out%nnz))
+DO i=1,graph_in%nr
+  DO j=graph_in%kr(i),graph_in%kr(i+1)-1
+    graph_out%lc(graph_out%kr(i)+j-graph_in%kr(i))=graph_in%lc(j)
+  END DO
+  k=0
+  DO iadd=1,nadd
+    j=search_array(nodes_add(iadd),graph_in%lc(graph_in%kr(i):graph_in%kr(i+1)-1), &
+      graph_in%kr(i+1)-graph_in%kr(i))
+    IF(j==0)THEN
+      k=k+1
+      graph_out%lc(graph_out%kr(i+1)-k)=nodes_add(iadd)
+    END IF
+  END DO
+  IF((graph_out%kr(i+1)-graph_out%kr(i))>(graph_in%kr(i+1)-graph_in%kr(i)))THEN
+    CALL sort_array(graph_out%lc(graph_out%kr(i):graph_out%kr(i+1)-1), &
+      graph_out%kr(i+1)-graph_out%kr(i))
+  END IF
+END DO
+!---
+DEALLOCATE(ltmp)
+DEBUG_STACK_POP
+end subroutine graph_add_full_col
 !------------------------------------------------------------------------------
 ! SUBROUTINE: combine_matrices_real
 !------------------------------------------------------------------------------

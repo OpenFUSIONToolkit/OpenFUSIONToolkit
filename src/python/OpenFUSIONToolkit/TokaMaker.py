@@ -1063,7 +1063,7 @@ class TokaMaker():
         tokamaker_set_settings(ctypes.byref(self.settings))
     
     def plot_machine(self,fig,ax,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
-                     coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]'):
+                     coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',colorbar=None):
         '''! Plot machine geometry
 
         @param fig Figure to add to
@@ -1076,6 +1076,8 @@ class TokaMaker():
         @param coil_symmap Make coil current colorscale symmetric
         @param coil_scale Scale for coil currents when plotting
         @param coil_clabel Label for coil current colorbar
+        @param colorbar Colorbar instance to overwrite (None to add)
+        @result Colorbar instance for coil colors or None
         '''
         mask_vals = numpy.ones((self.np,))
         # Shade vacuum region
@@ -1097,7 +1099,10 @@ class TokaMaker():
                     clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap, vmin=-max_curr, vmax=max_curr)
                 else:
                     clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap)
-                fig.colorbar(clf,ax=ax,label=coil_clabel)
+                cax = None
+                if colorbar is not None:
+                    cax = colorbar.ax
+                colorbar = fig.colorbar(clf,ax=ax,cax=cax,label=coil_clabel)
         else:
             for i in range(self.ncoils):
                 mask_tmp = (self.reg == coil_map[i])
@@ -1111,6 +1116,7 @@ class TokaMaker():
             ax.plot(self.lim_contour[:,0],self.lim_contour[:,1],color=limiter_color)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
+        return colorbar
 
     def plot_constraints(self,fig,ax,isoflux_color='tab:red',isoflux_marker='+',saddle_color='tab:green',saddle_marker='x'):
         '''! Plot geometry constraints
@@ -1197,7 +1203,7 @@ class TokaMaker():
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
     
-    def plot_eddy(self,fig,ax,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]'):
+    def plot_eddy(self,fig,ax,dpsi_dt=None,nlevels=40,colormap='jet',symmap=False,clabel=r'$J_w$ [$A/m^2$]',colorbar=None):
         r'''! Plot contours of \f$\hat{\psi}\f$
 
         @param fig Figure to add to
@@ -1205,7 +1211,10 @@ class TokaMaker():
         @param dpsi_dt dPsi/dt corresponding to eddy currents (eg. from time-dependent simulation)
         @param nlevels Number contour lines used for shading
         @param colormap Colormap to use for shadings
+        @param symmap Make current colorscale symmetric?
         @param clabel Label for colorbar
+        @param colorbar Colorbar instance to overwrite (None to add)
+        @result Colorbar instance or None
         '''
         # Apply 1/R scale (avoiding divide by zero)
         dpsi_dt = dpsi_dt.copy()
@@ -1228,11 +1237,19 @@ class TokaMaker():
                 if cond_reg.get('noncontiguous',False):
                     mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
                 mask = numpy.logical_or(mask,mask_tmp)
-        clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],mesh_currents[mask],nlevels,cmap=colormap)
-        cb = fig.colorbar(clf,ax=ax)
-        cb.set_label(clabel)
+        if symmap:
+            max_curr = abs(mesh_currents).max()
+            clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], nlevels, cmap=colormap, vmin=-max_curr, vmax=max_curr)
+        else:
+            clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], nlevels, cmap=colormap)
+        cax = None
+        if colorbar is not None:
+            cax = colorbar.ax
+        colorbar = fig.colorbar(clf,ax=ax,cax=cax)
+        colorbar.set_label(clabel)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
+        return colorbar
 
     def get_vfixed(self):
         '''! Get required vacuum flux values to balance fixed boundary equilibrium
