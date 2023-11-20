@@ -102,7 +102,7 @@ IF(TRIM(gs_global%coil_file)=='none')THEN
         gs_global%cond_regions(gs_global%ncond_regs)%eta=eta_tmp(i)
       END IF
       gs_global%cond_regions(gs_global%ncond_regs)%id=i
-      gs_global%cond_regions(gs_global%ncond_regs)%contiguous=(contig_tmp(i)==1)
+      gs_global%cond_regions(gs_global%ncond_regs)%continuous=(contig_tmp(i)==1)
     ELSE
       gs_global%ncoil_regs=gs_global%ncoil_regs+1
       gs_global%coil_regions(gs_global%ncoil_regs)%id=i

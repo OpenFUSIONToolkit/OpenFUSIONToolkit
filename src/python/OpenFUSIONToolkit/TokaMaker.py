@@ -473,7 +473,7 @@ class TokaMaker():
             eta_vals[1] = 1.E10
             for key in cond_dict:
                 eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
-                if cond_dict[key].get('noncontiguous',False):
+                if cond_dict[key].get('noncontinuous',False):
                     contig_flag[cond_dict[key]['reg_id']-1] = 0
         cstring = c_char_p(coil_file.encode())
         tokamaker_setup_regions(cstring,eta_vals,contig_flag)
@@ -1234,7 +1234,7 @@ class TokaMaker():
                 mask_tmp = (self.reg == cond_reg['reg_id'])
                 field_tmp = dpsi_dt/eta
                 mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
-                if cond_reg.get('noncontiguous',False):
+                if cond_reg.get('noncontinuous',False):
                     mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
                 mask = numpy.logical_or(mask,mask_tmp)
         if symmap:
@@ -1389,7 +1389,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,noncontiguous=None,nTurns=None):
+    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -1429,11 +1429,11 @@ class gs_Domain:
         else:
             if reg_type == 'conductor':
                 raise ValueError('Resistivity not specified for "conductor" region')
-        if noncontiguous is not None:
+        if noncontinuous is not None:
             if reg_type != 'conductor':
                 raise ValueError('Non-contiguous specification only valid for "conductor" regions')
             else:
-                self.region_info[name]['noncontiguous'] = noncontiguous
+                self.region_info[name]['noncontinuous'] = noncontinuous
         if nTurns is not None:
             if reg_type != 'coil':
                 raise ValueError('nTurns specification only valid for "coil" regions')
