@@ -83,27 +83,27 @@ def check_result(volume_test, area_test, tol=1.E-4):
 def test_base(top_lev,cad_type):
     volume_cubit = 3.9206
     area_cubit = 12.1195
-    assert cubit_setup(1,top_lev,'sphere_test',cad_type=cad_type)
+    assert cubit_setup(1,top_lev,'sphere_tet4_test',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_quad(top_lev):
     volume_cubit = 4.18656
     area_cubit = 12.56197
-    assert cubit_setup(1,top_lev,'sphere_test','sphere_test',grid_order=2)
+    assert cubit_setup(1,top_lev,'sphere_tet4_test','sphere_test',grid_order=2)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_1ref(top_lev):
     volume_cubit = 4.11948
     area_cubit = 12.4519
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'sphere_test','sphere_test')
+    assert cubit_setup(minlev,top_lev,'sphere_tet4_test','sphere_test')
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (1, 2))
 @pytest.mark.parametrize("cad_type", (0, 2))
 def test_hex_base(top_lev,cad_type):
     volume_cubit = 3.91742
     area_cubit = 12.15673
-    assert cubit_setup(1,top_lev,'sphere_test_hex',cad_type=cad_type)
+    assert cubit_setup(1,top_lev,'sphere_hex8_test',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 
 #============================================================================
@@ -113,7 +113,7 @@ def test_hex_base(top_lev,cad_type):
 def test_tet10_quad(top_lev,cad_type):
     volume_cubit = 4.18656
     area_cubit = 12.56197
-    assert cubit_setup(1,top_lev,'sphere_test2',grid_order=2,cad_type=cad_type)
+    assert cubit_setup(1,top_lev,'sphere_tet10_test',grid_order=2,cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("cad_type", (0, 2))
@@ -122,14 +122,14 @@ def test_tet10_1ref(top_lev,cad_type,grid_order):
     volume_cubit = [4.11948, 4.18656]
     area_cubit = [12.4519, 12.5620]
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'sphere_test2',grid_order=grid_order,cad_type=cad_type)
+    assert cubit_setup(minlev,top_lev,'sphere_tet10_test',grid_order=grid_order,cad_type=cad_type)
     assert check_result(volume_cubit[grid_order-1], area_cubit[grid_order-1])
 @pytest.mark.parametrize("top_lev", (1, 2))
 @pytest.mark.parametrize("cad_type", (0, 2))
 def test_hex27_quad(top_lev,cad_type):
     volume_cubit = 4.18831
     area_cubit = 12.56542
-    assert cubit_setup(1,top_lev,'sphere_test_hex2',grid_order=2,cad_type=cad_type)
+    assert cubit_setup(1,top_lev,'sphere_hex27_test',grid_order=2,cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("cad_type", (0, 2))
@@ -138,7 +138,7 @@ def test_hex27_1ref(top_lev,cad_type,grid_order):
     volume_cubit = [4.11911, 4.18831]
     area_cubit = [12.4621, 12.5654]
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'sphere_test_hex2',grid_order=grid_order,cad_type=cad_type)
+    assert cubit_setup(minlev,top_lev,'sphere_hex27_test',grid_order=grid_order,cad_type=cad_type)
     assert check_result(volume_cubit[grid_order-1], area_cubit[grid_order-1])
 
 #============================================================================
@@ -148,14 +148,14 @@ def test_hex27_1ref(top_lev,cad_type,grid_order):
 def test_cut_base(top_lev,cad_type):
     volume_cubit = 3.944408
     area_cubit = 12.16156
-    assert cubit_setup(1,top_lev,'sphere_test_cut',cad_type=cad_type)
+    assert cubit_setup(1,top_lev,'sphere_cut_test',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_cut_1ref(top_lev):
     volume_cubit = 4.12584
     area_cubit = 12.46292
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'sphere_test_cut','sphere_test_cut')
+    assert cubit_setup(minlev,top_lev,'sphere_cut_test','sphere_cut_test')
     assert check_result(volume_cubit, area_cubit)
 
 #============================================================================
@@ -164,20 +164,20 @@ def test_cut_1ref(top_lev):
 def test_reflect_base(top_lev):
     volume_cubit = 3.02070
     area_cubit =  12.26361
-    assert cubit_setup(1,top_lev,'ref_test',reflect='T')
+    assert cubit_setup(1,top_lev,'ref_tet4_test',reflect='T')
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_reflect_1ref(top_lev):
     volume_cubit = 3.11110
     area_cubit =  12.49011
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'ref_test','ref_test',reflect='T')
+    assert cubit_setup(minlev,top_lev,'ref_tet4_test','ref_test',reflect='T')
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_reflect_quad(top_lev):
     volume_cubit = 3.14123
     area_cubit =  12.56531
-    assert cubit_setup(1,top_lev,'ref_test','ref_test',grid_order=2,reflect='T')
+    assert cubit_setup(1,top_lev,'ref_tet10_test','ref_test',grid_order=2,reflect='T')
     assert check_result(volume_cubit, area_cubit)
 
 #============================================================================
@@ -186,20 +186,20 @@ def test_reflect_quad(top_lev):
 def test_perreflect_base(top_lev):
     volume_cubit = 3.02070
     area_cubit =   6.22221
-    assert cubit_setup(1,top_lev,'ref_test',reflect='T',per_ns=1)
+    assert cubit_setup(1,top_lev,'ref_tet4_test',reflect='T',per_ns=1)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_perreflect_1ref(top_lev):
     volume_cubit = 3.11110
     area_cubit =   6.26791
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'ref_test','ref_test',reflect='T',per_ns=1)
+    assert cubit_setup(minlev,top_lev,'ref_tet4_test','ref_test',reflect='T',per_ns=1)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_perreflect_quad(top_lev):
     volume_cubit = 3.14123
     area_cubit =   6.28283
-    assert cubit_setup(1,top_lev,'ref_test','ref_test',grid_order=2,reflect='T',per_ns=1)
+    assert cubit_setup(1,top_lev,'ref_tet10_test','ref_test',grid_order=2,reflect='T',per_ns=1)
     assert check_result(volume_cubit, area_cubit)
 
 #============================================================================
@@ -208,14 +208,14 @@ def test_perreflect_quad(top_lev):
 def test_tet10reflect_quad(top_lev):
     volume_cubit = 3.14123
     area_cubit =  12.56531
-    assert cubit_setup(1,top_lev,'ref_test2',grid_order=2,reflect='T')
+    assert cubit_setup(1,top_lev,'ref_tet10_test',grid_order=2,reflect='T')
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_tet10reflect_1ref(top_lev):
     volume_cubit = 3.11110
     area_cubit =  12.49011
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'ref_test2',reflect='T')
+    assert cubit_setup(minlev,top_lev,'ref_tet10_test',reflect='T')
     assert check_result(volume_cubit, area_cubit)
 
 #============================================================================
@@ -224,20 +224,20 @@ def test_tet10reflect_1ref(top_lev):
 def test_stretch_base(top_lev):
     volume_cubit = 3.02070
     area_cubit =  12.26361
-    assert cubit_setup(1,top_lev,'ref_test',zstretch=2.)
+    assert cubit_setup(1,top_lev,'ref_tet4_test',zstretch=2.)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_stretch_1ref(top_lev):
     volume_cubit = 3.11110
     area_cubit =  12.49011
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'ref_test','ref_test',zstretch=2.)
+    assert cubit_setup(minlev,top_lev,'ref_tet4_test','ref_test',zstretch=2.)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_stretch_quad(top_lev):
     volume_cubit = 3.14123
     area_cubit =  12.56531
-    assert cubit_setup(1,top_lev,'ref_test','ref_test',grid_order=2,zstretch=2.)
+    assert cubit_setup(1,top_lev,'ref_tet10_test','ref_test',grid_order=2,zstretch=2.)
     assert check_result(volume_cubit, area_cubit)
 
 #============================================================================
@@ -288,5 +288,3 @@ def test_surf_sphere_quad(mesh_type,top_lev,cad_type):
     area_cubit = 12.5664
     assert cubit_setup(1,top_lev,'sphere_{0}_test'.format(mesh_type),test_2d='T',grid_order=2,cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit, tol=1.E-3)
-
-# test_hex27_1ref(2,0)
