@@ -799,6 +799,8 @@ END IF
 CALL multigrid_reffix_ho_surf
 !---Select mesh type and adjust boundary
 select case(smesh%cad_type)
+  case(mesh_native_id)
+    ! Do nothing
   case(mesh_t3d_id)
     ! call mesh_t3d_reffix
   case(mesh_cubit_id)

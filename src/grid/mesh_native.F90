@@ -131,10 +131,6 @@ ELSE
 END IF
 mesh%np=dim_sizes(2)
 IF(mesh%np==0)CALL oft_abort('Zero length point list','native_load_vmesh',__FILE__)
-IF(.NOT.oft_env%head_proc)THEN
-    DEBUG_STACK_POP
-    RETURN
-END IF
 !---Read in points
 ALLOCATE(mesh%r(3,mesh%np))
 IF(np_mem>0)THEN
@@ -187,13 +183,14 @@ END IF
 IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
 ! call mesh_t3d_geom
-call mesh_global_resolution(smesh)
+call mesh_global_resolution(mesh)
 ! !---
 ! do i=1,lenreflag
 !     if(reflect(i:i)=='x')call mesh_t3d_reflect(1,.1d0*mesh%hmin,ref_per(i))
 !     if(reflect(i:i)=='y')call mesh_t3d_reflect(2,.1d0*mesh%hmin,ref_per(i))
 !     if(reflect(i:i)=='z')call mesh_t3d_reflect(3,.1d0*mesh%hmin,ref_per(i))
 ! end do
+IF(oft_env%rank/=0)DEALLOCATE(mesh%r,mesh%lc,mesh%reg)
 DEBUG_STACK_POP
 end subroutine native_load_mesh
 !------------------------------------------------------------------------------
@@ -226,7 +223,7 @@ IF(oft_env%head_proc)THEN
         ! lenreflag=lnblnk(reflect)
         !
         WRITE(*,*)
-        WRITE(*,'(A)')'**** Loading OFT mesh'
+        WRITE(*,'(A)')'**** Loading OFT surface mesh'
         WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
         ! WRITE(*,'(2X,2A)')'Geom File = ',TRIM(inpname)
         IF(lenreflag>0)THEN
@@ -295,10 +292,6 @@ is_2d=(dim_sizes(1)==2)
 smesh%np=dim_sizes(2)
 IF(smesh%np==0)CALL oft_abort('Zero length point list','native_load_smesh',__FILE__)
 DEALLOCATE(dim_sizes)
-IF(.NOT.oft_env%head_proc)THEN
-    DEBUG_STACK_POP
-    RETURN
-END IF
 !---Read in points
 ALLOCATE(smesh%r(3,smesh%np))
 IF(is_2d)THEN
@@ -373,6 +366,7 @@ call mesh_global_resolution(smesh)
 !     if(reflect(i:i)=='y')call mesh_t3d_reflect(2,.1d0*mesh%hmin,ref_per(i))
 !     if(reflect(i:i)=='z')call mesh_t3d_reflect(3,.1d0*mesh%hmin,ref_per(i))
 ! end do
+IF(oft_env%rank/=0)DEALLOCATE(smesh%r,smesh%lc,smesh%reg)
 DEBUG_STACK_POP
 end subroutine native_load_smesh
 !------------------------------------------------------------------------------
@@ -481,7 +475,7 @@ END DO
 DO i=1,np_ho
     etmp=le_ho(:,i)
     k=ABS(mesh_local_findedge(self,etmp))
-    if(k==0)CALL oft_abort('Unlinked mesh edge','native_hobase',__FILE__)
+    if(k==0)CALL oft_abort('Unlinked mesh edge','native_hobase_simplex',__FILE__)
     self%ho_info%r(:,k) = r_ho(:,i)
 END DO
 !---Destory temporary storage
@@ -556,7 +550,7 @@ END DO
 DO i=1,self%nf
     self%ho_info%lfp(1,i)=i+self%ne
     self%ho_info%r(:,i+self%ne)=(self%r(:,self%lf(1,i))+self%r(:,self%lf(2,i)) &
-    + self%r(:,self%lf(3,i))+self%r(:,self%lf(4,i)))/4.d0
+        + self%r(:,self%lf(3,i))+self%r(:,self%lf(4,i)))/4.d0
 END DO
 !---Set face centerpoints from imported list
 DO i=1,self%nf

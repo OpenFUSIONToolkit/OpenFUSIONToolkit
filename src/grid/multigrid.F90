@@ -150,12 +150,12 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
   CALL oft_increase_indent
   !---Copy quadratic mesh if available
   IF(ASSOCIATED(pmesh%ho_info%r))THEN
-    mesh%order=pmesh%order
+    ! mesh%order=pmesh%order
     ho_count = mesh%ne*pmesh%ho_info%nep &
       + mesh%nf*pmesh%ho_info%nfp &
       + mesh%nc*pmesh%ho_info%ncp
     ALLOCATE(mesh%ho_info%r(3,ho_count))
-    mesh%bmesh%order=pmesh%bmesh%order
+    ! mesh%bmesh%order=pmesh%bmesh%order
     ho_count = mesh%bmesh%ne*pmesh%bmesh%ho_info%nep &
       + mesh%bmesh%nc*pmesh%bmesh%ho_info%ncp
     ALLOCATE(mesh%bmesh%ho_info%r(3,ho_count))
@@ -552,7 +552,7 @@ end subroutine multigrid_reffix_ho
 !> Adjust points to CAD boundary and propogate CAD linkage
 !------------------------------------------------------------------------------
 subroutine multigrid_reffix_ho_surf
-integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,ncde
+integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,ncde,cc
 real(r8) :: f1(4),f2(4),ftmp(4)
 class(oft_bmesh), pointer :: pmesh
 pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
@@ -569,7 +569,7 @@ IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN ! Current level is transfer lev
   CALL oft_increase_indent
   !---Copy quadratic mesh if available
   IF(ASSOCIATED(pmesh%ho_info%r))THEN
-    smesh%order=pmesh%order
+    ! smesh%order=pmesh%order
     ho_count = smesh%ne*pmesh%ho_info%nep &
       + smesh%nc*pmesh%ho_info%ncp
     ALLOCATE(smesh%ho_info%r(3,ho_count))
@@ -610,7 +610,7 @@ IF(pmesh%ho_info%ncp==1)THEN
   END DO
 END IF
 !
-smesh%order=pmesh%order
+! smesh%order=pmesh%order
 ho_count = smesh%ne*pmesh%ho_info%nep &
   + smesh%nc*pmesh%ho_info%ncp
 ALLOCATE(smesh%ho_info%r(3,ho_count))
@@ -629,7 +629,7 @@ CALL pmesh%set_order(2)
 CALL mesh_global_set_curved(pmesh,2)
 !---Create new high order nodes
 ncde=SIZE(mg_mesh%sinter(mg_mesh%level-1)%lcde,DIM=1)
-!$omp parallel private(cell,k,j,l,ep,fp,f1,f2,ftmp,ed,ed2)
+!$omp parallel private(cell,k,j,l,ep,fp,f1,f2,ftmp,ed,ed2,cc)
 !---Edge children
 !$omp do
 DO i=1,pmesh%ne
@@ -656,6 +656,7 @@ DO i=1,pmesh%ne
     smesh%ho_info%lep(1,ed) = ed
   END DO
 END DO
+!$omp end do nowait
 !---Cell children
 IF(ncde>0)THEN
   !$omp do
@@ -688,6 +689,49 @@ IF(ncde>0)THEN
       smesh%ho_info%lep(1,ed) = ed
     END DO
   END DO
+  !$omp end do nowait
+END IF
+IF(smesh%ho_info%ncp==1)THEN
+  !$omp do
+  DO i=1,pmesh%nc
+    !---Get location of center point
+    f2=0.d0
+    DO k=1,smesh%cell_np
+      CALL pmesh%vlog(k,f1)
+      f2=f2+f1/REAL(smesh%cell_np,8)
+    END DO
+    !---Loop over edges
+    DO l=1,4
+      cc = (i-1)*4+l
+      ftmp=0.d0
+      DO j=1,2
+        IF(smesh%lc(j,cc)>pmesh%np+pmesh%ne)THEN
+          ftmp=ftmp+f2
+        ELSE IF(smesh%lc(j,cc)>pmesh%np)THEN
+          !---Endpoint is mid point of edge
+          ed2=smesh%le(j,ed)-pmesh%np
+          DO k=1,smesh%cell_np
+            IF(ANY(pmesh%lc(k,i)==pmesh%le(:,ed2)))THEN
+              CALL pmesh%vlog(k,f1)
+              ftmp=ftmp+f1/2.d0
+            END IF
+          END DO
+        ELSE
+          DO k=1,smesh%cell_np
+            IF(pmesh%lc(k,i)==smesh%lc(j,cc))THEN
+              CALL pmesh%vlog(k,f1)
+              ftmp=ftmp+f1
+              EXIT
+            END IF
+          END DO
+        END IF
+      END DO
+      ftmp=ftmp/REAL(smesh%cell_np,8)
+      smesh%ho_info%r(:,cc+mesh%ne) = pmesh%log2phys(i,ftmp)
+      smesh%ho_info%lcp(1,cc) = cc+mesh%ne
+    END DO
+  END DO
+  !$omp end do nowait
 END IF
 !$omp end parallel
 CALL pmesh%set_order(1)
