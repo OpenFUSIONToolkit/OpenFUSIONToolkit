@@ -133,7 +133,7 @@ end subroutine multigrid_refine
 !> Adjust points to CAD boundary and propogate CAD linkage
 !------------------------------------------------------------------------------
 subroutine multigrid_reffix_ho
-integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,ncde
+integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,nfdf,ncde,ncdf,fc,cc
 real(r8) :: f1(4),f2(4),ftmp(4),pt(3)
 class(oft_mesh), pointer :: pmesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
@@ -248,21 +248,23 @@ IF(pmesh%ho_info%ncp==1)THEN
   ALLOCATE(mesh%ho_info%lcp(mesh%ho_info%ncp,mesh%nc))
   mesh%ho_info%lcp=0
 END IF
-mesh%order=pmesh%order
-ho_count = mesh%ne*pmesh%ho_info%nep &
-  + mesh%nf*pmesh%ho_info%nfp &
-  + mesh%nc*pmesh%ho_info%ncp
+! mesh%order=pmesh%order
+ho_count = mesh%ne*mesh%ho_info%nep &
+  + mesh%nf*mesh%ho_info%nfp &
+  + mesh%nc*mesh%ho_info%ncp
 ALLOCATE(mesh%ho_info%r(3,ho_count))
 mesh%ho_info%r=0.d0
-mesh%bmesh%order=pmesh%bmesh%order
+! mesh%bmesh%order=pmesh%bmesh%order
 ho_count = mesh%bmesh%ne*pmesh%bmesh%ho_info%nep &
   + mesh%bmesh%nc*pmesh%bmesh%ho_info%ncp
 ALLOCATE(mesh%bmesh%ho_info%r(3,ho_count))
 mesh%bmesh%ho_info%r=0.d0
 !
 nfde=SIZE(mg_mesh%inter(mg_mesh%level-1)%lfde,DIM=1)
+nfdf=SIZE(mg_mesh%inter(mg_mesh%level-1)%lfdf,DIM=1)
 ncde=SIZE(mg_mesh%inter(mg_mesh%level-1)%lcde,DIM=1)
-!$omp parallel private(cell,k,j,l,ep,fp,f1,f2,ftmp,ed,ed2)
+ncdf=SIZE(mg_mesh%inter(mg_mesh%level-1)%lcdf,DIM=1)
+!$omp parallel private(cell,k,j,l,ep,fp,f1,f2,ftmp,ed,ed2,fc,cc)
 !---Edge children
 !$omp do
 DO i=1,pmesh%ne
@@ -289,6 +291,7 @@ DO i=1,pmesh%ne
     mesh%ho_info%lep(1,ed) = ed
   END DO
 END DO
+!$omp end do nowait
 !---Face children
 IF(nfde>0)THEN
   !$omp do
@@ -328,6 +331,56 @@ IF(nfde>0)THEN
       mesh%ho_info%lep(1,ed) = ed
     END DO
   END DO
+  !$omp end do nowait
+END IF
+IF(nfdf>0.AND.pmesh%ho_info%nfp==1)THEN
+  !$omp do
+  DO i=1,pmesh%nf
+    cell = pmesh%lfc(1,i)
+    fp=0
+    DO k=1,mesh%cell_np
+      DO j=1,mesh%face_np
+        IF(pmesh%lc(k,cell)==pmesh%lf(j,i))fp(j)=k
+      END DO
+    END DO
+    !---Get location of face center
+    f1=0.d0; f2=0.d0; ftmp=0.d0
+    DO k=1,mesh%face_np
+      CALL pmesh%vlog(fp(k),f1)
+      f2=f2+f1/REAL(mesh%face_np,8)
+    END DO
+    !---Loop over daughter faces
+    DO l=1,nfdf
+      fc = ABS(mg_mesh%inter(mg_mesh%level-1)%lfdf(l,i))
+      ftmp=0.d0
+      DO j=1,mesh%face_np
+        IF(mesh%lf(j,fc)>pmesh%np+pmesh%ne)THEN
+          ftmp=ftmp+f2
+        ELSE IF(mesh%lf(j,fc)>pmesh%np)THEN
+          !---Endpoint is mid point of edge
+          ed2=mesh%lf(j,fc)-pmesh%np
+          DO k=1,mesh%face_np
+            IF(ANY(pmesh%lf(k,i)==pmesh%le(:,ed2)))THEN
+              CALL pmesh%vlog(fp(k),f1)
+              ftmp=ftmp+f1/2.d0
+            END IF
+          END DO
+        ELSE
+          DO k=1,mesh%face_np
+            IF(pmesh%lf(k,i)==mesh%lf(j,fc))THEN
+              CALL pmesh%vlog(fp(k),f1)
+              ftmp=ftmp+f1
+              EXIT
+            END IF
+          END DO
+        END IF
+      END DO
+      ftmp=ftmp/REAL(mesh%face_np,8)
+      mesh%ho_info%r(:,fc+mesh%ne) = pmesh%log2phys(cell,ftmp)
+      mesh%ho_info%lfp(1,fc) = fc+mesh%ne
+    END DO
+  END DO
+  !$omp end do nowait
 END IF
 !---Cell children
 IF(ncde>0)THEN
@@ -370,7 +423,111 @@ IF(ncde>0)THEN
       mesh%ho_info%lep(1,ed) = ed
     END DO
   END DO
+  !$omp end do nowait
 END IF
+IF(ncdf>0.AND.pmesh%ho_info%nfp==1)THEN
+  !$omp do
+  DO i=1,pmesh%nc
+    !---Get location of center point
+    f2=0.d0
+    DO k=1,mesh%cell_np
+      CALL pmesh%vlog(k,f1)
+      f2=f2+f1/REAL(mesh%cell_np,8)
+    END DO
+    !---Loop over edges
+    DO l=1,ncdf
+      fc = ABS(mg_mesh%inter(mg_mesh%level-1)%lcdf(l,i))
+      ftmp=0.d0
+      DO j=1,mesh%face_np
+        IF(mesh%lf(j,fc)>pmesh%np+pmesh%ne+pmesh%nf)THEN
+          ftmp=ftmp+f2
+        ELSE IF(mesh%lf(j,fc)>pmesh%np+pmesh%ne)THEN
+          !---Endpoint is mid point of face
+          ed2=mesh%lf(j,fc)-pmesh%np-pmesh%ne
+          DO k=1,mesh%cell_np
+            IF(ANY(pmesh%lc(k,i)==pmesh%lf(:,ed2)))THEN
+              CALL pmesh%vlog(k,f1)
+              ftmp=ftmp+f1/REAL(mesh%face_np,8)
+            END IF
+          END DO
+        ELSE IF(mesh%lf(j,fc)>pmesh%np)THEN
+          !---Endpoint is mid point of edge
+          ed2=mesh%lf(j,fc)-pmesh%np
+          DO k=1,mesh%cell_np
+            IF(ANY(pmesh%lc(k,i)==pmesh%le(:,ed2)))THEN
+              CALL pmesh%vlog(k,f1)
+              ftmp=ftmp+f1/2.d0
+            END IF
+          END DO
+        ELSE
+          DO k=1,mesh%cell_np
+            IF(pmesh%lf(k,i)==mesh%lf(j,fc))THEN
+              CALL pmesh%vlog(k,f1)
+              ftmp=ftmp+f1
+              EXIT
+            END IF
+          END DO
+        END IF
+      END DO
+      ftmp=ftmp/REAL(mesh%face_np,8)
+      mesh%ho_info%r(:,fc+mesh%ne) = pmesh%log2phys(i,ftmp)
+      mesh%ho_info%lfp(1,fc) = fc+mesh%ne
+    END DO
+  END DO
+  !$omp end do nowait
+END IF
+IF(pmesh%ho_info%ncp==1)THEN
+  !$omp do
+  DO i=1,pmesh%nc
+    !---Get location of center point
+    f2=0.d0
+    DO k=1,mesh%cell_np
+      CALL pmesh%vlog(k,f1)
+      f2=f2+f1/REAL(mesh%cell_np,8)
+    END DO
+    !---Loop over cells
+    DO l=1,8
+      cc = (i-1)*8 + l
+      ftmp=0.d0
+      DO j=1,mesh%cell_np
+        IF(mesh%lc(j,cc)>pmesh%np+pmesh%ne+pmesh%nf)THEN
+          ftmp=ftmp+f2
+        ELSE IF(mesh%lc(j,cc)>pmesh%np+pmesh%ne)THEN
+          !---Endpoint is mid point of face
+          ed2=mesh%lc(j,cc)-pmesh%np-pmesh%ne
+          DO k=1,mesh%cell_np
+            IF(ANY(pmesh%lc(k,i)==pmesh%lf(:,ed2)))THEN
+              CALL pmesh%vlog(k,f1)
+              ftmp=ftmp+f1/REAL(mesh%face_np,8)
+            END IF
+          END DO
+        ELSE IF(mesh%lc(j,cc)>pmesh%np)THEN
+          !---Endpoint is mid point of edge
+          ed2=mesh%lc(j,cc)-pmesh%np
+          DO k=1,mesh%cell_np
+            IF(ANY(pmesh%lc(k,i)==pmesh%le(:,ed2)))THEN
+              CALL pmesh%vlog(k,f1)
+              ftmp=ftmp+f1/2.d0
+            END IF
+          END DO
+        ELSE
+          DO k=1,mesh%cell_np
+            IF(pmesh%lc(k,i)==mesh%lc(j,cc))THEN
+              CALL pmesh%vlog(k,f1)
+              ftmp=ftmp+f1
+              EXIT
+            END IF
+          END DO
+        END IF
+      END DO
+      ftmp=ftmp/REAL(mesh%cell_np,8)
+      mesh%ho_info%r(:,cc+mesh%ne+mesh%nf) = pmesh%log2phys(i,ftmp)
+      mesh%ho_info%lcp(1,cc) = cc+mesh%ne+mesh%nf
+    END DO
+  END DO
+  !$omp end do nowait
+END IF
+!$omp barrier
 !---Propogate to boundary mesh
 !$omp do
 do i=1,mesh%bmesh%ne

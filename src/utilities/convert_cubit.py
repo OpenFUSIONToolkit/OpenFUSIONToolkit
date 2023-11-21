@@ -148,7 +148,7 @@ def read_mesh(filename):
             r_ho = np.vstack((r_ho,r[reindex_flag_ho[1:] == 1].copy()))
         ho_info = (r_ho, le_ho, lf_ho)
     else:
-        r_ho = np.zeros((0,3))
+        r_ho = np.zeros((0,r_new.shape[1]))
         ho_info = None
     print("  Mesh type    = {0}".format(mesh_type))
     print("  Dimension    = {0}".format(r_new.shape[1]))

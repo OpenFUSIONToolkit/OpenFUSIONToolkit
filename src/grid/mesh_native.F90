@@ -348,7 +348,14 @@ IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
     IF(ndims==-1)CALL oft_abort('"mesh/ho_info/R" field does not exist in input file', 'native_load_smesh', __FILE__)
     np_ho=dim_sizes(2)
     ALLOCATE(r_ho(3,np_ho))
-    CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
+    IF(dim_sizes(1)==2)THEN
+        ALLOCATE(rtmp(2,np_ho))
+        CALL hdf5_read(rtmp,TRIM(filename),"mesh/ho_info/R",success)
+        r_ho(1:2,:)=rtmp
+        DEALLOCATE(rtmp)
+    ELSE
+        CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
+    END IF
     IF(.NOT.success)CALL oft_abort('Error reading quadratic points','native_load_smesh',__FILE__)
     ALLOCATE(le_ho(2,np_ho))
     CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
