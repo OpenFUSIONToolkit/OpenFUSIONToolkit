@@ -2,7 +2,7 @@ if( OFT_BUILD_TESTS )
   # Common
   file( COPY conftest.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 
-  # Taylor tests
+  # Marklin tests
   oft_add_test( test_taylor.F90 )
   file( COPY test_taylor.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   oft_add_test( test_taylor_inj.F90 )
@@ -11,7 +11,7 @@ if( OFT_BUILD_TESTS )
   #file( COPY torus_test.in.e DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   file( COPY torus_test.g DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 
-  # MHD tests
+  # MUG tests
   add_library( test_phys_helpers test_phys_helpers.F90 )
   add_dependencies( test_phys_helpers oftphysics )
   oft_add_test( test_sound.F90 test_phys_helpers )
@@ -31,4 +31,8 @@ if( OFT_BUILD_TESTS )
   file( COPY tw_test-passive.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   file( COPY tw_test-plate.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   file( COPY tw_test-torus.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+
+  # TokaMaker tests
+  file( COPY test_TokaMaker.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  file( COPY ITER_geom.json DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 endif()

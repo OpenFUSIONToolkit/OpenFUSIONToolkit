@@ -75,6 +75,7 @@ if(OFT_PACKAGE_BUILD)
 else()
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 endif()
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 
 ########################
 # Required library detection and setup
