@@ -286,7 +286,6 @@ def test_coil_h3(order):
 #============================================================================
 def run_ITER_case(mesh_resolution,fe_order,mp_q):
     def create_mesh():
-        print(os.listdir())
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
         plasma_dx = 0.15/mesh_resolution
@@ -314,6 +313,7 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
         coil_dict = gs_mesh.get_coils()
         cond_dict = gs_mesh.get_conductors()
         save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
+    print(os.getcwd(),os.listdir())
     if not os.path.exists('ITER_mesh.h5'):
         try:
             create_mesh()
@@ -421,6 +421,7 @@ def validate_ITER(results,dict_exp):
 # Test runners for ITER test cases
 @pytest.mark.parametrize("order", (2,3))#3,4))
 def test_ITER(order):
+    print(os.getcwd(),os.listdir())
     exp_dict = {
         'Ip': 15599996.700479196,
         'Ip_centroid': [6.20274133, 0.5296048],
