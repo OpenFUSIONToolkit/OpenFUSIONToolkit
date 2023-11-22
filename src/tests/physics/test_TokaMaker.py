@@ -121,6 +121,7 @@ def test_solo_h2(order):
     ]
     results = mp_run(run_solo_case,(0.015/2.0,order))
     assert validate_solo(results,errs[order-2][0],errs[order-2][1])
+@pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
 def test_solo_h3(order):
     errs = [
@@ -196,6 +197,7 @@ def test_spheromak_h2(order):
     errs = [2.5203856661960034e-06, 3.279268054674832e-08, 2.5185712724779513e-10]
     results = mp_run(run_sph_case,(0.05/2.0,order))
     assert validate_sph(results,errs[order-2])
+@pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
 def test_spheromak_h3(order):
     errs = [3.257155111957006e-07, 2.090369020180253e-09, 8.601148342547016e-12]
@@ -273,6 +275,7 @@ def test_coil_h2(order):
     errs = [0.0032993582771277, 2.725546769847347e-05, 8.670511127765199e-07]
     results = mp_run(run_coil_case,(0.1/2.0,order))
     assert validate_coil(results,errs[order-2])
+@pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
 def test_coil_h3(order):
     errs = [0.0008175212508035045, 1.921137561342415e-06, 4.4282752350112954e-07]
@@ -311,7 +314,11 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
         cond_dict = gs_mesh.get_conductors()
         save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
     if not os.path.exists('ITER_mesh.h5'):
-        create_mesh()
+        try:
+            create_mesh()
+        except:
+            mp_q.put(None)
+            return
     # Run EQ
     mygs = TokaMaker()
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
@@ -409,28 +416,28 @@ def validate_ITER(results,dict_exp):
     return test_result
 
 
-# # Test runners for ITER test cases
-# @pytest.mark.parametrize("order", (2,3,4))
-# def test_ITER(order):
-#     exp_dict = {
-#         'Ip': 15599996.700479196,
-#         'Ip_centroid': [6.20274133, 0.5296048],
-#         'kappa': 1.86799695311941,
-#         'kappaU': 1.7388335731481432,
-#         'kappaL': 1.997160333090677,
-#         'delta': 0.4642130933423834,
-#         'deltaU': 0.3840631923067706,
-#         'deltaL': 0.5443629943779958,
-#         'vol': 820.0973897169655,
-#         'q_0': 0.8234473499435633,
-#         'q_95': 2.76048354704068,
-#         'P_ax': 619225.0167519478,
-#         'W_MHD': 242986888.67690986,
-#         'beta_pol': 39.73860565406112,
-#         'dflux': 1.5402746036620532,
-#         'tflux': 121.86870301036512,
-#         'l_i': 0.9048845463517069,
-#         'beta_tor': 1.768879437469196
-#     }
-#     results = mp_run(run_ITER_case,(1.0,order))
-#     assert validate_ITER(results,exp_dict)
+# Test runners for ITER test cases
+@pytest.mark.parametrize("order", (2,))#3,4))
+def test_ITER(order):
+    exp_dict = {
+        'Ip': 15599996.700479196,
+        'Ip_centroid': [6.20274133, 0.5296048],
+        'kappa': 1.86799695311941,
+        'kappaU': 1.7388335731481432,
+        'kappaL': 1.997160333090677,
+        'delta': 0.4642130933423834,
+        'deltaU': 0.3840631923067706,
+        'deltaL': 0.5443629943779958,
+        'vol': 820.0973897169655,
+        'q_0': 0.8234473499435633,
+        'q_95': 2.76048354704068,
+        'P_ax': 619225.0167519478,
+        'W_MHD': 242986888.67690986,
+        'beta_pol': 39.73860565406112,
+        'dflux': 1.5402746036620532,
+        'tflux': 121.86870301036512,
+        'l_i': 0.9048845463517069,
+        'beta_tor': 1.768879437469196
+    }
+    results = mp_run(run_ITER_case,(1.0,order))
+    assert validate_ITER(results,exp_dict)
