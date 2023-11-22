@@ -14,6 +14,7 @@ from OpenFUSIONToolkit.TokaMaker import TokaMaker, gs_Domain, save_gs_mesh, load
 
 
 def mp_run(target,args,timeout=30):
+    os.chdir(test_dir)
     mp_q = multiprocessing.Queue()
     p = multiprocessing.Process(target=target, args=args + (mp_q,))
     p.start()
@@ -313,7 +314,6 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
         coil_dict = gs_mesh.get_coils()
         cond_dict = gs_mesh.get_conductors()
         save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
-    print(os.getcwd(),os.listdir())
     if not os.path.exists('ITER_mesh.h5'):
         try:
             create_mesh()
@@ -419,9 +419,8 @@ def validate_ITER(results,dict_exp):
 
 
 # Test runners for ITER test cases
-@pytest.mark.parametrize("order", (2,3))#3,4))
+@pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER(order):
-    print(os.getcwd(),os.listdir())
     exp_dict = {
         'Ip': 15599996.700479196,
         'Ip_centroid': [6.20274133, 0.5296048],
