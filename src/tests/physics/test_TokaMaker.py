@@ -1,6 +1,7 @@
 from __future__ import print_function
 import os
 import sys
+import time
 import multiprocessing
 import json
 import pytest
@@ -12,10 +13,21 @@ sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit.TokaMaker import TokaMaker, gs_Domain, save_gs_mesh, load_gs_mesh
 
 
-def mp_run(target,args):
+def mp_run(target,args,timeout=30):
     mp_q = multiprocessing.Queue()
     p = multiprocessing.Process(target=target, args=args + (mp_q,))
     p.start()
+    start = time.time()
+    while time.time() - start <= timeout:
+        if not p.is_alive():
+            break
+        time.sleep(.5)
+    else: # Reached timeout
+        print("Timeout reached")
+        p.terminate()
+        p.join()
+        return None
+    # Completed successfully
     test_result = mp_q.get()
     p.join()
     return test_result
