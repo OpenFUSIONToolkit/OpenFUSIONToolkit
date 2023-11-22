@@ -286,6 +286,7 @@ def test_coil_h3(order):
 #============================================================================
 def run_ITER_case(mesh_resolution,fe_order,mp_q):
     def create_mesh():
+        print(os.listdir())
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
         plasma_dx = 0.15/mesh_resolution
