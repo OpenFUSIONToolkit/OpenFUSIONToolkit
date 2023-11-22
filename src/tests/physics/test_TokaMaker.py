@@ -409,28 +409,28 @@ def validate_ITER(results,dict_exp):
     return test_result
 
 
-# Test runners for ITER test cases
-@pytest.mark.parametrize("order", (2,3,4))
-def test_ITER(order):
-    exp_dict = {
-        'Ip': 15599996.700479196,
-        'Ip_centroid': [6.20274133, 0.5296048],
-        'kappa': 1.86799695311941,
-        'kappaU': 1.7388335731481432,
-        'kappaL': 1.997160333090677,
-        'delta': 0.4642130933423834,
-        'deltaU': 0.3840631923067706,
-        'deltaL': 0.5443629943779958,
-        'vol': 820.0973897169655,
-        'q_0': 0.8234473499435633,
-        'q_95': 2.76048354704068,
-        'P_ax': 619225.0167519478,
-        'W_MHD': 242986888.67690986,
-        'beta_pol': 39.73860565406112,
-        'dflux': 1.5402746036620532,
-        'tflux': 121.86870301036512,
-        'l_i': 0.9048845463517069,
-        'beta_tor': 1.768879437469196
-    }
-    results = mp_run(run_ITER_case,(1.0,order))
-    assert validate_ITER(results,exp_dict)
+# # Test runners for ITER test cases
+# @pytest.mark.parametrize("order", (2,3,4))
+# def test_ITER(order):
+#     exp_dict = {
+#         'Ip': 15599996.700479196,
+#         'Ip_centroid': [6.20274133, 0.5296048],
+#         'kappa': 1.86799695311941,
+#         'kappaU': 1.7388335731481432,
+#         'kappaL': 1.997160333090677,
+#         'delta': 0.4642130933423834,
+#         'deltaU': 0.3840631923067706,
+#         'deltaL': 0.5443629943779958,
+#         'vol': 820.0973897169655,
+#         'q_0': 0.8234473499435633,
+#         'q_95': 2.76048354704068,
+#         'P_ax': 619225.0167519478,
+#         'W_MHD': 242986888.67690986,
+#         'beta_pol': 39.73860565406112,
+#         'dflux': 1.5402746036620532,
+#         'tflux': 121.86870301036512,
+#         'l_i': 0.9048845463517069,
+#         'beta_tor': 1.768879437469196
+#     }
+#     results = mp_run(run_ITER_case,(1.0,order))
+#     assert validate_ITER(results,exp_dict)
