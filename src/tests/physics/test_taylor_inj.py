@@ -17,16 +17,15 @@ oft_in_template = """
 
 &mesh_options
  meshname='torus'
- cad_type=2
+ cad_type=0
  nlevels={1}
  nbase={0}
  grid_order={8}
  jac_ratio_tol=50.
 /
 
-&cubit_options
- filename='torus_test.g'
- lf_file=T
+&native_mesh_options
+ filename='torus_test.h5'
 /
 
 &hcurl_op_options

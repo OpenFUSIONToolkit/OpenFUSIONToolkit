@@ -833,7 +833,6 @@ ELSE
       CALL reset_eq
       dx = dxi/cofs_scale(offset+1)
       gs_active%Itor_target=cofs(offset+1) + dx
-      WRITE(*,*)'Hi',gs_active%Itor_target/mu0
       CALL run_err(.FALSE.,jac_mat(:,offset+1),m,ierr)
       jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
       gs_active%Itor_target=cofs(offset+1)

@@ -25,10 +25,13 @@ USE oft_mesh_cubit, ONLY: mesh_cubit_id, inpname
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
 INTEGER(i4) :: io_unit
-#ifdef HAVE_NCDF
 INTEGER(i4) :: ierr
+#if !defined(HAVE_NCDF)
+CHARACTER(LEN=80) :: inpname = 'none'
+#endif
 LOGICAL :: test_surf = .FALSE.
-NAMELIST/cubit_test_options/test_surf
+INTEGER(i4) :: cad_type = 2
+NAMELIST/cubit_test_options/test_surf,cad_type
 !---Initialize enviroment
 CALL oft_init
 !---Read in options
@@ -40,9 +43,15 @@ IF(ierr<0)CALL oft_abort('No "cubit_test_options" found in input file.', &
   'test_cubit',__FILE__)
 IF(ierr>0)CALL oft_abort('Error parsing "cubit_test_options" in input file.', &
   'test_cubit',__FILE__)
+#if !defined(HAVE_NCDF)
+IF(cad_type==2)THEN
+  WRITE(*,*)'SKIP TEST'
+  CALL oft_finalize
+END IF
+#endif
 IF(test_surf)THEN
   CALL multigrid_construct_surf
-  IF(smesh%cad_type/=mesh_cubit_id)CALL oft_abort('Wrong mesh type, test for CUBIT only.','test_cubit',__FILE__)
+  IF(smesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
 #if !defined(HAVE_ONURBS)
   IF(TRIM(inpname)/='none')THEN
     WRITE(*,*)'SKIP TEST'
@@ -59,7 +68,7 @@ IF(test_surf)THEN
 ELSE
   !---Setup grid
   CALL multigrid_construct
-  IF(mesh%cad_type/=mesh_cubit_id)CALL oft_abort('Wrong mesh type, test for CUBIT only.','test_cubit',__FILE__)
+  IF(mesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
 #if !defined(HAVE_ONURBS)
   IF(TRIM(inpname)/='none')THEN
     WRITE(*,*)'SKIP TEST'
@@ -74,9 +83,6 @@ ELSE
 END IF
 !---Finalize enviroment
 CALL oft_finalize
-#else
-WRITE(*,*)'SKIP TEST'
-#endif
 CONTAINS
 !---------------------------------------------------------------------------
 ! SUBROUTINE compute_volume
