@@ -316,7 +316,8 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
     if not os.path.exists('ITER_mesh.h5'):
         try:
             create_mesh()
-        except:
+        except Exception as e:
+            print(e)
             mp_q.put(None)
             return
     # Run EQ
@@ -417,7 +418,7 @@ def validate_ITER(results,dict_exp):
 
 
 # Test runners for ITER test cases
-@pytest.mark.parametrize("order", (2,))#3,4))
+@pytest.mark.parametrize("order", (2,3))#3,4))
 def test_ITER(order):
     exp_dict = {
         'Ip': 15599996.700479196,
