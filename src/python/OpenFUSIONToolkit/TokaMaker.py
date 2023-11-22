@@ -1667,8 +1667,9 @@ def save_gs_mesh(pts,tris,regions,coil_dict,cond_dict,filename,use_hdf5=True):
                 h5_file.create_dataset('mesh/r', data=pts, dtype='f8')
                 h5_file.create_dataset('mesh/lc', data=tris, dtype='i4')
                 h5_file.create_dataset('mesh/reg', data=regions, dtype='i4')
-                h5_file.create_dataset('mesh/coil_dict', data=coil_json, dtype=h5py.string_dtype('ascii', len(coil_json)))
-                h5_file.create_dataset('mesh/cond_dict', data=cond_json, dtype=h5py.string_dtype('ascii', len(cond_json)))
+                string_datatype = h5py.string_dtype('ascii')
+                h5_file.create_dataset('mesh/coil_dict', data=coil_json, dtype=string_datatype)
+                h5_file.create_dataset('mesh/cond_dict', data=cond_json, dtype=string_datatype)
         else:
             with open(filename, 'w+') as fid:
                 fid.write(json.dumps({
