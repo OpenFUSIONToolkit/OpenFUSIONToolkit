@@ -7,9 +7,7 @@ if( OFT_BUILD_TESTS )
   file( COPY test_taylor.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   oft_add_test( test_taylor_inj.F90 )
   file( COPY test_taylor_inj.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
-  #file( COPY torus_test.3dm DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
-  #file( COPY torus_test.in.e DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
-  file( COPY torus_test.g DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  file( COPY torus_test.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 
   # MUG tests
   add_library( test_phys_helpers test_phys_helpers.F90 )

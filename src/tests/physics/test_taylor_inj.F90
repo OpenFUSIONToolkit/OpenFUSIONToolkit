@@ -33,7 +33,6 @@ USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
   taylor_gffa, oft_taylor_rinterp
 implicit none
 INTEGER(i4) :: ierr,io_unit
-#ifdef HAVE_NCDF
 REAL(r8) :: comps(3),diff_err
 CLASS(oft_vector), POINTER :: gffa
 INTEGER(i4), PARAMETER :: nh = 1
@@ -133,7 +132,4 @@ CALL mesh%save_vertex_vector(bvout,'B')
 END BLOCK
 !---Finalize enviroment
 CALL oft_finalize
-#else
-WRITE(*,*)'SKIP TEST'
-#endif
 END PROGRAM test_taylor_inj

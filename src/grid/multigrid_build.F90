@@ -25,7 +25,8 @@ use multigrid, only: mg_mesh, multigrid_refine, multigrid_hybrid_base, &
   multigrid_hybrid_bmesh, multigrid_brefine, hexmesh_mg_globals, tetmesh_mg_globals, &
   multigrid_level, trimesh_mg_globals, quadmesh_mg_globals, multigrid_reffix_ho, &
   multigrid_reffix_ho_surf
-use oft_mesh_native, only: native_load_mesh, native_load_smesh, mesh_native_id
+use oft_mesh_native, only: native_load_mesh, native_load_smesh, mesh_native_id, &
+  native_hobase
 use oft_mesh_t3d, only: mesh_t3d_load, mesh_t3d_cadsync, mesh_t3d_cadlink, &
   mesh_t3d_add_quad, mesh_t3d_reffix, mesh_t3d_add_quad, &
   mesh_t3d_set_periodic, smesh_t3d_load, mesh_t3d_id
@@ -66,6 +67,7 @@ select case(cad_type)
   case(mesh_native_id) ! Native Mesh
     CALL native_load_mesh
     CALL mesh_global_init(mesh)
+    CALL native_hobase(mesh)
   case(mesh_t3d_id) ! T3D Mesh
     CALL mesh_t3d_load
     CALL mesh_global_init(mesh)
@@ -116,6 +118,8 @@ END IF
 CALL multigrid_reffix_ho
 !---Select mesh type and adjust boundary
 select case(mesh%cad_type)
+  case(mesh_native_id)
+    ! Do nothing
   case(mesh_t3d_id)
     call mesh_t3d_reffix
   case(mesh_cubit_id)
@@ -180,6 +184,8 @@ END IF
 CALL mesh_global_set_curved(mesh,1)
 !---Select mesh type and adjust boundary
 select case(mesh%cad_type)
+  case(mesh_native_id)
+    ! Do nothing CALL mesh_cube_add_quad
   case(mesh_t3d_id)
     call mesh_t3d_add_quad
   case(mesh_cubit_id)
@@ -743,6 +749,7 @@ select case(cad_type)
   case(mesh_native_id) ! Native Mesh
     CALL native_load_smesh
     CALL smesh_global_init(smesh)
+    CALL native_hobase(smesh)
   case(mesh_t3d_id) ! T3D Mesh
     CALL smesh_t3d_load
     CALL smesh_global_init(smesh)
@@ -792,6 +799,8 @@ END IF
 CALL multigrid_reffix_ho_surf
 !---Select mesh type and adjust boundary
 select case(smesh%cad_type)
+  case(mesh_native_id)
+    ! Do nothing
   case(mesh_t3d_id)
     ! call mesh_t3d_reffix
   case(mesh_cubit_id)
@@ -840,6 +849,8 @@ END IF
 CALL mesh_global_set_curved(smesh,2)
 !---Select mesh type and adjust boundary
 select case(smesh%cad_type)
+  case(mesh_native_id)
+    ! Do nothing
   case(mesh_t3d_id)
     ! call smesh_t3d_add_quad
   case(mesh_cubit_id)
@@ -851,7 +862,7 @@ select case(smesh%cad_type)
   case(mesh_sphere_id)
     call smesh_circle_add_quad
   case(mesh_cube_id)
-    ! Do nothing CALL mesh_cube_add_quad
+    ! Do nothing
   case default
     call oft_abort('Invalid mesh type.','multigrid_add_quad',__FILE__)
 end select

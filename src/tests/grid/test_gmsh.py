@@ -16,7 +16,7 @@ oft_in_template = """
 
 &mesh_options
  meshname='cylinder'
- cad_type=3
+ cad_type={3}
  nlevels={1}
  nbase={0}
  grid_order={2}
@@ -26,17 +26,21 @@ oft_in_template = """
  filename='cyl.mesh'
  order=2
 /
+
+&native_mesh_options
+ filename='cyl_gmsh.h5'
+/
 """
 
 # Common setup function and process handling
-def gmsh_setup(nbase, nlevels, grid_order=1):
+def gmsh_setup(nbase, nlevels, grid_order=1, cad_type=3):
     nproc = 1
     if nbase != nlevels:
         nproc = 2
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, grid_order))
+        fid.write(oft_in_template.format(nbase, nlevels, grid_order, cad_type))
     return run_OFT("./test_gmsh", nproc, 60)
 
 #
@@ -60,27 +64,30 @@ def check_result(volume_test, area_test):
 #============================================================================
 # Test runners for basic Cylinder mesh
 @pytest.mark.parametrize("top_lev", (1, 2))
-def test_base(top_lev):
+@pytest.mark.parametrize("cad_type", (0, 3))
+def test_base(top_lev,cad_type):
     volume_gmsh = 3.0913
     area_gmsh = 12.3812
-    assert gmsh_setup(1,top_lev)
+    assert gmsh_setup(1,top_lev,cad_type=cad_type)
     assert check_result(volume_gmsh, area_gmsh)
 
 #============================================================================
 # Test runner for quadratic Cylinder mesh
 @pytest.mark.parametrize("top_lev", (1, 2))
-def test_quad(top_lev):
+@pytest.mark.parametrize("cad_type", (0, 3))
+def test_quad(top_lev,cad_type):
     volume_gmsh = 3.1415
     area_gmsh = 12.5660
-    assert gmsh_setup(1,top_lev,grid_order=2)
+    assert gmsh_setup(1,top_lev,grid_order=2,cad_type=cad_type)
     assert check_result(volume_gmsh, area_gmsh)
 
 #============================================================================
 # Test runner for single refinement Cylinder mesh
 @pytest.mark.parametrize("top_lev", (2, 3))
-def test_1ref(top_lev):
+@pytest.mark.parametrize("cad_type", (0, 3))
+def test_1ref(top_lev,cad_type):
     volume_gmsh = 3.1290
     area_gmsh = 12.5198
     minlev = 4 - top_lev
-    assert gmsh_setup(minlev,top_lev)
+    assert gmsh_setup(minlev,top_lev,cad_type=cad_type)
     assert check_result(volume_gmsh, area_gmsh)
