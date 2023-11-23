@@ -47,14 +47,14 @@ hex_face_map = np.array([
     [2,3,7,6]
 ])
 element_type_map = {
-    'TRI3': {'ncp': 3, 'ncp_lin': 3, 'type': 'TRI_p1', 'ed_map': tri_ed_map},
-    'TRI6': {'ncp': 6, 'ncp_lin': 3, 'type': 'TRI_p2', 'ed_map': tri_ed_map},
-    'QUAD4': {'ncp': 4, 'ncp_lin': 4, 'type': 'QUAD_p1', 'ed_map': quad_ed_map},
-    'QUAD9': {'ncp': 9, 'ncp_lin': 4, 'type': 'QUAD_p2', 'ed_map': quad_ed_map, 'cellpoint': True},
-    'TETRA4': {'ncp': 4, 'ncp_lin': 4, 'type': 'TET_p1', 'ed_map': tet_ed_map},
-    'TETRA10': {'ncp': 10, 'ncp_lin': 4, 'type': 'TET_p2', 'ed_map': tet_ed_map},
-    'HEX8': {'ncp': 8, 'ncp_lin': 8, 'type': 'HEX_p1', 'ed_map': hex_ed_map, 'face_map': hex_face_map},
-    'HEX27': {'ncp': 27, 'ncp_lin': 8, 'type': 'HEX_p2', 'ed_map': hex_ed_map, 'face_map': hex_face_map, 'cellpoint': True}
+    'TRI3': {'dim': 2, 'ncp': 3, 'ncp_lin': 3, 'type': 'TRI_p1', 'ed_map': tri_ed_map},
+    'TRI6': {'dim': 2, 'ncp': 6, 'ncp_lin': 3, 'type': 'TRI_p2', 'ed_map': tri_ed_map},
+    'QUAD4': {'dim': 2, 'ncp': 4, 'ncp_lin': 4, 'type': 'QUAD_p1', 'ed_map': quad_ed_map},
+    'QUAD9': {'dim': 2, 'ncp': 9, 'ncp_lin': 4, 'type': 'QUAD_p2', 'ed_map': quad_ed_map, 'cellpoint': True},
+    'TETRA4': {'dim': 3, 'ncp': 4, 'ncp_lin': 4, 'type': 'TET_p1', 'ed_map': tet_ed_map},
+    'TETRA10': {'dim': 3, 'ncp': 10, 'ncp_lin': 4, 'type': 'TET_p2', 'ed_map': tet_ed_map},
+    'HEX8': {'dim': 3, 'ncp': 8, 'ncp_lin': 8, 'type': 'HEX_p1', 'ed_map': hex_ed_map, 'face_map': hex_face_map},
+    'HEX27': {'dim': 3, 'ncp': 27, 'ncp_lin': 8, 'type': 'HEX_p2', 'ed_map': hex_ed_map, 'face_map': hex_face_map, 'cellpoint': True}
 }
 element_type_map['TRI'] = element_type_map['TRI3']
 element_type_map['TETRA'] = element_type_map['TETRA4']
@@ -79,24 +79,36 @@ def read_mesh(filename):
         r = np.transpose(np.vstack(r)).copy()
     # Read regions
     lc = []
-    reg = []
     node_sets = []
     side_sets = []
     block_types = []
+    max_logical_dim = 0
     for varname, variable in ncdf_file.variables.items():
         if varname.startswith('connect'):
             for attrname in variable.ncattrs():
                 if attrname.startswith('elem_type'):
-                    block_types.append(element_type_map.get(getattr(variable, attrname),{'type': 'unknown'}))
+                    block_type = getattr(variable, attrname)
+                    block_type_info = element_type_map.get(block_type,{'type': block_type, 'dim': -1})
+                    max_logical_dim = max(max_logical_dim,block_type_info['dim'])
+                    block_types.append(block_type_info)
             lc_tmp = np.asarray(variable)
             lc.append(lc_tmp)
-            nReg = len(lc)
-            reg.append(nReg*np.ones((lc_tmp.shape[0],), dtype=np.int32))
         elif varname.startswith('node_ns'):
             node_sets.append(np.asarray(variable))
         elif varname.startswith('elem_ss'):
             side_sets.append(np.asarray(variable))
-    nReg = len(lc)
+    # Remove lower level geometry
+    keep_inds = []
+    reg = []
+    for i, block_type in enumerate(block_types):
+        if block_type['dim'] < max_logical_dim:
+            print("  Note: Removing block {0} of type {1}".format(i+1,block_type['type']))
+            continue
+        keep_inds.append(i)
+        nReg = len(keep_inds)
+        reg.append(nReg*np.ones((lc_tmp.shape[0],), dtype=np.int32))
+    lc = [lc[i] for i in keep_inds]
+    block_types = [block_types[i] for i in keep_inds]
     lc = np.vstack(lc)
     reg = np.hstack(reg)
     mesh_order = 1
@@ -167,7 +179,7 @@ This may be normal or could indicate an error""".format(np_total-np_orig))
     #
     return r_new, lc_new, reg, node_sets, side_sets, ho_info
 
-def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None):
+def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, periodic_info=None):
     print()
     print("Saving mesh: {0}".format(filename))
     h5_file = h5py.File(filename, 'w')
@@ -187,12 +199,15 @@ def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None):
         h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(side_sets),], dtype='i4')
         for i, side_set in enumerate(side_sets):
             h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(i+1), data=side_set, dtype='i4')
+    if periodic_info is not None:
+        h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
 
 
 parser = argparse.ArgumentParser()
 parser.description = "Pre-processing script for mesh files"
 parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
 parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
+parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of perioidic nodeset")
 options = parser.parse_args()
 
 out_file = options.out_file
@@ -200,4 +215,11 @@ if out_file is None:
     out_file = os.path.splitext(options.in_file)[0] + ".h5"
 
 r, lc, reg, node_sets, side_sets, ho_info = read_mesh(options.in_file)
-write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info)
+
+periodic_info = None
+if options.periodic_nodeset is not None:
+    if options.periodic_nodeset > len(node_sets):
+        raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
+    periodic_info = node_sets.pop(options.periodic_nodeset-1)
+
+write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, periodic_info)

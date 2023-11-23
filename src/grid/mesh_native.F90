@@ -31,6 +31,7 @@ INTEGER(i4), ALLOCATABLE, PUBLIC :: reg_mem(:)
 INTEGER(i4) :: np_ho
 REAL(r8), ALLOCATABLE :: r_ho(:,:)
 INTEGER(i4), ALLOCATABLE :: le_ho(:,:),lf_ho(:,:)
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: per_nodes
 CONTAINS
 !------------------------------------------------------------------------------
 !> Read in t3d mesh file from file "filename"
@@ -40,10 +41,12 @@ CONTAINS
 !------------------------------------------------------------------------------
 subroutine native_load_mesh
 logical :: success
-integer(i4) :: i,id,lenreflag,ierr,io_unit,ndims,np_mem,mesh_order
+integer(i4) :: i,id,ierr,io_unit,ndims,np_mem,mesh_order
 integer(i4), allocatable, dimension(:) :: dim_sizes
+LOGICAL :: reflect = .FALSE.
+LOGICAL :: ref_periodic = .FALSE.
 !---Read in mesh options
-namelist/native_mesh_options/filename!,inpname,reflect,ref_per,zstretch
+namelist/native_mesh_options/filename,reflect,ref_periodic!,zstretch
 DEBUG_STACK_PUSH
 np_mem=-1
 IF(oft_env%head_proc)THEN
@@ -56,42 +59,24 @@ IF(oft_env%head_proc)THEN
         IF(ierr<0)CALL oft_abort('No "native_mesh_options" found in input file.','native_load_vmesh',__FILE__)
         IF(ierr>0)CALL oft_abort('Error parsing "native_mesh_options" in input file.','native_load_vmesh',__FILE__)
         IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','native_load_vmesh',__FILE__)
-        ! IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','native_load_vmesh',__FILE__)
-        ! lenreflag=lnblnk(reflect)
         !
         WRITE(*,*)
         WRITE(*,'(A)')'**** Loading OFT mesh'
         WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
-        ! WRITE(*,'(2X,2A)')'Geom File = ',TRIM(inpname)
-        IF(lenreflag>0)THEN
-            ! WRITE(*,'(2X,A)')'Reflection:'
-            ! DO i=1,lenreflag
-            !     SELECT CASE(reflect(i:i))
-            !     CASE('x')
-            !         WRITE(*,'(4X,A,L)')'YZ-plane, periodic = ',ref_per(1)
-            !     CASE('y')
-            !         WRITE(*,'(4X,A,L)')'XZ-plane, periodic = ',ref_per(2)
-            !     CASE('z')
-            !         WRITE(*,'(4X,A,L)')'XY-plane, periodic = ',ref_per(3)
-            !     END SELECT
-            ! END DO
-        END IF
     END IF
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
 CALL MPI_Bcast(np_mem,1,OFT_MPI_I4,0,oft_env%COMM,ierr)
-IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 CALL MPI_Bcast(filename,80,OFT_MPI_CHAR,0,oft_env%COMM,ierr)
-IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
-! CALL MPI_Bcast(inpname, 40,OFT_MPI_CHAR,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
-! CALL MPI_Bcast(reflect,  3,OFT_MPI_CHAR,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
-! CALL MPI_Bcast(ref_per,  3,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(reflect,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(ref_periodic,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 ! CALL MPI_Bcast(zstretch, 1,OFT_MPI_R8,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
+! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 #endif
 !---Read in mesh sizes
 IF(np_mem>0)THEN
@@ -180,16 +165,20 @@ IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
 ELSE
     mesh_order=1
 END IF
+!---Read periodicity information
+IF(ref_periodic.AND.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))THEN
+    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+    ALLOCATE(per_nodes(dim_sizes(1)))
+    CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+    WRITE(*,*)'Found periodic points',dim_sizes(1)
+END IF
+!
 IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
-! call mesh_t3d_geom
-call mesh_global_resolution(mesh)
-! !---
-! do i=1,lenreflag
-!     if(reflect(i:i)=='x')call mesh_t3d_reflect(1,.1d0*mesh%hmin,ref_per(i))
-!     if(reflect(i:i)=='y')call mesh_t3d_reflect(2,.1d0*mesh%hmin,ref_per(i))
-!     if(reflect(i:i)=='z')call mesh_t3d_reflect(3,.1d0*mesh%hmin,ref_per(i))
-! end do
+IF(reflect)THEN
+    call mesh_global_resolution(mesh)
+    call native_reflect(mesh,.1d0*mesh%hmin)
+END IF
 IF(oft_env%rank/=0)DEALLOCATE(mesh%r,mesh%lc,mesh%reg)
 DEBUG_STACK_POP
 end subroutine native_load_mesh
@@ -204,8 +193,10 @@ logical :: is_2d,success
 integer(i4) :: i,id,lenreflag,ierr,io_unit,ndims,np_mem,mesh_order
 integer(i4), allocatable, dimension(:) :: dim_sizes
 real(r8), allocatable, dimension(:,:) :: rtmp
+LOGICAL :: reflect = .FALSE.
+LOGICAL :: ref_periodic = .FALSE.
 !---Read in mesh options
-namelist/native_mesh_options/filename!,inpname,reflect,ref_per,zstretch
+namelist/native_mesh_options/filename,reflect,ref_periodic!,zstretch
 DEBUG_STACK_PUSH
 !---
 np_mem=-1
@@ -219,26 +210,10 @@ IF(oft_env%head_proc)THEN
         IF(ierr<0)CALL oft_abort('No "native_mesh_options" found in input file.','native_load_smesh',__FILE__)
         IF(ierr>0)CALL oft_abort('Error parsing "native_mesh_options" in input file.','native_load_smesh',__FILE__)
         IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','native_load_smesh',__FILE__)
-        ! IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','native_load_smesh',__FILE__)
-        ! lenreflag=lnblnk(reflect)
         !
         WRITE(*,*)
         WRITE(*,'(A)')'**** Loading OFT surface mesh'
         WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
-        ! WRITE(*,'(2X,2A)')'Geom File = ',TRIM(inpname)
-        IF(lenreflag>0)THEN
-            ! WRITE(*,'(2X,A)')'Reflection:'
-            ! DO i=1,lenreflag
-            !     SELECT CASE(reflect(i:i))
-            !     CASE('x')
-            !         WRITE(*,'(4X,A,L)')'YZ-plane, periodic = ',ref_per(1)
-            !     CASE('y')
-            !         WRITE(*,'(4X,A,L)')'XZ-plane, periodic = ',ref_per(2)
-            !     CASE('z')
-            !         WRITE(*,'(4X,A,L)')'XY-plane, periodic = ',ref_per(3)
-            !     END SELECT
-            ! END DO
-        END IF
     END IF
 END IF
 !---Broadcast input information
@@ -247,14 +222,12 @@ CALL MPI_Bcast(np_mem,1,OFT_MPI_I4,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
 CALL MPI_Bcast(filename,80,OFT_MPI_CHAR,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
-! CALL MPI_Bcast(inpname, 40,OFT_MPI_CHAR,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
-! CALL MPI_Bcast(reflect,  3,OFT_MPI_CHAR,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
-! CALL MPI_Bcast(ref_per,  3,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
+CALL MPI_Bcast(reflect,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(ref_periodic,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 ! CALL MPI_Bcast(zstretch, 1,OFT_MPI_R8,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_t3d_load',__FILE__)
+! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 #endif
 !---Read in mesh sizes
 IF(np_mem>0)THEN
@@ -356,16 +329,18 @@ IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
 ELSE
     mesh_order=1
 END IF
+!---Read periodicity information
+IF(ref_periodic.AND.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))THEN
+    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+    ALLOCATE(per_nodes(dim_sizes(1)))
+    CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+END IF
 IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
-! call mesh_t3d_geom
-call mesh_global_resolution(smesh)
-! !---
-! do i=1,lenreflag
-!     if(reflect(i:i)=='x')call mesh_t3d_reflect(1,.1d0*mesh%hmin,ref_per(i))
-!     if(reflect(i:i)=='y')call mesh_t3d_reflect(2,.1d0*mesh%hmin,ref_per(i))
-!     if(reflect(i:i)=='z')call mesh_t3d_reflect(3,.1d0*mesh%hmin,ref_per(i))
-! end do
+IF(reflect)THEN
+    call mesh_global_resolution(smesh)
+    call native_reflect(smesh,.1d0*smesh%hmin)
+END IF
 IF(oft_env%rank/=0)DEALLOCATE(smesh%r,smesh%lc,smesh%reg)
 DEBUG_STACK_POP
 end subroutine native_load_smesh
@@ -571,4 +546,222 @@ END DO
 DEALLOCATE(r_ho,le_ho,lf_ho)
 DEBUG_STACK_POP
 end subroutine native_hobase_hex
+!------------------------------------------------------------------------------
+!> Reflect an native mesh across the xy-plane
+!------------------------------------------------------------------------------
+subroutine native_reflect(self,tol)
+CLASS(oft_amesh), intent(inout) :: self !< Mesh to reflect
+real(r8), intent(in) :: tol !< tol Tolerance for marking point as on the reflection plane
+integer(i4) :: npold,neold,nfold,ncold,i,j,ic,is,cid_max,sid_max,nreg,npold_ho,ne_ho,nf_ho,np_per
+integer(i4), allocatable :: newindex(:),hoindex(:),regtmp(:),ltemp(:,:)
+real(r8), allocatable :: rtemp(:,:),rlftemp(:,:),rctemp(:,:)
+DEBUG_STACK_PUSH
+IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting mesh -> z'
+CALL oft_increase_indent
+!---Reflect points that are not on reflection plane
+npold=self%np
+allocate(newindex(2*self%np),rtemp(3,2*self%np))
+rtemp(:,1:self%np)=self%r
+deallocate(self%r)
+do i=1,npold
+    IF(ABS(rtemp(3,i))<=tol)THEN
+        rtemp(3,i)=0.d0
+        newindex(i)=i
+    ELSE
+        self%np=self%np+1
+        rtemp(:,self%np) = rtemp(:,i)
+        rtemp(3,self%np) =-rtemp(3,i)
+        newindex(i)=self%np
+    ENDIF
+enddo
+allocate(self%r(3,self%np))
+self%r=rtemp(:,1:self%np)
+deallocate(rtemp)
+!---Reflect cells
+ncold=self%nc
+allocate(ltemp(self%cell_np,2*self%nc),regtmp(2*self%nc))
+ltemp(:,1:self%nc)=self%lc
+regtmp(1:self%nc)=self%reg
+nreg = MAXVAL(self%reg)
+deallocate(self%lc,self%reg)
+do i=1,ncold
+    self%nc=self%nc+1
+    DO j=1,self%cell_np
+        ltemp(j,self%nc)=newindex(ltemp(j,i))
+    END DO
+    regtmp(self%nc)=regtmp(i)+nreg
+enddo
+allocate(self%lc(self%cell_np,self%nc),self%reg(self%nc))
+self%lc=ltemp(:,1:self%nc)
+self%reg=regtmp
+deallocate(ltemp,regtmp)
+!---Reflect high-order nodes
+IF(np_ho>0)THEN
+    npold=SIZE(r_ho,DIM=2)
+    !---Reflect edges
+    neold=SIZE(le_ho,DIM=2)
+    allocate(ltemp(2,2*neold),rtemp(3,2*neold))
+    ltemp(:,1:neold)=le_ho
+    rtemp(:,1:neold)=r_ho(:,1:neold)
+    deallocate(le_ho)
+    ne_ho=neold
+    DO i=1,neold
+        IF(ABS(rtemp(3,i))<=tol)THEN
+            rtemp(3,i)=0.d0
+        ELSE
+            ne_ho=ne_ho+1
+            ltemp(:,ne_ho) = newindex(ltemp(:,i))
+            rtemp(:,ne_ho) = rtemp(:,i)
+            rtemp(3,ne_ho) =-rtemp(3,i)
+        ENDIF
+    END DO
+    allocate(le_ho(2,ne_ho))
+    le_ho=ltemp(:,1:ne_ho)
+    deallocate(ltemp)
+    np_ho = ne_ho
+    SELECT TYPE(self)
+      CLASS IS(oft_mesh)
+        IF(ALLOCATED(lf_ho))THEN
+            nfold=SIZE(lf_ho,DIM=2)
+            allocate(ltemp(self%face_np,2*nfold),rlftemp(3,2*nfold))
+            ltemp(:,1:nfold)=lf_ho
+            rlftemp(:,1:nfold)=r_ho(:,neold+1:neold+nfold)
+            deallocate(lf_ho)
+            nf_ho=nfold
+            DO i=1,nfold
+                IF(ABS(rlftemp(3,i))<=tol)THEN
+                    rlftemp(3,i)=0.d0
+                ELSE
+                    nf_ho=nf_ho+1
+                    ltemp(:,nf_ho) = newindex(ltemp(:,i))
+                    rlftemp(:,nf_ho) = rlftemp(:,i)
+                    rlftemp(3,nf_ho) =-rlftemp(3,i)
+                ENDIF
+            END DO
+            allocate(lf_ho(self%face_np,nf_ho))
+            lf_ho=ltemp(:,1:nf_ho)
+            deallocate(ltemp)
+            np_ho = ne_ho+nf_ho+self%nc
+            allocate(rctemp(3,np_ho))
+            rctemp(:,1:ne_ho)=rtemp(:,1:ne_ho)
+            rctemp(:,ne_ho+1:ne_ho+nf_ho) = rlftemp(:,1:nf_ho)
+            deallocate(rtemp,rlftemp)
+            rctemp(:,ne_ho+nf_ho+1:ne_ho+nf_ho+ncold) = r_ho(:,neold+nfold+1:neold+nfold+ncold)
+            DO i=1,ncold
+                rctemp(:,ne_ho+nf_ho+ncold+i) = rctemp(:,ne_ho+nf_ho+i)
+                rctemp(3,ne_ho+nf_ho+ncold+i) =-rctemp(3,ne_ho+nf_ho+i)
+            END DO
+            allocate(rtemp(3,np_ho))
+            rtemp=rctemp
+            deallocate(rctemp)
+        END IF
+      CLASS IS(oft_bmesh)
+        IF(npold>neold)THEN
+            np_ho = ne_ho+self%nc
+            allocate(rctemp(3,np_ho))
+            rctemp(:,1:ne_ho)=rtemp(:,1:ne_ho)
+            deallocate(rtemp)
+            rctemp(:,ne_ho+1:ne_ho+ncold) = r_ho(:,neold+1:neold+ncold)
+            IF(self%dim==2)THEN
+                DO i=1,ncold
+                    rctemp(:,ne_ho+ncold+i) = rctemp(:,ne_ho+i)
+                    rctemp(1,ne_ho+ncold+i) =-rctemp(1,ne_ho+i)
+                END DO
+            ELSE
+                DO i=1,ncold
+                    rctemp(:,ne_ho+ncold+i) = rctemp(:,ne_ho+i)
+                    rctemp(3,ne_ho+ncold+i) =-rctemp(3,ne_ho+i)
+                END DO
+            END IF
+            allocate(rtemp(3,np_ho))
+            rtemp=rctemp
+            deallocate(rctemp)
+        END IF
+    END SELECT
+    !---
+    deallocate(r_ho)
+    allocate(r_ho(3,np_ho))
+    r_ho = rtemp(:,1:np_ho)
+    deallocate(rtemp)
+END IF
+!---Flag periodic points
+IF(ALLOCATED(per_nodes))THEN
+    np_per=SIZE(per_nodes)
+    ALLOCATE(self%periodic%lp(self%np))
+    self%periodic%lp=-1
+    DO i=1,np_per
+        j=per_nodes(i)
+        self%periodic%lp(newindex(j))=j
+    END DO
+END IF
+deallocate(newindex)
+! IF(oft_debug_print(3))write(*,'(A)')oft_indent,'Done'
+CALL oft_decrease_indent
+DEBUG_STACK_POP
+end subroutine native_reflect
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+subroutine native_set_periodic
+integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per
+integer(i4), ALLOCATABLE :: pt_f(:)
+IF(.NOT.ALLOCATED(per_nodes))RETURN
+DEBUG_STACK_PUSH
+IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting native mesh periodicity'
+CALL oft_increase_indent
+IF(.NOT.ASSOCIATED(mesh%periodic%lp))THEN
+    ALLOCATE(mesh%periodic%lp(mesh%np))
+    mesh%periodic%lp=-1
+    np_per=SIZE(per_nodes)
+    DO i=1,np_per
+        j=per_nodes(i)
+        DO k=1,mesh%nbp
+            kk=mesh%lbp(k)
+            IF(kk==j)CYCLE
+            IF(ALL(ABS(mesh%r(1:2,j)-mesh%r(1:2,kk))<1.d-8).AND.ABS(mesh%r(3,kk))<1.d-8)THEN
+            IF(kk>j)THEN
+                mesh%periodic%lp(kk)=j
+            ELSE
+                mesh%periodic%lp(j)=kk
+            END IF
+            EXIT
+            END IF
+        END DO
+    END DO
+END IF
+!---Set periodic faces
+mesh%periodic%nper=1
+ALLOCATE(mesh%periodic%le(mesh%ne))
+ALLOCATE(mesh%periodic%lf(mesh%nf))
+mesh%periodic%le=-1
+mesh%periodic%lf=-1
+!---Flag periodic edges
+!$omp parallel private(j,pt_e,pt_f,ind)
+allocate(pt_f(mesh%face_np))
+!$omp do
+DO i=1,mesh%nbe
+    j = mesh%lbe(i)
+    pt_e=mesh%periodic%lp(mesh%le(:,j))
+    IF(ALL(pt_e>0))THEN
+    ind=ABS(mesh_local_findedge(mesh,pt_e))
+    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad edge',i,ind
+    mesh%periodic%le(j)=ind
+    END IF
+END DO
+!---Flag periodic faces
+!$omp do
+DO i=1,mesh%nbf
+    j = mesh%lbf(i)
+    pt_f=mesh%periodic%lp(mesh%lf(:,j))
+    IF(ALL(pt_f>0))THEN
+    ind=ABS(mesh_local_findface(mesh,pt_f))
+    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad face',i,ind
+    mesh%periodic%lf(j)=ind
+    END IF
+END DO
+deallocate(pt_f)
+!$omp end parallel
+CALL oft_decrease_indent
+DEBUG_STACK_POP
+end subroutine native_set_periodic
 end module oft_mesh_native
