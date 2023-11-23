@@ -38,6 +38,8 @@ oft_in_template = """
 
 &native_mesh_options
  filename='{2}.h5'
+ reflect={5}
+ ref_periodic={10}
 /
 """
 
@@ -51,11 +53,14 @@ def cubit_setup(nbase, nlevels, prefix, inp_prefix=None, grid_order=1,
     nproc = 1
     if nbase != nlevels:
         nproc = 2
+    ref_periodic = 'F'
+    if per_ns > 0:
+        ref_periodic = 'T'
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, prefix, prefix2,
-                                       grid_order, reflect, per_ns, zstretch, test_2d, cad_type))
+                                       grid_order, reflect, per_ns, zstretch, test_2d, cad_type, ref_periodic))
     return run_OFT("./test_cubit", nproc, 60)
 
 # Validate results against expected values
@@ -161,10 +166,18 @@ def test_cut_1ref(top_lev):
 #============================================================================
 # Test runners for reflection
 @pytest.mark.parametrize("top_lev", (1, 2))
-def test_reflect_base(top_lev):
+@pytest.mark.parametrize("cad_type", (0, 2))
+def test_reflect_base(top_lev,cad_type):
     volume_cubit = 3.02070
     area_cubit =  12.26361
-    assert cubit_setup(1,top_lev,'ref_tet4_test',reflect='T')
+    assert cubit_setup(1,top_lev,'ref_tet4_test',reflect='T',cad_type=cad_type)
+    assert check_result(volume_cubit, area_cubit)
+@pytest.mark.parametrize("top_lev", (1, 2))
+@pytest.mark.parametrize("cad_type", (0, 2))
+def test_reflect_hex_base(top_lev,cad_type):
+    volume_cubit = 3.00000
+    area_cubit =  12.21166
+    assert cubit_setup(1,top_lev,'ref_hex8_test',reflect='T',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_reflect_1ref(top_lev):
@@ -183,10 +196,18 @@ def test_reflect_quad(top_lev):
 #============================================================================
 # Test runners for periodic reflection
 @pytest.mark.parametrize("top_lev", (1, 2))
-def test_perreflect_base(top_lev):
+@pytest.mark.parametrize("cad_type", (0, 2))
+def test_perreflect_base(top_lev,cad_type):
     volume_cubit = 3.02070
     area_cubit =   6.22221
-    assert cubit_setup(1,top_lev,'ref_tet4_test',reflect='T',per_ns=1)
+    assert cubit_setup(1,top_lev,'ref_tet4_test',reflect='T',per_ns=1,cad_type=cad_type)
+    assert check_result(volume_cubit, area_cubit)
+@pytest.mark.parametrize("top_lev", (1, 2))
+@pytest.mark.parametrize("cad_type", (0, 2))
+def test_perreflect_hex_base(top_lev,cad_type):
+    volume_cubit = 3.00000
+    area_cubit =   6.21166
+    assert cubit_setup(1,top_lev,'ref_hex8_test',reflect='T',per_ns=1,cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_perreflect_1ref(top_lev):
@@ -205,17 +226,34 @@ def test_perreflect_quad(top_lev):
 #============================================================================
 # Test runners for high order reflected meshes
 @pytest.mark.parametrize("top_lev", (1, 2))
-def test_tet10reflect_quad(top_lev):
+@pytest.mark.parametrize("cad_type", (0, 2))
+def test_tet10reflect_quad(top_lev,cad_type):
     volume_cubit = 3.14123
     area_cubit =  12.56531
-    assert cubit_setup(1,top_lev,'ref_tet10_test',grid_order=2,reflect='T')
+    assert cubit_setup(1,top_lev,'ref_tet10_test',grid_order=2,reflect='T',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (2, 3))
-def test_tet10reflect_1ref(top_lev):
+@pytest.mark.parametrize("cad_type", (0, 2))
+def test_tet10reflect_1ref(top_lev,cad_type):
     volume_cubit = 3.11110
     area_cubit =  12.49011
     minlev = 4 - top_lev
-    assert cubit_setup(minlev,top_lev,'ref_tet10_test',reflect='T')
+    assert cubit_setup(minlev,top_lev,'ref_tet10_test',reflect='T',cad_type=cad_type)
+    assert check_result(volume_cubit, area_cubit)
+@pytest.mark.parametrize("top_lev", (1, 2))
+@pytest.mark.parametrize("cad_type", (0, 2))
+def test_hex27reflect_quad(top_lev,cad_type):
+    volume_cubit = 3.14110
+    area_cubit =  12.56491
+    assert cubit_setup(1,top_lev,'ref_hex27_test',grid_order=2,reflect='T',cad_type=cad_type)
+    assert check_result(volume_cubit, area_cubit)
+@pytest.mark.parametrize("top_lev", (2, 3))
+@pytest.mark.parametrize("cad_type", (0, 2))
+def test_hex27reflect_1ref(top_lev,cad_type):
+    volume_cubit = 3.10583
+    area_cubit =  12.47691
+    minlev = 4 - top_lev
+    assert cubit_setup(minlev,top_lev,'ref_hex27_test',reflect='T',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
 
 #============================================================================

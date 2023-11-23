@@ -12,10 +12,33 @@ mesh volume 1
 #
 nodeset 1 surface 3
 #
-refine parallel fileroot 'ref_test' overwrite no_execute
+#refine parallel fileroot 'ref_test' overwrite no_execute
+export Genesis "ref_tet4_test.g" dimension 3 overwrite block all
 #
 block 1 volume 1
 block 1 element type tetra10
 set large exodus file on
-export Genesis  "ref_test2.in.e" block 1 overwrite
+export Genesis "ref_tet10_test.g" dimension 3 overwrite block all
 
+reset
+#
+create Cylinder height 0.5 radius 1 
+move Volume 1  x 0 y 0 z 0.25 include_merged
+#
+surface 2  scheme circle
+surface 2 size .5
+mesh surface 2
+volume 1  redistribute nodes off 
+volume 1  scheme Sweep sweep transform least squares 
+volume 1  autosmooth target on  fixed imprints off  smart smooth off 
+volume 1 size .5
+mesh volume 1
+#
+nodeset 1 surface 3
+#
+export Genesis "ref_hex8_test.g" dimension 3 overwrite block all
+#
+block 1 volume 1
+block 1 element type hex27
+set large exodus file on
+export Genesis  "ref_hex27_test.g" dimension 3 overwrite block all
