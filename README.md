@@ -37,7 +37,7 @@ Detailed documentation is included in the binary packages at `/path/to/oft/insta
 Contributing
 -----------
 
-Guidance on contributing to the toolkit is in progress and will be included shortly (see [Issue #1](https://github.com/hansec/OpenFUSIONToolkit/issues/1))
+See [CONTRIBUTING.md](https://github.com/hansec/OpenFUSIONToolkit/blob/main/CONTRIBUTING.md) for information on how to contribute.
 
 
 Copyright
