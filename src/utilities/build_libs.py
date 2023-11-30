@@ -655,8 +655,13 @@ class METIS(package):
         return self.config_dict
 
     def build(self):
+        build_dir = os.getcwd()
         build_lines = [
-            "make config cc={CC} cmake={CMAKE} prefix={METIS_ROOT}",
+            "GKLIB_PATH={0}".format(os.path.join(build_dir,"GKlib")),
+            "rm -rf build",
+            "mkdir -p build",
+            "cd build",
+            "{CMAKE} -DCMAKE_INSTALL_PREFIX={METIS_ROOT} -DCMAKE_C_COMPILER={CC} -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DGKLIB_PATH=$GKLIB_PATH .. ",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
