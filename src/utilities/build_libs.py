@@ -655,8 +655,9 @@ class METIS(package):
         return self.config_dict
 
     def build(self):
+        build_dir = os.getcwd()
         build_lines = [
-            "GKLIB_PATH=$(realpath GKlib)",
+            "GKLIB_PATH={0}".format(os.path.join(build_dir,"GKlib")),
             "rm -rf build",
             "mkdir -p build",
             "cd build",
