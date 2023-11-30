@@ -26,6 +26,11 @@ jobs:
             cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python", pip: "pip"
           }
         - {
+            name: "Ubuntu 22.04 GCC 13",
+            os: ubuntu-22.04,
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3"
+          }
+        - {
             name: "macOS Monterey GCC 12",
             os: macos-12,
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", pip: "pip3"
