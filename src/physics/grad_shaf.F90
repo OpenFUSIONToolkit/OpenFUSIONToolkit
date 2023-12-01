@@ -5066,8 +5066,8 @@ ELSE
 END IF
 dt_in=-1.d0
 IF(PRESENT(dt))dt_in=dt
+ALLOCATE(eta_reg(smesh%nreg))
 IF(dt_in>0.d0)THEN
-  ALLOCATE(eta_reg(smesh%nreg))
   eta_reg=-1.d0
   DO i=1,self%ncond_regs
     jr=self%cond_regions(i)%id
@@ -5144,8 +5144,7 @@ DEALLOCATE(j,lop)
 CALL oft_blagrange%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
-DEALLOCATE(oft_lag_vec)
-IF(dt_in>0.d0)DEALLOCATE(eta_reg)
+DEALLOCATE(oft_lag_vec,eta_reg)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
   WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
