@@ -604,6 +604,36 @@ class package:
         return True
 
 
+class CMAKE(package):
+    def __init__(self):
+        self.name = "CMAKE"
+        self.url = "https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9.tar.gz"
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        # Installation check files
+        self.install_chk_files = [os.path.join(self.config_dict['CMAKE_BIN'], 'cmake')]
+        # Replace CMAKE executable
+        self.config_dict['CMAKE'] = os.path.join(self.config_dict['CMAKE_BIN'], 'cmake')
+        return self.config_dict
+
+    def build(self):
+        build_dir = os.getcwd()
+        build_lines = [
+            "rm -rf build",
+            "mkdir build",
+            "cd build",
+            "unset CC",
+            "unset CXX",
+            "unset FC",
+            "../configure --prefix={CMAKE_ROOT}",
+            "make -j{MAKE_THREADS}",
+            "make install"
+        ]
+        self.run_build(build_lines, self.config_dict)
+
+
 class METIS(package):
     def __init__(self, comp_wrapper=False):
         self.name = "METIS"
@@ -1620,6 +1650,7 @@ parser.add_argument("--cross_compile_host", default=None, type=str, help="Host t
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
 group = parser.add_argument_group("CMAKE", "CMAKE configure options for the OpenFUSIONToolkit")
+group.add_argument("--build_cmake", action="store_true", default=False, help="Build CMAKE instead of using system version?")
 group.add_argument("--oft_build_debug", action="store_true", default=False, help="Build debug version of OFT?")
 group.add_argument("--oft_build_python", action="store_true", default=False, help="Build OFT Python libraries?")
 group.add_argument("--oft_build_tests", action="store_true", default=False, help="Build OFT tests?")
@@ -1724,6 +1755,9 @@ else:
         use_mpi = True
 # Setup library builds (in order of dependency)
 packages = []
+# CMAKE
+if options.build_cmake:
+    packages.append(CMAKE())
 # BLAS/LAPACK
 if options.use_mkl:
     packages.append(MKL(options.mkl_root))

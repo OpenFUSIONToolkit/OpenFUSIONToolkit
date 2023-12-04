@@ -27,9 +27,11 @@ def get_prereqs(filename):
                 known_libs[line.split('=>')[0].strip()] = line.split('=>')[1].split('(')[0].strip()
     return preqs, known_libs
 
+print('Copying required dynamic libraries')
 output, error, errcode = run_command('ldconfig -p')
 ld_confoutput = output.splitlines()
 
+MKL_ROOT = None
 for i in range(2):
     full_prequisites = {}
     known_resolutions = {}
@@ -69,11 +71,42 @@ for i in range(2):
         path = prequisites[key]
         realpath = os.path.realpath(prequisites[key])
         if i == 1:
-            print('{0} -> {1} ({2})'.format(key, path, realpath))
+            if path == realpath:
+                print('  {0} -> {1}'.format(key, path))
+            else:
+                print('  {0} -> {1} ({2})'.format(key, path, realpath))
+            if (MKL_ROOT is None) and key.startswith('libmkl'):
+                MKL_ROOT = os.path.dirname(realpath)
         filename = os.path.basename(realpath)
         symname = os.path.basename(key)
         if filename == symname:
             shutil.copy(path, key)
+        else:
+            shutil.copy(realpath, filename)
+            try:
+                os.remove(symname)
+            except FileNotFoundError:
+                pass
+            os.symlink(filename, symname)
+
+# Copy MKL computational kernels if linked with MKL
+if MKL_ROOT is not None:
+    print('Detected oneAPI MKL usage: {0}'.format(MKL_ROOT))
+    mkl_comp_libs = ('libmkl_def', 'libmkl_avx2')
+    mkl_libs = []
+    for mkl_lib in os.listdir(MKL_ROOT):
+        for comp_lib in mkl_comp_libs:
+            if mkl_lib.startswith(comp_lib):
+                mkl_libs.append(mkl_lib)
+                break
+    for mkl_lib in mkl_libs:
+        path = os.path.join(MKL_ROOT,mkl_lib)
+        realpath = os.path.realpath(path)
+        filename = os.path.basename(realpath)
+        symname = os.path.basename(mkl_lib)
+        print('  Copying MKL kernel lib: {0}'.format(mkl_lib))
+        if filename == symname:
+            shutil.copy(path, mkl_lib)
         else:
             shutil.copy(realpath, filename)
             try:
