@@ -70,6 +70,12 @@ IF(sol_type==4)THEN
   CALL oft_finalize
 END IF
 #endif
+#if !defined( HAVE_MKL )
+IF(sol_type==5)THEN
+  WRITE(*,*)'SKIP TEST: 5'
+  CALL oft_finalize
+END IF
+#endif
 !---Setup grid
 CALL multigrid_construct
 IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
@@ -135,6 +141,8 @@ SELECT CASE(sol_type)
     linv_pre_lu%package='mumps'
   CASE(4)
     linv_pre_lu%package='umfpack'
+  CASE(5)
+    linv_pre_lu%package='pardiso'
 END SELECT
 !---Solve
 CALL u%set(1.d0)

@@ -194,14 +194,23 @@ def setup_build_env(build_dir="build"):
     # Check CMAKE version
     result, errcode = run_command("{CMAKE} --version".format(**config_dict))
     if errcode != 0:
-        error_exit("CMAKE not found")
-    line = result.split("\n")[0]
-    ver_string = line.split("version")[1]
-    ver_string = ver_string.split("-")[0]  # Needed if patch release
-    ver_major = int(ver_string.split(".")[0])
-    ver_minor = int(ver_string.split(".")[1])
-    if ver_major == 2 and ver_minor < 8:
-        error_exit("Specified CMAKE version is <2.8")
+        config_dict['CMAKE'] = None
+        print("System CMAKE not found, will build instead")
+        # error_exit("CMAKE not found")
+    else:
+        try:
+            line = result.split("\n")[0]
+            ver_string = line.split("version")[1]
+            ver_string = ver_string.split("-")[0]  # Needed if patch release
+            ver_major = int(ver_string.split(".")[0])
+            ver_minor = int(ver_string.split(".")[1])
+            if ver_major < 3 or ver_minor < 15:
+                config_dict['CMAKE'] = None
+                print("System CMAKE version < 3.15, will build instead")
+                # error_exit("Specified CMAKE version is <2.8")
+        except:
+            config_dict['CMAKE'] = None
+            print("Could not determine system CMAKE version, will build instead")
     # Check FORTRAN compiler
     result, errcode = run_command("{FC} --version".format(**config_dict))
     if errcode != 0:
@@ -619,7 +628,6 @@ class CMAKE(package):
         return self.config_dict
 
     def build(self):
-        build_dir = os.getcwd()
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -627,7 +635,7 @@ class CMAKE(package):
             "unset CC",
             "unset CXX",
             "unset FC",
-            "../configure --prefix={CMAKE_ROOT}",
+            "../bootstrap -- -DCMAKE_USE_OPENSSL=OFF -DCMAKE_INSTALL_PREFIX={CMAKE_ROOT}",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -643,9 +651,8 @@ class METIS(package):
 
     def detect_sizes(self):
         print("  Testing METIS sizes")
-        f = open('tmp.cc', 'w+')
-        f.write('#include "metis.h"\n\nTEST_INDWIDTH IDXTYPEWIDTH\nTEST_REALWIDTH REALTYPEWIDTH')
-        f.close()
+        with open('tmp.cc', 'w+') as fid:
+            fid.write('#include "metis.h"\n\nTEST_INDWIDTH IDXTYPEWIDTH\nTEST_REALWIDTH REALTYPEWIDTH')
         result, _ = run_command("{CC} -E tmp.cc | tail -2".format(**config_dict))
         os.remove('tmp.cc')
         values = result.split()
@@ -1256,6 +1263,7 @@ class SUPERLU(package):
             "export FC={FC}",
             "{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT} \\",
             "  -DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH} \\",
+            "  -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE \\",
             "  -Denable_blaslib:BOOL=TRUE ..",
             "make -j{MAKE_THREADS}",
             "make install"
@@ -1313,6 +1321,7 @@ SUPERLU_DIST_LIB = -L{SUPERLU_DIST_LIB} {SUPERLU_DIST_LIBS}
             "  -DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH} \\",
             "  -Denable_openmp:BOOL={SUPERLU_DIST_OMP_FLAG} \\",
             "  -DBUILD_SHARED_LIBS:BOOL=FALSE \\",
+            "  -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE \\",
             "  -DCMAKE_INSTALL_LIBDIR=lib ..",
             "make -j{MAKE_THREADS}",
             "make install"
@@ -1366,7 +1375,11 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
         build_lines = [
             "export CC={CC}",
             "export CX={CXX}",
-            "export FC={FC}",
+            "export FC={FC}"
+        ]
+        if 'CMAKE_BIN' in self.config_dict:
+            build_lines += ["export PATH={0}:$PATH".format(self.config_dict['CMAKE_BIN'])]
+        build_lines += [
             "export FFLAGS=-fPIC",
             "export JOBS={MAKE_THREADS}",
             "export OPTIMIZATION=-O2",
@@ -1501,9 +1514,8 @@ class PETSC(package):
 
     def detect_version(self):
         print("  Testing PETSc version")
-        f = open('tmp.c', 'w+')
-        f.write('#include "petscversion.h"\n\nPETSC_VERSION_MAJOR PETSC_VERSION_MINOR')
-        f.close()
+        with open('tmp.c', 'w+') as fid:
+            fid.write('#include "petscversion.h"\n\nPETSC_VERSION_MAJOR PETSC_VERSION_MINOR')
         command = "{CC} -E tmp.c | tail -1".format(**self.config_dict)
         result, errcode = run_command(command)
         os.remove('tmp.c')
@@ -1650,7 +1662,7 @@ parser.add_argument("--cross_compile_host", default=None, type=str, help="Host t
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
 group = parser.add_argument_group("CMAKE", "CMAKE configure options for the OpenFUSIONToolkit")
-group.add_argument("--build_cmake", action="store_true", default=False, help="Build CMAKE instead of using system version?")
+group.add_argument("--build_cmake", default=0, type=int, help="Build CMAKE instead of using system version?")
 group.add_argument("--oft_build_debug", action="store_true", default=False, help="Build debug version of OFT?")
 group.add_argument("--oft_build_python", action="store_true", default=False, help="Build OFT Python libraries?")
 group.add_argument("--oft_build_tests", action="store_true", default=False, help="Build OFT tests?")
@@ -1756,7 +1768,7 @@ else:
 # Setup library builds (in order of dependency)
 packages = []
 # CMAKE
-if options.build_cmake:
+if (config_dict['CMAKE'] is None) or options.build_cmake == 1:
     packages.append(CMAKE())
 # BLAS/LAPACK
 if options.use_mkl:
