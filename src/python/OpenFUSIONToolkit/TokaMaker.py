@@ -15,7 +15,7 @@ from .util import *
 
 # Settings STRUCT
 class tokamaker_settings_struct(c_struct):
-    '''! TokaMaker settings structure
+    r'''! TokaMaker settings structure
 
      - `pm` Print 'performance' information (eg. iteration count) during run?
      - `free_boundary` Perform free-boundary calculation?
@@ -204,7 +204,7 @@ def tokamaker_default_settings():
     return settings
 
 def create_isoflux(npts, r0, z0, a, kappa, delta, kappaL=None, deltaL=None):
-    '''! Create isoflux points using simple analytic form
+    r'''! Create isoflux points using simple analytic form
 
     @param npts Number of points to sample (evenly spaced in \f$\theta\f$)
     @param r0 Major radial position for magnetic axis
@@ -475,7 +475,7 @@ class TokaMaker():
         tokamaker_setup_regions(cstring,eta_vals)
 
     def eval_green(self,x,xc):
-        '''! Evaluate Green's function for a toroidal filament
+        r'''! Evaluate Green's function for a toroidal filament
 
         @param x Observation point [2]
         @param xc Coil location [2]
@@ -490,7 +490,7 @@ class TokaMaker():
         return vals*mu0
     
     def setup(self,order=2,F0=0.0,full_domain=False):
-        '''! Setup G-S solver
+        r'''! Setup G-S solver
 
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
@@ -630,7 +630,7 @@ class TokaMaker():
         tokamaker_set_coil_vsc(coil_gains)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0):
-        '''! Initialize \f$\psi\f$ using uniform current distributions
+        r'''! Initialize \f$\psi\f$ using uniform current distributions
 
         If r0>0 then a uniform current density inside a surface bounded by
         a curve of the form defined in @ref oftpy.create_isoflux is used.
@@ -647,7 +647,7 @@ class TokaMaker():
         return error_flag.value
 
     def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in'):
-        '''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
+        r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
         @param foffset Value of \f$F0=R0*B0\f$
@@ -658,7 +658,7 @@ class TokaMaker():
         tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()))
 
     def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None):
-        '''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
+        r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         Arrays should have the form array[i,:] = (\f$\hat{\psi}_i\f$, \f$f(\hat{\psi}_i)\f$) and span
         \f$\hat{\psi}_i = [0,1]\f$.
@@ -790,7 +790,7 @@ class TokaMaker():
         print("  l_i                     =   {0:7.4F}".format(eq_stats['l_i']))
     
     def set_isoflux(self,isoflux,weights=None,grad_wt_lim=-1.0):
-        '''! Set isoflux constraint points (all points lie on a flux surface)
+        r'''! Set isoflux constraint points (all points lie on a flux surface)
 
         To constraint points more uniformly in space additional weighting based on
         the gradient of $\psi$ at each point can also be included by setting
@@ -826,7 +826,7 @@ class TokaMaker():
             self._saddles = saddles.copy()
     
     def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,retain_previous=False):
-        '''! Set global target values
+        r'''! Set global target values
 
         Once set, values are retained until they are explicitly set to their respective disabled
         values (see below). By default, all targets are disabled so this function should be called
@@ -866,7 +866,7 @@ class TokaMaker():
         tokamaker_set_targets(self._Ip_target,self._Ip_ratio_target,self._pax_target,self._estore_target,self._R0_target,self._V0_target)
 
     def get_psi(self,normalized=True):
-        '''! Get poloidal flux values on node points
+        r'''! Get poloidal flux values on node points
 
         @param normalized Normalize (and offset) poloidal flux
         @result \f$\hat{\psi} = \frac{\psi-\psi_0}{\psi_a-\psi_0} \f$ or \f$\psi\f$
@@ -907,7 +907,7 @@ class TokaMaker():
         return currents, coil_map
 
     def get_coil_Lmat(self):
-        '''! Get mutual inductance matrix between coils
+        r'''! Get mutual inductance matrix between coils
 
         @note This is the inductance in terms of A-turns. To get in terms of
         current in a single of the \f$n\f$ windings you must multiply by \f$n_i*n_j\f$.
@@ -919,7 +919,7 @@ class TokaMaker():
         return Lmat
     
     def trace_surf(self,psi):
-        '''! Trace surface for a given poloidal flux
+        r'''! Trace surface for a given poloidal flux
 
         @param psi Flux surface to trace \f$\hat{\psi}\f$
         @result \f$r(\hat{\psi})\f$
@@ -935,7 +935,7 @@ class TokaMaker():
             return None
     
     def get_q(self,psi=None,psi_pad=0.02,npsi=50):
-        '''! Get q-profile at specified or uniformly spaced points
+        r'''! Get q-profile at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
@@ -964,7 +964,7 @@ class TokaMaker():
             return psi,qvals,ravgs,dl.value,rbounds,zbounds
 
     def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
-        '''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
+        r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
@@ -990,7 +990,7 @@ class TokaMaker():
             return psi,fc,r_avgs,modb_avgs
 
     def get_globals(self):
-        '''! Get global plasma parameters
+        r'''! Get global plasma parameters
 
         @result Ip, [R_Ip, Z_Ip], \f$\int dV\f$, \f$\int P dV\f$, diamagnetic flux,
         enclosed toroidal flux
@@ -1007,7 +1007,7 @@ class TokaMaker():
         return Ip.value, centroid, vol.value, pvol.value, dflux.value, tflux.value, Li.value
     
     def get_profiles(self,psi=None,psi_pad=1.E-8,npsi=50):
-        '''! Get G-S source profiles
+        r'''! Get G-S source profiles
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
@@ -1126,7 +1126,7 @@ class TokaMaker():
     def plot_psi(self,fig,ax,psi=None,normalized=True,plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,
                  vacuum_color='darkgray',vacuum_nlevels=8,vacuum_levels=None,vacuum_colormap=None,
                  xpoint_color='k',xpoint_marker='x',opoint_color='k',opoint_marker='*'):
-        '''! Plot contours of \f$\hat{\psi}\f$
+        r'''! Plot contours of \f$\hat{\psi}\f$
 
         @param fig Figure to add to
         @param ax Axis to add to
@@ -1194,7 +1194,7 @@ class TokaMaker():
         ax.set_aspect('equal','box')
     
     def plot_eddy(self,fig,ax,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]'):
-        '''! Plot contours of \f$\hat{\psi}\f$
+        r'''! Plot contours of \f$\hat{\psi}\f$
 
         @param fig Figure to add to
         @param ax Axis to add to
