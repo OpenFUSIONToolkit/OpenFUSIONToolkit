@@ -5334,6 +5334,7 @@ DO i=1,smesh%nbc
     END IF
   END DO
 END DO
+DEALLOCATE(el1)
 !---
 allocate(self%bc_rhs_list(self%bc_nrhs))
 allocate(self%bc_lmat(oft_blagrange%nbe,oft_blagrange%nbe))
@@ -5358,7 +5359,8 @@ nfail=0
 !$omp parallel private(j,jr,k,kk,rop1,gop1,loc_map1,cell1,el1,f1,ed1,dl1,dn1,dl1_mag,pts1,val, &
 !$omp rop2,gop2,loc_map2,el2,f2,dl2,dn2,dl2_mag,pt2,pts2,work,neval,ierr,iwork,last,ltmp,goptmp1) &
 !$omp reduction(+:nfail)
-ALLOCATE(rop1(oft_blagrange%nce),gop1(3,oft_blagrange%nce),loc_map1(oft_blagrange%nce))
+ALLOCATE(el1(oft_blagrange%nce),loc_map1(oft_blagrange%nce))
+ALLOCATE(rop1(oft_blagrange%nce),gop1(3,oft_blagrange%nce))
 ALLOCATE(el2(oft_blagrange%nce),loc_map2(oft_blagrange%nce))
 ALLOCATE(rop2(oft_blagrange%nce),gop2(3,oft_blagrange%nce))
 !$omp do schedule(static,10)

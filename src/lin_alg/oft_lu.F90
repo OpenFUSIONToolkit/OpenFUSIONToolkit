@@ -747,8 +747,10 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ivals
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rvals
 self%refactor=.TRUE.
 self%update_graph=.TRUE.
-NULLIFY(self%A)
-IF(.NOT.self%initialized)RETURN
+IF(.NOT.self%initialized)THEN
+  NULLIFY(self%A)
+  RETURN
+END IF
 ALLOCATE(ivals(1),rvals(1))
 SELECT CASE(TRIM(self%package))
 #ifdef HAVE_SUPERLU
@@ -797,6 +799,7 @@ SELECT CASE(TRIM(self%package))
     DEALLOCATE(self%ipiv,self%atmp)
 END SELECT
 DEALLOCATE(ivals,rvals)
+NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine lusolver_delete
 !------------------------------------------------------------------------------
