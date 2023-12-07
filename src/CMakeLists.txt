@@ -16,7 +16,6 @@ option(OFT_BUILD_PYTHON "Build experimental Python wrappers?" OFF)
 option(OFT_BUILD_DOCS "Build documentation?" OFF)
 option(OFT_PACKAGE_BUILD "Perform a destributable package?" OFF)
 option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" OFF)
-set(OFT_PYTEST_NAME "pytest" CACHE STRING "Name of pytest command")
 
 # Internal variables
 set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")

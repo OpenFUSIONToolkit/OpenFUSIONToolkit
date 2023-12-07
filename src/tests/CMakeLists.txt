@@ -12,6 +12,16 @@ function(oft_add_test)
   endif()
 endfunction(oft_add_test)
 
+# Find pytest
+if( NOT OFT_PYTEST_EXE )
+  find_program( OFT_PYTEST_EXE NAMES pytest py.test pytest-3 py.test-3 )
+endif()
+if( OFT_PYTEST_EXE )
+  message( STATUS "Found pytest: ${OFT_PYTEST_EXE}" )
+else()
+  message( FATAL_ERROR "pytest not found but required for automated tests" )
+endif()
+
 # Add sub-directories and copy testing script
 file( COPY oft_testing.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 add_subdirectory( grid )
@@ -36,13 +46,13 @@ endif()
 add_custom_target(test)
 add_custom_command(
     TARGET  test
-    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_NAME} -m \"not slow\" grid lin_alg fem physics
+    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} -m \"not slow\" grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
 )
 # Add "full" testing command to Makefile
 add_custom_target(test_full)
 add_custom_command(
     TARGET  test_full
-    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_NAME} grid lin_alg fem physics
+    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
 )
