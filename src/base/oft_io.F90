@@ -368,7 +368,7 @@ end function oft_file_exist
 function hdf5_field_exist(filepath,path) result(exists)
 character(LEN=*), intent(in) :: filepath !< Path to file
 character(LEN=*), intent(in) :: path !< Path of field in file
-integer :: access_flag,error
+integer :: access_flag,error,subpath
 integer(HID_T) :: file_id,dset_id
 logical :: exists
 exists=oft_file_exist(filepath)
@@ -380,7 +380,11 @@ call h5open_f(error)
 call h5fopen_f(TRIM(filepath), access_flag, file_id, error)
 IF(error/=0)exists=.FALSE.
 !---Check for desired field
-IF(exists)CALL h5lexists_f(file_id, "/"//TRIM(path), exists, error)
+DO subpath=1,LEN_TRIM(path)
+  IF(.NOT.exists)EXIT
+  IF(subpath<LEN_TRIM(path).AND.path(subpath:subpath)/="/")CYCLE
+  CALL h5lexists_f(file_id, "/"//path(1:subpath), exists, error)
+END DO
 !---Close file and finalize HDF5
 call h5fclose_f(file_id, error)
 call h5close_f(error)
