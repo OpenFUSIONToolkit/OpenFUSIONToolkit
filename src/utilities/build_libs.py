@@ -164,7 +164,7 @@ def check_c_compiles_and_runs(source, flags, config_dict):
         return True
 
 
-def setup_build_env(build_dir="build"):
+def setup_build_env(build_dir="build", build_cmake_ver=None):
     # Setup build environment
     # Set defaults
     config_dict = {"CC": "gcc", "CXX": "g++", "FC": "gfortran", "LD": None,
@@ -192,26 +192,30 @@ def setup_build_env(build_dir="build"):
     if errcode != 0:
         error_exit('"patch" not found')
     # Check CMAKE version
-    result, errcode = run_command("{CMAKE} --version".format(**config_dict))
-    cmake_err_string = ''
-    if errcode != 0:
-        config_dict['CMAKE'] = None
-        cmake_err_string = "specified CMAKE does not appear to work"
-    else:
-        try:
-            line = result.split("\n")[0]
-            ver_string = line.split("version")[1]
-            ver_string = ver_string.split("-")[0]  # Needed if patch release
-            if ver_lt(ver_string,"3.12"):
-                config_dict['CMAKE'] = None
-                cmake_err_string = "specified CMAKE version < 3.12"
-            else:
-                config_dict['CMAKE_VERSION'] = ver_string
-        except:
+    if build_cmake_ver is None:
+        result, errcode = run_command("{CMAKE} --version".format(**config_dict))
+        cmake_err_string = ''
+        if errcode != 0:
             config_dict['CMAKE'] = None
-            cmake_err_string = "could not determine system CMAKE version"
-    if config_dict['CMAKE'] is None:
-        error_exit('CMAKE required, but {0}'.format(cmake_err_string), ('Update or retry with "--build_cmake=1" to build a compatible version',))
+            cmake_err_string = "specified CMAKE does not appear to work"
+        else:
+            try:
+                line = result.split("\n")[0]
+                ver_string = line.split("version")[1]
+                ver_string = ver_string.split("-")[0]  # Needed if patch release
+                if ver_lt(ver_string,"3.12"):
+                    config_dict['CMAKE'] = None
+                    cmake_err_string = "specified CMAKE version < 3.12"
+                else:
+                    config_dict['CMAKE_VERSION'] = ver_string
+            except:
+                config_dict['CMAKE'] = None
+                cmake_err_string = "could not determine system CMAKE version"
+        if config_dict['CMAKE'] is None:
+            error_exit('CMAKE required, but {0}'.format(cmake_err_string), ('Update or retry with "--build_cmake=1" to build a compatible version',))
+    else:
+        config_dict['CMAKE'] = 'tobuild'
+        config_dict['CMAKE_VERSION'] = build_cmake_ver
     # Check FORTRAN compiler
     result, errcode = run_command("{FC} --version".format(**config_dict))
     if errcode != 0:
@@ -624,6 +628,7 @@ class CMAKE(package):
     def __init__(self):
         self.name = "CMAKE"
         self.url = "https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9.tar.gz"
+        self.version = '3.27'
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -632,7 +637,7 @@ class CMAKE(package):
         self.install_chk_files = [os.path.join(self.config_dict['CMAKE_BIN'], 'cmake')]
         # Replace CMAKE executable
         self.config_dict['CMAKE'] = os.path.join(self.config_dict['CMAKE_BIN'], 'cmake')
-        self.config_dict['CMAKE_VERSION'] = '3.27'
+        self.config_dict['CMAKE_VERSION'] = self.version
         return self.config_dict
 
     def build(self):
@@ -1747,7 +1752,10 @@ group.add_argument("--petsc_wrapper", action="store_true", default=False, help="
 #
 options = parser.parse_args()
 fetch_progress = options.no_dl_progress
-config_dict = setup_build_env()
+build_cmake_ver = None
+if options.build_cmake == 1:
+    build_cmake_ver = CMAKE().version
+config_dict = setup_build_env(build_cmake_ver=build_cmake_ver)
 config_dict['DOWN_ONLY'] = options.download_only
 config_dict['SETUP_ONLY'] = options.setup_only
 if options.nthread > 1:
@@ -1781,7 +1789,7 @@ else:
 # Setup library builds (in order of dependency)
 packages = []
 # CMAKE
-if (config_dict['CMAKE'] is None) or options.build_cmake == 1:
+if options.build_cmake == 1:
     packages.append(CMAKE())
 # BLAS/LAPACK
 if options.use_mkl:
