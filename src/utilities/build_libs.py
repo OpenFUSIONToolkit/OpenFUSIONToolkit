@@ -69,10 +69,10 @@ def fetch_file(url, file):
                 file_size = int(response.info().getheaders("Content-Length")[0])
             except:
                 file_size = -1
-    except URLError:
-        error_exit('Download failed for file: "{0}"'.format(url))
     except ValueError:
         error_exit('Invalid download URL: "{0}"'.format(url))
+    except:
+        error_exit('Download failed for file: "{0}"'.format(url))
     else:
         line = "  Downloading: {0}".format(url)
         print(line)
@@ -193,15 +193,25 @@ def setup_build_env(build_dir="build"):
         error_exit('"patch" not found')
     # Check CMAKE version
     result, errcode = run_command("{CMAKE} --version".format(**config_dict))
+    cmake_err_string = ''
     if errcode != 0:
-        error_exit("CMAKE not found")
-    line = result.split("\n")[0]
-    ver_string = line.split("version")[1]
-    ver_string = ver_string.split("-")[0]  # Needed if patch release
-    ver_major = int(ver_string.split(".")[0])
-    ver_minor = int(ver_string.split(".")[1])
-    if ver_major == 2 and ver_minor < 8:
-        error_exit("Specified CMAKE version is <2.8")
+        config_dict['CMAKE'] = None
+        cmake_err_string = "specified CMAKE does not appear to work"
+    else:
+        try:
+            line = result.split("\n")[0]
+            ver_string = line.split("version")[1]
+            ver_string = ver_string.split("-")[0]  # Needed if patch release
+            if ver_lt(ver_string,"3.12"):
+                config_dict['CMAKE'] = None
+                cmake_err_string = "specified CMAKE version < 3.12"
+            else:
+                config_dict['CMAKE_VERSION'] = ver_string
+        except:
+            config_dict['CMAKE'] = None
+            cmake_err_string = "could not determine system CMAKE version"
+    if config_dict['CMAKE'] is None:
+        error_exit('CMAKE required, but {0}'.format(cmake_err_string), ('Update or retry with "--build_cmake=1" to build a compatible version',))
     # Check FORTRAN compiler
     result, errcode = run_command("{FC} --version".format(**config_dict))
     if errcode != 0:
@@ -212,6 +222,9 @@ def setup_build_env(build_dir="build"):
         fc_vendor = 'gnu'
     elif (line.find('ifort') >= 0) or (line.find('ifx') >= 0):
         fc_vendor = 'intel'
+        if line.find('ifx') >= 0:
+            if ver_lt(config_dict.get('CMAKE_VERSION','0.0'),"3.20"):
+                error_exit('CMAKE >= 3.20 required for Intel "ifx" Fortran compiler', ('Update or retry with "--build_cmake=1" to build a compatible version',))
     # Check C++ compiler
     result, errcode = run_command("{CXX} --version".format(**config_dict))
     if errcode != 0:
@@ -222,6 +235,9 @@ def setup_build_env(build_dir="build"):
         error_exit("C compiler does not appear to work!")
     if result.find('LLVM') >= 0:
         error_exit("Apple compiler wrappers detected!", ("Native GCC required on MacOS",))
+    elif result.find('oneAPI DPC++/C++') >= 0:
+        if ver_lt(config_dict.get('CMAKE_VERSION','0.0'),"3.20"):
+            error_exit('CMAKE >= 3.20 required for Intel "icx" C/C++ compiler', ('Update or retry with "--build_cmake=1" to build a compatible version',))
     line = result.split("\n")[0]
     cc_vendor = 'unknown'
     cc_version = 'unknown'
@@ -604,6 +620,36 @@ class package:
         return True
 
 
+class CMAKE(package):
+    def __init__(self):
+        self.name = "CMAKE"
+        self.url = "https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9.tar.gz"
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        # Installation check files
+        self.install_chk_files = [os.path.join(self.config_dict['CMAKE_BIN'], 'cmake')]
+        # Replace CMAKE executable
+        self.config_dict['CMAKE'] = os.path.join(self.config_dict['CMAKE_BIN'], 'cmake')
+        self.config_dict['CMAKE_VERSION'] = '3.27'
+        return self.config_dict
+
+    def build(self):
+        build_lines = [
+            "rm -rf build",
+            "mkdir build",
+            "cd build",
+            "unset CC",
+            "unset CXX",
+            "unset FC",
+            "../bootstrap -- -DCMAKE_USE_OPENSSL=OFF -DCMAKE_INSTALL_PREFIX={CMAKE_ROOT}",
+            "make -j{MAKE_THREADS}",
+            "make install"
+        ]
+        self.run_build(build_lines, self.config_dict)
+
+
 class METIS(package):
     def __init__(self, comp_wrapper=False):
         self.name = "METIS"
@@ -613,9 +659,8 @@ class METIS(package):
 
     def detect_sizes(self):
         print("  Testing METIS sizes")
-        f = open('tmp.cc', 'w+')
-        f.write('#include "metis.h"\n\nTEST_INDWIDTH IDXTYPEWIDTH\nTEST_REALWIDTH REALTYPEWIDTH')
-        f.close()
+        with open('tmp.cc', 'w+') as fid:
+            fid.write('#include "metis.h"\n\nTEST_INDWIDTH IDXTYPEWIDTH\nTEST_REALWIDTH REALTYPEWIDTH')
         result, _ = run_command("{CC} -E tmp.cc | tail -2".format(**config_dict))
         os.remove('tmp.cc')
         values = result.split()
@@ -1098,7 +1143,7 @@ class BLAS_LAPACK(package):
                 'export FCFLAGS="{0}"'.format(" ".join(fflags))
             ]
         build_lines += [    
-            "{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={BLAS_LAPACK_ROOT} -Wno-dev -DCMAKE_BUILD_TYPE=Release ..",
+            "{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={BLAS_LAPACK_ROOT} -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -Wno-dev -DCMAKE_BUILD_TYPE=Release ..",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1226,6 +1271,7 @@ class SUPERLU(package):
             "export FC={FC}",
             "{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT} \\",
             "  -DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH} \\",
+            "  -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE \\",
             "  -Denable_blaslib:BOOL=TRUE ..",
             "make -j{MAKE_THREADS}",
             "make install"
@@ -1276,13 +1322,16 @@ SUPERLU_DIST_LIB = -L{SUPERLU_DIST_LIB} {SUPERLU_DIST_LIBS}
             "export CC={CC}",
             "export CXX={CXX}",
             "export FC={FC}",
-            "export MPI_Fortran={MPI_FC}",
             "{CMAKE} -DTPL_ENABLE_PARMETISLIB:BOOL=FALSE \\",
             "  -DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT} \\",
             "  -DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH} \\",
             "  -DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH} \\",
             "  -Denable_openmp:BOOL={SUPERLU_DIST_OMP_FLAG} \\",
+            "  -Denable_tests=OFF -Denable_examples=OFF \\",
             "  -DBUILD_SHARED_LIBS:BOOL=FALSE \\",
+            "  -DMPI_Fortran_COMPILER={MPI_FC} \\",
+            "  -DMPI_C_COMPILER={MPI_CC} \\",
+            "  -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE \\",
             "  -DCMAKE_INSTALL_LIBDIR=lib ..",
             "make -j{MAKE_THREADS}",
             "make install"
@@ -1321,9 +1370,12 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
         return self.config_dict
 
     def build(self):
+        if ver_lt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.22"):
+            error_exit('CMAKE >= 3.22 required for UMFPACK', ('Update or retry with "--build_cmake=1" to build a compatible version',))
         AMD_CMAKE_options = [
             "-DCMAKE_INSTALL_PREFIX={UMFPACK_ROOT}",
-            "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE"
+            "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
+            "-DCMAKE_INSTALL_LIBDIR=lib"
         ]
         config_CMAKE_options = AMD_CMAKE_options.copy() + [
             "-DBLAS_ROOT:PATH={BLAS_ROOT}",
@@ -1336,7 +1388,11 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
         build_lines = [
             "export CC={CC}",
             "export CX={CXX}",
-            "export FC={FC}",
+            "export FC={FC}"
+        ]
+        if 'CMAKE_BIN' in self.config_dict:
+            build_lines += ["export PATH={0}:$PATH".format(self.config_dict['CMAKE_BIN'])]
+        build_lines += [
             "export FFLAGS=-fPIC",
             "export JOBS={MAKE_THREADS}",
             "export OPTIMIZATION=-O2",
@@ -1471,9 +1527,8 @@ class PETSC(package):
 
     def detect_version(self):
         print("  Testing PETSc version")
-        f = open('tmp.c', 'w+')
-        f.write('#include "petscversion.h"\n\nPETSC_VERSION_MAJOR PETSC_VERSION_MINOR')
-        f.close()
+        with open('tmp.c', 'w+') as fid:
+            fid.write('#include "petscversion.h"\n\nPETSC_VERSION_MAJOR PETSC_VERSION_MINOR')
         command = "{CC} -E tmp.c | tail -1".format(**self.config_dict)
         result, errcode = run_command(command)
         os.remove('tmp.c')
@@ -1620,15 +1675,16 @@ parser.add_argument("--cross_compile_host", default=None, type=str, help="Host t
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
 group = parser.add_argument_group("CMAKE", "CMAKE configure options for the OpenFUSIONToolkit")
-group.add_argument("--oft_build_debug", action="store_true", default=False, help="Build debug version of OFT?")
-group.add_argument("--oft_build_python", action="store_true", default=False, help="Build OFT Python libraries?")
-group.add_argument("--oft_build_tests", action="store_true", default=False, help="Build OFT tests?")
-group.add_argument("--oft_build_examples", action="store_true", default=False, help="Build OFT examples?")
-group.add_argument("--oft_build_docs", action="store_true", default=False, help="Build OFT documentation? (requires doxygen)")
+group.add_argument("--build_cmake", default=0, type=int, choices=(0,1), help="Build CMAKE instead of using system version?")
+group.add_argument("--oft_build_debug", default=0, type=int, choices=(0,1), help="Build debug version of OFT?")
+group.add_argument("--oft_build_python", default=1, type=int, choices=(0,1), help="Build OFT Python libraries? (default: 1)")
+group.add_argument("--oft_build_tests", default=0, type=int, choices=(0,1), help="Build OFT tests?")
+group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples?")
+group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help="Build OFT documentation? (requires doxygen)")
 group.add_argument("--oft_package", action="store_true", default=False, help="Perform a packaging build of OFT?")
 #
 group = parser.add_argument_group("MPI", "MPI package options")
-group.add_argument("--build_mpi", default=0, type=int, help="Build MPI libraries?")
+group.add_argument("--build_mpi", default=0, type=int, choices=(0,1), help="Build MPI libraries?")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
@@ -1654,37 +1710,37 @@ group = parser.add_argument_group("METIS", "METIS package options")
 group.add_argument("--metis_wrapper", action="store_true", default=False, help="METIS included in compilers")
 #
 group = parser.add_argument_group("FoX XML", "FoX XML package options")
-group.add_argument("--build_fox", default=1, type=int, help="Build Fox XML library? (default)")
+group.add_argument("--build_fox", default=1, type=int, choices=(0,1), help="Build Fox XML library? (default)")
 #
 group = parser.add_argument_group("OpenNURBS", "OpenNURBS package options")
-group.add_argument("--build_onurbs", default=0, type=int, help="Build OpenNURBS library?")
+group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="Build OpenNURBS library?")
 #
 group = parser.add_argument_group("NETCDF", "NETCDF package options")
-group.add_argument("--build_netcdf", default=0, type=int, help="Build NETCDF library?")
+group.add_argument("--build_netcdf", default=0, type=int, choices=(0,1), help="Build NETCDF library?")
 group.add_argument("--netcdf_wrapper", action="store_true", default=False, help="NETCDF included in compilers")
 #
 group = parser.add_argument_group("ARPACK", "ARPACK package options")
-group.add_argument("--build_arpack", default=0, type=int, help="Build ARPACK library?")
+group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="Build ARPACK library?")
 #
 group = parser.add_argument_group("SuperLU", "SuperLU package options")
-group.add_argument("--build_superlu", default=0, type=int, help="Build SuperLU library?")
+group.add_argument("--build_superlu", default=0, type=int, choices=(0,1), help="Build SuperLU library?")
 group.add_argument("--superlu_wrapper", action="store_true", default=False, help="SuperLU included in compilers")
 #
 group = parser.add_argument_group("SuperLU-DIST", "SuperLU-DIST package options")
-group.add_argument("--build_superlu_dist", default=0, type=int, help="Build SuperLU-DIST library?")
+group.add_argument("--build_superlu_dist", default=0, type=int, choices=(0,1), help="Build SuperLU-DIST library?")
 group.add_argument("--superlu_dist_threads", action="store_true", default=False, help="Build SuperLU-DIST with thread support (OpenMP)")
 group.add_argument("--superlu_dist_wrapper", action="store_true", default=False, help="SuperLU-DIST included in compilers")
 #
 group = parser.add_argument_group("UMFPACK", "UMFPACK package options")
-group.add_argument("--build_umfpack", default=0, type=int, help="Build UMFPACK library?")
+group.add_argument("--build_umfpack", default=0, type=int, choices=(0,1), help="Build UMFPACK library?")
 group.add_argument("--umfpack_wrapper", action="store_true", default=False, help="UMFPACK included in compilers")
 #
 group = parser.add_argument_group("PETSc", "PETSc package options")
-group.add_argument("--build_petsc", default=0, type=int, help="Build PETSc library?")
-group.add_argument("--petsc_debug", default=1, type=int, help="Build PETSc with debugging information (default)")
-group.add_argument("--petsc_superlu", default=1, type=int, help="Build PETSc with SuperLU (default)")
-group.add_argument("--petsc_mumps", default=1, type=int, help="Build PETSc with MUMPS (default)")
-group.add_argument("--petsc_umfpack", default=0, type=int, help="Build PETSc with UMFPACK")
+group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library?")
+group.add_argument("--petsc_debug", default=1, type=int, choices=(0,1), help="Build PETSc with debugging information (default)")
+group.add_argument("--petsc_superlu", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU (default)")
+group.add_argument("--petsc_mumps", default=1, type=int, choices=(0,1), help="Build PETSc with MUMPS (default)")
+group.add_argument("--petsc_umfpack", default=0, type=int, choices=(0,1), help="Build PETSc with UMFPACK")
 group.add_argument("--petsc_version", default="3.8", type=str,
     help="Use different version of PETSc [3.6,3.7,3.8,3.9,3.10] (default is 3.8)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
@@ -1724,6 +1780,9 @@ else:
         use_mpi = True
 # Setup library builds (in order of dependency)
 packages = []
+# CMAKE
+if (config_dict['CMAKE'] is None) or options.build_cmake == 1:
+    packages.append(CMAKE())
 # BLAS/LAPACK
 if options.use_mkl:
     packages.append(MKL(options.mkl_root))
@@ -1787,10 +1846,10 @@ for package in packages:
 if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
     build_make_include(config_dict)
     build_cmake_script(config_dict,
-        build_debug=options.oft_build_debug,
-        build_python=options.oft_build_python,
-        build_tests=options.oft_build_tests,
-        build_examples=options.oft_build_examples,
-        build_docs=options.oft_build_docs,
+        build_debug=(options.oft_build_debug == 1),
+        build_python=(options.oft_build_python == 1),
+        build_tests=(options.oft_build_tests == 1),
+        build_examples=(options.oft_build_examples == 1),
+        build_docs=(options.oft_build_docs == 1),
         package_build=options.oft_package
     )

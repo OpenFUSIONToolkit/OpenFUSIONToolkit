@@ -64,7 +64,7 @@ jobs:
       working-directory: libs
       run: >
         ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
-        --build_umfpack=1 --build_arpack=1 --oft_build_python --oft_build_tests
+        --build_umfpack=1 --build_arpack=1 --oft_build_tests=1
 
     - uses: actions/upload-artifact@v3
       if: failure()
