@@ -1791,6 +1791,34 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 !
+!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+DO i=1,bmesh%nc
+  pt_j = 0.d0
+  DO ii=1,3
+    pt_j = pt_j + bmesh%r(:,bmesh%lc(ii,i))
+  END DO
+  pt_j=pt_j/3.d0
+  !---Compute driver contributions
+  DO j=1,self%n_vcoils
+    ecc = 0.d0
+    IF(self%vcoils(j)%sens_mask)CYCLE
+    DO k=1,self%vcoils(j)%ncoils
+      diffvec=0.d0
+      DO kk=2,self%vcoils(j)%coils(k)%npts
+        cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
+        cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
+        diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+      END DO
+      ecc=ecc+self%vcoils(j)%scales(k)*diffvec
+    END DO
+    DO jj=1,3
+      !$omp atomic
+      self%Bel(self%np_active+self%nholes+j,i,jj) = &
+        self%Bel(self%np_active+self%nholes+j,i,jj) + ecc(jj)
+    END DO
+  END DO
+END DO
+!
 WRITE(*,*)'Building driver-face magnetic reconstruction operator'
 ALLOCATE(self%Bdr(self%n_icoils,bmesh%nc,3))
 self%Bdr=0.d0
@@ -1804,6 +1832,7 @@ DO i=1,bmesh%nc
   !---Compute driver contributions
   DO j=1,self%n_icoils
     ecc = 0.d0
+    IF(self%icoils(j)%sens_mask)CYCLE
     DO k=1,self%icoils(j)%ncoils
       diffvec=0.d0
       DO kk=2,self%icoils(j)%coils(k)%npts
