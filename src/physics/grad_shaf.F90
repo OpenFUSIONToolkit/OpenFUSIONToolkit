@@ -237,6 +237,8 @@ TYPE :: gs_eq
   CLASS(oft_matrix), POINTER :: mop => NULL()
   CLASS(flux_func), POINTER :: I => NULL() !<
   CLASS(flux_func), POINTER :: P => NULL() !<
+  CLASS(flux_func), POINTER :: eta => NULL() !<
+  CLASS(flux_func), POINTER :: I_NI => NULL() !<
   PROCEDURE(region_eta_set), NOPASS, POINTER :: set_eta => NULL()
 CONTAINS
   !

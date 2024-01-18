@@ -71,7 +71,7 @@ tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
 
 # G-S load flux functions (f_file,f_offset,p_file)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
-    [c_char_p, c_double, c_char_p])
+    [c_char_p, c_double, c_char_p, c_char_p, c_char_p])
 
 # G-S run function
 tokamaker_run = ctypes_subroutine(oftpy_lib.tokamaker_run, 
@@ -141,6 +141,15 @@ tokamaker_sauter_fc = ctypes_subroutine(oftpy_lib.tokamaker_sauter_fc, # (npsi,p
 #
 tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals, # (Itor,centroid,vol,pvol,dflux,tflux,li)
     [c_double_ptr, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr])
+
+#
+tokamaker_dan_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_dan_get_globals, # (Itor,vol)
+    [c_double_ptr, c_double_ptr])
+
+#
+tokamaker_get_eta_jsq = ctypes_subroutine(oftpy_lib.tokamaker_get_eta_jsq, # (Itor,vol)
+    [c_double_ptr])
+    # [c_int,ctypes_numpy_array(numpy.float64,1),c_double_ptr])
 
 #
 tokamaker_get_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_profs, # (npsi,psi_in,f,fp,p,pp)
@@ -646,7 +655,7 @@ class TokaMaker():
         tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),ctypes.byref(error_flag))
         return error_flag.value
 
-    def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in'):
+    def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in', eta_file='eta_prof.in', f_NI_file='f_NI_prof.in'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -655,9 +664,9 @@ class TokaMaker():
         '''
         if foffset is not None:
             self._F0 = foffset
-        tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()))
+        tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()),c_char_p(eta_file.encode()),c_char_p(f_NI_file.encode()))
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, eta_prof=None, ffp_NI_prof=None):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         Arrays should have the form array[i,:] = (\f$\hat{\psi}_i\f$, \f$f(\hat{\psi}_i)\f$) and span
@@ -713,9 +722,17 @@ class TokaMaker():
         if pp_prof is not None:
             pp_file = 'tokamaker_p.prof'
             create_prof_file(pp_file, pp_prof, "P'")
+        eta_file = 'none'
+        if eta_prof is not None:
+            eta_file = 'tokamaker_eta.prof'
+            create_prof_file(eta_file, eta_prof, "eta'")
+        ffp_NI_file = 'none'
+        if ffp_NI_prof is not None:
+            ffp_NI_file = 'tokamaker_ffp_NI.prof'
+            create_prof_file(ffp_NI_file, ffp_NI_prof, "ffp_NI")
         if foffset is not None:
             self._F0 = foffset
-        self.load_profiles(ffp_file,foffset,pp_file)
+        self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
     
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
@@ -1005,7 +1022,29 @@ class TokaMaker():
         tokamaker_get_globals(ctypes.byref(Ip),centroid,ctypes.byref(vol),ctypes.byref(pvol),
             ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Li))
         return Ip.value, centroid, vol.value, pvol.value, dflux.value, tflux.value, Li.value
-    
+
+    def get_loopvoltage(self, eta=1., npsi=50, eta_arr=None, ffp_NI_arr=None, Ip=None):
+        '''! Get global plasma parameters
+        @result Ip, [R_Ip, Z_Ip], \f$\int dV\f$, \f$\int P dV\f$, diamagnetic flux,
+        enclosed toroidal flux
+        '''
+        eta_jsq = c_double()
+
+        if eta_arr is None:
+            print('Error: eta array not specified')
+        elif ffp_NI_arr is None:
+            print('Error: eta array not specified')
+        else:
+            #eta_arr = numpy.linspace(eta,eta,npsi,dtype=numpy.float64)
+            #tokamaker_get_eta_jsq(eta_arr.shape[0],eta_arr,ctypes.byref(eta_jsq))
+            self.set_profiles(eta_prof=eta_arr,ffp_NI_prof=ffp_NI_arr)
+            tokamaker_get_eta_jsq(ctypes.byref(eta_jsq))
+
+        if Ip is None:
+            Ip,_,_,_,_,_,_ = self.get_globals()
+
+        return eta_jsq.value / Ip
+
     def get_profiles(self,psi=None,psi_pad=1.E-8,npsi=50):
         r'''! Get G-S source profiles
 

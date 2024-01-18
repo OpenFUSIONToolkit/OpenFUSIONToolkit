@@ -24,7 +24,7 @@ USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
-  gs_profile_load, sauter_fc
+  gs_profile_load, sauter_fc, gs_dan_comp_globals, gs_get_eta_jsq
 USE oft_gs_td, ONLY: setup_gs_td, step_gs_td, eig_gs_td
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -189,8 +189,8 @@ CALL gs_global%init()
 ncoils=gs_global%ncoil_regs
 END SUBROUTINE tokamaker_setup
 !
-SUBROUTINE tokamaker_load_profiles(f_file,f_offset,p_file) BIND(C,NAME="tokamaker_load_profiles")
-CHARACTER(KIND=c_char), INTENT(in) :: f_file(80),p_file(80)
+SUBROUTINE tokamaker_load_profiles(f_file,f_offset,p_file,eta_file,f_NI_file) BIND(C,NAME="tokamaker_load_profiles")
+CHARACTER(KIND=c_char), INTENT(in) :: f_file(80),p_file(80),eta_file(80),f_NI_file(80)
 REAL(c_double), VALUE, INTENT(in) :: f_offset
 CHARACTER(LEN=80) :: tmp_str
 CALL copy_string_rev(f_file,tmp_str)
@@ -198,6 +198,10 @@ IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%I)
 IF(f_offset>-1.d98)gs_global%I%f_offset=f_offset
 CALL copy_string_rev(p_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%P)
+CALL copy_string_rev(eta_file,tmp_str)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%eta)
+CALL copy_string_rev(f_NI_file,tmp_str)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%I_NI)
 END SUBROUTINE tokamaker_load_profiles
 !
 SUBROUTINE tokamaker_init_psi(r0,z0,a,kappa,delta,ierr) BIND(C,NAME="tokamaker_init_psi")
@@ -380,6 +384,20 @@ vol=vol*2.d0*pi
 pvol=pvol*2.d0*pi/mu0
 li=li*2.d0/(mu0*gs_global%o_point(1))
 END SUBROUTINE tokamaker_get_globals
+!
+SUBROUTINE tokamaker_dan_get_globals(Itor,vol) BIND(C,NAME="tokamaker_dan_get_globals")
+REAL(c_double), INTENT(out) :: Itor,vol
+CALL gs_dan_comp_globals(gs_global,Itor,vol)
+Itor=Itor/mu0
+vol=vol*2.d0*pi
+END SUBROUTINE tokamaker_dan_get_globals
+!
+SUBROUTINE tokamaker_get_eta_jsq(eta_jsq) BIND(C,NAME="tokamaker_get_eta_jsq")
+!INTEGER(c_int), VALUE, INTENT(in) :: npsi
+!REAL(c_double), INTENT(in) :: eta_arr(npsi)
+REAL(c_double), INTENT(out) :: eta_jsq
+CALL gs_get_eta_jsq(gs_global,eta_jsq)
+END SUBROUTINE tokamaker_get_eta_jsq
 !
 SUBROUTINE tokamaker_get_profs(npsi,psi_in,f,fp,p,pp) BIND(C,NAME="tokamaker_get_profs")
 INTEGER(c_int), VALUE, INTENT(in) :: npsi
