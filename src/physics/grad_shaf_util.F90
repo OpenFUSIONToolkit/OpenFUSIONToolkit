@@ -653,58 +653,6 @@ CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_comp_globals
 !---------------------------------------------------------------------------
-!> Compute toroidal current for Grad-Shafranov equilibrium
-!!
-!! @param[in,out] self G-S object
-!! @param[out] itor Toroidal current
-!! @param[out] centroid Current centroid (optional) [2]
-!---------------------------------------------------------------------------
-subroutine gs_dan_comp_globals(self,itor,vol)
-class(gs_eq), intent(inout) :: self
-real(8), intent(out) :: itor,vol
-type(oft_lag_brinterp), target :: psi_eval
-type(oft_lag_bginterp), target :: psi_geval
-real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
-real(8) :: pt(3),curr_cent(2),Btor,Bpol(2)
-integer(4) :: i,m
-!---
-psi_eval%u=>self%psi
-CALL psi_eval%setup
-CALL psi_geval%shared_setup(psi_eval)
-!---
-itor = 0.d0
-vol = 0.d0
-!!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol) &
-!!$omp reduction(+:itor) reduction(+:vol) &
-do i=1,smesh%nc
-  IF(smesh%reg(i)/=1)CYCLE
-  do m=1,oft_blagrange%quad%np
-    call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
-    IF(psitmp(1)<self%plasma_bounds(1))CYCLE
-    pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
-    !---Compute Magnetic Field
-    IF(gs_test_bounds(self,pt))THEN
-      IF(self%mode==0)THEN
-        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
-      ELSE
-        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
-      END IF
-      itor = itor + itor_loc*v*oft_blagrange%quad%wts(m)
-      vol = vol + v*oft_blagrange%quad%wts(m)*pt(1)
-    END IF
-  end do
-end do
-!centroid = centroid/itor
-!
-itor=itor*self%psiscale
-
-CALL psi_eval%delete
-CALL psi_geval%delete
-end subroutine gs_dan_comp_globals
-!---------------------------------------------------------------------------
 !> Compute eta*j^2 for loop voltage calculation
 !!
 !! @param[in,out] self G-S object
@@ -712,8 +660,6 @@ end subroutine gs_dan_comp_globals
 !---------------------------------------------------------------------------
 subroutine gs_get_eta_jsq(self,eta_jsq)
 class(gs_eq), intent(inout) :: self
-!integer(4), intent(in) :: nr
-!real(8), intent(in) :: eta_arr(nr)
 real(8), intent(out) :: eta_jsq
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
@@ -727,7 +673,6 @@ CALL psi_geval%shared_setup(psi_eval)
 !---
 eta_jsq = 0.d0
 I_NI = 0.d0
-
 !!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol) &
 !!$omp reduction(+:itor) reduction(+:vol) &
 do i=1,smesh%nc
@@ -739,12 +684,6 @@ do i=1,smesh%nc
     pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
-  !    IF(self%mode==0)THEN
-  !      itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-  !      + (self%alam**2)*self%I_NI%Fp(psitmp(1))*(self%I_NI%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
-  !    ELSE
-  !      itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-  !      + .5d0*self%alam*self%I_NI%Fp(psitmp(1))/(pt(1)+self%eps))
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
@@ -757,14 +696,8 @@ do i=1,smesh%nc
     END IF
   end do
 end do
-!centroid = centroid/itor
-!
-!eta_jsq=eta_jsq*self%psiscale
-
-
-
 eta_jsq=eta_jsq*(2*pi/(mu0*mu0))
-
+!
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_get_eta_jsq

@@ -24,7 +24,7 @@ USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
-  gs_profile_load, sauter_fc, gs_dan_comp_globals, gs_get_eta_jsq
+  gs_profile_load, sauter_fc, gs_get_eta_jsq
 USE oft_gs_td, ONLY: setup_gs_td, step_gs_td, eig_gs_td
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -385,16 +385,7 @@ pvol=pvol*2.d0*pi/mu0
 li=li*2.d0/(mu0*gs_global%o_point(1))
 END SUBROUTINE tokamaker_get_globals
 !
-SUBROUTINE tokamaker_dan_get_globals(Itor,vol) BIND(C,NAME="tokamaker_dan_get_globals")
-REAL(c_double), INTENT(out) :: Itor,vol
-CALL gs_dan_comp_globals(gs_global,Itor,vol)
-Itor=Itor/mu0
-vol=vol*2.d0*pi
-END SUBROUTINE tokamaker_dan_get_globals
-!
 SUBROUTINE tokamaker_get_eta_jsq(eta_jsq) BIND(C,NAME="tokamaker_get_eta_jsq")
-!INTEGER(c_int), VALUE, INTENT(in) :: npsi
-!REAL(c_double), INTENT(in) :: eta_arr(npsi)
 REAL(c_double), INTENT(out) :: eta_jsq
 CALL gs_get_eta_jsq(gs_global,eta_jsq)
 END SUBROUTINE tokamaker_get_eta_jsq
