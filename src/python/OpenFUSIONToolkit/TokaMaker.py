@@ -143,13 +143,8 @@ tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals, # (It
     [c_double_ptr, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr])
 
 #
-tokamaker_dan_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_dan_get_globals, # (Itor,vol)
-    [c_double_ptr, c_double_ptr])
-
-#
-tokamaker_get_eta_jsq = ctypes_subroutine(oftpy_lib.tokamaker_get_eta_jsq, # (Itor,vol)
+tokamaker_get_eta_jsq = ctypes_subroutine(oftpy_lib.tokamaker_get_eta_jsq, # (eta*j^2)
     [c_double_ptr])
-    # [c_int,ctypes_numpy_array(numpy.float64,1),c_double_ptr])
 
 #
 tokamaker_get_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_profs, # (npsi,psi_in,f,fp,p,pp)
@@ -1023,21 +1018,23 @@ class TokaMaker():
             ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Li))
         return Ip.value, centroid, vol.value, pvol.value, dflux.value, tflux.value, Li.value
 
-    def get_loopvoltage(self, eta=1., npsi=50, eta_arr=None, ffp_NI_arr=None, Ip=None):
-        '''! Get global plasma parameters
-        @result Ip, [R_Ip, Z_Ip], \f$\int dV\f$, \f$\int P dV\f$, diamagnetic flux,
-        enclosed toroidal flux
+    def get_loopvoltage(self, eta=None, ffp_NI=None, Ip=None):
+        r'''! Get plasma loop voltage
+
+        @param eta Dictionary object containing resistivity profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        @param ffp_NI Dictionary object containing non-inductive current profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        @result V_loop [Volts]
         '''
         eta_jsq = c_double()
 
-        if eta_arr is None:
+        if eta is None:
             print('Error: eta array not specified')
-        elif ffp_NI_arr is None:
+        elif ffp_NI is None:
             print('Error: eta array not specified')
         else:
-            #eta_arr = numpy.linspace(eta,eta,npsi,dtype=numpy.float64)
-            #tokamaker_get_eta_jsq(eta_arr.shape[0],eta_arr,ctypes.byref(eta_jsq))
-            self.set_profiles(eta_prof=eta_arr,ffp_NI_prof=ffp_NI_arr)
+            self.set_profiles(eta_prof=eta,ffp_NI_prof=ffp_NI)
             tokamaker_get_eta_jsq(ctypes.byref(eta_jsq))
 
         if Ip is None:
