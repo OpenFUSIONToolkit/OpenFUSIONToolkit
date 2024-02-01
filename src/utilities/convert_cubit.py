@@ -106,7 +106,7 @@ def read_mesh(filename):
             continue
         keep_inds.append(i)
         nReg = len(keep_inds)
-        reg.append(nReg*np.ones((lc_tmp.shape[0],), dtype=np.int32))
+        reg.append(nReg*np.ones((lc[i].shape[0],), dtype=np.int32))
     lc = [lc[i] for i in keep_inds]
     block_types = [block_types[i] for i in keep_inds]
     lc = np.vstack(lc)
