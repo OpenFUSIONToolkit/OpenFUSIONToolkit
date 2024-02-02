@@ -30,7 +30,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install prerequisites
-        run: sudo apt -y install doxygen graphviz
+        run: |
+          sudo apt -y install doxygen graphviz
+          pip3 install jupyter nbconvert
 
       - name: Setup Pages
         id: pages
