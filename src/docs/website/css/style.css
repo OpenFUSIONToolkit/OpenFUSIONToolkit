@@ -211,6 +211,23 @@ ol {
   padding-left: 20px;
 }
 
+
+ol.ref_list {
+    list-style: none;
+    counter-reset: list;
+    padding-left: 2em;
+}
+ol.ref_list li {
+    margin-bottom: 0.5em;
+}
+ol.ref_list > li:before {
+    content: "[" counter(list, decimal) "] ";
+    /*content: counter(list, decimal) ")";*/
+    counter-increment: list;
+    position: absolute;
+    left: 1em;
+}
+
 dl dt {
   font-weight: bold;
 }

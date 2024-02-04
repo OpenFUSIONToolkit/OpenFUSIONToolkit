@@ -22,9 +22,9 @@
   <!-- MAIN CONTENT -->
   <div id="main_content_wrap" class="outer">
     <section id="main_content" class="inner">
-        <p>The Open FUSION Toolkit (OFT) is a finite element framework designed for simulating physical systems relevant to plasma and fusion science and engineering in complex 2D and 3D geometries. The code supports the use of high order finite element methods on unstructured hexahedral/quadrilateral and tetrahedral/triangular grids.</p>
+        <p>The Open FUSION Toolkit (OFT) is suite of tools, built on a common finite element framework, designed for simulating physical systems relevant to plasma and fusion science and engineering in complex 2D and 3D geometries. The code supports the use of high order finite element methods on unstructured hexahedral/quadrilateral and tetrahedral/triangular grids for a variety of relevant physics models.</p>
 
-        <h4>Components</h4>
+        <h4>Component tools</h4>
         <ul class="no_bullet">
             <li><strong>TokaMaker:</strong> A time-dependent free-boundary Grad-Shafranov equilibrium code</li>
             <li><strong>ThinCurr:</strong> A 3D thin-wall electromagnetic simulation package</li>
@@ -35,12 +35,12 @@
         <h4>Binary Packages</h4>
         <p>We supply <a href="https://github.com/hansec/OpenFUSIONToolkit/releases">pre-built binary packages</a> for the following platforms:</p>
         <ul>
-          <li>Linux x86_64</li>
+          <li>Linux x86_64<sup>*</sup></li>
           <li>macos arm64</li>
           <li>macos x86_64</li>
         </ul>
 
-        <p>* - Linux binaries <em>may</em> work on Windows via WSL, however this is not explictly tested at this time.</p>
+        <p><sup>*</sup> - Linux binaries <em>may</em> work on Windows via <a href="https://learn.microsoft.com/en-us/windows/wsl/">WSL</a>, however this is not explictly tested at this time.</p>
 
         <h4>Install from Source</h4>
         <p>Please refer to the <a href="https://github.com/OpenMathLib/OpenFUSIONToolkit/wiki">wiki</a> for instructions on how to build the code from source. Presently we support building on Linux and macos with GCC 8+ and Intel oneAPI 2023 compiler suites. Other platforms and compilers may work, but are not explictly tested at this time.</p>
@@ -53,33 +53,33 @@
         <hr/>
 
         <h3>Publications</h3>
-        <p>A list of publications using the Open FUSION Toolkit can be found <a href="/publications.html">here</a>. To be added to this list please <a href="https://github.com/hansec/OpenFUSIONToolkit/issues"></a>open an issue</p>
+        <p>A list of publications using the Open FUSION Toolkit can be found <a href="publications.html">here</a>. To be added to this list please <a href="https://github.com/hansec/OpenFUSIONToolkit/issues">open an issue</a> or create a pull request.</p>
 
         <h4>How To Cite</h4>
-        <p>To cite the Open FUSION Toolkit, please cite the zenodo DOI corresponding to the code version and the appropriate publication from below for the component tools used in your research.</p>
+        <p>To cite the Open FUSION Toolkit, please cite the zenodo DOI corresponding to the code version and the appropriate publication(s) from below for the component tools used in your research.</p>
         <ul class="no_bullet">
             <li><strong>TokaMaker:</strong>
-                <ol>
+                <ul class="no_bullet">
                     <li>C. Hansen et al., <em>Comput. Phys. Commun.</em> <strong>289</strong>, 109111 (2024) <a href="https://doi.org/10.1016/j.cpc.2024.109111">[DOI]</a></li>
-                </ol>
+                </ul>
             </li>
             <li><strong>ThinCurr:</strong>
-                <ol>
+                <ul class="no_bullet">
                     <li>A. Battey et al., <em>Nucl. Fusion</em> <strong>64</strong>, 016010 (2023) <a href="https://doi.org/10.1088/1741-4326/ad0bcf">[DOI]</a></li>
                     <li>C. Hansen et al., <em>Phys. Plasmas</em> <strong>24</strong>, 042513 (2017) <a href="http://dx.doi.org/10.1063/1.4981214">[DOI]</a></li>
-                </ol>
+                </ul>
             </li>
             <li><strong>MUG:</strong>
-                <ol>
+                <ul class="no_bullet">
                     <li>C. Hansen et al., <em>Phys. Plasmas</em> <strong>22</strong>, 042505 (2015) <a href="http://dx.doi.org/10.1063/1.4917476">[DOI]</a></li>
                     <li>C. Hansen et al., <em>PhD Thesis: U. Washington</em> (2014) <a href="http://hdl.handle.net/1773/25420">[URI]</a></li>
-                </ol>
+                </ul>
             </li>
             <li><strong>Marklin:</strong>
-                <ol>
+                <ul class="no_bullet">
                     <li>T. Benedett et al., <em>Nucl. Fusion</em> <strong>61</strong> 036022 (2021) <a href="http://dx.doi.org/10.1088/1741-4326/abd41c">[DOI]</a></li>
                     <li>T. Jarboe et al., <em>Phys. Rev. Lett.</em> <strong>97</strong>, 115003 (2006) <a href="http://dx.doi.org/10.1103/PhysRevLett.97.115003">[DOI]</a></li>
-                </ol>
+                </ul>
             </li>
         </ul>
     </section>
