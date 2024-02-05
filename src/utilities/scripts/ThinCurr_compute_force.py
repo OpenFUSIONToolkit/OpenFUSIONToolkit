@@ -2,7 +2,6 @@ import argparse
 import numpy as np
 import h5py
 
-mu0 = np.pi*4.E-7
 
 def compute_force(J,B,area,use_slow,reg_min,reg_max,rcc_torque=None,torque_cen=None):
     if use_slow:
@@ -21,14 +20,14 @@ def compute_force(J,B,area,use_slow,reg_min,reg_max,rcc_torque=None,torque_cen=N
         F = np.sum(F_cc,axis=0)
         if rcc_torque is not None:
             T = np.sum(np.cross(rcc_torque[reg_mask,:],np.cross(J[reg_mask,:],B[reg_mask,:])),axis=0)
-    #
+    # Print results
     if rcc_torque is None:
         print("{0:15.6E} {1:15.6E} {2:15.6E} ({3:15.6E})".format(*F,np.sqrt(np.sum(np.power(F,2)))/F_mean))
     else:
         print("{0:15.6E} {1:15.6E} {2:15.6E} ({3:15.6E}) {4:15.6E} {5:15.6E} {6:15.6E}".format(*F,np.sqrt(np.sum(np.power(F,2)))/F_mean,*T))
 
 parser = argparse.ArgumentParser()
-parser.description = "Compute force on regions from PSI-Tet thin-wall simulation"
+parser.description = "Compute force on regions from ThinCurr simulations"
 parser.add_argument("--reg_min", default=-1.0, type=float, help='Minimum region ID')
 parser.add_argument("--reg_max", default=1000.0, type=float, help='Maximum region ID')
 parser.add_argument("--btr0", default=0.0, type=float, help='Vacuum toroidal flux F=B_t,0 * R_0')
