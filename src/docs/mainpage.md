@@ -1,4 +1,4 @@
-Open FUSION Toolkit Documentation			{#mainpage}
+Open FUSION Toolkit Documentation (v1.0.0-beta1)			{#mainpage}
 =======
 
 [TOC]
@@ -20,7 +20,7 @@ Currently the framework is used to implement the following physics modules:
  - \ref doc_taylor_main "Marklin": 3D force-free, uniform \f$ \lambda \f$ equilibrium solver
 
 \section doc_main_build Building OFT
-The documentation for [Building OFT](https://github.com/hansec/OpenFUSIONToolit/wiki) on different platforms
+The documentation for [Building OFT](https://github.com/hansec/OpenFUSIONToolkit/wiki) on different platforms
 is maintained on GitHub along with the source code. At present, OFT is actively used both on macOS and Linux.
 
 \section doc_main_api Framework modules and API
@@ -62,7 +62,7 @@ For information on using OFT see
 
 \section doc_main_writing Writing Documentation
 
-OFT uses [Doxygen](http://www.stack.nl/~dimitri/doxygen/) to create structured and navigable
+OFT uses [Doxygen](https://www.doxygen.nl/) to create structured and navigable
 documentation from the source code and structured comments. For more information on how to write
 in source documentation blocks, add documentation pages, and create new example programs/modules
 see \ref doc_doxygen.

@@ -164,7 +164,10 @@ if __name__ == '__main__':
         base_path = filename.split('.')[0]
         full_name = os.path.basename(filename)
         file_name, _ = os.path.splitext(full_name)
-        run_command("jupyter nbconvert --to markdown {0}".format(filename))
+        _, errcode = run_command("jupyter nbconvert --to markdown {0}".format(filename))
+        if errcode != 0:
+           print("Jupyter notebook->markdown conversion failed for {0}".format(filename))
+           continue
         # Copy files to doc directory, replacing image paths
         with open(base_path+".md", 'r') as fid:
            contents = fid.read()

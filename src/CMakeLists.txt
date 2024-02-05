@@ -2,8 +2,7 @@
 # OpenFUSIONToolkit
 ########################
 cmake_minimum_required( VERSION 3.12 )
-project( OpeNFUSIONToolkit )
-enable_language( Fortran )
+project( OpeNFUSIONToolkit NONE )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
 
 option(OFT_BUILD_TESTS "Build tests?" OFF)
@@ -14,6 +13,7 @@ option(OFT_DEBUG_STACK "Build with internal debugging stack?" OFF)
 option(OFT_PROFILE "Build with internal profiling enabled?" OFF)
 option(OFT_BUILD_PYTHON "Build experimental Python wrappers?" OFF)
 option(OFT_BUILD_DOCS "Build documentation?" OFF)
+option(OFT_DOCS_ONLY "Build documentation only?" OFF)
 option(OFT_PACKAGE_BUILD "Perform a destributable package?" OFF)
 option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" OFF)
 
@@ -22,8 +22,50 @@ set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")
 set(OFT_PYTHON_BINS CACHE INTERNAL "package_python_binaries")
 
 ########################
+# Build documentation
+########################
+if(OFT_BUILD_DOCS)
+  find_package(Doxygen REQUIRED)
+
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+
+  find_package(Python)
+  add_custom_target( build_ex_docs
+    COMMAND Python::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/utilities/generate_doc.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Building documentation from examples"
+    VERBATIM 
+  )
+
+  add_custom_target( docs ALL
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Generating documentation with Doxygen"
+    VERBATIM
+  )
+  add_dependencies(docs build_ex_docs)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/doc/Documentation.html"
+    "<meta http-equiv=\"REFRESH\" content=\"0;URL=html/index.html\">"
+  )
+
+  install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc"
+    DESTINATION .
+    COMPONENT docs
+  )
+
+  if(OFT_DOCS_ONLY)
+    return()
+  endif()
+endif()
+
+########################
 # Compiler and flag setup
 ########################
+enable_language( C )
+enable_language( CXX )
+enable_language( Fortran )
 if ("${CMAKE_Fortran_COMPILER_ID}" MATCHES "Intel")
   set( CMAKE_C_FLAGS_DEBUG "-g -O0" )
   set( CMAKE_CXX_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
@@ -318,41 +360,6 @@ if( OFT_BUILD_TESTS )
 endif()
 # Binary directories
 add_subdirectory( bin )
-
-########################
-# Build documentation
-########################
-if(OFT_BUILD_DOCS)
-  find_package(Doxygen REQUIRED)
-
-  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in)
-  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
-  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
-
-  find_package(Python)
-  add_custom_target( build_ex_docs
-    COMMAND Python::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/utilities/generate_doc.py
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Building documentation from examples"
-    VERBATIM 
-  )
-
-  add_custom_target( docs ALL
-    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Generating documentation with Doxygen"
-    VERBATIM
-  )
-  add_dependencies(docs build_ex_docs)
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/doc/Documentation.html"
-    "<meta http-equiv=\"REFRESH\" content=\"0;URL=html/index.html\">"
-  )
-
-  install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc"
-    DESTINATION .
-    COMPONENT docs
-  )
-endif()
 
 ########################
 # Packaging
