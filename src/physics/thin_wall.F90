@@ -1818,6 +1818,7 @@ DO i=1,bmesh%nc
     END DO
   END DO
 END DO
+self%Bel=self%Bel/(4.d0*pi)
 !
 WRITE(*,*)'Building driver-face magnetic reconstruction operator'
 ALLOCATE(self%Bdr(self%n_icoils,bmesh%nc,3))
@@ -1848,6 +1849,7 @@ DO i=1,bmesh%nc
     END DO
   END DO
 END DO
+self%Bdr=self%Bdr/(4.d0*pi)
 END SUBROUTINE tw_compute_Bops
 !------------------------------------------------------------------------------
 !> Setup hole definition for ordered chain of vertices
@@ -2528,9 +2530,9 @@ ALLOCATE(ptvec(3,self%mesh%np))
 DO i=1,self%mesh%np
   ptvec(:,i)=0.d0
   DO j=self%mesh%kpc(i),self%mesh%kpc(i+1)-1
-    ptvec(:,i) = ptvec(:,i) + cellvec(:,self%mesh%lpc(j))
+    ptvec(:,i) = ptvec(:,i) + cellvec(:,self%mesh%lpc(j))*self%mesh%ca(self%mesh%lpc(j))/3.d0
   END DO
-  ptvec(:,i) = ptvec(:,i)/REAL(self%mesh%kpc(i+1)-self%mesh%kpc(i)+1,8)
+  ptvec(:,i) = ptvec(:,i)/self%mesh%va(i)!/REAL(self%mesh%kpc(i+1)-self%mesh%kpc(i)+1,8)
 END DO
 CALL self%mesh%save_vertex_vector(ptvec/mu0,TRIM(tag)//'_v') ! Convert back to Amps
 !
