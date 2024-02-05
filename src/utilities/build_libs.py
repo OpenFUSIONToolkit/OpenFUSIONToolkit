@@ -996,6 +996,9 @@ class OpenBLAS(package):
         if self.threaded:
             self.config_dict['COMP_DEFS'].append("-DBLAS_THREADED")
             self.config_dict['COMP_DEFS'].append("-DLAPACK_THREADED")
+            self.config_dict['OpenBLAS_THREADS'] = True
+        else:
+            self.config_dict['OpenBLAS_THREADS'] = False
         # Installation check files
         self.install_chk_files = [self.config_dict['BLAS_LIB_PATH']]
         #
@@ -1382,6 +1385,8 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
             "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-DCMAKE_INSTALL_LIBDIR=lib"
         ]
+        if self.config_dict.get('OpenBLAS_THREADS',False):
+            AMD_CMAKE_options.append("-DCMAKE_EXE_LINKER_FLAGS={0}".format(self.config_dict['OMP_FLAGS']))
         config_CMAKE_options = AMD_CMAKE_options.copy() + [
             "-DBLAS_ROOT:PATH={BLAS_ROOT}",
             "-DBLA_VENDOR:STRING={BLAS_VENDOR}"

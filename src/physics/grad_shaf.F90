@@ -5610,8 +5610,8 @@ end subroutine compute_bcmat
 !
 subroutine get_olbp(olbp)
 integer(4), intent(out) :: olbp(:)
-integer(4) :: i,ii,j,k,l,orient(2)
-real(8) :: val
+integer(4) :: i,ii,j,k,l
+real(8) :: val,orient(2)
 olbp=0
 j=0
 val=1.d99
