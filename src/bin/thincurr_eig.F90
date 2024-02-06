@@ -367,7 +367,7 @@ SUBROUTINE plot_eig(self,nsensors,sensors)
 TYPE(tw_type), INTENT(inout) :: self
 INTEGER(4), INTENT(in) :: nsensors
 TYPE(floop_sensor), POINTER, INTENT(in) :: sensors(:)
-INTEGER(4) :: i,j,k,ntimes,ncoils,itime,io_unit
+INTEGER(4) :: i,j,k,jj,ntimes,ncoils,itime,io_unit
 REAL(8) :: uu,t,tmp,area
 REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_vec
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals,senout
@@ -381,6 +381,10 @@ WRITE(*,*)'Post-processing eigenmode run'
 CALL self%Uloc%new(uio)
 ALLOCATE(vals(self%nelems))
 IF(nsensors>0)ALLOCATE(senout(nsensors,neigs))
+IF(compute_B)THEN
+  IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%nc))
+  CALL tw_compute_Bops(self)
+END IF
 DO i=1,neigs
   !---Load solution from file
   WRITE(eig_tag,'(I2.2)')i
@@ -389,11 +393,16 @@ DO i=1,neigs
   !---Save plot fields
   CALL tw_save_pfield(self,vals,'J_'//eig_tag)
   IF(compute_B)THEN
-    IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%nc))
-    CALL tw_compute_Bops(self)
-    cc_vals=0.d0
-    DO j=1,self%nelems
-      cc_vals=cc_vals+vals(j)*self%Bel(:,:,j)
+    !$omp parallel do private(j,jj,tmp)
+    DO k=1,smesh%nc
+      DO jj=1,3
+        tmp=0.d0
+        !$omp simd reduction(+:tmp)
+        DO j=1,self%nelems
+          tmp=tmp+vals(j)*self%Bel(j,k,jj)
+        END DO
+        cc_vals(jj,k)=tmp
+      END DO
     END DO
     CALL self%mesh%save_cell_vector(cc_vals,'B_'//eig_tag)
   END IF
