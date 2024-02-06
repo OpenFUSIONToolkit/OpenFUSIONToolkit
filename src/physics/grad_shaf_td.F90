@@ -107,164 +107,6 @@ CONTAINS
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine run_gs_td(eq_in,dt,nsteps,lin_tol,nl_tol)
-TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
-INTEGER(4), INTENT(in) :: nsteps
-REAL(8), INTENT(in) :: dt,lin_tol,nl_tol
-INTEGER(4) :: i,j,k,ierr,io_unit,npts,iostat
-LOGICAL :: file_exists
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: vel_bc
-REAL(8) :: err_tmp,ip_target,p_scale,f_scale,time_val,pt(2)
-REAL(8), ALLOCATABLE, DIMENSION(:) :: np_count,res_in
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: pts
-REAL(8), POINTER, DIMENSION(:) :: vals_out,vals2,rhs_tmp
-!
-tMaker_td_obj%gs_eq=>eq_in
-tMaker_td_obj%ip_target=tMaker_td_obj%gs_eq%Itor_target
-tMaker_td_obj%f_scale=tMaker_td_obj%gs_eq%alam
-tMaker_td_obj%p_scale=tMaker_td_obj%gs_eq%pnorm
-tMaker_td_obj%dt=dt
-!
-! CALL gs_profile_load('f_prof.in',tMaker_td_obj%gs_eq%I)
-tMaker_td_obj%F=>tMaker_td_obj%gs_eq%I
-tMaker_td_obj%P=>tMaker_td_obj%gs_eq%P
-! CALL gs_profile_load('p_prof.in',tMaker_td_obj%gs_eq%P)
-!---------------------------------------------------------------------------
-! Create Solver fields
-!---------------------------------------------------------------------------
-NULLIFY(vals_out)
-! call oft_blagrange%vec_create(psi_sol)
-psi_sol=>tMaker_td_obj%gs_eq%psi
-call oft_blagrange%vec_create(rhs1)
-call oft_blagrange%vec_create(rhs2)
-call oft_blagrange%vec_create(psi_tmp)
-call oft_blagrange%vec_create(tmp_vec)
-! CALL psi_sol%add(0.d0,1.d0,tMaker_td_obj%gs_eq%psi)
-!---------------------------------------------------------------------------
-! Create extrapolation fields (Unused)
-!---------------------------------------------------------------------------
-IF(maxextrap>0)THEN
-  ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
-  DO i=1,maxextrap
-    CALL oft_blagrange%vec_create(extrap_fields(i)%f)
-    extrapt(i)=0.d0
-  END DO
-  nextrap=0
-END IF
-!---
-ALLOCATE(tMaker_td_obj%eta_reg(smesh%nreg))
-tMaker_td_obj%eta_reg=-1.d0
-DO i=1,tMaker_td_obj%gs_eq%ncond_regs
-  j=tMaker_td_obj%gs_eq%cond_regions(i)%id
-  tMaker_td_obj%eta_reg(j)=tMaker_td_obj%gs_eq%cond_regions(i)%eta
-END DO
-ALLOCATE(tMaker_td_obj%curr_reg(smesh%nreg))
-tMaker_td_obj%curr_reg=0.d0
-DO i=1,tMaker_td_obj%gs_eq%ncoil_regs
-  j=tMaker_td_obj%gs_eq%coil_regions(i)%id
-  tMaker_td_obj%curr_reg(j)=tMaker_td_obj%gs_eq%coil_regions(i)%curr
-END DO
-! Advance using MF-NK method
-CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
-CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
-adv_solver%A=>adv_op
-adv_solver%its=10
-adv_solver%nrits=10
-adv_solver%pre=>adv_pre
-adv_pre%A=>tMaker_td_obj%vac_op
-!
-CALL mfmat%setup(psi_tmp,tMaker_td_obj)
-! CALL mfmat%utyp%delete()
-! DEALLOCATE(mfmat%utyp)
-mfmat%b0=1.d-5
-mf_solver%A=>mfmat
-mf_solver%its=100
-mf_solver%nrits=20
-mf_solver%atol=lin_tol
-mf_solver%itplot=1
-mf_solver%pm=oft_env%pm
-! CALL create_diag_pre(mf_solver%pre)
-! mf_solver%pre%A=>dels
-mf_solver%pre=>adv_solver
-!
-nksolver%A=>tMaker_td_obj
-nksolver%J_inv=>mf_solver
-nksolver%its=20
-nksolver%atol=nl_tol
-nksolver%rtol=1.d-20 ! Disable relative tolerance
-nksolver%backtrack=.FALSE.
-nksolver%J_update=>tMaker_td_mfnk_update
-nksolver%up_freq=1
-time_val=0.d0
-DO i=1,nsteps
-    !
-    ! Advance B
-    !
-    CALL psi_tmp%add(0.d0,1.d0,psi_sol)
-    CALL apply_rhs(tMaker_td_obj,psi_sol,rhs1)
-    CALL blag_zerob(rhs1)
-    ! ! Extrapolate solution (linear)
-    ! DO j=maxextrap,2,-1
-    !   CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
-    !   extrapt(j)=extrapt(j-1)
-    ! END DO
-    ! IF(nextrap<maxextrap)nextrap=nextrap+1
-    ! CALL extrap_fields(1)%f%add(0.d0,1.d0,psi_sol)
-    ! extrapt(1)=time_val
-
-    ! !---Rebuild plasma matrix
-    ! IF(MOD(i,2)==0)THEN
-    !   CALL build_jop(adv_op,psi_sol)
-    !   CALL adv_pre%update(.TRUE.)
-    ! END IF
-    DO j=1,4
-        ! CALL vector_extrapolate(extrapt,extrap_fields,nextrap,time_val+tMaker_td_obj%dt,psi_sol)
-        !---MFNK iteration
-        ! CALL tMaker_td_mfnk_update(psi_sol)
-        CALL blag_zerob(psi_sol)
-        CALL nksolver%apply(psi_sol,rhs1)
-        IF(nksolver%cits<0)THEN
-            CALL psi_sol%add(0.d0,1.d0,psi_tmp)
-            tMaker_td_obj%dt=tMaker_td_obj%dt/2.d0
-            CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
-            CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
-            CALL adv_pre%update(.TRUE.)
-            CALL apply_rhs(tMaker_td_obj,psi_sol,rhs1)
-            CALL blag_zerob(rhs1)
-            CYCLE
-        ELSE
-            EXIT
-        END IF
-    END DO
-    IF(j>4)CALL oft_abort("Nonlinear solve failed", "run_gs_td",__FILE__)
-    !
-    CALL psi_sol%get_local(vals_out)
-    CALL psi_tmp%add(1.d0,-1.d0,psi_sol)
-    CALL gs_zerob(psi_tmp)
-    err_tmp=SQRT(psi_tmp%dot(psi_tmp))
-    CALL psi_tmp%add(0.d0,1.d0,psi_sol)
-    CALL gs_zerob(psi_tmp)
-    err_tmp=err_tmp/SQRT(psi_tmp%dot(psi_tmp))
-    time_val=time_val+tMaker_td_obj%dt
-    WRITE(*,'(4ES14.6,3I4)')time_val,tMaker_td_obj%ip,tMaker_td_obj%gs_eq%o_point(2),err_tmp, &
-        nksolver%nlits,nksolver%lits,j
-    IF(tMaker_td_obj%ip<1.d-6)THEN
-        tMaker_td_obj%p_scale=0.d0
-        tMaker_td_obj%f_scale=0.d0
-        tMaker_td_obj%ip_target=-1.d0
-    END IF
-    ! !---Plot
-    ! IF(MOD(i,nplot)==0)THEN
-    !     CALL hdf5_create_timestep(time_val)
-    !     CALL psi_sol%get_local(vals_out)
-    !     CALL smesh%save_vertex_scalar(vals_out,'Psi')
-    !     CALL smesh%save_vertex_scalar(vals_out-tMaker_td_obj%F%plasma_bounds(1),'Psi_p')
-    ! END IF
-END DO
-end subroutine run_gs_td
-!---------------------------------------------------------------------------
-!> Needs docs
-!---------------------------------------------------------------------------
 subroutine setup_gs_td(eq_in,dt,lin_tol,nl_tol)
 TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
 REAL(8), INTENT(in) :: dt,lin_tol,nl_tol
@@ -320,12 +162,15 @@ DO i=1,tMaker_td_obj%gs_eq%ncoil_regs
 END DO
 ! Advance using MF-NK method
 CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
-! CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
-! adv_solver%A=>adv_op
-! adv_solver%its=5
-! adv_solver%nrits=5
-! adv_solver%pre=>adv_pre
-adv_pre%A=>tMaker_td_obj%vac_op
+IF(self%gs_eq%region_info%nnonaxi>0)THEN
+    adv_pre%A=>tMaker_td_obj%vac_op
+ELSE
+    CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
+    adv_solver%A=>adv_op
+    adv_solver%its=5
+    adv_solver%nrits=5
+    adv_solver%pre=>adv_pre
+END IF
 !
 CALL mfmat%setup(psi_tmp,tMaker_td_obj)
 ! CALL mfmat%utyp%delete()
@@ -361,7 +206,7 @@ IF(dt/=tMaker_td_obj%dt)THEN
     dt=ABS(dt)
     tMaker_td_obj%dt=dt
     CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
-    ! CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
+    IF(self%gs_eq%region_info%nnonaxi<=0)CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
     CALL adv_pre%update(.TRUE.)
 END IF
 ! Update coil currents (end of time step)
@@ -400,7 +245,7 @@ DO j=1,4
         CALL psi_sol%add(0.d0,1.d0,psi_tmp)
         tMaker_td_obj%dt=tMaker_td_obj%dt/2.d0
         CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
-        ! CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
+        IF(self%gs_eq%region_info%nnonaxi<=0)CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
         CALL adv_pre%update(.TRUE.)
         CALL apply_rhs(tMaker_td_obj,psi_sol,rhs1)
         CALL blag_zerob(rhs1)

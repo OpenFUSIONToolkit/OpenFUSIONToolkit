@@ -1603,7 +1603,8 @@ class gs_Domain:
                 cond_list[key] = {
                     'reg_id': self.region_info[key]['id'],
                     'cond_id': cond_id,
-                    'eta': self.region_info[key]['eta']
+                    'eta': self.region_info[key]['eta'],
+                    'noncontinuous': self.region_info[key].get('noncontinuous',False)
                 }
                 cond_id += 1
         return cond_list
