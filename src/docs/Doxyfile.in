@@ -3,7 +3,7 @@
 #---------------------------------------------------------------------------
 
 PROJECT_NAME           = The Open FUSION Toolkit
-PROJECT_NUMBER         =
+PROJECT_NUMBER         = @CMAKE_PROJECT_VERSION@@OFT_VER_SUFFIX@
 PROJECT_BRIEF          = "Modeling tools for plasma and fusion research and engineering"
 PROJECT_LOGO           =
 

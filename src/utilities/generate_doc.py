@@ -130,13 +130,11 @@ if __name__ == '__main__':
         print("Invalid Run Directory!!!")
         print("Must be run from root source directory.")
         sys.exit(1)
-    # Regenerate generated docs folder
-    try:
-        shutil.rmtree("docs/generated")
-    except:
-       pass
-    os.mkdir("docs/generated")
-    os.mkdir("docs/generated/images")
+    # Create docs folder if necessary
+    if not os.path.isdir("docs/generated"):
+        os.mkdir("docs/generated")
+    if not os.path.isdir("docs/generated/images"):
+        os.mkdir("docs/generated/images")
     # Loop over all example files
     files = os.listdir("examples")
     print("\n==========================================")
@@ -168,16 +166,21 @@ if __name__ == '__main__':
         if errcode != 0:
            print("Jupyter notebook->markdown conversion failed for {0}".format(filename))
            continue
-        # Copy files to doc directory, replacing image paths
+        # Copy files to doc directory
         with open(base_path+".md", 'r') as fid:
            contents = fid.read()
+        # Update image paths
         contents = contents.replace("{0}_files".format(file_name), "images")
         contents = contents.replace("[png]", "[]")
+        # Convert code block style
         contents_split = contents.split('```')
         for i, content_segment in enumerate(contents_split):
             if (i % 2) == 0:
                 contents_split[i] = re.sub(eq_reg,r'\\f$\1\\f$',content_segment)
         contents = '```'.join(contents_split)
+        contents = contents.replace('```python','~~~~~~~~~~~~~{.py}') 
+        contents = contents.replace('```','~~~~~~~~~~~~~')
+        # Write updated markdown file to doc directory
         with open("docs/generated/doc_{0}.md".format(file_name), 'w+') as fid:
            fid.write(contents)
         # Copy images to img directory
