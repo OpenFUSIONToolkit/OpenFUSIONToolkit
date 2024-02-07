@@ -44,7 +44,7 @@ jobs:
       - name: Configure OFT documentation
         shell: bash
         working-directory: build_docs
-        run: cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON ../src
+        run: cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=OFF ../src
 
       - name: Build OFT documentation
         shell: bash
