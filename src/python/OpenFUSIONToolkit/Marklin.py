@@ -2,7 +2,7 @@
 
 @authors Chris Hansen
 @date September 2023
-@ingroup python
+@ingroup doxy_oft_python
 '''
 
 ##@file Marklin.py
@@ -11,6 +11,7 @@
 import numpy
 from .util import *
 
+## @cond
 # Marklin setup function (mesh and such) order,nmodes,minlev,error_str
 marklin_compute = ctypes_subroutine(oftpy_lib.marklin_setup,
     [c_int, c_int, c_int, c_bool, c_char_p])
@@ -30,6 +31,7 @@ marklin_get_bint = ctypes_subroutine(oftpy_lib.marklin_get_bint,
 #
 marklin_apply_int = ctypes_subroutine(oftpy_lib.marklin_apply_int,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double, c_int_ptr ,ctypes_numpy_array(numpy.float64,1)])
+## @endcond
 
 oft_in_template = """&runtime_options
  debug={DEBUG_LEVEL}
@@ -42,17 +44,30 @@ oft_in_template = """&runtime_options
 
 {MESH_DEF}
 """
-mu0 = numpy.pi*4.E-7
 
 class OFT_field_interpolator():
-    def __init__(self,int_obj,int_type,size,fbary_tol=1.E-8):
+    '''! Interpolation class for force-free eigenstate vector fields'''
+    def __init__(self,int_obj,int_type,dim,fbary_tol=1.E-8):
+        '''! Initialize interpolation object
+
+        @param int_obj Address of FORTRAN interpolation class
+        @param int_type Interpolation type (1: vector potential; 2: magnetic field)
+        @param dim Dimension of vector field
+        @param fbary_tol Tolerance for physical to logical mapping
+        '''
         self.cell = c_int(-1)
         self.int_type = int_type
-        self.val = numpy.zeros((size,), dtype=numpy.float64)
+        self.dim = dim
+        self.val = numpy.zeros((self.dim,), dtype=numpy.float64)
         self.int_obj = int_obj
         self.fbary_tol = fbary_tol
 
     def eval(self,pt):
+        '''! Evaluate field at a given location
+
+        @param pt Location for evaluation [3]
+        @result Field at evaluation point [self.dim]
+        '''
         marklin_apply_int(self.int_obj,self.int_type,pt,self.fbary_tol,ctypes.byref(self.cell),self.val)
         return self.val
 
@@ -122,11 +137,13 @@ class Marklin():
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
 
-    def compute(self,nmodes=1,order=2,minlev=-1,F0=0.0,save_rst=True):
-        '''! Setup G-S solver
+    def compute(self,nmodes=1,order=2,minlev=-1,save_rst=True):
+        r'''! Compute force-free eigenmodes
 
-        @param order Order of FE representation to use
-        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param nmodes Number of eigenmodes to compute
+        @param order Order of FE representation
+        @param minlev Minimum level for multigrid solve
+        @param save_rst Save restart files? 
         '''
         if self.nm != -1:
             raise ValueError('Eigenstates already computed')
@@ -138,11 +155,7 @@ class Marklin():
         self.nm = nmodes
 
     def save_visit(self):
-        '''! Setup G-S solver
-
-        @param order Order of FE representation to use
-        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
-        '''
+        '''! Save eigenmodes to VisIt format'''
         #
         cstring = c_char_p(b""*200)
         marklin_save_visit(cstring)
@@ -150,10 +163,10 @@ class Marklin():
             raise Exception(cstring.value)
 
     def get_ainterp(self,imode):
-        '''! Setup G-S solver
+        r'''! Create field interpolator for vector potential
 
-        @param order Order of FE representation to use
-        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param imode Index of eigenstate
+        @result Field interpolation object
         '''
         #
         int_obj = c_void_p()
@@ -164,10 +177,10 @@ class Marklin():
         return OFT_field_interpolator(int_obj,1,3)
 
     def get_binterp(self,imode):
-        '''! Setup G-S solver
+        r'''! Create field interpolator for magnetic field
 
-        @param order Order of FE representation to use
-        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param imode Index of eigenstate
+        @result Field interpolation object
         '''
         #
         int_obj = c_void_p()

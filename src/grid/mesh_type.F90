@@ -1,10 +1,10 @@
 !------------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !------------------------------------------------------------------------------
 !> @file oft_mesh_type.F90
 !
 !> @defgroup doxy_oft_grid Meshing
-!! Modules containing the OpenFUSIONToolkit meshing framework.
+!! Modules containing the Open FUSION Toolkit meshing framework.
 !
 !> Tetrahedral mesh structure definitions
 !! - MPI seam

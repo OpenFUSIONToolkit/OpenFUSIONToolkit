@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #---------------------------------------------------------------------------
-# Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #---------------------------------------------------------------------------
 #
 # Script for handling creation of arbitrary order tessellations of the unit

@@ -3,7 +3,7 @@ Using Doxygen    {#doc_doxygen}
 
 [TOC]
 
-The OpenFUSIONToolkit uses [Doxygen](http://www.stack.nl/~dimitri/doxygen/) to create structured and
+The Open FUSION Toolkit uses [Doxygen](http://www.stack.nl/~dimitri/doxygen/) to create structured and
 navigable documentation from the source code and structured comments. When adding
 new components or modifying exisiting elements the associated documentation should be
 updated to allow easy reference. For information on Doxygen specific commands which can

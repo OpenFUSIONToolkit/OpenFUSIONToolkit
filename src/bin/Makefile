@@ -1,4 +1,4 @@
-# OpenFUSIONToolkit makefile
+# Open FUSION Toolkit makefile
 # All platform specific customization is done
 # in associated make_libs.mk files for each system
 

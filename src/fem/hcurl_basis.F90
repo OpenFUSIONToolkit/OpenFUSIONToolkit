@@ -1,10 +1,10 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file oft_hcurl_basis.F90
 !
 !> @defgroup doxy_oft_hcurl Nedelec H1(Curl)
-!! Nedelec H1(Curl) finite element implementation for the OpenFUSIONToolkit
+!! Nedelec H1(Curl) finite element implementation for the Open FUSION Toolkit
 !! @ingroup doxy_oft_fem
 !
 !> Base Nedelec H1(Curl) FE class and basis evaluation
@@ -28,7 +28,7 @@ USE oft_hexmesh_type, ONLY: hex_bary_ecoords, hex_bary_efcoords, hex_bary_fcoord
   hex_get_bary, hex_get_bary_gop, hex_get_bary_cgop
 USE multigrid, ONLY: mg_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
-USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type!, oft_ml_bfem_type
+USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------

@@ -1,10 +1,10 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file test_t3d.F90
 !
 !> \defgroup testing Tests
-!! Regression tests for the OpenFUSIONToolkit
+!! Regression tests for the Open FUSION Toolkit
 !
 !> Regression tests for the CUBIT mesh interface. Test perform refinements
 !! and compare the resulting mesh volume and surface area with results from

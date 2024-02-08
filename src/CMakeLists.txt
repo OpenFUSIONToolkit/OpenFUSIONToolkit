@@ -1,5 +1,5 @@
 ########################
-# OpenFUSIONToolkit
+# Open FUSION Toolkit
 ########################
 cmake_minimum_required( VERSION 3.12 )
 project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
@@ -381,7 +381,7 @@ if(OFT_PACKAGE_BUILD)
   set(CPACK_PACKAGE_VERSION  ${CMAKE_PROJECT_VERSION}${OFT_VER_SUFFIX})
   set(CPACK_PACKAGE_CONTACT  "Chris Hansen")
   set(CPACK_PACKAGE_VENDOR   "Chris Hansen")
-  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "OpenFUSIONToolkit for plasma equilibrium and dynamic simulation.")
+  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open FUSION Toolkit for plasma equilibrium and dynamic simulation.")
   set(CPACK_PACKAGE_DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION_SUMMARY})
 
   set(CPACK_RESOURCE_FILE_LICENSE     ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE)

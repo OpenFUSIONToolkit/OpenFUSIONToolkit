@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 #---------------------------------------------------------------------------
-# Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #---------------------------------------------------------------------------
 #
-# Driver script for creating XDMF descriptor files for OpenFUSIONToolkit output
+# Driver script for creating XDMF descriptor files for Open FUSION Toolkit output
 #
 #---------------------------------------------------------------------------
 from __future__ import print_function
@@ -243,7 +243,7 @@ class xdmf_doc:
 # Input parameters
 # ===============================================================
 parser = argparse.ArgumentParser()
-parser.description = "Create Xdmf file for VisIt from OpenFUSIONToolkit output."
+parser.description = "Create Xdmf file for VisIt from Open FUSION Toolkit output."
 parser.add_argument('-i', '--infile', type=str, default='dump.dat', help='Input file name, default="dump.dat"')
 parser.add_argument('-v', '--verbose', action="store_true", default=False, help='Display debug information during Xdmf write.')
 parser.add_argument('-s', '--size', type=int, default=20, help='Size of XML file cache before flush.')

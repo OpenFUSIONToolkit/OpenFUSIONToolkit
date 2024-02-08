@@ -5,7 +5,7 @@
  * and Lawrence Berkeley National Lab.
  * October 15, 2003
  *
- * Modified for use with OpenFUSIONToolkit by Chris Hansen (December 2014)
+ * Modified for use with Open FUSION Toolkit by Chris Hansen (December 2014)
  */
 #include "superlu_ddefs.h"
 

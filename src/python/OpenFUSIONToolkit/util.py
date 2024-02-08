@@ -54,6 +54,7 @@ def ctypes_subroutine(function, argtypes=None):
     return tmp_fun
 
 # Common parameters
+## Vacuum magnetic permeability
 mu0 = numpy.pi*4.E-7
 
 ## @cond

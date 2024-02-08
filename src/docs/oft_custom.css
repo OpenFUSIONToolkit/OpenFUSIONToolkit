@@ -14,7 +14,7 @@ html {
 @media screen and (min-width: 999px) {
     div.contents .toc {
         background-color: var(--toc-color);
-        border-left: 0;
+        border: 1px solid var(--separator-color);
         border-radius: var(--border-radius-small);
         z-index: 10;
     }

@@ -1,10 +1,10 @@
 !------------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !------------------------------------------------------------------------------
 !> @file oft_la_base.F90
 !
 !> @defgroup doxy_oft_lin_alg Linera Algebra
-!! Linear Algebra framework for the OpenFUSIONToolkit
+!! Linear Algebra framework for the Open FUSION Toolkit
 !
 !> Abstract field interfaces and native vector implementations
 !!
