@@ -1,6 +1,6 @@
 # FindOFT_FoX.cmake
 #
-# Finds the FoX library for use with the OpenFUSIONToolkit
+# Finds the FoX library for use with the Open FUSION Toolkit
 # as installed by version "4.1" of FoX.
 #
 # This will define the following variables

@@ -1,10 +1,10 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file oft_lag_basis.F90
 !
 !> @defgroup doxy_oft_lag Lagrange
-!! Lagrange finite element implementation for the OpenFUSIONToolkit
+!! Lagrange finite element implementation for the Open FUSION Toolkit
 !! @ingroup doxy_oft_fem
 !
 !> Base Lagrange FE class and basis evaluation

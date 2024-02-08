@@ -1,4 +1,4 @@
-OpenFUSIONToolkit API Documentation     {#doc_api_main}
+Open FUSION Toolkit API Documentation     {#doc_api_main}
 ================
 
 [TOC]
@@ -12,7 +12,7 @@ Talk about the API...
 \subpage doc_petsc_usage
 
 \section doc_api_main_ex API Examples
-The following examples illustrate usage of the OpenFUSIONToolkit base API to define and solve simple systems of equations. 
+The following examples illustrate usage of the Open FUSION Toolkit base API to define and solve simple systems of equations. 
 
  - \subpage doc_api_ex1
  - \subpage doc_api_ex2

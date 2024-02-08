@@ -1,4 +1,4 @@
-# OpenFUSIONToolkit makefile
+# Open FUSION Toolkit makefile
 # All platform specific customization is done
 # in associated make_libs.mk files for each system
 
@@ -69,7 +69,7 @@ clean:
 # Print help information
 help:
 	@echo
-	@echo 'Make targets for OpenFUSIONToolkit (OFT):'
+	@echo 'Make targets for Open FUSION Toolkit (OFT):'
 	@echo '  all             Build all available driver programs'
 	@echo '    taylor          Build Taylor driver programs'
 	@echo '    grad_shaf       Build Grad-Shafranov driver programs'

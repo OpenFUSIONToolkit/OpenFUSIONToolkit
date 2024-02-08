@@ -1,4 +1,4 @@
-name: OpenFUSIONToolkit CI build
+name: Open FUSION Toolkit CI build
 
 on:
   push:

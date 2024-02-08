@@ -1,10 +1,10 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file taylor.f90
 !
 !> @defgroup doxy_oft_physics Physics
-!! Physics modules for the OpenFUSIONToolkit
+!! Physics modules for the Open FUSION Toolkit
 !
 !> Subroutines and fields for Taylor state calculations using
 !! mimetic operators.

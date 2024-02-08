@@ -1,9 +1,9 @@
 !------------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !------------------------------------------------------------------------------
 !> @file tracing.F90
 !
-!> Tracing implementation for the OpenFUSIONToolkit
+!> Tracing implementation for the Open FUSION Toolkit
 !!
 !! The default tracing implementation uses LSODE as the ode solver for advancing
 !! field lines.

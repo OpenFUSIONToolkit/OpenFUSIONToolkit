@@ -727,7 +727,7 @@ class TokaMaker():
         '''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         @param lcfs_pad Padding at LCFS for boundary calculations
-        @returns Dictionary of equilibrium parameters
+        @result Dictionary of equilibrium parameters
         '''
         _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02]) # Given backward so last point is LCFS (for dl)
         Ip,centroid,vol,pvol,dflux,tflux,li = self.get_globals()

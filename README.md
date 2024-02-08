@@ -46,6 +46,6 @@ See [CONTRIBUTING.md](https://github.com/hansec/OpenFUSIONToolkit/blob/main/CONT
 Copyright
 ---------
 
-OpenFUSIONToolkit code development project, up to version 1.0 Copyright (c) 2023, OpenFUSIONToolkit team.
+Open FUSION Toolkit code development project, up to version 1.0 Copyright (c) 2023, Open FUSION Toolkit team.
 
-Written by OpenFUSIONToolkit team and collaborators with Christopher J. Hansen as principle developer. All rights reserved.
+Written by Open FUSION Toolkit team and collaborators with Christopher J. Hansen as principle developer. All rights reserved.

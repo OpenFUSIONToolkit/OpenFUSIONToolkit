@@ -3,7 +3,7 @@ CUBIT Mesh Interface    {#doc_cubit}
 
 [TOC]
 
-The OpenFUSIONToolkit (OFT) includes an interface to the CUBIT mesh generation program. This interface allows the
+The Open FUSION Toolkit (OFT) includes an interface to the CUBIT mesh generation program. This interface allows the
 import and refinement of meshes created in CUBIT. Mesh import requires that OFT is built
 with NETCDF. Boundary conformal refinement requires the OpenNURBS library as well.
 

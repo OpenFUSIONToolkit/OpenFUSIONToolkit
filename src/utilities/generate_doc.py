@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #---------------------------------------------------------------------------
-# Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #---------------------------------------------------------------------------
 #
 # Script for handling creation of Doxygen documentation from structured examples.
@@ -156,9 +156,13 @@ if __name__ == '__main__':
             with open(path,"w+") as fid:
                 fid.write(new_file)
     # Add Jupyter notebooks to documentation
+    print()
+    print("\n==========================================")
+    print("Converting Jupyter notebooks")
     eq_reg = re.compile("\$(.*?)\$")
-    files = glob.glob("examples/TokaMaker/*/*.ipynb")
+    files = glob.glob("examples/*/*/*.ipynb")
     for filename in files:
+        print(filename)
         base_path = filename.split('.')[0]
         full_name = os.path.basename(filename)
         file_name, _ = os.path.splitext(full_name)

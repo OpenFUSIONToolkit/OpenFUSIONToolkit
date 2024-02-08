@@ -1,6 +1,6 @@
 # FindOFT_PETSc.cmake
 #
-# Finds the PETSc library for use with the OpenFUSIONToolkit
+# Finds the PETSc library for use with the Open FUSION Toolkit
 # as installed by versions 3.6 - 3.11 of PETSc.
 #
 # This will define the following variables
