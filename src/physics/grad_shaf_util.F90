@@ -657,14 +657,15 @@ end subroutine gs_comp_globals
 !!
 !! @param[in,out] self G-S object
 !! @param[out] eta_jsq = eta*j^2
+!! @param[out] itor Toroidal current
 !---------------------------------------------------------------------------
-subroutine gs_get_eta_jsq(self,eta_jsq)
+subroutine gs_calc_vloop(self,vloop)
 class(gs_eq), intent(inout) :: self
-real(8), intent(out) :: eta_jsq
+real(8), intent(out) :: vloop
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
-real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
-real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),I_NI
+real(8) :: itor_loc,j_NI_loc,eta_jsq,itor,goptmp(3,3),v
+real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),I_NI,psitmp(1),gpsitmp(3)
 integer(4) :: i,m
 !---
 psi_eval%u=>self%psi
@@ -673,6 +674,8 @@ CALL psi_geval%shared_setup(psi_eval)
 !---
 eta_jsq = 0.d0
 I_NI = 0.d0
+itor = 0.d0
+vloop = 0.d0
 !!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol) &
 !!$omp reduction(+:itor) reduction(+:vol) &
 do i=1,smesh%nc
@@ -686,21 +689,28 @@ do i=1,smesh%nc
     IF(gs_test_bounds(self,pt))THEN
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
-        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
           + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
-      ELSE
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+      ELSE
+        j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
           + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+self%eps))
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
       END IF
-      eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(itor_loc**2)*v*oft_blagrange%quad%wts(m)*pt(1)
+      eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(j_NI_loc**2)*v*oft_blagrange%quad%wts(m)*pt(1)
+      itor = itor + itor_loc*v*oft_blagrange%quad%wts(m)
     END IF
   end do
 end do
 eta_jsq=eta_jsq*(2*pi/(mu0*mu0))
+itor=itor/mu0
+vloop=self%psiscale*(eta_jsq/itor)
 !
 CALL psi_eval%delete
 CALL psi_geval%delete
-end subroutine gs_get_eta_jsq
+end subroutine gs_calc_vloop
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_analyze
 !---------------------------------------------------------------------------

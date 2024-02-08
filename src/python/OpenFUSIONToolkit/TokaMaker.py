@@ -143,7 +143,7 @@ tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals, # (It
     [c_double_ptr, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr])
 
 #
-tokamaker_get_eta_jsq = ctypes_subroutine(oftpy_lib.tokamaker_get_eta_jsq, # (eta*j^2)
+tokamaker_gs_calc_vloop = ctypes_subroutine(oftpy_lib.tokamaker_gs_calc_vloop, # (V_loop)
     [c_double_ptr])
 
 #
@@ -655,7 +655,8 @@ class TokaMaker():
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
         @param foffset Value of \f$F0=R0*B0\f$
-        @param p_file File containing \f$P'\f$ definition
+        @param p_file File containing $\eta$ definition
+        @param p_file File containing non-inductive FF' definition
         '''
         if foffset is not None:
             self._F0 = foffset
@@ -664,12 +665,13 @@ class TokaMaker():
     def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, eta_prof=None, ffp_NI_prof=None):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
-        Arrays should have the form array[i,:] = (\f$\hat{\psi}_i\f$, \f$f(\hat{\psi}_i)\f$) and span
-        \f$\hat{\psi}_i = [0,1]\f$.
-
-        @param ffp_prof Values defining \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) [:,2]
+        @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations 
+        in normalized Psi ['x']
         @param foffset Value of \f$F0=R0*B0\f$
-        @param pp_prof Values defining \f$P'\f$ [:,2]
+        @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
+        in normalized Psi ['x']
         '''
         def create_prof_file(filename, profile_dict, name):
             file_lines = [profile_dict['type']]
@@ -728,7 +730,61 @@ class TokaMaker():
         if foffset is not None:
             self._F0 = foffset
         self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
-    
+
+    def set_resistivity(self, foffset=None, eta_prof=None):
+        r'''! Set flux function profile $\eta$ using a piecewise linear definition
+
+        Arrays should have the form array[i,:] = (\f$\hat{\psi}_i\f$, \f$f(\hat{\psi}_i)\f$) and span
+        \f$\hat{\psi}_i = [0,1]\f$.
+
+        @param eta_prof Values defining $\eta$ [:,2]
+        '''
+        def create_prof_file(filename, profile_dict, name):
+            file_lines = [profile_dict['type']]
+            if profile_dict['type'] == 'flat':
+                pass
+            elif profile_dict['type'] == 'linterp':
+                x = profile_dict.get('x',None)
+                if x is None:
+                    raise KeyError('No array "x" for piecewise linear profile.')
+                else:
+                    x = numpy.array(x.copy())
+                y = profile_dict.get('y',None)
+                if y is None:
+                    raise KeyError('No array "y" for piecewise linear profile.')
+                else:
+                    y = numpy.array(y.copy())
+                if numpy.min(numpy.diff(x)) < 0.0:
+                    raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
+                if (x[0] < 0.0) or (x[-1] > 1.0):
+                    raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
+                if self.psi_convention == 0:
+                    x = 1.0 - x
+                    sort_inds = x.argsort()
+                    x = x[sort_inds]
+                    y = y[sort_inds]
+                elif self.psi_convention == 1:
+                    pass
+                else:
+                    raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
+                file_lines += [
+                    "{0} {1}".format(x.shape[0]-1, y[0]),
+                    "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
+                    "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
+                ]
+            else:
+                raise KeyError('Invalid profile type ("flat", "linterp")')
+            with open(filename, 'w+') as fid:
+                fid.write("\n".join(file_lines))
+        ffp_file = 'none'
+        pp_file = 'none'
+        eta_file = 'none'
+        if eta_prof is not None:
+            eta_file = 'tokamaker_eta.prof'
+            create_prof_file(eta_file, eta_prof, "eta'")
+        ffp_NI_file = 'none'
+        self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
+
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
         error_flag = c_int()
@@ -1018,29 +1074,27 @@ class TokaMaker():
             ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Li))
         return Ip.value, centroid, vol.value, pvol.value, dflux.value, tflux.value, Li.value
 
-    def get_loopvoltage(self, eta=None, ffp_NI=None, Ip=None):
+    def calc_loopvoltage(self, eta=None, ffp_NI=None):
         r'''! Get plasma loop voltage
 
         @param eta Dictionary object containing resistivity profile ['y'] and sampled locations 
         in normalized Psi ['x']
-        @param ffp_NI Dictionary object containing non-inductive current profile ['y'] and sampled locations 
+        @param ffp_NI Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
         in normalized Psi ['x']
-        @result V_loop [Volts]
+        @result Vloop [Volts]
         '''
-        eta_jsq = c_double()
+        V_loop = c_double()
 
         if eta is None:
             print('Error: eta array not specified')
         elif ffp_NI is None:
             print('Error: eta array not specified')
         else:
-            self.set_profiles(eta_prof=eta,ffp_NI_prof=ffp_NI)
-            tokamaker_get_eta_jsq(ctypes.byref(eta_jsq))
+            self.set_profiles(ffp_NI_prof=ffp_NI)
+            self.set_resistivity(eta_prof=eta)
+            tokamaker_gs_calc_vloop(ctypes.byref(V_loop))
 
-        if Ip is None:
-            Ip,_,_,_,_,_,_ = self.get_globals()
-
-        return eta_jsq.value / Ip
+        return V_loop.value
 
     def get_profiles(self,psi=None,psi_pad=1.E-8,npsi=50):
         r'''! Get G-S source profiles
