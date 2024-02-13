@@ -305,6 +305,51 @@ def read_eqdsk(filename):
         eqdsk_obj['rzlim'] = read_2d(fid, eqdsk_obj['nlim'], 2)
     return eqdsk_obj
 
+def create_prof_file(self, filename, profile_dict, name):
+    '''! Create profile input file to be read by load_profiles()
+
+    @param filename Name of input file, see options in set_profiles()
+    @param profile_dict Dictionary object containing profile values ['y'] and sampled locations 
+    in normalized Psi ['x']
+    @param filename Name of input quantity, see options in set_profiles()
+    '''
+    file_lines = [profile_dict['type']]
+    if profile_dict['type'] == 'flat':
+        pass
+    elif profile_dict['type'] == 'linterp':
+        x = profile_dict.get('x',None)
+        if x is None:
+            raise KeyError('No array "x" for piecewise linear profile.')
+        else:
+            x = numpy.array(x.copy())
+        y = profile_dict.get('y',None)
+        if y is None:
+            raise KeyError('No array "y" for piecewise linear profile.')
+        else:
+            y = numpy.array(y.copy())
+        if numpy.min(numpy.diff(x)) < 0.0:
+            raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
+        if (x[0] < 0.0) or (x[-1] > 1.0):
+            raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
+        if self.psi_convention == 0:
+            x = 1.0 - x
+            sort_inds = x.argsort()
+            x = x[sort_inds]
+            y = y[sort_inds]
+        elif self.psi_convention == 1:
+            pass
+        else:
+            raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
+        file_lines += [
+            "{0} {1}".format(x.shape[0]-1, y[0]),
+            "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
+            "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
+        ]
+    else:
+        raise KeyError('Invalid profile type ("flat", "linterp")')
+    with open(filename, 'w+') as fid:
+        fid.write("\n".join(file_lines))
+
 oft_in_template = """&runtime_options
  debug={DEBUG_LEVEL}
 /
@@ -673,60 +718,22 @@ class TokaMaker():
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
         in normalized Psi ['x']
         '''
-        def create_prof_file(filename, profile_dict, name):
-            file_lines = [profile_dict['type']]
-            if profile_dict['type'] == 'flat':
-                pass
-            elif profile_dict['type'] == 'linterp':
-                x = profile_dict.get('x',None)
-                if x is None:
-                    raise KeyError('No array "x" for piecewise linear profile.')
-                else:
-                    x = numpy.array(x.copy())
-                y = profile_dict.get('y',None)
-                if y is None:
-                    raise KeyError('No array "y" for piecewise linear profile.')
-                else:
-                    y = numpy.array(y.copy())
-                if numpy.min(numpy.diff(x)) < 0.0:
-                    raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
-                if (x[0] < 0.0) or (x[-1] > 1.0):
-                    raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
-                if self.psi_convention == 0:
-                    x = 1.0 - x
-                    sort_inds = x.argsort()
-                    x = x[sort_inds]
-                    y = y[sort_inds]
-                elif self.psi_convention == 1:
-                    pass
-                else:
-                    raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
-                file_lines += [
-                    "{0} {1}".format(x.shape[0]-1, y[0]),
-                    "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
-                    "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
-                ]
-            else:
-                raise KeyError('Invalid profile type ("flat", "linterp")')
-            with open(filename, 'w+') as fid:
-                fid.write("\n".join(file_lines))
-        #
         ffp_file = 'none'
         if ffp_prof is not None:
             ffp_file = 'tokamaker_f.prof'
-            create_prof_file(ffp_file, ffp_prof, "F*F'")
+            create_prof_file(self, ffp_file, ffp_prof, "F*F'")
         pp_file = 'none'
         if pp_prof is not None:
             pp_file = 'tokamaker_p.prof'
-            create_prof_file(pp_file, pp_prof, "P'")
+            create_prof_file(self, pp_file, pp_prof, "P'")
         eta_file = 'none'
         if eta_prof is not None:
             eta_file = 'tokamaker_eta.prof'
-            create_prof_file(eta_file, eta_prof, "eta'")
+            create_prof_file(self, eta_file, eta_prof, "eta'")
         ffp_NI_file = 'none'
         if ffp_NI_prof is not None:
             ffp_NI_file = 'tokamaker_ffp_NI.prof'
-            create_prof_file(ffp_NI_file, ffp_NI_prof, "ffp_NI")
+            create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
         if foffset is not None:
             self._F0 = foffset
         self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
@@ -739,49 +746,12 @@ class TokaMaker():
 
         @param eta_prof Values defining $\eta$ [:,2]
         '''
-        def create_prof_file(filename, profile_dict, name):
-            file_lines = [profile_dict['type']]
-            if profile_dict['type'] == 'flat':
-                pass
-            elif profile_dict['type'] == 'linterp':
-                x = profile_dict.get('x',None)
-                if x is None:
-                    raise KeyError('No array "x" for piecewise linear profile.')
-                else:
-                    x = numpy.array(x.copy())
-                y = profile_dict.get('y',None)
-                if y is None:
-                    raise KeyError('No array "y" for piecewise linear profile.')
-                else:
-                    y = numpy.array(y.copy())
-                if numpy.min(numpy.diff(x)) < 0.0:
-                    raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
-                if (x[0] < 0.0) or (x[-1] > 1.0):
-                    raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
-                if self.psi_convention == 0:
-                    x = 1.0 - x
-                    sort_inds = x.argsort()
-                    x = x[sort_inds]
-                    y = y[sort_inds]
-                elif self.psi_convention == 1:
-                    pass
-                else:
-                    raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
-                file_lines += [
-                    "{0} {1}".format(x.shape[0]-1, y[0]),
-                    "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
-                    "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
-                ]
-            else:
-                raise KeyError('Invalid profile type ("flat", "linterp")')
-            with open(filename, 'w+') as fid:
-                fid.write("\n".join(file_lines))
         ffp_file = 'none'
         pp_file = 'none'
         eta_file = 'none'
         if eta_prof is not None:
             eta_file = 'tokamaker_eta.prof'
-            create_prof_file(eta_file, eta_prof, "eta'")
+            create_prof_file(self, eta_file, eta_prof, "eta'")
         ffp_NI_file = 'none'
         self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
 

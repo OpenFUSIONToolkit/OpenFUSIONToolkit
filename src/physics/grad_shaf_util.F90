@@ -653,15 +653,11 @@ CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_comp_globals
 !---------------------------------------------------------------------------
-!> Compute eta*j^2 for loop voltage calculation
-!!
-!! @param[in,out] self G-S object
-!! @param[out] eta_jsq = eta*j^2
-!! @param[out] itor Toroidal current
+!> Compute plasma loop voltage
 !---------------------------------------------------------------------------
 subroutine gs_calc_vloop(self,vloop)
-class(gs_eq), intent(inout) :: self
-real(8), intent(out) :: vloop
+class(gs_eq), intent(inout) :: self !< G-S object
+real(8), intent(out) :: vloop !< loop voltage
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc,j_NI_loc,eta_jsq,itor,goptmp(3,3),v
@@ -685,7 +681,7 @@ do i=1,smesh%nc
     call psi_eval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
     pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
-    !---Compute Magnetic Field
+    !---Compute toroidal current itor, and eta*j^2 eta_jsq (numerator of Vloop integral)
     IF(gs_test_bounds(self,pt))THEN
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
@@ -706,6 +702,7 @@ do i=1,smesh%nc
 end do
 eta_jsq=eta_jsq*(2*pi/(mu0*mu0))
 itor=itor/mu0
+!---Vloop = integral(eta_jsq) / itor
 vloop=self%psiscale*(eta_jsq/itor)
 !
 CALL psi_eval%delete
