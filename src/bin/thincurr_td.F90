@@ -349,7 +349,7 @@ IF(sensors%njumpers>0)THEN
     DO k=1,self%nholes
       tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
     END DO
-    jumpout(j+1)=tmp
+    jumpout(j+1)=tmp/mu0
   END DO
   !---Setup history file
   IF(oft_env%head_proc)THEN
@@ -455,7 +455,7 @@ DO i=1,nsteps
       DO k=1,self%nholes
         tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
       END DO
-      jumpout(j+1)=tmp
+      jumpout(j+1)=tmp/mu0
     END DO
     jumpout(1)=t
     CALL jumper_hist%write(data_r8=jumpout)
@@ -575,7 +575,7 @@ IF(sensors%njumpers>0)THEN
     DO k=1,self%nholes
       tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
     END DO
-    jumpout(j+1)=tmp
+    jumpout(j+1)=tmp/mu0
   END DO
   !---Setup history file
   IF(oft_env%head_proc)THEN
@@ -666,7 +666,7 @@ DO i=1,nsteps
         DO k=1,self%nholes
           tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
         END DO
-        jumpout(j+1)=tmp
+        jumpout(j+1)=tmp/mu0
       END DO
       jumpout(1)=t
       CALL jumper_hist%write(data_r8=jumpout)
