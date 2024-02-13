@@ -478,7 +478,7 @@ class TokaMaker():
         r'''! Evaluate Green's function for a toroidal filament
 
         @param x Observation point [2]
-        @param xc Coil location [2]
+        @param xc Coil location [:,2]
         @result \f$\psi(x)\f$ due to a coil with unit current [A] at xc
         '''
         n = x.shape[0]
@@ -605,10 +605,17 @@ class TokaMaker():
         @param reg_targets Regularization targets [ncoils+1] (default: 0)
         @param reg_weights Weights for regularization terms [ncoils+1] (default: 1)
         '''
+        if (reg_mat.shape[0] != self.ncoils+1) or (reg_mat.shape[1] != self.ncoils+1):
+            raise ValueError('Incorrect shape of "reg_mat", should be [ncoils+1,ncoils+1]')
         if reg_targets is None:
             reg_targets = numpy.zeros((reg_mat.shape[0],), dtype=numpy.float64)
         if reg_weights is None:
             reg_weights = numpy.ones((reg_mat.shape[0],), dtype=numpy.float64)
+        if reg_targets.shape[0] != self.ncoils+1:
+            raise ValueError('Incorrect shape of "reg_targets", should be [ncoils+1]')
+        if reg_weights.shape[0] != self.ncoils+1:
+            raise ValueError('Incorrect shape of "reg_weights", should be [ncoils+1]')
+        
         tokamaker_set_coil_regmat(numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
 
     def set_coil_bounds(self,coil_bounds):
@@ -619,6 +626,8 @@ class TokaMaker():
 
         @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
         '''
+        if (coil_bounds.shape[0] != self.ncoils+1) or (coil_bounds.shape[1] != 2):
+            raise ValueError('Incorrect shape of "coil_bounds", should be [ncoils+1,2]')
         bounds = numpy.copy(coil_bounds, order='C')
         tokamaker_set_coil_bounds(bounds)
 
@@ -627,6 +636,8 @@ class TokaMaker():
 
         @param coil_gains Gains for each coil (absolute scale is arbitrary)
         '''
+        if coil_gains.shape[0] != self.ncoils:
+            raise ValueError('Incorrect shape of "coil_gains", should be [ncoils]')
         tokamaker_set_coil_vsc(coil_gains)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0):
@@ -807,6 +818,8 @@ class TokaMaker():
         else:
             if weights is None:
                 weights = numpy.ones((isoflux.shape[0],), dtype=numpy.float64)
+            if weights.shape[0] != isoflux.shape[0]:
+                raise ValueError('Shape of "weights" does not match first dimension of "isoflux"')
             tokamaker_set_isoflux(isoflux,weights,isoflux.shape[0],grad_wt_lim)
             self._isoflux = isoflux.copy()
     
@@ -822,6 +835,8 @@ class TokaMaker():
         else:
             if weights is None:
                 weights = numpy.ones((saddles.shape[0],), dtype=numpy.float64)
+            if weights.shape[0] != saddles.shape[0]:
+                raise ValueError('Shape of "weights" does not match first dimension of "saddles"')
             tokamaker_set_saddles(saddles,weights,saddles.shape[0])
             self._saddles = saddles.copy()
     
@@ -886,6 +901,8 @@ class TokaMaker():
 
         @param psi Poloidal flux values (should not be normalized!)
         '''
+        if psi.shape[0] != self.np:
+            raise ValueError('Incorrect shape of "psi", should be [np]')
         tokamaker_set_psi(psi)
     
     def set_psi_dt(self,psi0,dt):
@@ -894,6 +911,8 @@ class TokaMaker():
         @param psi0 Reference poloidal flux at t-dt (unnormalized)
         @param dt Time since reference poloidal flux
         '''
+        if psi0.shape[0] != self.np:
+            raise ValueError('Incorrect shape of "psi0", should be [np]')
         tokamaker_set_psi_dt(psi0,c_double(dt))
     
     def get_coil_currents(self):
@@ -1052,6 +1071,8 @@ class TokaMaker():
 
         @param currents Current in each coil [A-turns]
         '''
+        if currents.shape[0] != self.ncoils:
+            raise ValueError('Incorrect shape of "currents", should be [ncoils]')
         tokamaker_set_coil_currents(currents)
 
     def update_settings(self):
