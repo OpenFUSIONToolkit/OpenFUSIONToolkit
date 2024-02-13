@@ -1,5 +1,5 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file thincurr_td.F90
 !
@@ -29,7 +29,7 @@
 !---------------------------------------------------------------------------
 PROGRAM thincurr_td
 USE oft_base
-USE oft_io, ONLY: hdf5_create_timestep
+USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
@@ -190,7 +190,7 @@ LOGICAL, INTENT(in) :: direct
 INTEGER(4), INTENT(in) :: nplot
 TYPE(tw_sensors), INTENT(in) :: sensors
 !---
-INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,io_unit2,neta,face,info,ind1
+INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1
 REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op
 REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: curr_waveform,volt_waveform,cc_vals
@@ -199,6 +199,7 @@ CLASS(oft_vector), POINTER :: u,g
 TYPE(oft_native_dense_matrix), TARGET :: Lmat,Minv
 TYPE(oft_sum_matrix), TARGET :: fmat,bmat
 CLASS(oft_solver), POINTER :: linv
+TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
@@ -310,15 +311,26 @@ CALL u%get_local(vals)
 IF(sensors%nfloops>0)THEN
   WRITE(fmt_str,'(I6)')sensors%nfloops+1
   fmt_str='('//TRIM(fmt_str)//'E24.15)'
-  ALLOCATE(senout(sensors%nfloops))
+  ALLOCATE(senout(sensors%nfloops+1))
   senout=0.d0
   IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
-    sensors%nfloops,icoil_curr,1,0.d0,senout,1)
-  OPEN(NEWUNIT=io_unit,FILE='floops.hist')
-  WRITE(io_unit,'(1000E24.15)')t,senout
+    sensors%nfloops,icoil_curr,1,0.d0,senout(2),1)
+  !---Setup history file
+  IF(oft_env%head_proc)THEN
+    floop_hist%filedesc = 'ThinCurr flux loop history file'
+    CALL floop_hist%setup('floops.hist')
+    CALL floop_hist%add_field('time', 'r8', desc="Simulation time [s]")
+    DO i=1,sensors%nfloops
+      CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
+    END DO
+    CALL floop_hist%write_header
+    CALL floop_hist%open
+    senout(1)=t
+    CALL floop_hist%write(data_r8=senout)
+  END IF
 END IF
 IF(sensors%njumpers>0)THEN
-  ALLOCATE(jumpout(sensors%njumpers))
+  ALLOCATE(jumpout(sensors%njumpers+1))
   DO j=1,sensors%njumpers
     tmp=0.d0
     val_prev=0.d0
@@ -337,10 +349,21 @@ IF(sensors%njumpers>0)THEN
     DO k=1,self%nholes
       tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
     END DO
-    jumpout(j)=tmp
+    jumpout(j+1)=tmp/mu0
   END DO
-  OPEN(NEWUNIT=io_unit2,FILE='jumpers.hist')
-  WRITE(io_unit2,'(1000E24.15)')t,jumpout
+  !---Setup history file
+  IF(oft_env%head_proc)THEN
+    jumper_hist%filedesc = 'ThinCurr current jumper history file'
+    CALL jumper_hist%setup('jumpers.hist')
+    CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
+    DO i=1,sensors%njumpers
+      CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
+    END DO
+    CALL jumper_hist%write_header
+    CALL jumper_hist%open
+    jumpout(1)=t
+    CALL jumper_hist%write(data_r8=jumpout)
+  END IF
 END IF
 !---Advance system in time
 DO i=1,nsteps
@@ -407,10 +430,11 @@ DO i=1,nsteps
   END IF
   IF(sensors%nfloops>0)THEN
     CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen,sensors%nfloops, &
-      vals,1,0.d0,senout,1)
+      vals,1,0.d0,senout(2),1)
     IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
-      sensors%nfloops,icoil_curr,1,1.d0,senout,1)
-    WRITE(io_unit,'(1000E24.15)')t,senout
+      sensors%nfloops,icoil_curr,1,1.d0,senout(2),1)
+    senout(1)=t
+    CALL floop_hist%write(data_r8=senout)
   END IF
   IF(sensors%njumpers>0)THEN
     DO j=1,sensors%njumpers
@@ -431,9 +455,10 @@ DO i=1,nsteps
       DO k=1,self%nholes
         tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
       END DO
-      jumpout(j)=tmp
+      jumpout(j+1)=tmp/mu0
     END DO
-    WRITE(io_unit2,'(1000E24.15)')t,jumpout
+    jumpout(1)=t
+    CALL jumper_hist%write(data_r8=jumpout)
   END IF
 END DO
 !---Copy solution to input
@@ -441,11 +466,11 @@ CALL u%get_local(vals)
 vec=vals
 !---Cleanup
 IF(sensors%nfloops>0)THEN
-  CLOSE(io_unit)
+  CALL floop_hist%close
   DEALLOCATE(senout)
 END IF
 IF(sensors%njumpers>0)THEN
-  CLOSE(io_unit2)
+  CALL jumper_hist%close
   DEALLOCATE(jumpout)
 END IF
 CALL u%delete()
@@ -474,12 +499,13 @@ INTEGER(4), INTENT(in) :: nsteps
 INTEGER(4), INTENT(in) :: nplot
 TYPE(tw_sensors), INTENT(in) :: sensors
 !---
-INTEGER(4) :: i,j,jj,k,ntimes_curr,ncols,itime,io_unit,io_unit2,face,ind1,ind2
+INTEGER(4) :: i,j,jj,k,ntimes_curr,ncols,itime,io_unit,face,ind1,ind2
 REAL(8) :: uu,t,tmp,area,tmp2,val_prev
 REAL(8), ALLOCATABLE, DIMENSION(:) :: bvals,coil_vec,senout,jumpout
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals,coil_waveform
 REAL(8), POINTER, DIMENSION(:) :: vals
 CLASS(oft_vector), POINTER :: u
+TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
 WRITE(*,*)'Post-processing simulation'
@@ -511,15 +537,26 @@ END IF
 !
 CALL u%get_local(vals)
 IF(sensors%nfloops>0)THEN
-  ALLOCATE(senout(sensors%nfloops))
+  ALLOCATE(senout(sensors%nfloops+1))
   senout=0.d0
   IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
-    sensors%nfloops,coil_vec,1,0.d0,senout,1)
-  OPEN(NEWUNIT=io_unit,FILE='floops.hist')
-  WRITE(io_unit,*)t,senout
+    sensors%nfloops,coil_vec,1,0.d0,senout(2),1)
+  !---Setup history file
+  IF(oft_env%head_proc)THEN
+    floop_hist%filedesc = 'ThinCurr flux loop history file'
+    CALL floop_hist%setup('floops.hist')
+    CALL floop_hist%add_field('time', 'r8', desc="Simulation time [s]")
+    DO i=1,sensors%nfloops
+      CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
+    END DO
+    CALL floop_hist%write_header
+    CALL floop_hist%open
+    senout(1)=t
+    CALL floop_hist%write(data_r8=senout)
+  END IF
 END IF
 IF(sensors%njumpers>0)THEN
-  ALLOCATE(jumpout(sensors%njumpers))
+  ALLOCATE(jumpout(sensors%njumpers+1))
   DO j=1,sensors%njumpers
     tmp=0.d0
     val_prev=0.d0
@@ -538,10 +575,21 @@ IF(sensors%njumpers>0)THEN
     DO k=1,self%nholes
       tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
     END DO
-    jumpout(j)=tmp
+    jumpout(j+1)=tmp/mu0
   END DO
-  OPEN(NEWUNIT=io_unit2,FILE='jumpers.hist')
-  WRITE(io_unit2,*)t,jumpout
+  !---Setup history file
+  IF(oft_env%head_proc)THEN
+    jumper_hist%filedesc = 'ThinCurr current jumper history file'
+    CALL jumper_hist%setup('jumpers.hist')
+    CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
+    DO i=1,sensors%njumpers
+      CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
+    END DO
+    CALL jumper_hist%write_header
+    CALL jumper_hist%open
+    jumpout(1)=t
+    CALL jumper_hist%write(data_r8=jumpout)
+  END IF
 END IF
 IF(compute_B)THEN
   IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%nc))
@@ -593,10 +641,11 @@ DO i=1,nsteps
     !
     IF(sensors%nfloops>0)THEN
       IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen, &
-        sensors%nfloops,vals,1,0.d0,senout,1)
+        sensors%nfloops,vals,1,0.d0,senout(2),1)
       CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen,sensors%nfloops, &
-        coil_vec,1,1.d0,senout,1)
-      WRITE(io_unit,*)t,senout
+        coil_vec,1,1.d0,senout(2),1)
+      senout(1)=t
+      CALL floop_hist%write(data_r8=senout)
     END IF
     IF(sensors%njumpers>0)THEN
       DO j=1,sensors%njumpers
@@ -617,19 +666,20 @@ DO i=1,nsteps
         DO k=1,self%nholes
           tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
         END DO
-        jumpout(j)=tmp
+        jumpout(j+1)=tmp/mu0
       END DO
-      WRITE(io_unit2,*)t,jumpout
+      jumpout(1)=t
+      CALL jumper_hist%write(data_r8=jumpout)
     END IF
   END IF
 END DO
 !---Cleanup
 IF(sensors%nfloops>0)THEN
-  CLOSE(io_unit)
+  CALL floop_hist%close()
   DEALLOCATE(senout)
 END IF
 IF(sensors%njumpers>0)THEN
-  CLOSE(io_unit2)
+  CALL jumper_hist%close()
   DEALLOCATE(jumpout)
 END IF
 CALL u%delete

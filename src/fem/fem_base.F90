@@ -1,10 +1,10 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file fem_base.F90
 !
 !> @defgroup doxy_oft_fem Finite Element
-!! Finite element constructions for the OpenFUSIONToolkit
+!! Finite element constructions for the Open FUSION Toolkit
 !
 !> Base FEM class and functions for construction of FE linkage
 !! - FEM base class

@@ -6,6 +6,7 @@ import numpy as np
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 from oft_testing import run_OFT
+from oft_io import oft_histfile
 
 mu0 = np.pi*4.E-7
 
@@ -173,13 +174,9 @@ def validate_fr(fr_real, fr_imag, tols=(1.E-4, 1.E-4)):
     """
     Helper function to validate frequency-response results against test case.
     """
-    fr_run_real = []
-    fr_run_imag = []
-    with open('thincurr_fr.dat', 'r') as fid:
-        for line in fid:
-            vals = line.split()
-            fr_run_real.append(float(vals[1]))
-            fr_run_imag.append(float(vals[2]))
+    hist_file = oft_histfile('thincurr_fr.dat')
+    fr_run_real = [hist_file.data[field][0] for field in hist_file.field_tags]
+    fr_run_imag = [hist_file.data[field][1] for field in hist_file.field_tags]
     if not len(fr_run_real) == len(fr_real):
         print("FAILED: Number of sensors does not match")
         return False
@@ -202,11 +199,8 @@ def validate_td(sigs_final, tols=(1.E-8, 1.E-3)):
     """
     Helper function to validate time-dependent results against test case.
     """
-    td_sigs_final = []
-    with open('floops.hist', 'r') as fid:
-        for line in fid:
-            pass
-        td_sigs_final = [float(val) for val in line.split()]
+    hist_file = oft_histfile('floops.hist')
+    td_sigs_final = [hist_file.data[field][-1] for field in hist_file.field_tags]
     if not len(td_sigs_final) == len(sigs_final):
         print("FAILED: Number of sensors does not match")
         return False

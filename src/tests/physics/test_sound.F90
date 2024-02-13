@@ -1,5 +1,5 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> Regression test for xMHD module. A traveling sound wave is initialized in
 !! a triply periodic box and advanced for one period. The resulting wave is

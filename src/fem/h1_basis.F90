@@ -1,10 +1,10 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file oft_h1_basis.F90
 !
 !> @defgroup doxy_oft_h1 Nedelec H1
-!! Nedelec H1 finite element implementation for the OpenFUSIONToolkit
+!! Nedelec H1 finite element implementation for the Open FUSION Toolkit
 !! @ingroup doxy_oft_fem
 !
 !> Base Nedelec H1 FE class and basis evaluation

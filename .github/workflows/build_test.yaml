@@ -1,4 +1,4 @@
-name: OpenFUSIONToolkit CI build
+name: Open FUSION Toolkit CI build
 
 on:
   push:
@@ -37,14 +37,14 @@ jobs:
           }
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install prerequisites
       run: ${{ matrix.config.pip }} install pytest numpy scipy h5py triangle
 
     - name: Cache external libraries
       id: cache-ext-libs
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: libs
         key: ${{ runner.os }}-build-${{ hashFiles('src/utilities/build_libs.py') }}
@@ -66,7 +66,7 @@ jobs:
         ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
         --build_umfpack=1 --build_arpack=1 --oft_build_tests=1
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       if: failure()
       with:
         name: Library failure log

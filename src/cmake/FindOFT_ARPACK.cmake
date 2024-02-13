@@ -1,6 +1,6 @@
 # FindOFT_ARPACK.cmake
 #
-# Finds the arpack-ng library for use with the OpenFUSIONToolkit
+# Finds the arpack-ng library for use with the Open FUSION Toolkit
 # as installed by version "3.5" of arpack-ng.
 #
 # This will define the following variables

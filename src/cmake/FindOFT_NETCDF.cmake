@@ -1,6 +1,6 @@
 # FindOFT_NETCDF.cmake
 #
-# Finds the NetCDF library for use with the OpenFUSIONToolkit
+# Finds the NetCDF library for use with the Open FUSION Toolkit
 # as installed by version "4.6.2" of NetCDF and
 # version "4.4.4" NetCDF-Fortran.
 #

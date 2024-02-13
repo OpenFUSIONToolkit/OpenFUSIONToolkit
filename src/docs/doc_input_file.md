@@ -5,7 +5,7 @@ Input File Settings    {#doc_input_file}
 
 # Introduction {#doc_input_intro}
 
-The OpenFUSIONToolkit uses a input file to provide run-time information about different parameters, ex. the input mesh and number of refinements. By default OFT looks uses the file \c oft.in in the working directory, a different input file may be specified by passing its name as the first argument.
+The Open FUSION Toolkit uses a input file to provide run-time information about different parameters, ex. the input mesh and number of refinements. By default OFT looks uses the file \c oft.in in the working directory, a different input file may be specified by passing its name as the first argument.
 
 \verbatim
 ~$ oft_check_mesh myinput
