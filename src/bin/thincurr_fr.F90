@@ -22,7 +22,7 @@
 !---------------------------------------------------------------------------
 PROGRAM thincurr_fr
 USE oft_base
-USE oft_io, ONLY: hdf5_create_timestep
+USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
@@ -203,6 +203,7 @@ DOUBLE COMPLEX, ALLOCATABLE, DIMENSION(:) :: x,b
 DOUBLE COMPLEX, ALLOCATABLE, DIMENSION(:,:) :: Mmat
 CLASS(oft_vector), POINTER :: uloc
 TYPE(oft_graph) :: graph
+TYPE(oft_bin_file) :: floop_hist
 LOGICAL :: pm_save
 !---
 WRITE(*,*)
@@ -267,11 +268,21 @@ IF(sensors%nfloops>0)THEN
   senout=senin
   CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen,sensors%nfloops,driver(:,1),1,1.d0,senout(:,1),1)
   CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen,sensors%nfloops,driver(:,2),1,1.d0,senout(:,2),1)
-  OPEN(NEWUNIT=io_unit,FILE='thincurr_fr.dat')
-  DO i=1,sensors%nfloops
-    WRITE(io_unit,'(A,4Es24.15)')sensors%floops(i)%name,senout(i,:),senin(i,:)
-  END DO
-  CLOSE(io_unit)
+  !---Setup history file
+  IF(oft_env%head_proc)THEN
+    floop_hist%filedesc = 'ThinCurr frequency-response flux loop signals (Re, Im, Re_vac, Im_vac)'
+    CALL floop_hist%setup('thincurr_fr.dat')
+    DO i=1,sensors%nfloops
+      CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
+    END DO
+    CALL floop_hist%write_header
+    CALL floop_hist%open
+    CALL floop_hist%write(data_r8=senout(:,1))
+    CALL floop_hist%write(data_r8=senout(:,2))
+    CALL floop_hist%write(data_r8=senin(:,1))
+    CALL floop_hist%write(data_r8=senin(:,2))
+    CALL floop_hist%close
+  END IF
   DEALLOCATE(senout)
 END IF
 
