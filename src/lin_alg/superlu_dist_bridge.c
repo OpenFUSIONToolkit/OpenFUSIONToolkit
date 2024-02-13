@@ -150,11 +150,18 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 						SLU_NC, SLU_D, SLU_GE);
 			// Destroy and recreate
 			Destroy_LU(*n, grid, LUfactors->LUstruct);
+			LUstructFree(LUfactors->LUstruct);
+			SUPERLU_FREE(LUfactors->LUstruct);
+			LUstruct = (LUstruct_t *) SUPERLU_MALLOC(sizeof(LUstruct_t));
 			LUstructInit(*n, LUstruct);
 			if ( *iopt == 1 ) {
 				// Destroy and recreate
 				ScalePermstructFree(LUfactors->ScalePermstruct);
+				SUPERLU_FREE(LUfactors->ScalePermstruct);
+				ScalePermstruct = (ScalePermstruct_t *) SUPERLU_MALLOC(sizeof(ScalePermstruct_t));
 				ScalePermstructInit(*n, *n, ScalePermstruct);
+			} else {
+				ScalePermstruct = LUfactors->ScalePermstruct;
 			}
         }
 

@@ -713,7 +713,6 @@ IF(nnodes==1)THEN
   CALL fox_extractDataContent(current_node,fac_type,num=nread,iostat=ierr)
   IF(nread==1)self%type=TRIM(fac_type)
 END IF
-IF(self%package(1:5)=='super')self%package='super'
 IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'LU solver setup:'
   WRITE(*,'(2X,2A)')'- Package:  ',self%package
