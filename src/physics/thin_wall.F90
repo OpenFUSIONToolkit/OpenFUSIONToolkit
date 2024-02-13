@@ -264,6 +264,16 @@ IF(self%nholes>0)THEN
     END DO
   END DO
   DEALLOCATE(kfh_tmp)
+  !---Check for duplicates
+  DO i=1,self%nholes
+    DO j=1,self%nholes
+      IF(i==j.OR.self%hmesh(i)%n/=self%hmesh(j)%n)CYCLE
+      IF(ALL(self%hmesh(i)%lp_sorted==self%hmesh(j)%lp_sorted))THEN
+        WRITE(*,*)"Duplicate hole detected: ",i,j
+        CALL oft_abort("Duplicate hole detected","tw_setup",__FILE__)
+      END IF
+    END DO
+  END DO
 END IF
 ALLOCATE(self%pmap(self%mesh%np))
 self%pmap=0
