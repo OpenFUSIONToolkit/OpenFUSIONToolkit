@@ -425,6 +425,11 @@ def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=F
             cmake_lines.append("-DOFT_SUPERLU_DIST_ROOT:PATH={0}".format(mydict["SUPERLU_DIST_ROOT"]))
         if "UMFPACK_ROOT" in mydict:
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
+    if tmp_dict['OS_TYPE'] == 'Darwin':
+        result, errcode = run_command("sw_vers --productVersion")
+        if (errcode == 0) and (result.split('.')[0] == '13'):
+            cmake_lines.append('-DCMAKE_EXE_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
+            cmake_lines.append('-DCMAKE_SHARED_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
     cmake_lines += [os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))]
     cmake_lines_str = ' \\\n  '.join(cmake_lines)
     # Template string
