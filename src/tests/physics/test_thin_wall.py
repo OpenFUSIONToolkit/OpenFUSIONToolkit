@@ -100,7 +100,7 @@ def thin_wall_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,
     if vcoils is not None:
         coil_string += '<vcoils>\n'
         for pcoil in vcoils:
-            coil_string += '<coil_set type="2" res_per_len="10.0" radius="1.E-2"><coil npts="{0}">\n'.format(nPhi)
+            coil_string += '<coil_set type="2" res_per_len="1.256637E-5" radius="1.E-2"><coil npts="{0}">\n'.format(nPhi)
             R = pcoil[0]; Z = pcoil[1]
             for i in range(nPhi):
                 phi = i*phi_fac

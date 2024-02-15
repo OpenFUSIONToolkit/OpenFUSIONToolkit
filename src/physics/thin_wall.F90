@@ -1594,7 +1594,8 @@ DO i=1,tw_obj%n_vcoils
     END DO
     tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself + tw_obj%vcoils(i)%res_per_len(j)*dl
   END DO
-  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself*pi*4.d-7
+  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
+  tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself/mu0 ! Convert to magnetic units
   !
   eta_add=tw_obj%vcoils(i)%Rself
   j_add(1)=tw_obj%np_active+tw_obj%nholes+i
