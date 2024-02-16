@@ -113,6 +113,14 @@ tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
     [ctypes_numpy_array(numpy.float64,1), c_double])
 
 #
+tokamaker_get_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_get_field_eval,
+    [c_int, c_void_ptr_ptr, c_char_p])
+
+#
+tokamaker_apply_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_apply_field_eval,
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double, c_int_ptr, c_int, ctypes_numpy_array(numpy.float64,1)])
+
+#
 tokamaker_get_coil_currents = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_currents,
     [ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.int32,1)])
 
@@ -312,7 +320,41 @@ oft_in_template = """&runtime_options
 
 {MESH_DEF}
 """
-mu0 = numpy.pi*4.E-7
+
+
+class TokaMaker_field_interpolator():
+    '''! Interpolation class for Grad-Shafranov fields'''
+    def __init__(self,int_obj,int_type,dim,fbary_tol=1.E-8):
+        '''! Initialize interpolation object
+
+        @param int_obj Address of FORTRAN interpolation class
+        @param int_type Interpolation type (see @ref TokaMaker.TokaMaker.get_field_eval "get_field_eval")
+        @param dim Dimension of vector field
+        @param fbary_tol Tolerance for physical to logical mapping
+        '''
+        self.cell = c_int(-1)
+        self.int_type = int_type
+        self.dim = dim
+        self.val = numpy.zeros((self.dim,), dtype=numpy.float64)
+        self.int_obj = int_obj
+        self.fbary_tol = fbary_tol
+    
+    def __del__(self):
+        '''Destroy underlying interpolation object'''
+        pt_eval = numpy.zeros((3,), dtype=numpy.float64)
+        tokamaker_apply_field_eval(-self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
+
+    def eval(self,pt):
+        '''! Evaluate field at a given location
+
+        @param pt Location for evaluation [2]
+        @result Field at evaluation point [self.dim]
+        '''
+        pt_eval = numpy.zeros((3,), dtype=numpy.float64)
+        pt_eval[:2] = pt
+        tokamaker_apply_field_eval(self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
+        return self.val
+
 
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
@@ -914,6 +956,28 @@ class TokaMaker():
         if psi0.shape[0] != self.np:
             raise ValueError('Incorrect shape of "psi0", should be [np]')
         tokamaker_set_psi_dt(psi0,c_double(dt))
+    
+    def get_field_eval(self,field_type):
+        r'''! Create field interpolator for vector potential
+
+        @param imode Index of eigenstate
+        @result Field interpolation object
+        '''
+        #
+        mode_map = {'B': 1, 'PSI': 2, 'F': 3, 'P': 4}
+        imode = mode_map.get(field_type.upper())
+        if imode is None:
+            raise ValueError('Invalid field type ("B", "psi", "F", "P")')
+        #
+        int_obj = c_void_p()
+        cstring = c_char_p(b""*200)
+        tokamaker_get_field_eval(imode,ctypes.byref(int_obj),cstring)
+        if cstring.value != b'':
+            raise Exception(cstring.value)
+        field_dim = 1
+        if imode == 1:
+            field_dim = 3
+        return TokaMaker_field_interpolator(int_obj,imode,field_dim)
     
     def get_coil_currents(self):
         '''! Get currents in each coil [A-turns]

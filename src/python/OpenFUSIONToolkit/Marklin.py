@@ -45,7 +45,7 @@ oft_in_template = """&runtime_options
 {MESH_DEF}
 """
 
-class OFT_field_interpolator():
+class Marklin_field_interpolator():
     '''! Interpolation class for force-free eigenstate vector fields'''
     def __init__(self,int_obj,int_type,dim,fbary_tol=1.E-8):
         '''! Initialize interpolation object
@@ -61,6 +61,11 @@ class OFT_field_interpolator():
         self.val = numpy.zeros((self.dim,), dtype=numpy.float64)
         self.int_obj = int_obj
         self.fbary_tol = fbary_tol
+    
+    def __del__(self):
+        '''Destroy underlying interpolation object'''
+        pt_eval = numpy.zeros((3,), dtype=numpy.float64)
+        marklin_apply_int(-self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.val)
 
     def eval(self,pt):
         '''! Evaluate field at a given location
@@ -174,7 +179,7 @@ class Marklin():
         marklin_get_aint(imode,ctypes.byref(int_obj),cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
-        return OFT_field_interpolator(int_obj,1,3)
+        return Marklin_field_interpolator(int_obj,1,3)
 
     def get_binterp(self,imode):
         r'''! Create field interpolator for magnetic field
@@ -188,4 +193,4 @@ class Marklin():
         marklin_get_bint(imode,ctypes.byref(int_obj),cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
-        return OFT_field_interpolator(int_obj,2,3)
+        return Marklin_field_interpolator(int_obj,2,3)
