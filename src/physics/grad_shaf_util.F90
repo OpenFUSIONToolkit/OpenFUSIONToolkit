@@ -660,8 +660,17 @@ class(gs_eq), intent(inout) :: self !< G-S object
 real(8), intent(out) :: vloop !< loop voltage
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
-real(8) :: itor_loc,j_NI_loc,eta_jsq,itor,goptmp(3,3),v
-real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),I_NI,psitmp(1),gpsitmp(3)
+real(8) :: itor_loc !< local toroidal current in integration
+real(8) :: itor !< toroidal current
+real(8) :: j_NI_loc !< local non-inductive current in integration
+real(8) :: I_NI !< non-inductive F*F'
+real(8) :: eta_jsq !< eta*j_NI**2 
+real(8) :: goptmp(3,3) !< needs docs
+real(8) :: v !< volume
+real(8) :: pt(3) !< radial coordinate
+real(8) :: curr_cent(2) !< needs docs
+real(8) :: psitmp(1) !< magnetic flux coordinate
+real(8) :: gpsitmp(3) !< needs docs
 integer(4) :: i,m
 !---
 psi_eval%u=>self%psi
@@ -672,7 +681,7 @@ eta_jsq = 0.d0
 I_NI = 0.d0
 itor = 0.d0
 vloop = 0.d0
-!!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol) &
+!!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc) &
 !!$omp reduction(+:itor) reduction(+:vol) &
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE

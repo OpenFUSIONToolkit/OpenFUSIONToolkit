@@ -707,7 +707,7 @@ class TokaMaker():
             self._F0 = foffset
         tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()),c_char_p(eta_file.encode()),c_char_p(f_NI_file.encode()))
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, eta_prof=None, ffp_NI_prof=None):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations 
@@ -727,9 +727,6 @@ class TokaMaker():
             pp_file = 'tokamaker_p.prof'
             create_prof_file(self, pp_file, pp_prof, "P'")
         eta_file = 'none'
-        if eta_prof is not None:
-            eta_file = 'tokamaker_eta.prof'
-            create_prof_file(self, eta_file, eta_prof, "eta'")
         ffp_NI_file = 'none'
         if ffp_NI_prof is not None:
             ffp_NI_file = 'tokamaker_ffp_NI.prof'
@@ -738,7 +735,7 @@ class TokaMaker():
             self._F0 = foffset
         self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
 
-    def set_resistivity(self, foffset=None, eta_prof=None):
+    def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
 
         Arrays should have the form array[i,:] = (\f$\hat{\psi}_i\f$, \f$f(\hat{\psi}_i)\f$) and span
@@ -753,7 +750,7 @@ class TokaMaker():
             eta_file = 'tokamaker_eta.prof'
             create_prof_file(self, eta_file, eta_prof, "eta'")
         ffp_NI_file = 'none'
-        self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
+        self.load_profiles(ffp_file,None,pp_file,eta_file,ffp_NI_file)
 
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
@@ -1044,7 +1041,7 @@ class TokaMaker():
             ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Li))
         return Ip.value, centroid, vol.value, pvol.value, dflux.value, tflux.value, Li.value
 
-    def calc_loopvoltage(self, eta=None, ffp_NI=None):
+    def calc_loopvoltage(self):
         r'''! Get plasma loop voltage
 
         @param eta Dictionary object containing resistivity profile ['y'] and sampled locations 
@@ -1055,16 +1052,12 @@ class TokaMaker():
         '''
         V_loop = c_double()
 
-        if eta is None:
-            print('Error: eta array not specified')
-        elif ffp_NI is None:
-            print('Error: eta array not specified')
-        else:
-            self.set_profiles(ffp_NI_prof=ffp_NI)
-            self.set_resistivity(eta_prof=eta)
-            tokamaker_gs_calc_vloop(ctypes.byref(V_loop))
+        tokamaker_gs_calc_vloop(ctypes.byref(V_loop))
 
-        return V_loop.value
+        if V_loop.value < 0.:
+            raise ValueError('eta array not specified')
+        else:
+            return V_loop.value
 
     def get_profiles(self,psi=None,psi_pad=1.E-8,npsi=50):
         r'''! Get G-S source profiles

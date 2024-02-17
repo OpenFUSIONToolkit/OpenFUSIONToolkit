@@ -387,6 +387,10 @@ END SUBROUTINE tokamaker_get_globals
 !
 SUBROUTINE tokamaker_gs_calc_vloop(vloop) BIND(C,NAME="tokamaker_gs_calc_vloop")
 REAL(c_double), INTENT(out) :: vloop
+IF(.NOT.ASSOCIATED(gs_global%eta))THEN
+  vloop=-1.d0
+  RETURN
+END IF
 CALL gs_calc_vloop(gs_global,vloop)
 END SUBROUTINE tokamaker_gs_calc_vloop
 !
