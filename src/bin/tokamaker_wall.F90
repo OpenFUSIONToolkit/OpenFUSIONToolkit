@@ -1,5 +1,5 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> Experiment specific components.
 !!
@@ -62,7 +62,7 @@ END IF
 END FUNCTION ltx_eta_set
 END MODULE exp_geom  
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> Handle non-axisymmetric walls
 !!
@@ -713,7 +713,7 @@ DEALLOCATE(eig_vec,etatmp,corr_mat)
 END SUBROUTINE nonax_eigs
 END MODULE nonax_wall
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> Driver program for GS equilibria
 !!

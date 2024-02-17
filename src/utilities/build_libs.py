@@ -996,6 +996,9 @@ class OpenBLAS(package):
         if self.threaded:
             self.config_dict['COMP_DEFS'].append("-DBLAS_THREADED")
             self.config_dict['COMP_DEFS'].append("-DLAPACK_THREADED")
+            self.config_dict['OpenBLAS_THREADS'] = True
+        else:
+            self.config_dict['OpenBLAS_THREADS'] = False
         # Installation check files
         self.install_chk_files = [self.config_dict['BLAS_LIB_PATH']]
         #
@@ -1382,6 +1385,8 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
             "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-DCMAKE_INSTALL_LIBDIR=lib"
         ]
+        if self.config_dict.get('OpenBLAS_THREADS',False):
+            AMD_CMAKE_options.append("-DCMAKE_EXE_LINKER_FLAGS={0}".format(self.config_dict['OMP_FLAGS']))
         config_CMAKE_options = AMD_CMAKE_options.copy() + [
             "-DBLAS_ROOT:PATH={BLAS_ROOT}",
             "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
@@ -1670,7 +1675,7 @@ PETSC_LIB = -L{PETSC_LIB} {PETSC_LIBS}\n"""
 
 # Start of main script
 parser = argparse.ArgumentParser()
-parser.description = "Third-party library build script for the OpenFUSIONToolkit"
+parser.description = "Third-party library build script for the Open FUSION Toolkit"
 parser.add_argument("--download_only", action="store_true", default=False, help="Only download packages")
 parser.add_argument("--setup_only", action="store_true", default=False, help="Download and setup build, but do not actually build")
 parser.add_argument("--nthread", default=1, type=int, help="Number of threads to use for make (default=1)")
@@ -1679,7 +1684,7 @@ parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
 parser.add_argument("--cross_compile_host", default=None, type=str, help="Host type for cross-compilation")
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
-group = parser.add_argument_group("CMAKE", "CMAKE configure options for the OpenFUSIONToolkit")
+group = parser.add_argument_group("CMAKE", "CMAKE configure options for the Open FUSION Toolkit")
 group.add_argument("--build_cmake", default=0, type=int, choices=(0,1), help="Build CMAKE instead of using system version?")
 group.add_argument("--oft_build_debug", default=0, type=int, choices=(0,1), help="Build debug version of OFT?")
 group.add_argument("--oft_build_python", default=1, type=int, choices=(0,1), help="Build OFT Python libraries? (default: 1)")

@@ -3,7 +3,7 @@ Composite Finite Element Representations      {#doc_comp_fem}
 
 [TOC]
 
-The OpenFUSIONToolkit supports the construction of composite vectors and matrices from sets of finite element
+The Open FUSION Toolkit supports the construction of composite vectors and matrices from sets of finite element
 fields. This is primarily used to support Multi-Physics solution where multiple fields are advanced
 simultaneously. It can also be used to represent vector valued fields with scalar finite elements
 for each component. A composite FE representation is defined in terms of the sub-field representations

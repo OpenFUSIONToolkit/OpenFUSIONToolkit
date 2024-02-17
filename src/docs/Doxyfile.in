@@ -3,7 +3,7 @@
 #---------------------------------------------------------------------------
 
 PROJECT_NAME           = The Open FUSION Toolkit
-PROJECT_NUMBER         =
+PROJECT_NUMBER         = @CMAKE_PROJECT_VERSION@@OFT_VER_SUFFIX@
 PROJECT_BRIEF          = "Modeling tools for plasma and fusion research and engineering"
 PROJECT_LOGO           =
 
@@ -14,8 +14,8 @@ TAB_SIZE               = 2
 NUM_PROC_THREADS       = 1
 
 OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/doc
-CREATE_SUBDIRS         = YES
-CREATE_SUBDIRS_LEVEL   = 8
+CREATE_SUBDIRS         = NO
+CREATE_SUBDIRS_LEVEL   = 0
 SHORT_NAMES            = NO
 OUTPUT_LANGUAGE        = English
 LAYOUT_FILE            = @CMAKE_CURRENT_SOURCE_DIR@/docs/OFTLayout.xml
@@ -68,7 +68,7 @@ RESOLVE_UNNAMED_PARAMS = YES
 HIDE_UNDOC_MEMBERS     = NO
 HIDE_UNDOC_CLASSES     = NO
 HIDE_IN_BODY_DOCS      = NO
-CASE_SENSE_NAMES       = NO
+CASE_SENSE_NAMES       = YES
 HIDE_SCOPE_NAMES       = YES
 
 SHOW_HEADERFILE        = YES
@@ -128,9 +128,7 @@ HTML_FORMULA_FORMAT    = png
 FORMULA_FONTSIZE       = 14
 FORMULA_MACROFILE      =
 USE_MATHJAX            = YES
-MATHJAX_VERSION        = MathJax_2
-MATHJAX_FORMAT         = HTML-CSS
-MATHJAX_RELPATH        = https://cdn.jsdelivr.net/npm/mathjax@2 # https://www.mathjax.org
+MATHJAX_VERSION        = MathJax_3
 MATHJAX_EXTENSIONS     =
 MATHJAX_CODEFILE       =
 
@@ -195,9 +193,9 @@ HIDE_UNDOC_RELATIONS   = YES
 HAVE_DOT               = YES
 DOT_NUM_THREADS        = 0
 DOT_FONTPATH           =
-CLASS_GRAPH            = YES # NO
-COLLABORATION_GRAPH    = YES
-GROUP_GRAPHS           = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = NO
+GROUP_GRAPHS           = NO
 UML_LOOK               = NO
 UML_LIMIT_NUM_FIELDS   = 10
 DOT_UML_DETAILS        = NO
@@ -207,12 +205,11 @@ INCLUDE_GRAPH          = NO
 INCLUDED_BY_GRAPH      = NO
 CALL_GRAPH             = NO
 CALLER_GRAPH           = NO
-GRAPHICAL_HIERARCHY    = YES
-DIRECTORY_GRAPH        = YES
+GRAPHICAL_HIERARCHY    = NO
+DIRECTORY_GRAPH        = NO
 DIR_GRAPH_MAX_DEPTH    = 1
 DOT_IMAGE_FORMAT       = png
 INTERACTIVE_SVG        = NO
-#DOT_PATH               = /usr/local/graphviz-2.14/bin
 DOTFILE_DIRS           =
 MSCFILE_DIRS           =
 DIAFILE_DIRS           =

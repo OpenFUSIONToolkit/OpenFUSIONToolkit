@@ -1,9 +1,9 @@
 ########################
-# OpenFUSIONToolkit
+# Open FUSION Toolkit
 ########################
 cmake_minimum_required( VERSION 3.12 )
-project( OpeNFUSIONToolkit )
-enable_language( Fortran )
+project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
+set( OFT_VER_SUFFIX "-beta2" CACHE INTERNAL "Version suffix" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
 
 option(OFT_BUILD_TESTS "Build tests?" OFF)
@@ -14,16 +14,68 @@ option(OFT_DEBUG_STACK "Build with internal debugging stack?" OFF)
 option(OFT_PROFILE "Build with internal profiling enabled?" OFF)
 option(OFT_BUILD_PYTHON "Build experimental Python wrappers?" OFF)
 option(OFT_BUILD_DOCS "Build documentation?" OFF)
+option(OFT_DOCS_ONLY "Build documentation only?" OFF)
 option(OFT_PACKAGE_BUILD "Perform a destributable package?" OFF)
-option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" OFF)
+option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" ON)
 
 # Internal variables
 set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")
 set(OFT_PYTHON_BINS CACHE INTERNAL "package_python_binaries")
+if(OFT_PACKAGE_NIGHTLY)
+  execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_REV_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  set( OFT_VER_SUFFIX "-${GIT_REV_HASH}" CACHE INTERNAL "Version suffix" )
+endif()
+
+########################
+# Build documentation
+########################
+if(OFT_BUILD_DOCS)
+  find_package(Doxygen REQUIRED)
+
+  file(REMOVE_RECURSE ${CMAKE_CURRENT_SOURCE_DIR}/docs/generated)
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs/generated)
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/mainpage.in ${CMAKE_CURRENT_SOURCE_DIR}/docs/generated/mainpage.md @ONLY)
+
+  find_package(Python)
+  add_custom_target( build_ex_docs
+    COMMAND Python::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/utilities/generate_doc.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Building documentation from examples"
+    VERBATIM 
+  )
+
+  add_custom_target( docs ALL
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Generating documentation with Doxygen"
+    VERBATIM
+  )
+  add_dependencies(docs build_ex_docs)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/doc/Documentation.html"
+    "<meta http-equiv=\"REFRESH\" content=\"0;URL=html/index.html\">"
+  )
+
+  install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc"
+    DESTINATION .
+    COMPONENT docs
+  )
+
+  if(OFT_DOCS_ONLY)
+    return()
+  endif()
+endif()
 
 ########################
 # Compiler and flag setup
 ########################
+enable_language( C )
+enable_language( CXX )
+enable_language( Fortran )
 if ("${CMAKE_Fortran_COMPILER_ID}" MATCHES "Intel")
   set( CMAKE_C_FLAGS_DEBUG "-g -O0" )
   set( CMAKE_CXX_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
@@ -320,51 +372,16 @@ endif()
 add_subdirectory( bin )
 
 ########################
-# Build documentation
-########################
-if(OFT_BUILD_DOCS)
-  find_package(Doxygen REQUIRED)
-
-  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in)
-  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
-  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
-
-  find_package(Python)
-  add_custom_target( build_ex_docs
-    COMMAND Python::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/utilities/generate_doc.py
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Building documentation from examples"
-    VERBATIM 
-  )
-
-  add_custom_target( docs ALL
-    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Generating documentation with Doxygen"
-    VERBATIM
-  )
-  add_dependencies(docs build_ex_docs)
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/doc/Documentation.html"
-    "<meta http-equiv=\"REFRESH\" content=\"0;URL=html/index.html\">"
-  )
-
-  install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc"
-    DESTINATION .
-    COMPONENT docs
-  )
-endif()
-
-########################
 # Packaging
 ########################
 if(OFT_PACKAGE_BUILD)
   include(InstallRequiredSystemLibraries)
   set(CPACK_STRIP_FILES      ON)
-  set(CPACK_PACKAGE_NAME     ${PROJECT_NAME} )
-  set(CPACK_PACKAGE_VERSION  1.0.0-beta1)
+  set(CPACK_PACKAGE_NAME     ${CMAKE_PROJECT_NAME} )
+  set(CPACK_PACKAGE_VERSION  ${CMAKE_PROJECT_VERSION}${OFT_VER_SUFFIX})
   set(CPACK_PACKAGE_CONTACT  "Chris Hansen")
   set(CPACK_PACKAGE_VENDOR   "Chris Hansen")
-  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "OpenFUSIONToolkit for plasma equilibrium and dynamic simulation.")
+  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open FUSION Toolkit for plasma equilibrium and dynamic simulation.")
   set(CPACK_PACKAGE_DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION_SUMMARY})
 
   set(CPACK_RESOURCE_FILE_LICENSE     ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE)
@@ -387,16 +404,7 @@ if(OFT_PACKAGE_BUILD)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE ${CMAKE_CURRENT_BINARY_DIR}/LICENSE COPYONLY)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../README.md ${CMAKE_CURRENT_BINARY_DIR}/README.md COPYONLY)
   endif()
-  if(OFT_PACKAGE_NIGHTLY)
-    execute_process(
-      COMMAND git rev-parse --short HEAD
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      OUTPUT_VARIABLE GIT_REV_HASH
-      OUTPUT_STRIP_TRAILING_WHITESPACE)
-    set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}_${GIT_REV_HASH}-${CPACK_SYSTEM_NAME}-${CMAKE_Fortran_COMPILER_ID}-${CMAKE_HOST_SYSTEM_PROCESSOR})
-  else()
-    set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME}-${CMAKE_Fortran_COMPILER_ID}-${CMAKE_HOST_SYSTEM_PROCESSOR})
-  endif()
+  set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME}-${CMAKE_Fortran_COMPILER_ID}-${CMAKE_HOST_SYSTEM_PROCESSOR})
 
   include(CPack)
   cpack_add_component( app REQUIRED )

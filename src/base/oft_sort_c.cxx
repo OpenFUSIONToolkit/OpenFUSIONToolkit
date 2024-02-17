@@ -1,4 +1,4 @@
-// Sorting and search functions for the OpenFUSIONToolkit
+// Sorting and search functions for the Open FUSION Toolkit
 #include <algorithm>
 #include <vector>
 
