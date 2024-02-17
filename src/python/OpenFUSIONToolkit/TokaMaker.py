@@ -711,8 +711,9 @@ class TokaMaker():
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
         @param foffset Value of \f$F0=R0*B0\f$
-        @param p_file File containing $\eta$ definition
-        @param p_file File containing non-inductive FF' definition
+        @param p_file File containing \f$P'\f$ definition
+        @param eta_file File containing $\eta$ definition
+        @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
         '''
         if foffset is not None:
             self._F0 = foffset

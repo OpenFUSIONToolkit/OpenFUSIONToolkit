@@ -208,7 +208,10 @@ END SUBROUTINE tokamaker_setup
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_load_profiles(f_file,f_offset,p_file,eta_file,f_NI_file) BIND(C,NAME="tokamaker_load_profiles")
-CHARACTER(KIND=c_char), INTENT(in) :: f_file(80),p_file(80),eta_file(80),f_NI_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: f_file(80) !< F*F' prof.in file
+CHARACTER(KIND=c_char), INTENT(in) :: p_file(80) !< P' prof.in file
+CHARACTER(KIND=c_char), INTENT(in) :: eta_file(80) !< Resistivity (eta) prof.in file
+CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(80) !< Non-inductive F*F' prof.in file
 REAL(c_double), VALUE, INTENT(in) :: f_offset !< Needs docs
 CHARACTER(LEN=80) :: tmp_str
 CALL copy_string_rev(f_file,tmp_str)
