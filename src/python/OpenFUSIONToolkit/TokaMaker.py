@@ -313,6 +313,7 @@ oft_in_template = """&runtime_options
 {MESH_DEF}
 """
 mu0 = numpy.pi*4.E-7
+kB_m3_eV = 1.60217663e-19
 
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
@@ -1047,41 +1048,39 @@ class TokaMaker():
                     break
             return self.x_points[:i,:], self.diverted
     
-    def compute_Hmode_solution(self,
-                               psi_norm, # sample locations in normalized Psi
-                               n_psi, # number of normalized Psi 
-                               ne, # electron density profile, sampled over psi_norm
-                               Te, # electron temperature profile [eV], sampled over psi_norm
-                               ni, # ion density profile, sampled over psi_norm
-                               Ti, # ion temperature profile [eV], sampled over psi_norm
-                               inductive_jtor, # inductive toroidal current, sampled over psi_norm
-                               Zeff, # effective Z profile, sampled over psi_norm
-                               R0, # major radius
-                               nis = None, # list of impurity density profiles; NOT USED
-                               Zis = [1.], # list of impurity profile atomic numbers; NOT USED
-                               ### NOTE: if using nis and Zis, @param dnis_dpsi must be specified as
-                               ### a list of impurity gradients over Psi. See
-                               ### See https://omfit.io/_modules/omfit_classes/utils_fusion.html for 
-                               ### more detailed documentation 
-                               max_iterations=6, # maximum number of H-mode mygs.solve() iterations
-                               initialize_Lmode=True
-                               ):
+    def compute_Hmode_solution(self,psi_norm,n_psi,ne,Te,ni,Ti,inductive_jtor,Zeff,R0,nis=None,Zis=[1.],max_iterations=6,initialize_eq=True):
         '''! Self-consistently compute bootstrap contribution from H-mode profiles,
         and iterate solution until all functions of Psi converge. 
 
-        @params See above
-        @param initialize_Lmode If True, cubic polynomials will be fit to the core of all kinetic profiles
-        in order to flatten the pedestal. This will initialize the G-S solution at an estimated L-mode 
-        pressure profile and using the L-mode bootstrap contribution. Initializing the solver in L-mode 
-        before raising the pedestal height increases the likelihood that the solver will converge in H-mode. 
+        @param psi_norm Sample locations in normalized Psi
+        @param n_psi Number of normalized Psi samples
+        @param ne Electron density profile, sampled over psi_norm
+        @param Te Electron temperature profile [eV], sampled over psi_norm
+        @param ni Ion density profile, sampled over psi_norm
+        @param Ti Ion temperature profile [eV], sampled over psi_norm
+        @param inductive_jtor Inductive toroidal current, sampled over psi_norm
+        @param Zeff Effective Z profile, sampled over psi_norm
+        @param R0 Major radius
+        @param nis List of impurity density profiles; NOT USED
+        @param Zis List of impurity profile atomic numbers; NOT USED. NOTE: if 
+        using nis and Zis, dnis_dpsi must be specified in sauter_bootstrap() as 
+        a list of impurity gradients over Psi. See 
+        https://omfit.io/_modules/omfit_classes/utils_fusion.html for more 
+        detailed documentation 
+        @param max_iterations Maximum number of H-mode mygs.solve() iterations
+        @param initialize_eq Initialize equilibrium solve with flattened pedestal. If True, 
+        cubic polynomials will be fit to the core of all kinetic profiles in order to 
+        flatten the pedestal. This will initialize the G-S solution at an estimated L-mode 
+        pressure profile and using the L-mode bootstrap contribution. Initializing the solver 
+        in L-mode before raising the pedestal height increases the likelihood that the solver 
+        will converge in H-mode.
         '''
-
         try:
             from omfit_classes.utils_fusion import sauter_bootstrap
         except:
-            raise ImportError('omfit_classes.utils_fusio not installed')
+            raise ImportError('omfit_classes.utils_fusion not installed')
         
-        def scale_jtor_to_ffprime(jtor, R_avg, one_over_R_avg, pprime, mu0):
+        def ffprime_from_jtor_pprime(jtor, pprime, R_avg, one_over_R_avg):
             r'''! Convert from J_toroidal to FF' using Grad-Shafranov equation
 
             @param jtor Toroidal current profile
@@ -1089,10 +1088,10 @@ class TokaMaker():
             @param one_over_R_avg Flux averaged 1/R, calculated by TokaMaker
             @param pprime dP/dPsi profile
             '''
-            ffprime = (jtor -  R_avg * (-pprime)) * (2.*mu0 / one_over_R_avg) ####### FACTOR OF 2?
+            ffprime = (jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg) ####### FACTOR OF 2?
             return ffprime
 
-        pressure = (1.602e-19 * ne * Te) + (1.602e-19 * ni * Ti) # 1.602e-19 * [m^-3] * [eV] = [Pa]
+        pressure = (kB_m3_eV * ne * Te) + (kB_m3_eV * ni * Ti) # 1.602e-19 * [m^-3] * [eV] = [Pa]
 
         ### Set new pax target
         self.set_targets(pax=pressure[0])
@@ -1148,13 +1147,11 @@ class TokaMaker():
                                     dn_e_dpsi=dn_e_dpsi,
                                     dnis_dpsi=dn_i_dpsi,
                                     )[0]
-
-            mu0 = 1.2566370614359173e-06
             
             j_BS[-1] = 0. ### FORCING j_BS TO BE ZERO AT THE EDGE
             jtor_total = inductive_jtor + j_BS
             
-            ffprime = scale_jtor_to_ffprime(jtor_total, ravgs[0], ravgs[1], pprime, mu0)
+            ffprime = ffprime_from_jtor_pprime(jtor_total, pprime, ravgs[0], ravgs[1])
 
             ffp_prof = {
                 'type': 'linterp',
@@ -1170,14 +1167,14 @@ class TokaMaker():
 
             return pp_prof, ffp_prof
 
-        if initialize_Lmode:
+        if initialize_eq:
             x_trimmed = psi_norm.tolist().copy()
             ne_trimmed = ne.tolist().copy()
             Te_trimmed = Te.tolist().copy()
             ni_trimmed = ni.tolist().copy()
             Ti_trimmed = Ti.tolist().copy()
 
-            ### Remove profile values from psi_norm ~ 0.5 to 0.9, leaving single value at the edge
+            ### Remove profile values from psi_norm ~0.5 to ~0.99, leaving single value at the edge
             mid_index = int(len(x_trimmed)/2)
             end_index = len(x_trimmed)-1
             del x_trimmed[mid_index:end_index]
@@ -1197,15 +1194,18 @@ class TokaMaker():
             Lmode_ni = ni_model(psi_norm)
             Lmode_Ti = Ti_model(psi_norm)
 
-            Lmode_pressure = (1.602e-19 * Lmode_ne * Lmode_Te) + (1.602e-19 * Lmode_ni * Lmode_Ti)
-
-            print('>>> Initializing equilibrium with estimated L-mode profiles:')
+            Lmode_pressure = (kB_m3_eV * Lmode_ne * Lmode_Te) + (kB_m3_eV * Lmode_ni * Lmode_Ti)
 
             ### Iterate on L-mode bootstrap contribution until reasonably converged
+            print('>>> Initializing equilibrium with pedestal removed:')
             n = 0
             flag = -1
             while n < max_iterations:
+                print('> Iteration '+str(n)+':')
                 Lmode_pp_prof, Lmode_ffp_prof = profile_iteration(self, Lmode_pressure, Lmode_ne, Lmode_ni, Lmode_Te, Lmode_Ti, psi_norm, n_psi, Zeff, inductive_jtor, R0, nis, Zis)
+
+                Lmode_pp_prof['y'] -= Lmode_pp_prof['y'][-1] # Enforce 0.0 at edge
+                Lmode_ffp_prof['y'] -= Lmode_ffp_prof['y'][-1] # Enforce 0.0 at edge
 
                 self.set_profiles(ffp_prof=Lmode_ffp_prof,pp_prof=Lmode_pp_prof)
 
@@ -1222,9 +1222,12 @@ class TokaMaker():
         flag = -1
         print('>>> Iterating on H-mode equilibrium solution:')
         while n < max_iterations:
-            
+            print('> Iteration '+str(n)+':')
             pp_prof, ffp_prof = profile_iteration(self, pressure, ne, ni, Te, Ti, psi_norm, n_psi, Zeff, inductive_jtor, R0, nis, Zis)
 
+            pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+            ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+        
             self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
 
             flag = self.solve()
