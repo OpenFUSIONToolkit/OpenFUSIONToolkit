@@ -1,0 +1,91 @@
+name: Open FUSION Toolkit code coverage build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, reopened, synchronize]
+  
+jobs:
+  build:
+    name: Code coverage
+    runs-on: ubuntu-22.04
+    env:
+      CC: gcc-13
+      CXX: g++-13
+      FC: gfortran-13
+      OMP_NUM_THREADS: 1
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install prerequisites
+      run: |
+        sudo apt -y install lcov
+        pip3 install pytest numpy scipy h5py triangle
+
+    - name: Cache external libraries
+      id: cache-ext-libs
+      uses: actions/cache@v4
+      with:
+        path: libs
+        key: ${{ runner.os }}-cov_build-${{ hashFiles('src/utilities/build_libs.py') }}
+
+    - if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
+      name: Create build dir
+      run: mkdir libs
+
+    - name: Check compilers
+      run: |
+        $CC --version
+        $CXX --version
+        $FC --version
+
+    - name: Build external
+      shell: bash
+      working-directory: libs
+      run: >
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
+        --ref_blas --build_mpi=1 --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1
+        --build_arpack=1 --oft_build_tests=1 --oft_build_coverage=1
+
+    - uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: Library failure log
+        path: libs/build/build_error.log
+    
+    - name: Remove external build directory
+      shell: bash
+      working-directory: libs
+      run: rm -rf build
+
+    - name: Configure OFT
+      shell: bash
+      working-directory: libs
+      run: bash config_cmake.sh
+
+    - name: Build OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: make
+
+    - name: Test OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: make test
+    
+    - name: Generate coverage report
+      shell: bash
+      working-directory: libs/build_release
+      run: |
+        lcov -c --directory . --output-file main_coverage.info --gcov-tool gcov-13
+        lcov -r main_coverage.info -o cleaned_coverage.txt '/opt/*' '/usr/*'
+    
+    - uses: codecov/codecov-action@v4
+      with:
+        file: libs/build_release/cleaned_coverage.txt
+        token: ${{ secrets.CODECOV_TOKEN }}
+        slug: hansec/OpenFUSIONToolkit
+        verbose: true

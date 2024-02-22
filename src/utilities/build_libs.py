@@ -343,7 +343,7 @@ EXT_LIBS = {EXT_LIBS_LINE}
         fid.write(string)
 
 
-def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=False,build_examples=False,build_docs=False,package_build=False):
+def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=False,build_examples=False,build_docs=False,build_coverage=False,package_build=False):
     def bool_to_string(val):
         if val:
             return "TRUE"
@@ -366,6 +366,7 @@ def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=F
         "-DOFT_BUILD_PYTHON:BOOL={0}".format(bool_to_string(build_python)),
         "-DOFT_BUILD_DOCS:BOOL={0}".format(bool_to_string(build_docs)),
         "-DOFT_PACKAGE_BUILD:BOOL={0}".format(bool_to_string(package_build)),
+        "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
         "-DOFT_USE_OpenMP:BOOL=TRUE",
         "-DCMAKE_C_COMPILER:FILEPATH={CC}",
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
@@ -1697,6 +1698,7 @@ group.add_argument("--oft_build_tests", default=0, type=int, choices=(0,1), help
 group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples?")
 group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help="Build OFT documentation? (requires doxygen)")
 group.add_argument("--oft_package", action="store_true", default=False, help="Perform a packaging build of OFT?")
+group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
 #
 group = parser.add_argument_group("MPI", "MPI package options")
 group.add_argument("--build_mpi", default=0, type=int, choices=(0,1), help="Build MPI libraries?")
@@ -1869,5 +1871,6 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         build_tests=(options.oft_build_tests == 1),
         build_examples=(options.oft_build_examples == 1),
         build_docs=(options.oft_build_docs == 1),
+        build_coverage=(options.oft_build_coverage == 1),
         package_build=options.oft_package
     )

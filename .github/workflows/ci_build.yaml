@@ -9,7 +9,7 @@ on:
   
 jobs:
   build:
-    name: ${{ matrix.config.name }}
+    name: ${{ format('{0} ({1})', matrix.config.name, matrix.parallel) }}
     runs-on: ${{ matrix.config.os }}
     env:
       CC: ${{ matrix.config.cc }}
@@ -19,6 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        parallel: ["openmp", "mpi_openmp"]
         config:
         - {
             name: "Ubuntu 20.04 GCC 10",
@@ -52,7 +53,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ runner.os }}-build-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ runner.os }}-build-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       name: Create build dir
@@ -64,12 +65,22 @@ jobs:
         $CXX --version
         $FC --version
 
-    - name: Build external
+    - if: ${{ matrix.parallel == 'openmp' }}
+      name: Build external (OpenMP)
       shell: bash
       working-directory: libs
       run: >
         ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
         --build_umfpack=1 --build_arpack=1 --oft_build_tests=1
+    
+    - if: ${{ matrix.parallel == 'mpi_openmp' }}
+      name: Build external (MPI+OpenMP)
+      shell: bash
+      working-directory: libs
+      run: >
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
+        --build_mpi=1 --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1
+        --build_arpack=1 --oft_build_tests=1
 
     - uses: actions/upload-artifact@v4
       if: failure()
@@ -97,7 +108,16 @@ jobs:
       working-directory: libs/build_release
       run: make install
 
-    - name: Test OFT
+    - name: Test OFT (OpenMP)
+      if: ${{ matrix.parallel == 'openmp' }}
       shell: bash
       working-directory: libs/build_release
       run: make test
+    
+    - name: Test OFT (MPI+OpenMP)
+      if: ${{ matrix.parallel == 'mpi_openmp' }}
+      shell: bash
+      working-directory: libs/build_release
+      run: make test
+      env:
+        OMP_NUM_THREADS: 1
