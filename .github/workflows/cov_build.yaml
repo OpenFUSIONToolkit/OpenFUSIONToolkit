@@ -15,10 +15,11 @@ jobs:
       CC: gcc-13
       CXX: g++-13
       FC: gfortran-13
-      OMP_NUM_THREADS: 1
+      OMP_NUM_THREADS: 2
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repo
+      uses: actions/checkout@v4
 
     - name: Install prerequisites
       run: |
@@ -32,8 +33,8 @@ jobs:
         path: libs
         key: cov_build-${{ hashFiles('src/utilities/build_libs.py') }}
 
-    - if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
-      name: Create build dir
+    - name: Create build dir
+      if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       run: mkdir libs
 
     - name: Check compilers
@@ -50,7 +51,8 @@ jobs:
         --ref_blas --build_mpi=1 --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1
         --build_arpack=1 --oft_build_tests=1 --oft_build_coverage
 
-    - uses: actions/upload-artifact@v4
+    - name: Upload library failure log
+      uses: actions/upload-artifact@v4
       if: failure()
       with:
         name: Library failure log
@@ -83,7 +85,8 @@ jobs:
         lcov -c --directory . --output-file main_coverage.info --gcov-tool gcov-13
         lcov -r main_coverage.info -o cleaned_coverage.txt '/opt/*' '/usr/*'
     
-    - uses: codecov/codecov-action@v4
+    - name: Upload coverage report to Codecov
+      uses: codecov/codecov-action@v4
       with:
         file: libs/build_release/cleaned_coverage.txt
         token: ${{ secrets.CODECOV_TOKEN }}

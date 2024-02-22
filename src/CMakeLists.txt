@@ -93,7 +93,7 @@ if ("${CMAKE_Fortran_COMPILER_ID}" MATCHES "Intel")
   endif()
 elseif("${CMAKE_Fortran_COMPILER_ID}" MATCHES "GNU")
   if(OFT_COVERAGE)
-    set( CMAKE_C_FLAGS_DEBUG "--Og --coverage -fprofile-update=atomic -g -Wuninitialized" ) # -fprofile-arcs -ftest-coverage
+    set( CMAKE_C_FLAGS_DEBUG "-Og --coverage -fprofile-update=atomic -g -Wuninitialized" ) # -fprofile-arcs -ftest-coverage
     set( CMAKE_C_FLAGS_RELEASE "-Og --coverage -fprofile-update=atomic -g" ) # -fprofile-arcs -ftest-coverage
     set(CMAKE_C_OUTPUT_EXTENSION_REPLACE ON)
     set(CMAKE_CXX_OUTPUT_EXTENSION_REPLACE ON)
