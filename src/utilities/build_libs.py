@@ -463,6 +463,7 @@ class package:
     root_path = None
     root_build_path = None
     skip = False
+    build_timeout = 15
     extra_fetch = []
     patch_files = []
     install_chk_files = []
@@ -596,7 +597,7 @@ class package:
             fid.write("\n".join(script_lines))
         if self.config_dict['SETUP_ONLY']:
             return
-        result, _ = run_command("bash build_tmp.sh", timeout=15*60)
+        result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60)
         with open("build_tmp.log", "w+") as fid:
             fid.write(result)
         # Check for build success
@@ -728,6 +729,7 @@ class MPI(package):
     def __init__(self):
         self.name = "MPI"
         self.url = "http://faculty.washington.edu/hansec/libs/mpich-3.3.2.tar.gz"
+        self.build_timeout = 20
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()

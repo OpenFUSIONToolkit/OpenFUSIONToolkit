@@ -53,7 +53,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ runner.os }}-build-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ matrix.config.os }}-build-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       name: Create build dir

@@ -30,7 +30,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ runner.os }}-cov_build-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: cov_build-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       name: Create build dir
@@ -46,7 +46,7 @@ jobs:
       shell: bash
       working-directory: libs
       run: >
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
+        python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=2
         --ref_blas --build_mpi=1 --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1
         --build_arpack=1 --oft_build_tests=1 --oft_build_coverage=1
 
