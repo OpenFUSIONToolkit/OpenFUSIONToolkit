@@ -222,11 +222,11 @@ def validate_td(sigs_final, tols=(1.E-8, 1.E-3)):
 # Test runners for time-dependent cases
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_plate(direct_flag):
-    sigs_final = (4.E-3, 8.442894E-4, 7.118076E-4)
+    sigs_final = (4.E-3, 8.459371E-4, 7.130923E-4)
     assert thin_wall_setup("tw_test-plate.h5",1,direct_flag, 
                            icoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
-                           curr_waveform=((-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)))
+                           curr_waveform=((-1.0, 0.0), (0.0, 0.0), (1.0, 1.0)))
     assert validate_td(sigs_final)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
@@ -235,16 +235,16 @@ def test_td_plate_volt(direct_flag):
     assert thin_wall_setup("tw_test-plate.h5",1,direct_flag, 
                            vcoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
-                           volt_waveform=((-1.0, 1.0), (0.0, 1.0), (1.0, 1.0)))
+                           volt_waveform=((0.0, 1.0), (1.0, 1.0)))
     assert validate_td(sigs_final)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_cyl(direct_flag):
-    sigs_final = (4.E-3, 7.178084E-4, 6.040163E-4)
+    sigs_final = (4.E-3, 7.254196E-4, 6.151460E-4)
     assert thin_wall_setup("tw_test-cyl.h5",1,direct_flag, 
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
-                           curr_waveform=((-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)))
+                           curr_waveform=((-1.0, 0.0), (0.0, 0.0), (1.0, 1.0)))
     assert validate_td(sigs_final)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
@@ -253,17 +253,17 @@ def test_td_cyl_volt(direct_flag):
     assert thin_wall_setup("tw_test-cyl.h5",1,direct_flag, 
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
-                           volt_waveform=((-1.0, 1.0, 1.0), (0.0, 1.0, 1.0), (1.0, 1.0, 1.0)))
+                           volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)))
     assert validate_td(sigs_final)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_torus(direct_flag):
-    sigs_final = (4.E-3, 4.772879E-4, 3.408103E-5)
+    sigs_final = (4.E-3, 4.935683E-4, 3.729159E-5)
     assert thin_wall_setup("tw_test-torus.h5",1,direct_flag, 
                            icoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
-                           curr_waveform=((-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)))
+                           curr_waveform=((-1.0, 0.0), (0.0, 0.0), (1.0, 1.0)))
     assert validate_td(sigs_final)
 
 @pytest.mark.coverage
@@ -273,18 +273,18 @@ def test_td_torus_volt(direct_flag):
     assert thin_wall_setup("tw_test-torus.h5",1,direct_flag, 
                            vcoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
-                           volt_waveform=((-1.0, 1.0, 1.0), (0.0, 1.0, 1.0), (1.0, 1.0, 1.0)))
+                           volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)))
     assert validate_td(sigs_final)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive(direct_flag):
-   sigs_final = (4.E-3, 7.685703E-4, 7.888816E-4)
+   sigs_final = (4.E-3, 7.706778E-4, 7.903190E-4)
    assert thin_wall_setup("tw_test-passive.h5",1,direct_flag,eta=1.E4, 
                           icoils=((0.5, 0.1),),
                           vcoils=((0.5, 0.0),),
                           floops=((0.5, -0.05), (0.5, -0.1)),
-                          curr_waveform=((-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)))
+                          curr_waveform=((-1.0, 0.0), (0.0, 0.0), (1.0, 1.0)))
    assert validate_td(sigs_final)
 
 @pytest.mark.coverage
@@ -294,7 +294,7 @@ def test_td_passive_volt(direct_flag):
    assert thin_wall_setup("tw_test-passive.h5",1,direct_flag,eta=1.E4, 
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
-                          volt_waveform=((-1.0, 0.0, 1.0), (0.0, 0.0, 1.0), (1.0, 0.0, 1.0)))
+                          volt_waveform=((0.0, 0.0, 1.0), (1.0, 0.0, 1.0)))
    assert validate_td(sigs_final)
 
 #============================================================================

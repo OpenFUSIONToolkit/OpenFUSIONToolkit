@@ -303,7 +303,7 @@ CALL u%restore_local(vals)
 t=0.d0
 IF(ntimes_curr>0)THEN
   DO j=1,self%n_icoils
-    icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t)
+    icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
   END DO
 END IF
 !---Save sensor data for t=0
@@ -373,32 +373,32 @@ DO i=1,nsteps
     IF(ntimes_curr>0)THEN
       DO j=1,self%n_icoils
         ! Start of step
-        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt/4.d0)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t-dt/4.d0)
+        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt/4.d0,1)
+        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t-dt/4.d0,1)
         ! End of step
-        icoil_dcurr(j)=icoil_dcurr(j)+linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0)
+        icoil_dcurr(j)=icoil_dcurr(j)+linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
+        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
       END DO
     END IF
     IF(ntimes_volt>0)THEN
       DO j=1,self%n_vcoils
         ! Start of step
-        pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t)/2.d0
-        pcoil_volt(j)=pcoil_volt(j)+linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt)/2.d0
+        pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t,1)/2.d0
+        pcoil_volt(j)=pcoil_volt(j)+linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)/2.d0
       END DO
     END IF
   ELSE
     CALL Lmat%apply(u,g)
     IF(ntimes_curr>0)THEN
       DO j=1,self%n_icoils
-        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0)
+        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
+        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
       END DO
       icoil_dcurr=icoil_dcurr*2.d0
     END IF
     IF(ntimes_volt>0)THEN
       DO j=1,self%n_vcoils
-        pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt)
+        pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)
       END DO
     END IF
   END IF
@@ -425,7 +425,7 @@ DO i=1,nsteps
   CALL u%get_local(vals)
   IF(ntimes_curr>0)THEN
     DO j=1,self%n_icoils
-      icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t)
+      icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
     END DO
   END IF
   IF(sensors%nfloops>0)THEN
@@ -531,7 +531,7 @@ ALLOCATE(vals(self%nelems),bvals(self%nelems))
 t=0.d0
 IF(ntimes_curr>0)THEN
   DO j=1,self%n_icoils
-    coil_vec(j)=linterp(coil_waveform(:,1),coil_waveform(:,j+1),ntimes_curr,t)
+    coil_vec(j)=linterp(coil_waveform(:,1),coil_waveform(:,j+1),ntimes_curr,t,1)
   END DO
 END IF
 !
@@ -600,7 +600,7 @@ DO i=1,nsteps
   IF(MOD(i,nplot)==0)THEN
     IF(ntimes_curr>0)THEN
       DO j=1,self%n_icoils
-        coil_vec(j)=linterp(coil_waveform(:,1),coil_waveform(:,j+1),ntimes_curr,t)
+        coil_vec(j)=linterp(coil_waveform(:,1),coil_waveform(:,j+1),ntimes_curr,t,1)
       END DO
     END IF
     !
