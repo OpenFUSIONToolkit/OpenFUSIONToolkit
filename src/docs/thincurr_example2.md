@@ -67,8 +67,7 @@ ToDo: Describe current potential "holes"
 
 **Coil current waveform file** (`curr.drive`)
 \verbatim
-2 4
--1.0  1.E3
+2 3
 0.0   1.E3
 1.E-4 0.0
 1.0   0.0
