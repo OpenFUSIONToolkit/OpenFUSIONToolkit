@@ -47,6 +47,7 @@ def quad_case(order,grid_type):
     else:
         return [99., 99., 99.]
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", range(1,3))
 @pytest.mark.parametrize("order", range(1,12))
 def test_quadrature(order,grid_type):

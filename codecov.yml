@@ -1,0 +1,16 @@
+coverage:
+  # Set ranges for status displays
+  range: 50..80
+  round: down
+  precision: 1
+  # Make check informational only (not blocking/failing)
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+# GitHub specific settings
+github_checks:
+  annotations: false # Disable code annotations

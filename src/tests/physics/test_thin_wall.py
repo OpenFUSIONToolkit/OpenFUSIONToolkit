@@ -228,6 +228,7 @@ def test_td_plate(direct_flag):
                            floops=((0.5, -0.05), (0.5, -0.1)),
                            curr_waveform=((-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)))
     assert validate_td(sigs_final)
+
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_plate_volt(direct_flag):
     sigs_final = (4.E-3, 2.383774E+1, 2.005698E+1)
@@ -255,6 +256,7 @@ def test_td_cyl_volt(direct_flag):
                            volt_waveform=((-1.0, 1.0, 1.0), (0.0, 1.0, 1.0), (1.0, 1.0, 1.0)))
     assert validate_td(sigs_final)
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_torus(direct_flag):
     sigs_final = (4.E-3, 4.772879E-4, 3.408103E-5)
@@ -264,6 +266,7 @@ def test_td_torus(direct_flag):
                            curr_waveform=((-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)))
     assert validate_td(sigs_final)
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_torus_volt(direct_flag):
     sigs_final = (4.E-3, 3.249705E0, 2.3204651E-1)
@@ -273,6 +276,7 @@ def test_td_torus_volt(direct_flag):
                            volt_waveform=((-1.0, 1.0, 1.0), (0.0, 1.0, 1.0), (1.0, 1.0, 1.0)))
     assert validate_td(sigs_final)
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive(direct_flag):
    sigs_final = (4.E-3, 7.685703E-4, 7.888816E-4)
@@ -283,6 +287,7 @@ def test_td_passive(direct_flag):
                           curr_waveform=((-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)))
    assert validate_td(sigs_final)
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive_volt(direct_flag):
    sigs_final = (4.E-3, 2.114789E+1, 2.170003E+1)
@@ -306,12 +311,14 @@ def test_eig_cyl(direct_flag):
     assert thin_wall_setup("tw_test-cyl.h5",2,direct_flag)
     assert validate_eigs(eigs)
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_torus(direct_flag):
     eigs = (4.751344E-2, 2.564491E-2, 2.555695E-2, 2.285850E-2)
     assert thin_wall_setup("tw_test-torus.h5",2,direct_flag)
     assert validate_eigs(eigs)
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_passive(direct_flag):
     eigs = (1.483589E-1, 6.207849E-2, 2.942791E-2, 2.693574E-2)
@@ -340,6 +347,7 @@ def test_fr_cyl(direct_flag):
                            floops=((0.9, 0.5), (0.9, 0.0)))
     assert validate_fr(fr_real, fr_imag)
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_fr_torus(direct_flag):
     fr_real = (-2.806665E-3, -1.194625E-4)
@@ -349,6 +357,7 @@ def test_fr_torus(direct_flag):
                            floops=((1.4, 0.0), (0.6, 0.0)))
     assert validate_fr(fr_real, fr_imag)
 
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_fr_passive(direct_flag):
     fr_real = (1.777366E-1, 1.868689E-1)

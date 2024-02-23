@@ -148,6 +148,7 @@ def test_r2_p1(parallel, petsc_flag):
     lam = 7.8527035135303347
     tflux = None #0.39122960997664691
     run_r2_base(lam, tflux, 1, parallel, petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("parallel", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p1(parallel, petsc_flag):
@@ -220,6 +221,7 @@ def test_r3_p4(parallel, petsc_flag):
     lam = 4.4949864203192
     tflux = None #0.06331006366265143
     run_r3_base(lam, tflux, 4, parallel, petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p4_mg(petsc_flag):
     lam = 4.4949864203192
