@@ -1,7 +1,7 @@
 Open Flexible Unstructured Simulation Infrastructure with Open Numerics (FUSION) Toolkit (OFT)
 =====================================
 
-![CI status](https://github.com/hansec/OpenFUSIONToolkit/actions/workflows/build_test.yaml/badge.svg?branch=main)
+![CI status](https://github.com/hansec/OpenFUSIONToolkit/actions/workflows/ci_build.yaml/badge.svg?branch=main)
 [![codecov](https://codecov.io/gh/hansec/OpenFUSIONToolkit/graph/badge.svg?token=GG282HKNAO)](https://codecov.io/gh/hansec/OpenFUSIONToolkit)
 [![DOI](https://zenodo.org/badge/710415041.svg)](https://zenodo.org/doi/10.5281/zenodo.10306801)
 
