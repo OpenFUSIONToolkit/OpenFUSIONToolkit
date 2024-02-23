@@ -71,6 +71,7 @@ def single_level(nlevels, order, mpi=False, grid_type=1, petsc_flag='F'):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p1(grid_type, petsc_flag):
     single_level(2, 1, grid_type=grid_type, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
@@ -83,6 +84,7 @@ def test_r3_p1(grid_type, mpi, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p2(grid_type, petsc_flag):
     single_level(2, 2, grid_type=grid_type, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
@@ -95,6 +97,7 @@ def test_r3_p2(grid_type, mpi, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p3(grid_type, petsc_flag):
     single_level(2, 3, grid_type=grid_type, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
@@ -107,6 +110,7 @@ def test_r3_p3(grid_type, mpi, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p4(grid_type, petsc_flag):
     single_level(2, 4, grid_type=grid_type, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))

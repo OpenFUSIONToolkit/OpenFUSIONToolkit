@@ -15,7 +15,7 @@ jobs:
       CC: gcc-13
       CXX: g++-13
       FC: gfortran-13
-      OMP_NUM_THREADS: 2
+      OMP_NUM_THREADS: 1
 
     steps:
     - name: Checkout repo
@@ -76,14 +76,14 @@ jobs:
     - name: Test OFT
       shell: bash
       working-directory: libs/build_release
-      run: make test
+      run: make test_cov
     
     - name: Generate coverage report
       shell: bash
       working-directory: libs/build_release
       run: |
         lcov -c --directory . --output-file main_coverage.info --gcov-tool gcov-13
-        lcov -r main_coverage.info -o cleaned_coverage.txt '/opt/*' '/usr/*'
+        lcov --ignore-errors unused -r main_coverage.info -o cleaned_coverage.txt '/opt/*' '/usr/*'
     
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v4

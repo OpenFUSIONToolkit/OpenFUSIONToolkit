@@ -68,12 +68,14 @@ def test_base(top_lev):
     area_t3d = 12.5187
     assert t3d_setup(1,top_lev,'cyl')
     assert check_result(volume_t3d, area_t3d)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_quad(top_lev):
     volume_t3d = 3.1416
     area_t3d = 12.5663
     assert t3d_setup(1,top_lev,'cyl',2)
     assert check_result(volume_t3d, area_t3d)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_1ref(top_lev):
     volume_t3d = 3.1378
@@ -90,12 +92,14 @@ def test_stretch_base(top_lev):
     area_t3d =    18.7916
     assert t3d_setup(1,top_lev,'cyl',zstretch=2.)
     assert check_result(volume_t3d, area_t3d)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_stretch_quad(top_lev):
     volume_t3d = 2*3.1416
     area_t3d =    18.8495
     assert t3d_setup(1,top_lev,'cyl',2,zstretch=2.)
     assert check_result(volume_t3d, area_t3d)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_stretch_1ref(top_lev):
     volume_t3d = 2*3.1378
