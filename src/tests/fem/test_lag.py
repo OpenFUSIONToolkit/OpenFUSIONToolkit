@@ -134,6 +134,7 @@ def test_r2_p4(petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p4(mpi, petsc_flag):
     single_level(3, 4, 154, 5.1147216970434615, mpi=mpi, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p4_mg(petsc_flag):
     multi_level(3, 4, 21, 5.1147216970434615, petsc_flag=petsc_flag)
@@ -186,6 +187,7 @@ def test_hex_r2_p4(petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p4(mpi, petsc_flag):
     single_level(3, 4, 97, 2.5568335937210307, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p4_mg(petsc_flag):
     multi_level(3, 4, 15, 2.5568335937210307, grid_type=2, petsc_flag=petsc_flag)

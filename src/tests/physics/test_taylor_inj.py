@@ -126,6 +126,7 @@ def test_r1_p1(parallel, petsc_flag):
     energy = 7.969787207500343
     mags = (111.78525848354835, 7.3927838909183474E-2, 2.3689570294000877)
     run_r1_base(energy, mags, 1, parallel, petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("parallel", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p1(parallel, petsc_flag):
@@ -154,6 +155,7 @@ def test_r2_p2(parallel, petsc_flag):
     energy = 7.4654554644593762
     mags = (159.33067882086129, 0.15585267451452800, 11.630373174047200)
     run_r2_base(energy, mags, 2, parallel, petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p2_mg(petsc_flag):
     energy = 7.4654554644593762

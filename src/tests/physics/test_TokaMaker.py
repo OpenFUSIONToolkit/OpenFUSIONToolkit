@@ -104,6 +104,7 @@ def validate_solo(results,psi_err_exp,X_err_exp):
 
 
 # Test runners for Solov'ev cases
+@pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
 def test_solo_h1(order):
     errs = [
@@ -188,6 +189,7 @@ def validate_sph(results,psi_err_exp):
 
 
 # Test runners for Spheromak cases
+@pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
 def test_spheromak_h1(order):
     errs = [2.039674417912789e-05, 5.103597862537552e-07, 8.088772274705608e-09]
@@ -266,6 +268,7 @@ def validate_coil(results,psi_err_exp):
 
 
 # Test runners for vacuum coil cases
+@pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
 def test_coil_h1(order):
     errs = [0.010800921782063938, 0.0002851010669736233, 1.8185396736818836e-05]
@@ -419,6 +422,7 @@ def validate_ITER(results,dict_exp):
 
 
 # Test runners for ITER test cases
+@pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER(order):
     exp_dict = {

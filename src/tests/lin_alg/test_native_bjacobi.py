@@ -70,6 +70,7 @@ def check_solver(nprocs,nlocal,sol_type,iteration_count,converged_error):
     assert validate_result(iteration_count,converged_error)
 
 # Test runner for base test case
+@pytest.mark.coverage
 @pytest.mark.parametrize("solver_type", range(nSolvers))
 def test_base(solver_type):
     iteration_count = 1
@@ -82,12 +83,14 @@ def test_base_nlocal2(solver_type):
     converged_error = 1.4688646289584524
     check_solver(1, 2, solver_type+1, iteration_count, converged_error)
 # Test runner for base test case
+@pytest.mark.coverage
 @pytest.mark.parametrize("solver_type", range(nSolvers))
 def test_base_nlocal2_part(solver_type):
     iteration_count = 47
     converged_error = 1.4688646289584524
     check_solver(1, -2, solver_type+1, iteration_count, converged_error)
 # Test runner for base test case
+@pytest.mark.coverage
 @pytest.mark.parametrize("solver_type", range(nSolvers))
 def test_mpi2(solver_type):
     iteration_count = 50
@@ -100,6 +103,7 @@ def test_mpi2_nlocal2(solver_type):
     converged_error = 1.4688646289584524
     check_solver(2, 2, solver_type+1, iteration_count, converged_error)
 # Test runner for base test case
+@pytest.mark.coverage
 @pytest.mark.parametrize("solver_type", range(nSolvers))
 def test_mpi2_nlocal2_part(solver_type):
     iteration_count = 57

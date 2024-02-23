@@ -165,6 +165,7 @@ def test_nl_r1_p2(petsc_flag):
     assert sound_setup(1,1,2,2,petsc=petsc_flag)
     assert validate_result(nerr_exp,terr_exp,verr_exp)
 @pytest.mark.mpi
+@pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("two_temp", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
@@ -230,6 +231,7 @@ def test_lin_r1_p2(petsc_flag):
     assert validate_result(nerr_exp,terr_exp,verr_exp,linear=True)
 @pytest.mark.linear
 @pytest.mark.mpi
+@pytest.mark.coverage
 @pytest.mark.parametrize("two_temp", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_lin_r1_p2_mpi(two_temp,petsc_flag):
@@ -294,6 +296,7 @@ def test_hex_nl_r1_p2(petsc_flag):
     assert sound_setup(1,1,2,2,petsc=petsc_flag,hex_mesh=True)
     assert validate_result(nerr_exp,terr_exp,verr_exp)
 @pytest.mark.mpi
+@pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("two_temp", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
@@ -359,6 +362,7 @@ def test_hex_lin_r1_p2(petsc_flag):
     assert validate_result(nerr_exp,terr_exp,verr_exp,linear=True)
 @pytest.mark.linear
 @pytest.mark.mpi
+@pytest.mark.coverage
 @pytest.mark.parametrize("two_temp", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_lin_r1_p2_mpi(two_temp,petsc_flag):
