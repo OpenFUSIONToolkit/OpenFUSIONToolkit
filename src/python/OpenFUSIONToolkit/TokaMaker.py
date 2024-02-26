@@ -1291,7 +1291,7 @@ class TokaMaker():
                 field_tmp = dpsi_dt/eta
                 mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
                 mask = numpy.logical_or(mask,mask_tmp)
-        clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],mesh_currents[mask],nlevels,cmap=colormap)
+        clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],mesh_currents[mask],cmap=colormap)
         cb = fig.colorbar(clf,ax=ax)
         cb.set_label(clabel)
         # Make 1:1 aspect ratio
