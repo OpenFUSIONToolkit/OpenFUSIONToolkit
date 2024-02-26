@@ -1395,7 +1395,7 @@ class gs_Domain:
         '''
         if json_filename is not None:
             with open(json_filename, 'r') as fid:
-                input_dict = json.load(json_filename)
+                input_dict = json.load(fid)
             self.rextent = input_dict['rextent']
             self.zextents = input_dict['zextents']
             self.rpad = input_dict['rpad']
@@ -1649,7 +1649,7 @@ class gs_Domain:
                 cond_id += 1
         return cond_list
     
-    def build_mesh(self,debug=False):
+    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False):
         '''! Build mesh for specified domains
 
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
@@ -1661,7 +1661,7 @@ class gs_Domain:
             raise ValueError('No plasma region specified')
         else:
             # Make sure a boundary exists if we have regions other than plasma
-            if (self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0):
+            if ((self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0)) and require_boundary:
                 if self.boundary_reg is None:
                     raise ValueError('No boundary region specified')
                 # Check or set extents
@@ -1696,7 +1696,9 @@ class gs_Domain:
             if self.region_info[key]['count'] == 0:
                 raise KeyError('Region "{0}" defined but never created'.format(key))
         # Generate mesh
-        self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs)
+        self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
+        if setup_only:
+            return None, None, None
         return self.mesh.get_mesh()
     
     def save_json(self,filename):
@@ -1785,7 +1787,7 @@ def load_gs_mesh(filename,use_hdf5=True):
 
 class Mesh:
     '''! Mesh builder class for triangle library'''
-    def __init__(self,region_list,merge_thresh=1.E-6,debug=False,extra_reg_defs=[]):
+    def __init__(self,region_list,merge_thresh=1.E-4,debug=False,extra_reg_defs=[]):
         '''! Initialize Mesh builder object
 
         @param region_list List of @ref oftpy.Region objects that define mesh
@@ -1819,30 +1821,108 @@ class Mesh:
                             reg_pt_map[reg_id] = ilocal
                             self._unique_points.append(reg_pt)
                 for iseg, segment in enumerate(self._segments):
-                    if len(tmp_pts) != len(segment[0]):
-                        continue
-                    # Look forward
-                    for i,test_pt in enumerate(segment[0]):
-                        if tmp_pt_map[i] != test_pt:
+                    nOverlap = 0
+                    for test_pt in segment[0]:
+                        if test_pt in tmp_pt_map:
+                            nOverlap += 1
+                    if (nOverlap > 1) and (len(tmp_pts) == len(segment[0])): # Full overlap
+                        # Look forward
+                        for i,test_pt in enumerate(segment[0]):
+                            if tmp_pt_map[i] != test_pt:
+                                break
+                        else: # Matched segment
+                            if debug:
+                                print('  Merging curve segments:',ireg,iseg)
+                            segment[1] = min(segment[1],region._dx_curve)
+                            segment[2] = min(segment[2],region._small_thresh)
+                            local_seg_map.append(iseg)
                             break
-                    else: # Matched segment
-                        if debug:
-                            print('  Merging curve segments:',ireg,iseg)
-                        segment[1] = min(segment[1],region._dx_curve)
-                        segment[2] = min(segment[2],region._small_thresh)
-                        local_seg_map.append(iseg)
-                        break
-                    # Look backward
-                    for i,test_pt in enumerate(segment[0]):
-                        if tmp_pt_map[-i-1] != test_pt:
+                        # Look backward
+                        for i,test_pt in enumerate(segment[0]):
+                            if tmp_pt_map[-i-1] != test_pt:
+                                break
+                        else: # Matched segment
+                            if debug:
+                                print('  Merging curve segments:',ireg,iseg)
+                            segment[1] = min(segment[1],region._dx_curve)
+                            segment[2] = min(segment[2],region._small_thresh)
+                            local_seg_map.append(-iseg)
                             break
-                    else: # Matched segment
+                    elif  (nOverlap > 1): # Partial match
                         if debug:
-                            print('  Merging curve segments:',ireg,iseg)
-                        segment[1] = min(segment[1],region._dx_curve)
-                        segment[2] = min(segment[2],region._small_thresh)
-                        local_seg_map.append(-iseg)
-                        break
+                            print('  Merging partially overlapping curve segments:',ireg,iseg)
+                        if len(tmp_pts) < len(segment[0]):
+                            overlap_start = len(segment[0])
+                            overlap_end = -1
+                            first_pt = -1
+                            for i, test_pt in enumerate(segment[0]):
+                                if test_pt in tmp_pt_map:
+                                    overlap_start = min(overlap_start,i)
+                                    overlap_end = max(overlap_end,i)
+                                    if first_pt < 0 :
+                                        first_pt = tmp_pt_map.index(test_pt)
+                            segment_split = [iseg, -1, -1]
+                            if overlap_start > 0:
+                                self._segments.append([segment[0][:overlap_start+1], segment[1], segment[2]])
+                                segment_split[1] = len(self._segments)-1
+                            if overlap_end < len(segment[0])-1:
+                                self._segments.append([segment[0][overlap_end:], segment[1], segment[2]])
+                                segment_split[2] = len(self._segments)-1
+                            segment[0] = segment[0][overlap_start:overlap_end+1]
+                            segment[1] = min(segment[1],region._dx_curve)
+                            segment[2] = min(segment[2],region._small_thresh)
+                            #
+                            for reg_seg_map in self._reg_seg_map:
+                                try:
+                                    ifound = reg_seg_map.index(iseg)
+                                    if segment_split[1] >= 0:
+                                        reg_seg_map.insert(ifound,segment_split[1])
+                                        ifound += 1
+                                    if segment_split[2] >= 0:
+                                        reg_seg_map.insert(ifound+1,segment_split[2])
+                                except ValueError:
+                                    ifound = -1
+                                    pass
+                                try:
+                                    ifound = reg_seg_map.index(-iseg)
+                                    if ifound >= 0:
+                                        if segment_split[2] >= 0:
+                                            reg_seg_map.insert(ifound,-segment_split[2])
+                                            ifound += 1
+                                        if segment_split[1] >= 0:
+                                            reg_seg_map.insert(ifound+1,-segment_split[1])
+                                except ValueError:
+                                    pass
+                            #
+                            if first_pt == overlap_start:
+                                local_seg_map.append(iseg)
+                                break
+                            else:
+                                local_seg_map.append(-iseg)
+                                break
+                        else:
+                            overlap_start = len(tmp_pts)
+                            overlap_end = -1
+                            first_pt = -1
+                            for i, test_pt in enumerate(tmp_pt_map):
+                                if test_pt in segment[0]:
+                                    overlap_start = min(overlap_start,i)
+                                    overlap_end = max(overlap_end,i)
+                                    if first_pt < 0 :
+                                        first_pt = segment[0].index(test_pt)
+                            if overlap_start > 0:
+                                self._segments.append([tmp_pt_map[:overlap_start+1], region._dx_curve, region._small_thresh])
+                            if overlap_end < len(segment[0])-1:
+                                self._segments.append([tmp_pt_map[overlap_end:], region._dx_curve, region._small_thresh])
+                            segment[1] = min(segment[1],region._dx_curve)
+                            segment[2] = min(segment[2],region._small_thresh)
+                            #
+                            if first_pt == overlap_start:
+                                local_seg_map.append(iseg)
+                                break
+                            else:
+                                local_seg_map.append(-iseg)
+                                break
                 else:
                     self._segments.append([tmp_pt_map, region._dx_curve, region._small_thresh])
                     local_seg_map.append(len(self._segments)-1)
