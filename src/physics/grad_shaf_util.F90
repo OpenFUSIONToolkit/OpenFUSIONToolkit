@@ -663,6 +663,71 @@ CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_comp_globals
 !---------------------------------------------------------------------------
+!> Compute plasma loop voltage
+!---------------------------------------------------------------------------
+subroutine gs_calc_vloop(self,vloop)
+class(gs_eq), intent(inout) :: self !< G-S object
+real(8), intent(out) :: vloop !< loop voltage
+type(oft_lag_brinterp), target :: psi_eval
+type(oft_lag_bginterp), target :: psi_geval
+real(8) :: itor_loc !< local toroidal current in integration
+real(8) :: itor !< toroidal current
+real(8) :: j_NI_loc !< local non-inductive current in integration
+real(8) :: I_NI !< non-inductive F*F'
+real(8) :: eta_jsq !< eta*j_NI**2 
+real(8) :: goptmp(3,3) !< needs docs
+real(8) :: v !< volume
+real(8) :: pt(3) !< radial coordinate
+real(8) :: curr_cent(2) !< needs docs
+real(8) :: psitmp(1) !< magnetic flux coordinate
+real(8) :: gpsitmp(3) !< needs docs
+integer(4) :: i,m
+!---
+psi_eval%u=>self%psi
+CALL psi_eval%setup
+CALL psi_geval%shared_setup(psi_eval)
+!---
+eta_jsq = 0.d0
+I_NI = 0.d0
+itor = 0.d0
+vloop = 0.d0
+!!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc) &
+!!$omp reduction(+:itor) reduction(+:vol) &
+do i=1,smesh%nc
+  IF(smesh%reg(i)/=1)CYCLE
+  do m=1,oft_blagrange%quad%np
+    call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
+    IF(psitmp(1)<self%plasma_bounds(1))CYCLE
+    pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+    !---Compute toroidal current itor, and eta*j^2 eta_jsq (numerator of Vloop integral)
+    IF(gs_test_bounds(self,pt))THEN
+      IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
+      IF(self%mode==0)THEN
+        j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+      ELSE
+        j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+self%eps))
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
+      END IF
+      eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(j_NI_loc**2)*v*oft_blagrange%quad%wts(m)*pt(1)
+      itor = itor + itor_loc*v*oft_blagrange%quad%wts(m)
+    END IF
+  end do
+end do
+eta_jsq=eta_jsq*(2*pi/(mu0*mu0))
+itor=itor/mu0
+!---Vloop = integral(eta_jsq) / itor
+vloop=self%psiscale*(eta_jsq/itor)
+!
+CALL psi_eval%delete
+CALL psi_geval%delete
+end subroutine gs_calc_vloop
+!---------------------------------------------------------------------------
 ! SUBROUTINE gs_analyze
 !---------------------------------------------------------------------------
 !> Needs Docs

@@ -1,6 +1,7 @@
 from __future__ import print_function
 import os
 import sys
+import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 from oft_testing import run_OFT
@@ -67,11 +68,13 @@ def validate_result(expected_lams):
 #============================================================================
 expected_lams = (1.7109941816427034, 2.1784222152553760, 2.7901970304756087, 3.6590583531008862)
 # Test runner for base test case
+@pytest.mark.coverage
 def test_base():
     assert arpack_setup(4)
     assert validate_result(expected_lams)
 
 # Test runner for MPI test case
+@pytest.mark.coverage
 def test_mpi():
     assert arpack_setup(4,True)
     assert validate_result(expected_lams)

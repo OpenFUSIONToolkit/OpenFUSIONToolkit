@@ -56,3 +56,10 @@ add_custom_command(
     COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
 )
+# Add "full" testing command to Makefile
+add_custom_target(test_cov)
+add_custom_command(
+    TARGET  test_cov
+    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} -m \"coverage\" grid lin_alg fem physics
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
+)

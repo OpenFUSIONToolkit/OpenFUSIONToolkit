@@ -236,8 +236,10 @@ TYPE :: gs_eq
   CLASS(oft_matrix), POINTER :: dels_dt => NULL()
   CLASS(oft_matrix), POINTER :: mrop => NULL()
   CLASS(oft_matrix), POINTER :: mop => NULL()
-  CLASS(flux_func), POINTER :: I => NULL() !<
-  CLASS(flux_func), POINTER :: P => NULL() !<
+  CLASS(flux_func), POINTER :: I => NULL() !< F*F' flux function
+  CLASS(flux_func), POINTER :: P => NULL() !< Pressure flux function
+  CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
+  CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
   PROCEDURE(region_eta_set), NOPASS, POINTER :: set_eta => NULL()
 CONTAINS
   !

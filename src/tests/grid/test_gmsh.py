@@ -63,6 +63,7 @@ def check_result(volume_test, area_test):
 
 #============================================================================
 # Test runners for basic Cylinder mesh
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (1, 2))
 @pytest.mark.parametrize("cad_type", (0, 3))
 def test_base(top_lev,cad_type):
@@ -73,6 +74,7 @@ def test_base(top_lev,cad_type):
 
 #============================================================================
 # Test runner for quadratic Cylinder mesh
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (1, 2))
 @pytest.mark.parametrize("cad_type", (0, 3))
 def test_quad(top_lev,cad_type):
@@ -83,6 +85,7 @@ def test_quad(top_lev,cad_type):
 
 #============================================================================
 # Test runner for single refinement Cylinder mesh
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("cad_type", (0, 3))
 def test_1ref(top_lev,cad_type):

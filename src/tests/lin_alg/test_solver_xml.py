@@ -63,6 +63,7 @@ def validate_result(iteration_count,converged_error):
 
 #============================================================================
 # Test runner for base test case
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F', 'T'))
 def test_gmres(petsc_flag):
     xml_file = """
@@ -78,6 +79,7 @@ def test_gmres(petsc_flag):
 
 #============================================================================
 # Test runner for base test case
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F', 'T'))
 def test_gmres_jacobi(petsc_flag):
     xml_file = """
@@ -94,6 +96,7 @@ def test_gmres_jacobi(petsc_flag):
 
 #============================================================================
 # Test runner for base test case
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F', 'T'))
 def test_cg(petsc_flag):
     xml_file = """
@@ -108,6 +111,7 @@ def test_cg(petsc_flag):
 
 #============================================================================
 # Test runner for base test case
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F', 'T'))
 def test_cg_jacobi(petsc_flag):
     xml_file = """
