@@ -44,13 +44,13 @@ jobs:
         run: mkdir build_docs
 
       - name: Configure OFT documentation (nightly)
-        if: github.ref != 'ref/head/gh-pages'
+        if: github.ref != 'refs/head/gh-pages'
         shell: bash
         working-directory: build_docs
         run: cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=ON ../src
       
       - name: Configure OFT documentation (deploy)
-        if: github.ref == 'ref/head/gh-pages'
+        if: github.ref == 'refs/head/gh-pages'
         shell: bash
         working-directory: build_docs
         run: cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=OFF ../src
@@ -80,7 +80,7 @@ jobs:
           overwrite: true
       
       - name: Upload actions artifact (nightly)
-        if: github.ref == 'ref/head/main'
+        if: github.ref == 'refs/head/main'
         uses: actions/upload-artifact@v4
         with:
           name: commit_${{ github.sha }}-website
@@ -88,12 +88,12 @@ jobs:
           overwrite: true
 
       - name: Upload pages artifact
-        if: github.ref == 'ref/head/gh-pages'
+        if: github.ref == 'refs/head/gh-pages'
         uses: actions/upload-pages-artifact@v3
 
   # Deployment job
   deploy:
-    if: github.ref == 'ref/head/gh-pages'
+    if: github.ref == 'refs/head/gh-pages'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
