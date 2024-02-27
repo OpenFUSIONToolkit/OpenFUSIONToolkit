@@ -43,7 +43,14 @@ jobs:
       - name: Create build dir
         run: mkdir build_docs
 
-      - name: Configure OFT documentation
+      - name: Configure OFT documentation (nightly)
+        if: github.ref != 'ref/head/gh-pages'
+        shell: bash
+        working-directory: build_docs
+        run: cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=ON ../src
+      
+      - name: Configure OFT documentation (deploy)
+        if: github.ref == 'ref/head/gh-pages'
         shell: bash
         working-directory: build_docs
         run: cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=OFF ../src
@@ -65,7 +72,7 @@ jobs:
           done
         
       - name: Upload actions artifact
-        if: github.event_name == 'pull_request'
+        if: github.ref != 'ref/head/gh-pages'
         uses: actions/upload-artifact@v4
         with:
           name: pull_${{ github.event.pull_request.number }}-website
@@ -73,7 +80,7 @@ jobs:
           overwrite: true
 
       - name: Upload pages artifact
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'ref/head/gh-pages'
         uses: actions/upload-pages-artifact@v3
 
   # Deployment job
