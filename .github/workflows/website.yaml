@@ -42,9 +42,6 @@ jobs:
 
       - name: Create build dir
         run: mkdir build_docs
-      
-      - name: Check branch
-        run: echo ${{ github.ref }}
 
       - name: Configure OFT documentation (nightly)
         if: github.ref != 'refs/head/gh-pages'
@@ -83,7 +80,7 @@ jobs:
           overwrite: true
       
       - name: Upload actions artifact (nightly)
-        if: github.ref == 'refs/head/main'
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: commit_${{ github.sha }}-website
@@ -91,12 +88,12 @@ jobs:
           overwrite: true
 
       - name: Upload pages artifact
-        if: github.ref == 'refs/head/gh-pages'
+        if: github.ref == 'refs/heads/gh-pages'
         uses: actions/upload-pages-artifact@v3
 
   # Deployment job
   deploy:
-    if: github.ref == 'refs/head/gh-pages'
+    if: github.ref == 'refs/heads/gh-pages'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
