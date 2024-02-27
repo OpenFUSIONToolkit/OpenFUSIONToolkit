@@ -31,7 +31,8 @@ USE fem_utils, ONLY: bfem_interp, bfem_map_flag
 USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_eval, oft_blag_geval, &
   oft_blag_npos, oft_blag_d2eval
 USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp, &
-  oft_lag_bg2interp, blag_zerob, blag_zerogrnd, oft_blag_getmop
+  oft_lag_bg2interp, blag_zerob, blag_zerogrnd, oft_blag_getmop, &
+  oft_blag_vproject
 !---
 USE fem_utils, ONLY: fem_interp
 USE mhd_utils, ONLY: mu0
@@ -263,23 +264,31 @@ CONTAINS
   PROCEDURE :: delete => gs_destroy
 END TYPE gs_eq
 !---------------------------------------------------------------------------
-! CLASS gs_interp
-!---------------------------------------------------------------------------
-!> Interpolate a Lagrange field.
+!> Interpolate G-S profiles at a specific point in space
 !!
-!! @extends fem_base::fem_interp
+!! @extends fem_base::bfem_interp
 !---------------------------------------------------------------------------
-type, extends(bfem_interp) :: gs_interp
+type, extends(bfem_interp) :: gs_prof_interp
   INTEGER(i4) :: mode = 0
   class(gs_eq), pointer :: gs => NULL() !< Field for interpolation
   type(oft_lag_brinterp), pointer :: psi_eval => NULL()
   type(oft_lag_bginterp), pointer :: psi_geval => NULL()
 contains
-  procedure :: setup => gs_interp_setup
-  procedure :: delete => gs_interp_delete
+  procedure :: setup => gs_prof_interp_setup
+  procedure :: delete => gs_prof_interp_delete
   !> Reconstruct a Lagrange scalar field
-  procedure :: interp => gs_rinterp
-end type gs_interp
+  procedure :: interp => gs_prof_interp_apply
+end type gs_prof_interp
+!---------------------------------------------------------------------------
+!> Interpolate a Lagrange field.
+!!
+!! @extends fem_base::fem_interp
+!---------------------------------------------------------------------------
+type, extends(gs_prof_interp) :: gs_b_interp
+contains
+  !> Reconstruct a Lagrange scalar field
+  procedure :: interp => gs_b_interp_apply
+end type gs_b_interp
 !---------------------------------------------------------------------------
 ! CLASS gsinv_interp
 !---------------------------------------------------------------------------
@@ -4710,20 +4719,20 @@ IF(PRESENT(lambda))lam=lambda
 eta = 1.65d-9*LOG(lam)/(T**1.5d0) ! Spitzer 1.65e-9 * Log(Lambda)/(T^3/2) [T in KeV]
 end function gs_eta_spitzer
 !
-subroutine gs_interp_setup(self)
-class(gs_interp), intent(inout) :: self
+subroutine gs_prof_interp_setup(self)
+class(gs_prof_interp), intent(inout) :: self
 ALLOCATE(self%psi_eval,self%psi_geval)
 self%psi_eval%u=>self%gs%psi
 CALL self%psi_eval%setup()
 CALL self%psi_geval%shared_setup(self%psi_eval)
-end subroutine gs_interp_setup
+end subroutine gs_prof_interp_setup
 !
-subroutine gs_interp_delete(self)
-class(gs_interp), intent(inout) :: self
+subroutine gs_prof_interp_delete(self)
+class(gs_prof_interp), intent(inout) :: self
 CALL self%psi_eval%delete()
 CALL self%psi_geval%delete()
 DEALLOCATE(self%psi_eval,self%psi_geval)
-end subroutine gs_interp_delete
+end subroutine gs_prof_interp_delete
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_rinterp
 !---------------------------------------------------------------------------
@@ -4734,8 +4743,8 @@ end subroutine gs_interp_delete
 !! @param[in] gop Logical gradient vectors at f [3,4]
 !! @param[out] val Reconstructed field at f [1]
 !---------------------------------------------------------------------------
-subroutine gs_rinterp(self,cell,f,gop,val)
-class(gs_interp), intent(inout) :: self
+subroutine gs_prof_interp_apply(self,cell,f,gop,val)
+class(gs_prof_interp), intent(inout) :: self
 integer(4), intent(in) :: cell
 real(8), intent(in) :: f(:)
 real(8), intent(in) :: gop(3,3)
@@ -4753,26 +4762,21 @@ END IF
 !---
 SELECT CASE(self%mode)
   CASE(1)
-    pt=smesh%log2phys(cell,f)
-    CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
-    val(1)=-self%gs%psiscale*gpsitmp(2)/(pt(1)+gs_epsilon)
+    CALL self%psi_eval%interp(cell,f,gop,psitmp)
+    val(1)=self%gs%psiscale*psitmp(1)
   CASE(2)
     pt=smesh%log2phys(cell,f)
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
       IF(self%gs%mode==0)THEN
-        val(1)=self%gs%psiscale*self%gs%alam*(self%gs%I%f(psitmp(1))+self%gs%I%f_offset/self%gs%alam)/(pt(1)+gs_epsilon)
+        val(1)=self%gs%psiscale*self%gs%alam*(self%gs%I%f(psitmp(1))+self%gs%I%f_offset/self%gs%alam)
       ELSE
-        val(1)=self%gs%psiscale*SQRT(self%gs%alam*self%gs%I%f(psitmp(1)) + self%gs%I%f_offset**2)/(pt(1)+gs_epsilon)
+        val(1)=self%gs%psiscale*SQRT(self%gs%alam*self%gs%I%f(psitmp(1)) + self%gs%I%f_offset**2)
       END IF
     ELSE
-      val(1)=self%gs%psiscale*self%gs%I%f_offset/(pt(1)+gs_epsilon)
+      val(1)=self%gs%psiscale*self%gs%I%f_offset
     END IF
   CASE(3)
-    pt=smesh%log2phys(cell,f)
-    CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
-    val(1)=self%gs%psiscale*gpsitmp(1)/(pt(1)+gs_epsilon)
-  CASE(4)
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
       val(1)=(self%gs%psiscale**2)*self%gs%pnorm*self%gs%P%F(psitmp(1))/mu0
@@ -4780,9 +4784,48 @@ SELECT CASE(self%mode)
       val(1)=0.d0
     END IF
   CASE DEFAULT
-    CALL oft_abort('Unkown field mode','gs_rinterp',__FILE__)
+    CALL oft_abort('Unkown field mode','gs_prof_interp_apply',__FILE__)
 END SELECT
-end subroutine gs_rinterp
+end subroutine gs_prof_interp_apply
+!---------------------------------------------------------------------------
+!> Reconstruct a Grad-Shafranov field
+!!
+!! @param[in] cell Cell for interpolation
+!! @param[in] f Possition in cell in logical coord [4]
+!! @param[in] gop Logical gradient vectors at f [3,4]
+!! @param[out] val Reconstructed field at f [1]
+!---------------------------------------------------------------------------
+subroutine gs_b_interp_apply(self,cell,f,gop,val)
+class(gs_b_interp), intent(inout) :: self
+integer(4), intent(in) :: cell
+real(8), intent(in) :: f(:)
+real(8), intent(in) :: gop(3,3)
+real(8), intent(out) :: val(:)
+real(8) :: psitmp(1),gpsitmp(3),pt(3)
+logical :: in_plasma
+pt=smesh%log2phys(cell,f)
+in_plasma=.TRUE.
+IF(gs_test_bounds(self%gs,pt).AND.(smesh%reg(cell)==1))THEN
+  in_plasma=.TRUE.
+ELSE
+  in_plasma=.FALSE.
+END IF
+! Sample fields
+CALL self%psi_eval%interp(cell,f,gop,psitmp)
+CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
+! Evaluate B-field
+val(1)=-self%gs%psiscale*gpsitmp(2)/(pt(1)+gs_epsilon)
+val(3)=self%gs%psiscale*gpsitmp(1)/(pt(1)+gs_epsilon)
+IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
+  IF(self%gs%mode==0)THEN
+    val(2)=self%gs%psiscale*self%gs%alam*(self%gs%I%f(psitmp(1))+self%gs%I%f_offset/self%gs%alam)/(pt(1)+gs_epsilon)
+  ELSE
+    val(2)=self%gs%psiscale*SQRT(self%gs%alam*self%gs%I%f(psitmp(1)) + self%gs%I%f_offset**2)/(pt(1)+gs_epsilon)
+  END IF
+ELSE
+  val(2)=self%gs%psiscale*self%gs%I%f_offset/(pt(1)+gs_epsilon)
+END IF
+end subroutine gs_b_interp_apply
 !---------------------------------------------------------------------------
 ! SUBROUTINE gsinv_setup
 !---------------------------------------------------------------------------
@@ -4850,10 +4893,11 @@ end subroutine gsinv_apply
 subroutine gs_save_fgrid(self,filename)
 class(gs_eq), target, intent(inout) :: self
 character(LEN=*), optional, intent(in) :: filename
-class(oft_vector), pointer :: a,b
+class(oft_vector), pointer :: a,br,bt,bz
 real(r8), pointer :: vals_tmp(:)
 class(oft_solver), pointer :: solver
-type(gs_interp) :: field
+type(gs_b_interp) :: Bfield
+type(gs_prof_interp) :: field
 integer(4) :: i,io_unit
 real(8), allocatable :: Fout(:,:)
 logical :: pm_save
@@ -4861,25 +4905,41 @@ logical :: pm_save
 NULLIFY(vals_tmp)
 ALLOCATE(Fout(5,oft_blagrange%ne))
 CALL self%psi%new(a)
-CALL self%psi%new(b)
+CALL self%psi%new(br)
+CALL self%psi%new(bt)
+CALL self%psi%new(bz)
+Bfield%gs=>self
 field%gs=>self
+CALL Bfield%setup()
 CALL field%setup()
 !---Setup Solver
 CALL create_cg_solver(solver)
 solver%A=>self%mop
 solver%its=-2
 CALL create_diag_pre(solver%pre)
-!---Project fields
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
-DO i=1,4
-  field%mode=i
-  CALL oft_blag_project(field,b)
-  CALL a%set(0.d0)
-  CALL solver%apply(a,b)
-  CALL a%get_local(vals_tmp)
-  Fout(i,:)=vals_tmp
-END DO
-oft_env%pm=pm_save
+!---Project B-field
+CALL oft_blag_vproject(Bfield,br,bt,bz)
+CALL a%set(0.d0)
+CALL solver%apply(a,br)
+CALL a%get_local(vals_tmp)
+Fout(1,:)=vals_tmp
+CALL a%set(0.d0)
+CALL solver%apply(a,bt)
+CALL a%get_local(vals_tmp)
+Fout(2,:)=vals_tmp
+CALL a%set(0.d0)
+CALL solver%apply(a,bz)
+CALL a%get_local(vals_tmp)
+Fout(3,:)=vals_tmp
+!---Project pressure
+field%mode=3
+CALL oft_blag_project(field,br)
+CALL a%set(0.d0)
+CALL solver%apply(a,br)
+CALL a%get_local(vals_tmp)
+Fout(4,:)=vals_tmp
+!---Get poloidal flux
 CALL self%psi%get_local(vals_tmp)
 Fout(5,:)=vals_tmp
 !---Output
@@ -4897,9 +4957,13 @@ CALL smesh%save_vertex_scalar(Fout(2,:),'Bt')
 CALL smesh%save_vertex_scalar(Fout(3,:),'Bz')
 CALL smesh%save_vertex_scalar(Fout(4,:),'P')
 !---Clean up
+oft_env%pm=pm_save
 CALL a%delete
-CALL b%delete
-DEALLOCATE(a,b,Fout,vals_tmp)
+CALL br%delete
+CALL bt%delete
+CALL bz%delete
+DEALLOCATE(a,br,bt,bz,Fout,vals_tmp)
+CALL Bfield%delete()
 CALL field%delete()
 CALL solver%pre%delete
 DEALLOCATE(solver%pre)

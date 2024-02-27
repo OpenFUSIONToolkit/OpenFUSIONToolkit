@@ -219,6 +219,17 @@ REAL(c_double), INTENT(out) :: field(3) !< Needs docs
 TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
 TYPE(oft_hcurl_cinterp), POINTER :: binterp_obj
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+IF(int_type<0)THEN
+  SELECT CASE(int_type)
+  CASE(1)
+    CALL c_f_pointer(int_obj, ainterp_obj)
+    CALL ainterp_obj%delete()
+  CASE(2)
+    CALL c_f_pointer(int_obj, binterp_obj)
+    CALL binterp_obj%delete()
+  END SELECT
+  RETURN
+END IF
 call mesh_findcell(mesh,cell,pt,f)
 IF(cell==0)RETURN
 fmin=MINVAL(f); fmax=MAXVAL(f)
