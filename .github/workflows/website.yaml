@@ -67,10 +67,18 @@ jobs:
       - name: Upload actions artifact
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
+        id: artifact-upload-step
         with:
           name: pull_${{ github.event.pull_request.number }}-website
           path: _site/
           overwrite: true
+
+      - name: Add artifact to PR
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          message: |
+            An updated build of the documentation for this PR has been completed :incoming_envelope:. It can be accessed at ${{ steps.artifact-upload-step.outputs.artifact-url }}.
 
       - name: Upload pages artifact
         if: github.event_name != 'pull_request'
