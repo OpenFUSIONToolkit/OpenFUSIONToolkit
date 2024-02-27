@@ -2,9 +2,9 @@
 name: Build and deploy OFT website using GitHub Pages
 
 on:
-  # Runs on pushes targeting the default branch
+  # Runs on pushes targeting main or gh-pages branch (deploy on gh-pages only)
   push:
-    branches: ["gh-pages"]
+    branches: ["gh-pages", "main"]
   pull_request:
     types: [opened, reopened, synchronize]
 
@@ -78,7 +78,7 @@ jobs:
 
   # Deployment job
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'ref/head/gh-pages'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
