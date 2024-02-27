@@ -48,7 +48,7 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1)])
+    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,2), c_int])
 
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
@@ -122,7 +122,7 @@ tokamaker_apply_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_apply_field_e
 
 #
 tokamaker_get_coil_currents = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_currents,
-    [ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.int32,1)])
+    [ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1)])
 
 #
 tokamaker_get_coil_Lmat = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_Lmat,
@@ -177,7 +177,7 @@ tokamaker_set_saddles = ctypes_subroutine(oftpy_lib.tokamaker_set_saddles,
 
 # G-S set coil regularization matrix
 tokamaker_set_coil_regmat = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_regmat,
-    [ctypes_numpy_array(numpy.float64,2),ctypes_numpy_array(numpy.float64,1),ctypes_numpy_array(numpy.float64,1)])
+    [c_int, ctypes_numpy_array(numpy.float64,2),ctypes_numpy_array(numpy.float64,1),ctypes_numpy_array(numpy.float64,1)])
 
 # G-S set coil regularization matrix
 tokamaker_set_coil_bounds = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_bounds,
@@ -423,6 +423,8 @@ class TokaMaker():
         self.settings = tokamaker_default_settings()
         ## Conductor definition dictionary
         self._cond_dict = {}
+        ## Coil definition dictionary
+        self._coil_dict = {}
         ## Vacuum F value
         self._F0 = 0.0
         ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
@@ -486,6 +488,7 @@ class TokaMaker():
         # Reset defaults
         self.settings = tokamaker_default_settings()
         self._cond_dict = {}
+        self._coil_dict = {}
         self._F0 = 0.0
         self._Ip_target=c_double(-1.0)
         self._Ip_ratio_target=c_double(-1.E99)
@@ -548,13 +551,14 @@ class TokaMaker():
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
     
-    def setup_regions(self,coil_file='none',cond_dict={}):
+    def setup_regions(self,coil_file='none',cond_dict={},coil_dict={}):
         '''! Define mesh regions (coils and conductors)
 
         @param coil_file File containing coil/conductor definitions in XML format
         @param cond_dict Dictionary specifying conducting regions
         '''
         self._cond_dict = cond_dict
+        self._coil_dict = coil_dict
         if coil_file != 'none':
             eta_vals = numpy.ones((1),dtype=numpy.float64)
         else:
@@ -562,8 +566,23 @@ class TokaMaker():
             eta_vals[1] = 1.E10
             for key in cond_dict:
                 eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
+        nCoils = 0
+        self.coil_sets = {}
+        for key in coil_dict:
+            coil_set = coil_dict[key].get('coil_set',key)
+            if coil_set not in self.coil_sets:
+                self.coil_sets[coil_set] = {
+                    'id': nCoils,
+                    'sub_coils': []
+                }
+                nCoils += 1
+            self.coil_sets[coil_set]['sub_coils'].append(coil_dict[key])
+        coil_nturns = numpy.zeros((nCoils, self.nregs))
+        for key in self.coil_sets:
+            for sub_coil in self.coil_sets[key]['sub_coils']:
+                coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
         cstring = c_char_p(coil_file.encode())
-        tokamaker_setup_regions(cstring,eta_vals)
+        tokamaker_setup_regions(cstring,eta_vals,coil_nturns,nCoils)
 
     def eval_green(self,x,xc):
         r'''! Evaluate Green's function for a toroidal filament
@@ -707,7 +726,7 @@ class TokaMaker():
         if reg_weights.shape[0] != self.ncoils+1:
             raise ValueError('Incorrect shape of "reg_weights", should be [ncoils+1]')
         
-        tokamaker_set_coil_regmat(numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
+        tokamaker_set_coil_regmat(self.ncoils+1,numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
 
     def set_coil_bounds(self,coil_bounds):
         '''! Set hard constraints on coil currents
@@ -1021,9 +1040,9 @@ class TokaMaker():
         @result Coil currents, Coil to region map
         '''
         currents = numpy.zeros((self.ncoils,),dtype=numpy.float64)
-        coil_map = numpy.zeros((self.ncoils,),dtype=numpy.int32)
-        tokamaker_get_coil_currents(currents, coil_map)
-        return currents, coil_map
+        currents_reg = numpy.zeros((self.nregs,),dtype=numpy.float64)
+        tokamaker_get_coil_currents(currents, currents_reg)
+        return currents, currents_reg
 
     def get_coil_Lmat(self):
         r'''! Get mutual inductance matrix between coils
@@ -1219,11 +1238,11 @@ class TokaMaker():
             if mask.sum() > 0.0:
                 ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask,:], mask_vals, colors=vacuum_color)
         # Shade coils
-        coil_currents, coil_map = self.get_coil_currents()
         if coil_colormap is not None:
+            _, region_currents = self.get_coil_currents()
             mesh_currents = numpy.zeros((self.lc.shape[0],))
             for i in range(self.ncoils):
-                mesh_currents[self.reg == coil_map[i]] = coil_currents[i]
+                mesh_currents = region_currents[self.reg-1]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:
                 mesh_currents *= coil_scale
@@ -1234,8 +1253,8 @@ class TokaMaker():
                     clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap)
                 fig.colorbar(clf,ax=ax,label=coil_clabel)
         else:
-            for i in range(self.ncoils):
-                mask_tmp = (self.reg == coil_map[i])
+            for _, coil_reg in self._coil_dict.items():
+                mask_tmp = (self.reg == coil_reg['reg_id'])
                 ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask_tmp,:], mask_vals, colors=coil_color, alpha=1)
         # Shade conductors
         for _, cond_reg in self._cond_dict.items():
@@ -1499,7 +1518,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,nTurns=None):
+    def define_region(self,name,dx,reg_type,eta=None,nTurns=None,coil_set=None):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -1541,9 +1560,15 @@ class gs_Domain:
                 raise ValueError('Resistivity not specified for "conductor" region')
         if nTurns is not None:
             if reg_type != 'coil':
-                raise ValueError('nTurns specification only valid for "coil" regions')
+                raise ValueError('"nTurns" specification only valid for "coil" regions')
             else:
                 self.region_info[name]['nturns'] = nTurns
+        if coil_set is not None:
+            if reg_type != 'coil':
+                raise ValueError('"coil_set" specification only valid for "coil" regions')
+            else:
+                self.region_info[name]['coil_set'] = coil_set
+        
 
     def add_annulus(self,inner_countour,inner_name,outer_contour,annulus_name,parent_name=None,angle_tol=30.0,sliver_tol=120.0,small_thresh=None):
         '''! Add annular geometry defining region boundaries to the mesh
@@ -1691,7 +1716,8 @@ class gs_Domain:
                 coil_list[key] = {
                     'reg_id': self.region_info[key]['id'],
                     'coil_id': coil_id,
-                    'nturns': self.region_info[key].get('nturns',1)
+                    'nturns': self.region_info[key].get('nturns',1),
+                    'coil_set': self.region_info[key].get('coil_set',key)
                 }
                 coil_id += 1
         return coil_list
