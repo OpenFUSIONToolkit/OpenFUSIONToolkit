@@ -71,11 +71,19 @@ jobs:
             echo "::warning title=Invalid file permissions automatically fixed::$line"
           done
         
-      - name: Upload actions artifact
-        if: github.ref != 'ref/head/gh-pages'
+      - name: Upload actions artifact (pull request)
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: pull_${{ github.event.pull_request.number }}-website
+          path: _site/
+          overwrite: true
+      
+      - name: Upload actions artifact (nightly)
+        if: github.ref == 'ref/head/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: commit_${{ github.sha }}-website
           path: _site/
           overwrite: true
 
