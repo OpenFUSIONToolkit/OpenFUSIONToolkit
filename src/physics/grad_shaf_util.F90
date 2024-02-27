@@ -18,12 +18,13 @@ USE oft_la_base, ONLY: oft_vector
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_geval
-USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp
+USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp, &
+  oft_blag_vproject
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
   gs_set_cond_weights, gs_estored, gs_dflux, gs_tflux, gs_helicity, gs_itor_nl, &
-  gs_psimax, gs_test_bounds, gs_interp, oft_indent, gs_get_qprof, gsinv_interp, &
+  gs_psimax, gs_test_bounds, gs_b_interp, oft_indent, gs_get_qprof, gsinv_interp, &
   gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent
 USE oft_gs_profiles
 IMPLICIT NONE
@@ -186,9 +187,9 @@ integer(4), POINTER :: lctmp(:,:)
 real(8), POINTER :: rtmp(:,:),cond_corr(:,:,:)
 REAL(8), PARAMETER :: rst_version = 2.d0
 LOGICAL :: pm_save
-CLASS(oft_vector), POINTER :: a,b
+CLASS(oft_vector), POINTER :: a,br,bt,bz
 CLASS(oft_solver), POINTER :: solver
-TYPE(gs_interp) :: field
+TYPE(gs_b_interp) :: field
 real(r8), POINTER :: vals_tmp(:)
 m=100
 IF(PRESENT(mpsi_sample))m=mpsi_sample
@@ -236,7 +237,9 @@ CALL self%psi%get_local(vals_tmp)
 CALL hdf5_write(vals_tmp,filename,'gs/psi')
 !---Save B-field
 CALL self%psi%new(a)
-CALL self%psi%new(b)
+CALL self%psi%new(br)
+CALL self%psi%new(bt)
+CALL self%psi%new(bz)
 ! CALL vector_cast(psiv,a)
 field%gs=>self
 CALL field%setup()
@@ -247,19 +250,26 @@ CALL create_diag_pre(solver%pre)
 !---Project to plotting grid
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 ALLOCATE(tmpout(3,a%n))
-DO i=1,3
-  field%mode=i
-  CALL oft_blag_project(field,b)
-  CALL a%set(0.d0)
-  CALL solver%apply(a,b)
-  CALL a%get_local(vals_tmp)
-  tmpout(i,:)=vals_tmp
-END DO
+CALL oft_blag_vproject(field,br,bt,bz)
+CALL a%set(0.d0)
+CALL solver%apply(a,br)
+CALL a%get_local(vals_tmp)
+tmpout(1,:)=vals_tmp
+CALL a%set(0.d0)
+CALL solver%apply(a,bt)
+CALL a%get_local(vals_tmp)
+tmpout(2,:)=vals_tmp
+CALL a%set(0.d0)
+CALL solver%apply(a,bz)
+CALL a%get_local(vals_tmp)
+tmpout(3,:)=vals_tmp
 oft_env%pm=pm_save
 CALL hdf5_write(tmpout,filename,'gs/B')
 CALL a%delete
-CALL b%delete
-DEALLOCATE(a,b,tmpout,vals_tmp)
+CALL br%delete
+CALL bt%delete
+CALL bz%delete
+DEALLOCATE(a,br,bt,bz,tmpout,vals_tmp)
 CALL field%delete()
 CALL solver%pre%delete()
 DEALLOCATE(solver%pre)

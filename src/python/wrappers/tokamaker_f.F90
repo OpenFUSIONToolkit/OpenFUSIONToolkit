@@ -11,7 +11,7 @@ MODULE tokamaker_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
   c_f_pointer, c_bool, c_null_ptr
 USE oft_base
-USE oft_mesh_type, ONLY: smesh
+USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 ! USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid, ONLY: multigrid_reset
 ! USE multigrid_build, ONLY: multigrid_construct_surf
@@ -21,8 +21,8 @@ USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
   oft_lag_setup
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
-  gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf
+USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, &
+  gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
 USE oft_gs_td, ONLY: setup_gs_td, step_gs_td, eig_gs_td
@@ -527,6 +527,70 @@ pts=C_LOC(pts_tmp)
 fluxes=C_LOC(fluxes_tmp)
 npts=SIZE(fluxes_tmp,DIM=1)
 END SUBROUTINE tokamaker_get_vfixed
+!------------------------------------------------------------------------------
+!> Create an interpolation object for tokamaker fields
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_field_eval(imode,int_obj,error_str) BIND(C,NAME="tokamaker_get_field_eval")
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
+TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (unused)
+TYPE(gs_prof_interp), POINTER :: prof_interp_obj
+TYPE(gs_b_interp), POINTER :: b_interp_obj
+CALL copy_string('',error_str)
+IF(imode==1)THEN
+  ALLOCATE(b_interp_obj)
+  b_interp_obj%gs=>gs_global
+  CALL b_interp_obj%setup()
+  int_obj=C_LOC(b_interp_obj)
+ELSE
+  ALLOCATE(prof_interp_obj)
+  prof_interp_obj%gs=>gs_global
+  prof_interp_obj%mode=imode-1
+  CALL prof_interp_obj%setup()
+  int_obj=C_LOC(prof_interp_obj)
+END IF
+END SUBROUTINE tokamaker_get_field_eval
+!------------------------------------------------------------------------------
+!> Evaluate a TokaMaker field with an interpolation object created by
+!! \ref tokamaker_f::tokamaker_get_field_eval
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_apply_field_eval(int_obj,int_type,pt,fbary_tol,cell,dim,field) BIND(C,NAME="tokamaker_apply_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to interpolation object
+INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Field type (negative to destroy)
+REAL(c_double), INTENT(in) :: pt(3) !< Location for evaluation [R,Z,0]
+REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Tolerance for physical to logical mapping
+INTEGER(c_int), INTENT(inout) :: cell !< Cell containing `pt` (starting guess on input)
+INTEGER(c_int), VALUE, INTENT(in) :: dim !< Dimension of field
+REAL(c_double), INTENT(out) :: field(dim) !< Field at `pt`
+TYPE(gs_prof_interp), POINTER :: prof_interp_obj
+TYPE(gs_b_interp), POINTER :: b_interp_obj
+REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+IF(int_type<0)THEN
+  IF(int_type==-1)THEN
+    CALL c_f_pointer(int_obj, b_interp_obj)
+    CALL b_interp_obj%delete
+  ELSE
+    CALL c_f_pointer(int_obj, prof_interp_obj)
+    CALL prof_interp_obj%delete
+  END IF
+  RETURN
+END IF
+call bmesh_findcell(smesh,cell,pt,f)
+IF(cell==0)RETURN
+fmin=MINVAL(f); fmax=MAXVAL(f)
+IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
+  cell=-ABS(cell)
+  RETURN
+END IF
+CALL smesh%jacobian(cell,f,goptmp,vol)
+IF(int_type==1)THEN
+  CALL c_f_pointer(int_obj, b_interp_obj)
+  CALL b_interp_obj%interp(cell,f,goptmp,field)
+ELSE
+  CALL c_f_pointer(int_obj, prof_interp_obj)
+  CALL prof_interp_obj%interp(cell,f,goptmp,field)
+END IF
+END SUBROUTINE tokamaker_apply_field_eval
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
