@@ -17,6 +17,7 @@ The following examples illustrate usage of TokaMaker to compute different Grad-S
 
 ### Mesh Generation
  - \subpage doc_tMaker_mesh_ex1
+ - \subpage doc_tMaker_mesh_ex2
 
 ### Fixed Boundary Equilibria
  - \subpage doc_tMaker_ex1
@@ -24,3 +25,4 @@ The following examples illustrate usage of TokaMaker to compute different Grad-S
 
 ### Free Boundary Equilibria
  - \subpage doc_tMaker_ex3
+ - \subpage doc_tMaker_ex4
