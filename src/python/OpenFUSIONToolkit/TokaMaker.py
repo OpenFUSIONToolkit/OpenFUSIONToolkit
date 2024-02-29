@@ -711,22 +711,23 @@ class TokaMaker():
         Can be used to enforce "soft" constraints on coil currents. For hard constraints see
         @ref TokaMaker.TokaMaker.set_coil_bounds "set_coil_bounds".
 
-        @param reg_mat Regularization matrix [ncoils+1,ncoils+1]
-        @param reg_targets Regularization targets [ncoils+1] (default: 0)
-        @param reg_weights Weights for regularization terms [ncoils+1] (default: 1)
+        @param reg_mat Regularization matrix [nregularize,ncoils+1]
+        @param reg_targets Regularization targets [nregularize] (default: 0)
+        @param reg_weights Weights for regularization terms [nregularize] (default: 1)
         '''
-        if (reg_mat.shape[0] != self.ncoils+1) or (reg_mat.shape[1] != self.ncoils+1):
-            raise ValueError('Incorrect shape of "reg_mat", should be [ncoils+1,ncoils+1]')
+        if reg_mat.shape[1] != self.ncoils+1:
+            raise ValueError('Incorrect shape of "reg_mat", should be [nregularize,ncoils+1]')
+        nregularize = reg_mat.shape[0]
         if reg_targets is None:
-            reg_targets = numpy.zeros((reg_mat.shape[0],), dtype=numpy.float64)
+            reg_targets = numpy.zeros((nregularize,), dtype=numpy.float64)
         if reg_weights is None:
-            reg_weights = numpy.ones((reg_mat.shape[0],), dtype=numpy.float64)
-        if reg_targets.shape[0] != self.ncoils+1:
-            raise ValueError('Incorrect shape of "reg_targets", should be [ncoils+1]')
-        if reg_weights.shape[0] != self.ncoils+1:
-            raise ValueError('Incorrect shape of "reg_weights", should be [ncoils+1]')
+            reg_weights = numpy.ones((nregularize,), dtype=numpy.float64)
+        if reg_targets.shape[0] != nregularize:
+            raise ValueError('Incorrect shape of "reg_targets", should be [nregularize]')
+        if reg_weights.shape[0] != nregularize:
+            raise ValueError('Incorrect shape of "reg_weights", should be [nregularize]')
         
-        tokamaker_set_coil_regmat(self.ncoils+1,numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
+        tokamaker_set_coil_regmat(nregularize,numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
 
     def set_coil_bounds(self,coil_bounds):
         '''! Set hard constraints on coil currents
