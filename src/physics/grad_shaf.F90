@@ -170,6 +170,7 @@ TYPE :: gs_eq
   REAL(r8) :: plasma_bounds(2) = (/-1.d99,1.d99/)
   REAL(r8) :: spatial_bounds(2,2) = RESHAPE((/-1.d99,1.d99,-1.d99,1.d99/),(/2,2/))
   REAL(r8) :: lim_zmax = 1.d99
+  REAL(r8) :: lim_area = -1.d0
   REAL(r8) :: o_point(2) = (/-1.d0,1.d99/)
   REAL(r8) :: lim_point(2) = (/-1.d0,1.d99/)
   REAL(r8) :: x_points(2,max_xpoints) = 0.d0
@@ -1139,6 +1140,10 @@ DO i=1,smesh%nc
 END DO
 self%saddle_pmask=self%saddle_pmask.OR.smesh%bp
 CALL get_limiter
+self%lim_area=0.d0
+DO i=1,smesh%nc
+  IF(smesh%reg(i)==1)self%lim_area=self%lim_area+smesh%ca(i)
+END DO
 !
 NULLIFY(tmp_vec,psi_vals)
 call self%psi%new(tmp_vec)
@@ -3554,7 +3559,7 @@ real(8), intent(out) :: o_point(2),o_psi,x_point(2,max_xpoints),x_psi(max_xpoint
 integer(4), PARAMETER :: npts = 10, max_unique = 20
 integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
 integer(4), allocatable :: ncuts(:)
-real(8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3),loc_vals(3)
+real(8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3),loc_vals(3),psi_scale_len
 real(8) :: region(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99], [2,2])
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
@@ -3593,6 +3598,7 @@ DO i=1,smesh%np
   IF(self%saddle_pmask(i))ncuts(i)=-1
 END DO
 !
+psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))/(1.d1*SQRT(self%lim_area))
 unique_saddles=-1.d99
 o_psi=-1.d99
 n_unique=0
@@ -3602,7 +3608,7 @@ DO i=1,smesh%np
     saddle_loc=smesh%r(1:2,i)
     ! IF(ALL(smesh%reg(smesh%lpc(smesh%kpc(i):smesh%kpc(i+1)-1))/=1))CYCLE
     IF(oft_blagrange%order>1)THEN
-      CALL gs_find_saddle(self,saddle_psi,saddle_loc,stype)
+      CALL gs_find_saddle(self,psi_scale_len,saddle_psi,saddle_loc,stype)
     ELSE
       saddle_psi=psi_eval%vals(i)
       IF(ncuts(i)==0)stype=1
@@ -3657,8 +3663,9 @@ end subroutine gs_analyze_saddles
 !---------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------
-subroutine gs_find_saddle(self,psi_x,pt,stype)
+subroutine gs_find_saddle(self,psi_scale_len,psi_x,pt,stype)
 class(gs_eq), intent(inout) :: self
+real(8), intent(in) :: psi_scale_len
 real(8), intent(inout) :: psi_x
 real(8), intent(inout) :: pt(2)
 integer(4), intent(out) :: stype
@@ -3713,6 +3720,7 @@ IF((cell_active==0).OR.(minval(f)<-1.d-3).OR.(maxval(f)>1.d0+1.d-3))THEN
   RETURN
 END IF
 IF(smesh%reg(cell_active)/=1)RETURN ! Dont allow saddles outside of plasma region
+IF(SQRT(SUM(gpsitmp**2))>psi_scale_len)RETURN
 call psi_eval_active%interp(cell_active,f,goptmp,gpsitmp(1:1))
 psi_x=gpsitmp(1)
 pt=ptmp
