@@ -235,7 +235,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     # Run EQ
     mygs = TokaMaker()
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict)
+    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
     mygs.set_coil_currents(np.array([1.E-2]))
     err_flag = mygs.solve(True)
@@ -328,7 +328,7 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
     mygs = TokaMaker()
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict)
+    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order,F0=5.3*6.2)
     vsc_signs = np.zeros((mygs.ncoils,), dtype=np.float64)
     vsc_signs[[coil_dict['VSU']['coil_id'], coil_dict['VSL']['coil_id']]] = [1.0,-1.0]

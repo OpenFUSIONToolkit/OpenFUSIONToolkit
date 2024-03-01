@@ -425,6 +425,8 @@ class TokaMaker():
         self._cond_dict = {}
         ## Coil definition dictionary
         self._coil_dict = {}
+        ## Coil set definitions, including sub-coils
+        self.coil_sets = {}
         ## Vacuum F value
         self._F0 = 0.0
         ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
@@ -1036,9 +1038,9 @@ class TokaMaker():
         return TokaMaker_field_interpolator(int_obj,imode,field_dim)
     
     def get_coil_currents(self):
-        '''! Get currents in each coil [A-turns]
+        '''! Get currents in each coil [A] and coil region [A-turns]
 
-        @result Coil currents, Coil to region map
+        @result Coil currents [ncoils], Coil currents by region [nregs]
         '''
         currents = numpy.zeros((self.ncoils,),dtype=numpy.float64)
         currents_reg = numpy.zeros((self.nregs,),dtype=numpy.float64)
@@ -1207,7 +1209,7 @@ class TokaMaker():
     def set_coil_currents(self, currents):
         '''! Set coil currents
 
-        @param currents Current in each coil [A-turns]
+        @param currents Current in each coil [A]
         '''
         if currents.shape[0] != self.ncoils:
             raise ValueError('Incorrect shape of "currents", should be [ncoils]')
