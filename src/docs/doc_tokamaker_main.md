@@ -16,13 +16,13 @@ Talk about TokaMaker...
 The following examples illustrate usage of TokaMaker to compute different Grad-Shafranov equilibria. 
 
 ### Mesh Generation
- - \subpage doc_tMaker_mesh_ex1
- - \subpage doc_tMaker_mesh_ex2
+ - \subpage doc_tMaker_HBT_ex1
+ - \subpage doc_tMaker_ITER_ex1
 
 ### Fixed Boundary Equilibria
- - \subpage doc_tMaker_ex1
- - \subpage doc_tMaker_ex2
+ - \subpage doc_tMaker_fixed_ex1
+ - \subpage doc_tMaker_fixed_ex2
 
 ### Free Boundary Equilibria
- - \subpage doc_tMaker_ex3
- - \subpage doc_tMaker_ex4
+ - \subpage doc_tMaker_HBT_ex2
+ - \subpage doc_tMaker_ITER_ex2
