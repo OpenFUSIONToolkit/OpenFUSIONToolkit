@@ -21,9 +21,12 @@ USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_tet_quadrature, ONLY: set_quad_2d
-USE oft_la_base, ONLY: oft_vector
+USE oft_la_base, ONLY: oft_vector, oft_cvector
+USE oft_deriv_matrices, ONLY: oft_noop_matrix
 USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, native_vector_cast, &
-  native_vector_slice_push, native_vector_slice_pop
+  native_vector_slice_push, native_vector_slice_pop, oft_native_dense_matrix
+USE oft_solver_base, ONLY: oft_solver, oft_csolver
+USE oft_lu, ONLY: lapack_matinv, lapack_cholesky
 USE axi_green, ONLY: green, axi_coil_set
 USE mhd_utils, ONLY: mu0
 #define MAX_EDGE_CONN 6
@@ -123,6 +126,7 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: qbasis => NULL() !< Basis function pre-evaluated at cell centers
   CLASS(oft_vector), POINTER :: Uloc => NULL() !< FE vector for thin-wall model
+  CLASS(oft_vector), POINTER :: Uloc_pts => NULL() !< Needs docs
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL() !< Resistivity matrix for thin-wall model
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Underlying surface mesh
   TYPE(hole_mesh), POINTER, DIMENSION(:) :: hmesh => NULL() !< Hole definitions
@@ -134,6 +138,7 @@ CONTAINS
   !> Save debug information for model
   PROCEDURE :: save_debug => tw_save_debug
 END TYPE tw_type
+
 !------------------------------------------------------------------------------
 !> Class for thin-wall simulation
 !------------------------------------------------------------------------------
@@ -285,13 +290,21 @@ DO i=1,self%mesh%np
 END DO
 ! Convert closure cells to vertices and mark
 DO i=1,self%nclosures
-  j=MAXLOC(self%pmap(self%mesh%lc(:,self%closures(i))),DIM=1)
+  l=-1
+  j=1
+  DO k=1,3
+    IF(self%pmap(self%mesh%lc(k,self%closures(i)))<=0)CYCLE
+    IF(self%mesh%kpc(self%mesh%lc(k,self%closures(i))+1)-self%mesh%kpc(self%mesh%lc(k,self%closures(i)))>l)THEN
+      l=self%mesh%kpc(self%mesh%lc(k,self%closures(i))+1)-self%mesh%kpc(self%mesh%lc(k,self%closures(i)))
+      j=k
+    END IF
+  END DO
   j=self%mesh%lc(j,self%closures(i))
   IF(self%pmap(j)==0)CALL oft_abort("Error getting closure vertex","tw_setup",__FILE__)
   self%pmap(j)=-i
   self%closures(i)=j
 END DO
-self%nclosures=0
+self%nclosures=-self%nclosures
 ! Reindex, removing closure vertices
 self%np_active=0
 DO i=1,self%mesh%np
@@ -324,6 +337,19 @@ ALLOCATE(oft_native_vector::self%Uloc)
 SELECT TYPE(this=>self%Uloc)
   CLASS IS(oft_native_vector)
     this%n=self%nelems; this%ng=self%nelems
+    this%nslice=this%n
+    ALLOCATE(this%v(this%n))
+    ALLOCATE(this%stitch_info)
+    ALLOCATE(this%stitch_info%be(this%n))
+    this%stitch_info%full=.TRUE.
+    this%stitch_info%nbe=0
+    this%stitch_info%be=.FALSE.
+END SELECT
+!---Create point vector
+ALLOCATE(oft_native_vector::self%Uloc_pts)
+SELECT TYPE(this=>self%Uloc_pts)
+  CLASS IS(oft_native_vector)
+    this%n=self%mesh%np; this%ng=self%mesh%np
     this%nslice=this%n
     ALLOCATE(this%v(this%n))
     ALLOCATE(this%stitch_info)
@@ -1681,6 +1707,7 @@ TYPE(tw_type), INTENT(inout) :: self
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
+REAL(8), PARAMETER :: B_dx = 1.d-6
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
@@ -1690,41 +1717,35 @@ ALLOCATE(quads(18))
 DO i=1,18
   CALL set_quad_2d(quads(i),i)
 END DO
-ALLOCATE(self%Bel(self%nelems,bmesh%nc,3))
+ALLOCATE(self%Bel(self%nelems,bmesh%np,3))
 self%Bel=0.d0
 f=1.d0/3.d0
-WRITE(*,*)'Building element->face magnetic reconstruction operator'
+WRITE(*,*)'Building element->element magnetic reconstruction operator'
 !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,pt_j,evec_i, &
 !$omp atmp,i,area_i,dl_min,dl_max,norm_j,diffvec,is_neighbor,iquad)
-ALLOCATE(atmp(3,3,bmesh%nc))
+ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
   ! CALL bmesh%jacobian(i,f,rgop,area_i)
   ! CALL bmesh%norm(i,f,norm_i)
-  area_i=bmesh%ca(i)
+  area_i=bmesh%ca(i)*2.d0
   DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
     evec_i(:,ii)=self%qbasis(:,ii,i)
   END DO
+  CALL bmesh%norm(i,f,norm_j)
   !---Compute sensor couplings
   atmp=0.d0
-  DO j=1,bmesh%nc
-    CALL bmesh%norm(j,f,norm_j)
-    pt_j=0.d0
-    DO jj=1,3
-      pt_j = pt_j + bmesh%r(:,bmesh%lc(jj,j))/3.d0
-    END DO
-    !pt_j=pt_j-norm_j*1.d-5 ! Sample just inside face
+  DO j=1,bmesh%np
+    pt_j=bmesh%r(:,j)
     !---Compute minimum separation
     dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,bmesh%ca(j))*2.d0) !-1.d99
+    dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
     !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
     DO ii=1,3
-      DO jj=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-bmesh%r(:,bmesh%lc(jj,j)))**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-bmesh%r(:,bmesh%lc(jj,j)))**2)))
-      END DO
+      dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
+      dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
     END DO
     !---Chose quadrature order based on distance
     IF(dl_min<1.d-8)THEN
@@ -1736,21 +1757,23 @@ DO i=1,bmesh%nc
     END IF
     !
     IF(iquad>10)THEN
+      IF(is_neighbor)THEN
+        ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
+        pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
+      END IF
       diffvec=0.d0
-      !pt_j=pt_j-norm_j*1.d-5 ! Sample just inside face
-      IF(is_neighbor)pt_j=pt_j-norm_j*1.d-5 ! Sample just inside face
       DO ik=1,2
-        IF(ik==2)pt_j=pt_j+norm_j*2.d-5 ! Sample just outside face
+        IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
         DO jj=1,3
           ! Forward step
-          pt_j(jj)=pt_j(jj)+1.d-6
+          pt_j(jj)=pt_j(jj)+B_dx
           tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)+tmp/2.d-6
+          diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
           ! Backward step
-          pt_j(jj)=pt_j(jj)-2.d-6
+          pt_j(jj)=pt_j(jj)-2.d0*B_dx
           tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)-tmp/2.d-6
-          pt_j(jj)=pt_j(jj)+1.d-6 ! Reset point
+          diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
+          pt_j(jj)=pt_j(jj)+B_dx ! Reset point
         END DO
         IF(.NOT.is_neighbor)EXIT
       END DO
@@ -1777,7 +1800,7 @@ DO i=1,bmesh%nc
   DO ii=1,3
     ik=self%pmap(bmesh%lc(ii,i))
     IF(ik==0)CYCLE
-    DO j=1,bmesh%nc
+    DO j=1,bmesh%np
       DO jj=1,3
         !$omp atomic
         self%Bel(ik,j,jj) = self%Bel(ik,j,jj) + atmp(jj,ii,j)
@@ -1786,7 +1809,7 @@ DO i=1,bmesh%nc
   END DO
   DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))+self%np_active
-    DO j=1,bmesh%nc
+    DO j=1,bmesh%np
       DO jj=1,3
         tmp=SIGN(1,self%lfh(1,ii))*atmp(jj,self%lfh(2,ii),j)
         !$omp atomic
@@ -1802,13 +1825,10 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 !
+WRITE(*,*)'Building vcoil->element magnetic reconstruction operator'
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
-DO i=1,bmesh%nc
-  pt_j = 0.d0
-  DO ii=1,3
-    pt_j = pt_j + bmesh%r(:,bmesh%lc(ii,i))
-  END DO
-  pt_j=pt_j/3.d0
+DO i=1,bmesh%np
+  pt_j=bmesh%r(:,i)
   !---Compute driver contributions
   DO j=1,self%n_vcoils
     ecc = 0.d0
@@ -1831,16 +1851,12 @@ DO i=1,bmesh%nc
 END DO
 self%Bel=self%Bel/(4.d0*pi)
 !
-WRITE(*,*)'Building driver-face magnetic reconstruction operator'
-ALLOCATE(self%Bdr(self%n_icoils,bmesh%nc,3))
+WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
+ALLOCATE(self%Bdr(self%n_icoils,bmesh%np,3))
 self%Bdr=0.d0
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
-DO i=1,bmesh%nc
-  pt_j = 0.d0
-  DO ii=1,3
-    pt_j = pt_j + bmesh%r(:,bmesh%lc(ii,i))
-  END DO
-  pt_j=pt_j/3.d0
+DO i=1,bmesh%np
+  pt_j=bmesh%r(:,i)
   !---Compute driver contributions
   DO j=1,self%n_icoils
     ecc = 0.d0
@@ -2400,7 +2416,7 @@ END DO
 DO i=1,self%nclosures
   self%pmap(self%closures(i))=-i
 END DO
-self%nclosures=0
+self%nclosures=-self%nclosures
 ! Reindex, removing closure vertex
 self%np_active=0
 DO i=1,self%mesh%np
@@ -2543,7 +2559,7 @@ DO i=1,self%mesh%np
   DO j=self%mesh%kpc(i),self%mesh%kpc(i+1)-1
     ptvec(:,i) = ptvec(:,i) + cellvec(:,self%mesh%lpc(j))*self%mesh%ca(self%mesh%lpc(j))/3.d0
   END DO
-  ptvec(:,i) = ptvec(:,i)/self%mesh%va(i)!/REAL(self%mesh%kpc(i+1)-self%mesh%kpc(i)+1,8)
+  ptvec(:,i) = ptvec(:,i)/self%mesh%va(i)
 END DO
 CALL self%mesh%save_vertex_vector(ptvec/mu0,TRIM(tag)//'_v') ! Convert back to Amps
 !

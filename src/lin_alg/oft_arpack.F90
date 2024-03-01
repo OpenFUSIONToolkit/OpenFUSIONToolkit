@@ -398,6 +398,7 @@ DEALLOCATE(vslice)
 !---------------------------------------------------------------------------
 ! Begin Reverse Communication
 !---------------------------------------------------------------------------
+i=0
 self%info=0
 DO
   !---Call APRACK driver
@@ -410,6 +411,7 @@ DO
                  resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
   END IF
+  i=i+1
   !IF(head_proc.AND.pm)WRITE(*,*)i,ido
   !---Handle user action request
   IF(ido==-1.OR.ido==1)THEN ! Apply y = OP*x

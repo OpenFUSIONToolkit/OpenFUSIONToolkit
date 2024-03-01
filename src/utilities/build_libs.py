@@ -1042,7 +1042,7 @@ int main(int argc, char** argv) {
         if self.threaded:
             oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1', 'FCOMMON_OPT="-frecursive {OMP_FLAGS} -fPIC"']
         else:
-            oblas_options += ['USE_THREAD=0', 'FCOMMON_OPT="-frecursive -fPIC"']
+            oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1', 'FCOMMON_OPT="-frecursive -fPIC"']
         if self.config_dict['OS_TYPE'] == 'Darwin':
             if not check_c_compiles_and_runs(avx_test_source, "-mavx", tmp_dict):
                 oblas_options += ['NO_AVX=1']

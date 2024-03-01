@@ -30,11 +30,13 @@ USE oft_mesh_cubit, ONLY: smesh_cubit_load, cubit_read_nodesets, cubit_read_side
 #endif
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
-USE oft_la_base, ONLY: oft_vector, oft_graph
+USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv
-USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, partition_graph
-USE oft_deriv_matrices, ONLY: oft_sum_matrix
+USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, partition_graph, &
+  oft_native_dense_cmatrix
+USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
 USE oft_solver_base, ONLY: oft_solver
+USE oft_native_solvers, ONLY: oft_native_gmres_csolver, oft_diag_cscale
 USE oft_solver_utils, ONLY: create_cg_solver, create_gmres_solver, create_diag_pre, &
   create_native_solver
 #ifdef HAVE_ARPACK
@@ -43,9 +45,10 @@ USE oft_arpack, ONLY: oft_iram_eigsolver
 USE axi_green, ONLY: green
 USE mhd_utils, ONLY: mu0
 USE thin_wall
+USE thin_wall_hodlr
 IMPLICIT NONE
 INTEGER(4) :: nsensors = 0
-TYPE(tw_type) :: tw_sim,mode_source
+TYPE(tw_type), TARGET :: tw_sim,mode_source
 TYPE(tw_sensors) :: sensors
 !
 INTEGER(4) :: i,n,ierr,io_unit
@@ -58,6 +61,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
+TYPE(oft_tw_hodlr_op), TARGET :: tw_hodlr
 !
 INTEGER(4) :: fr_limit = 0
 INTEGER(4) :: jumper_start = -1
@@ -68,7 +72,8 @@ LOGICAL :: save_Msen = .FALSE.
 REAL(8) :: freq = 1.d3
 REAL(8) :: force_f0 = 0.d0
 CHARACTER(LEN=80) :: mode_file = 'none'
-NAMELIST/thincurr_fr_options/direct,save_L,save_Mcoil,save_Msen,freq,mode_file,fr_limit,jumper_start
+NAMELIST/thincurr_fr_options/direct,save_L,save_Mcoil,save_Msen,freq,mode_file, &
+  fr_limit,jumper_start
 !---
 CALL oft_init
 !---Read in options
@@ -173,10 +178,20 @@ END IF
 !---------------------------------------------------------------------------
 ! Load or build element to element mutual matrix
 !---------------------------------------------------------------------------
-IF(save_L)THEN
-  CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat,'Lmat.save')
-ELSE
-  CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+IF(fr_limit/=2)THEN
+  tw_hodlr%tw_obj=>tw_sim
+  CALL tw_hodlr%setup()
+  IF(tw_hodlr%L_svd_tol>0.d0)THEN
+    IF(direct)call oft_abort('Matrix compression requires "direct=F"', &
+      'thincurr_fr',__FILE__)
+    CALL tw_hodlr%compute_L()
+  ELSE
+    IF(save_L)THEN
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat,'Lmat.save')
+    ELSE
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+    END IF
+  END IF
 END IF
 !---Setup resistivity matrix
 CALL tw_compute_Rmat(tw_sim,.TRUE.)
@@ -199,42 +214,73 @@ INTEGER(i4), INTENT(in) :: fr_limit
 INTEGER(i4) :: i,j,k,io_unit,info
 REAL(r8) :: lam0
 REAL(r8), ALLOCATABLE :: senout(:,:)
-DOUBLE COMPLEX, ALLOCATABLE, DIMENSION(:) :: x,b
-DOUBLE COMPLEX, ALLOCATABLE, DIMENSION(:,:) :: Mmat
+DOUBLE COMPLEX, POINTER, DIMENSION(:) :: x,b
+DOUBLE COMPLEX, POINTER, DIMENSION(:,:) :: Mmat
+TYPE(oft_sum_cmatrix), TARGET :: aca_Fmat
 CLASS(oft_vector), POINTER :: uloc
+CLASS(oft_cvector), POINTER :: aloc,bloc
 TYPE(oft_graph) :: graph
+TYPE(oft_native_gmres_csolver), TARGET :: frinv
+TYPE(oft_tw_hodlr_bjpre), TARGET :: frinv_pre
 TYPE(oft_bin_file) :: floop_hist
 LOGICAL :: pm_save
 !---
 WRITE(*,*)
 WRITE(*,*)'Starting Frequency-response run'
 !---Setup matrix
-ALLOCATE(Mmat(self%nelems,self%nelems),b(self%nelems))
+ALLOCATE(b(self%nelems))
 b=-(0.d0,1.d0)*driver(:,1) + (1.d0,0.d0)*driver(:,2) ! -i*L_e*I_e
-SELECT CASE(fr_limit)
-  CASE(0)
-    WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
-    b=b*freq*2.d0*pi ! Scale RHS by forcing frequency
-    Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
-    DO i=1,self%Rmat%nr
-      DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
-        Mmat(i,self%Rmat%lc(j))=Mmat(i,self%Rmat%lc(j)) + self%Rmat%M(j)
+IF(tw_hodlr%L_svd_tol>0.d0)THEN
+  SELECT CASE(fr_limit)
+    CASE(0)
+      WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
+      b=b*freq*2.d0*pi ! Scale RHS by forcing frequency
+      aca_Fmat%rJ=>tw_hodlr
+      aca_Fmat%rK=>self%Rmat
+      aca_Fmat%beta=(0.d0,1.d0)*freq*2.d0*pi
+      aca_Fmat%alam=(1.d0,0.d0)
+    CASE(1)
+      WRITE(*,'(X,A)')'  Frequency -> Inf (L limit)'
+      aca_Fmat%rJ=>tw_hodlr
+      aca_Fmat%rK=>self%Rmat
+      aca_Fmat%beta=(0.d0,1.d0)
+      aca_Fmat%alam=(0.d0,0.d0)
+    CASE(2)
+      WRITE(*,'(X,A)')'  Frequency -> 0   (R limit)'
+      aca_Fmat%rJ=>self%Rmat
+      aca_Fmat%rK=>self%Rmat
+      aca_Fmat%beta=(0.d0,0.d0)
+      aca_Fmat%alam=(1.d0,0.d0)
+    CASE DEFAULT
+      CALL oft_abort('Invalid "fr_limit" value (0,1,2)', 'run_fr', __FILE__)
+  END SELECT
+ELSE
+  ALLOCATE(Mmat(self%nelems,self%nelems))
+  SELECT CASE(fr_limit)
+    CASE(0)
+      WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
+      b=b*freq*2.d0*pi ! Scale RHS by forcing frequency
+      Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
+      DO i=1,self%Rmat%nr
+        DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
+          Mmat(i,self%Rmat%lc(j))=Mmat(i,self%Rmat%lc(j)) + self%Rmat%M(j)
+        END DO
       END DO
-    END DO
-  CASE(1)
-    WRITE(*,'(X,A)')'  Frequency -> Inf (L limit)'
-    Mmat=(0.d0,1.d0)*self%Lmat
-  CASE(2)
-    WRITE(*,'(X,A)')'  Frequency -> 0   (R limit)'
-    Mmat=(0.d0,0.d0)
-    DO i=1,self%Rmat%nr
-      DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
-        Mmat(i,self%Rmat%lc(j))=Mmat(i,self%Rmat%lc(j)) + self%Rmat%M(j)
+    CASE(1)
+      WRITE(*,'(X,A)')'  Frequency -> Inf (L limit)'
+      Mmat=(0.d0,1.d0)*self%Lmat
+    CASE(2)
+      WRITE(*,'(X,A)')'  Frequency -> 0   (R limit)'
+      Mmat=(0.d0,0.d0)
+      DO i=1,self%Rmat%nr
+        DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
+          Mmat(i,self%Rmat%lc(j))=Mmat(i,self%Rmat%lc(j)) + self%Rmat%M(j)
+        END DO
       END DO
-    END DO
-  CASE DEFAULT
-    CALL oft_abort('Invalid "fr_limit" value (0,1,2)', 'run_fr', __FILE__)
-END SELECT
+    CASE DEFAULT
+      CALL oft_abort('Invalid "fr_limit" value (0,1,2)', 'run_fr', __FILE__)
+  END SELECT
+END IF
 !---Solve system
 ALLOCATE(x(self%nelems))
 x=(0.d0,0.d0)
@@ -242,13 +288,39 @@ IF(direct)THEN
   CALL lapack_matinv(self%nelems,Mmat,info)
   CALL zgemv('N',self%nelems,self%nelems,1.d0,Mmat,self%nelems,b,1,0.d0,x,1)
 ELSE
-  graph%nr=self%Rmat%nr
-  graph%nnz=self%Rmat%nnz
-  graph%kr=>self%Rmat%kr
-  graph%lc=>self%Rmat%lc
-  CALL gmres_comp(60,-1,self%nelems,Mmat,x,b,graph,MAX(1,INT(self%nelems/2000,4)),.TRUE.)
+  IF(tw_hodlr%L_svd_tol>0.d0)THEN
+    frinv%pre=>frinv_pre
+    frinv_pre%mf_obj=>tw_hodlr
+    frinv_pre%Rmat=>self%Rmat
+    frinv_pre%alpha=aca_Fmat%beta
+    frinv_pre%beta=aca_Fmat%alam
+    ! ALLOCATE(oft_diag_cscale::frinv%pre)
+    frinv%A=>aca_Fmat
+    frinv%nrits=60
+    frinv%its=-1
+    NULLIFY(aloc,bloc)
+    CALL self%Uloc%new(aloc)
+    CALL self%Uloc%new(bloc)
+    CALL aca_Fmat%assemble(aloc)
+    !---Solve system
+    CALL aloc%restore_local(x)
+    CALL bloc%restore_local(b)
+    CALL frinv%apply(aloc,bloc)
+    CALL aloc%get_local(x)
+    !---Cleanup temporaries
+    CALL aloc%delete()
+    CALL bloc%delete()
+    DEALLOCATE(aloc,bloc)
+  ELSE
+    graph%nr=self%Rmat%nr
+    graph%nnz=self%Rmat%nnz
+    graph%kr=>self%Rmat%kr
+    graph%lc=>self%Rmat%lc
+    CALL gmres_comp(60,-1,self%nelems,Mmat,x,b,graph,MAX(1,INT(self%nelems/2000,4)),.TRUE.)
+    DEALLOCATE(Mmat)
+  END IF
 END IF
-DEALLOCATE(Mmat,b)
+DEALLOCATE(b)
 
 !---Setup local vectors for I/O
 CALL self%Uloc%new(uloc)

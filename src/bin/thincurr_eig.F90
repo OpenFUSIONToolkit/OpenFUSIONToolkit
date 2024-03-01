@@ -40,13 +40,15 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_gmres_solver, create_diag_p
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_iram_eigsolver
 #endif
+USE oft_lag_basis, ONLY: oft_blagrange
 USE axi_green, ONLY: green
 USE mhd_utils, ONLY: mu0
 USE thin_wall
+USE thin_wall_hodlr
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4) :: nsensors = 0
-TYPE(tw_type) :: tw_sim
+TYPE(tw_type), TARGET :: tw_sim
 TYPE(tw_sensors) :: sensors
 !
 INTEGER(4) :: i,n,ierr,io_unit
@@ -58,6 +60,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
+TYPE(oft_tw_hodlr_op), TARGET :: tw_hodlr
 !
 INTEGER(4) :: neigs = 5
 INTEGER(4) :: jumper_start = -1
@@ -67,7 +70,8 @@ LOGICAL :: save_L = .FALSE.
 LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 LOGICAL :: compute_B = .FALSE.
-NAMELIST/thincurr_eig_options/direct,plot_run,save_L,save_Mcoil,save_Msen,compute_B,neigs,jumper_start
+NAMELIST/thincurr_eig_options/direct,plot_run,save_L,save_Mcoil,save_Msen, &
+  compute_B,neigs,jumper_start
 !---
 CALL oft_init
 !---Read in options
@@ -142,10 +146,18 @@ ELSE
   ELSE
     CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
   END IF
-  IF(save_L)THEN
-    CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat,'Lmat.save')
+  !---
+  tw_hodlr%tw_obj=>tw_sim
+  CALL tw_hodlr%setup()
+  IF(tw_hodlr%L_svd_tol>0.d0)THEN
+    IF(direct)CALL oft_abort('HODLR compression requires "direct=F"','thincurr_eig',__FILE__)
+    CALL tw_hodlr%compute_L()
   ELSE
-    CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+    IF(save_L)THEN
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat,'Lmat.save')
+    ELSE
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+    END IF
   END IF
   !---Setup resistivity matrix
   CALL tw_compute_Rmat(tw_sim,.TRUE.)
@@ -236,7 +248,7 @@ CALL sort_array(W_tmp,sort_tmp,N)
 DEALLOCATE(W_tmp)
 !---Copy to output
 DO i=1,neigs
-  j = sort_tmp(N+1-i-self%nclosures)
+  j = sort_tmp(N+1-i)
   eig_rval(i)=WR(j)
   eig_ival(i)=WI(j)
   eig_vec(:,i)=REAL(VR(:,j),8)
@@ -277,10 +289,6 @@ TYPE(oft_timer) :: loctimer
 DEBUG_STACK_PUSH
 WRITE(*,*)
 WRITE(*,*)'Starting eigenvalue solve'
-!---Setup matrix
-fmat%nr=self%nelems; fmat%nc=self%nelems
-fmat%nrg=self%nelems; fmat%ncg=self%nelems
-fmat%M => self%Lmat
 !---Setup local vectors
 CALL self%Uloc%new(uloc)
 CALL self%Rmat%assemble(uloc)
@@ -306,11 +314,18 @@ END IF
 linv%A=>self%Rmat
 
 !---Setup Arnoldi eig value solver
-arsolver%A=>fmat
+IF(tw_hodlr%L_svd_tol>0.d0)THEN
+  arsolver%A=>tw_hodlr
+ELSE
+  fmat%nr=self%nelems; fmat%nc=self%nelems
+  fmat%nrg=self%nelems; fmat%ncg=self%nelems
+  fmat%M => self%Lmat
+  arsolver%A=>fmat
+END IF
 arsolver%M=>self%Rmat
 arsolver%tol=1.E-5_r8
 arsolver%Minv=>linv
-arsolver%nev=neigs+self%nclosures
+arsolver%nev=neigs
 arsolver%mode=2
 
 !---Compute eigenvalues/vectors
@@ -329,19 +344,16 @@ IF(arsolver%info>=0)THEN
   DEALLOCATE(W_tmp)
   !---Copy output
   DO i=1,neigs
-    j = sort_tmp(arsolver%nev-self%nclosures+1-i)
+    j = sort_tmp(arsolver%nev+1-i)
     eig_rval(i)=arsolver%eig_val(1,j)
     eig_ival(i)=arsolver%eig_val(2,j)
     eig_vec(:,i)=arsolver%eig_vec(:,j)
   END DO
   DEALLOCATE(sort_tmp)
-  ! !---Handle closures
-  ! DO i=1,self%nclosures
-  !   eig_vec(self%closures(i),1:neigs)=0.d0
-  ! END DO
-  WRITE(*,*)'Eigenvalues'
-  WRITE(*,*)'  Real: ',eig_rval(1:MIN(5,neigs))
-  WRITE(*,*)'  Imag: ',eig_ival(1:MIN(5,neigs))
+  !---Print first few eigenvalues
+  WRITE(*,'(A)')'Eigenvalues'
+  WRITE(*,'(A,5Es14.5)')'  Real: ',eig_rval(1:MIN(5,neigs))
+  WRITE(*,'(A,5Es14.5)')'  Imag: ',eig_ival(1:MIN(5,neigs))
   WRITE(*,*)
 END IF
 !---Cleanup
@@ -364,15 +376,15 @@ END SUBROUTINE run_eig
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE plot_eig(self,nsensors,sensors)
-TYPE(tw_type), INTENT(inout) :: self
+TYPE(tw_type), TARGET, INTENT(inout) :: self
 INTEGER(4), INTENT(in) :: nsensors
 TYPE(floop_sensor), POINTER, INTENT(in) :: sensors(:)
 INTEGER(4) :: i,j,k,jj,ntimes,ncoils,itime,io_unit
 REAL(8) :: uu,t,tmp,area
 REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_vec
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals,senout
-REAL(8), POINTER, DIMENSION(:) :: vals
-CLASS(oft_vector), POINTER :: uio
+REAL(8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: cc_vals,senout
+REAL(8), POINTER, DIMENSION(:) :: vals,vtmp
+CLASS(oft_vector), POINTER :: uio,Bx,By,Bz
 TYPE(oft_bin_file) :: floop_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
@@ -383,8 +395,17 @@ CALL self%Uloc%new(uio)
 ALLOCATE(vals(self%nelems))
 IF(nsensors>0)ALLOCATE(senout(nsensors,neigs))
 IF(compute_B)THEN
-  IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%nc))
-  CALL tw_compute_Bops(self)
+  IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%np))
+  tw_hodlr%tw_obj=>self
+  CALL tw_hodlr%setup()
+  IF(tw_hodlr%B_svd_tol>0.d0)THEN
+    CALL tw_hodlr%compute_B()
+    CALL self%Uloc_pts%new(Bx)
+    CALL self%Uloc_pts%new(By)
+    CALL self%Uloc_pts%new(Bz)
+  ELSE
+    CALL tw_compute_Bops(self)
+  END IF
 END IF
 DO i=1,neigs
   !---Load solution from file
@@ -394,18 +415,29 @@ DO i=1,neigs
   !---Save plot fields
   CALL tw_save_pfield(self,vals,'J_'//eig_tag)
   IF(compute_B)THEN
-    !$omp parallel do private(j,jj,tmp)
-    DO k=1,smesh%nc
-      DO jj=1,3
-        tmp=0.d0
-        !$omp simd reduction(+:tmp)
-        DO j=1,self%nelems
-          tmp=tmp+vals(j)*self%Bel(j,k,jj)
+    IF(tw_hodlr%B_svd_tol>0.d0)THEN
+      CALL tw_hodlr%apply_bop(uio,Bx,By,Bz)
+      NULLIFY(vtmp)
+      CALL Bx%get_local(vtmp)
+      cc_vals(1,:)=vtmp
+      CALL By%get_local(vtmp)
+      cc_vals(2,:)=vtmp
+      CALL Bz%get_local(vtmp)
+      cc_vals(3,:)=vtmp
+    ELSE
+      !$omp parallel do private(j,jj,tmp)
+      DO k=1,smesh%np
+        DO jj=1,3
+          tmp=0.d0
+          !$omp simd reduction(+:tmp)
+          DO j=1,self%nelems
+            tmp=tmp+vals(j)*self%Bel(j,k,jj)
+          END DO
+          cc_vals(jj,k)=tmp
         END DO
-        cc_vals(jj,k)=tmp
       END DO
-    END DO
-    CALL self%mesh%save_cell_vector(cc_vals,'B_'//eig_tag)
+    END IF
+    CALL self%mesh%save_vertex_vector(cc_vals,'B_v_'//eig_tag)
   END IF
   !---Save sensor signals
   IF(nsensors>0)THEN
