@@ -56,6 +56,7 @@ def check_result(filename):
 
 #============================================================================
 # Test runner for find_cell test on linear elements
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 def test_find_lin(grid_type):
     assert mapping_setup(1,1,1,91,'find',grid_type=grid_type)
@@ -63,6 +64,7 @@ def test_find_lin(grid_type):
 
 #============================================================================
 # Test runner for find_cell test on quadratic elements
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 def test_find_quad(grid_type):
     assert mapping_setup(1,1,2,91,'find',grid_type=grid_type)
@@ -70,6 +72,7 @@ def test_find_quad(grid_type):
 
 #============================================================================
 # Test runner for jacobian tests on linear elements
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("elem_order", (2, 3, 4))
 def test_jac_lin(grid_type, elem_order):
@@ -78,6 +81,7 @@ def test_jac_lin(grid_type, elem_order):
 
 #============================================================================
 # Test runner for jacobian tests on quadratic elements
+@pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("elem_order", (2, 3, 4))
 def test_jac_quad(grid_type, elem_order):

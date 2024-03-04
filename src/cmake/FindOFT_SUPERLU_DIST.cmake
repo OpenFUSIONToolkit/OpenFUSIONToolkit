@@ -1,6 +1,6 @@
 # FindOFT_SUPERLU_DIST.cmake
 #
-# Finds the SuperLU-DIST library for use with the OpenFUSIONToolkit
+# Finds the SuperLU-DIST library for use with the Open FUSION Toolkit
 # as installed by version "3.3+" of SuperLU.
 #
 # This will define the following variables

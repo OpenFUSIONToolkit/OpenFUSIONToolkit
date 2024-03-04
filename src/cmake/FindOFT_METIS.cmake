@@ -1,6 +1,6 @@
 # FindOFT_METIS.cmake
 #
-# Finds the metis library for use with the OpenFUSIONToolkit
+# Finds the metis library for use with the Open FUSION Toolkit
 # as installed by version "5.1" of metis.
 #
 # This will define the following variables

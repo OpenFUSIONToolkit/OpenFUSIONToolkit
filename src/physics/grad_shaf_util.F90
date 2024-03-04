@@ -1,5 +1,5 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file oft_gs_util.F90
 !
@@ -18,12 +18,13 @@ USE oft_la_base, ONLY: oft_vector
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_geval
-USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp
+USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp, &
+  oft_blag_vproject
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
   gs_set_cond_weights, gs_estored, gs_dflux, gs_tflux, gs_helicity, gs_itor_nl, &
-  gs_psimax, gs_test_bounds, gs_interp, oft_indent, gs_get_qprof, gsinv_interp, &
+  gs_psimax, gs_test_bounds, gs_b_interp, oft_indent, gs_get_qprof, gsinv_interp, &
   gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent
 USE oft_gs_profiles
 IMPLICIT NONE
@@ -186,9 +187,9 @@ integer(4), POINTER :: lctmp(:,:)
 real(8), POINTER :: rtmp(:,:),cond_corr(:,:,:)
 REAL(8), PARAMETER :: rst_version = 2.d0
 LOGICAL :: pm_save
-CLASS(oft_vector), POINTER :: a,b
+CLASS(oft_vector), POINTER :: a,br,bt,bz
 CLASS(oft_solver), POINTER :: solver
-TYPE(gs_interp) :: field
+TYPE(gs_b_interp) :: field
 real(r8), POINTER :: vals_tmp(:)
 m=100
 IF(PRESENT(mpsi_sample))m=mpsi_sample
@@ -236,7 +237,9 @@ CALL self%psi%get_local(vals_tmp)
 CALL hdf5_write(vals_tmp,filename,'gs/psi')
 !---Save B-field
 CALL self%psi%new(a)
-CALL self%psi%new(b)
+CALL self%psi%new(br)
+CALL self%psi%new(bt)
+CALL self%psi%new(bz)
 ! CALL vector_cast(psiv,a)
 field%gs=>self
 CALL field%setup()
@@ -247,19 +250,26 @@ CALL create_diag_pre(solver%pre)
 !---Project to plotting grid
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 ALLOCATE(tmpout(3,a%n))
-DO i=1,3
-  field%mode=i
-  CALL oft_blag_project(field,b)
-  CALL a%set(0.d0)
-  CALL solver%apply(a,b)
-  CALL a%get_local(vals_tmp)
-  tmpout(i,:)=vals_tmp
-END DO
+CALL oft_blag_vproject(field,br,bt,bz)
+CALL a%set(0.d0)
+CALL solver%apply(a,br)
+CALL a%get_local(vals_tmp)
+tmpout(1,:)=vals_tmp
+CALL a%set(0.d0)
+CALL solver%apply(a,bt)
+CALL a%get_local(vals_tmp)
+tmpout(2,:)=vals_tmp
+CALL a%set(0.d0)
+CALL solver%apply(a,bz)
+CALL a%get_local(vals_tmp)
+tmpout(3,:)=vals_tmp
 oft_env%pm=pm_save
 CALL hdf5_write(tmpout,filename,'gs/B')
 CALL a%delete
-CALL b%delete
-DEALLOCATE(a,b,tmpout,vals_tmp)
+CALL br%delete
+CALL bt%delete
+CALL bz%delete
+DEALLOCATE(a,br,bt,bz,tmpout,vals_tmp)
 CALL field%delete()
 CALL solver%pre%delete()
 DEALLOCATE(solver%pre)
@@ -272,16 +282,20 @@ CALL hdf5_write(tmpout(:,1),filename,'gs/cond_source')
 DEALLOCATE(tmpout)
 IF(self%ncoil_regs>0)THEN
   ALLOCATE(tmpout(self%ncoil_regs,1))
+  tmpout=0.d0
   DO i=1,self%ncoil_regs
-    tmpout(i,1)=self%coil_regions(i)%curr
+    DO j=1,self%ncoils
+      tmpout(i,1)=tmpout(i,1) &
+        + self%coil_currs(j)*self%coil_nturns(self%coil_regions(i)%id,j)
+    END DO
   END DO
   CALL hdf5_write(tmpout(:,1),filename,'gs/int_coils')
   DEALLOCATE(tmpout)
 END IF
-IF(self%ncoils>0)THEN
-  ALLOCATE(tmpout(self%ncoils,1))
-  DO i=1,self%ncoils
-    tmpout(i,1)=self%coils(i)%curr
+IF(self%ncoils_ext>0)THEN
+  ALLOCATE(tmpout(self%ncoils_ext,1))
+  DO i=1,self%ncoils_ext
+    tmpout(i,1)=self%coils_ext(i)%curr
   END DO
   CALL hdf5_write(tmpout(:,1),filename,'gs/ext_coils')
   DEALLOCATE(tmpout)
@@ -383,16 +397,17 @@ END IF
 IF(self%ncoil_regs>0)THEN
   ALLOCATE(tmpin(self%ncoil_regs,1))
   CALL hdf5_read(tmpin(:,1),filename,'gs/int_coils')
+  CALL oft_abort("Not supported","gs_load",__FILE__)
   DO i=1,self%ncoil_regs
     self%coil_regions(i)%curr=tmpin(i,1)
   END DO
   DEALLOCATE(tmpin)
 END IF
-IF(self%ncoils>0)THEN
-  ALLOCATE(tmpin(self%ncoils,1))
+IF(self%ncoils_ext>0)THEN
+  ALLOCATE(tmpin(self%ncoils_ext,1))
   CALL hdf5_read(tmpin(:,1),filename,'gs/ext_coils')
-  DO i=1,self%ncoils
-    self%coils(i)%curr=tmpin(i,1)
+  DO i=1,self%ncoils_ext
+    self%coils_ext(i)%curr=tmpin(i,1)
   END DO
   DEALLOCATE(tmpin)
 END IF
@@ -652,6 +667,71 @@ tflux=tflux*self%psiscale
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_comp_globals
+!---------------------------------------------------------------------------
+!> Compute plasma loop voltage
+!---------------------------------------------------------------------------
+subroutine gs_calc_vloop(self,vloop)
+class(gs_eq), intent(inout) :: self !< G-S object
+real(8), intent(out) :: vloop !< loop voltage
+type(oft_lag_brinterp), target :: psi_eval
+type(oft_lag_bginterp), target :: psi_geval
+real(8) :: itor_loc !< local toroidal current in integration
+real(8) :: itor !< toroidal current
+real(8) :: j_NI_loc !< local non-inductive current in integration
+real(8) :: I_NI !< non-inductive F*F'
+real(8) :: eta_jsq !< eta*j_NI**2 
+real(8) :: goptmp(3,3) !< needs docs
+real(8) :: v !< volume
+real(8) :: pt(3) !< radial coordinate
+real(8) :: curr_cent(2) !< needs docs
+real(8) :: psitmp(1) !< magnetic flux coordinate
+real(8) :: gpsitmp(3) !< needs docs
+integer(4) :: i,m
+!---
+psi_eval%u=>self%psi
+CALL psi_eval%setup
+CALL psi_geval%shared_setup(psi_eval)
+!---
+eta_jsq = 0.d0
+I_NI = 0.d0
+itor = 0.d0
+vloop = 0.d0
+!!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc) &
+!!$omp reduction(+:itor) reduction(+:vol) &
+do i=1,smesh%nc
+  IF(smesh%reg(i)/=1)CYCLE
+  do m=1,oft_blagrange%quad%np
+    call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
+    IF(psitmp(1)<self%plasma_bounds(1))CYCLE
+    pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+    !---Compute toroidal current itor, and eta*j^2 eta_jsq (numerator of Vloop integral)
+    IF(gs_test_bounds(self,pt))THEN
+      IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
+      IF(self%mode==0)THEN
+        j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+      ELSE
+        j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+self%eps))
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+          + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
+      END IF
+      eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(j_NI_loc**2)*v*oft_blagrange%quad%wts(m)*pt(1)
+      itor = itor + itor_loc*v*oft_blagrange%quad%wts(m)
+    END IF
+  end do
+end do
+eta_jsq=eta_jsq*(2*pi/(mu0*mu0))
+itor=itor/mu0
+!---Vloop = integral(eta_jsq) / itor
+vloop=self%psiscale*(eta_jsq/itor)
+!
+CALL psi_eval%delete
+CALL psi_geval%delete
+end subroutine gs_calc_vloop
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_analyze
 !---------------------------------------------------------------------------

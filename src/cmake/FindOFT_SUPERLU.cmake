@@ -1,6 +1,6 @@
 # FindOFT_SUPERLU.cmake
 #
-# Finds the SuperLU library for use with the OpenFUSIONToolkit
+# Finds the SuperLU library for use with the Open FUSION Toolkit
 # as installed by version "4.3+" of SuperLU.
 #
 # This will define the following variables

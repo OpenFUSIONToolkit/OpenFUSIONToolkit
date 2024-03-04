@@ -1,13 +1,13 @@
 !------------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !------------------------------------------------------------------------------
 !> @file oft_base.F90
 !
-!> @defgroup doxy_oft_base OpenFUSIONToolkit Base
-!! Enviroment functions and aliases for the OpenFUSIONToolkit
+!> @defgroup doxy_oft_base Open FUSION Toolkit Base
+!! Enviroment functions and aliases for the Open FUSION Toolkit
 !
-!> Base environment functions and aliases for OpenFUSIONToolkit.
-!! - MPI aliases for OpenFUSIONToolkit environment
+!> Base environment functions and aliases for Open FUSION Toolkit.
+!! - MPI aliases for Open FUSION Toolkit environment
 !! - Runtime settings and identifiers
 !! - Init, Abort, Finalize functions
 !! oft_env_type class
@@ -90,7 +90,7 @@ TYPE :: fox_node
 END TYPE
 #endif
 !---------------------------------------------------------------------------
-!> OpenFUSIONToolkit environment class
+!> Open FUSION Toolkit environment class
 !!
 !! Contains runtime enviroment information
 !! - Global MPI COMM alias
@@ -99,7 +99,7 @@ END TYPE
 TYPE :: oft_env_type
   INTEGER(i4) :: nbase = -1 !< Number of OpenMP base meshes
   INTEGER(i4) :: nparts = 1 !< Number of OpenMP paritions
-  INTEGER(i4) :: COMM = MPI_COMM_WORLD !< OpenFUSIONToolkit MPI communicator
+  INTEGER(i4) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
   INTEGER(i4) :: nnodes = -1 !< Number of MPI tasks
   INTEGER(i4) :: ppn = 1 !< Number of procs per NUMA node
   INTEGER(i4) :: nprocs = -1 !< Number of MPI tasks
@@ -153,7 +153,7 @@ INTERFACE
 END INTERFACE
 CONTAINS
 !---------------------------------------------------------------------------
-!> Initializes OpenFUSIONToolkit run environment
+!> Initializes Open FUSION Toolkit run environment
 !!
 !! Also calls MPI_INIT
 !---------------------------------------------------------------------------
@@ -250,7 +250,7 @@ IF(oft_env%xml_file(1:4)/='none')THEN
   doc=>fox_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
   oft_env%xml=>fox_item(fox_getElementsByTagname(doc,"oft"),0)
 #else
-  CALL oft_warn("OpenFUSIONToolkit not built wit xml support, ignoring xml input.")
+  CALL oft_warn("Open FUSION Toolkit not built wit xml support, ignoring xml input.")
 #endif
 END IF
 !---
@@ -264,7 +264,7 @@ oft_indent=""
 !---Print runtime information
 IF(oft_env%rank==0)THEN
   WRITE(*,'(A)')    '#----------------------------------------------'
-  WRITE(*,'(A)')    'OpenFUSIONToolkit Initialized'
+  WRITE(*,'(A)')    'Open FUSION Toolkit Initialized'
   WRITE(*,'(2A)')   'Development branch:   ',GITBRANCH
   WRITE(*,'(2A)')   'Revision id:          ',GITVERSION
   WRITE(*,'(2A)')   'Parallelization Info:'
@@ -294,7 +294,7 @@ END IF
 END IF
 END SUBROUTINE oft_init
 !---------------------------------------------------------------------------
-!> Finalize OpenFUSIONToolkit environment
+!> Finalize Open FUSION Toolkit environment
 !!
 !! Also calls PetscFinalize/MPI_FINALIZE
 !---------------------------------------------------------------------------
@@ -342,7 +342,7 @@ CALL MPI_FINALIZE(ierr)
 STOP
 END SUBROUTINE oft_finalize
 !---------------------------------------------------------------------------
-!> Graceful abort for OpenFUSIONToolkit
+!> Graceful abort for Open FUSION Toolkit
 !!
 !! Also calls MPI_ABORT/STOP
 !---------------------------------------------------------------------------
@@ -379,7 +379,7 @@ ERROR STOP errcode
 #endif
 END SUBROUTINE oft_abort
 !---------------------------------------------------------------------------
-!> Graceful warning printing for OpenFUSIONToolkit
+!> Graceful warning printing for Open FUSION Toolkit
 !---------------------------------------------------------------------------
 SUBROUTINE oft_warn(error_str)
 CHARACTER(LEN=*) :: error_str
@@ -922,20 +922,43 @@ END SUBROUTINE orient_listn_inv
 !! @warning This function requires `x` be sorted lowest to highest.
 !! @note This function performs an interval search each time it is called.
 !!
-!! @returns \f$ F(xx) \f$
+!! @returns \f$ F(xx) \f$ (-1.E99 if outside domain and `extrap=0`)
 !------------------------------------------------------------------------------
-PURE FUNCTION linterp(x,y,n,xx) result(yy)
+FUNCTION linterp(x,y,n,xx,extrap) result(yy)
 REAL(r8), INTENT(in) :: x(n) !< Paramaterizing array \f$ x_i \f$ [n]
 REAL(r8), INTENT(in) :: y(n) !< Function values \f$ F(x_i) \f$ [n]
-REAL(r8), INTENT(in) :: xx !< Length of function parameterization
-INTEGER(i4), INTENT(in) :: n !< Location to perform interpolation
+REAL(r8), INTENT(in) :: xx !< Location to perform interpolation
+INTEGER(i4), INTENT(in) :: n !< Length of function parameterization
+INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Extrapolation mode (0: none, 1: constant, 2: linear)
 INTEGER(i4) :: i
 REAL(r8) :: yy
 yy=-1.d99
 DO i=2,n
   IF(x(i-1)<=xx.AND.x(i)>=xx)EXIT
 END DO
-IF(i<=n)yy=(y(i)-y(i-1))*(xx-x(i-1))/(x(i)-x(i-1)) + y(i-1)
+IF(i<=n)THEN
+  yy=(y(i)-y(i-1))*(xx-x(i-1))/(x(i)-x(i-1)) + y(i-1)
+ELSE
+  IF(PRESENT(extrap))THEN
+    SELECT CASE(extrap)
+    CASE(0)
+    CASE(1)
+      IF(xx<x(1))THEN
+        yy=y(1)
+      ELSE IF(xx>x(n))THEN
+        yy=y(n)
+      END IF
+    CASE(2)
+      IF(xx<x(1))THEN
+        yy=(y(2)-y(1))*(xx-x(1))/(x(2)-x(1)) + y(1)
+      ELSE IF(xx>x(n))THEN
+        yy=(y(n)-y(n-1))*(xx-x(n-1))/(x(n)-x(n-1)) + y(n-1)
+      END IF
+    CASE DEFAULT
+      CALL oft_abort("Invalid extrapolation type","linterp",__FILE__)
+    END SELECT
+  END IF
+END IF
 END FUNCTION linterp
 !---------------------------------------------------------------------------
 !> Reset the stack

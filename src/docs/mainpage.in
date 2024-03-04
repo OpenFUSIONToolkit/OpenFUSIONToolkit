@@ -1,4 +1,4 @@
-Open FUSION Toolkit Documentation (v1.0.0-beta1)			{#mainpage}
+Open FUSION Toolkit Documentation (v@CMAKE_PROJECT_VERSION@@OFT_VER_SUFFIX@)			{#mainpage}
 =======
 
 [TOC]

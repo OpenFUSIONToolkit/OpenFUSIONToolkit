@@ -1,5 +1,5 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file oft_gs_td.F90
 !
@@ -156,13 +156,16 @@ DO i=1,tMaker_td_obj%gs_eq%ncond_regs
 END DO
 ALLOCATE(tMaker_td_obj%curr_reg(smesh%nreg))
 tMaker_td_obj%curr_reg=0.d0
-DO i=1,tMaker_td_obj%gs_eq%ncoil_regs
-    j=tMaker_td_obj%gs_eq%coil_regions(i)%id
-    tMaker_td_obj%curr_reg(j)=tMaker_td_obj%gs_eq%coil_regions(i)%curr
+DO i=1,tMaker_td_obj%gs_eq%ncoils
+    DO k=1,tMaker_td_obj%gs_eq%ncoil_regs
+        j=tMaker_td_obj%gs_eq%coil_regions(k)%id
+        tMaker_td_obj%curr_reg(j)=tMaker_td_obj%curr_reg(j) &
+          + tMaker_td_obj%gs_eq%coil_currs(i)*tMaker_td_obj%gs_eq%coil_nturns(j,i)
+    END DO
 END DO
 ! Advance using MF-NK method
 CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
-IF(self%gs_eq%region_info%nnonaxi>0)THEN
+IF(tMaker_td_obj%gs_eq%region_info%nnonaxi>0)THEN
     adv_pre%A=>tMaker_td_obj%vac_op
 ELSE
     CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
@@ -170,6 +173,7 @@ ELSE
     adv_solver%its=5
     adv_solver%nrits=5
     adv_solver%pre=>adv_pre
+    adv_pre%A=>tMaker_td_obj%vac_op
 END IF
 !
 CALL mfmat%setup(psi_tmp,tMaker_td_obj)
@@ -206,13 +210,16 @@ IF(dt/=tMaker_td_obj%dt)THEN
     dt=ABS(dt)
     tMaker_td_obj%dt=dt
     CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
-    IF(self%gs_eq%region_info%nnonaxi<=0)CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
+    IF(tMaker_td_obj%gs_eq%region_info%nnonaxi<=0)CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
     CALL adv_pre%update(.TRUE.)
 END IF
 ! Update coil currents (end of time step)
-DO i=1,tMaker_td_obj%gs_eq%ncoil_regs
-    j=tMaker_td_obj%gs_eq%coil_regions(i)%id
-    tMaker_td_obj%curr_reg(j)=tMaker_td_obj%gs_eq%coil_regions(i)%curr
+DO i=1,tMaker_td_obj%gs_eq%ncoils
+    DO k=1,tMaker_td_obj%gs_eq%ncoil_regs
+        j=tMaker_td_obj%gs_eq%coil_regions(k)%id
+        tMaker_td_obj%curr_reg(j)=tMaker_td_obj%curr_reg(j) &
+        + tMaker_td_obj%gs_eq%coil_currs(i)*tMaker_td_obj%gs_eq%coil_nturns(j,i)
+    END DO
 END DO
 ! Point to profiles in case they changed
 tMaker_td_obj%F=>tMaker_td_obj%gs_eq%I
@@ -245,7 +252,7 @@ DO j=1,4
         CALL psi_sol%add(0.d0,1.d0,psi_tmp)
         tMaker_td_obj%dt=tMaker_td_obj%dt/2.d0
         CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
-        IF(self%gs_eq%region_info%nnonaxi<=0)CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
+        IF(tMaker_td_obj%gs_eq%region_info%nnonaxi<=0)CALL build_jop(tMaker_td_obj,adv_op,psi_sol)
         CALL adv_pre%update(.TRUE.)
         CALL apply_rhs(tMaker_td_obj,psi_sol,rhs1)
         CALL blag_zerob(rhs1)

@@ -1,5 +1,5 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> @file thin_wall.F90
 !
@@ -264,6 +264,16 @@ IF(self%nholes>0)THEN
     END DO
   END DO
   DEALLOCATE(kfh_tmp)
+  !---Check for duplicates
+  DO i=1,self%nholes
+    DO j=1,self%nholes
+      IF(i==j.OR.self%hmesh(i)%n/=self%hmesh(j)%n)CYCLE
+      IF(ALL(self%hmesh(i)%lp_sorted==self%hmesh(j)%lp_sorted))THEN
+        WRITE(*,*)"Duplicate hole detected: ",i,j
+        CALL oft_abort("Duplicate hole detected","tw_setup",__FILE__)
+      END IF
+    END DO
+  END DO
 END IF
 ALLOCATE(self%pmap(self%mesh%np))
 self%pmap=0
@@ -1584,7 +1594,8 @@ DO i=1,tw_obj%n_vcoils
     END DO
     tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself + tw_obj%vcoils(i)%res_per_len(j)*dl
   END DO
-  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself*pi*4.d-7
+  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
+  tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself/mu0 ! Convert to magnetic units
   !
   eta_add=tw_obj%vcoils(i)%Rself
   j_add(1)=tw_obj%np_active+tw_obj%nholes+i

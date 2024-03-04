@@ -77,6 +77,7 @@ def single_level(levels,order,exp_its,exp_error,grid_type=1,petsc_flag='F'):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_tri_p1_base(levels, petsc_flag):
     single_level(levels, 1, 3, 3.0669984042999903E-002, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_tri_p1_1ref(levels, petsc_flag):
@@ -88,6 +89,7 @@ def test_tri_p1_1ref(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_tri_p2_base(levels, petsc_flag):
     single_level(levels, 2, 12, 0.12223325061763389, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_tri_p2_1ref(levels, petsc_flag):
@@ -99,6 +101,7 @@ def test_tri_p2_1ref(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_tri_p3_base(levels, petsc_flag):
     single_level(levels, 3, 26, 0.27578221875222847, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_tri_p3_1ref(levels, petsc_flag):
@@ -110,6 +113,7 @@ def test_tri_p3_1ref(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_tri_p4_base(levels, petsc_flag):
     single_level(levels, 4, 50, 0.49032174402311279, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_tri_p4_1ref(levels, petsc_flag):
@@ -121,6 +125,7 @@ def test_tri_p4_1ref(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_quad_p1_base(levels, petsc_flag):
     single_level(levels, 1, 1, 1.7777777777777774E-002, grid_type=2, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_quad_p1_1ref(levels, petsc_flag):
@@ -132,6 +137,7 @@ def test_quad_p1_1ref(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_quad_p2_base(levels, petsc_flag):
     single_level(levels, 2, 6, 6.0977378920293084E-002, grid_type=2, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_quad_p2_1ref(levels, petsc_flag):
@@ -143,6 +149,7 @@ def test_quad_p2_1ref(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_quad_p3_base(levels, petsc_flag):
     single_level(levels, 3, 10, 0.13790992889879716, grid_type=2, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_quad_p3_1ref(levels, petsc_flag):
@@ -154,6 +161,7 @@ def test_quad_p3_1ref(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_quad_p4_base(levels, petsc_flag):
     single_level(levels, 4, 25, 0.24510302835546499, grid_type=2, petsc_flag=petsc_flag)
+@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_quad_p4_1ref(levels, petsc_flag):

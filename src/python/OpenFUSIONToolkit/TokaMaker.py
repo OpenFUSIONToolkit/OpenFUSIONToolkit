@@ -48,7 +48,7 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1)])
+    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
 
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
@@ -71,7 +71,7 @@ tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
 
 # G-S load flux functions (f_file,f_offset,p_file)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
-    [c_char_p, c_double, c_char_p])
+    [c_char_p, c_double, c_char_p, c_char_p, c_char_p])
 
 # G-S run function
 tokamaker_run = ctypes_subroutine(oftpy_lib.tokamaker_run, 
@@ -113,8 +113,16 @@ tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
     [ctypes_numpy_array(numpy.float64,1), c_double])
 
 #
+tokamaker_get_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_get_field_eval,
+    [c_int, c_void_ptr_ptr, c_char_p])
+
+#
+tokamaker_apply_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_apply_field_eval,
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double, c_int_ptr, c_int, ctypes_numpy_array(numpy.float64,1)])
+
+#
 tokamaker_get_coil_currents = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_currents,
-    [ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.int32,1)])
+    [ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1)])
 
 #
 tokamaker_get_coil_Lmat = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_Lmat,
@@ -143,6 +151,10 @@ tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals, # (It
     [c_double_ptr, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr])
 
 #
+tokamaker_gs_calc_vloop = ctypes_subroutine(oftpy_lib.tokamaker_gs_calc_vloop, # (V_loop)
+    [c_double_ptr])
+
+#
 tokamaker_get_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_profs, # (npsi,psi_in,f,fp,p,pp)
     [c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), 
      ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1)])
@@ -165,7 +177,7 @@ tokamaker_set_saddles = ctypes_subroutine(oftpy_lib.tokamaker_set_saddles,
 
 # G-S set coil regularization matrix
 tokamaker_set_coil_regmat = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_regmat,
-    [ctypes_numpy_array(numpy.float64,2),ctypes_numpy_array(numpy.float64,1),ctypes_numpy_array(numpy.float64,1)])
+    [c_int, ctypes_numpy_array(numpy.float64,2),ctypes_numpy_array(numpy.float64,1),ctypes_numpy_array(numpy.float64,1)])
 
 # G-S set coil regularization matrix
 tokamaker_set_coil_bounds = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_bounds,
@@ -301,6 +313,51 @@ def read_eqdsk(filename):
         eqdsk_obj['rzlim'] = read_2d(fid, eqdsk_obj['nlim'], 2)
     return eqdsk_obj
 
+def create_prof_file(self, filename, profile_dict, name):
+    '''! Create profile input file to be read by load_profiles()
+
+    @param filename Name of input file, see options in set_profiles()
+    @param profile_dict Dictionary object containing profile values ['y'] and sampled locations 
+    in normalized Psi ['x']
+    @param filename Name of input quantity, see options in set_profiles()
+    '''
+    file_lines = [profile_dict['type']]
+    if profile_dict['type'] == 'flat':
+        pass
+    elif profile_dict['type'] == 'linterp':
+        x = profile_dict.get('x',None)
+        if x is None:
+            raise KeyError('No array "x" for piecewise linear profile.')
+        else:
+            x = numpy.array(x.copy())
+        y = profile_dict.get('y',None)
+        if y is None:
+            raise KeyError('No array "y" for piecewise linear profile.')
+        else:
+            y = numpy.array(y.copy())
+        if numpy.min(numpy.diff(x)) < 0.0:
+            raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
+        if (x[0] < 0.0) or (x[-1] > 1.0):
+            raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
+        if self.psi_convention == 0:
+            x = 1.0 - x
+            sort_inds = x.argsort()
+            x = x[sort_inds]
+            y = y[sort_inds]
+        elif self.psi_convention == 1:
+            pass
+        else:
+            raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
+        file_lines += [
+            "{0} {1}".format(x.shape[0]-1, y[0]),
+            "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
+            "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
+        ]
+    else:
+        raise KeyError('Invalid profile type ("flat", "linterp")')
+    with open(filename, 'w+') as fid:
+        fid.write("\n".join(file_lines))
+
 oft_in_template = """&runtime_options
  debug={DEBUG_LEVEL}
 /
@@ -312,7 +369,41 @@ oft_in_template = """&runtime_options
 
 {MESH_DEF}
 """
-mu0 = numpy.pi*4.E-7
+
+
+class TokaMaker_field_interpolator():
+    '''! Interpolation class for Grad-Shafranov fields'''
+    def __init__(self,int_obj,int_type,dim,fbary_tol=1.E-8):
+        '''! Initialize interpolation object
+
+        @param int_obj Address of FORTRAN interpolation class
+        @param int_type Interpolation type (see @ref TokaMaker.TokaMaker.get_field_eval "get_field_eval")
+        @param dim Dimension of vector field
+        @param fbary_tol Tolerance for physical to logical mapping
+        '''
+        self.cell = c_int(-1)
+        self.int_type = int_type
+        self.dim = dim
+        self.val = numpy.zeros((self.dim,), dtype=numpy.float64)
+        self.int_obj = int_obj
+        self.fbary_tol = fbary_tol
+    
+    def __del__(self):
+        '''Destroy underlying interpolation object'''
+        pt_eval = numpy.zeros((3,), dtype=numpy.float64)
+        tokamaker_apply_field_eval(-self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
+
+    def eval(self,pt):
+        '''! Evaluate field at a given location
+
+        @param pt Location for evaluation [2]
+        @result Field at evaluation point [self.dim]
+        '''
+        pt_eval = numpy.zeros((3,), dtype=numpy.float64)
+        pt_eval[:2] = pt
+        tokamaker_apply_field_eval(self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
+        return self.val
+
 
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
@@ -332,6 +423,10 @@ class TokaMaker():
         self.settings = tokamaker_default_settings()
         ## Conductor definition dictionary
         self._cond_dict = {}
+        ## Coil definition dictionary
+        self._coil_dict = {}
+        ## Coil set definitions, including sub-coils
+        self.coil_sets = {}
         ## Vacuum F value
         self._F0 = 0.0
         ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
@@ -395,6 +490,7 @@ class TokaMaker():
         # Reset defaults
         self.settings = tokamaker_default_settings()
         self._cond_dict = {}
+        self._coil_dict = {}
         self._F0 = 0.0
         self._Ip_target=c_double(-1.0)
         self._Ip_ratio_target=c_double(-1.E99)
@@ -457,13 +553,14 @@ class TokaMaker():
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
     
-    def setup_regions(self,coil_file='none',cond_dict={}):
+    def setup_regions(self,coil_file='none',cond_dict={},coil_dict={}):
         '''! Define mesh regions (coils and conductors)
 
         @param coil_file File containing coil/conductor definitions in XML format
         @param cond_dict Dictionary specifying conducting regions
         '''
         self._cond_dict = cond_dict
+        self._coil_dict = coil_dict
         if coil_file != 'none':
             eta_vals = numpy.ones((1),dtype=numpy.float64)
             contig_flag = numpy.ones((1),dtype=numpy.int32)
@@ -475,14 +572,29 @@ class TokaMaker():
                 eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
                 if cond_dict[key].get('noncontinuous',False):
                     contig_flag[cond_dict[key]['reg_id']-1] = 0
+        nCoils = 0
+        self.coil_sets = {}
+        for key in coil_dict:
+            coil_set = coil_dict[key].get('coil_set',key)
+            if coil_set not in self.coil_sets:
+                self.coil_sets[coil_set] = {
+                    'id': nCoils,
+                    'sub_coils': []
+                }
+                nCoils += 1
+            self.coil_sets[coil_set]['sub_coils'].append(coil_dict[key])
+        coil_nturns = numpy.zeros((nCoils, self.nregs))
+        for key in self.coil_sets:
+            for sub_coil in self.coil_sets[key]['sub_coils']:
+                coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
         cstring = c_char_p(coil_file.encode())
-        tokamaker_setup_regions(cstring,eta_vals,contig_flag)
+        tokamaker_setup_regions(cstring,eta_vals,contig_flag,coil_nturns,nCoils)
 
     def eval_green(self,x,xc):
         r'''! Evaluate Green's function for a toroidal filament
 
         @param x Observation point [2]
-        @param xc Coil location [2]
+        @param xc Coil location [:,2]
         @result \f$\psi(x)\f$ due to a coil with unit current [A] at xc
         '''
         n = x.shape[0]
@@ -605,15 +717,23 @@ class TokaMaker():
         Can be used to enforce "soft" constraints on coil currents. For hard constraints see
         @ref TokaMaker.TokaMaker.set_coil_bounds "set_coil_bounds".
 
-        @param reg_mat Regularization matrix [ncoils+1,ncoils+1]
-        @param reg_targets Regularization targets [ncoils+1] (default: 0)
-        @param reg_weights Weights for regularization terms [ncoils+1] (default: 1)
+        @param reg_mat Regularization matrix [nregularize,ncoils+1]
+        @param reg_targets Regularization targets [nregularize] (default: 0)
+        @param reg_weights Weights for regularization terms [nregularize] (default: 1)
         '''
+        if reg_mat.shape[1] != self.ncoils+1:
+            raise ValueError('Incorrect shape of "reg_mat", should be [nregularize,ncoils+1]')
+        nregularize = reg_mat.shape[0]
         if reg_targets is None:
-            reg_targets = numpy.zeros((reg_mat.shape[0],), dtype=numpy.float64)
+            reg_targets = numpy.zeros((nregularize,), dtype=numpy.float64)
         if reg_weights is None:
-            reg_weights = numpy.ones((reg_mat.shape[0],), dtype=numpy.float64)
-        tokamaker_set_coil_regmat(numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
+            reg_weights = numpy.ones((nregularize,), dtype=numpy.float64)
+        if reg_targets.shape[0] != nregularize:
+            raise ValueError('Incorrect shape of "reg_targets", should be [nregularize]')
+        if reg_weights.shape[0] != nregularize:
+            raise ValueError('Incorrect shape of "reg_weights", should be [nregularize]')
+        
+        tokamaker_set_coil_regmat(nregularize,numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
 
     def set_coil_bounds(self,coil_bounds):
         '''! Set hard constraints on coil currents
@@ -623,6 +743,8 @@ class TokaMaker():
 
         @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
         '''
+        if (coil_bounds.shape[0] != self.ncoils+1) or (coil_bounds.shape[1] != 2):
+            raise ValueError('Incorrect shape of "coil_bounds", should be [ncoils+1,2]')
         bounds = numpy.copy(coil_bounds, order='C')
         tokamaker_set_coil_bounds(bounds)
 
@@ -631,6 +753,8 @@ class TokaMaker():
 
         @param coil_gains Gains for each coil (absolute scale is arbitrary)
         '''
+        if coil_gains.shape[0] != self.ncoils:
+            raise ValueError('Incorrect shape of "coil_gains", should be [ncoils]')
         tokamaker_set_coil_vsc(coil_gains)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0):
@@ -650,77 +774,64 @@ class TokaMaker():
         tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),ctypes.byref(error_flag))
         return error_flag.value
 
-    def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in'):
+    def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in', eta_file='eta_prof.in', f_NI_file='f_NI_prof.in'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
         @param foffset Value of \f$F0=R0*B0\f$
         @param p_file File containing \f$P'\f$ definition
+        @param eta_file File containing $\eta$ definition
+        @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
         '''
         if foffset is not None:
             self._F0 = foffset
-        tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()))
+        tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()),c_char_p(eta_file.encode()),c_char_p(f_NI_file.encode()))
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
+
+        @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        @param foffset Value of \f$F0=R0*B0\f$
+        @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        '''
+        ffp_file = 'none'
+        if ffp_prof is not None:
+            ffp_file = 'tokamaker_f.prof'
+            create_prof_file(self, ffp_file, ffp_prof, "F*F'")
+        pp_file = 'none'
+        if pp_prof is not None:
+            pp_file = 'tokamaker_p.prof'
+            create_prof_file(self, pp_file, pp_prof, "P'")
+        eta_file = 'none'
+        ffp_NI_file = 'none'
+        if ffp_NI_prof is not None:
+            ffp_NI_file = 'tokamaker_ffp_NI.prof'
+            create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
+        if foffset is not None:
+            self._F0 = foffset
+        self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
+
+    def set_resistivity(self, eta_prof=None):
+        r'''! Set flux function profile $\eta$ using a piecewise linear definition
 
         Arrays should have the form array[i,:] = (\f$\hat{\psi}_i\f$, \f$f(\hat{\psi}_i)\f$) and span
         \f$\hat{\psi}_i = [0,1]\f$.
 
-        @param ffp_prof Values defining \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) [:,2]
-        @param foffset Value of \f$F0=R0*B0\f$
-        @param pp_prof Values defining \f$P'\f$ [:,2]
+        @param eta_prof Values defining $\eta$ [:,2]
         '''
-        def create_prof_file(filename, profile_dict, name):
-            file_lines = [profile_dict['type']]
-            if profile_dict['type'] == 'flat':
-                pass
-            elif profile_dict['type'] == 'linterp':
-                x = profile_dict.get('x',None)
-                if x is None:
-                    raise KeyError('No array "x" for piecewise linear profile.')
-                else:
-                    x = numpy.array(x.copy())
-                y = profile_dict.get('y',None)
-                if y is None:
-                    raise KeyError('No array "y" for piecewise linear profile.')
-                else:
-                    y = numpy.array(y.copy())
-                if numpy.min(numpy.diff(x)) < 0.0:
-                    raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
-                if (x[0] < 0.0) or (x[-1] > 1.0):
-                    raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
-                if self.psi_convention == 0:
-                    x = 1.0 - x
-                    sort_inds = x.argsort()
-                    x = x[sort_inds]
-                    y = y[sort_inds]
-                elif self.psi_convention == 1:
-                    pass
-                else:
-                    raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
-                file_lines += [
-                    "{0} {1}".format(x.shape[0]-1, y[0]),
-                    "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
-                    "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
-                ]
-            else:
-                raise KeyError('Invalid profile type ("flat", "linterp")')
-            with open(filename, 'w+') as fid:
-                fid.write("\n".join(file_lines))
-        #
         ffp_file = 'none'
-        if ffp_prof is not None:
-            ffp_file = 'tokamaker_f.prof'
-            create_prof_file(ffp_file, ffp_prof, "F*F'")
         pp_file = 'none'
-        if pp_prof is not None:
-            pp_file = 'tokamaker_p.prof'
-            create_prof_file(pp_file, pp_prof, "P'")
-        if foffset is not None:
-            self._F0 = foffset
-        self.load_profiles(ffp_file,foffset,pp_file)
-    
+        eta_file = 'none'
+        if eta_prof is not None:
+            eta_file = 'tokamaker_eta.prof'
+            create_prof_file(self, eta_file, eta_prof, "eta'")
+        ffp_NI_file = 'none'
+        self.load_profiles(ffp_file,None,pp_file,eta_file,ffp_NI_file)
+
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
         error_flag = c_int()
@@ -731,7 +842,7 @@ class TokaMaker():
         '''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         @param lcfs_pad Padding at LCFS for boundary calculations
-        @returns Dictionary of equilibrium parameters
+        @result Dictionary of equilibrium parameters
         '''
         _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02]) # Given backward so last point is LCFS (for dl)
         Ip,centroid,vol,pvol,dflux,tflux,li = self.get_globals()
@@ -811,6 +922,8 @@ class TokaMaker():
         else:
             if weights is None:
                 weights = numpy.ones((isoflux.shape[0],), dtype=numpy.float64)
+            if weights.shape[0] != isoflux.shape[0]:
+                raise ValueError('Shape of "weights" does not match first dimension of "isoflux"')
             tokamaker_set_isoflux(isoflux,weights,isoflux.shape[0],grad_wt_lim)
             self._isoflux = isoflux.copy()
     
@@ -826,6 +939,8 @@ class TokaMaker():
         else:
             if weights is None:
                 weights = numpy.ones((saddles.shape[0],), dtype=numpy.float64)
+            if weights.shape[0] != saddles.shape[0]:
+                raise ValueError('Shape of "weights" does not match first dimension of "saddles"')
             tokamaker_set_saddles(saddles,weights,saddles.shape[0])
             self._saddles = saddles.copy()
     
@@ -890,6 +1005,8 @@ class TokaMaker():
 
         @param psi Poloidal flux values (should not be normalized!)
         '''
+        if psi.shape[0] != self.np:
+            raise ValueError('Incorrect shape of "psi", should be [np]')
         tokamaker_set_psi(psi)
     
     def set_psi_dt(self,psi0,dt):
@@ -898,17 +1015,41 @@ class TokaMaker():
         @param psi0 Reference poloidal flux at t-dt (unnormalized)
         @param dt Time since reference poloidal flux
         '''
+        if psi0.shape[0] != self.np:
+            raise ValueError('Incorrect shape of "psi0", should be [np]')
         tokamaker_set_psi_dt(psi0,c_double(dt))
     
-    def get_coil_currents(self):
-        '''! Get currents in each coil [A-turns]
+    def get_field_eval(self,field_type):
+        r'''! Create field interpolator for vector potential
 
-        @result Coil currents, Coil to region map
+        @param imode Index of eigenstate
+        @result Field interpolation object
+        '''
+        #
+        mode_map = {'B': 1, 'PSI': 2, 'F': 3, 'P': 4}
+        imode = mode_map.get(field_type.upper())
+        if imode is None:
+            raise ValueError('Invalid field type ("B", "psi", "F", "P")')
+        #
+        int_obj = c_void_p()
+        cstring = c_char_p(b""*200)
+        tokamaker_get_field_eval(imode,ctypes.byref(int_obj),cstring)
+        if cstring.value != b'':
+            raise Exception(cstring.value)
+        field_dim = 1
+        if imode == 1:
+            field_dim = 3
+        return TokaMaker_field_interpolator(int_obj,imode,field_dim)
+    
+    def get_coil_currents(self):
+        '''! Get currents in each coil [A] and coil region [A-turns]
+
+        @result Coil currents [ncoils], Coil currents by region [nregs]
         '''
         currents = numpy.zeros((self.ncoils,),dtype=numpy.float64)
-        coil_map = numpy.zeros((self.ncoils,),dtype=numpy.int32)
-        tokamaker_get_coil_currents(currents, coil_map)
-        return currents, coil_map
+        currents_reg = numpy.zeros((self.nregs,),dtype=numpy.float64)
+        tokamaker_get_coil_currents(currents, currents_reg)
+        return currents, currents_reg
 
     def get_coil_Lmat(self):
         r'''! Get mutual inductance matrix between coils
@@ -1009,7 +1150,25 @@ class TokaMaker():
         tokamaker_get_globals(ctypes.byref(Ip),centroid,ctypes.byref(vol),ctypes.byref(pvol),
             ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Li))
         return Ip.value, centroid, vol.value, pvol.value, dflux.value, tflux.value, Li.value
-    
+
+    def calc_loopvoltage(self):
+        r'''! Get plasma loop voltage
+
+        @param eta Dictionary object containing resistivity profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        @param ffp_NI Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        @result Vloop [Volts]
+        '''
+        V_loop = c_double()
+
+        tokamaker_gs_calc_vloop(ctypes.byref(V_loop))
+
+        if V_loop.value < 0.:
+            raise ValueError('eta array not specified')
+        else:
+            return V_loop.value
+
     def get_profiles(self,psi=None,psi_pad=1.E-8,npsi=50):
         r'''! Get G-S source profiles
 
@@ -1054,8 +1213,10 @@ class TokaMaker():
     def set_coil_currents(self, currents):
         '''! Set coil currents
 
-        @param currents Current in each coil [A-turns]
+        @param currents Current in each coil [A]
         '''
+        if currents.shape[0] != self.ncoils:
+            raise ValueError('Incorrect shape of "currents", should be [ncoils]')
         tokamaker_set_coil_currents(currents)
 
     def update_settings(self):
@@ -1086,11 +1247,11 @@ class TokaMaker():
             if mask.sum() > 0.0:
                 ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask,:], mask_vals, colors=vacuum_color)
         # Shade coils
-        coil_currents, coil_map = self.get_coil_currents()
         if coil_colormap is not None:
+            _, region_currents = self.get_coil_currents()
             mesh_currents = numpy.zeros((self.lc.shape[0],))
             for i in range(self.ncoils):
-                mesh_currents[self.reg == coil_map[i]] = coil_currents[i]
+                mesh_currents = region_currents[self.reg-1]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:
                 mesh_currents *= coil_scale
@@ -1104,8 +1265,8 @@ class TokaMaker():
                     cax = colorbar.ax
                 colorbar = fig.colorbar(clf,ax=ax,cax=cax,label=coil_clabel)
         else:
-            for i in range(self.ncoils):
-                mask_tmp = (self.reg == coil_map[i])
+            for _, coil_reg in self._coil_dict.items():
+                mask_tmp = (self.reg == coil_reg['reg_id'])
                 ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask_tmp,:], mask_vals, colors=coil_color, alpha=1)
         # Shade conductors
         for _, cond_reg in self._cond_dict.items():
@@ -1203,13 +1364,12 @@ class TokaMaker():
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
     
-    def plot_eddy(self,fig,ax,dpsi_dt=None,nlevels=40,colormap='jet',symmap=False,clabel=r'$J_w$ [$A/m^2$]',colorbar=None):
+    def plot_eddy(self,fig,ax,dpsi_dt=None,colormap='jet',symmap=False,clabel=r'$J_w$ [$A/m^2$]',colorbar=None):
         r'''! Plot contours of \f$\hat{\psi}\f$
 
         @param fig Figure to add to
         @param ax Axis to add to
         @param dpsi_dt dPsi/dt corresponding to eddy currents (eg. from time-dependent simulation)
-        @param nlevels Number contour lines used for shading
         @param colormap Colormap to use for shadings
         @param symmap Make current colorscale symmetric?
         @param clabel Label for colorbar
@@ -1239,9 +1399,9 @@ class TokaMaker():
                 mask = numpy.logical_or(mask,mask_tmp)
         if symmap:
             max_curr = abs(mesh_currents).max()
-            clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], nlevels, cmap=colormap, vmin=-max_curr, vmax=max_curr)
+            clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=colormap, vmin=-max_curr, vmax=max_curr)
         else:
-            clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], nlevels, cmap=colormap)
+            clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=colormap)
         cax = None
         if colorbar is not None:
             cax = colorbar.ax
@@ -1349,7 +1509,7 @@ class gs_Domain:
         '''
         if json_filename is not None:
             with open(json_filename, 'r') as fid:
-                input_dict = json.load(json_filename)
+                input_dict = json.load(fid)
             self.rextent = input_dict['rextent']
             self.zextents = input_dict['zextents']
             self.rpad = input_dict['rpad']
@@ -1389,7 +1549,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None):
+    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -1436,9 +1596,15 @@ class gs_Domain:
                 self.region_info[name]['noncontinuous'] = noncontinuous
         if nTurns is not None:
             if reg_type != 'coil':
-                raise ValueError('nTurns specification only valid for "coil" regions')
+                raise ValueError('"nTurns" specification only valid for "coil" regions')
             else:
                 self.region_info[name]['nturns'] = nTurns
+        if coil_set is not None:
+            if reg_type != 'coil':
+                raise ValueError('"coil_set" specification only valid for "coil" regions')
+            else:
+                self.region_info[name]['coil_set'] = coil_set
+        
 
     def add_annulus(self,inner_countour,inner_name,outer_contour,annulus_name,parent_name=None,angle_tol=30.0,sliver_tol=120.0,small_thresh=None):
         '''! Add annular geometry defining region boundaries to the mesh
@@ -1586,7 +1752,8 @@ class gs_Domain:
                 coil_list[key] = {
                     'reg_id': self.region_info[key]['id'],
                     'coil_id': coil_id,
-                    'nturns': self.region_info[key].get('nturns',1)
+                    'nturns': self.region_info[key].get('nturns',1),
+                    'coil_set': self.region_info[key].get('coil_set',key)
                 }
                 coil_id += 1
         return coil_list
@@ -1609,7 +1776,7 @@ class gs_Domain:
                 cond_id += 1
         return cond_list
     
-    def build_mesh(self,debug=False):
+    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False):
         '''! Build mesh for specified domains
 
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
@@ -1621,7 +1788,7 @@ class gs_Domain:
             raise ValueError('No plasma region specified')
         else:
             # Make sure a boundary exists if we have regions other than plasma
-            if (self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0):
+            if ((self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0)) and require_boundary:
                 if self.boundary_reg is None:
                     raise ValueError('No boundary region specified')
                 # Check or set extents
@@ -1656,7 +1823,9 @@ class gs_Domain:
             if self.region_info[key]['count'] == 0:
                 raise KeyError('Region "{0}" defined but never created'.format(key))
         # Generate mesh
-        self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs)
+        self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
+        if setup_only:
+            return None, None, None
         return self.mesh.get_mesh()
     
     def save_json(self,filename):
@@ -1745,7 +1914,7 @@ def load_gs_mesh(filename,use_hdf5=True):
 
 class Mesh:
     '''! Mesh builder class for triangle library'''
-    def __init__(self,region_list,merge_thresh=1.E-6,debug=False,extra_reg_defs=[]):
+    def __init__(self,region_list,merge_thresh=1.E-4,debug=False,extra_reg_defs=[]):
         '''! Initialize Mesh builder object
 
         @param region_list List of @ref oftpy.Region objects that define mesh
@@ -1779,30 +1948,108 @@ class Mesh:
                             reg_pt_map[reg_id] = ilocal
                             self._unique_points.append(reg_pt)
                 for iseg, segment in enumerate(self._segments):
-                    if len(tmp_pts) != len(segment[0]):
-                        continue
-                    # Look forward
-                    for i,test_pt in enumerate(segment[0]):
-                        if tmp_pt_map[i] != test_pt:
+                    nOverlap = 0
+                    for test_pt in segment[0]:
+                        if test_pt in tmp_pt_map:
+                            nOverlap += 1
+                    if (nOverlap > 1) and (len(tmp_pts) == len(segment[0])): # Full overlap
+                        # Look forward
+                        for i,test_pt in enumerate(segment[0]):
+                            if tmp_pt_map[i] != test_pt:
+                                break
+                        else: # Matched segment
+                            if debug:
+                                print('  Merging curve segments:',ireg,iseg)
+                            segment[1] = min(segment[1],region._dx_curve)
+                            segment[2] = min(segment[2],region._small_thresh)
+                            local_seg_map.append(iseg)
                             break
-                    else: # Matched segment
-                        if debug:
-                            print('  Merging curve segments:',ireg,iseg)
-                        segment[1] = min(segment[1],region._dx_curve)
-                        segment[2] = min(segment[2],region._small_thresh)
-                        local_seg_map.append(iseg)
-                        break
-                    # Look backward
-                    for i,test_pt in enumerate(segment[0]):
-                        if tmp_pt_map[-i-1] != test_pt:
+                        # Look backward
+                        for i,test_pt in enumerate(segment[0]):
+                            if tmp_pt_map[-i-1] != test_pt:
+                                break
+                        else: # Matched segment
+                            if debug:
+                                print('  Merging curve segments:',ireg,iseg)
+                            segment[1] = min(segment[1],region._dx_curve)
+                            segment[2] = min(segment[2],region._small_thresh)
+                            local_seg_map.append(-iseg)
                             break
-                    else: # Matched segment
+                    elif  (nOverlap > 1): # Partial match
                         if debug:
-                            print('  Merging curve segments:',ireg,iseg)
-                        segment[1] = min(segment[1],region._dx_curve)
-                        segment[2] = min(segment[2],region._small_thresh)
-                        local_seg_map.append(-iseg)
-                        break
+                            print('  Merging partially overlapping curve segments:',ireg,iseg)
+                        if len(tmp_pts) < len(segment[0]):
+                            overlap_start = len(segment[0])
+                            overlap_end = -1
+                            first_pt = -1
+                            for i, test_pt in enumerate(segment[0]):
+                                if test_pt in tmp_pt_map:
+                                    overlap_start = min(overlap_start,i)
+                                    overlap_end = max(overlap_end,i)
+                                    if first_pt < 0 :
+                                        first_pt = tmp_pt_map.index(test_pt)
+                            segment_split = [iseg, -1, -1]
+                            if overlap_start > 0:
+                                self._segments.append([segment[0][:overlap_start+1], segment[1], segment[2]])
+                                segment_split[1] = len(self._segments)-1
+                            if overlap_end < len(segment[0])-1:
+                                self._segments.append([segment[0][overlap_end:], segment[1], segment[2]])
+                                segment_split[2] = len(self._segments)-1
+                            segment[0] = segment[0][overlap_start:overlap_end+1]
+                            segment[1] = min(segment[1],region._dx_curve)
+                            segment[2] = min(segment[2],region._small_thresh)
+                            #
+                            for reg_seg_map in self._reg_seg_map:
+                                try:
+                                    ifound = reg_seg_map.index(iseg)
+                                    if segment_split[1] >= 0:
+                                        reg_seg_map.insert(ifound,segment_split[1])
+                                        ifound += 1
+                                    if segment_split[2] >= 0:
+                                        reg_seg_map.insert(ifound+1,segment_split[2])
+                                except ValueError:
+                                    ifound = -1
+                                    pass
+                                try:
+                                    ifound = reg_seg_map.index(-iseg)
+                                    if ifound >= 0:
+                                        if segment_split[2] >= 0:
+                                            reg_seg_map.insert(ifound,-segment_split[2])
+                                            ifound += 1
+                                        if segment_split[1] >= 0:
+                                            reg_seg_map.insert(ifound+1,-segment_split[1])
+                                except ValueError:
+                                    pass
+                            #
+                            if first_pt == overlap_start:
+                                local_seg_map.append(iseg)
+                                break
+                            else:
+                                local_seg_map.append(-iseg)
+                                break
+                        else:
+                            overlap_start = len(tmp_pts)
+                            overlap_end = -1
+                            first_pt = -1
+                            for i, test_pt in enumerate(tmp_pt_map):
+                                if test_pt in segment[0]:
+                                    overlap_start = min(overlap_start,i)
+                                    overlap_end = max(overlap_end,i)
+                                    if first_pt < 0 :
+                                        first_pt = segment[0].index(test_pt)
+                            if overlap_start > 0:
+                                self._segments.append([tmp_pt_map[:overlap_start+1], region._dx_curve, region._small_thresh])
+                            if overlap_end < len(segment[0])-1:
+                                self._segments.append([tmp_pt_map[overlap_end:], region._dx_curve, region._small_thresh])
+                            segment[1] = min(segment[1],region._dx_curve)
+                            segment[2] = min(segment[2],region._small_thresh)
+                            #
+                            if first_pt == overlap_start:
+                                local_seg_map.append(iseg)
+                                break
+                            else:
+                                local_seg_map.append(-iseg)
+                                break
                 else:
                     self._segments.append([tmp_pt_map, region._dx_curve, region._small_thresh])
                     local_seg_map.append(len(self._segments)-1)

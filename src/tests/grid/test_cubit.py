@@ -90,12 +90,14 @@ def test_base(top_lev,cad_type):
     area_cubit = 12.1195
     assert cubit_setup(1,top_lev,'sphere_tet4_test',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_quad(top_lev):
     volume_cubit = 4.18656
     area_cubit = 12.56197
     assert cubit_setup(1,top_lev,'sphere_tet4_test','sphere_test',grid_order=2)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_1ref(top_lev):
     volume_cubit = 4.11948
@@ -120,6 +122,7 @@ def test_tet10_quad(top_lev,cad_type):
     area_cubit = 12.56197
     assert cubit_setup(1,top_lev,'sphere_tet10_test',grid_order=2,cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("cad_type", (0, 2))
 @pytest.mark.parametrize("grid_order", (1, 2))
@@ -136,6 +139,7 @@ def test_hex27_quad(top_lev,cad_type):
     area_cubit = 12.56542
     assert cubit_setup(1,top_lev,'sphere_hex27_test',grid_order=2,cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("cad_type", (0, 2))
 @pytest.mark.parametrize("grid_order", (1, 2))
@@ -155,6 +159,7 @@ def test_cut_base(top_lev,cad_type):
     area_cubit = 12.16156
     assert cubit_setup(1,top_lev,'sphere_cut_test',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_cut_1ref(top_lev):
     volume_cubit = 4.12584
@@ -179,6 +184,7 @@ def test_reflect_hex_base(top_lev,cad_type):
     area_cubit =  12.21166
     assert cubit_setup(1,top_lev,'ref_hex8_test',reflect='T',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_reflect_1ref(top_lev):
     volume_cubit = 3.11110
@@ -186,6 +192,7 @@ def test_reflect_1ref(top_lev):
     minlev = 4 - top_lev
     assert cubit_setup(minlev,top_lev,'ref_tet4_test','ref_test',reflect='T')
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_reflect_quad(top_lev):
     volume_cubit = 3.14123
@@ -209,6 +216,7 @@ def test_perreflect_hex_base(top_lev,cad_type):
     area_cubit =   6.21166
     assert cubit_setup(1,top_lev,'ref_hex8_test',reflect='T',per_ns=1,cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_perreflect_1ref(top_lev):
     volume_cubit = 3.11110
@@ -216,6 +224,7 @@ def test_perreflect_1ref(top_lev):
     minlev = 4 - top_lev
     assert cubit_setup(minlev,top_lev,'ref_tet4_test','ref_test',reflect='T',per_ns=1)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_perreflect_quad(top_lev):
     volume_cubit = 3.14123
@@ -232,6 +241,7 @@ def test_tet10reflect_quad(top_lev,cad_type):
     area_cubit =  12.56531
     assert cubit_setup(1,top_lev,'ref_tet10_test',grid_order=2,reflect='T',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("cad_type", (0, 2))
 def test_tet10reflect_1ref(top_lev,cad_type):
@@ -247,6 +257,7 @@ def test_hex27reflect_quad(top_lev,cad_type):
     area_cubit =  12.56491
     assert cubit_setup(1,top_lev,'ref_hex27_test',grid_order=2,reflect='T',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 @pytest.mark.parametrize("cad_type", (0, 2))
 def test_hex27reflect_1ref(top_lev,cad_type):
@@ -264,6 +275,7 @@ def test_stretch_base(top_lev):
     area_cubit =  12.26361
     assert cubit_setup(1,top_lev,'ref_tet4_test',zstretch=2.)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (2, 3))
 def test_stretch_1ref(top_lev):
     volume_cubit = 3.11110
@@ -271,6 +283,7 @@ def test_stretch_1ref(top_lev):
     minlev = 4 - top_lev
     assert cubit_setup(minlev,top_lev,'ref_tet4_test','ref_test',zstretch=2.)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_stretch_quad(top_lev):
     volume_cubit = 3.14123
@@ -288,6 +301,7 @@ def test_surf_circle_base(mesh_type,top_lev,cad_type):
     area_cubit = 3.1403
     assert cubit_setup(1,top_lev,'circle_{0}_test'.format(mesh_type),test_2d='T',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit, tol=1.E-3)
+@pytest.mark.coverage
 @pytest.mark.parametrize("mesh_type", ("tri3", "tri6", "quad4", "quad9"))
 @pytest.mark.parametrize("levels", ((2, 2), (2, 3), (1, 3)))
 def test_surf_circle_1ref(mesh_type,levels):
@@ -295,6 +309,7 @@ def test_surf_circle_1ref(mesh_type,levels):
     area_cubit = 3.1403
     assert cubit_setup(levels[0],levels[1],'circle_{0}_test'.format(mesh_type),test_2d='T')
     assert check_result(volume_cubit, area_cubit, tol=1.E-3)
+@pytest.mark.coverage
 @pytest.mark.parametrize("mesh_type", ("tri6", "quad9"))
 @pytest.mark.parametrize("top_lev", (1, 2))
 @pytest.mark.parametrize("cad_type", (0, 2))
@@ -311,6 +326,7 @@ def test_surf_sphere_base(mesh_type,top_lev,cad_type):
     area_cubit = 12.5595
     assert cubit_setup(1,top_lev,'sphere_{0}_test'.format(mesh_type),test_2d='T',cad_type=cad_type)
     assert check_result(volume_cubit, area_cubit, tol=1.E-3)
+@pytest.mark.coverage
 @pytest.mark.parametrize("mesh_type", ("tri3", "quad4"))
 @pytest.mark.parametrize("levels", ((2, 2), (2, 3), (1, 3)))
 def test_surf_sphere_1ref(mesh_type,levels):
@@ -318,6 +334,7 @@ def test_surf_sphere_1ref(mesh_type,levels):
     area_cubit = 12.5595
     assert cubit_setup(levels[0],levels[1],'sphere_{0}_test'.format(mesh_type),test_2d='T')
     assert check_result(volume_cubit, area_cubit, tol=1.E-3)
+@pytest.mark.coverage
 @pytest.mark.parametrize("mesh_type", ("tri6", "quad9"))
 @pytest.mark.parametrize("top_lev", (1, 2))
 @pytest.mark.parametrize("cad_type", (0, 2))

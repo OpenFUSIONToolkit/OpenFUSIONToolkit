@@ -104,6 +104,7 @@ def validate_solo(results,psi_err_exp,X_err_exp):
 
 
 # Test runners for Solov'ev cases
+@pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
 def test_solo_h1(order):
     errs = [
@@ -188,6 +189,7 @@ def validate_sph(results,psi_err_exp):
 
 
 # Test runners for Spheromak cases
+@pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
 def test_spheromak_h1(order):
     errs = [2.039674417912789e-05, 5.103597862537552e-07, 8.088772274705608e-09]
@@ -233,7 +235,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     # Run EQ
     mygs = TokaMaker()
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict)
+    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
     mygs.set_coil_currents(np.array([1.E-2]))
     err_flag = mygs.solve(True)
@@ -266,6 +268,7 @@ def validate_coil(results,psi_err_exp):
 
 
 # Test runners for vacuum coil cases
+@pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
 def test_coil_h1(order):
     errs = [0.010800921782063938, 0.0002851010669736233, 1.8185396736818836e-05]
@@ -325,7 +328,7 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
     mygs = TokaMaker()
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict)
+    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order,F0=5.3*6.2)
     vsc_signs = np.zeros((mygs.ncoils,), dtype=np.float64)
     vsc_signs[[coil_dict['VSU']['coil_id'], coil_dict['VSL']['coil_id']]] = [1.0,-1.0]
@@ -419,6 +422,7 @@ def validate_ITER(results,dict_exp):
 
 
 # Test runners for ITER test cases
+@pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER(order):
     exp_dict = {

@@ -71,3 +71,14 @@ The Open FUSION Toolkit is a community effort. We encourage you to pitch in in a
 Thanks! :sunny: :heart:
 
 The Open FUSION Toolkit Team
+
+## Contributors
+Daniel Burgess (@d-burg)\
+Chris Hansen (@hansec)\
+Francois Logak
+
+### Contributors to predecessor codes
+Thomas Benedett\
+Alan Kaptanoglu\
+George Marklin\
+Derek Sutherland

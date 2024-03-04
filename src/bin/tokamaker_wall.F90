@@ -1,5 +1,5 @@
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> Experiment specific components.
 !!
@@ -62,7 +62,7 @@ END IF
 END FUNCTION ltx_eta_set
 END MODULE exp_geom  
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> Handle non-axisymmetric walls
 !!
@@ -713,7 +713,7 @@ DEALLOCATE(eig_vec,etatmp,corr_mat)
 END SUBROUTINE nonax_eigs
 END MODULE nonax_wall
 !---------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
 !> Driver program for GS equilibria
 !!
@@ -830,8 +830,8 @@ mygs%compute_chi=.FALSE.
 IF(TRIM(coil_file)/='none')THEN
   mygs%coil_file=coil_file
   CALL mygs%load_coils(ignore_inmesh=.TRUE.)
-  DO i=1,mygs%ncoils
-    mygs%coils(i)%curr=0.d0 ! Zero all external coils
+  DO i=1,mygs%ncoils_ext
+    mygs%coils_ext(i)%curr=0.d0 ! Zero all external coils
   END DO
   DO i=1,mygs%ncoil_regs
     mygs%coil_regions(i)%curr=0.d0 ! Zero all internal coil regions
@@ -955,20 +955,20 @@ DO i=1,self%ncond_regs
           CASE(1)
             IF(grid_3d)THEN
               CALL nonax_indcouple(self%cond_regions(i)%nc_quad,rc,self%cond_regions(i)%extent, &
-              eigs,self%coils(k)%pt,self%coils(k)%ncoils,correction(:,j),sensors,nsensor,mirror_wall, &
+              eigs,self%coils_ext(k)%pt,self%coils_ext(k)%ncoils,correction(:,j),sensors,nsensor,mirror_wall, &
               rz_grid,rz_correction)
             ELSE 
               CALL nonax_indcouple(self%cond_regions(i)%nc_quad,rc,self%cond_regions(i)%extent, &
-              eigs,self%coils(k)%pt,self%coils(k)%ncoils,correction(:,j),sensors,nsensor,mirror_wall)
+              eigs,self%coils_ext(k)%pt,self%coils_ext(k)%ncoils,correction(:,j),sensors,nsensor,mirror_wall)
             END IF
           CASE(2)
             IF(grid_3d)THEN
               CALL nonax_rescouple(self%cond_regions(i)%nc_quad,rc,self%cond_regions(i)%extent, &
-              eigs,self%coils(k)%pt,self%coils(k)%ncoils,correction(:,j),sensors,nsensor,mirror_wall, &
+              eigs,self%coils_ext(k)%pt,self%coils_ext(k)%ncoils,correction(:,j),sensors,nsensor,mirror_wall, &
               eta,rz_grid,rz_correction)
             ELSE 
               CALL nonax_rescouple(self%cond_regions(i)%nc_quad,rc,self%cond_regions(i)%extent, &
-              eigs,self%coils(k)%pt,self%coils(k)%ncoils,correction(:,j),sensors,nsensor,mirror_wall,eta)
+              eigs,self%coils_ext(k)%pt,self%coils_ext(k)%ncoils,correction(:,j),sensors,nsensor,mirror_wall,eta)
             END IF
           CASE(3)
             IF(grid_3d)THEN

@@ -1,5 +1,5 @@
 #---------------------------------------------------------------------------
-# Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #---------------------------------------------------------------------------
 #
 # Python construction of Lagrange elements for simplectic elements in 2D and

@@ -1,5 +1,5 @@
 !------------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !------------------------------------------------------------------------------
 !> @file oft_io.F90
 !
@@ -100,7 +100,7 @@ integer(i4), parameter :: hdf5_nl=800 !< Maximum number of HDF5 fields
 integer(i4), parameter :: hdf5_flen=40 !< Maximum size of HDF5 filenames
 contains
 !------------------------------------------------------------------------------
-!> Setup OpenFUSIONToolkit binary I/O file
+!> Setup Open FUSION Toolkit binary I/O file
 !------------------------------------------------------------------------------
 SUBROUTINE bin_file_setup(self,filename,desc)
 CLASS(oft_bin_file), INTENT(inout) :: self
@@ -113,7 +113,7 @@ self%nbytes = 0
 IF(PRESENT(desc))self%filedesc=desc
 END SUBROUTINE bin_file_setup
 !------------------------------------------------------------------------------
-!> Open OpenFUSIONToolkit binary I/O file
+!> Open Open FUSION Toolkit binary I/O file
 !------------------------------------------------------------------------------
 SUBROUTINE bin_file_open(self)
 CLASS(oft_bin_file), INTENT(inout) :: self
@@ -131,14 +131,14 @@ END IF
 self%header_written=.FALSE.
 END SUBROUTINE bin_file_open
 !------------------------------------------------------------------------------
-!> Close OpenFUSIONToolkit binary I/O file
+!> Close Open FUSION Toolkit binary I/O file
 !------------------------------------------------------------------------------
 SUBROUTINE bin_file_close(self)
 CLASS(oft_bin_file), INTENT(inout) :: self
 CLOSE(self%io_unit)
 END SUBROUTINE bin_file_close
 !------------------------------------------------------------------------------
-!> Add field to OpenFUSIONToolkit binary I/O file
+!> Add field to Open FUSION Toolkit binary I/O file
 !------------------------------------------------------------------------------
 SUBROUTINE bin_file_add(self,fieldname,type_str,desc,fsize)
 CLASS(oft_bin_file), INTENT(inout) :: self !< File object
@@ -196,7 +196,7 @@ ELSE
 END IF
 END SUBROUTINE bin_file_add
 !------------------------------------------------------------------------------
-!> Add comment to OpenFUSIONToolkit binary I/O file
+!> Add comment to Open FUSION Toolkit binary I/O file
 !------------------------------------------------------------------------------
 SUBROUTINE bin_file_add_comm(self,comment)
 CLASS(oft_bin_file), INTENT(inout) :: self !< File object
@@ -214,7 +214,7 @@ self%ncomm=self%ncomm+1
 self%comm_lines(self%ncomm)=comment
 END SUBROUTINE bin_file_add_comm
 !------------------------------------------------------------------------------
-!> Write header for OpenFUSIONToolkit binary I/O file
+!> Write header for Open FUSION Toolkit binary I/O file
 !------------------------------------------------------------------------------
 SUBROUTINE bin_file_header(self)
 CLASS(oft_bin_file), INTENT(inout) :: self
@@ -224,7 +224,7 @@ INTEGER(i8) :: value(8)
 CALL DATE_AND_TIME(VALUES=value)
 OPEN(NEWUNIT=self%io_unit,FILE=TRIM(self%filename))
 100 FORMAT("# Created: ",I2,':',I2.2,':'I2.2,' on ',I2,"-",I2.2,"-",I4)
-WRITE(self%io_unit,'(A)')"# OpenFUSIONToolkit binary output"
+WRITE(self%io_unit,'(A)')"# Open FUSION Toolkit binary output"
 WRITE(self%io_unit,'(2A)')"# Description: ",TRIM(self%filedesc)
 WRITE(self%io_unit,100)value(5:7),value(2:3),value(1)
 IF(self%ncomm>0)THEN
@@ -266,7 +266,7 @@ CLOSE(self%io_unit)
 self%header_written=.TRUE.
 END SUBROUTINE bin_file_header
 !------------------------------------------------------------------------------
-!> Write single set of data to OpenFUSIONToolkit binary I/O file
+!> Write single set of data to Open FUSION Toolkit binary I/O file
 !------------------------------------------------------------------------------
 SUBROUTINE bin_file_write(self,data_i4,data_i8,data_r4,data_r8)
 CLASS(oft_bin_file), INTENT(inout) :: self !< File object
@@ -282,7 +282,7 @@ IF(PRESENT(data_r8))WRITE(self%io_unit)data_r8
 WRITE(self%io_unit)self%nfields
 END SUBROUTINE bin_file_write
 !------------------------------------------------------------------------------
-!> Flush I/O buffer for OpenFUSIONToolkit binary I/O file
+!> Flush I/O buffer for Open FUSION Toolkit binary I/O file
 !------------------------------------------------------------------------------
 SUBROUTINE bin_file_flush(self)
 CLASS(oft_bin_file), INTENT(inout) :: self

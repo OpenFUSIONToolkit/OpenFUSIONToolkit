@@ -147,6 +147,7 @@ def test_nl_r1_p2(petsc_flag):
     assert alfven_setup(1,1,2,2,petsc=petsc_flag)
     assert validate_result(berr_exp,verr_exp)
 @pytest.mark.mpi
+@pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_nl_r1_p2_mpi(mf,petsc_flag):
@@ -203,6 +204,7 @@ def test_lin_r1_p2(petsc_flag):
     assert validate_result(berr_exp,verr_exp,linear=True)
 @pytest.mark.linear
 @pytest.mark.mpi
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_lin_r1_p2_mpi(petsc_flag):
     berr_exp = 4.2445515350299369E-002
@@ -258,6 +260,7 @@ def test_hex_nl_r1_p2(petsc_flag):
     assert alfven_setup(1,1,2,2,petsc=petsc_flag,hex_mesh=True)
     assert validate_result(berr_exp,verr_exp)
 @pytest.mark.mpi
+@pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_nl_r1_p2_mpi(mf,petsc_flag):
@@ -318,6 +321,7 @@ def test_hex_lin_r1_p2(petsc_flag):
     assert validate_result(berr_exp,verr_exp,linear=True)
 @pytest.mark.linear
 @pytest.mark.mpi
+@pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_lin_r1_p2_mpi(petsc_flag):
     berr_exp = 1.8185749172894013E-002

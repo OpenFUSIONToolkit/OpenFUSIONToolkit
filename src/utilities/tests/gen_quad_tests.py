@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #---------------------------------------------------------------------------
-# Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #---------------------------------------------------------------------------
 #
 # Class definition for manipulating Open FUSION Toolkit (OFT) structured binary files in Python

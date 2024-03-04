@@ -1,6 +1,6 @@
 # FindOFT_OpenNURBS.cmake
 #
-# Finds the OpenNURBS library for use with the OpenFUSIONToolkit
+# Finds the OpenNURBS library for use with the Open FUSION Toolkit
 # as installed by version "5.0" of OpenNURBS.
 #
 # This will define the following variables

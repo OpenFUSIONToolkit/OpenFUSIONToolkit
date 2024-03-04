@@ -1,14 +1,11 @@
 !---------------------------------------------------------------------------
 !> @file marklin_f.F90
 !
-!> @defgroup python Python
-!! Python interface for Marklin force-free ideal MHD equilibrium functionality
-!
-!> Fortran part of Python wrapper for Grad-Shafranov functionality
+!> Fortran part of Python wrapper for Marklin force-free ideal MHD equilibrium functionality
 !!
 !! @authors Chris Hansen
 !! @date May 2023
-!! @ingroup python
+!! @ingroup doxy_oft_python
 !---------------------------------------------------------------------------
 MODULE marklin_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
@@ -52,14 +49,19 @@ USE mhd_utils, ONLY: mu0
 USE oft_base_f, ONLY: copy_string, copy_string_rev
 IMPLICIT NONE
 !
-integer(i4), POINTER :: lc_plot(:,:),reg_plot(:)
-real(r8), POINTER :: r_plot(:,:)
+integer(i4), POINTER :: lc_plot(:,:) !< Needs docs
+integer(i4), POINTER :: reg_plot(:) !< Needs docs
+real(r8), POINTER :: r_plot(:,:) !< Needs docs
 CONTAINS
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE marklin_setup(order,nmodes,minlev,save_rst,error_str) BIND(C,NAME="marklin_setup")
-INTEGER(KIND=c_int), VALUE, INTENT(in) :: order,nmodes,minlev
-LOGICAL(c_bool), VALUE, INTENT(in) :: save_rst
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80)
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nmodes !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: minlev !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: save_rst !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()
 CLASS(oft_solver), POINTER :: lminv => NULL()
@@ -94,9 +96,11 @@ oft_env%pm=.TRUE.
 taylor_rst=save_rst
 CALL taylor_hmodes(nmodes)
 END SUBROUTINE marklin_setup
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE marklin_save_visit(error_str) BIND(C,NAME="marklin_save_visit")
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()
 CLASS(oft_solver), POINTER :: lminv => NULL()
@@ -142,11 +146,13 @@ DO i=1,taylor_nm
   call mesh%save_vertex_vector(bvout,'B_'//pltnum)
 END DO
 END SUBROUTINE marklin_save_visit
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE marklin_get_aint(imode,int_obj,error_str) BIND(C,NAME="marklin_get_aint")
-INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode
-TYPE(c_ptr), INTENT(out) :: int_obj
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80)
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Needs docs
+TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 TYPE(oft_h1_rinterp), POINTER :: interp_obj
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
@@ -187,28 +193,43 @@ int_obj=C_LOC(interp_obj)
 !---Cleanup
 CALL divout%delete()
 END SUBROUTINE marklin_get_aint
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE marklin_get_bint(imode,int_obj,error_str) BIND(C,NAME="marklin_get_bint")
-INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode
-TYPE(c_ptr), INTENT(out) :: int_obj
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80)
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Needs docs
+TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 TYPE(oft_hcurl_cinterp), POINTER :: interp_obj
 ALLOCATE(interp_obj)
 interp_obj%u=>taylor_hffa(imode,oft_hcurl_level)%f
 CALL interp_obj%setup()
 int_obj=C_LOC(interp_obj)
 END SUBROUTINE marklin_get_bint
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE marklin_apply_int(int_obj,int_type,pt,fbary_tol,cell,field) BIND(C,NAME="marklin_apply_int")
-TYPE(c_ptr), VALUE, INTENT(in) :: int_obj
-INTEGER(c_int), VALUE, INTENT(in) :: int_type
-REAL(c_double), INTENT(in) :: pt(3)
-REAL(c_double), VALUE, INTENT(in) :: fbary_tol
-INTEGER(c_int), INTENT(inout) :: cell
-REAL(c_double), INTENT(out) :: field(3)
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Needs docs
+REAL(c_double), INTENT(in) :: pt(3) !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Needs docs
+INTEGER(c_int), INTENT(inout) :: cell !< Needs docs
+REAL(c_double), INTENT(out) :: field(3) !< Needs docs
 TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
 TYPE(oft_hcurl_cinterp), POINTER :: binterp_obj
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+IF(int_type<0)THEN
+  SELECT CASE(int_type)
+  CASE(1)
+    CALL c_f_pointer(int_obj, ainterp_obj)
+    CALL ainterp_obj%delete()
+  CASE(2)
+    CALL c_f_pointer(int_obj, binterp_obj)
+    CALL binterp_obj%delete()
+  END SELECT
+  RETURN
+END IF
 call mesh_findcell(mesh,cell,pt,f)
 IF(cell==0)RETURN
 fmin=MINVAL(f); fmax=MAXVAL(f)

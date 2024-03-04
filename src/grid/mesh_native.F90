@@ -1,5 +1,5 @@
 !------------------------------------------------------------------------------
-! Flexible Unstructured Simulation Infrastructure with Open Numerics (OpenFUSIONToolkit)
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !------------------------------------------------------------------------------
 !> @file oft_mesh_native.F90
 !
@@ -39,7 +39,7 @@ CONTAINS
 !! - Read in mesh points and cells
 !! - Read in surface IDs for CAD edges and faces
 !------------------------------------------------------------------------------
-subroutine native_load_mesh
+subroutine native_load_vmesh
 logical :: success
 integer(i4) :: i,id,ierr,io_unit,ndims,np_mem,mesh_order
 integer(i4), allocatable, dimension(:) :: dim_sizes
@@ -166,7 +166,9 @@ ELSE
     mesh_order=1
 END IF
 !---Read periodicity information
-IF(ref_periodic.AND.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))THEN
+IF(ref_periodic)THEN
+    IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
+      "Periodic nodeset not found in file","native_load_vmesh",__FILE__)
     CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
     ALLOCATE(per_nodes(dim_sizes(1)))
     CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
@@ -181,7 +183,7 @@ IF(reflect)THEN
 END IF
 IF(oft_env%rank/=0)DEALLOCATE(mesh%r,mesh%lc,mesh%reg)
 DEBUG_STACK_POP
-end subroutine native_load_mesh
+end subroutine native_load_vmesh
 !------------------------------------------------------------------------------
 !> Read in t3d mesh file from file "filename"
 !! - Read in T3D options from input file
@@ -330,7 +332,9 @@ ELSE
     mesh_order=1
 END IF
 !---Read periodicity information
-IF(ref_periodic.AND.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))THEN
+IF(ref_periodic)THEN
+    IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
+      "Periodic nodeset not found in file","native_load_smesh",__FILE__)
     CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
     ALLOCATE(per_nodes(dim_sizes(1)))
     CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)

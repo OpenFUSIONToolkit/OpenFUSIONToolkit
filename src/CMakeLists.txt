@@ -1,8 +1,9 @@
 ########################
-# OpenFUSIONToolkit
+# Open FUSION Toolkit
 ########################
 cmake_minimum_required( VERSION 3.12 )
-project( OpeNFUSIONToolkit NONE )
+project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
+set( OFT_VER_SUFFIX "-beta2" CACHE INTERNAL "Version suffix" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
 
 option(OFT_BUILD_TESTS "Build tests?" OFF)
@@ -15,11 +16,20 @@ option(OFT_BUILD_PYTHON "Build experimental Python wrappers?" OFF)
 option(OFT_BUILD_DOCS "Build documentation?" OFF)
 option(OFT_DOCS_ONLY "Build documentation only?" OFF)
 option(OFT_PACKAGE_BUILD "Perform a destributable package?" OFF)
-option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" OFF)
+option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" ON)
+option(OFT_COVERAGE "Build with code coverage information?" OFF)
 
 # Internal variables
 set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")
 set(OFT_PYTHON_BINS CACHE INTERNAL "package_python_binaries")
+if(OFT_PACKAGE_NIGHTLY)
+  execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_REV_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  set( OFT_VER_SUFFIX "-${GIT_REV_HASH}" CACHE INTERNAL "Version suffix" )
+endif()
 
 ########################
 # Build documentation
@@ -27,9 +37,10 @@ set(OFT_PYTHON_BINS CACHE INTERNAL "package_python_binaries")
 if(OFT_BUILD_DOCS)
   find_package(Doxygen REQUIRED)
 
-  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in)
-  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
-  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+  file(REMOVE_RECURSE ${CMAKE_CURRENT_SOURCE_DIR}/docs/generated)
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs/generated)
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/mainpage.in ${CMAKE_CURRENT_SOURCE_DIR}/docs/generated/mainpage.md @ONLY)
 
   find_package(Python)
   add_custom_target( build_ex_docs
@@ -81,12 +92,20 @@ if ("${CMAKE_Fortran_COMPILER_ID}" MATCHES "Intel")
     set( EXT_LIBS "-lstdc++" )
   endif()
 elseif("${CMAKE_Fortran_COMPILER_ID}" MATCHES "GNU")
-  set( CMAKE_C_FLAGS_DEBUG "-g -O0" )
+  if(OFT_COVERAGE)
+    set( CMAKE_C_FLAGS_DEBUG "-Og --coverage -fprofile-update=atomic -g -Wuninitialized" ) # -fprofile-arcs -ftest-coverage
+    set( CMAKE_C_FLAGS_RELEASE "-Og --coverage -fprofile-update=atomic -g" ) # -fprofile-arcs -ftest-coverage
+    set(CMAKE_C_OUTPUT_EXTENSION_REPLACE ON)
+    set(CMAKE_CXX_OUTPUT_EXTENSION_REPLACE ON)
+    set(CMAKE_Fortran_OUTPUT_EXTENSION_REPLACE ON)
+  else()
+    set( CMAKE_C_FLAGS_DEBUG "-g -O0 -Wuninitialized" )
+    set( CMAKE_C_FLAGS_RELEASE "-O2" )
+  endif()
   set( CMAKE_CXX_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
-  set( CMAKE_Fortran_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
-  set( CMAKE_C_FLAGS_RELEASE "-O2" )
   set( CMAKE_CXX_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} )
-  set( CMAKE_Fortran_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} )
+  set( CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Werror=line-truncation -Wconversion" )
+  set( CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -Werror=line-truncation -Wconversion" )
   if(NOT OFT_PACKAGE_BUILD)
     set( CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG} -fcheck=all" )
   endif()
@@ -367,11 +386,11 @@ add_subdirectory( bin )
 if(OFT_PACKAGE_BUILD)
   include(InstallRequiredSystemLibraries)
   set(CPACK_STRIP_FILES      ON)
-  set(CPACK_PACKAGE_NAME     ${PROJECT_NAME} )
-  set(CPACK_PACKAGE_VERSION  1.0.0-beta1)
+  set(CPACK_PACKAGE_NAME     ${CMAKE_PROJECT_NAME} )
+  set(CPACK_PACKAGE_VERSION  ${CMAKE_PROJECT_VERSION}${OFT_VER_SUFFIX})
   set(CPACK_PACKAGE_CONTACT  "Chris Hansen")
   set(CPACK_PACKAGE_VENDOR   "Chris Hansen")
-  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "OpenFUSIONToolkit for plasma equilibrium and dynamic simulation.")
+  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open FUSION Toolkit for plasma equilibrium and dynamic simulation.")
   set(CPACK_PACKAGE_DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION_SUMMARY})
 
   set(CPACK_RESOURCE_FILE_LICENSE     ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE)
@@ -394,16 +413,7 @@ if(OFT_PACKAGE_BUILD)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE ${CMAKE_CURRENT_BINARY_DIR}/LICENSE COPYONLY)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../README.md ${CMAKE_CURRENT_BINARY_DIR}/README.md COPYONLY)
   endif()
-  if(OFT_PACKAGE_NIGHTLY)
-    execute_process(
-      COMMAND git rev-parse --short HEAD
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      OUTPUT_VARIABLE GIT_REV_HASH
-      OUTPUT_STRIP_TRAILING_WHITESPACE)
-    set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}_${GIT_REV_HASH}-${CPACK_SYSTEM_NAME}-${CMAKE_Fortran_COMPILER_ID}-${CMAKE_HOST_SYSTEM_PROCESSOR})
-  else()
-    set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME}-${CMAKE_Fortran_COMPILER_ID}-${CMAKE_HOST_SYSTEM_PROCESSOR})
-  endif()
+  set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME}-${CMAKE_Fortran_COMPILER_ID}-${CMAKE_HOST_SYSTEM_PROCESSOR})
 
   include(CPack)
   cpack_add_component( app REQUIRED )

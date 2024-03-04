@@ -343,7 +343,7 @@ EXT_LIBS = {EXT_LIBS_LINE}
         fid.write(string)
 
 
-def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=False,build_examples=False,build_docs=False,package_build=False):
+def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=False,build_examples=False,build_docs=False,build_coverage=False,package_build=False):
     def bool_to_string(val):
         if val:
             return "TRUE"
@@ -366,6 +366,7 @@ def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=F
         "-DOFT_BUILD_PYTHON:BOOL={0}".format(bool_to_string(build_python)),
         "-DOFT_BUILD_DOCS:BOOL={0}".format(bool_to_string(build_docs)),
         "-DOFT_PACKAGE_BUILD:BOOL={0}".format(bool_to_string(package_build)),
+        "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
         "-DOFT_USE_OpenMP:BOOL=TRUE",
         "-DCMAKE_C_COMPILER:FILEPATH={CC}",
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
@@ -425,6 +426,11 @@ def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=F
             cmake_lines.append("-DOFT_SUPERLU_DIST_ROOT:PATH={0}".format(mydict["SUPERLU_DIST_ROOT"]))
         if "UMFPACK_ROOT" in mydict:
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
+    if tmp_dict['OS_TYPE'] == 'Darwin':
+        result, errcode = run_command("sw_vers --productVersion")
+        if (errcode == 0) and (result.split('.')[0] == '13'):
+            cmake_lines.append('-DCMAKE_EXE_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
+            cmake_lines.append('-DCMAKE_SHARED_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
     cmake_lines += [os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))]
     cmake_lines_str = ' \\\n  '.join(cmake_lines)
     # Template string
@@ -457,6 +463,7 @@ class package:
     root_path = None
     root_build_path = None
     skip = False
+    build_timeout = 15
     extra_fetch = []
     patch_files = []
     install_chk_files = []
@@ -590,7 +597,7 @@ class package:
             fid.write("\n".join(script_lines))
         if self.config_dict['SETUP_ONLY']:
             return
-        result, _ = run_command("bash build_tmp.sh", timeout=15*60)
+        result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60)
         with open("build_tmp.log", "w+") as fid:
             fid.write(result)
         # Check for build success
@@ -722,6 +729,7 @@ class MPI(package):
     def __init__(self):
         self.name = "MPI"
         self.url = "http://faculty.washington.edu/hansec/libs/mpich-3.3.2.tar.gz"
+        self.build_timeout = 20
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1675,7 +1683,7 @@ PETSC_LIB = -L{PETSC_LIB} {PETSC_LIBS}\n"""
 
 # Start of main script
 parser = argparse.ArgumentParser()
-parser.description = "Third-party library build script for the OpenFUSIONToolkit"
+parser.description = "Third-party library build script for the Open FUSION Toolkit"
 parser.add_argument("--download_only", action="store_true", default=False, help="Only download packages")
 parser.add_argument("--setup_only", action="store_true", default=False, help="Download and setup build, but do not actually build")
 parser.add_argument("--nthread", default=1, type=int, help="Number of threads to use for make (default=1)")
@@ -1684,7 +1692,7 @@ parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
 parser.add_argument("--cross_compile_host", default=None, type=str, help="Host type for cross-compilation")
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
-group = parser.add_argument_group("CMAKE", "CMAKE configure options for the OpenFUSIONToolkit")
+group = parser.add_argument_group("CMAKE", "CMAKE configure options for the Open FUSION Toolkit")
 group.add_argument("--build_cmake", default=0, type=int, choices=(0,1), help="Build CMAKE instead of using system version?")
 group.add_argument("--oft_build_debug", default=0, type=int, choices=(0,1), help="Build debug version of OFT?")
 group.add_argument("--oft_build_python", default=1, type=int, choices=(0,1), help="Build OFT Python libraries? (default: 1)")
@@ -1692,6 +1700,7 @@ group.add_argument("--oft_build_tests", default=0, type=int, choices=(0,1), help
 group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples?")
 group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help="Build OFT documentation? (requires doxygen)")
 group.add_argument("--oft_package", action="store_true", default=False, help="Perform a packaging build of OFT?")
+group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
 #
 group = parser.add_argument_group("MPI", "MPI package options")
 group.add_argument("--build_mpi", default=0, type=int, choices=(0,1), help="Build MPI libraries?")
@@ -1864,5 +1873,6 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         build_tests=(options.oft_build_tests == 1),
         build_examples=(options.oft_build_examples == 1),
         build_docs=(options.oft_build_docs == 1),
+        build_coverage=(options.oft_build_coverage == 1),
         package_build=options.oft_package
     )
