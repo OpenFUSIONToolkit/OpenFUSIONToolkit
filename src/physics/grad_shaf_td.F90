@@ -214,11 +214,12 @@ IF(dt/=tMaker_td_obj%dt)THEN
     CALL adv_pre%update(.TRUE.)
 END IF
 ! Update coil currents (end of time step)
+tMaker_td_obj%curr_reg=0.d0
 DO i=1,tMaker_td_obj%gs_eq%ncoils
     DO k=1,tMaker_td_obj%gs_eq%ncoil_regs
         j=tMaker_td_obj%gs_eq%coil_regions(k)%id
         tMaker_td_obj%curr_reg(j)=tMaker_td_obj%curr_reg(j) &
-        + tMaker_td_obj%gs_eq%coil_currs(i)*tMaker_td_obj%gs_eq%coil_nturns(j,i)
+          + tMaker_td_obj%gs_eq%coil_currs(i)*tMaker_td_obj%gs_eq%coil_nturns(j,i)
     END DO
 END DO
 ! Point to profiles in case they changed
