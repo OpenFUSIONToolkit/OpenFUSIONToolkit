@@ -81,10 +81,12 @@ END SUBROUTINE tokamaker_eval_green
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta) BIND(C,NAME="tokamaker_setup_regions")
+SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(80) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
-real(r8), POINTER :: eta_tmp(:)
+TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Needs docs
+real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(4) :: i
 CALL copy_string_rev(coil_file,gs_global%coil_file)
 IF(TRIM(gs_global%coil_file)=='none')THEN
@@ -99,6 +101,15 @@ IF(TRIM(gs_global%coil_file)=='none')THEN
       gs_global%ncoil_regs=gs_global%ncoil_regs+1
     END IF
   END DO
+  !
+  gs_global%ncoils=ncoils
+  ALLOCATE(gs_global%coil_vcont(ncoils),gs_global%coil_currs(ncoils))
+  gs_global%coil_vcont = 0.d0
+  gs_global%coil_currs = 0.d0
+  CALL c_f_pointer(coil_nturns, nturns_tmp, [smesh%nreg,ncoils])
+  ALLOCATE(gs_global%coil_nturns(smesh%nreg,ncoils))
+  gs_global%coil_nturns=0.d0
+  gs_global%coil_nturns=nturns_tmp
   !
   ALLOCATE(gs_global%cond_regions(gs_global%ncond_regs))
   ALLOCATE(gs_global%coil_regions(gs_global%ncoil_regs))
@@ -202,7 +213,7 @@ gs_global%full_domain=full_domain
 CALL gs_setup_walls(gs_global)
 CALL gs_global%load_limiters
 CALL gs_global%init()
-ncoils=gs_global%ncoil_regs
+ncoils=gs_global%ncoils
 END SUBROUTINE tokamaker_setup
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -374,20 +385,22 @@ END SUBROUTINE tokamaker_get_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_coil_currents(currents,coil_map) BIND(C,NAME="tokamaker_get_coil_currents")
+SUBROUTINE tokamaker_get_coil_currents(currents,reg_currents) BIND(C,NAME="tokamaker_get_coil_currents")
 TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: coil_map !< Needs docs
-INTEGER(4) :: i
-INTEGER(4), POINTER, DIMENSION(:) :: coil_regs
+TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Needs docs
+INTEGER(4) :: i,j
 REAL(8) :: curr
-REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-CALL c_f_pointer(coil_map, coil_regs, [gs_global%ncoil_regs])
-CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoil_regs])
-DO i=1,gs_global%ncoil_regs
-  curr = gs_global%coil_regions(i)%curr & 
-    + gs_global%coil_regions(i)%vcont_gain*gs_global%vcontrol_val
-  vals_tmp(i)=curr*gs_global%coil_regions(i)%area/mu0
-  coil_regs(i)=gs_global%coil_regions(i)%id
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp,coil_regs
+CALL c_f_pointer(reg_currents, coil_regs, [smesh%nreg])
+CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoils])
+vals_tmp=(gs_global%coil_currs + gs_global%coil_vcont*gs_global%vcontrol_val)/mu0
+coil_regs = 0.d0
+DO j=1,gs_global%ncoil_regs
+  DO i=1,gs_global%ncoils
+    coil_regs(gs_global%coil_regions(j)%id) = coil_regs(gs_global%coil_regions(j)%id) &
+      + vals_tmp(i)*gs_global%coil_nturns(gs_global%coil_regions(j)%id,i)
+  END DO
+  coil_regs(gs_global%coil_regions(j)%id) = coil_regs(gs_global%coil_regions(j)%id)*gs_global%coil_regions(j)%area
 END DO
 END SUBROUTINE tokamaker_get_coil_currents
 !------------------------------------------------------------------------------
@@ -396,7 +409,7 @@ END SUBROUTINE tokamaker_get_coil_currents
 SUBROUTINE tokamaker_get_coil_Lmat(Lmat) BIND(C,NAME="tokamaker_get_coil_Lmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: Lmat !< Needs docs
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
-CALL c_f_pointer(Lmat, vals_tmp, [gs_global%ncoil_regs+1,gs_global%ncoil_regs+1])
+CALL c_f_pointer(Lmat, vals_tmp, [gs_global%ncoils+1,gs_global%ncoils+1])
 vals_tmp=gs_global%Lcoils
 END SUBROUTINE tokamaker_get_coil_Lmat
 !------------------------------------------------------------------------------
@@ -694,31 +707,30 @@ TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
 INTEGER(4) :: i
 REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoil_regs])
-DO i=1,gs_global%ncoil_regs
-  gs_global%coil_regions(i)%curr=vals_tmp(i)*mu0/gs_global%coil_regions(i)%area
-END DO
-gs_global%vcontrol_val=0.d0
+CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoils])
+gs_global%coil_currs = vals_tmp*mu0
+gs_global%vcontrol_val = 0.d0
 END SUBROUTINE tokamaker_set_coil_currents
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_regmat(coil_reg_mat,coil_reg_targets,coil_reg_weights) BIND(C,NAME="tokamaker_set_coil_regmat")
+SUBROUTINE tokamaker_set_coil_regmat(nregularize,coil_reg_mat,coil_reg_targets,coil_reg_weights) BIND(C,NAME="tokamaker_set_coil_regmat")
+INTEGER(c_int), VALUE, INTENT(in) :: nregularize !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_mat !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_targets !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_weights !< Needs docs
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
-IF(.NOT.ASSOCIATED(gs_global%coil_reg_mat))THEN
-  ALLOCATE(gs_global%coil_reg_mat(gs_global%ncoil_regs+1,gs_global%ncoil_regs+1))
-  ALLOCATE(gs_global%coil_reg_targets(gs_global%ncoil_regs+1))
-END IF
-CALL c_f_pointer(coil_reg_mat, vals_tmp, [gs_global%ncoil_regs+1,gs_global%ncoil_regs+1])
+IF(ASSOCIATED(gs_global%coil_reg_mat))DEALLOCATE(gs_global%coil_reg_mat,gs_global%coil_reg_targets)
+gs_global%nregularize=nregularize
+ALLOCATE(gs_global%coil_reg_mat(gs_global%nregularize,gs_global%ncoils+1))
+ALLOCATE(gs_global%coil_reg_targets(gs_global%nregularize))
+CALL c_f_pointer(coil_reg_mat, vals_tmp, [gs_global%nregularize,gs_global%ncoils+1])
 gs_global%coil_reg_mat=vals_tmp
-CALL c_f_pointer(coil_reg_targets, vals_tmp, [gs_global%ncoil_regs+1,1])
+CALL c_f_pointer(coil_reg_targets, vals_tmp, [gs_global%nregularize,1])
 gs_global%coil_reg_targets=vals_tmp(:,1)*mu0
-CALL c_f_pointer(coil_reg_weights, vals_tmp, [gs_global%ncoil_regs+1,1])
-DO i=1,gs_global%ncoil_regs+1
+CALL c_f_pointer(coil_reg_weights, vals_tmp, [gs_global%nregularize,1])
+DO i=1,gs_global%nregularize
   gs_global%coil_reg_targets(i)=gs_global%coil_reg_targets(i)*vals_tmp(i,1)
   gs_global%coil_reg_mat(i,:)=gs_global%coil_reg_mat(i,:)*vals_tmp(i,1)
 END DO
@@ -730,15 +742,15 @@ SUBROUTINE tokamaker_set_coil_bounds(coil_bounds) BIND(C,NAME="tokamaker_set_coi
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_bounds !< Needs docs
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
-CALL c_f_pointer(coil_bounds, vals_tmp, [2,gs_global%ncoil_regs+1])
+CALL c_f_pointer(coil_bounds, vals_tmp, [2,gs_global%ncoils+1])
 IF(.NOT.ASSOCIATED(gs_global%coil_bounds))THEN
-  ALLOCATE(gs_global%coil_bounds(2,gs_global%ncoil_regs+1))
+  ALLOCATE(gs_global%coil_bounds(2,gs_global%ncoils+1))
   gs_global%coil_bounds(1,:)=-1.d98; gs_global%coil_bounds(2,:)=1.d98
 END IF
-DO i=1,gs_global%ncoil_regs
-  gs_global%coil_bounds([2,1],i)=-vals_tmp(:,i)*mu0/gs_global%coil_regions(i)%area
+DO i=1,gs_global%ncoils
+  gs_global%coil_bounds([2,1],i)=-vals_tmp(:,i)*mu0
 END DO
-gs_global%coil_bounds([2,1],gs_global%ncoil_regs+1)=-vals_tmp(:,gs_global%ncoil_regs+1)*mu0
+gs_global%coil_bounds([2,1],gs_global%ncoils+1)=-vals_tmp(:,gs_global%ncoils+1)*mu0
 END SUBROUTINE tokamaker_set_coil_bounds
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -747,10 +759,8 @@ SUBROUTINE tokamaker_set_coil_vsc(coil_gains) BIND(C,NAME="tokamaker_set_coil_vs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_gains !< Needs docs
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
-CALL c_f_pointer(coil_gains, vals_tmp, [gs_global%ncoil_regs])
-DO i=1,gs_global%ncoil_regs
-  gs_global%coil_regions(i)%vcont_gain=vals_tmp(i)/gs_global%coil_regions(i)%area
-END DO
+CALL c_f_pointer(coil_gains, vals_tmp, [gs_global%ncoils])
+gs_global%coil_vcont=vals_tmp
 END SUBROUTINE tokamaker_set_coil_vsc
 !------------------------------------------------------------------------------
 !> Needs docs

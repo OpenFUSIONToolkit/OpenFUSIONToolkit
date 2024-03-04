@@ -159,9 +159,12 @@ DO i=1,tMaker_td_obj%gs_eq%ncond_regs
 END DO
 ALLOCATE(tMaker_td_obj%curr_reg(smesh%nreg))
 tMaker_td_obj%curr_reg=0.d0
-DO i=1,tMaker_td_obj%gs_eq%ncoil_regs
-  j=tMaker_td_obj%gs_eq%coil_regions(i)%id
-  tMaker_td_obj%curr_reg(j)=tMaker_td_obj%gs_eq%coil_regions(i)%curr
+DO i=1,tMaker_td_obj%gs_eq%ncoils
+    DO k=1,tMaker_td_obj%gs_eq%ncoil_regs
+        j=tMaker_td_obj%gs_eq%coil_regions(k)%id
+        tMaker_td_obj%curr_reg(j)=tMaker_td_obj%curr_reg(j) &
+        + tMaker_td_obj%gs_eq%coil_currs(i)*tMaker_td_obj%gs_eq%coil_nturns(j,i)
+    END DO
 END DO
 ! Advance using MF-NK method
 CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
@@ -313,9 +316,12 @@ DO i=1,tMaker_td_obj%gs_eq%ncond_regs
 END DO
 ALLOCATE(tMaker_td_obj%curr_reg(smesh%nreg))
 tMaker_td_obj%curr_reg=0.d0
-DO i=1,tMaker_td_obj%gs_eq%ncoil_regs
-    j=tMaker_td_obj%gs_eq%coil_regions(i)%id
-    tMaker_td_obj%curr_reg(j)=tMaker_td_obj%gs_eq%coil_regions(i)%curr
+DO i=1,tMaker_td_obj%gs_eq%ncoils
+    DO k=1,tMaker_td_obj%gs_eq%ncoil_regs
+        j=tMaker_td_obj%gs_eq%coil_regions(k)%id
+        tMaker_td_obj%curr_reg(j)=tMaker_td_obj%curr_reg(j) &
+          + tMaker_td_obj%gs_eq%coil_currs(i)*tMaker_td_obj%gs_eq%coil_nturns(j,i)
+    END DO
 END DO
 ! Advance using MF-NK method
 CALL build_vac_op(tMaker_td_obj,tMaker_td_obj%vac_op)
@@ -364,9 +370,12 @@ IF(dt/=tMaker_td_obj%dt)THEN
     CALL adv_pre%update(.TRUE.)
 END IF
 ! Update coil currents (end of time step)
-DO i=1,tMaker_td_obj%gs_eq%ncoil_regs
-    j=tMaker_td_obj%gs_eq%coil_regions(i)%id
-    tMaker_td_obj%curr_reg(j)=tMaker_td_obj%gs_eq%coil_regions(i)%curr
+DO i=1,tMaker_td_obj%gs_eq%ncoils
+    DO k=1,tMaker_td_obj%gs_eq%ncoil_regs
+        j=tMaker_td_obj%gs_eq%coil_regions(k)%id
+        tMaker_td_obj%curr_reg(j)=tMaker_td_obj%curr_reg(j) &
+        + tMaker_td_obj%gs_eq%coil_currs(i)*tMaker_td_obj%gs_eq%coil_nturns(j,i)
+    END DO
 END DO
 ! Point to profiles in case they changed
 tMaker_td_obj%F=>tMaker_td_obj%gs_eq%I
