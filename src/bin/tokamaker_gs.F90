@@ -162,9 +162,9 @@ IF(file_exists)THEN
   CLOSE(io_unit)
   !---Read coil constraint matrix
   IF(.NOT.ASSOCIATED(mygs%coil_reg_mat))THEN
-    ALLOCATE(mygs%coil_reg_mat(mygs%ncoil_regs+1,mygs%ncoil_regs+1))
+    ALLOCATE(mygs%coil_reg_mat(mygs%ncoils+1,mygs%ncoils+1))
     OPEN(NEWUNIT=io_unit,FILE='coil_reg_mat.dat')
-    DO i=1,mygs%ncoil_regs+1
+    DO i=1,mygs%ncoils+1
       READ(io_unit,*)mygs%coil_reg_mat(i,:)
     END DO
     CLOSE(io_unit)

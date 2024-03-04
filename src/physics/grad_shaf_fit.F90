@@ -282,7 +282,7 @@ IF(gs_active%ncond_regs>0)THEN
   WRITE(*,*)'Fixed',ncond_active,gs_active%ncond_eigs
   ncofs = ncofs + ncond_active !gs_active%ncond_eigs
 END IF
-IF(fit_coils)ncofs = ncofs + gs_active%ncoils
+IF(fit_coils)ncofs = ncofs + gs_active%ncoils_ext
 IF(fit_F0)ncofs = ncofs + 1
 !---
 ALLOCATE(cofs(ncofs),cofs_scale(ncofs))
@@ -342,12 +342,12 @@ IF(ncond_active>0)THEN
   offset = je
 END IF
 IF(fit_coils)THEN
-  js = offset; je = offset+gs_active%ncoils
-  ALLOCATE(curr_in(gs_active%ncoils))
-  DO i=1,gs_active%ncoils
-    curr_in(i)=gs_active%coils(i)%curr
+  js = offset; je = offset+gs_active%ncoils_ext
+  ALLOCATE(curr_in(gs_active%ncoils_ext))
+  DO i=1,gs_active%ncoils_ext
+    curr_in(i)=gs_active%coils_ext(i)%curr
     cofs(js+i)=0.d0
-    cofs_scale(js+i) = 1.0/ABS(gs_active%coils(i)%curr)
+    cofs_scale(js+i) = 1.0/ABS(gs_active%coils_ext(i)%curr)
   END DO
   offset = je
 END IF
@@ -672,9 +672,9 @@ IF(iflag==1)THEN
     offset = je
   END IF
   IF(fit_coils)THEN
-    js = offset; je = offset+gs_active%ncoils
-    DO i=1,gs_active%ncoils
-      gs_active%coils(i)%curr=cofs(js+i)+curr_in(i)
+    js = offset; je = offset+gs_active%ncoils_ext
+    DO i=1,gs_active%ncoils_ext
+      gs_active%coils_ext(i)%curr=cofs(js+i)+curr_in(i)
     END DO
     offset = je
   END IF
@@ -782,7 +782,7 @@ IF(iflag==1)THEN
       offset=je
     END IF
     IF(fit_coils)THEN
-      js = offset; je = offset+gs_active%ncoils
+      js = offset; je = offset+gs_active%ncoils_ext
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Ext currents [%]  ='
       DO i=js+1,je
         WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)/curr_in
@@ -960,14 +960,14 @@ ELSE
     offset = je
   END IF
   IF(fit_coils)THEN
-    js = offset; je = offset+gs_active%ncoils
-    DO j=1,gs_active%ncoils
+    js = offset; je = offset+gs_active%ncoils_ext
+    DO j=1,gs_active%ncoils_ext
       CALL reset_eq
       dx = dxi/cofs_scale(js+j)
-      gs_active%coils(j)%curr=cofs(js+j)+curr_in(j)+dx
+      gs_active%coils_ext(j)%curr=cofs(js+j)+curr_in(j)+dx
       CALL run_err(linearized_fit,jac_mat(:,js+j),m,ierr)
       jac_mat(:,js+j)=(jac_mat(:,js+j)-err)/dx
-      gs_active%coils(j)%curr=cofs(js+j)+curr_in(j)
+      gs_active%coils_ext(j)%curr=cofs(js+j)+curr_in(j)
     END DO
     offset = je
   END IF
@@ -1069,16 +1069,16 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)n
 !---
 ncons=n
-IF(fit_coils)ncons=n+gs_active%ncoils
+IF(fit_coils)ncons=n+gs_active%ncoils_ext
 IF(gs_active%V0_target>-1.d98)ncons=ncons+1
 ALLOCATE(cons(ncons))
 j=1
 !---
 IF(fit_coils)THEN
-  DO i=1,gs_active%ncoils
+  DO i=1,gs_active%ncoils_ext
     ALLOCATE(coil_con)
     coil_con%coil=i
-    coil_con%val=gs_active%coils(i)%curr/mu0
+    coil_con%val=gs_active%coils_ext(i)%curr/mu0
     coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
     cons(j)%con=>coil_con
     j=j+1
@@ -1254,7 +1254,7 @@ FUNCTION fit_coil_error(self,gs) RESULT(err)
 CLASS(coil_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: err
-err = (gs%coils(self%coil)%curr/mu0 - self%val)*self%wt
+err = (gs%coils_ext(self%coil)%curr/mu0 - self%val)*self%wt
 END FUNCTION fit_coil_error
 !------------------------------------------------------------------------------
 ! FUNCTION fit_coil_eval
@@ -1265,7 +1265,7 @@ FUNCTION fit_coil_eval(self,gs) RESULT(val)
 CLASS(coil_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
-val = gs%coils(self%coil)%curr/mu0
+val = gs%coils_ext(self%coil)%curr/mu0
 END FUNCTION fit_coil_eval
 !------------------------------------------------------------------------------
 ! FUNCTION fit_vcont_error
