@@ -1,5 +1,5 @@
 # Based on sample workflow for building and deploying a Jekyll site to GitHub Pages
-name: Build and deploy OFT website using GitHub Pages
+name: GitHub Pages Build
 
 on:
   # Runs on pushes targeting main or gh-pages branch (deploy on gh-pages only)
