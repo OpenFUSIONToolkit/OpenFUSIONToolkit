@@ -135,6 +135,21 @@ def ver_lt(ver_string, ver_test):
     return False
 
 
+def ver_gt(ver_string, ver_test):
+    v1 = ver_test.split('.')
+    v2 = ver_string.split('.')
+    if int(v2[0]) > int(v1[0]):
+        return True
+    elif int(v2[0]) == int(v1[0]):
+        if int(v2[1]) > int(v1[1]):
+            return True
+    return False
+
+
+def ver_range(ver_string, ver_min, ver_max):
+    return ver_gt(ver_string, ver_min) and ver_lt(ver_string, ver_max)
+
+
 def check_c_compiles_and_runs(source, flags, config_dict):
     def cleanup(pwd):
         os.remove('test.c')
@@ -430,9 +445,12 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
     if tmp_dict['OS_TYPE'] == 'Darwin':
         result, errcode = run_command("sw_vers --productVersion")
-        if (errcode == 0) and ((result.split('.')[0] == '13') or (result.split('.')[0] == '14' and int(result.split('.')[1]) < 3)):
-            cmake_lines.append('-DCMAKE_EXE_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
-            cmake_lines.append('-DCMAKE_SHARED_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
+        if errcode == 0:
+            if ver_range(result, '12.99', '14.2'):
+                cmake_lines.append('-DCMAKE_EXE_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
+                cmake_lines.append('-DCMAKE_SHARED_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
+        else:
+            print('Error detecting macOS version using "sw_vers --productVersion"')
     cmake_lines += [os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))]
     cmake_lines_str = ' \\\n  '.join(cmake_lines)
     # Template string
@@ -1561,16 +1579,6 @@ class PETSC(package):
         else:
             return None, None
 
-    def ver_lt(self, ver_test):
-        v1 = ver_test.split('.')
-        v2 = self.version.split('.')
-        if int(v2[0]) < int(v1[0]):
-            return True
-        elif int(v2[0]) == int(v1[0]):
-            if int(v2[1]) < int(v1[1]):
-                return True
-        return False
-
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
         if self.comp_wrapper:
@@ -1604,9 +1612,9 @@ class PETSC(package):
             if self.version == '3.6':
                 self.config_dict['PETSC_LIBS'] += " -lsuperlu_4.3 -lsuperlu_dist_4.1"
                 self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu_4.3.a'))
-            elif not self.ver_lt('3.7'):
+            elif not ver_lt(self.version,'3.7'):
                 self.config_dict['PETSC_LIBS'] += " -lsuperlu"
-                if self.ver_lt('3.10'):
+                if ver_lt(self.version,'3.10'):
                     self.config_dict['PETSC_LIBS'] += " -lsuperlu_dist"
                 self.config_dict['COMP_DEFS'].append("-DHAVE_SUPERLU")
                 self.config_dict['COMP_DEFS'].append("-DSUPERLU_VER_MAJOR=5")
@@ -1646,9 +1654,9 @@ PETSC_LIB = -L{PETSC_LIB} {PETSC_LIBS}\n"""
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
             options.append('--FFLAGS="-fallow-argument-mismatch"')
         options += ['--download-metis', '--download-parmetis', '--with-x=no', '--with-shared-libraries=0']
-        if not self.ver_lt('3.5'):
+        if not ver_lt(self.version,'3.5'):
             options += [' --with-ssl=0']
-            if not self.ver_lt('3.8'):
+            if not ver_lt(self.version,'3.8'):
                 options += ['--with-cmake-exec={CMAKE}']
             else:
                 options += ['--with-cmake={CMAKE}']
@@ -1658,7 +1666,7 @@ PETSC_LIB = -L{PETSC_LIB} {PETSC_LIBS}\n"""
                 result, _ = run_command("{0} -print-sysroot".format(self.config_dict['CC']))
                 def_lines.append('export SDKROOT={0}'.format(result.strip()))
             options += ['--download-superlu']
-            if self.ver_lt('3.10'):
+            if ver_lt(self.version,'3.10'):
                 options += ['--download-superlu_dist']
         if self.with_umfpack:
             options += ['--download-umfpack']
