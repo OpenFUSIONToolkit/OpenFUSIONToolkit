@@ -752,6 +752,7 @@ IF((self%L_svd_tol<0.d0).AND.(self%B_svd_tol<0.d0))RETURN
 !---Partition mesh
 WRITE(*,*)'Partitioning grid for block low rank compressed operators'
 CALL tw_part_mesh(self%tw_obj,self%leaf_target,self%nlevels,self%levels)
+sparse_count=0
 DO i=1,self%nlevels
     ! WRITE(*,*)i,self%levels(i)%nblocks
     ALLOCATE(self%levels(i)%mat_mask(self%levels(i)%nblocks,self%levels(i)%nblocks))
