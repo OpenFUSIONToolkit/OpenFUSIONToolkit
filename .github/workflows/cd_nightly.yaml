@@ -47,11 +47,11 @@ jobs:
         key: ${{ matrix.config.os }}-nightly-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Get OS version (Linux)
-      if: startsWith(matrix.config.os, 'macos')
+      if: startsWith(matrix.config.os, 'ubuntu')
       run: lsb_release -d
 
     - name: Get OS version (macOS)
-      if: startsWith(matrix.config.os, 'ubuntu')
+      if: startsWith(matrix.config.os, 'macos')
       run: sw_vers --productVersion
 
     - name: Check compilers
