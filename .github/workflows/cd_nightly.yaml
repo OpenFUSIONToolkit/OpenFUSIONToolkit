@@ -56,11 +56,20 @@ jobs:
         $CXX --version
         $FC --version
 
-    - name: Build external
+    - name: Build external (Linux)
+      if: matrix.config.os == 'ubuntu-20.04'
       shell: bash
       working-directory: libs
       run: >
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
+        --build_umfpack=1 --build_arpack=1 --oblas_dynamic_arch --oft_package
+
+    - name: Build external (macOS)
+      if: matrix.config.os != 'ubuntu-20.04'
+      shell: bash
+      working-directory: libs
+      run: >
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
         --build_umfpack=1 --build_arpack=1 --oft_package
 
     - name: Upload library failure log
