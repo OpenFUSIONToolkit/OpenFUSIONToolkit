@@ -1,4 +1,4 @@
-name: Open FUSION Toolkit code coverage build
+name: Coverage Build
 
 on:
   push:
