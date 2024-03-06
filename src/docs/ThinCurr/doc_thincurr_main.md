@@ -18,3 +18,4 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_thincurr_ex1
  - \subpage doc_thincurr_ex2
  - \subpage doc_thincurr_ex3
+ - \subpage doc_thincurr_ex4

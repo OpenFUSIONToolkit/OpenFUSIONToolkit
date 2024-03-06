@@ -158,7 +158,8 @@ tw_hodlr%tw_obj=>tw_sim
 CALL tw_hodlr%setup()
 IF(.NOT.plot_run)THEN
   IF(tw_hodlr%L_svd_tol>0.d0)THEN
-    IF(direct)call oft_abort('Matrix compression requires "direct=F"','thincurr_td',__FILE__)
+    IF(direct)CALL oft_abort('HODLR compression does not support "direct=T"','thincurr_td',__FILE__)
+    IF(save_L)CALL oft_abort('HODLR compression does not support "save_L=T"','thincurr_td',__FILE__)
     CALL tw_hodlr%compute_L()
   ELSE
     IF(save_L)THEN

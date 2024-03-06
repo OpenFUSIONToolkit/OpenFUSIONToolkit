@@ -150,7 +150,8 @@ ELSE
   tw_hodlr%tw_obj=>tw_sim
   CALL tw_hodlr%setup()
   IF(tw_hodlr%L_svd_tol>0.d0)THEN
-    IF(direct)CALL oft_abort('HODLR compression requires "direct=F"','thincurr_eig',__FILE__)
+    IF(direct)CALL oft_abort('HODLR compression does not support "direct=T"','thincurr_eig',__FILE__)
+    IF(save_L)CALL oft_abort('HODLR compression does not support "save_L=T"','thincurr_eig',__FILE__)
     CALL tw_hodlr%compute_L()
   ELSE
     IF(save_L)THEN
