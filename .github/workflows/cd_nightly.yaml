@@ -46,9 +46,13 @@ jobs:
         path: libs
         key: ${{ matrix.config.os }}-nightly-${{ hashFiles('src/utilities/build_libs.py') }}
 
-    - name: Create build dir
-      if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
-      run: mkdir libs
+    - name: Get OS version (Linux)
+      if: startsWith(matrix.config.os, 'macos')
+      run: lsb_release -d
+
+    - name: Get OS version (macOS)
+      if: startsWith(matrix.config.os, 'ubuntu')
+      run: sw_vers --productVersion
 
     - name: Check compilers
       run: |
@@ -56,8 +60,12 @@ jobs:
         $CXX --version
         $FC --version
 
+    - name: Create build dir
+      if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
+      run: mkdir libs
+
     - name: Build external (Linux)
-      if: matrix.config.os == 'ubuntu-20.04'
+      if: startsWith(matrix.config.os, 'ubuntu')
       shell: bash
       working-directory: libs
       run: >
@@ -65,7 +73,7 @@ jobs:
         --build_umfpack=1 --build_arpack=1 --oblas_dynamic_arch --oft_package
 
     - name: Build external (macOS)
-      if: matrix.config.os != 'ubuntu-20.04'
+      if: startsWith(matrix.config.os, 'macos')
       shell: bash
       working-directory: libs
       run: >
