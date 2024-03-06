@@ -343,7 +343,8 @@ EXT_LIBS = {EXT_LIBS_LINE}
         fid.write(string)
 
 
-def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=False,build_examples=False,build_docs=False,build_coverage=False,package_build=False):
+def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False, 
+                       build_examples=False,build_docs=False,build_coverage=False,package_build=False,package_release=False):
     def bool_to_string(val):
         if val:
             return "TRUE"
@@ -365,9 +366,10 @@ def build_cmake_script(mydict,build_debug=False,build_python=False,build_tests=F
         "-DOFT_BUILD_EXAMPLES:BOOL={0}".format(bool_to_string(build_examples)),
         "-DOFT_BUILD_PYTHON:BOOL={0}".format(bool_to_string(build_python)),
         "-DOFT_BUILD_DOCS:BOOL={0}".format(bool_to_string(build_docs)),
+        "-DOFT_USE_OpenMP:BOOL={0}".format(bool_to_string(use_openmp)),
         "-DOFT_PACKAGE_BUILD:BOOL={0}".format(bool_to_string(package_build)),
+        "-DOFT_PACKAGE_NIGHTLY:BOOL={0}".format(bool_to_string(not package_release)),
         "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
-        "-DOFT_USE_OpenMP:BOOL=TRUE",
         "-DCMAKE_C_COMPILER:FILEPATH={CC}",
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
         "-DCMAKE_Fortran_COMPILER:FILEPATH={FC}"
@@ -1696,10 +1698,12 @@ group = parser.add_argument_group("CMAKE", "CMAKE configure options for the Open
 group.add_argument("--build_cmake", default=0, type=int, choices=(0,1), help="Build CMAKE instead of using system version?")
 group.add_argument("--oft_build_debug", default=0, type=int, choices=(0,1), help="Build debug version of OFT?")
 group.add_argument("--oft_build_python", default=1, type=int, choices=(0,1), help="Build OFT Python libraries? (default: 1)")
+group.add_argument("--oft_use_openmp", default=1, type=int, choices=(0,1), help="Build OFT with OpenMP support? (default)")
 group.add_argument("--oft_build_tests", default=0, type=int, choices=(0,1), help="Build OFT tests?")
 group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples?")
 group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help="Build OFT documentation? (requires doxygen)")
 group.add_argument("--oft_package", action="store_true", default=False, help="Perform a packaging build of OFT?")
+group.add_argument("--oft_package_release", action="store_true", default=False, help="Perform a release package of OFT?")
 group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
 #
 group = parser.add_argument_group("MPI", "MPI package options")
@@ -1869,10 +1873,12 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
     build_make_include(config_dict)
     build_cmake_script(config_dict,
         build_debug=(options.oft_build_debug == 1),
+        use_openmp=(options.oft_use_openmp == 1),
         build_python=(options.oft_build_python == 1),
         build_tests=(options.oft_build_tests == 1),
         build_examples=(options.oft_build_examples == 1),
         build_docs=(options.oft_build_docs == 1),
         build_coverage=(options.oft_build_coverage == 1),
-        package_build=options.oft_package
+        package_build=options.oft_package,
+        package_release=options.oft_package_release
     )

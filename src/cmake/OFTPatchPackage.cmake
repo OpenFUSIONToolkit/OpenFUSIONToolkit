@@ -52,7 +52,7 @@ else()
     "
     message(STATUS \"Patching executables\")
     execute_process(
-      COMMAND python ${CMAKE_SOURCE_DIR}/cmake/patch_package.py
+      COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/cmake/patch_package.py
       WORKING_DIRECTORY \${CMAKE_INSTALL_PREFIX}/bin
     )
     "
