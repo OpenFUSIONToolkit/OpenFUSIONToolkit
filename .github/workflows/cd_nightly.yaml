@@ -51,7 +51,9 @@ jobs:
 
     - name: Get OS version (macOS)
       if: startsWith(matrix.config.os, 'macos')
-      run: sw_vers -productVersion
+      run: |
+        sw_vers -productVersion
+        pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
 
     - name: Check compilers
       run: |

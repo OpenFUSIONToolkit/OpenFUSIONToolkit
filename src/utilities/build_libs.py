@@ -444,9 +444,13 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         if "UMFPACK_ROOT" in mydict:
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
     if tmp_dict['OS_TYPE'] == 'Darwin':
-        result, errcode = run_command("sw_vers -productVersion")
+        try:
+            result, errcode = run_command("pkgutil --pkg-info=com.apple.pkg.CLTools_Executables | grep version")
+            result = result.split(':')[1]
+        except:
+            errcode = -1
         if errcode == 0:
-            if ver_range(result, '12.99', '14.3'):
+            if ver_range(result, '14.99', '15.3'):
                 cmake_lines.append('-DCMAKE_EXE_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
                 cmake_lines.append('-DCMAKE_SHARED_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
         else:
