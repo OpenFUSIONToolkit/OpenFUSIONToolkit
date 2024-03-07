@@ -65,7 +65,7 @@ class Marklin_field_interpolator():
     def __del__(self):
         '''Destroy underlying interpolation object'''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
-        marklin_apply_int(-self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.val)
+        marklin_apply_int(self.int_obj,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.val)
 
     def eval(self,pt):
         '''! Evaluate field at a given location

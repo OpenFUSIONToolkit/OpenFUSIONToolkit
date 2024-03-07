@@ -391,7 +391,7 @@ class TokaMaker_field_interpolator():
     def __del__(self):
         '''Destroy underlying interpolation object'''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
-        tokamaker_apply_field_eval(-self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
+        tokamaker_apply_field_eval(self.int_obj,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
 
     def eval(self,pt):
         '''! Evaluate field at a given location
@@ -1232,7 +1232,7 @@ class TokaMaker():
         @param coil_colormap Colormap for coil current values
         @param coil_symmap Make coil current colorscale symmetric
         @param coil_scale Scale for coil currents when plotting
-        @param coil_clabel Label for coil current colorbar
+        @param coil_clabel Label for coil current colorbar (None to disable colorbar)
         '''
         mask_vals = numpy.ones((self.np,))
         # Shade vacuum region
@@ -1254,7 +1254,8 @@ class TokaMaker():
                     clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap, vmin=-max_curr, vmax=max_curr)
                 else:
                     clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap)
-                fig.colorbar(clf,ax=ax,label=coil_clabel)
+                if coil_clabel is not None:
+                    fig.colorbar(clf,ax=ax,label=coil_clabel)
         else:
             for _, coil_reg in self._coil_dict.items():
                 mask_tmp = (self.reg == coil_reg['reg_id'])
@@ -1362,7 +1363,7 @@ class TokaMaker():
         @param dpsi_dt dPsi/dt corresponding to eddy currents (eg. from time-dependent simulation)
         @param nlevels Number contour lines used for shading
         @param colormap Colormap to use for shadings
-        @param clabel Label for colorbar
+        @param clabel Label for colorbar (None to disable colorbar)
         '''
         # Apply 1/R scale (avoiding divide by zero)
         dpsi_dt = dpsi_dt.copy()
@@ -1378,8 +1379,9 @@ class TokaMaker():
                 mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
                 mask = numpy.logical_or(mask,mask_tmp)
         clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],mesh_currents[mask],cmap=colormap)
-        cb = fig.colorbar(clf,ax=ax)
-        cb.set_label(clabel)
+        if clabel is not None:
+            cb = fig.colorbar(clf,ax=ax)
+            cb.set_label(clabel)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
 
