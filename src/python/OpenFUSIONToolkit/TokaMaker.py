@@ -1679,8 +1679,8 @@ class gs_Domain:
         self.zmin = min(self.zmin,contour[:,1].min())
         self.regions.append(Region(contour,dx,dx_curve,angle_tol,sliver_tol,small_thresh,reg["id"]))
         reg["count"] += 1
-    
-    def add_rectangle(self,rc,zc,w,h,name,parent_name=None):
+
+    def add_rectangle(self,rc,zc,w,h,name,parent_name=None, rot=None):
         '''! Add rectangular geometry defining region boundaries to the mesh
 
         @param rc Radial center of rectangle
@@ -1689,13 +1689,24 @@ class gs_Domain:
         @param h Height of the rectangle (vertical direction)
         @param name Name of region enclosed by the polygon
         @param parent_name Name of region outside the polygon
+        @param rot Rotation of rectangle (degrees)
         '''
         contour = numpy.asarray([
-            [rc-w/2.0, zc-h/2.0],
-            [rc+w/2.0, zc-h/2.0],
-            [rc+w/2.0, zc+h/2.0],
-            [rc-w/2.0, zc+h/2.0]
+            [-w/2.0, -h/2.0],
+            [+w/2.0, -h/2.0],
+            [+w/2.0, +h/2.0],
+            [-w/2.0, +h/2.0]
         ])
+
+        if rot is not None:
+            rot = numpy.deg2rad(rot)
+            rotmat = numpy.asarray([numpy.cos(rot), -numpy.sin(rot), numpy.sin(rot), numpy.cos(rot)]).reshape((2,2))
+
+            contour = numpy.dot(contour,rotmat.T)
+        
+        contour[:,0] += rc
+        contour[:,1] += zc
+
         self.add_polygon(contour,name,parent_name)
     
     def add_enclosed(self,in_point,name):
