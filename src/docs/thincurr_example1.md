@@ -13,6 +13,18 @@ Contents of the input files are provided below and in the examples directory und
 
 During the run you will see it report a bunch of general information and then it will report the first few eigenvalues from the calculation. These values should all be purely real (no imaginary component) and should be decreasing in value from first to last. For this case the largest values should be around 9.7 ms.
 
+# Post processing
+
+Once complete you can now generate XDMF files suitable for visualization of results using the [VisIt](https://visit-dav.github.io/visit-website/index.html) code. This is a two step process. First, rerun the code as above but with `plot_run=T` in the `thincurr_eig_options` group. Once complete, you need to run the `build_xdmf.py` script, which generates XDMF metadata files that tells VisIt how to read the data. This can be done using the following command
+
+    python /path/to/oft/bin/build_xdmf.py
+
+Next use VisIt to open the `surf_static.xmf` file, which will contain a series of vector fields named as `J_XX` that correspond to the current distributions of the various eigenstates. If you are running this example remotely and using VisIt locally you will need to copy the `mesh.*.h5`, `scalar_dump.*.h5`, `vector_dump.*.h5`, and `*.xmf` files to your local computer for visualization. The first eigenmode `J_01` should look like the figure below.
+
+\image html thincurr_ex1-result.png "Resulting current distribution for the first eigenmode"
+
+# Supporting information
+
 ## Input files
 
 **General global settings** (`oft.in`)
@@ -38,7 +50,7 @@ During the run you will see it report a bunch of general information and then it
 \endverbatim
 
 **XML global settings** (`oft_in.xml`)
-\verbatim
+```xml
 <oft>
   <thincurr>
     <eta>1.257E-5</eta>
@@ -47,14 +59,37 @@ During the run you will see it report a bunch of general information and then it
     </coil_set>
   </thincurr>
 </oft>
-\endverbatim
+```
 
-# Post processing
+## Mesh definition
 
-Once complete you can now generate XDMF files suitable for visualization of results using the [VisIt](https://visit-dav.github.io/visit-website/index.html) code. This is a two step process. First, rerun the code as above but with `plot_run=T` in the `thincurr_eig_options` group. Once complete, you need to run the `build_xdmf.py` script, which generates XDMF metadata files that tells VisIt how to read the data. This can be done using the following command
+**Cubit mesh script** (`thincurr_ex-plate.jou`)
+```
+reset
+undo off
 
-    python /path/to/oft/bin/build_xdmf.py
+#{mesh_size=0.05}
 
-Next use VisIt to open the `surf_static.xmf` file, which will contain a series of vector fields named as `J_XX` that correspond to the current distributions of the various eigenstates. If you are running this example remotely and using VisIt locally you will need to copy the `mesh.*.h5`, `scalar_dump.*.h5`, `vector_dump.*.h5`, and `*.xmf` files to your local computer for visualization. The first eigenmode `J_01` should look like the figure below.
+# Create simple 1x1 plate
+create surface rectangle width 1 height 1 zplane
 
-![](images/thincurr_ex1-result.png)
+# Generate mesh
+set trimesher geometry sizing off
+surface all scheme trimesh
+surface all size {mesh_size}
+mesh surface all
+
+# Create mesh blocks
+set duplicate block elements off
+block 1 add surface 1
+
+# Export grid
+set large exodus file on
+export Genesis  "thincurr_ex-plate.g" overwrite block 1
+```
+
+The file can then be converted to OFT's native mesh format using the `convert_cubit.py` script as
+
+    python /path/to/OFT/bin/convert_cubit.py --in_file=thincurr_ex-plate.g
+
+which will yield the converted file `thincurr_ex-plate.h5`.
