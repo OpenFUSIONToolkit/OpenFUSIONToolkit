@@ -2104,7 +2104,7 @@ class Mesh:
         try:
             import triangle as tr
         except ImportError:
-            print('Meshing requires "traingle" python library')
+            print('Meshing requires "triangle" python library')
             return None
         print('Generating mesh:')
         beta = tr.triangulate(alpha,'pqaA')
