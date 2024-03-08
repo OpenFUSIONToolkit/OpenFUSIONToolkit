@@ -25,6 +25,7 @@ USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, &
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
+USE oft_gs_fit, ONLY: fit_gs
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -44,6 +45,20 @@ TYPE, BIND(C) :: tokamaker_settings_type
   REAL(KIND=c_double) :: lim_zmax = 1.d99 !< Needs docs
   CHARACTER(KIND=c_char) :: limiter_file(80) = 'none' !< Needs docs
 END TYPE tokamaker_settings_type
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+TYPE, BIND(C) :: tokamaker_recon_settings_type
+  LOGICAL(KIND=c_bool) :: fitI = .TRUE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitP = .TRUE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitPnorm = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitAlam = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitR0 = .TRUE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitV0 = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitCoils = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitF0 = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fixedCentering = .FALSE. !< Needs docs
+END TYPE tokamaker_recon_settings_type
 !
 TYPE(gs_eq), POINTER :: gs_global => NULL() !< Global G-S object
 TYPE(oft_tmaker_td), POINTER :: gs_td_global => NULL() !< Global time-dependent object
@@ -270,6 +285,29 @@ END SUBROUTINE tokamaker_run
 SUBROUTINE tokamaker_analyze() BIND(C,NAME="tokamaker_analyze")
 CALL gs_analyze(gs_global)
 END SUBROUTINE tokamaker_analyze
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_recon_run(vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_run")
+LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
+TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
+INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
+LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+IF(vacuum)gs_global%has_plasma=.FALSE.
+fitI=settings%fitI
+fitP=settings%fitP
+fitPnorm=settings%fitPnorm
+fitAlam=settings%fitAlam
+fitR0=settings%fitR0
+fitV0=settings%fitV0
+fitCoils=settings%fitCoils
+fitF0=settings%fitF0
+fixedCentering=settings%fixedCentering
+CALL fit_gs(gs_global,fitI,fitP,fitPnorm,&
+            fitAlam,fitR0,fitV0,fitCoils,fitF0, &
+            fixedCentering)
+gs_global%has_plasma=.TRUE.
+END SUBROUTINE tokamaker_recon_run
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

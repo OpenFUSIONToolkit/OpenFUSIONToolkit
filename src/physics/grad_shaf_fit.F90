@@ -11,7 +11,7 @@
 !---------------------------------------------------------------------------
 MODULE oft_gs_fit
 use oft_base
-USE oft_io, ONLY: hdf5_read
+USE oft_io, ONLY: hdf5_read, oft_file_exist
 USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 !---
 use oft_la_base, only: oft_vector
@@ -282,7 +282,7 @@ IF(gs_active%ncond_regs>0)THEN
   WRITE(*,*)'Fixed',ncond_active,gs_active%ncond_eigs
   ncofs = ncofs + ncond_active !gs_active%ncond_eigs
 END IF
-IF(fit_coils)ncofs = ncofs + gs_active%ncoils_ext
+IF(fit_coils)ncofs = ncofs + gs_active%ncoils
 IF(fit_F0)ncofs = ncofs + 1
 !---
 ALLOCATE(cofs(ncofs),cofs_scale(ncofs))
@@ -342,12 +342,12 @@ IF(ncond_active>0)THEN
   offset = je
 END IF
 IF(fit_coils)THEN
-  js = offset; je = offset+gs_active%ncoils_ext
-  ALLOCATE(curr_in(gs_active%ncoils_ext))
-  DO i=1,gs_active%ncoils_ext
-    curr_in(i)=gs_active%coils_ext(i)%curr
+  js = offset; je = offset+gs_active%ncoils
+  ALLOCATE(curr_in(gs_active%ncoils))
+  DO i=1,gs_active%ncoils
+    curr_in(i)=gs_active%coil_currs(i)
     cofs(js+i)=0.d0
-    cofs_scale(js+i) = 1.0/ABS(gs_active%coils_ext(i)%curr)
+    cofs_scale(js+i) = 1.0/ABS(gs_active%coil_currs(i))
   END DO
   offset = je
 END IF
@@ -672,9 +672,9 @@ IF(iflag==1)THEN
     offset = je
   END IF
   IF(fit_coils)THEN
-    js = offset; je = offset+gs_active%ncoils_ext
-    DO i=1,gs_active%ncoils_ext
-      gs_active%coils_ext(i)%curr=cofs(js+i)+curr_in(i)
+    js = offset; je = offset+gs_active%ncoils
+    DO i=1,gs_active%ncoils
+      gs_active%coil_currs(i)=cofs(js+i)+curr_in(i)
     END DO
     offset = je
   END IF
@@ -772,7 +772,7 @@ IF(iflag==1)THEN
       WRITE(*,*)
       offset=je
     END IF
-    IF(gs_active%ncond_regs>0)THEN
+    IF(ncond_active>0)THEN
       js = offset; je = offset+ncond_active
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Cond weights      ='
       DO i=js+1,je
@@ -782,8 +782,8 @@ IF(iflag==1)THEN
       offset=je
     END IF
     IF(fit_coils)THEN
-      js = offset; je = offset+gs_active%ncoils_ext
-      WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Ext currents [%]  ='
+      js = offset; je = offset+gs_active%ncoils
+      WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Coil currents [%]  ='
       DO i=js+1,je
         WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)/curr_in
       END DO
@@ -960,14 +960,14 @@ ELSE
     offset = je
   END IF
   IF(fit_coils)THEN
-    js = offset; je = offset+gs_active%ncoils_ext
-    DO j=1,gs_active%ncoils_ext
+    js = offset; je = offset+gs_active%ncoils
+    DO j=1,gs_active%ncoils
       CALL reset_eq
       dx = dxi/cofs_scale(js+j)
-      gs_active%coils_ext(j)%curr=cofs(js+j)+curr_in(j)+dx
+      gs_active%coil_currs(j)=cofs(js+j)+curr_in(j)+dx
       CALL run_err(linearized_fit,jac_mat(:,js+j),m,ierr)
       jac_mat(:,js+j)=(jac_mat(:,js+j)-err)/dx
-      gs_active%coils_ext(j)%curr=cofs(js+j)+curr_in(j)
+      gs_active%coil_currs(j)=cofs(js+j)+curr_in(j)
     END DO
     offset = je
   END IF
@@ -985,6 +985,7 @@ ELSE
   IF(ANY(isnan(jac_mat)))THEN
     CALL oft_abort("Gradient failed: NaN detected", "fit_error_grad", __FILE__)
   END IF
+  WRITE(*,*)
 END IF
 !---Centering
 CALL reset_eq
@@ -1069,27 +1070,27 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)n
 !---
 ncons=n
-IF(fit_coils)ncons=n+gs_active%ncoils_ext
-IF(gs_active%V0_target>-1.d98)ncons=ncons+1
+IF(fit_coils)ncons=n+gs_active%ncoils
+! IF(gs_active%V0_target>-1.d98)ncons=ncons+1
 ALLOCATE(cons(ncons))
 j=1
 !---
 IF(fit_coils)THEN
-  DO i=1,gs_active%ncoils_ext
+  DO i=1,gs_active%ncoils
     ALLOCATE(coil_con)
     coil_con%coil=i
-    coil_con%val=gs_active%coils_ext(i)%curr/mu0
+    coil_con%val=gs_active%coil_currs(i)/mu0
     coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
     cons(j)%con=>coil_con
     j=j+1
   END DO
 END IF
-IF(gs_active%V0_target>-1.d98)THEN
-  ALLOCATE(vcont_constraint::cons(j)%con)
-  cons(j)%con%val=0.d0
-  cons(j)%con%wt=2.d8
-  j=j+1
-END IF
+! IF(gs_active%V0_target>-1.d98)THEN
+!   ALLOCATE(vcont_constraint::cons(j)%con)
+!   cons(j)%con%val=0.d0
+!   cons(j)%con%wt=2.d-8
+!   j=j+1
+! END IF
 !---Load
 neddy=0
 DO i=1,n
@@ -1161,9 +1162,11 @@ nax_corr=0.d0
 DO i=1,gs_active%ncond_regs
   nax_tmp=0.d0
   WRITE(num_str,'(I2.2)')i
-  CALL hdf5_read(nax_tmp(1:gs_active%cond_regions(i)%neigs,:), 'wall_eig.rst', &
-    'corr_'//num_str, success=file_exists)
-  IF(file_exists)WRITE(*,'(2A,I4)')oft_indent,'Non-axisymmetric corrections found: ',i
+  IF(oft_file_exist('wall_eig.rst'))THEN
+    CALL hdf5_read(nax_tmp(1:gs_active%cond_regions(i)%neigs,:), 'wall_eig.rst', &
+      'corr_'//num_str, success=file_exists)
+    WRITE(*,'(2A,I4)')oft_indent,'Non-axisymmetric corrections found: ',i
+  END IF
   DO j=1,gs_active%cond_regions(i)%neigs
     nax_corr(gs_active%cond_regions(i)%eig_map(j),:)=nax_corr(gs_active%cond_regions(i)%eig_map(j),:) &
       + nax_tmp(j,:)
@@ -1254,7 +1257,7 @@ FUNCTION fit_coil_error(self,gs) RESULT(err)
 CLASS(coil_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: err
-err = (gs%coils_ext(self%coil)%curr/mu0 - self%val)*self%wt
+err = (gs%coil_currs(self%coil)/mu0 - self%val)*self%wt
 END FUNCTION fit_coil_error
 !------------------------------------------------------------------------------
 ! FUNCTION fit_coil_eval
@@ -1265,7 +1268,7 @@ FUNCTION fit_coil_eval(self,gs) RESULT(val)
 CLASS(coil_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
-val = gs%coils_ext(self%coil)%curr/mu0
+val = gs%coil_currs(self%coil)/mu0
 END FUNCTION fit_coil_eval
 !------------------------------------------------------------------------------
 ! FUNCTION fit_vcont_error

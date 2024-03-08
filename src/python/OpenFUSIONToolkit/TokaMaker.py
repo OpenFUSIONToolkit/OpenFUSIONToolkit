@@ -42,6 +42,32 @@ class tokamaker_settings_struct(c_struct):
                 ("lim_zmax", c_double),
                 ("limiter_file", ctypes.c_char*80)]
 
+# Reconstruction settings STRUCT
+class tokamaker_recon_settings_struct(c_struct):
+    r'''! TokaMaker reconstruction settings structure
+
+     - `pm` Print 'performance' information (eg. iteration count) during run?
+     - `free_boundary` Perform free-boundary calculation?
+     - `has_plasma` Include plasma effects in calculation, vacuum otherwise?
+     - `limited_only` Do not search for X-points when determining LCFS?
+     - `maxits` Maximum NL iteration count for G-S solver
+     - `mode` Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
+     - `urf` Under-relaxation factor for NL fixed-point iteration
+     - `nl_tol` Convergence tolerance for NL solver
+     - `rmin` Minimum magnetic axis major radius, used to catch 'lost' equilibria
+     - `lim_zmax` Maximum vertical range for limiter points, can be used to exclude complex diverter regions
+     - `limiter_file` File containing additional limiter points not included in mesh (default: 'none')
+    '''
+    _fields_ = [("fitI", c_bool),
+                ("fitP", c_bool),
+                ("fitPnorm", c_bool),
+                ("fitAlam", c_bool),
+                ("fitR0", c_bool),
+                ("fitV0", c_bool),
+                ("fitCoils", c_bool),
+                ("fitF0", c_bool),
+                ("fixedCentering", c_bool)]
+
 
 ## @cond
 # Set mesh in memory: (ndim,np,r_loc,npc,nc,lc_loc,reg_loc)
@@ -80,6 +106,10 @@ tokamaker_run = ctypes_subroutine(oftpy_lib.tokamaker_run,
 
 # G-S info function
 tokamaker_analyze = ctypes_subroutine(oftpy_lib.tokamaker_analyze)
+
+# G-S reconstruction run function
+tokamaker_recon_run = ctypes_subroutine(oftpy_lib.tokamaker_recon_run,
+    [c_bool, ctypes.POINTER(tokamaker_recon_settings_struct), c_int_ptr])
 
 # G-S time-dependent run function
 tokamaker_setup_td = ctypes_subroutine(oftpy_lib.tokamaker_setup_td,
@@ -214,6 +244,23 @@ def tokamaker_default_settings():
     settings.rmin = 0.0
     settings.lim_zmax = 1.E99
     settings.limiter_file = 'none'.encode()
+    return settings
+
+def tokamaker_recon_default_settings():
+    '''! Initialize reconstruction settings object with default values
+
+    @result tokamaker_recon_settings_struct object
+    '''
+    settings = tokamaker_recon_settings_struct()
+    settings.fitI = False
+    settings.fitP = False
+    settings.fitPnorm = True
+    settings.fitAlam = True
+    settings.fitR0 = False
+    settings.fitV0 = False
+    settings.fitCoils = False
+    settings.fitF0 = False
+    settings.fixedCentering = False
     return settings
 
 def create_isoflux(npts, r0, z0, a, kappa, delta, kappaL=None, deltaL=None):
@@ -422,6 +469,8 @@ class TokaMaker():
         tokamaker_alloc(ctypes.byref(self.gs_obj))
         ## General settings object
         self.settings = tokamaker_default_settings()
+        ## Reconstruction specific settings object
+        self.recon_settings = tokamaker_recon_default_settings()
         ## Conductor definition dictionary
         self._cond_dict = {}
         ## Vacuum definition dictionary
@@ -494,6 +543,7 @@ class TokaMaker():
         self._oft_in_dict['MESH_DEF'] = ''
         # Reset defaults
         self.settings = tokamaker_default_settings()
+        self.recon_settings = tokamaker_recon_default_settings()
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
@@ -862,6 +912,12 @@ class TokaMaker():
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
         error_flag = c_int()
         tokamaker_run(c_bool(vacuum),ctypes.byref(error_flag))
+        return error_flag.value
+    
+    def reconstruct(self, vacuum=False):
+        '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.'''
+        error_flag = c_int()
+        tokamaker_recon_run(c_bool(vacuum),self.recon_settings,ctypes.byref(error_flag))
         return error_flag.value
 
     def get_stats(self,lcfs_pad=0.01):

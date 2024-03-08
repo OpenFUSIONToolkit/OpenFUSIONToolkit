@@ -1161,14 +1161,20 @@ NULLIFY(tmp_vec,psi_vals)
 call self%psi%new(tmp_vec)
 !---Compute coil fields
 IF(self%ncoils==0)THEN
-  self%ncoils=self%ncoil_regs
-  ALLOCATE(self%coil_nturns(smesh%nreg,self%ncoils))
-  ALLOCATE(self%coil_currs(self%ncoils))
+  self%ncoils=self%ncoil_regs+self%ncoils_ext
+  ALLOCATE(self%coil_nturns(smesh%nreg+self%ncoils_ext,self%ncoils))
+  ALLOCATE(self%coil_currs(self%ncoils),self%coil_vcont(self%ncoils))
   self%coil_nturns=0.d0
+  self%coil_vcont=0.d0
   self%coil_currs=0.d0
   DO i=1,self%ncoil_regs
     self%coil_nturns(self%coil_regions(i)%id,i)=1.d0
     self%coil_currs(i)=self%coil_regions(i)%curr*self%coil_regions(i)%area
+    self%coil_vcont(self%coil_regions(i)%id)=self%coil_regions(i)%vcont_gain
+  END DO
+  DO i=1,self%ncoils_ext
+    self%coil_nturns(smesh%nreg+i,self%ncoil_regs+i)=1.d0
+    self%coil_currs(self%ncoil_regs+i)=self%coils_ext(i)%curr
   END DO
 ELSE
   DO i=1,self%ncoil_regs
@@ -5317,6 +5323,7 @@ END IF
 !---
 IF(self%ncoils>0)THEN
   DEALLOCATE(self%coil_currs,self%coil_vcont,self%coil_nturns)
+  self%ncoils=0
 END IF
 !---
 IF(self%ncond_regs>0)THEN
