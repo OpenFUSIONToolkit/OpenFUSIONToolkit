@@ -178,6 +178,7 @@ if __name__ == '__main__':
         contents = contents.replace("[png]", "[]")
         # Convert notes to note blocks
         contents = contents.replace("**Note:**", r'@note')
+        contents = contents.replace("**Warning:**", r'@warning')
         # Convert code block style
         contents_split = contents.split('```')
         for i, content_segment in enumerate(contents_split):
