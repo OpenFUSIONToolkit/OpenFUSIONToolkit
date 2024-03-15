@@ -1048,7 +1048,7 @@ class TokaMaker():
                     break
             return self.x_points[:i,:], self.diverted
     
-    def solve_with_bootstrap(self,psi_norm,n_psi,ne,Te,ni,Ti,inductive_jtor,Zeff,R0,nis=None,Zis=[1.],max_iterations=6,initialize_eq=True):
+    def solve_with_bootstrap(self,psi_norm,n_psi,ne,Te,ni,Ti,inductive_jtor,Zeff,R0,scale_jBS=1.0,nis=None,Zis=[1.],max_iterations=6,initialize_eq=True,return_jBS=False):
         '''! Self-consistently compute bootstrap contribution from H-mode profiles,
         and iterate solution until all functions of Psi converge. 
 
@@ -1072,10 +1072,12 @@ class TokaMaker():
         @param inductive_jtor Inductive toroidal current, sampled over psi_norm
         @param Zeff Effective Z profile, sampled over psi_norm
         @param R0 Major radius
+        @param scale_jBS Scalar which can scale bootstrap current profile
         @param nis List of impurity density profiles; NOT USED
         @param Zis List of impurity profile atomic numbers; NOT USED. 
         @param max_iterations Maximum number of H-mode mygs.solve() iterations
         @param initialize_eq Initialize equilibrium solve with flattened pedestal. 
+        @param return_jBS Return bootstrap profile alongside err_flag
         '''
         try:
             from omfit_classes.utils_fusion import sauter_bootstrap
@@ -1090,7 +1092,7 @@ class TokaMaker():
             @param one_over_R_avg Flux averaged 1/R, calculated by TokaMaker
             @param pprime dP/dPsi profile
             '''
-            ffprime = (jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg) ####### FACTOR OF 2?
+            ffprime = 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
             return ffprime
 
         pressure = (kB_m3_eV * ne * Te) + (kB_m3_eV * ni * Ti) # 1.602e-19 * [m^-3] * [eV] = [Pa]
@@ -1098,7 +1100,7 @@ class TokaMaker():
         ### Set new pax target
         self.set_targets(pax=pressure[0])
 
-        def profile_iteration(self, pressure, ne, ni, Te, Ti, psi_norm, n_psi, Zeff, inductive_jtor, R0, nis, Zis, include_jBS=True):
+        def profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,R0,scale_jBS,nis,Zis,include_jBS=True):
 
             pprime = numpy.gradient(pressure) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
 
@@ -1152,10 +1154,11 @@ class TokaMaker():
                                         dnis_dpsi=dn_i_dpsi,
                                         )[0]
                     
-                j_BS[-1] = 0. ### FORCING j_BS TO BE ZERO AT THE EDGE
                 inductive_jtor[-1] = 0. ### FORCING inductive_jtor TO BE ZERO AT THE EDGE
+                j_BS *= scale_jBS ### Scale j_BS by user specified scalar
                 jtor_total = inductive_jtor + j_BS
             else:
+                j_BS = None
                 inductive_jtor[-1] = 0. ### FORCING inductive_jtor TO BE ZERO AT THE EDGE
                 jtor_total = inductive_jtor
             
@@ -1173,7 +1176,7 @@ class TokaMaker():
                 'y': pprime / pprime[0]
             }
 
-            return pp_prof, ffp_prof
+            return pp_prof, ffp_prof, j_BS
 
         if initialize_eq:
             x_trimmed = psi_norm.tolist().copy()
@@ -1197,22 +1200,25 @@ class TokaMaker():
             ni_model = numpy.poly1d(numpy.polyfit(x_trimmed, ni_trimmed, 3))
             Ti_model = numpy.poly1d(numpy.polyfit(x_trimmed, Ti_trimmed, 3))
 
-            Lmode_ne = ne_model(psi_norm)
-            Lmode_Te = Te_model(psi_norm)
-            Lmode_ni = ni_model(psi_norm)
-            Lmode_Ti = Ti_model(psi_norm)
+            init_ne = ne_model(psi_norm)
+            init_Te = Te_model(psi_norm)
+            init_ni = ni_model(psi_norm)
+            init_Ti = Ti_model(psi_norm)
 
-            Lmode_pressure = (kB_m3_eV * Lmode_ne * Lmode_Te) + (kB_m3_eV * Lmode_ni * Lmode_Ti)
+            init_pressure = (kB_m3_eV * init_ne * init_Te) + (kB_m3_eV * init_ni * init_Ti)
 
-            ### Initialize equilibirum on "L-mode" P' and inductive j_tor profiles
+            ### Initialize equilibirum on L-mode-like P' and inductive j_tor profiles
             print('>>> Initializing equilibrium with pedestal removed:')
 
-            Lmode_pp_prof, Lmode_ffp_prof = profile_iteration(self, Lmode_pressure, Lmode_ne, Lmode_ni, Lmode_Te, Lmode_Ti, psi_norm, n_psi, Zeff, inductive_jtor, R0, nis, Zis, include_jBS=False)
+            init_pp_prof, init_ffp_prof, j_BS = profile_iteration(self,init_pressure,init_ne,init_ni,init_Te,init_Ti,psi_norm,n_psi,Zeff,inductive_jtor,R0,scale_jBS,nis,Zis,include_jBS=False)
 
-            Lmode_pp_prof['y'] -= Lmode_pp_prof['y'][-1] # Enforce 0.0 at edge
-            Lmode_ffp_prof['y'] -= Lmode_ffp_prof['y'][-1] # Enforce 0.0 at edge
+            init_pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+            init_ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
 
-            self.set_profiles(ffp_prof=Lmode_ffp_prof,pp_prof=Lmode_pp_prof)
+            init_pp_prof['y'] = numpy.nan_to_num(init_pp_prof['y'])
+            init_ffp_prof['y'] = numpy.nan_to_num(init_ffp_prof['y'])
+
+            self.set_profiles(ffp_prof=init_ffp_prof,pp_prof=init_pp_prof)
 
             flag = self.solve()
 
@@ -1222,11 +1228,15 @@ class TokaMaker():
         print('>>> Iterating on H-mode equilibrium solution:')
         while n < max_iterations:
             print('> Iteration '+str(n)+':')
-            pp_prof, ffp_prof = profile_iteration(self, pressure, ne, ni, Te, Ti, psi_norm, n_psi, Zeff, inductive_jtor, R0, nis, Zis)
+
+            pp_prof, ffp_prof, j_BS = profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,R0,scale_jBS,nis,Zis)
 
             pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
             ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
         
+            pp_prof['y'] = numpy.nan_to_num(pp_prof['y']) # Check for any nan's
+            ffp_prof['y'] = numpy.nan_to_num(ffp_prof['y']) # Check for any nan's
+
             self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
 
             flag = self.solve()
@@ -1237,8 +1247,11 @@ class TokaMaker():
                 break
             elif n >= max_iterations:
                 raise TypeError('H-mode equilibrium solve did not converge')
-            
-        return flag
+        
+        if return_jBS:
+            return flag, j_BS
+        else:
+            return flag
         
     def set_coil_currents(self, currents):
         '''! Set coil currents
