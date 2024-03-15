@@ -77,7 +77,7 @@ real(r8), pointer, dimension(:,:) :: taylor_hlam => NULL() !< Homogeneous force-
 real(r8), pointer, dimension(:,:) :: taylor_htor => NULL() !< Homogeneous force-free toroidal fluxes
 type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_hffa => NULL() !< Homogeneous force-free fields
 !---Inhomogeneous fields
-integer(i4) :: taylor_nh=2 !< Number of jump planes in current geometry
+integer(i4) :: taylor_nh=-1 !< Number of jump planes in current geometry
 real(r8), pointer, dimension(:,:)  :: taylor_hcpc => NULL() !< Center points of jump planes
 real(r8), pointer, dimension(:,:)  :: taylor_hcpv => NULL() !< Normal vectors for jump planes
 real(r8)  :: taylor_jtol = 1.d-6 !< Tolerance for identifying edges on jump plane
@@ -90,17 +90,13 @@ type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_gffa => NULL() !< Inhomo
 logical :: taylor_rst=.TRUE. !< Save solutions to data files
 contains
 !---------------------------------------------------------------------------
-! SUBROUTINE: taylor_hmodes
-!---------------------------------------------------------------------------
 !> Compute 'taylor_nm' Force-Free eignemodes.
 !!
 !! @note When `taylor_rst=.TRUE.` one restart files will be generated for
 !! each computed mode on each MG level `hffa_*.rst`.
-!!
-!! @param[in] nm Number of modes to compute (optional: 1)
 !---------------------------------------------------------------------------
 subroutine taylor_hmodes(nm)
-integer(i4), optional, intent(in) :: nm
+integer(i4), optional, intent(in) :: nm !< Number of modes to compute (optional: 1)
 class(oft_vector), pointer :: u,tmp
 !--- Taylor eigenvalue solver
 TYPE(oft_native_cg_eigsolver) :: eigsolver
@@ -141,6 +137,7 @@ IF(oft_env%head_proc)THEN
   CALL mytimer%tick
 END IF
 !---Allocate storage
+IF(ASSOCIATED(taylor_hffa))DEALLOCATE(taylor_hffa,taylor_hlam,taylor_htor)
 ALLOCATE(taylor_hffa(taylor_nm,oft_hcurl_nlevels))
 ALLOCATE(taylor_hlam(taylor_nm,oft_hcurl_nlevels))
 ALLOCATE(taylor_htor(taylor_nm,oft_hcurl_nlevels))
@@ -306,44 +303,37 @@ CALL oft_lag_set_level(oft_lagrange_nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_hmodes
 !---------------------------------------------------------------------------
-! SUBROUTINE: taylor_vacuum
-!---------------------------------------------------------------------------
 !> Generate vacuum fields for a geometry with cut planes.
 !!
 !! @note When `taylor_rst=.TRUE.` two restart files will be generated for
 !! each jump plane `hvac_*.rst` and `hcur_*.rst`
-!!
-!! @param[in] nh Number of jump planes
-!! @param[in] hcpc Jump plane center possitions [3,nh]
-!! @param[in] hcpv Jump plane normal vectors [3,nh]
-!! @param[in] htags Names for each jump plane [LEN=taylor_tag_size,nh] (optional)
 !---------------------------------------------------------------------------
 subroutine taylor_vacuum(nh,hcpc,hcpv,htags,energy)
-integer(i4), intent(in) :: nh
-real(r8), intent(in) :: hcpc(3,nh)
-real(r8), intent(in) :: hcpv(3,nh)
-character(LEN=taylor_tag_size), optional, intent(in) :: htags(nh)
-real(r8), optional, intent(out) :: energy(nh)
+integer(i4), intent(in) :: nh !< Number of jump planes
+real(r8), intent(in) :: hcpc(3,nh) !< Jump plane center possitions [3,nh]
+real(r8), intent(in) :: hcpv(3,nh) !< Jump plane normal vectors [3,nh]
+character(LEN=taylor_tag_size), optional, intent(in) :: htags(nh) !< Names for each jump plane [LEN=taylor_tag_size,nh] (optional)
+real(r8), optional, intent(out) :: energy(nh) !< Energy in vacuum field for each jump (optional)
 !---H1 Divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
-!---WOP solver
-CLASS(oft_solver), POINTER :: winv => NULL()
-!---H1(Curl) Divergence cleaner
-CLASS(oft_solver), POINTER :: linv_lag => NULL()
-TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
+! !---WOP solver
+! CLASS(oft_solver), POINTER :: winv => NULL()
+! !---H1(Curl) Divergence cleaner
+! CLASS(oft_solver), POINTER :: linv_lag => NULL()
+! TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
 !--- ML structures for MG-preconditioner
-TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL()
+! TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL()
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_lop => NULL()
-TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_wop => NULL()
+! TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_wop => NULL()
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: levels,nu
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: df
 !---
 class(oft_matrix), pointer :: lop => NULL()
-class(oft_matrix), pointer :: lop_lag => NULL()
+! class(oft_matrix), pointer :: lop_lag => NULL()
 class(oft_matrix), pointer :: mop => NULL()
-class(oft_matrix), pointer :: mop_hcurl => NULL()
-class(oft_matrix), pointer :: wop => NULL()
+! class(oft_matrix), pointer :: mop_hcurl => NULL()
+! class(oft_matrix), pointer :: wop => NULL()
 !---
 class(oft_vector), pointer :: u,b,tmp
 real(r8), pointer, dimension(:) :: vals => NULL()
@@ -353,9 +343,13 @@ logical :: rst=.FALSE.
 character(2) :: pnum,mnum
 character(40) :: filename
 DEBUG_STACK_PUSH
-NULLIFY(lop,lop_lag,mop,mop_hcurl,wop)
-NULLIFY(ml_int,ml_lop,ml_wop)
+NULLIFY(lop,mop)
+NULLIFY(ml_lop)
 !---Create taylor module variables
+IF(ASSOCIATED(taylor_hvac))THEN
+  DEALLOCATE(taylor_hcpc,taylor_hcpv,taylor_htag)
+  DEALLOCATE(taylor_hvac)
+END IF
 taylor_nh=nh
 ALLOCATE(taylor_hcpc(3,taylor_nh),taylor_hcpv(3,taylor_nh))
 taylor_hcpc=hcpc
@@ -376,8 +370,8 @@ IF(taylor_rst)THEN
     WRITE(mnum,'(I2.2)')i
     filename='hvac_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     rst=rst.AND.oft_file_exist(filename)
-    filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
-    rst=rst.AND.oft_file_exist(filename)
+    ! filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    ! rst=rst.AND.oft_file_exist(filename)
   END DO
 ELSE
   rst=.FALSE.
@@ -406,45 +400,45 @@ ELSE
   CALL create_cg_solver(linv)
   CALL create_diag_pre(linv%pre)
 END IF
-!---------------------------------------------------------------------------
-! Setup H1(Curl)::WOP preconditioner
-!---------------------------------------------------------------------------
-CALL create_cg_solver(winv, force_native=.TRUE.)
-IF((taylor_minlev==oft_hcurl_nlevels).OR.rst)THEN ! Lowest level uses diag precond
-  NULLIFY(wop)
-  CALL oft_hcurl_getwop(wop,'zerob')
-  CALL create_diag_pre(winv%pre)
-ELSE ! Nested levels use MG
-  CALL hcurl_getwop_pre(winv%pre,ml_wop,nlevels=oft_hcurl_nlevels-taylor_minlev+1)
-  wop=>ml_wop(oft_hcurl_nlevels-taylor_minlev+1)%M
-END IF
-!---------------------------------------------------------------------------
-! Create H1(Curl)::WOP solver
-!---------------------------------------------------------------------------
-winv%A=>wop
-winv%its=-3
-winv%atol=1.d-9
-SELECT TYPE(this=>winv)
-CLASS IS(oft_native_cg_solver)
-    this%cleaner=>hcurl_divout
-  CLASS DEFAULT
-    CALL oft_abort('Error allocating winv solver', 'taylor_vacuum', __FILE__)
-END SELECT
-!---------------------------------------------------------------------------
-! Create H1(Curl) divergence cleaner
-!---------------------------------------------------------------------------
-CALL oft_lag_set_level(MIN(oft_hcurl_level,oft_lagrange_lin_level))
-CALL oft_lag_getlop(lop_lag,"zerob")
-CALL create_cg_solver(linv_lag)
-linv_lag%A=>lop_lag
-!linv_lag%its=-2
-CALL create_diag_pre(linv_lag%pre)
-linv_lag%its=40
-hcurl_divout%solver=>linv_lag
-hcurl_divout%bc=>lag_zerob
-hcurl_divout%app_freq=2
-CALL oft_hcurl_getmop(mop_hcurl,'zerob')
-hcurl_divout%mop=>mop_hcurl
+! !---------------------------------------------------------------------------
+! ! Setup H1(Curl)::WOP preconditioner
+! !---------------------------------------------------------------------------
+! CALL create_cg_solver(winv, force_native=.TRUE.)
+! IF((taylor_minlev==oft_hcurl_nlevels).OR.rst)THEN ! Lowest level uses diag precond
+!   NULLIFY(wop)
+!   CALL oft_hcurl_getwop(wop,'zerob')
+!   CALL create_diag_pre(winv%pre)
+! ELSE ! Nested levels use MG
+!   CALL hcurl_getwop_pre(winv%pre,ml_wop,nlevels=oft_hcurl_nlevels-taylor_minlev+1)
+!   wop=>ml_wop(oft_hcurl_nlevels-taylor_minlev+1)%M
+! END IF
+! !---------------------------------------------------------------------------
+! ! Create H1(Curl)::WOP solver
+! !---------------------------------------------------------------------------
+! winv%A=>wop
+! winv%its=-3
+! winv%atol=1.d-9
+! SELECT TYPE(this=>winv)
+! CLASS IS(oft_native_cg_solver)
+!     this%cleaner=>hcurl_divout
+!   CLASS DEFAULT
+!     CALL oft_abort('Error allocating winv solver', 'taylor_vacuum', __FILE__)
+! END SELECT
+! !---------------------------------------------------------------------------
+! ! Create H1(Curl) divergence cleaner
+! !---------------------------------------------------------------------------
+! CALL oft_lag_set_level(MIN(oft_hcurl_level,oft_lagrange_lin_level))
+! CALL oft_lag_getlop(lop_lag,"zerob")
+! CALL create_cg_solver(linv_lag)
+! linv_lag%A=>lop_lag
+! !linv_lag%its=-2
+! CALL create_diag_pre(linv_lag%pre)
+! linv_lag%its=40
+! hcurl_divout%solver=>linv_lag
+! hcurl_divout%bc=>lag_zerob
+! hcurl_divout%app_freq=2
+! CALL oft_hcurl_getmop(mop_hcurl,'zerob')
+! hcurl_divout%mop=>mop_hcurl
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
@@ -453,7 +447,7 @@ NULLIFY(tmp)
 CALL h1_getmop(mop,'none')
 !---Allocate vacuum and current field containers
 ALLOCATE(taylor_hvac(taylor_nh,oft_h1_nlevels))
-ALLOCATE(taylor_hcur(taylor_nh,oft_h1_nlevels))
+! ALLOCATE(taylor_hcur(taylor_nh,oft_h1_nlevels))
 !---Create temporary H1(Curl) vector
 CALL oft_hcurl_create(b)
 !---Loop over cut planes
@@ -504,11 +498,247 @@ DO i=1,taylor_nh
     WRITE(*,*)'Vacuum Energy = ',1.d0/venergy
   END IF
   IF(PRESENT(energy))energy(i)=1.d0/venergy
+! !---------------------------------------------------------------------------
+! ! Compute current field
+! !---------------------------------------------------------------------------
+!   !---Use vacuum field as source term
+!   call tmp%scale(1.d0/venergy)
+!   call oft_hcurl_create(taylor_hcur(i,oft_hcurl_level)%f)
+!   u=>taylor_hcur(i,oft_hcurl_level)%f
+!   rst=.FALSE.
+!   IF(taylor_rst)THEN
+!     WRITE(pnum,'(I2.2)')oft_hcurl%order
+!     WRITE(mnum,'(I2.2)')i
+!     filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+!     IF(oft_file_exist(filename))THEN
+!       CALL oft_hcurl%vec_load(u,filename,'hcur')
+!       rst=.TRUE.
+!     END IF
+!   END IF
+!   IF(.NOT.rst)THEN
+!     !---Copy H1(Curl) subpace into new vector
+!     CALL b%set(0.d0)
+!     NULLIFY(vals)
+!     CALL tmp%get_slice(vals,1)
+!     CALL b%restore_slice(vals)
+!     !---Compute current field
+!     hcurl_divout%pm=.FALSE.
+!     hcurl_divout%mop=>mop_hcurl
+!     CALL hcurl_zerob(b)
+!     CALL winv%apply(u,b)
+!   END IF
+!   !---Clean divergence
+!   NULLIFY(hcurl_divout%mop)
+!   hcurl_divout%app_freq=1
+!   hcurl_divout%pm=.TRUE.
+!   CALL hcurl_divout%apply(u)
+!   !---
+!   DO j=1,taylor_nm
+!     CALL wop%apply(taylor_hffa(j,oft_hcurl_level)%f,b)
+!     venergy = u%dot(b)
+!     IF(oft_env%head_proc)WRITE(*,'(A,I3,A,E10.3)')'Mode ',j,' Coupling = ',venergy
+!   END DO
+! !---------------------------------------------------------------------------
+! ! Write restart file
+! !---------------------------------------------------------------------------
+!   IF(taylor_rst)THEN
+!     WRITE(pnum,'(I2.2)')oft_hcurl%order
+!     WRITE(mnum,'(I2.2)')i
+!     filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+!     IF(.NOT.oft_file_exist(filename))THEN
+!       CALL oft_mpi_barrier(ierr)
+!       CALL oft_hcurl%vec_save(u,filename,'hcur')
+!     END IF
+!   END IF
+END DO
+!---
+CALL tmp%delete
+CALL b%delete
+NULLIFY(tmp,b)
+!---
+CALL mop%delete
+! CALL mop_hcurl%delete
+! CALL lop_lag%delete
+! IF(ASSOCIATED(ml_wop))THEN
+!   DO i=1,SIZE(ml_wop)
+!     CALL ml_wop(i)%M%delete
+!     DEALLOCATE(ml_wop(i)%M)
+!   END DO
+!   DEALLOCATE(ml_wop)
+! END IF
+IF(ASSOCIATED(ml_lop))THEN
+  DO i=1,SIZE(ml_lop)
+    CALL ml_lop(i)%M%delete
+    DEALLOCATE(ml_lop(i)%M)
+  END DO
+  DEALLOCATE(ml_lop)
+END IF
+CALL linv%pre%delete
+DEALLOCATE(linv%pre)
+CALL linv%delete
+DEALLOCATE(linv)
+! CALL winv%pre%delete
+! DEALLOCATE(winv%pre)
+! CALL winv%delete
+! DEALLOCATE(winv)
+! CALL linv_lag%pre%delete
+! DEALLOCATE(linv_lag%pre)
+! CALL linv_lag%delete
+! DEALLOCATE(linv_lag)
+CALL oft_lag_set_level(oft_lagrange_nlevels)
+DEBUG_STACK_POP
+end subroutine taylor_vacuum
+!---------------------------------------------------------------------------
+!> Generate vector potential whose corresponding current matches the
+!! vacuum fields stored in @ref taylor::taylor_hvac
+!---------------------------------------------------------------------------
+subroutine taylor_vac_curr()
+! !---H1 Divergence cleaner
+! CLASS(oft_solver), POINTER :: linv => NULL()
+! TYPE(oft_h1_divout) :: divout
+!---WOP solver
+CLASS(oft_solver), POINTER :: winv => NULL()
+!---H1(Curl) Divergence cleaner
+CLASS(oft_solver), POINTER :: linv_lag => NULL()
+TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
+!--- ML structures for MG-preconditioner
+! TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL()
+! TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_lop => NULL()
+TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_wop => NULL()
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: levels,nu
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: df
+!---
+! class(oft_matrix), pointer :: lop => NULL()
+class(oft_matrix), pointer :: lop_lag => NULL()
+class(oft_matrix), pointer :: mop => NULL()
+class(oft_matrix), pointer :: mop_hcurl => NULL()
+class(oft_matrix), pointer :: wop => NULL()
+!---
+class(oft_vector), pointer :: u,b,tmp
+real(r8), pointer, dimension(:) :: vals => NULL()
+real(r8) :: alam,venergy
+integer(i4) :: i,j,k,nlevels,ierr
+logical :: rst=.FALSE.
+character(2) :: pnum,mnum
+character(40) :: filename
+DEBUG_STACK_PUSH
+NULLIFY(lop_lag,mop,mop_hcurl,wop)
+NULLIFY(ml_wop)
+! !---Create taylor module variables
+! IF(ALLOCATED(taylor_nh>0))THEN
+!   DEALLOCATE(taylor_hcpc,taylor_hcpv,taylor_htag)
+!   DEALLOCATE(taylor_hvac,taylor_hcur)
+! END IF
+! taylor_nh=nh
+! ALLOCATE(taylor_hcpc(3,taylor_nh),taylor_hcpv(3,taylor_nh))
+! taylor_hcpc=hcpc
+! taylor_hcpv=hcpv
+! ALLOCATE(taylor_htag(taylor_nh))
+! IF(PRESENT(htags))THEN
+!   taylor_htag=htags
+! ELSE
+!   DO i=1,taylor_nh
+!     WRITE(taylor_htag(i),'(A3,I1)')'INJ',i
+!   END DO
+! END IF
+!---Loop over cut planes
+IF(taylor_rst)THEN
+  rst=.TRUE.
+  DO i=1,taylor_nh
+    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(mnum,'(I2.2)')i
+    ! filename='hvac_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    ! rst=rst.AND.oft_file_exist(filename)
+    filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    rst=rst.AND.oft_file_exist(filename)
+  END DO
+ELSE
+  rst=.FALSE.
+END IF
+! IF(.NOT.rst)THEN
+! !---------------------------------------------------------------------------
+! ! Setup H0::LOP preconditioner
+! !---------------------------------------------------------------------------
+!   if(taylor_minlev==oft_h0_nlevels-1)then ! Lowest level uses diag precond
+!     CALL oft_h0_getlop(lop,'grnd')
+!     CALL create_cg_solver(linv)
+!     CALL create_diag_pre(linv%pre)
+!   else ! Nested levels use MG
+!     CALL create_cg_solver(linv, force_native=.TRUE.)
+!     CALL h0_getlop_pre(linv%pre,ml_lop,nlevels=oft_h0_nlevels-taylor_minlev+1)
+!     lop=>ml_lop(oft_h0_nlevels-taylor_minlev+1)%M
+!   end if
+! !---------------------------------------------------------------------------
+! ! Create divergence cleaner
+! !---------------------------------------------------------------------------
+!   linv%A=>lop
+!   linv%its=-2
+!   divout%solver=>linv
+!   divout%bc=>h0_zerogrnd
+! ELSE
+!   CALL create_cg_solver(linv)
+!   CALL create_diag_pre(linv%pre)
+! END IF
+!---------------------------------------------------------------------------
+! Setup H1(Curl)::WOP preconditioner
+!---------------------------------------------------------------------------
+CALL create_cg_solver(winv, force_native=.TRUE.)
+IF((taylor_minlev==oft_hcurl_nlevels).OR.rst)THEN ! Lowest level uses diag precond
+  NULLIFY(wop)
+  CALL oft_hcurl_getwop(wop,'zerob')
+  CALL create_diag_pre(winv%pre)
+ELSE ! Nested levels use MG
+  CALL hcurl_getwop_pre(winv%pre,ml_wop,nlevels=oft_hcurl_nlevels-taylor_minlev+1)
+  wop=>ml_wop(oft_hcurl_nlevels-taylor_minlev+1)%M
+END IF
+!---------------------------------------------------------------------------
+! Create H1(Curl)::WOP solver
+!---------------------------------------------------------------------------
+winv%A=>wop
+winv%its=-3
+winv%atol=1.d-9
+SELECT TYPE(this=>winv)
+CLASS IS(oft_native_cg_solver)
+    this%cleaner=>hcurl_divout
+  CLASS DEFAULT
+    CALL oft_abort('Error allocating winv solver', 'taylor_vacuum', __FILE__)
+END SELECT
+!---------------------------------------------------------------------------
+! Create H1(Curl) divergence cleaner
+!---------------------------------------------------------------------------
+CALL oft_lag_set_level(MIN(oft_hcurl_level,oft_lagrange_lin_level))
+CALL oft_lag_getlop(lop_lag,"zerob")
+CALL create_cg_solver(linv_lag)
+linv_lag%A=>lop_lag
+!linv_lag%its=-2
+CALL create_diag_pre(linv_lag%pre)
+linv_lag%its=40
+hcurl_divout%solver=>linv_lag
+hcurl_divout%bc=>lag_zerob
+hcurl_divout%app_freq=2
+CALL oft_hcurl_getmop(mop_hcurl,'zerob')
+hcurl_divout%mop=>mop_hcurl
+!---------------------------------------------------------------------------
+!
+!---------------------------------------------------------------------------
+NULLIFY(tmp)
+!---Get H1 mass matrix
+CALL h1_getmop(mop,'none')
+!---Allocate vacuum and current field containers
+IF(ASSOCIATED(taylor_hcur))DEALLOCATE(taylor_hcur)
+! ALLOCATE(taylor_hvac(taylor_nh,oft_h1_nlevels))
+ALLOCATE(taylor_hcur(taylor_nh,oft_h1_nlevels))
+!---Create temporary H1(Curl) vector
+CALL oft_hcurl_create(b)
+!---Loop over cut planes
+DO i=1,taylor_nh
 !---------------------------------------------------------------------------
 ! Compute current field
 !---------------------------------------------------------------------------
   !---Use vacuum field as source term
-  call tmp%scale(1.d0/venergy)
+  u=>taylor_hvac(i,oft_h1_level)%f
+  IF(.NOT.ASSOCIATED(tmp))CALL u%new(tmp)
+  CALL mop%apply(u,tmp)
   call oft_hcurl_create(taylor_hcur(i,oft_hcurl_level)%f)
   u=>taylor_hcur(i,oft_hcurl_level)%f
   rst=.FALSE.
@@ -572,17 +802,17 @@ IF(ASSOCIATED(ml_wop))THEN
   END DO
   DEALLOCATE(ml_wop)
 END IF
-IF(ASSOCIATED(ml_lop))THEN
-  DO i=1,SIZE(ml_lop)
-    CALL ml_lop(i)%M%delete
-    DEALLOCATE(ml_lop(i)%M)
-  END DO
-  DEALLOCATE(ml_lop)
-END IF
-CALL linv%pre%delete
-DEALLOCATE(linv%pre)
-CALL linv%delete
-DEALLOCATE(linv)
+! IF(ASSOCIATED(ml_lop))THEN
+!   DO i=1,SIZE(ml_lop)
+!     CALL ml_lop(i)%M%delete
+!     DEALLOCATE(ml_lop(i)%M)
+!   END DO
+!   DEALLOCATE(ml_lop)
+! END IF
+! CALL linv%pre%delete
+! DEALLOCATE(linv%pre)
+! CALL linv%delete
+! DEALLOCATE(linv)
 CALL winv%pre%delete
 DEALLOCATE(winv%pre)
 CALL winv%delete
@@ -593,7 +823,7 @@ CALL linv_lag%delete
 DEALLOCATE(linv_lag)
 CALL oft_lag_set_level(oft_lagrange_nlevels)
 DEBUG_STACK_POP
-end subroutine taylor_vacuum
+end subroutine taylor_vac_curr
 !---------------------------------------------------------------------------
 ! SUBROUTINE: taylor_injectors
 !---------------------------------------------------------------------------

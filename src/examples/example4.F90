@@ -42,8 +42,8 @@ USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_level
 USE oft_h1_fields, ONLY: oft_h1_create
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
-  taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, taylor_htor, &
-  taylor_tag_size
+  taylor_vac_curr, taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, &
+  taylor_htor, taylor_tag_size
 !---Tracing
 USE tracing, ONLY: oft_tracer, create_tracer, tracing_poincare
 IMPLICIT NONE
@@ -134,6 +134,7 @@ htags(2)='Yinj'
 !!interpolation object \ref taylor::oft_taylor_rinterp "oft_taylor_rinterp" is designed to support this type of field
 !!and is populated once the subfields are computed.
 CALL taylor_vacuum(nh,hcpc,hcpv,htags)
+CALL taylor_vac_curr()
 CALL taylor_injectors(taylor_hlam(1,oft_hcurl_level))
 !---Setup field interpolation object
 fluxes=(/1.d0,0.d0/)

@@ -28,9 +28,9 @@ USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_level
-USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
-  taylor_minlev, taylor_jtol, taylor_tag_size, taylor_hvac, taylor_hcur, &
-  taylor_gffa, oft_taylor_rinterp
+USE taylor, ONLY: taylor_vacuum, taylor_vac_curr, taylor_injectors, &
+  taylor_injector_single, taylor_minlev, taylor_jtol, taylor_tag_size, &
+  taylor_hvac, taylor_hcur, taylor_gffa, oft_taylor_rinterp
 implicit none
 INTEGER(i4) :: ierr,io_unit
 REAL(r8) :: comps(3),diff_err
@@ -76,6 +76,7 @@ htags(1)='Tinj'
 taylor_jtol=1.d-4
 oft_env%pm=.FALSE.
 CALL taylor_vacuum(nh,hcpc,hcpv,htags,energy)
+CALL taylor_vac_curr()
 CALL taylor_injectors(5.d0)
 comps(1) = taylor_hvac(1,oft_h1_level)%f%dot(taylor_hvac(1,oft_h1_level)%f)
 comps(2) = taylor_hcur(1,oft_h1_level)%f%dot(taylor_hcur(1,oft_h1_level)%f)

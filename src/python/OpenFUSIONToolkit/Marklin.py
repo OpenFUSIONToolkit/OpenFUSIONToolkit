@@ -13,20 +13,24 @@ from .util import *
 
 ## @cond
 # Marklin setup function (mesh and such) order,nmodes,minlev,error_str
-marklin_compute = ctypes_subroutine(oftpy_lib.marklin_setup,
+marklin_compute = ctypes_subroutine(oftpy_lib.marklin_compute_eigs,
     [c_int, c_int, c_int, c_bool, c_char_p])
+
+# Marklin setup function (mesh and such) order,minlev,nh,hcpc,hcpv,save_rst,error_str
+marklin_compute_vac = ctypes_subroutine(oftpy_lib.marklin_compute_vac,
+    [c_int, c_int, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_char_p])
 
 #
 marklin_save_visit = ctypes_subroutine(oftpy_lib.marklin_save_visit,
     [c_char_p])
 
-#
+# hmode_facs,int_obj,error_str
 marklin_get_aint = ctypes_subroutine(oftpy_lib.marklin_get_aint,
-    [c_int, c_void_ptr_ptr, c_char_p])
+    [ctypes_numpy_array(numpy.float64,1), c_void_ptr_ptr, c_char_p])
 
-#
+# hmode_facs,vac_facs,int_obj,error_str
 marklin_get_bint = ctypes_subroutine(oftpy_lib.marklin_get_bint,
-    [c_int, c_void_ptr_ptr, c_char_p])
+    [ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_void_ptr_ptr, c_char_p])
 
 #
 marklin_apply_int = ctypes_subroutine(oftpy_lib.marklin_apply_int,
@@ -99,7 +103,14 @@ class Marklin():
         self.lc = None
         ## Mesh regions [nc]
         self.reg = None
-        self.nm = -1
+        ## Needs docs
+        self.nm = 0
+        ## Needs docs
+        self.nh = 0
+        ## Needs docs
+        self.hcpc = None
+        ## Needs docs
+        self.hcpv = None
 
     def _update_psin(self):
         '''! Update input file (`oftpyin`) with current settings'''
@@ -154,14 +165,35 @@ class Marklin():
         @param minlev Minimum level for multigrid solve
         @param save_rst Save restart files? 
         '''
-        if self.nm != -1:
-            raise ValueError('Eigenstates already computed')
-        #
         cstring = c_char_p(b""*200)
-        marklin_compute(order,nmodes,minlev,save_rst,cstring)
+        marklin_compute(order,minlev,nmodes,save_rst,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
         self.nm = nmodes
+    
+    def compute_vac(self,nh,hcpc,hcpv,order=2,minlev=-1,save_rst=True):
+        r'''! Compute force-free eigenmodes
+
+        @param nmodes Number of eigenmodes to compute
+        @param order Order of FE representation
+        @param minlev Minimum level for multigrid solve
+        @param save_rst Save restart files? 
+        '''
+        if hcpc.shape[0] != nh:
+            raise ValueError('Inconsistent sizes for "hcpc[0]" != {0}'.format(nh))
+        if hcpc.shape[1] != 3:
+            raise ValueError('Inconsistent sizes for "hcpc[0]" != {0}'.format(3))
+        if hcpv.shape[0] != nh:
+            raise ValueError('Inconsistent sizes for "hcpv[0]" != {0}'.format(nh))
+        if hcpv.shape[1] != 3:
+            raise ValueError('Inconsistent sizes for "hcpv[0]" != {0}'.format(3))
+        cstring = c_char_p(b""*200)
+        marklin_compute_vac(order,minlev,nh,hcpc,hcpv,save_rst,cstring)
+        if cstring.value != b'':
+            raise Exception(cstring.value)
+        self.nh = nh
+        self.hcpc = hcpc
+        self.hcpv = hcpv
 
     def save_visit(self):
         '''! Save eigenmodes to VisIt format'''
@@ -171,7 +203,7 @@ class Marklin():
         if cstring.value != b'':
             raise Exception(cstring.value)
 
-    def get_ainterp(self,imode):
+    def get_ainterp(self,hmode_facs):
         r'''! Create field interpolator for vector potential
 
         @param imode Index of eigenstate
@@ -180,21 +212,26 @@ class Marklin():
         #
         int_obj = c_void_p()
         cstring = c_char_p(b""*200)
-        marklin_get_aint(imode,ctypes.byref(int_obj),cstring)
+        marklin_get_aint(hmode_facs,ctypes.byref(int_obj),cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
         return Marklin_field_interpolator(int_obj,1,3)
 
-    def get_binterp(self,imode):
+    def get_binterp(self,hmode_facs=None,vac_facs=None):
         r'''! Create field interpolator for magnetic field
 
         @param imode Index of eigenstate
         @result Field interpolation object
         '''
-        #
+        if hmode_facs is None:
+            if vac_facs is None:
+                raise ValueError('"hmode_facs" or "vac_facs" must be specified.')
+            hmode_facs = numpy.zeros((self.nm,), dtype=numpy.float64)
+        if vac_facs is None:
+            vac_facs = numpy.zeros((self.nh,), dtype=numpy.float64)
         int_obj = c_void_p()
         cstring = c_char_p(b""*200)
-        marklin_get_bint(imode,ctypes.byref(int_obj),cstring)
+        marklin_get_bint(hmode_facs,vac_facs,ctypes.byref(int_obj),cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
         return Marklin_field_interpolator(int_obj,2,3)
