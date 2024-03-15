@@ -20,6 +20,10 @@ marklin_compute = ctypes_subroutine(oftpy_lib.marklin_compute_eigs,
 marklin_compute_vac = ctypes_subroutine(oftpy_lib.marklin_compute_vac,
     [c_int, c_int, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_char_p])
 
+# int_obj,int_type,k_perp,error_str
+marklin_compute_pardiff = ctypes_subroutine(oftpy_lib.marklin_compute_pardiff,
+    [c_void_p, c_int, c_double, c_char_p])
+
 #
 marklin_save_visit = ctypes_subroutine(oftpy_lib.marklin_save_visit,
     [c_char_p])
@@ -194,6 +198,12 @@ class Marklin():
         self.nh = nh
         self.hcpc = hcpc
         self.hcpv = hcpv
+    
+    def compute_par_diff(self,interpolator,k_perp):
+        cstring = c_char_p(b""*200)
+        marklin_compute_pardiff(interpolator.int_obj,interpolator.int_type,k_perp,cstring)
+        if cstring.value != b'':
+            raise Exception(cstring.value)
 
     def save_visit(self):
         '''! Save eigenmodes to VisIt format'''

@@ -506,7 +506,7 @@ SELECT CASE(visc_type)
   CASE('ani')
     visc_itype=3
   CASE DEFAULT
-    CALL oft_abort('Unkown viscosity type','xmhd_read_settings',__FILE__)
+    CALL oft_abort('Unknown viscosity type','xmhd_read_settings',__FILE__)
 END SELECT
 !---Disable JxB if no B advance
 IF(.NOT.xmhd_adv_b)THEN

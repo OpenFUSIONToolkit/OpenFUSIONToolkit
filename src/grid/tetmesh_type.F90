@@ -309,7 +309,7 @@ CASE(3)
 CASE(4)
   sizes=[self%np+3*self%ne+3*self%nf+self%nc, self%nc*64]
 CASE DEFAULT
-  CALL oft_abort("Unkown tessellation size","tetmesh_get_io_sizes",__FILE__)
+  CALL oft_abort("Unknown tessellation size","tetmesh_get_io_sizes",__FILE__)
 END SELECT
 END FUNCTION tetmesh_get_io_sizes
 !------------------------------------------------------------------------------

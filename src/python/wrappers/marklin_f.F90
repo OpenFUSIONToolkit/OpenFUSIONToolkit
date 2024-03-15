@@ -25,9 +25,9 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: fem_interp
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange
-USE oft_lag_fields, ONLY: oft_lag_vcreate
+USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
-    oft_lag_vgetmop, oft_lag_vproject
+    oft_lag_vgetmop, oft_lag_vproject, oft_lag_getpdop, oft_lag_getmop
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, oft_hcurl_level, &
   oft_hcurl_minlev, ML_oft_hcurl
@@ -178,6 +178,69 @@ END SUBROUTINE marklin_compute_vac
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
+SUBROUTINE marklin_compute_pardiff(int_obj,int_type,k_perp,error_str) BIND(C,NAME="marklin_compute_pardiff")
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: k_perp !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
+!---Lagrange mass solver
+CLASS(oft_matrix), POINTER :: mop => NULL()
+CLASS(oft_matrix), POINTER :: pdop => NULL()
+CLASS(oft_solver), POINTER :: pdinv => NULL()
+!---Local variables
+INTEGER(i4) :: i,io_unit,ierr
+REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
+REAL(r8), POINTER, DIMENSION(:,:) :: hcpc_tmp,hcpv_tmp
+CLASS(oft_vector), POINTER :: u,v,check
+TYPE(oft_hcurl_cinterp) :: Bfield
+CHARACTER(LEN=3) :: pltnum
+TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
+TYPE(oft_taylor_rinterp), POINTER :: binterp_obj
+!---Clear error flag
+CALL copy_string('',error_str)
+!
+NULLIFY(pdop,mop,vals)
+SELECT CASE(int_type)
+  CASE(1)
+    CALL c_f_pointer(int_obj, ainterp_obj)
+    CALL oft_lag_getpdop(pdop,ainterp_obj,'zerob',k_perp)
+  CASE(2)
+    CALL c_f_pointer(int_obj, binterp_obj)
+    CALL oft_lag_getpdop(pdop,binterp_obj,'zerob',k_perp)
+  CASE DEFAULT
+    CALL copy_string('Invalid interpolation type',error_str)
+    RETURN
+END SELECT
+!---Setup solver
+CALL create_cg_solver(pdinv)
+CALL create_diag_pre(pdinv%pre)
+pdinv%A=>pdop
+pdinv%its=-2
+!---Create solver fields
+CALL oft_lag_create(u)
+CALL oft_lag_create(v)
+CALL oft_lag_getmop(mop,'none')
+CALL u%set(1.d0)
+CALL mop%apply(u,v)
+!
+CALL u%set(0.d0)
+CALL pdinv%apply(u,v)
+!
+IF(mesh%tess_order==0)CALL mesh%setup_io(oft_hcurl%order)
+CALL u%get_local(vals)
+CALL mesh%save_vertex_scalar(vals,'T')
+!
+CALL mop%delete()
+CALL pdinv%pre%delete()
+CALL pdinv%delete()
+CALL pdop%delete()
+CALL u%delete()
+CALL v%delete()
+DEALLOCATE(u,v,mop,pdop,pdinv)
+END SUBROUTINE marklin_compute_pardiff
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE marklin_save_visit(error_str) BIND(C,NAME="marklin_save_visit")
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 !---Lagrange mass solver
@@ -191,7 +254,7 @@ CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(oft_h1_rinterp) :: Bvfield
 CHARACTER(LEN=3) :: pltnum
-CALL mesh%setup_io(oft_hcurl%order)
+IF(mesh%tess_order==0)CALL mesh%setup_io(oft_hcurl%order)
 !---Construct operator
 NULLIFY(lmop)
 CALL oft_lag_vgetmop(lmop,'none')

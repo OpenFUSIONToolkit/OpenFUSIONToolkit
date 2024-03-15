@@ -149,7 +149,7 @@ TYPE, PUBLIC, ABSTRACT :: oft_amesh
   INTEGER(i4) :: cad_type = 1 !< Type of CAD geometry
   INTEGER(i4) :: type = 0 !< Mesh type
   INTEGER(i4) :: order = 1 !< order of boundary tets (default=linear)
-  INTEGER(i4) :: tess_order = 1 !< order of boundary tets (default=linear)
+  INTEGER(i4) :: tess_order = 0 !< order of boundary tets (default=linear)
   INTEGER(i4) :: cell_np = 0 !< Number of points per cell
   INTEGER(i4) :: cell_ne = 0 !< Number of edged per cell
   INTEGER(i4) :: np = 0 !< Number of points
@@ -739,6 +739,7 @@ CALL hdf5_create_files
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Writing mesh to plot files'
 CALL oft_increase_indent
 self%tess_order=tess_order
+self%bmesh%tess_order=tess_order
 !---Get grid tessellation
 CALL self%tessellate(rtmp, lctmp, self%tess_order)
 !---Write out point list
