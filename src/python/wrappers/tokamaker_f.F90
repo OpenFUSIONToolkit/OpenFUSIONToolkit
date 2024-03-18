@@ -25,7 +25,7 @@ USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, &
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
-USE oft_gs_td, ONLY: setup_gs_td, step_gs_td, eig_gs_td
+USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -46,6 +46,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
 END TYPE tokamaker_settings_type
 !
 TYPE(gs_eq), POINTER :: gs_global => NULL() !< Global G-S object
+TYPE(oft_tmaker_td), POINTER :: gs_td_global => NULL() !< Global time-dependent object
 integer(i4), POINTER :: lc_plot(:,:) => NULL() !< Needs docs
 integer(i4), POINTER :: reg_plot(:) => NULL() !< Needs docs
 real(r8), POINTER :: r_plot(:,:) => NULL() !< Needs docs
@@ -266,11 +267,17 @@ END SUBROUTINE tokamaker_analyze
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_td(dt,lin_tol,nl_tol) BIND(C,NAME="tokamaker_setup_td")
+SUBROUTINE tokamaker_setup_td(dt,lin_tol,nl_tol,pre_plasma) BIND(C,NAME="tokamaker_setup_td")
 REAL(c_double), VALUE, INTENT(in) :: dt !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: lin_tol !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: nl_tol !< Needs docs
-CALL setup_gs_td(gs_global,dt,lin_tol,nl_tol)
+LOGICAL(c_bool), VALUE, INTENT(in) :: pre_plasma !< Needs docs
+IF(ASSOCIATED(gs_td_global))THEN
+  CALL gs_td_global%delete()
+  DEALLOCATE(gs_td_global)
+END IF
+ALLOCATE(gs_td_global)
+CALL gs_td_global%setup(gs_global,dt,lin_tol,nl_tol,LOGICAL(pre_plasma))
 END SUBROUTINE tokamaker_setup_td
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -320,7 +327,7 @@ REAL(c_double), INTENT(inout) :: dt !< Needs docs
 INTEGER(c_int), INTENT(out) :: nl_its !< Needs docs
 INTEGER(c_int), INTENT(out) :: lin_its !< Needs docs
 INTEGER(c_int), INTENT(out) :: nretry !< Needs docs
-CALL step_gs_td(time,dt,nl_its,lin_its,nretry)
+CALL gs_td_global%step(time,dt,nl_its,lin_its,nretry)
 END SUBROUTINE tokamaker_step_td
 !------------------------------------------------------------------------------
 !> Needs docs

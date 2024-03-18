@@ -82,7 +82,7 @@ tokamaker_analyze = ctypes_subroutine(oftpy_lib.tokamaker_analyze)
 
 # G-S time-dependent run function
 tokamaker_setup_td = ctypes_subroutine(oftpy_lib.tokamaker_setup_td,
-    [c_double, c_double, c_double])
+    [c_double, c_double, c_double, c_bool])
 
 # G-S time-dependent run function
 tokamaker_eig_td = ctypes_subroutine(oftpy_lib.tokamaker_eig_td,
@@ -1448,14 +1448,15 @@ class TokaMaker():
         tokamaker_eig_td(c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),pm)
         return eig_vals, eig_vecs
 
-    def setup_td(self,dt,lin_tol,nl_tol):
+    def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
         '''! Setup the time-dependent G-S solver
 
         @param dt Starting time step
         @param lin_tol Tolerance for linear solver
         @param nl_tol Tolerance for non-linear solver
+        @param pre_plasma Use plasma contributions in preconditioner (default: False)
         '''
-        tokamaker_setup_td(c_double(dt),c_double(lin_tol),c_double(nl_tol))
+        tokamaker_setup_td(c_double(dt),c_double(lin_tol),c_double(nl_tol),c_bool(pre_plasma))
     
     def step_td(self,time,dt):
         '''! Compute eigenvalues for the time-dependent system
