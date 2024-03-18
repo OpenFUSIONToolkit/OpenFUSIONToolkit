@@ -21,7 +21,7 @@
 PROGRAM thincurr_eig
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file
+USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file, hdf5_create_file, hdf5_write
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
@@ -67,7 +67,9 @@ LOGICAL :: save_L = .FALSE.
 LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 LOGICAL :: compute_B = .FALSE.
-NAMELIST/thincurr_eig_options/direct,plot_run,save_L,save_Mcoil,save_Msen,compute_B,neigs,jumper_start
+LOGICAL :: reduce_model = .FALSE.
+NAMELIST/thincurr_eig_options/direct,plot_run,save_L,save_Mcoil,save_Msen, &
+  compute_B,neigs,jumper_start,reduce_model
 !---
 CALL oft_init
 !---Read in options
@@ -127,10 +129,14 @@ IF(plot_run)THEN
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
   CALL plot_eig(tw_sim,sensors%nfloops,sensors%floops)
 ELSE
-  tw_sim%n_icoils=0
-  sensors%nfloops=0
-  ALLOCATE(sensors%floops(sensors%nfloops))
-  IF(tw_sim%n_vcoils>0)THEN
+  IF(reduce_model)THEN
+    CALL tw_load_sensors(tw_sim,sensors,jumper_nsets)
+  ELSE
+    tw_sim%n_icoils=0
+    sensors%nfloops=0
+    ALLOCATE(sensors%floops(sensors%nfloops))
+  END IF
+  IF((tw_sim%n_vcoils>0).OR.(tw_sim%n_icoils>0))THEN
     IF(save_Mcoil)THEN
       CALL tw_compute_Ael2dr(tw_sim,'Mcoil.save')
     ELSE
@@ -167,7 +173,11 @@ ELSE
   END DO
   CLOSE(io_unit)
   CALL uio%delete()
-  DEALLOCATE(uio,eig_rval,eig_ival,eig_vec)
+  DEALLOCATE(uio)
+  !
+  IF(reduce_model)CALL model_reduction_eig(tw_sim,neigs,eig_vec)
+  !
+  DEALLOCATE(eig_rval,eig_ival,eig_vec)
 END IF
 !---
 CALL oft_finalize
@@ -436,4 +446,58 @@ DEALLOCATE(uio,vals)
 IF(ALLOCATED(cc_vals))DEALLOCATE(cc_vals)
 DEBUG_STACK_POP
 END SUBROUTINE plot_eig
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+SUBROUTINE model_reduction_eig(self,neigs,eig_vec)
+TYPE(tw_type), INTENT(in) :: self
+INTEGER(4), INTENT(in) :: neigs
+REAL(8), INTENT(out) :: eig_vec(:,:)
+!---
+REAL(8), POINTER :: vals(:)
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mattmp,Mat_red
+CLASS(oft_vector), POINTER :: atmp,btmp
+CALL hdf5_create_file('tCurr_reduced.h5')
+ALLOCATE(Mat_red(neigs,neigs),Mattmp(self%nelems,neigs))
+!---Reduce L matrix
+CALL dgemm('N','N',self%nelems,neigs,self%nelems,1.d0, &
+  self%Lmat,self%nelems,eig_vec,self%nelems,0.d0,Mattmp,self%nelems)
+CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0,eig_vec, &
+  self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
+CALL hdf5_write(Mat_red,'tCurr_reduced.h5','L')
+!---Reduce R matrix
+NULLIFY(vals)
+CALL self%Uloc%new(atmp)
+CALL self%Uloc%new(btmp)
+CALL atmp%get_local(vals)
+DO i=1,neigs
+  vals=eig_vec(:,i)
+  CALL atmp%restore_local(vals)
+  CALL btmp%set(0.d0)
+  CALL self%Rmat%apply(atmp,btmp)
+  CALL btmp%get_local(vals)
+  Mattmp(:,i) = vals
+END DO
+CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0, &
+  eig_vec,self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
+CALL hdf5_write(Mat_red,'tCurr_reduced.h5','R')
+DEALLOCATE(Mat_red,Mattmp)
+!---Reduce sensor coupling matrix
+IF(sensors%nfloops>0)THEN
+  ALLOCATE(Mat_red(sensors%nfloops,neigs))
+  CALL dgemm('N','N',sensors%nfloops,neigs,self%nelems,1.d0, &
+    self%Ael2sen,sensors%nfloops,eig_vec,self%nelems,0.d0,Mat_red,sensors%nfloops)
+  CALL hdf5_write(Mat_red,'tCurr_reduced.h5','Ms')
+  DEALLOCATE(Mat_red)
+END IF
+!---Reduce coil coupling matrix
+IF(self%n_icoils>0)THEN
+  ALLOCATE(Mat_red(neigs,self%n_icoils))
+  CALL dgemm('T','N',neigs,self%n_icoils,self%nelems,1.d0, &
+    eig_vec,self%nelems,self%Ael2dr,self%nelems,0.d0,Mat_red,neigs)
+  CALL hdf5_write(Mat_red,'tCurr_reduced.h5','Mc')
+  DEALLOCATE(Mat_red)
+  IF(sensors%nfloops>0)CALL hdf5_write(self%Adr2sen,'tCurr_reduced.h5','Msc')
+END IF
+END SUBROUTINE model_reduction_eig
 END PROGRAM thincurr_eig
