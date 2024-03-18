@@ -131,6 +131,9 @@ class Marklin():
             self._update_psin()
             oft_setup_vmesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
         elif r is not None:
+            r = numpy.ascontiguousarray(r)
+            lc = numpy.ascontiguousarray(lc)
+            reg = numpy.ascontiguousarray(reg)
             ndim = c_int(r.shape[1])
             np = c_int(r.shape[0])
             npc = c_int(lc.shape[1])
