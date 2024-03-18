@@ -131,15 +131,16 @@ class Marklin():
             self._update_psin()
             oft_setup_vmesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
         elif r is not None:
-            r = numpy.ascontiguousarray(r)
-            lc = numpy.ascontiguousarray(lc)
-            reg = numpy.ascontiguousarray(reg)
+            r = numpy.ascontiguousarray(r, dtype=numpy.float64)
+            lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
             ndim = c_int(r.shape[1])
             np = c_int(r.shape[0])
             npc = c_int(lc.shape[1])
             nc = c_int(lc.shape[0])
             if reg is None:
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
+            else:
+                reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
             oft_setup_vmesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
