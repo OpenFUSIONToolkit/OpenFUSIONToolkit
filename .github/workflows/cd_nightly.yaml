@@ -9,6 +9,7 @@ jobs:
   build:
     name: ${{ format('Nightly ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
+    timeout-minutes: 30
     env:
       CC: ${{ matrix.config.cc }}
       CXX: ${{ matrix.config.cxx }}
