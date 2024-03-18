@@ -542,12 +542,16 @@ class TokaMaker():
             self._update_oft_in()
             oft_setup_smesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
         elif r is not None:
+            r = numpy.ascontiguousarray(r, dtype=numpy.float64)
+            lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
             ndim = c_int(r.shape[1])
             np = c_int(r.shape[0])
             npc = c_int(lc.shape[1])
             nc = c_int(lc.shape[0])
             if reg is None:
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
+            else:
+                reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
             oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
@@ -728,8 +732,10 @@ class TokaMaker():
             raise ValueError('Incorrect shape of "reg_targets", should be [nregularize]')
         if reg_weights.shape[0] != nregularize:
             raise ValueError('Incorrect shape of "reg_weights", should be [nregularize]')
-        
-        tokamaker_set_coil_regmat(nregularize,numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
+        reg_mat = numpy.ascontiguousarray(reg_mat.transpose(), dtype=numpy.float64)
+        reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
+        reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
+        tokamaker_set_coil_regmat(nregularize,reg_mat, reg_targets, reg_weights)
 
     def set_coil_bounds(self,coil_bounds):
         '''! Set hard constraints on coil currents
@@ -741,8 +747,8 @@ class TokaMaker():
         '''
         if (coil_bounds.shape[0] != self.ncoils+1) or (coil_bounds.shape[1] != 2):
             raise ValueError('Incorrect shape of "coil_bounds", should be [ncoils+1,2]')
-        bounds = numpy.copy(coil_bounds, order='C')
-        tokamaker_set_coil_bounds(bounds)
+        boucoil_boundsnds = numpy.ascontiguousarray(coil_bounds, dtype=numpy.float64)
+        tokamaker_set_coil_bounds(coil_bounds)
 
     def set_coil_vsc(self,coil_gains):
         '''! Define a vertical stability coil set from one or more coils
@@ -751,6 +757,7 @@ class TokaMaker():
         '''
         if coil_gains.shape[0] != self.ncoils:
             raise ValueError('Incorrect shape of "coil_gains", should be [ncoils]')
+        coil_gains = numpy.ascontiguousarray(coil_gains, dtype=numpy.float64)
         tokamaker_set_coil_vsc(coil_gains)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0):
@@ -920,6 +927,8 @@ class TokaMaker():
                 weights = numpy.ones((isoflux.shape[0],), dtype=numpy.float64)
             if weights.shape[0] != isoflux.shape[0]:
                 raise ValueError('Shape of "weights" does not match first dimension of "isoflux"')
+            isoflux = numpy.ascontiguousarray(isoflux, dtype=numpy.float64)
+            weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             tokamaker_set_isoflux(isoflux,weights,isoflux.shape[0],grad_wt_lim)
             self._isoflux = isoflux.copy()
     
@@ -937,6 +946,8 @@ class TokaMaker():
                 weights = numpy.ones((saddles.shape[0],), dtype=numpy.float64)
             if weights.shape[0] != saddles.shape[0]:
                 raise ValueError('Shape of "weights" does not match first dimension of "saddles"')
+            saddles = numpy.ascontiguousarray(saddles, dtype=numpy.float64)
+            weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             tokamaker_set_saddles(saddles,weights,saddles.shape[0])
             self._saddles = saddles.copy()
     
@@ -1003,6 +1014,7 @@ class TokaMaker():
         '''
         if psi.shape[0] != self.np:
             raise ValueError('Incorrect shape of "psi", should be [np]')
+        psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         tokamaker_set_psi(psi)
     
     def set_psi_dt(self,psi0,dt):
@@ -1013,6 +1025,7 @@ class TokaMaker():
         '''
         if psi0.shape[0] != self.np:
             raise ValueError('Incorrect shape of "psi0", should be [np]')
+        psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
         tokamaker_set_psi_dt(psi0,c_double(dt))
     
     def get_field_eval(self,field_type):
@@ -1087,12 +1100,12 @@ class TokaMaker():
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
             if self.psi_convention == 0:
-                psi = numpy.flip(psi).copy()
-                psi_save = 1.0 - psi
+                psi = numpy.ascontiguousarray(numpy.flip(psi), dtype=numpy.float64)
+                psi_save = 1.0-psi
         else:
             if self.psi_convention == 0:
-                psi_save = psi.copy()
-                psi = 1.0-psi
+                psi_save = numpy.copy(psi)
+                psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         ravgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
         dl = c_double()
@@ -1115,12 +1128,12 @@ class TokaMaker():
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
             if self.psi_convention == 0:
-                psi = numpy.flip(psi).copy()
+                psi = numpy.ascontiguousarray(numpy.flip(psi), dtype=numpy.float64)
                 psi_save = 1.0 - psi
         else:
             if self.psi_convention == 0:
-                psi_save = psi.copy()
-                psi = 1.0-psi
+                psi_save = numpy.copy(psi)
+                psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         fc = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         r_avgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
         modb_avgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
@@ -1177,12 +1190,12 @@ class TokaMaker():
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
             if self.psi_convention == 0:
-                psi = numpy.flip(psi).copy()
+                psi = numpy.ascontiguousarray(numpy.flip(psi), dtype=numpy.float64)
                 psi_save = 1.0 - psi
         else:
             if self.psi_convention == 0:
-                psi_save = psi.copy()
-                psi = 1.0-psi
+                psi_save = numpy.copy(psi)
+                psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         f = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         fp = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         p = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
@@ -1213,6 +1226,7 @@ class TokaMaker():
         '''
         if currents.shape[0] != self.ncoils:
             raise ValueError('Incorrect shape of "currents", should be [ncoils]')
+        currents = numpy.ascontiguousarray(currents, dtype=numpy.float64)
         tokamaker_set_coil_currents(currents)
 
     def update_settings(self):
