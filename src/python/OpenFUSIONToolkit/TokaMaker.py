@@ -424,6 +424,8 @@ class TokaMaker():
         self.settings = tokamaker_default_settings()
         ## Conductor definition dictionary
         self._cond_dict = {}
+        ## Vacuum definition dictionary
+        self._vac_dict = {}
         ## Coil definition dictionary
         self._coil_dict = {}
         ## Coil set definitions, including sub-coils
@@ -493,6 +495,7 @@ class TokaMaker():
         # Reset defaults
         self.settings = tokamaker_default_settings()
         self._cond_dict = {}
+        self._vac_dict = {}
         self._coil_dict = {}
         self._F0 = 0.0
         self._Ip_target=c_double(-1.0)
@@ -562,15 +565,23 @@ class TokaMaker():
 
         @param cond_dict Dictionary specifying conducting regions
         '''
-        self._cond_dict = cond_dict
-        self._coil_dict = coil_dict
         xpoint_mask = numpy.zeros((self.nregs,),dtype=numpy.int32)
         xpoint_mask[0] = 1
         eta_vals = -2.0*numpy.ones((self.nregs,),dtype=numpy.float64)
         eta_vals[0] = -1.0
+        # Process conductors and vacuum regions
+        self._vac_dict = {}
         for key in cond_dict:
-            eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
+            if 'vac_id' in cond_dict[key]:
+                self._vac_dict[key] = cond_dict[key]
+            else:
+                eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
             xpoint_mask[cond_dict[key]['reg_id']-1] = int(cond_dict[key].get('allow_xpoints',False))
+        # Remove vacuum regions
+        for key in self._vac_dict:
+            del cond_dict[key]
+        self._cond_dict = cond_dict
+        # Process coils
         nCoils = 0
         self.coil_sets = {}
         for key in coil_dict:
@@ -584,6 +595,7 @@ class TokaMaker():
                 }
                 nCoils += 1
             self.coil_sets[coil_set]['sub_coils'].append(coil_dict[key])
+        self._coil_dict = coil_dict
         # Mark vacuum regions
         self.nvac = 0
         for i in range(self.nregs):
@@ -1766,6 +1778,7 @@ class gs_Domain:
         '''
         cond_list = {}
         cond_id = 0
+        vac_id = 0
         for key in self.region_info:
             if self.region_info[key]['type'] == 'conductor':
                 cond_list[key] = {
@@ -1775,6 +1788,13 @@ class gs_Domain:
                     'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
                 cond_id += 1
+            elif self.region_info[key]['type'] in ('vacuum','boundary'):
+                cond_list[key] = {
+                    'reg_id': self.region_info[key]['id'],
+                    'vac_id': vac_id,
+                    'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
+                }
+                vac_id += 1
         return cond_list
     
     def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False):
@@ -1938,6 +1958,8 @@ class gs_Domain:
         # Plot conductor regions
         nCond = 0
         for key, cond in self.get_conductors().items():
+            if 'vac_id' in cond:
+                continue
             nCond += 1
             reg_mark[cond['reg_id']-1] = 1
             cond_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==cond['reg_id'],:],lw=lw,label=key)
