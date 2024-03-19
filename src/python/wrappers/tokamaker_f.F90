@@ -82,17 +82,23 @@ END SUBROUTINE tokamaker_eval_green
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
+SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,xpoint_mask,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(80) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Needs docs
 real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(4) :: i
+INTEGER(4), POINTER :: xpoint_tmp(:)
 CALL copy_string_rev(coil_file,gs_global%coil_file)
 IF(TRIM(gs_global%coil_file)=='none')THEN
-  CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
   !
+  CALL c_f_pointer(xpoint_mask, xpoint_tmp, [smesh%nreg])
+  ALLOCATE(gs_global%saddle_rmask(smesh%nreg))
+  gs_global%saddle_rmask=LOGICAL(xpoint_tmp==0)
+  !
+  CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
   gs_global%ncoil_regs=0
   gs_global%ncond_regs=0
   DO i=2,smesh%nreg
