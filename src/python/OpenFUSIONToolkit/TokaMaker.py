@@ -48,7 +48,7 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,2), c_int])
+    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
 
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
@@ -469,6 +469,8 @@ class TokaMaker():
         self.lc = None
         ## Mesh regions [nc] 
         self.reg = None
+        ## Number of vacuum regions in mesh
+        self.nvac = 0
         ## Limiting contour
         self.lim_contour = None
     
@@ -511,6 +513,7 @@ class TokaMaker():
         self.r = None
         self.lc = None
         self.reg = None
+        self.nvac = 0
         self.lim_contour = None
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
@@ -553,24 +556,25 @@ class TokaMaker():
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
     
-    def setup_regions(self,coil_file='none',cond_dict={},coil_dict={}):
+    def setup_regions(self,cond_dict={},coil_dict={}):
         '''! Define mesh regions (coils and conductors)
 
-        @param coil_file File containing coil/conductor definitions in XML format
         @param cond_dict Dictionary specifying conducting regions
         '''
         self._cond_dict = cond_dict
         self._coil_dict = coil_dict
-        if coil_file != 'none':
-            eta_vals = numpy.ones((1),dtype=numpy.float64)
-        else:
-            eta_vals = -numpy.ones((self.nregs,),dtype=numpy.float64)
-            eta_vals[1] = 1.E10
-            for key in cond_dict:
-                eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
+        xpoint_mask = numpy.ones((self.nregs,),dtype=numpy.int32)
+        xpoint_mask[0] = 1
+        eta_vals = -2.0*numpy.ones((self.nregs,),dtype=numpy.float64)
+        eta_vals[0] = -1.0
+        for key in cond_dict:
+            eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
+            xpoint_mask[cond_dict[key]['reg_id']-1] = int(cond_dict[key].get('allow_xpoints',False))
         nCoils = 0
         self.coil_sets = {}
         for key in coil_dict:
+            xpoint_mask[coil_dict[key]['reg_id']-1] = int(coil_dict[key].get('allow_xpoints',False))
+            eta_vals[coil_dict[key]['reg_id']-1] = -1.0
             coil_set = coil_dict[key].get('coil_set',key)
             if coil_set not in self.coil_sets:
                 self.coil_sets[coil_set] = {
@@ -579,12 +583,18 @@ class TokaMaker():
                 }
                 nCoils += 1
             self.coil_sets[coil_set]['sub_coils'].append(coil_dict[key])
+        # Mark vacuum regions
+        self.nvac = 0
+        for i in range(self.nregs):
+            if eta_vals[i] < -1.5:
+                eta_vals[i] = 1.E10
+                self.nvac += 1 
         coil_nturns = numpy.zeros((nCoils, self.nregs))
         for key in self.coil_sets:
             for sub_coil in self.coil_sets[key]['sub_coils']:
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
-        cstring = c_char_p(coil_file.encode())
-        tokamaker_setup_regions(cstring,eta_vals,coil_nturns,nCoils)
+        cstring = c_char_p('none'.encode())
+        tokamaker_setup_regions(cstring,eta_vals,xpoint_mask,coil_nturns,nCoils)
 
     def eval_green(self,x,xc):
         r'''! Evaluate Green's function for a toroidal filament
@@ -1237,7 +1247,7 @@ class TokaMaker():
         mask_vals = numpy.ones((self.np,))
         # Shade vacuum region
         if vacuum_color is not None:
-            mask = (self.reg == 2)
+            mask = numpy.logical_and(self.reg > 1, self.reg <= self.nvac+1)
             if mask.sum() > 0.0:
                 ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask,:], mask_vals, colors=vacuum_color)
         # Shade coils
@@ -1524,7 +1534,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,nTurns=None,coil_set=None):
+    def define_region(self,name,dx,reg_type,eta=None,nTurns=None,coil_set=None,allow_xpoints=False):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -1532,29 +1542,34 @@ class gs_Domain:
         @param reg_type Type of region ("plasma", "vacuum", "boundary", "conductor", or "coil")
         @param eta Resistivity for "conductor" regions (raises error if region is other type)
         @param nTurns Number of turns for "cooil" regions (raises error if region is other type)
+        @param allow_xpoints Allow X-points in this region (for non-plasma regions only)
         '''
         if (dx is None) or (dx < 0.0):
             raise ValueError('"dx" must have a non-negative value')
         name = name.upper()
         if (name in self.region_info):
             raise KeyError('Region already exists!')
+        next_id = -1
         if reg_type == 'plasma':
             next_id = 1
+            allow_xpoints = True
         elif reg_type == 'vacuum':
-            next_id = 2
+            pass
         elif reg_type == 'boundary':
-            next_id = 2
             self.boundary_reg = name
         elif reg_type in ('conductor', 'coil'):
-            next_id = self.reg_type_counts['conductor'] + self.reg_type_counts['coil'] + 3
+            pass
         else:
             raise ValueError("Unknown region type")
+        if next_id < 0:
+            next_id = len(self.region_info) - self.reg_type_counts['plasma'] + 2
         self.reg_type_counts[reg_type] += 1
         self.region_info[name] = {
             'id': next_id,
             'dx': dx,
             'count': 0,
-            'type': reg_type
+            'type': reg_type,
+            'allow_xpoints': allow_xpoints
         }
         if eta is not None:
             if reg_type != 'conductor':
@@ -1734,7 +1749,8 @@ class gs_Domain:
                     'reg_id': self.region_info[key]['id'],
                     'coil_id': coil_id,
                     'nturns': self.region_info[key].get('nturns',1),
-                    'coil_set': self.region_info[key].get('coil_set',key)
+                    'coil_set': self.region_info[key].get('coil_set',key),
+                    'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
                 coil_id += 1
         return coil_list
@@ -1751,7 +1767,8 @@ class gs_Domain:
                 cond_list[key] = {
                     'reg_id': self.region_info[key]['id'],
                     'cond_id': cond_id,
-                    'eta': self.region_info[key]['eta']
+                    'eta': self.region_info[key]['eta'],
+                    'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
                 cond_id += 1
         return cond_list
@@ -1802,6 +1819,20 @@ class gs_Domain:
         for key in self.region_info:
             if self.region_info[key]['count'] == 0:
                 raise KeyError('Region "{0}" defined but never created'.format(key))
+        # Re-index regions
+        reg_reorder = [-1 for _ in self.region_info]
+        reg_reorder[0] = 1
+        reg_id = 1
+        for reg_type in ('boundary', 'vacuum','conductor','coil'):
+            for key in self.region_info:
+                if self.region_info[key]['type'] == reg_type:
+                    reg_id += 1
+                    reg_reorder[self.region_info[key]['id']-1] = reg_id
+                    self.region_info[key]['id'] = reg_id
+        for region in self.regions:
+            region._id = reg_reorder[region._id-1]
+        for point_def in self._extra_reg_defs:
+            point_def[2] = reg_reorder[point_def[2]-1]
         # Generate mesh
         self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
         if setup_only:

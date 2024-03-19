@@ -183,6 +183,7 @@ TYPE :: gs_eq
   LOGICAL, POINTER, DIMENSION(:) :: fe_flag => NULL()
   LOGICAL, POINTER, DIMENSION(:) :: saddle_pmask => NULL()
   LOGICAL, POINTER, DIMENSION(:) :: saddle_cmask => NULL()
+  LOGICAL, POINTER, DIMENSION(:) :: saddle_rmask => NULL()
   INTEGER(i4), POINTER, DIMENSION(:) :: limiter_nds => NULL()
   INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL()
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
@@ -1103,6 +1104,11 @@ IF(.NOT.ASSOCIATED(self%mrop))CALL build_mrop(self%mrop,"none")
 IF(.NOT.ASSOCIATED(self%mop))CALL oft_blag_getmop(self%mop,"none")
 !---Setup boundary conditions
 ALLOCATE(node_flag(oft_blagrange%ne),cdofs(oft_blagrange%nce))
+IF(.NOT.ASSOCIATED(self%saddle_rmask))THEN
+  ALLOCATE(self%saddle_rmask(smesh%nreg))
+  self%saddle_rmask=1
+  self%saddle_rmask(1)=0
+END IF
 ALLOCATE(self%saddle_cmask(smesh%nc),self%saddle_pmask(smesh%np))
 self%spatial_bounds(:,1)=[1.d99,-1.d99]
 self%spatial_bounds(:,2)=[1.d99,-1.d99]
@@ -1115,6 +1121,12 @@ DO i=1,smesh%nc
     DO j=1,oft_blagrange%nce
       node_flag(cdofs(j))=.TRUE.
     END DO
+    IF(.NOT.self%saddle_rmask(smesh%reg(i)))THEN
+      self%saddle_cmask(i)=.FALSE.
+      DO j=1,3
+        self%saddle_pmask(smesh%lc(j,i))=.FALSE.
+      END DO
+    END IF
   ELSE
     self%saddle_cmask(i)=.FALSE.
     DO j=1,3
@@ -3624,6 +3636,10 @@ DO i=1,smesh%np
         unique_saddles(1:2,n_unique) = saddle_loc
         unique_saddles(3,n_unique) = saddle_psi
         stypes(n_unique) = stype
+        !
+        cell=0
+        CALL bmesh_findcell(smesh,cell,saddle_loc,f)
+        IF(smesh%reg(cell)/=1)CYCLE
         o_psi = MAX(o_psi,saddle_psi)
       END IF
     END IF
@@ -3645,8 +3661,9 @@ DO m=1,n_unique
   cell=0
   CALL bmesh_findcell(smesh,cell,unique_saddles(1:2,m),f)
   IF(oft_debug_print(2))WRITE(*,*)stypes(m),unique_saddles(:,m),smesh%reg(cell)
-  IF(smesh%reg(cell)/=1)CYCLE
+  IF(self%saddle_rmask(smesh%reg(cell)))CYCLE
   IF(ABS(o_psi-unique_saddles(3,m))<1.d-8)THEN
+    IF(smesh%reg(cell)/=1)CYCLE
     o_point=unique_saddles(1:2,m)
     CYCLE
   END IF
@@ -3719,7 +3736,7 @@ IF((cell_active==0).OR.(minval(f)<-1.d-3).OR.(maxval(f)>1.d0+1.d-3))THEN
   ! CALL psi_eval%delete()
   RETURN
 END IF
-IF(smesh%reg(cell_active)/=1)RETURN ! Dont allow saddles outside of plasma region
+IF(self%saddle_rmask(smesh%reg(cell_active)))RETURN ! Dont allow saddles outside of allowable regions
 IF(SQRT(SUM(gpsitmp**2))>psi_scale_len)RETURN
 call psi_eval_active%interp(cell_active,f,goptmp,gpsitmp(1:1))
 psi_x=gpsitmp(1)
