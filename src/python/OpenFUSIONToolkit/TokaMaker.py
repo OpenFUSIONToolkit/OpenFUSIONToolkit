@@ -10,6 +10,7 @@
 # Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
 import json
+import math
 import numpy
 from .util import *
 
@@ -563,7 +564,7 @@ class TokaMaker():
         '''
         self._cond_dict = cond_dict
         self._coil_dict = coil_dict
-        xpoint_mask = numpy.ones((self.nregs,),dtype=numpy.int32)
+        xpoint_mask = numpy.zeros((self.nregs,),dtype=numpy.int32)
         xpoint_mask[0] = 1
         eta_vals = -2.0*numpy.ones((self.nregs,),dtype=numpy.float64)
         eta_vals[0] = -1.0
@@ -1492,6 +1493,9 @@ class gs_Domain:
         @param region_list List of @ref oftpy.Region objects that define mesh
         @param merge_thresh Distance threshold for merging nearby points
         '''
+        self._r = None
+        self._lc = None
+        self._reg = None
         if json_filename is not None:
             with open(json_filename, 'r') as fid:
                 input_dict = json.load(fid)
@@ -1835,9 +1839,9 @@ class gs_Domain:
             point_def[2] = reg_reorder[point_def[2]-1]
         # Generate mesh
         self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
-        if setup_only:
-            return None, None, None
-        return self.mesh.get_mesh()
+        if not setup_only:
+            self._r, self._lc, self._reg = self.mesh.get_mesh()
+        return self._r, self._lc, self._reg
     
     def save_json(self,filename):
         '''! Create a JSON file containing a description of the mesh 
@@ -1862,6 +1866,120 @@ class gs_Domain:
             output_dict['regions'].append(region.get_dict())
         with open(filename, 'w+') as fid:
             fid.write(json.dumps(output_dict))
+    
+    def plot_topology(self,fig,ax,linewidth=None):
+        '''! Plot mesh topology
+
+        @param fig Figure to add to (unused)
+        @param ax Axes to add to (must be scalar)
+        @param linewidth Line width for plots
+        '''
+        for region in self.regions:
+            region.plot_segments(fig,ax,linewidth=linewidth)
+        # Format plot
+        ax.set_aspect('equal','box')
+        ax.set_xlabel('R (m)')
+        ax.set_ylabel('Z (m)')
+    
+    def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False):
+        '''! Plot machine geometry
+
+        @param fig Figure to add to (unused)
+        @param ax Axes to add to (must be scalar, [2], or [2,2])
+        @param lw Width of lines in calls to "triplot()"
+        @param show_legends Show legends for plots with more than one region?
+        @param col_max Maximum number of entries per column in each legend
+        '''
+        if self._r is None:
+            raise ValueError('"plot_mesh()" can only be called after "build_mesh()"')
+        # Get format type from shape of axis object
+        format_type = -1
+        try:
+            if (ax.shape[0] == 2):
+                format_type = 1
+                try:
+                    if (ax.shape[1] == 2):
+                        format_type = 2
+                    else:
+                        format_type = -1
+                except:
+                    pass
+            else:
+                format_type = -1
+        except:
+            format_type = 0
+        if format_type < 0:
+            raise ValueError("Axes for plotting must be scalar, [2], or [2,2]")
+        # Set appropriate axes based on format type
+        if format_type == 0:
+            plasma_axis = ax
+            cond_axis = ax
+            coil_axis = ax
+            vac_axis = ax
+            ax_flat = [ax]
+        elif format_type == 1:
+            plasma_axis = ax[0]
+            vac_axis = ax[0]
+            cond_axis = ax[1]
+            coil_axis = ax[1]
+            ax_flat = ax.flatten()
+        else:
+            plasma_axis = ax[1,0]
+            cond_axis = ax[0,1]
+            coil_axis = ax[1,1]
+            vac_axis = ax[0,0]
+            ax_flat = ax.flatten()
+        # Get region count
+        nregs = self._reg.max()
+        reg_mark = numpy.zeros((nregs,))
+        reg_mark[0] = 1
+        # Plot the plasma region
+        plasma_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==1,:],lw=lw,label='Plasma')
+        # Plot conductor regions
+        nCond = 0
+        for key, cond in self.get_conductors().items():
+            nCond += 1
+            reg_mark[cond['reg_id']-1] = 1
+            cond_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==cond['reg_id'],:],lw=lw,label=key)
+        # Plot coil regions
+        coil_colors = {}
+        for key, coil in self.get_coils().items():
+            reg_mark[coil['reg_id']-1] = 1
+            if split_coil_sets:
+                leg_key = key
+            else:
+                leg_key = coil.get('coil_set',key)
+            if leg_key not in coil_colors:
+                lines, _ = coil_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==coil['reg_id'],:],lw=lw,label=leg_key)
+                coil_colors[leg_key] = lines.get_color()
+            else:
+                coil_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==coil['reg_id'],:],lw=lw,color=coil_colors[leg_key])
+        nCoil = len(coil_colors)
+        # Plot the vacuum regions
+        nVac = 0
+        for i in range(nregs):
+            if reg_mark[i] == 0:
+                nVac += 1
+                vac_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==i+1,:],lw=lw,label='Vacuum_{0}'.format(nVac))
+        # Format plots
+        for ax_tmp in ax_flat:
+            ax_tmp.set_aspect('equal','box')
+            ax_tmp.set_xlabel('R (m)')
+            ax_tmp.set_ylabel('Z (m)')
+        if show_legends:
+            if format_type == 0:
+                ncols = max(1,math.floor((1+nCond+nCoil+nVac)/col_max))
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+            elif format_type == 1:
+                ncols = max(1,math.floor((1+nVac)/col_max))
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                ncols = max(1,math.floor((nCond+nCoil)/col_max))
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+            elif format_type == 2:
+                ncols = max(1,math.floor((nCond)/col_max))
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                ncols = max(1,math.floor((nCoil)/col_max))
+                coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
 
 
 def save_gs_mesh(pts,tris,regions,coil_dict,cond_dict,filename,use_hdf5=True):
@@ -2316,14 +2434,15 @@ class Region:
             segments.append(self._points[self._segments[i],:])
         return segments
     
-    def plot_segments(self,fig,ax):
+    def plot_segments(self,fig,ax,linewidth=None):
         '''! Plot boundary curve
         
         @param fig Figure to add curves to
         @param ax Axis to add curves to
+        @param linewidth Line width for plots
         '''
         for i in range(len(self._segments)):
-            ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1])
+            ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1],linewidth=linewidth)
     
     def get_json(self):
         return {

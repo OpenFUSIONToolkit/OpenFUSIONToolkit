@@ -1106,8 +1106,8 @@ IF(.NOT.ASSOCIATED(self%mop))CALL oft_blag_getmop(self%mop,"none")
 ALLOCATE(node_flag(oft_blagrange%ne),cdofs(oft_blagrange%nce))
 IF(.NOT.ASSOCIATED(self%saddle_rmask))THEN
   ALLOCATE(self%saddle_rmask(smesh%nreg))
-  self%saddle_rmask=1
-  self%saddle_rmask(1)=0
+  self%saddle_rmask=.TRUE.
+  self%saddle_rmask(1)=.FALSE.
 END IF
 ALLOCATE(self%saddle_cmask(smesh%nc),self%saddle_pmask(smesh%np))
 self%spatial_bounds(:,1)=[1.d99,-1.d99]
@@ -1146,9 +1146,9 @@ DO i=1,smesh%np
     self%saddle_cmask(smesh%lpc(j))=.FALSE.
   END DO
 END DO
+self%saddle_pmask=.FALSE.
 DO i=1,smesh%nc
-  IF(self%saddle_cmask(i))CYCLE
-  self%saddle_pmask(smesh%lc(:,i))=.FALSE.
+  IF(self%saddle_cmask(i))self%saddle_pmask(smesh%lc(:,i))=.TRUE.
 END DO
 self%saddle_pmask=self%saddle_pmask.OR.smesh%bp
 CALL get_limiter
