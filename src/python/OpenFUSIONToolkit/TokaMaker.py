@@ -105,6 +105,9 @@ tokamaker_get_mesh = ctypes_subroutine(oftpy_lib.tokamaker_get_mesh,
 tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
     [ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr])
 
+tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
+    [ctypes_numpy_array(numpy.float64,1)])
+
 #
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
     [ctypes_numpy_array(numpy.float64,1)])
@@ -1040,6 +1043,16 @@ class TokaMaker():
         psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         tokamaker_set_psi(psi)
     
+    def get_delstar_curr(self,psi):
+        r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
+
+        @param psi \f$ \psi \f$ corresponding to desired current density
+        @result \f$ J_{\phi} = \textrm{M}^{-1} \Delta^{*} \psi \f$
+        '''
+        curr = numpy.copy(psi)
+        tokamaker_get_dels_curr(curr)
+        return curr/mu0
+    
     def set_psi_dt(self,psi0,dt):
         '''! Set reference poloidal flux and time step for eddy currents in .solve()
 
@@ -1392,30 +1405,76 @@ class TokaMaker():
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
     
-    def plot_eddy(self,fig,ax,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]'):
-        r'''! Plot contours of \f$\hat{\psi}\f$
+    def get_conductor_currents(self,psi,cell_centered=False):
+        r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$
 
-        @param fig Figure to add to
-        @param ax Axis to add to
-        @param dpsi_dt dPsi/dt corresponding to eddy currents (eg. from time-dependent simulation)
-        @param nlevels Number contour lines used for shading
-        @param colormap Colormap to use for shadings
-        @param clabel Label for colorbar (None to disable colorbar)
+        @param psi Psi corresponding to field with conductor currents (eg. from time-dependent simulation)
+        @param cell_centered Get currents at cell centers
+        '''
+        curr = self.get_delstar_curr(psi)
+        if cell_centered:
+            mesh_currents = numpy.zeros((self.lc.shape[0],))
+        # Loop over conducting regions and get mask/fields
+        mask = numpy.zeros((self.lc.shape[0],), dtype=numpy.int32)
+        for _, cond_reg in self._cond_dict.items():
+            eta = cond_reg.get('eta',-1.0)
+            if eta > 0:
+                mask_tmp = (self.reg == cond_reg['reg_id'])
+                if cell_centered:
+                    mesh_currents[mask_tmp] = numpy.sum(curr[self.lc[mask_tmp,:]],axis=1)/3.0
+                mask = numpy.logical_or(mask,mask_tmp)
+        if cell_centered:
+            return mask, mesh_currents
+        else:
+            return mask, curr
+    
+    def get_conductor_source(self,dpsi_dt):
+        r'''! Get toroidal current density in conducting regions for a \f$ d \psi / dt \f$ source
+
+        @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
         '''
         # Apply 1/R scale (avoiding divide by zero)
-        dpsi_dt = dpsi_dt.copy()
-        dpsi_dt[self.r[:,0]>0.0] /= self.r[self.r[:,0]>0.0,0]
-        # Loop over conducting regions and get mask/fields
+        curr = dpsi_dt.copy()
+        curr[self.r[:,0]>0.0] /= self.r[self.r[:,0]>0.0,0]
         mesh_currents = numpy.zeros((self.lc.shape[0],))
+        # Loop over conducting regions and get mask/fields
         mask = numpy.zeros((self.lc.shape[0],), dtype=numpy.int32)
-        for name, cond_reg in self._cond_dict.items():
+        for _, cond_reg in self._cond_dict.items():
             eta = cond_reg.get('eta',-1.0)
             if eta > 0:
                 mask_tmp = (self.reg == cond_reg['reg_id'])
                 field_tmp = dpsi_dt/eta
                 mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
                 mask = numpy.logical_or(mask,mask_tmp)
-        clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],mesh_currents[mask],cmap=colormap)
+        return mask, mesh_currents
+    
+    def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
+        r'''! Plot contours of \f$\hat{\psi}\f$
+
+        @param fig Figure to add to
+        @param ax Axis to add to
+        @param psi Psi corresponding to eddy currents (eg. from time-dependent simulation)
+        @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
+        @param nlevels Number contour lines used for shading (with "psi" only)
+        @param colormap Colormap to use for shadings
+        @param clabel Label for colorbar (None to disable colorbar)
+        '''
+        if psi is not None:
+            mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
+        elif dpsi_dt is not None:
+            mask, plot_field = self.get_conductor_source(dpsi_dt)
+        if plot_field.shape[0] == self.nc:
+            if symmap:
+                max_curr = abs(plot_field).max()
+                clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask,:],plot_field[mask],cmap=colormap,vmin=-max_curr,vmax=max_curr)
+            else:
+                clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],plot_field[mask],cmap=colormap)
+        else:
+            if symmap:
+                max_curr = abs(plot_field[self.lc[mask,:]]).max(axis=None)
+                clf = ax.tricontourf(self.r[:,0],self.r[:,1],self.lc[mask],plot_field,nlevels,cmap=colormap,vmin=-max_curr,vmax=max_curr)
+            else:
+                clf = ax.tricontourf(self.r[:,0],self.r[:,1],self.lc[mask],plot_field,nlevels,cmap=colormap)
         if clabel is not None:
             cb = fig.colorbar(clf,ax=ax)
             cb.set_label(clabel)

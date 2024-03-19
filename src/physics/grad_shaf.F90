@@ -241,6 +241,7 @@ TYPE :: gs_eq
   CLASS(oft_vector), POINTER :: psi_dt => NULL() !<
   CLASS(oft_matrix), POINTER :: dels => NULL()
   CLASS(oft_matrix), POINTER :: dels_dt => NULL()
+  CLASS(oft_matrix), POINTER :: dels_full => NULL()
   CLASS(oft_matrix), POINTER :: mrop => NULL()
   CLASS(oft_matrix), POINTER :: mop => NULL()
   CLASS(flux_func), POINTER :: I => NULL() !< F*F' flux function
