@@ -605,7 +605,7 @@ DO i=1,self%gs_eq%ncoils
     DO k=1,self%gs_eq%ncoil_regs
         j=self%gs_eq%coil_regions(k)%id
         self%curr_reg(j)=self%curr_reg(j) &
-          + self%gs_eq%coil_currs(i)*self%gs_eq%coil_nturns(j,i)
+          + (self%gs_eq%coil_currs(i) + self%gs_eq%vcontrol_val*self%gs_eq%coil_vcont(i))*self%gs_eq%coil_nturns(j,i)
     END DO
 END DO
 !
@@ -625,7 +625,7 @@ DO i=1,self%gs_eq%ncoils
     DO k=1,self%gs_eq%ncoil_regs
         j=self%gs_eq%coil_regions(k)%id
         self%curr_reg(j)=self%curr_reg(j) &
-            + self%gs_eq%coil_currs(i)*self%gs_eq%coil_nturns(j,i)
+            + (self%gs_eq%coil_currs(i) + self%gs_eq%vcontrol_val*self%gs_eq%coil_vcont(i))*self%gs_eq%coil_nturns(j,i)
     END DO
 END DO
 ! Point to profiles in case they changed
