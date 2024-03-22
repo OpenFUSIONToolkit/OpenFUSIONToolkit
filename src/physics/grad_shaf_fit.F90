@@ -575,7 +575,8 @@ IF(.NOT.ASSOCIATED(psi_center))THEN
   ip_target_in=gs_active%Itor_target
   pnorm_in=gs_active%pnorm
   estore_target_in=gs_active%estore_target
-  bounds_in=gs_active%spatial_bounds
+  ! bounds_in=gs_active%spatial_bounds
+  bounds_in(:,1)=gs_active%plasma_bounds
   vcont_in=gs_active%vcontrol_val
   CALL gs_active%psi%new(psi_center)
   CALL psi_center%add(0.d0,1.d0,gs_active%psi)
@@ -679,14 +680,14 @@ IF(iflag==1)THEN
     offset = je
   END IF
   IF(fit_F0)gs_active%I%f_offset = cofs(offset+1)
-  !---Centering
-  alam_in=gs_active%alam
-  ip_target_in=gs_active%Itor_target
-  pnorm_in=gs_active%pnorm
-  estore_target_in=gs_active%estore_target
-  bounds_in=gs_active%spatial_bounds
-  vcont_in=gs_active%vcontrol_val
-  CALL psi_center%add(0.d0,1.d0,gs_active%psi)
+  ! !---Centering
+  ! alam_in=gs_active%alam
+  ! ip_target_in=gs_active%Itor_target
+  ! pnorm_in=gs_active%pnorm
+  ! estore_target_in=gs_active%estore_target
+  ! bounds_in=gs_active%spatial_bounds
+  ! vcont_in=gs_active%vcontrol_val
+  ! CALL psi_center%add(0.d0,1.d0,gs_active%psi)
   CALL run_err(.FALSE.,err,m,ierr)
   IF(ierr/=0)THEN
     CALL reset_eq
@@ -720,7 +721,8 @@ IF(iflag==1)THEN
     ip_target_in=gs_active%Itor_target
     pnorm_in=gs_active%pnorm
     estore_target_in=gs_active%estore_target
-    bounds_in=gs_active%spatial_bounds
+    ! bounds_in=gs_active%spatial_bounds
+    bounds_in(:,1)=gs_active%plasma_bounds
     vcont_in=gs_active%vcontrol_val
     CALL psi_center%add(0.d0,1.d0,gs_active%psi)
   END IF
@@ -785,7 +787,7 @@ IF(iflag==1)THEN
       js = offset; je = offset+gs_active%ncoils
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Coil currents [%]  ='
       DO i=js+1,je
-        WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)/curr_in
+        WRITE(*,'(100ES11.3)',ADVANCE="NO")cofs(i)/curr_in(i-js)
       END DO
       WRITE(*,*)
       offset = je
@@ -997,7 +999,8 @@ gs_active%alam=alam_in
 gs_active%Itor_target=ip_target_in
 gs_active%pnorm=pnorm_in
 gs_active%estore_target=estore_target_in
-gs_active%spatial_bounds=bounds_in
+! gs_active%spatial_bounds=bounds_in
+gs_active%plasma_bounds=bounds_in(:,1)
 gs_active%vcontrol_val=vcont_in
 CALL gs_active%psi%add(0.d0,1.d0,psi_center)
 END SUBROUTINE reset_eq

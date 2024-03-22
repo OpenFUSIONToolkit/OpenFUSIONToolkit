@@ -66,7 +66,8 @@ class tokamaker_recon_settings_struct(c_struct):
                 ("fitV0", c_bool),
                 ("fitCoils", c_bool),
                 ("fitF0", c_bool),
-                ("fixedCentering", c_bool)]
+                ("fixedCentering", c_bool),
+                ("pm", c_bool)]
 
 
 ## @cond
@@ -261,6 +262,7 @@ def tokamaker_recon_default_settings():
     settings.fitCoils = False
     settings.fitF0 = False
     settings.fixedCentering = False
+    settings.pm = False
     return settings
 
 def create_isoflux(npts, r0, z0, a, kappa, delta, kappaL=None, deltaL=None):
