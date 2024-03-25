@@ -1402,6 +1402,7 @@ DO i=1,self%ncond_regs
   END DO
 END DO
 !
+self%plasma_bounds=[-1.d99,1.d99]
 CALL gs_update_bounds(self)
 CALL self%I%update(self)
 CALL self%p%update(self)
