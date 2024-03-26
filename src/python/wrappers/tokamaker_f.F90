@@ -26,7 +26,8 @@ USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
-  gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp
+  gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
+  gs_plasma_mutual, gs_source
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
@@ -457,6 +458,33 @@ END SUBROUTINE tokamaker_get_coil_currents
 SUBROUTINE tokamaker_get_coil_Lmat(Lmat) BIND(C,NAME="tokamaker_get_coil_Lmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: Lmat !< Needs docs
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
+INTEGER(4) :: i
+REAL(8) :: tmp1,tmp2,tmp3,itor
+CLASS(oft_vector), POINTER :: rhs,vec1,vec2
+!---Update plasma row/column
+IF(gs_global%has_plasma)THEN
+  DO i=1,gs_global%ncoils
+    CALL gs_plasma_mutual(gs_global,gs_global%psi_coil(i)%f,gs_global%Lcoils(i,gs_global%ncoils+1),itor)
+    gs_global%Lcoils(gs_global%ncoils+1,i)=gs_global%Lcoils(i,gs_global%ncoils+1)
+  END DO
+  !
+  CALL gs_global%psi%new(rhs)
+  CALL gs_global%psi%new(vec1)
+  CALL gs_global%psi%new(vec2)
+  CALL gs_source(gs_global,gs_global%psi,rhs,vec1,vec2,tmp1,tmp2,tmp3)
+  CALL vec1%set(0.d0)
+  CALL gs_global%lu_solver%apply(vec1,rhs)
+  CALL gs_plasma_mutual(gs_global,vec1,gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1),itor)
+  gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1)=gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1)/itor
+  CALL rhs%delete()
+  CALL vec1%delete()
+  CALL vec2%delete()
+  DEALLOCATE(rhs,vec1,vec2)
+ELSE
+  gs_global%Lcoils(gs_global%ncoils+1,:)=0.d0
+  gs_global%Lcoils(:,gs_global%ncoils+1)=0.d0
+END IF
+!---Copy out inductance matrix
 CALL c_f_pointer(Lmat, vals_tmp, [gs_global%ncoils+1,gs_global%ncoils+1])
 vals_tmp=gs_global%Lcoils
 END SUBROUTINE tokamaker_get_coil_Lmat

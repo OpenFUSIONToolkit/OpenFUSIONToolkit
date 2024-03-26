@@ -1191,7 +1191,7 @@ END DO
 DO i=1,self%ncoils
   DO j=i,self%ncoils
     CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
-    self%Lcoils(i,j)=self%Lcoils(i,j)!/self%coil_regions(j)%area
+    self%Lcoils(i,j)=self%Lcoils(i,j)
     IF(j>i)self%Lcoils(j,i)=self%Lcoils(i,j)
   END DO
 END DO
@@ -1824,19 +1824,13 @@ DEALLOCATE(btmp,psi_vals,eta_reg)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_wall_source
 !---------------------------------------------------------------------------
-! SUBROUTINE gs_coil_mutual
-!---------------------------------------------------------------------------
-!> Needs Docs
-!!
-!! @param[in,out] self G-S object
-!! @param[in,out] a Psi field
-!! @param[in,out] b Source field
+!> Compute inductance between coil and given poloidal flux
 !---------------------------------------------------------------------------
 subroutine gs_coil_mutual(self,iCoil,b,mutual)
-class(gs_eq), intent(inout) :: self
-integer(4), intent(in) :: iCoil
-CLASS(oft_vector), intent(inout) :: b
-real(8), intent(out) :: mutual
+class(gs_eq), intent(inout) :: self !< G-S solver object
+integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
+CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
+real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,psi_tmp,nturns
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
@@ -1877,6 +1871,71 @@ mutual=mu0*2.d0*pi*mutual!/self%coil_regions(iCoil)%area
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_coil_mutual
+!---------------------------------------------------------------------------
+!> Compute inductance between plasma current and given poloidal flux
+!---------------------------------------------------------------------------
+subroutine gs_plasma_mutual(self,b,mutual,itor)
+class(gs_eq), intent(inout) :: self !< G-S solver object
+CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
+real(8), intent(out) :: mutual !< Mutual inductance \f$ \int J_p \psi dV / I_p \f$
+real(8), intent(out) :: itor !< Plasma toroidal current
+real(r8), pointer, dimension(:) :: btmp
+real(8) :: psitmp(1),goptmp(3,3),det,pt(3),v,t1,b_tmp,itor_loc
+real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
+integer(4) :: j,m,l,k
+integer(4), allocatable :: j_lag(:)
+logical :: curved
+type(oft_lag_brinterp), target :: psi_eval
+! t1=omp_get_wtime()
+!---
+NULLIFY(btmp)
+CALL b%get_local(btmp)
+psi_eval%u=>self%psi
+CALL psi_eval%setup()
+!---
+mutual=0.d0
+itor=0.d0
+!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,pt,psitmp,b_tmp,l,rop,itor_loc) reduction(+:mutual) &
+!$omp reduction(+:itor)
+allocate(rop(oft_blagrange%nce))
+allocate(j_lag(oft_blagrange%nce))
+!$omp do schedule(static,1)
+DO j=1,smesh%nc
+  IF(smesh%reg(j)/=1)CYCLE
+  call oft_blagrange%ncdofs(j,j_lag)
+  curved=.TRUE. !trimesh_curved(smesh,j)
+  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
+  do m=1,oft_blagrange%quad%np
+    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(j,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
+    pt=smesh%log2phys(j,oft_blagrange%quad%pts(:,m))
+    !---Compute Magnetic Field
+    IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
+      IF(self%mode==0)THEN
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+      ELSE
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+      END IF
+      b_tmp=0.d0
+      DO l=1,oft_blagrange%nce
+        CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
+        b_tmp=b_tmp+btmp(j_lag(l))*rop(l)
+      END DO
+      det = v*oft_blagrange%quad%wts(m)
+      itor = itor + itor_loc*det
+      mutual = mutual + b_tmp*itor_loc*det
+    END IF
+  end do
+end do
+deallocate(j_lag,rop)
+!$omp end parallel
+mutual=mu0*2.d0*pi*mutual/itor
+CALL psi_eval%delete()
+DEALLOCATE(btmp)
+! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
+end subroutine gs_plasma_mutual
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_fit_isoflux
 !---------------------------------------------------------------------------
