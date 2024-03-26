@@ -1492,7 +1492,7 @@ CALL psi_eval%setup()
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 !---
-val = -psi(1)*2.d0*pi
+val = psi(1)*2.d0*pi
 END FUNCTION fit_flux_eval
 !------------------------------------------------------------------------------
 ! FUNCTION fit_saddle_error
