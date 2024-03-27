@@ -47,7 +47,8 @@ oft_in_template = """
 &thincurr_eig_options
  direct={1}
  plot_run=F
- neigs=4
+ neigs={6}
+ reduce_model={7}
 /
 
 &thincurr_fr_options
@@ -83,8 +84,14 @@ def thin_wall_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,
         volt_file_line=""
     else:
         volt_file_line='volt_file="volt.drive"' 
+    neigs = 4
+    reduce_model_flag = 'F'
+    if run_type == 4:
+        neigs = 10
+        reduce_model_flag = 'T'
+        run_type = 2
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(meshfile,direct_flag,freq,fr_limit,coil_file_line,volt_file_line))
+        fid.write(oft_in_template.format(meshfile,direct_flag,freq,fr_limit,coil_file_line,volt_file_line,neigs,reduce_model_flag))
     # Create XML input file for coils
     coil_string = ""
     if icoils is not None:
@@ -218,6 +225,25 @@ def validate_td(sigs_final, tols=(1.E-8, 1.E-3)):
             retval = False
     return retval
 
+def validate_model_red(eigs, tols=(1.E-5, 1.E-9)):
+    """
+    Helper function to validate eigenvalues against test case.
+    """
+    import h5py
+    with h5py.File('tCurr_reduced.h5','r') as file:
+        L = np.asarray(file['L'])
+        R = np.asarray(file['R'])
+    eigs_run_real, _ = np.linalg.eig(np.dot(np.linalg.inv(R),L))
+    eigs_run_real = -np.sort(-eigs_run_real)
+    retval = True
+    for (i, val) in enumerate(eigs):
+        if abs((val-eigs_run_real[i])/val) > tols[0]:
+            print("FAILED: Reduced model eigenvalue {0} incorrect!".format(i+1))
+            print("  Expected = {0}".format(val))
+            print("  Actual =   {0}".format(eigs_run_real[i]))
+            retval = False
+    return retval
+
 #============================================================================
 # Test runners for time-dependent cases
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
@@ -326,6 +352,32 @@ def test_eig_passive(direct_flag):
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)))
     assert validate_eigs(eigs)
+
+#============================================================================
+# Test runners for eigenvalue-based model reduction
+def test_mred_plate():
+    eigs = (9.735667E-3, 6.532314E-3, 6.532201E-3, 5.251598E-3)
+    assert thin_wall_setup("tw_test-plate.h5",4,True)
+    assert validate_model_red(eigs)
+    
+def test_mred_cyl():
+    eigs = (2.657195E-2, 1.248071E-2, 1.247103E-2, 1.200566E-2)
+    assert thin_wall_setup("tw_test-cyl.h5",4,True)
+    assert validate_model_red(eigs)
+
+@pytest.mark.coverage
+def test_mred_torus():
+    eigs = (4.751344E-2, 2.564491E-2, 2.555695E-2, 2.285850E-2)
+    assert thin_wall_setup("tw_test-torus.h5",4,True)
+    assert validate_model_red(eigs)
+
+@pytest.mark.coverage
+def test_mred_passive():
+    eigs = (1.483589E-1, 6.207849E-2, 2.942791E-2, 2.693574E-2)
+    assert thin_wall_setup("tw_test-passive.h5",4,True,eta=1.E4,
+                           vcoils=((0.5, 0.1), (0.5, 0.05),
+                                   (0.5, -0.05), (0.5, -0.1)))
+    assert validate_model_red(eigs)
 
 #============================================================================
 # Test runners for frequency-response cases
