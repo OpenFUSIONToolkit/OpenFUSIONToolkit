@@ -740,16 +740,37 @@ END SUBROUTINE tokamaker_set_isoflux
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_flux(locations,targets,weights,ntargets,grad_wt_lim) BIND(C,NAME="tokamaker_set_flux")
+REAL(c_double), INTENT(in) :: locations(2,ntargets) !< Needs docs
+REAL(c_double), INTENT(in) :: targets(ntargets) !< Needs docs
+REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
+IF(ASSOCIATED(gs_global%flux_targets))DEALLOCATE(gs_global%flux_targets)
+gs_global%flux_ntargets=ntargets
+IF(ntargets>0)THEN
+  ALLOCATE(gs_global%flux_targets(4,gs_global%flux_ntargets))
+  gs_global%flux_targets(1:2,:)=locations
+  gs_global%flux_targets(3,:)=targets
+  gs_global%flux_targets(4,:)=weights
+  ! gs_global%isoflux_grad_wt_lim=1.d0/grad_wt_lim
+! ELSE
+  ! gs_global%isoflux_grad_wt_lim=-1.d0
+END IF
+END SUBROUTINE tokamaker_set_flux
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_saddles(targets,weights,ntargets) BIND(C,NAME="tokamaker_set_saddles")
 REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
-IF(ASSOCIATED(gs_global%isoflux_saddles))DEALLOCATE(gs_global%isoflux_saddles)
-gs_global%isoflux_nsaddles=ntargets
+IF(ASSOCIATED(gs_global%saddle_targets))DEALLOCATE(gs_global%saddle_targets)
+gs_global%saddle_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(gs_global%isoflux_saddles(3,gs_global%isoflux_nsaddles))
-  gs_global%isoflux_saddles(1:2,:)=targets
-  gs_global%isoflux_saddles(3,:)=weights
+  ALLOCATE(gs_global%saddle_targets(3,gs_global%saddle_ntargets))
+  gs_global%saddle_targets(1:2,:)=targets
+  gs_global%saddle_targets(3,:)=weights
 END IF
 END SUBROUTINE tokamaker_set_saddles
 !------------------------------------------------------------------------------

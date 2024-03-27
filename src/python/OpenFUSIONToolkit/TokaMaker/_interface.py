@@ -164,6 +164,10 @@ tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
 tokamaker_set_isoflux = ctypes_subroutine(oftpy_lib.tokamaker_set_isoflux,
     [ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), c_int, c_double])
 
+# tokamaker_set_flux(locations,targets,weights,ntargets,grad_wt_lim)
+tokamaker_set_flux = ctypes_subroutine(oftpy_lib.tokamaker_set_flux,
+    [ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_int, c_double])
+
 # G-S set saddle (X-point) targets
 tokamaker_set_saddles = ctypes_subroutine(oftpy_lib.tokamaker_set_saddles,
     [ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), c_int])

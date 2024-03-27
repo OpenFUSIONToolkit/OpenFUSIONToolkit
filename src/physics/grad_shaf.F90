@@ -147,7 +147,7 @@ TYPE :: gs_eq
   INTEGER(i4) :: ncond_eigs = 0
   INTEGER(i4) :: bc_nrhs = 0
   INTEGER(i4) :: isoflux_ntargets = 0
-  INTEGER(i4) :: isoflux_nsaddles = 0
+  INTEGER(i4) :: saddle_ntargets = 0
   INTEGER(i4) :: flux_ntargets = 0
   INTEGER(i4) :: nlim_con = 0
   REAL(r8) :: eps = 1.d-12
@@ -200,7 +200,7 @@ TYPE :: gs_eq
   REAL(r8), POINTER, DIMENSION(:,:) :: bc_bmat => NULL()
   REAL(r8), POINTER, DIMENSION(:,:) :: rlcfs => NULL()
   REAL(r8), POINTER, DIMENSION(:,:) :: isoflux_targets => NULL()
-  REAL(r8), POINTER, DIMENSION(:,:) :: isoflux_saddles => NULL()
+  REAL(r8), POINTER, DIMENSION(:,:) :: saddle_targets => NULL()
   REAL(r8), POINTER, DIMENSION(:,:) :: flux_targets => NULL()
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_reg_mat => NULL()
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL()
@@ -1380,7 +1380,7 @@ CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 ! CALL tmp_vec2%delete()
 ! DEALLOCATE(tmp_vec2)
-IF(self%isoflux_ntargets>0)THEN
+IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
   CALL gs_fit_isoflux(self,self%psi,ierr)
   IF(ierr/=0)THEN
     ierr=-7
@@ -1897,7 +1897,7 @@ class(oft_vector), target, intent(inout) :: psi_full
 integer(4), intent(out) :: ierr
 type(oft_lag_brinterp) :: psi_eval
 type(oft_lag_bginterp) :: psi_geval,psi_geval2
-integer(4) :: i,j,k,mind,nCon,io_unit
+integer(4) :: i,j,k,mind,nCon,io_unit,coffset,roffset
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta,gpsi(3),wt_max,wt_min
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:),wt_tmp(:)
@@ -1912,9 +1912,10 @@ logical :: pm_save
 !   CLOSE(io_unit)
 ! END IF
 !
-nCon = self%isoflux_ntargets+2*self%isoflux_nsaddles+self%nregularize
+nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize
 ALLOCATE(err_mat(nCon,self%ncoils+1),err_inv(self%ncoils+1,self%ncoils+1))
-ALLOCATE(rhs(nCon),currs(self%ncoils+1),cells(self%isoflux_ntargets+self%isoflux_nsaddles))
+ALLOCATE(rhs(nCon),currs(self%ncoils+1))
+ALLOCATE(cells(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets))
 err_mat=0.d0
 rhs=0.d0
 cells=-1
@@ -1938,12 +1939,26 @@ DO j=1,self%isoflux_ntargets
     wt_tmp(j)=SQRT(SUM(gpsi(1:2)**2))
   END IF
 END DO
-DO j=1,self%isoflux_nsaddles
-  CALL bmesh_findcell(smesh,cells(self%isoflux_ntargets+j),self%isoflux_saddles(1:2,j),f)
-  CALL smesh%jacobian(cells(self%isoflux_ntargets+j),f,goptmp,v)
-  CALL psi_geval%interp(cells(self%isoflux_ntargets+j),f,goptmp,gpsi)
-  rhs(self%isoflux_ntargets+2*(j-1)+1)=gpsi(1)*self%isoflux_saddles(3,j)
-  rhs(self%isoflux_ntargets+2*(j-1)+2)=gpsi(2)*self%isoflux_saddles(3,j)
+roffset=self%isoflux_ntargets
+coffset=self%isoflux_ntargets
+DO j=1,self%flux_ntargets
+  CALL bmesh_findcell(smesh,cells(coffset+j),self%flux_targets(1:2,j),f)
+  CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
+  rhs(roffset+j)=pol_val(1)-self%flux_targets(3,j)!*self%isoflux_targets(3,j)
+  ! IF(self%isoflux_grad_wt_lim>0.d0)THEN
+  !   CALL smesh%jacobian(cells(coffset+j),f,goptmp,v)
+  !   CALL psi_geval2%interp(cells(coffset+j),f,goptmp,gpsi)
+  !   wt_tmp(roffset+j)=SQRT(SUM(gpsi(1:2)**2))
+  ! END IF
+END DO
+roffset=roffset+self%flux_ntargets
+coffset=coffset+self%flux_ntargets
+DO j=1,self%saddle_ntargets
+  CALL bmesh_findcell(smesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
+  CALL smesh%jacobian(cells(coffset+j),f,goptmp,v)
+  CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
+  rhs(roffset+2*(j-1)+1)=gpsi(1)*self%saddle_targets(3,j)
+  rhs(roffset+2*(j-1)+2)=gpsi(2)*self%saddle_targets(3,j)
 END DO
 !---Build L-S Matrix
 DO i=1,self%ncoils
@@ -1957,12 +1972,22 @@ DO i=1,self%ncoils
     CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
     err_mat(j,i)=pol_val(1)!*self%isoflux_targets(3,j)
   END DO
-  DO j=1,self%isoflux_nsaddles
-    CALL bmesh_findcell(smesh,cells(self%isoflux_ntargets+j),self%isoflux_saddles(1:2,j),f)
-    CALL smesh%jacobian(cells(self%isoflux_ntargets+j),f,goptmp,v)
-    CALL psi_geval%interp(cells(self%isoflux_ntargets+j),f,goptmp,gpsi)
-    err_mat(self%isoflux_ntargets+2*(j-1)+1,i)=gpsi(1)*self%isoflux_saddles(3,j)
-    err_mat(self%isoflux_ntargets+2*(j-1)+2,i)=gpsi(2)*self%isoflux_saddles(3,j)
+  roffset=self%isoflux_ntargets
+  coffset=self%isoflux_ntargets
+  DO j=1,self%flux_ntargets
+    CALL bmesh_findcell(smesh,cells(coffset+j),self%flux_targets(1:2,j),f)
+    ! CALL smesh%jacobian(cells(j),f,goptmp,v)
+    CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
+    err_mat(roffset+j,i)=pol_val(1)
+  END DO
+  roffset=roffset+self%flux_ntargets
+  coffset=coffset+self%flux_ntargets
+  DO j=1,self%saddle_ntargets
+    CALL bmesh_findcell(smesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
+    CALL smesh%jacobian(cells(coffset+j),f,goptmp,v)
+    CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
+    err_mat(roffset+2*(j-1)+1,i)=gpsi(1)*self%saddle_targets(3,j)
+    err_mat(roffset+2*(j-1)+2,i)=gpsi(2)*self%saddle_targets(3,j)
   END DO
 END DO
 DO i=1,self%ncoils
@@ -1977,13 +2002,20 @@ DO j=1,self%isoflux_ntargets-1
   rhs(j+1)=(rhs(j+1)-rhs(1))*self%isoflux_targets(3,j+1)*wt_max/MAX(wt_min,wt_tmp(j+1))
 END DO
 DEALLOCATE(wt_tmp)
+!---Apply weights to flux constraints
+roffset=self%isoflux_ntargets
+DO j=1,self%flux_ntargets
+  err_mat(roffset+j,:)=err_mat(roffset+j,:)*self%flux_targets(4,j)!*wt_max/MAX(wt_min,wt_tmp(j+1))
+  rhs(roffset+j)=rhs(roffset+j)*self%flux_targets(4,j)!*wt_max/MAX(wt_min,wt_tmp(j+1))
+END DO
 !---Coil regularization
+roffset=self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets
 DO i=1,self%nregularize
   DO j=1,self%ncoils
-    err_mat(self%isoflux_ntargets+2*self%isoflux_nsaddles+i,j)=self%coil_reg_mat(i,j) !*self%coil_regions(j)%area
+    err_mat(roffset+i,j)=self%coil_reg_mat(i,j) !*self%coil_regions(j)%area
   END DO
-  err_mat(self%isoflux_ntargets+2*self%isoflux_nsaddles+i,self%ncoils+1)=self%coil_reg_mat(i,self%ncoils+1)
-  rhs(self%isoflux_ntargets+2*self%isoflux_nsaddles+i)=-self%coil_reg_targets(i)
+  err_mat(roffset+i,self%ncoils+1)=self%coil_reg_mat(i,self%ncoils+1)
+  rhs(roffset+i)=-self%coil_reg_targets(i)
 END DO
 !---Solve L-S system
 IF(ASSOCIATED(self%coil_bounds))THEN
@@ -2316,7 +2348,7 @@ IF((self%pax_target>0.d0).AND.(self%Ip_ratio_target>-1.d98))THEN
   self%pax_target=-1.d0
 END IF
 IF(self%V0_target>-1.d98)THEN
-  IF(self%isoflux_ntargets>0)THEN
+  IF(self%isoflux_ntargets>0.OR.self%flux_ntargets>0)THEN
     CALL oft_warn("V0_target and isoflux_targets specified, ignoring V0_target")
     self%V0_target=-1.d99
     self%vcontrol_val=0.d0
@@ -2451,7 +2483,7 @@ DO i=1,self%maxits
   CALL self%psi%add(0.d0,self%alam,psi_alam,self%pnorm,psi_press)
 
   ! Fit coils if operating in isoflux mode
-  IF(self%isoflux_ntargets>0)THEN
+  IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
     CALL self%psi%add(1.d0,1.d0,psi_eddy)
     CALL self%psi%add(1.d0,1.d0,psi_bc)
     CALL gs_fit_isoflux(self,psip,ierr_loc)
@@ -2481,27 +2513,28 @@ DO i=1,self%maxits
   END IF
 
   ! Fit wall eigenmodes if fluxes are available
-  IF(self%flux_ntargets>0)THEN
-    CALL self%psi%add(1.d0,1.d0,psi_vac)
-    CALL gs_fit_walleigs(self,ierr_loc)
-    IF(ierr_loc/=0)THEN
-      error_flag=-8
-      EXIT
-    END IF
-    CALL self%psi%add(1.d0,-1.d0,psi_vac)
-    !---Update vacuum field part
-    CALL psi_eddy%set(0.d0)
-    DO j=1,self%ncond_regs
-      DO k=1,self%cond_regions(j)%neigs
-        ! ii=self%cond_regions(j)%eig_map(k)
-        ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-        !   self%cond_regions(j)%psi_eig(k)%f)
-        CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-          self%cond_regions(j)%psi_eig(k)%f)
-      END DO
-    END DO
-    CALL psi_vac%add(1.d0,1.d0,psi_eddy)
-  ELSE IF(self%isoflux_ntargets>0)THEN
+  ! IF(self%flux_ntargets>0)THEN
+  !   CALL self%psi%add(1.d0,1.d0,psi_vac)
+  !   CALL gs_fit_walleigs(self,ierr_loc)
+  !   IF(ierr_loc/=0)THEN
+  !     error_flag=-8
+  !     EXIT
+  !   END IF
+  !   CALL self%psi%add(1.d0,-1.d0,psi_vac)
+  !   !---Update vacuum field part
+  !   CALL psi_eddy%set(0.d0)
+  !   DO j=1,self%ncond_regs
+  !     DO k=1,self%cond_regions(j)%neigs
+  !       ! ii=self%cond_regions(j)%eig_map(k)
+  !       ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
+  !       !   self%cond_regions(j)%psi_eig(k)%f)
+  !       CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
+  !         self%cond_regions(j)%psi_eig(k)%f)
+  !     END DO
+  !   END DO
+  !   CALL psi_vac%add(1.d0,1.d0,psi_eddy)
+  ! ELSE IF(self%isoflux_ntargets>0)THEN
+  IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
     !---Update vacuum field part
     CALL psi_eddy%set(0.d0)
     DO j=1,self%ncond_regs
@@ -5293,7 +5326,7 @@ IF(ASSOCIATED(self%bc_mat))DEALLOCATE(self%bc_mat)
 IF(ASSOCIATED(self%bc_coil_mat))DEALLOCATE(self%bc_coil_mat)
 IF(ASSOCIATED(self%rlcfs))DEALLOCATE(self%rlcfs)
 IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
-IF(ASSOCIATED(self%isoflux_saddles))DEALLOCATE(self%isoflux_saddles)
+IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
 IF(ASSOCIATED(self%coil_reg_mat))DEALLOCATE(self%coil_reg_mat)
 IF(ASSOCIATED(self%coil_reg_targets))DEALLOCATE(self%coil_reg_targets)
 IF(ASSOCIATED(self%coil_bounds))DEALLOCATE(self%coil_bounds)

@@ -319,9 +319,11 @@ class TokaMaker():
         ## Number of coils in mesh
         self.ncoils = ncoils.value
         ## Isoflux constraint points (use @ref TokaMaker.TokaMaker.set_isoflux "set_isoflux")
-        self._isoflux = None
+        self._isoflux_targets = None
+        ## Flux constraint points (use @ref TokaMaker.TokaMaker.set_isoflux "set_flux")
+        self._flux_targets = None
         ## Saddle constraint points (use @ref TokaMaker.TokaMaker.set_saddles "set_saddles")
-        self._saddles = None
+        self._saddle_targets = None
         # Get references to internal variables
         o_loc = c_double_ptr()
         lim_loc = c_double_ptr()
@@ -616,7 +618,7 @@ class TokaMaker():
         '''
         if isoflux is None:
             tokamaker_set_isoflux(numpy.zeros((1,1)),numpy.zeros((1,)),0,grad_wt_lim)
-            self._isoflux = None
+            self._isoflux_targets = None
         else:
             if weights is None:
                 weights = numpy.ones((isoflux.shape[0],), dtype=numpy.float64)
@@ -625,7 +627,30 @@ class TokaMaker():
             isoflux = numpy.ascontiguousarray(isoflux, dtype=numpy.float64)
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             tokamaker_set_isoflux(isoflux,weights,isoflux.shape[0],grad_wt_lim)
-            self._isoflux = isoflux.copy()
+            self._isoflux_targets = isoflux.copy()
+    
+    def set_flux(self,locations,targets,weights=None): #,grad_wt_lim=-1.0):
+        r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$
+
+        @param locations List of points defining constraints [:,2]
+        @param targets Target \f$ \psi \f$ value at each point [:]
+        @param weights Weight to be applied to each constraint point [:] (default: 1)
+        '''
+        if locations is None:
+            tokamaker_set_flux(numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,-1.0)
+            self._flux_targets = None
+        else:
+            if targets.shape[0] != locations.shape[0]:
+                raise ValueError('Shape of "targets" does not match first dimension of "locations"')
+            if weights is None:
+                weights = numpy.ones((locations.shape[0],), dtype=numpy.float64)
+            if weights.shape[0] != locations.shape[0]:
+                raise ValueError('Shape of "weights" does not match first dimension of "locations"')
+            locations = numpy.ascontiguousarray(locations, dtype=numpy.float64)
+            targets = numpy.ascontiguousarray(targets, dtype=numpy.float64)
+            weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
+            tokamaker_set_flux(locations,targets,weights,locations.shape[0],-1.0)
+            self._flux_targets = (locations.copy(), targets.copy())
     
     def set_saddles(self,saddles,weights=None):
         '''! Set saddle constraint points (poloidal field should vanish at each point)
@@ -635,7 +660,7 @@ class TokaMaker():
         '''
         if saddles is None:
             tokamaker_set_saddles(numpy.zeros((1,1)),numpy.zeros((1,)),0)
-            self._saddles = None
+            self._saddle_targets = None
         else:
             if weights is None:
                 weights = numpy.ones((saddles.shape[0],), dtype=numpy.float64)
@@ -644,7 +669,7 @@ class TokaMaker():
             saddles = numpy.ascontiguousarray(saddles, dtype=numpy.float64)
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             tokamaker_set_saddles(saddles,weights,saddles.shape[0])
-            self._saddles = saddles.copy()
+            self._saddle_targets = saddles.copy()
     
     def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,retain_previous=False):
         r'''! Set global target values
@@ -988,11 +1013,11 @@ class TokaMaker():
         @param saddle_color Color of saddle points (None to disable)
         '''
         # Plot isoflux constraints
-        if (isoflux_color is not None) and (self._isoflux is not None):
-            ax.plot(self._isoflux[:,0],self._isoflux[:,1],color=isoflux_color,marker=isoflux_marker,linestyle='none')
+        if (isoflux_color is not None) and (self._isoflux_targets is not None):
+            ax.plot(self._isoflux_targets[:,0],self._isoflux_targets[:,1],color=isoflux_color,marker=isoflux_marker,linestyle='none')
         # Plot saddle constraints
-        if (saddle_color is not None) and (self._saddles is not None):
-            ax.plot(self._saddles[:,0],self._saddles[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
+        if (saddle_color is not None) and (self._saddle_targets is not None):
+            ax.plot(self._saddle_targets[:,0],self._saddle_targets[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
 
     def plot_psi(self,fig,ax,psi=None,normalized=True,plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,
                  vacuum_color='darkgray',vacuum_nlevels=8,vacuum_levels=None,vacuum_colormap=None,
