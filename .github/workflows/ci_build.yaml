@@ -70,6 +70,7 @@ jobs:
     - name: Build external (OpenMP)
       if: ${{ matrix.parallel == 'openmp' }}
       shell: bash
+      timeout-minutes: 30
       working-directory: libs
       run: >
         ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
@@ -78,6 +79,7 @@ jobs:
     - name: Build external (MPI+OpenMP)
       if: ${{ matrix.parallel == 'mpi_openmp' }}
       shell: bash
+      timeout-minutes: 60
       working-directory: libs
       run: >
         ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
@@ -113,5 +115,6 @@ jobs:
 
     - name: Test OFT
       shell: bash
+      timeout-minutes: 90
       working-directory: libs/build_release
       run: make test

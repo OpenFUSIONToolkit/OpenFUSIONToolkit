@@ -10,6 +10,7 @@
 # Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
 import json
+import math
 import numpy
 from .util import *
 
@@ -48,7 +49,7 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,2), c_int])
+    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
 
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
@@ -103,6 +104,9 @@ tokamaker_get_mesh = ctypes_subroutine(oftpy_lib.tokamaker_get_mesh,
 # G-S flux retrieval
 tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
     [ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr])
+
+tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
+    [ctypes_numpy_array(numpy.float64,1)])
 
 #
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
@@ -423,6 +427,8 @@ class TokaMaker():
         self.settings = tokamaker_default_settings()
         ## Conductor definition dictionary
         self._cond_dict = {}
+        ## Vacuum definition dictionary
+        self._vac_dict = {}
         ## Coil definition dictionary
         self._coil_dict = {}
         ## Coil set definitions, including sub-coils
@@ -469,6 +475,8 @@ class TokaMaker():
         self.lc = None
         ## Mesh regions [nc] 
         self.reg = None
+        ## Number of vacuum regions in mesh
+        self.nvac = 0
         ## Limiting contour
         self.lim_contour = None
     
@@ -490,6 +498,7 @@ class TokaMaker():
         # Reset defaults
         self.settings = tokamaker_default_settings()
         self._cond_dict = {}
+        self._vac_dict = {}
         self._coil_dict = {}
         self._F0 = 0.0
         self._Ip_target=c_double(-1.0)
@@ -511,6 +520,7 @@ class TokaMaker():
         self.r = None
         self.lc = None
         self.reg = None
+        self.nvac = 0
         self.lim_contour = None
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
@@ -542,35 +552,48 @@ class TokaMaker():
             self._update_oft_in()
             oft_setup_smesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
         elif r is not None:
+            r = numpy.ascontiguousarray(r, dtype=numpy.float64)
+            lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
             ndim = c_int(r.shape[1])
             np = c_int(r.shape[0])
             npc = c_int(lc.shape[1])
             nc = c_int(lc.shape[0])
             if reg is None:
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
+            else:
+                reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
             oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
     
-    def setup_regions(self,coil_file='none',cond_dict={},coil_dict={}):
+    def setup_regions(self,cond_dict={},coil_dict={}):
         '''! Define mesh regions (coils and conductors)
 
-        @param coil_file File containing coil/conductor definitions in XML format
         @param cond_dict Dictionary specifying conducting regions
         '''
-        self._cond_dict = cond_dict
-        self._coil_dict = coil_dict
-        if coil_file != 'none':
-            eta_vals = numpy.ones((1),dtype=numpy.float64)
-        else:
-            eta_vals = -numpy.ones((self.nregs,),dtype=numpy.float64)
-            eta_vals[1] = 1.E10
-            for key in cond_dict:
+        xpoint_mask = numpy.zeros((self.nregs,),dtype=numpy.int32)
+        xpoint_mask[0] = 1
+        eta_vals = -2.0*numpy.ones((self.nregs,),dtype=numpy.float64)
+        eta_vals[0] = -1.0
+        # Process conductors and vacuum regions
+        self._vac_dict = {}
+        for key in cond_dict:
+            if 'vac_id' in cond_dict[key]:
+                self._vac_dict[key] = cond_dict[key]
+            else:
                 eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
+            xpoint_mask[cond_dict[key]['reg_id']-1] = int(cond_dict[key].get('allow_xpoints',False))
+        # Remove vacuum regions
+        for key in self._vac_dict:
+            del cond_dict[key]
+        self._cond_dict = cond_dict
+        # Process coils
         nCoils = 0
         self.coil_sets = {}
         for key in coil_dict:
+            xpoint_mask[coil_dict[key]['reg_id']-1] = int(coil_dict[key].get('allow_xpoints',False))
+            eta_vals[coil_dict[key]['reg_id']-1] = -1.0
             coil_set = coil_dict[key].get('coil_set',key)
             if coil_set not in self.coil_sets:
                 self.coil_sets[coil_set] = {
@@ -579,12 +602,19 @@ class TokaMaker():
                 }
                 nCoils += 1
             self.coil_sets[coil_set]['sub_coils'].append(coil_dict[key])
+        self._coil_dict = coil_dict
+        # Mark vacuum regions
+        self.nvac = 0
+        for i in range(self.nregs):
+            if eta_vals[i] < -1.5:
+                eta_vals[i] = 1.E10
+                self.nvac += 1 
         coil_nturns = numpy.zeros((nCoils, self.nregs))
         for key in self.coil_sets:
             for sub_coil in self.coil_sets[key]['sub_coils']:
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
-        cstring = c_char_p(coil_file.encode())
-        tokamaker_setup_regions(cstring,eta_vals,coil_nturns,nCoils)
+        cstring = c_char_p('none'.encode())
+        tokamaker_setup_regions(cstring,eta_vals,xpoint_mask,coil_nturns,nCoils)
 
     def eval_green(self,x,xc):
         r'''! Evaluate Green's function for a toroidal filament
@@ -728,8 +758,10 @@ class TokaMaker():
             raise ValueError('Incorrect shape of "reg_targets", should be [nregularize]')
         if reg_weights.shape[0] != nregularize:
             raise ValueError('Incorrect shape of "reg_weights", should be [nregularize]')
-        
-        tokamaker_set_coil_regmat(nregularize,numpy.copy(reg_mat.transpose(), order='C'), reg_targets, reg_weights)
+        reg_mat = numpy.ascontiguousarray(reg_mat.transpose(), dtype=numpy.float64)
+        reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
+        reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
+        tokamaker_set_coil_regmat(nregularize,reg_mat, reg_targets, reg_weights)
 
     def set_coil_bounds(self,coil_bounds):
         '''! Set hard constraints on coil currents
@@ -741,8 +773,8 @@ class TokaMaker():
         '''
         if (coil_bounds.shape[0] != self.ncoils+1) or (coil_bounds.shape[1] != 2):
             raise ValueError('Incorrect shape of "coil_bounds", should be [ncoils+1,2]')
-        bounds = numpy.copy(coil_bounds, order='C')
-        tokamaker_set_coil_bounds(bounds)
+        boucoil_boundsnds = numpy.ascontiguousarray(coil_bounds, dtype=numpy.float64)
+        tokamaker_set_coil_bounds(coil_bounds)
 
     def set_coil_vsc(self,coil_gains):
         '''! Define a vertical stability coil set from one or more coils
@@ -751,6 +783,7 @@ class TokaMaker():
         '''
         if coil_gains.shape[0] != self.ncoils:
             raise ValueError('Incorrect shape of "coil_gains", should be [ncoils]')
+        coil_gains = numpy.ascontiguousarray(coil_gains, dtype=numpy.float64)
         tokamaker_set_coil_vsc(coil_gains)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0):
@@ -920,6 +953,8 @@ class TokaMaker():
                 weights = numpy.ones((isoflux.shape[0],), dtype=numpy.float64)
             if weights.shape[0] != isoflux.shape[0]:
                 raise ValueError('Shape of "weights" does not match first dimension of "isoflux"')
+            isoflux = numpy.ascontiguousarray(isoflux, dtype=numpy.float64)
+            weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             tokamaker_set_isoflux(isoflux,weights,isoflux.shape[0],grad_wt_lim)
             self._isoflux = isoflux.copy()
     
@@ -937,6 +972,8 @@ class TokaMaker():
                 weights = numpy.ones((saddles.shape[0],), dtype=numpy.float64)
             if weights.shape[0] != saddles.shape[0]:
                 raise ValueError('Shape of "weights" does not match first dimension of "saddles"')
+            saddles = numpy.ascontiguousarray(saddles, dtype=numpy.float64)
+            weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             tokamaker_set_saddles(saddles,weights,saddles.shape[0])
             self._saddles = saddles.copy()
     
@@ -1003,7 +1040,18 @@ class TokaMaker():
         '''
         if psi.shape[0] != self.np:
             raise ValueError('Incorrect shape of "psi", should be [np]')
+        psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         tokamaker_set_psi(psi)
+    
+    def get_delstar_curr(self,psi):
+        r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
+
+        @param psi \f$ \psi \f$ corresponding to desired current density
+        @result \f$ J_{\phi} = \textrm{M}^{-1} \Delta^{*} \psi \f$
+        '''
+        curr = numpy.copy(psi)
+        tokamaker_get_dels_curr(curr)
+        return curr/mu0
     
     def set_psi_dt(self,psi0,dt):
         '''! Set reference poloidal flux and time step for eddy currents in .solve()
@@ -1013,6 +1061,7 @@ class TokaMaker():
         '''
         if psi0.shape[0] != self.np:
             raise ValueError('Incorrect shape of "psi0", should be [np]')
+        psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
         tokamaker_set_psi_dt(psi0,c_double(dt))
     
     def get_field_eval(self,field_type):
@@ -1087,12 +1136,12 @@ class TokaMaker():
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
             if self.psi_convention == 0:
-                psi = numpy.flip(psi).copy()
-                psi_save = 1.0 - psi
+                psi = numpy.ascontiguousarray(numpy.flip(psi), dtype=numpy.float64)
+                psi_save = 1.0-psi
         else:
             if self.psi_convention == 0:
-                psi_save = psi.copy()
-                psi = 1.0-psi
+                psi_save = numpy.copy(psi)
+                psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         ravgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
         dl = c_double()
@@ -1115,12 +1164,12 @@ class TokaMaker():
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
             if self.psi_convention == 0:
-                psi = numpy.flip(psi).copy()
+                psi = numpy.ascontiguousarray(numpy.flip(psi), dtype=numpy.float64)
                 psi_save = 1.0 - psi
         else:
             if self.psi_convention == 0:
-                psi_save = psi.copy()
-                psi = 1.0-psi
+                psi_save = numpy.copy(psi)
+                psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         fc = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         r_avgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
         modb_avgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
@@ -1177,12 +1226,12 @@ class TokaMaker():
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
             if self.psi_convention == 0:
-                psi = numpy.flip(psi).copy()
+                psi = numpy.ascontiguousarray(numpy.flip(psi), dtype=numpy.float64)
                 psi_save = 1.0 - psi
         else:
             if self.psi_convention == 0:
-                psi_save = psi.copy()
-                psi = 1.0-psi
+                psi_save = numpy.copy(psi)
+                psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         f = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         fp = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         p = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
@@ -1213,6 +1262,7 @@ class TokaMaker():
         '''
         if currents.shape[0] != self.ncoils:
             raise ValueError('Incorrect shape of "currents", should be [ncoils]')
+        currents = numpy.ascontiguousarray(currents, dtype=numpy.float64)
         tokamaker_set_coil_currents(currents)
 
     def update_settings(self):
@@ -1237,7 +1287,7 @@ class TokaMaker():
         mask_vals = numpy.ones((self.np,))
         # Shade vacuum region
         if vacuum_color is not None:
-            mask = (self.reg == 2)
+            mask = numpy.logical_and(self.reg > 1, self.reg <= self.nvac+1)
             if mask.sum() > 0.0:
                 ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask,:], mask_vals, colors=vacuum_color)
         # Shade coils
@@ -1355,30 +1405,76 @@ class TokaMaker():
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
     
-    def plot_eddy(self,fig,ax,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]'):
-        r'''! Plot contours of \f$\hat{\psi}\f$
+    def get_conductor_currents(self,psi,cell_centered=False):
+        r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$
 
-        @param fig Figure to add to
-        @param ax Axis to add to
-        @param dpsi_dt dPsi/dt corresponding to eddy currents (eg. from time-dependent simulation)
-        @param nlevels Number contour lines used for shading
-        @param colormap Colormap to use for shadings
-        @param clabel Label for colorbar (None to disable colorbar)
+        @param psi Psi corresponding to field with conductor currents (eg. from time-dependent simulation)
+        @param cell_centered Get currents at cell centers
+        '''
+        curr = self.get_delstar_curr(psi)
+        if cell_centered:
+            mesh_currents = numpy.zeros((self.lc.shape[0],))
+        # Loop over conducting regions and get mask/fields
+        mask = numpy.zeros((self.lc.shape[0],), dtype=numpy.int32)
+        for _, cond_reg in self._cond_dict.items():
+            eta = cond_reg.get('eta',-1.0)
+            if eta > 0:
+                mask_tmp = (self.reg == cond_reg['reg_id'])
+                if cell_centered:
+                    mesh_currents[mask_tmp] = numpy.sum(curr[self.lc[mask_tmp,:]],axis=1)/3.0
+                mask = numpy.logical_or(mask,mask_tmp)
+        if cell_centered:
+            return mask, mesh_currents
+        else:
+            return mask, curr
+    
+    def get_conductor_source(self,dpsi_dt):
+        r'''! Get toroidal current density in conducting regions for a \f$ d \psi / dt \f$ source
+
+        @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
         '''
         # Apply 1/R scale (avoiding divide by zero)
-        dpsi_dt = dpsi_dt.copy()
-        dpsi_dt[self.r[:,0]>0.0] /= self.r[self.r[:,0]>0.0,0]
-        # Loop over conducting regions and get mask/fields
+        curr = dpsi_dt.copy()
+        curr[self.r[:,0]>0.0] /= self.r[self.r[:,0]>0.0,0]
         mesh_currents = numpy.zeros((self.lc.shape[0],))
+        # Loop over conducting regions and get mask/fields
         mask = numpy.zeros((self.lc.shape[0],), dtype=numpy.int32)
-        for name, cond_reg in self._cond_dict.items():
+        for _, cond_reg in self._cond_dict.items():
             eta = cond_reg.get('eta',-1.0)
             if eta > 0:
                 mask_tmp = (self.reg == cond_reg['reg_id'])
                 field_tmp = dpsi_dt/eta
                 mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
                 mask = numpy.logical_or(mask,mask_tmp)
-        clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],mesh_currents[mask],cmap=colormap)
+        return mask, mesh_currents
+    
+    def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
+        r'''! Plot contours of \f$\hat{\psi}\f$
+
+        @param fig Figure to add to
+        @param ax Axis to add to
+        @param psi Psi corresponding to eddy currents (eg. from time-dependent simulation)
+        @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
+        @param nlevels Number contour lines used for shading (with "psi" only)
+        @param colormap Colormap to use for shadings
+        @param clabel Label for colorbar (None to disable colorbar)
+        '''
+        if psi is not None:
+            mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
+        elif dpsi_dt is not None:
+            mask, plot_field = self.get_conductor_source(dpsi_dt)
+        if plot_field.shape[0] == self.nc:
+            if symmap:
+                max_curr = abs(plot_field).max()
+                clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask,:],plot_field[mask],cmap=colormap,vmin=-max_curr,vmax=max_curr)
+            else:
+                clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],plot_field[mask],cmap=colormap)
+        else:
+            if symmap:
+                max_curr = abs(plot_field[self.lc[mask,:]]).max(axis=None)
+                clf = ax.tricontourf(self.r[:,0],self.r[:,1],self.lc[mask],plot_field,nlevels,cmap=colormap,vmin=-max_curr,vmax=max_curr)
+            else:
+                clf = ax.tricontourf(self.r[:,0],self.r[:,1],self.lc[mask],plot_field,nlevels,cmap=colormap)
         if clabel is not None:
             cb = fig.colorbar(clf,ax=ax)
             cb.set_label(clabel)
@@ -1482,6 +1578,9 @@ class gs_Domain:
         @param region_list List of @ref oftpy.Region objects that define mesh
         @param merge_thresh Distance threshold for merging nearby points
         '''
+        self._r = None
+        self._lc = None
+        self._reg = None
         if json_filename is not None:
             with open(json_filename, 'r') as fid:
                 input_dict = json.load(fid)
@@ -1524,7 +1623,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,nTurns=None,coil_set=None):
+    def define_region(self,name,dx,reg_type,eta=None,nTurns=None,coil_set=None,allow_xpoints=False):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -1532,29 +1631,34 @@ class gs_Domain:
         @param reg_type Type of region ("plasma", "vacuum", "boundary", "conductor", or "coil")
         @param eta Resistivity for "conductor" regions (raises error if region is other type)
         @param nTurns Number of turns for "cooil" regions (raises error if region is other type)
+        @param allow_xpoints Allow X-points in this region (for non-plasma regions only)
         '''
         if (dx is None) or (dx < 0.0):
             raise ValueError('"dx" must have a non-negative value')
         name = name.upper()
         if (name in self.region_info):
             raise KeyError('Region already exists!')
+        next_id = -1
         if reg_type == 'plasma':
             next_id = 1
+            allow_xpoints = True
         elif reg_type == 'vacuum':
-            next_id = 2
+            pass
         elif reg_type == 'boundary':
-            next_id = 2
             self.boundary_reg = name
         elif reg_type in ('conductor', 'coil'):
-            next_id = self.reg_type_counts['conductor'] + self.reg_type_counts['coil'] + 3
+            pass
         else:
             raise ValueError("Unknown region type")
+        if next_id < 0:
+            next_id = len(self.region_info) - self.reg_type_counts['plasma'] + 2
         self.reg_type_counts[reg_type] += 1
         self.region_info[name] = {
             'id': next_id,
             'dx': dx,
             'count': 0,
-            'type': reg_type
+            'type': reg_type,
+            'allow_xpoints': allow_xpoints
         }
         if eta is not None:
             if reg_type != 'conductor':
@@ -1734,7 +1838,8 @@ class gs_Domain:
                     'reg_id': self.region_info[key]['id'],
                     'coil_id': coil_id,
                     'nturns': self.region_info[key].get('nturns',1),
-                    'coil_set': self.region_info[key].get('coil_set',key)
+                    'coil_set': self.region_info[key].get('coil_set',key),
+                    'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
                 coil_id += 1
         return coil_list
@@ -1746,14 +1851,23 @@ class gs_Domain:
         '''
         cond_list = {}
         cond_id = 0
+        vac_id = 0
         for key in self.region_info:
             if self.region_info[key]['type'] == 'conductor':
                 cond_list[key] = {
                     'reg_id': self.region_info[key]['id'],
                     'cond_id': cond_id,
-                    'eta': self.region_info[key]['eta']
+                    'eta': self.region_info[key]['eta'],
+                    'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
                 cond_id += 1
+            elif self.region_info[key]['type'] in ('vacuum','boundary'):
+                cond_list[key] = {
+                    'reg_id': self.region_info[key]['id'],
+                    'vac_id': vac_id,
+                    'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
+                }
+                vac_id += 1
         return cond_list
     
     def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False):
@@ -1802,11 +1916,25 @@ class gs_Domain:
         for key in self.region_info:
             if self.region_info[key]['count'] == 0:
                 raise KeyError('Region "{0}" defined but never created'.format(key))
+        # Re-index regions
+        reg_reorder = [-1 for _ in self.region_info]
+        reg_reorder[0] = 1
+        reg_id = 1
+        for reg_type in ('boundary', 'vacuum','conductor','coil'):
+            for key in self.region_info:
+                if self.region_info[key]['type'] == reg_type:
+                    reg_id += 1
+                    reg_reorder[self.region_info[key]['id']-1] = reg_id
+                    self.region_info[key]['id'] = reg_id
+        for region in self.regions:
+            region._id = reg_reorder[region._id-1]
+        for point_def in self._extra_reg_defs:
+            point_def[2] = reg_reorder[point_def[2]-1]
         # Generate mesh
         self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
-        if setup_only:
-            return None, None, None
-        return self.mesh.get_mesh()
+        if not setup_only:
+            self._r, self._lc, self._reg = self.mesh.get_mesh()
+        return self._r, self._lc, self._reg
     
     def save_json(self,filename):
         '''! Create a JSON file containing a description of the mesh 
@@ -1831,6 +1959,122 @@ class gs_Domain:
             output_dict['regions'].append(region.get_dict())
         with open(filename, 'w+') as fid:
             fid.write(json.dumps(output_dict))
+    
+    def plot_topology(self,fig,ax,linewidth=None):
+        '''! Plot mesh topology
+
+        @param fig Figure to add to (unused)
+        @param ax Axes to add to (must be scalar)
+        @param linewidth Line width for plots
+        '''
+        for region in self.regions:
+            region.plot_segments(fig,ax,linewidth=linewidth)
+        # Format plot
+        ax.set_aspect('equal','box')
+        ax.set_xlabel('R (m)')
+        ax.set_ylabel('Z (m)')
+    
+    def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False):
+        '''! Plot machine geometry
+
+        @param fig Figure to add to (unused)
+        @param ax Axes to add to (must be scalar, [2], or [2,2])
+        @param lw Width of lines in calls to "triplot()"
+        @param show_legends Show legends for plots with more than one region?
+        @param col_max Maximum number of entries per column in each legend
+        '''
+        if self._r is None:
+            raise ValueError('"plot_mesh()" can only be called after "build_mesh()"')
+        # Get format type from shape of axis object
+        format_type = -1
+        try:
+            if (ax.shape[0] == 2):
+                format_type = 1
+                try:
+                    if (ax.shape[1] == 2):
+                        format_type = 2
+                    else:
+                        format_type = -1
+                except:
+                    pass
+            else:
+                format_type = -1
+        except:
+            format_type = 0
+        if format_type < 0:
+            raise ValueError("Axes for plotting must be scalar, [2], or [2,2]")
+        # Set appropriate axes based on format type
+        if format_type == 0:
+            plasma_axis = ax
+            cond_axis = ax
+            coil_axis = ax
+            vac_axis = ax
+            ax_flat = [ax]
+        elif format_type == 1:
+            plasma_axis = ax[0]
+            vac_axis = ax[0]
+            cond_axis = ax[1]
+            coil_axis = ax[1]
+            ax_flat = ax.flatten()
+        else:
+            plasma_axis = ax[1,0]
+            cond_axis = ax[0,1]
+            coil_axis = ax[1,1]
+            vac_axis = ax[0,0]
+            ax_flat = ax.flatten()
+        # Get region count
+        nregs = self._reg.max()
+        reg_mark = numpy.zeros((nregs,))
+        reg_mark[0] = 1
+        # Plot the plasma region
+        plasma_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==1,:],lw=lw,label='Plasma')
+        # Plot conductor regions
+        nCond = 0
+        for key, cond in self.get_conductors().items():
+            if 'vac_id' in cond:
+                continue
+            nCond += 1
+            reg_mark[cond['reg_id']-1] = 1
+            cond_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==cond['reg_id'],:],lw=lw,label=key)
+        # Plot coil regions
+        coil_colors = {}
+        for key, coil in self.get_coils().items():
+            reg_mark[coil['reg_id']-1] = 1
+            if split_coil_sets:
+                leg_key = key
+            else:
+                leg_key = coil.get('coil_set',key)
+            if leg_key not in coil_colors:
+                lines, _ = coil_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==coil['reg_id'],:],lw=lw,label=leg_key)
+                coil_colors[leg_key] = lines.get_color()
+            else:
+                coil_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==coil['reg_id'],:],lw=lw,color=coil_colors[leg_key])
+        nCoil = len(coil_colors)
+        # Plot the vacuum regions
+        nVac = 0
+        for i in range(nregs):
+            if reg_mark[i] == 0:
+                nVac += 1
+                vac_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==i+1,:],lw=lw,label='Vacuum_{0}'.format(nVac))
+        # Format plots
+        for ax_tmp in ax_flat:
+            ax_tmp.set_aspect('equal','box')
+            ax_tmp.set_xlabel('R (m)')
+            ax_tmp.set_ylabel('Z (m)')
+        if show_legends:
+            if format_type == 0:
+                ncols = max(1,math.floor((1+nCond+nCoil+nVac)/col_max))
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+            elif format_type == 1:
+                ncols = max(1,math.floor((1+nVac)/col_max))
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                ncols = max(1,math.floor((nCond+nCoil)/col_max))
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+            elif format_type == 2:
+                ncols = max(1,math.floor((nCond)/col_max))
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                ncols = max(1,math.floor((nCoil)/col_max))
+                coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
 
 
 def save_gs_mesh(pts,tris,regions,coil_dict,cond_dict,filename,use_hdf5=True):
@@ -2285,14 +2529,15 @@ class Region:
             segments.append(self._points[self._segments[i],:])
         return segments
     
-    def plot_segments(self,fig,ax):
+    def plot_segments(self,fig,ax,linewidth=None):
         '''! Plot boundary curve
         
         @param fig Figure to add curves to
         @param ax Axis to add curves to
+        @param linewidth Line width for plots
         '''
         for i in range(len(self._segments)):
-            ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1])
+            ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1],linewidth=linewidth)
     
     def get_json(self):
         return {

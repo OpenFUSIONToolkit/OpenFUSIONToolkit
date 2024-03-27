@@ -15,13 +15,17 @@ USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 ! USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid, ONLY: multigrid_reset
 ! USE multigrid_build, ONLY: multigrid_construct_surf
+!
+USE oft_la_base, ONLY: oft_vector, oft_matrix
+USE oft_solver_base, ONLY: oft_solver
+USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
+!
 USE fem_base, ONLY: oft_afem_type
-USE oft_la_base, ONLY: oft_vector
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
   oft_lag_setup
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, &
+USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
@@ -82,17 +86,23 @@ END SUBROUTINE tokamaker_eval_green
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
+SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,xpoint_mask,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(80) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Needs docs
 real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(4) :: i
+INTEGER(4), POINTER :: xpoint_tmp(:)
 CALL copy_string_rev(coil_file,gs_global%coil_file)
 IF(TRIM(gs_global%coil_file)=='none')THEN
-  CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
   !
+  CALL c_f_pointer(xpoint_mask, xpoint_tmp, [smesh%nreg])
+  ALLOCATE(gs_global%saddle_rmask(smesh%nreg))
+  gs_global%saddle_rmask=LOGICAL(xpoint_tmp==0)
+  !
+  CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
   gs_global%ncoil_regs=0
   gs_global%ncond_regs=0
   DO i=2,smesh%nreg
@@ -389,6 +399,37 @@ CALL gs_global%psi%get_local(vals_tmp)
 psi_lim = gs_global%plasma_bounds(1)
 psi_max = gs_global%plasma_bounds(2)
 END SUBROUTINE tokamaker_get_psi
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_dels_curr(psi_vals) BIND(C,NAME="tokamaker_get_dels_curr")
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: u,v
+CLASS(oft_solver), POINTER :: minv
+IF(.NOT.ASSOCIATED(gs_global%dels_full))CALL build_dels(gs_global%dels_full,gs_global,"none")
+!
+CALL gs_global%psi%new(u)
+CALL gs_global%psi%new(v)
+CALL c_f_pointer(psi_vals, vals_tmp, [gs_global%psi%n])
+CALL u%restore_local(vals_tmp)
+!
+NULLIFY(minv)
+CALL create_cg_solver(minv)
+minv%A=>gs_global%mop
+minv%its=-2
+CALL create_diag_pre(minv%pre) ! Setup Preconditioner
+CALL gs_global%dels_full%apply(u,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL u%get_local(vals_tmp)
+!
+CALL u%delete()
+CALL v%delete()
+CALL minv%pre%delete()
+CALL minv%delete()
+DEALLOCATE(u,v,minv)
+END SUBROUTINE tokamaker_get_dels_curr
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
