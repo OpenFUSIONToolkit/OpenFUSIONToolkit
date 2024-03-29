@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - ci_debug
   pull_request:
     types: [opened, reopened, synchronize]
   
@@ -60,6 +61,16 @@ jobs:
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       run: mkdir libs
+
+    - name: Get OS version (Linux)
+      if: startsWith(matrix.config.os, 'ubuntu')
+      run: lsb_release -d
+
+    - name: Get OS version (macOS)
+      if: startsWith(matrix.config.os, 'macos')
+      run: |
+        sw_vers -productVersion
+        pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
 
     - name: Check compilers
       run: |
