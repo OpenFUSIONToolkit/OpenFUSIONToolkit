@@ -51,14 +51,14 @@ TYPE :: floop_sensor
   INTEGER(i4) :: np = 0 !< Number of points in loop
   REAL(r8) :: scale_fac = 1.d0 !< Scale factor to apply to signal
   REAL(r8), POINTER, DIMENSION(:,:) :: r => NULL() !< List of points [3,np]
-  CHARACTER(LEN=20) :: name = '' !< Name of sensor
+  CHARACTER(LEN=40) :: name = '' !< Name of sensor
 END TYPE floop_sensor
 !------------------------------------------------------------------------------
 !> Structure containing definition of a current jumper sensor
 !------------------------------------------------------------------------------
 TYPE :: jumper_sensor
   INTEGER(i4) :: np = 0 !< Number of points on jumper
-  CHARACTER(LEN=20) :: name = '' !< Name of sensor
+  CHARACTER(LEN=40) :: name = '' !< Name of sensor
   INTEGER(i4), POINTER, DIMENSION(:) :: points => NULL() !< List of points on jumper
   REAL(r8), POINTER, DIMENSION(:) :: hole_facs => NULL() !< Coupling weight to "holes"
 END TYPE jumper_sensor
@@ -90,6 +90,7 @@ TYPE :: tw_coil_set
   REAL(r8), POINTER, DIMENSION(:) :: res_per_len => NULL() !< Resistance/length of each coil (if required)
   REAL(r8), POINTER, DIMENSION(:) :: radius => NULL() !< Effective radius of each coil (for calculation of Lself)
   ! REAL(r8), POINTER, DIMENSION(:,:) :: axi_pt => NULL() !< Coil definitions for axisymmetric coils
+  CHARACTER(LEN=40) :: name = '' !< Name of coil set
   TYPE(tw_gen_coil), POINTER, DIMENSION(:) :: coils => NULL() !< List of coils
 END TYPE tw_coil_set
 !------------------------------------------------------------------------------
@@ -2024,6 +2025,13 @@ DO i=1,ncoils
   coil_tmp%res_per_len=-1.d0
   coil_tmp%radius=-1.d0
   coil_tmp%Rself=0.d0
+  !---Get coil set name
+  xml_attr=>fox_getAttributeNode(coil_set,"name")
+  IF(ASSOCIATED(xml_attr))THEN
+    CALL fox_extractDataContent(xml_attr,coil_tmp%name,num=nread,iostat=ierr)
+  ELSE
+    WRITE(coil_tmp%name,'(A8,I5.5)')'UNKNOWN_',i
+  END IF
   !---Get coil set resistivity per unit length (can be overriden)
   xml_attr=>fox_getAttributeNode(coil_set,"res_per_len")
   IF(ASSOCIATED(xml_attr))THEN
