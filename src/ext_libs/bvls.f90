@@ -580,7 +580,7 @@ subroutine initialize ( m, n, a, b, bnd, ierr, index, iter, itmax, &
   real ( kind = 8 ) x(n)
 
   ierr = 0
-  itmax = 5 * n
+  itmax = n * n !5 * n
   iter = 0
 !
 !  Initialize the array index().
