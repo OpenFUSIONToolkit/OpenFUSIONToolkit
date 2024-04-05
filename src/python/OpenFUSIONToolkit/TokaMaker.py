@@ -920,9 +920,9 @@ class TokaMaker():
             eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(self._F0/centroid[0],2))
         return eq_stats
 
-    def print_info(self,lcfs_pad=0.01):
+    def print_info(self,lcfs_pad=0.01,li_normalization='std'):
         '''! Print information (Ip, q, etc.) about current G-S equilbirium'''
-        eq_stats = self.get_stats(lcfs_pad=lcfs_pad)
+        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,li_normalization=li_normalization)
         print("Equilibrium Statistics:")
         if self.diverted:
             print("  Topology                =   Diverted")
