@@ -401,7 +401,7 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
     if err_flag != 0:
         mp_q.put(None)
         return
-    eq_info = mygs.get_stats()
+    eq_info = mygs.get_stats(li_normalization='ITER')
     Lmat = mygs.get_coil_Lmat()
     eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
     eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
