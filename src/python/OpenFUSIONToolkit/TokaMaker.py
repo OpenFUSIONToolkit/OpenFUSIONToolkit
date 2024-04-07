@@ -151,7 +151,7 @@ tokamaker_sauter_fc = ctypes_subroutine(oftpy_lib.tokamaker_sauter_fc, # (npsi,p
      ctypes_numpy_array(numpy.float64,2)])
 
 #
-tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals, # (Itor,centroid,vol,pvol,dflux,tflux,li)
+tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals, # (Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
     [c_double_ptr, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr])
 
 #
@@ -867,14 +867,18 @@ class TokaMaker():
         tokamaker_run(c_bool(vacuum),ctypes.byref(error_flag))
         return error_flag.value
 
-    def get_stats(self,lcfs_pad=0.01):
-        '''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
+    def get_stats(self,lcfs_pad=0.01,li_normalization='std'):
+        r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
+
+        See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
+        in [Jackson et al.](http://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
         @param lcfs_pad Padding at LCFS for boundary calculations
+        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
         @result Dictionary of equilibrium parameters
         '''
         _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02]) # Given backward so last point is LCFS (for dl)
-        Ip,centroid,vol,pvol,dflux,tflux,li = self.get_globals()
+        Ip,centroid,vol,pvol,dflux,tflux,Bp_vol = self.get_globals()
         _,_,_,p,_ = self.get_profiles(numpy.r_[0.001])
         if self.diverted:
             for i in range(self.x_points.shape[0]):
@@ -885,6 +889,13 @@ class TokaMaker():
                 zbounds[0,:] = x_active
             elif x_active[1] > zbounds[1,1]:
                 zbounds[1,:] = x_active
+        # Compute normalized inductance
+        if li_normalization.lower() == 'std':
+            li = (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2)
+        elif li_normalization.lower() == 'iter':
+            li = 2.0*Bp_vol/(numpy.power(mu0*Ip,2)*self.o_point[0])
+        else:
+            raise ValueError('Invalid "li_normalization"')
         #
         eq_stats = {
             'Ip': Ip,
@@ -909,9 +920,9 @@ class TokaMaker():
             eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(self._F0/centroid[0],2))
         return eq_stats
 
-    def print_info(self,lcfs_pad=0.01):
+    def print_info(self,lcfs_pad=0.01,li_normalization='std'):
         '''! Print information (Ip, q, etc.) about current G-S equilbirium'''
-        eq_stats = self.get_stats(lcfs_pad=lcfs_pad)
+        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,li_normalization=li_normalization)
         print("Equilibrium Statistics:")
         if self.diverted:
             print("  Topology                =   Diverted")
@@ -1191,10 +1202,10 @@ class TokaMaker():
         pvol = c_double()
         dflux = c_double()
         tflux = c_double()
-        Li = c_double()
+        Bp_vol = c_double()
         tokamaker_get_globals(ctypes.byref(Ip),centroid,ctypes.byref(vol),ctypes.byref(pvol),
-            ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Li))
-        return Ip.value, centroid, vol.value, pvol.value, dflux.value, tflux.value, Li.value
+            ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Bp_vol))
+        return Ip.value, centroid, vol.value, pvol.value, dflux.value, tflux.value, Bp_vol.value
 
     def calc_loopvoltage(self):
         r'''! Get plasma loop voltage

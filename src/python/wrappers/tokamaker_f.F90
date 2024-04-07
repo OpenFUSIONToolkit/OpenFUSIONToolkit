@@ -549,19 +549,18 @@ END SUBROUTINE tokamaker_sauter_fc
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_globals(Itor,centroid,vol,pvol,dflux,tflux,li) BIND(C,NAME="tokamaker_get_globals")
+SUBROUTINE tokamaker_get_globals(Itor,centroid,vol,pvol,dflux,tflux,bp_vol) BIND(C,NAME="tokamaker_get_globals")
 REAL(c_double), INTENT(out) :: Itor !< Needs docs
 REAL(c_double), INTENT(out) :: centroid(2) !< Needs docs
 REAL(c_double), INTENT(out) :: vol !< Needs docs
 REAL(c_double), INTENT(out) :: pvol !< Needs docs
 REAL(c_double), INTENT(out) :: dflux !< Needs docs
 REAL(c_double), INTENT(out) :: tflux !< Needs docs
-REAL(c_double), INTENT(out) :: li !< Needs docs
-CALL gs_comp_globals(gs_global,Itor,centroid,vol,pvol,dflux,tflux,li)
+REAL(c_double), INTENT(out) :: bp_vol !< Needs docs
+CALL gs_comp_globals(gs_global,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
 Itor=Itor/mu0
 vol=vol*2.d0*pi
 pvol=pvol*2.d0*pi/mu0
-li=li*2.d0/(mu0*gs_global%o_point(1))
 END SUBROUTINE tokamaker_get_globals
 !------------------------------------------------------------------------------
 !> Needs docs
