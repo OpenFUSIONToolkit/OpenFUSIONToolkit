@@ -98,6 +98,10 @@ tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
     [ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr])
 
 #
+tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
+    [ctypes_numpy_array(numpy.float64,1)])
+
+#
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
     [ctypes_numpy_array(numpy.float64,1)])
 
@@ -140,7 +144,7 @@ tokamaker_sauter_fc = ctypes_subroutine(oftpy_lib.tokamaker_sauter_fc, # (npsi,p
      ctypes_numpy_array(numpy.float64,2)])
 
 #
-tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals, # (Itor,centroid,vol,pvol,dflux,tflux,li)
+tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals, # (Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
     [c_double_ptr, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr])
 
 #
