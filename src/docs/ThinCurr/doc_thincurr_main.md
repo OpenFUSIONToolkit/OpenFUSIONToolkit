@@ -3,13 +3,16 @@ ThinCurr: 3D thin-wall electromagnetic simulation package     {#doc_tw_main}
 
 [TOC]
 
-Talk about ThinCurr...
+ThinCurr solves variants of a system of equations corresponding to inductive-resistive dynamics of currents
+flowing in thin conducting structures (2D sheets in 3D geometry)
+
+\f[ \mathrm{L} \frac{\partial I}{\partial t} + \mathrm{R} I = V. \f]
 
 ThinCurr is used through four driver programs:
 
- - \ref thincurr_eig for eigenvalue calculations
  - \ref thincurr_td for time-dependent runs
- - \ref thincurr_fr for frequency-response (frequency-domain) runs
+ - \ref thincurr_eig for eigenvalue calculations (\f$ \mathrm{L} \frac{\partial I}{\partial t} = \lambda \mathrm{R} I \f$)
+ - \ref thincurr_fr for frequency-response (frequency-domain) runs (\f$ i \omega \mathrm{L} I + \mathrm{R} I = V \f$)
  - \ref thincurr_from_mode to convert plasma mode structures to a current potential source
 
 \section doc_tw_main_ex ThinCurr Examples
@@ -19,3 +22,150 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_thincurr_ex2
  - \subpage doc_thincurr_ex3
  - \subpage doc_thincurr_ex4
+
+\section doc_tw_main_num Description of numerics
+Currents in ThinCurr are represented in terms of a surface current (\f$ \textbf{J}_s = \int \textbf{J} dt_w = \textbf{J} * t_w \f$),
+where \f$ t_w \f$ is the direction through the thickness of the wall, represents a uniform current flowing in a wall of approximately
+zero thickness. To produce a convienient basis that satisfies \f$ \nabla \cdot \textbf{J}_s = 0 \f$, a surface potential is used such that
+\f$ \textbf{J}_s = \nabla \phi \times \hat{\textbf{n}} \f$, where \f$ \hat{\textbf{n}} \f$ is the unit normal on the surface. \f$ \phi \f$ is
+then expanded in a scalar Lagrange basis
+
+\f[ \textbf{J}_s (\textbf{r}) = \sum_j \alpha_j \phi_j (\textbf{r}) \times \hat{\textbf{n}} \f]
+
+on an unstructured triangular grid. Additional filament elements can also be defined to represent coils and other suitable structures.
+With these preliminaries a Boundary Finite Element Method (BFEM) is then used to define the inductance \f$ \mathrm{L} \f$ and
+resistance \f$ \mathrm{R} \f$ operators as
+
+\f[ \mathrm{L}_{i,j} = \frac{\mu_0}{4 \pi} \int_{\Omega} \int_{\Omega'} \left( \nabla \phi_i (r) \times \hat{\textbf{n}} \right) \cdot \frac{\nabla \phi_j (r') \times \hat{\textbf{n}}}{|\textbf{r}-\textbf{r}'|} dA' dA \f]
+
+and
+
+\f[ \mathrm{R}_{i,j} = \int_{\Omega} \eta_s(r) \left( \nabla \phi_i (r) \times \hat{\textbf{n}} \right) \cdot \left( \nabla \phi_j (r) \times \hat{\textbf{n}} \right) dA, \f]
+
+yielding the final discretized system
+
+\f[ \mathrm{L}_{i,j} \frac{\partial \alpha_j}{\partial t} + \mathrm{R}_{i,j} \alpha_j = V_i, \f]
+
+where \f$ \alpha_j \f$ and \f$ V_i \f$ are the finite element weights and externally-applied voltages respectively. Voltages can be directly
+applied to filament elements or through the action of defined current waveforms through inductive coupling as in \f$ \mathrm{L} \f$.
+
+\image html thincurr_pot_ex.png "Potential (shading) and current (vectors) for the first (left) and second (right) eigenvalues of a square plate"
+
+\subsection doc_tw_main_filament Filament elements
+In addition to the meshed surfaces, conducting structures can also be represented using filaments. Filaments can have fixed current
+(`icoils`) or voltage (`vcoils`) waveforms as a function of time. In the latter case, resistance per unit length and effective radius
+can be specified for calculating self-inductance and resistive dissipation. For coupling between filaments and other filaments and
+surface elements zero cross-sectional area is assumed (ie. a simple line integral).
+
+Note that for `icoils` the current in a given `coil_set` is fixed, but the voltage on the coil will vary according to the
+mutual coupling of all coils and surfaces. Conversely, for `vcoils` the voltage is fixed and the current evolution will vary
+consistent with the mutual coupling of all coils and surfaces and the coils self-inductance and resistivity.
+
+\subsubsection doc_tw_main_filament_def Defining filaments
+
+```xml
+<icoils>
+  <coil_set>
+    <coil scale="-1.0">1.0, 0.1</coil>
+    <coil npts="5">1.0, 0.0, -0.1
+      0.0, 1.0, -0.1
+      -1.0, 0.0, -0.1
+      0.0, -1.0, -0.1
+      1.0, 0.0, -0.1
+    </coil>
+  </coil_set>
+</icoils>
+```
+
+```xml
+<vcoils>
+  <coil_set>
+    <coil res_per_len="2.195E-4" radius="0.005">1.1, 0.25</coil>
+    <coil res_per_len="2.195E-4" radius="0.005" npts="5">1.0, 0.0, -0.1
+      0.0, 1.0, -0.1
+      -1.0, 0.0, -0.1
+      0.0, -1.0, -0.1
+      1.0, 0.0, -0.1
+    </coil>
+  </coil_set>
+</vcoils>
+```
+
+
+\subsection doc_tw_main_bc Boundary conditions
+At the edge of a surface a boundary condition is required to ensure that no current flows normal to the boundary, which would
+result in divergence or lost current. By considering the potential representation we can easily show that zero normal current is
+satisfied by the condition \f$ | \nabla \phi \times \hat{\textbf{n}} \times \hat{\textbf{t}} | = | \nabla \phi \cdot \hat{\textbf{t}} | = 0\f$,
+where \f$ \hat{\textbf{t}} \f$ is the unit normal in the direction tangential to the boundary. This amounts to the condition that
+\f$ \phi \f$ is a constant on a given boundary. A simple solution that satisfies this boundary condition is to set the
+value on all boundary nodes to a single fixed value (generally zero). However as we will see in the next section this is overly
+restrictive for many cases.
+
+\image html thincurr_elem_ex.png "Example currents associated with nodes on the boundary (red) and interior (blue) showing a non-zero divergence at the edge without boundary conditions. The boundary conditions ensure no net current flows normal to the surfaces as in the red element."
+
+\subsection doc_tw_main_holes "Hole" elements
+Note the boundary condition above requires a constant potential on a given boundary. However, for multiply connected geometry, such
+as a cylinder, one or more distinct boundaries exist such that the potential can be different on each boundary. For the case of
+the cylinder there are two geometrically distinct boundarys, the top and bottom circular edges. If we consider the potential formulation
+we can show that the current flow across a line between two points on a given surface is given by the difference in the potential between
+those points
+
+\f[ \mathrm{I}_{l} = \int_a^b \hat{\textbf{n}} \cdot (\nabla \phi \times \hat{\textbf{n}} \times \textbf{dl}) = \int_a^b \nabla \phi \cdot \textbf{dl} = (\phi_b - \phi_a). \f]
+
+So if point \f$ a \f$ and \f$ b \f$ exist on different boundaries then the difference in the constant for each boundary
+defines the current passing between them. In the case of the cylinder this corresponds to the total current flowing azimuthally around
+the cylinder.
+
+To enable the values on boundaries to vary self-consistently in the model we define a new element that corresponds to a constant potential
+on a given closed boundary loop. In ThinCurr we call these elements "holes", as they are related to the topological concept of "holes".
+These elements correspond to current flowing around the boundary loop, and correspondingly to capturing magnetic flux within this loop.
+This captures flux that links the mesh without crossing through any of the triangles themselves (eg. flux down the center of a cylinder).
+
+\image html thincurr_cyl_hole.png "Example current associated with a hole element from the upper edge of a cylinder"
+
+While one may think we should add two holes in the case of the cylinder this is not the case as it would introduce a
+[gauge ambiguity](https://en.wikipedia.org/wiki/Gauge_fixing) in the system, resulting in a singular \f$ \textbf{L} \f$ matrix. We can see
+this by considering the azimuthal flowing current, which as above is given by the difference in potential between the top \f$ \phi_a \f$
+and bottom \f$ \phi_b \f$ of the cylinder. This means that a single current in our model is dependent on two values, indicating a redundancy
+that means \f$ \textbf{L} \f$ is not full rank, or in other words singular. To avoid this we only introduce only one hole, which in turn sets
+the potential on the other boundary to zero and eliminates the gauge ambiguity.
+
+\image html thincurr_torus_holes.png "Example currents associated with the hole elements for the poloidal (blue) and toroidal (red) directions"
+
+**Multiply connected regions**:
+
+Hole elements are not just necessary when there is a visible boundary, but whenever there are multiple distinct topological paths on
+a given surface. An example of this case is the torus, where there are two topologically distinct paths corresponding to the short (poloidal)
+and long (toroidal) way around the torus. We can see this using the consideration of the difference in potentials above, as the potential
+difference between any two points will always be zero and as a result no net current can flow in the poloidal or toroidal directions. To
+correct this two holes must be added, corresponding to loops in each of these two directions, which makes \f$ \phi \f$
+[mutlivalued](https://en.wikipedia.org/wiki/Multivalued_function) so that a difference in potential can exist even on closed paths.
+This use of jumps and a single-valued potential to represent a multivalued potential is common practice in numerical methods.
+
+\subsubsection doc_tw_main_holes_def Defining holes
+Holes are defined using "nodesets" in mesh definition files that mark the nodes corresponding to a given hole. There are two
+cases for these definitions:
+
+ 1. If the hole is on a boundary, as in the cylinder case, only a single node is needed and ThinCurr will determine the remaining
+ elements in the hole by finding a closed boundary loop.
+
+ 2. If the hole is on the interior of the mesh, as in the torus case, all the nodes that form the hole must be provided. ThinCurr
+ will then generate an ordered loop from this list.
+
+Nodesets are stored in the `mesh/NODESET****` fields in native mesh files. These can be converted from nodesets defined via the
+Cubit meshing software, through the Exodus II mesh format, and `convert_cubit.py` or other mesh inputs with suitable interfacing
+scripts.
+
+\subsection doc_tw_main_close "Closure" elements
+As stated above the fact that the solution depends only on the gradient and not on the absolute value of \f$ \phi \f$ itself can
+introduce a gauge ambiguity, resulting in redundant degrees of freedom. In the cases considered above this is resolved by keeping
+the potential on at least one boundary fixed to zero. However, when a surface is fully closed, as is the case for a sphere or torus,
+there are no boundaries. So to fix the gauge on these surfaces we must remove an element from the system, effectively fixing the
+potential to zero at that point. We call these elements "closure" elements as they are used to close the system, making it
+solveable.
+
+\subsubsection doc_tw_main_close_def Defining closures
+Closures are defined using "sidesets" in mesh definition files that mark the triangles where an element should be removed to
+avoid singularities in the system. Sidesets are stored in the `mesh/SIDESET****` fields in native mesh files. These can be
+converted from nodesets defined via the Cubit meshing software, through the Exodus II mesh format, and `convert_cubit.py` or other
+mesh inputs with suitable interfacing scripts.

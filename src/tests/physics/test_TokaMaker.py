@@ -235,7 +235,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     # Run EQ
     mygs = TokaMaker()
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict)
+    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
     mygs.set_coil_currents(np.array([1.E-2]))
     err_flag = mygs.solve(True)
@@ -304,7 +304,10 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
         gs_mesh.define_region('vv1',vv_dx,'conductor',eta=6.9E-7)
         gs_mesh.define_region('vv2',vv_dx,'conductor',eta=6.9E-7)
         for key, coil in ITER_geom['coils'].items():
-            gs_mesh.define_region(key,coil_dx,'coil')
+            if not key.startswith('VS'):
+                gs_mesh.define_region(key,coil_dx,'coil')
+        gs_mesh.define_region('VSU',coil_dx,'coil',coil_set='VS',nTurns=1.0)
+        gs_mesh.define_region('VSL',coil_dx,'coil',coil_set='VS',nTurns=-1.0)
         gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')             # Define the shape of the limiter
         gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2') # Define the shape of the VV
         gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air') # Define the shape of the VV
@@ -328,10 +331,10 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
     mygs = TokaMaker()
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict)
+    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order,F0=5.3*6.2)
     vsc_signs = np.zeros((mygs.ncoils,), dtype=np.float64)
-    vsc_signs[[coil_dict['VSU']['coil_id'], coil_dict['VSL']['coil_id']]] = [1.0,-1.0]
+    vsc_signs[mygs.coil_sets['VS']['id']] = 1.0
     mygs.set_coil_vsc(vsc_signs)
     coil_bounds = np.zeros((mygs.ncoils+1,2), dtype=np.float64)
     coil_bounds[:,0] = -50.E6; coil_bounds[:,1] = 50.E6
@@ -357,16 +360,16 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
     coil_reg_mat = np.eye(mygs.ncoils+1, dtype=np.float64)
     coil_reg_weights = np.ones((mygs.ncoils+1,))
     coil_reg_targets = np.zeros((mygs.ncoils+1,))
-    for key, coil in coil_dict.items():
+    for key, coil in mygs.coil_sets.items():
         if key.startswith('CS'):
             if key.startswith('CS1'):
-                coil_reg_weights[coil['coil_id']] = 2.E-2
+                coil_reg_weights[coil['id']] = 2.E-2
             else:
-                coil_reg_weights[coil['coil_id']] = 1.E-2
+                coil_reg_weights[coil['id']] = 1.E-2
         elif key.startswith('PF'):
-            coil_reg_weights[coil['coil_id']] = 1.E-2
+            coil_reg_weights[coil['id']] = 1.E-2
         elif key.startswith('VS'):
-            coil_reg_weights[coil['coil_id']] = 1.E2
+            coil_reg_weights[coil['id']] = 1.E2
     coil_reg_weights[-1] = 1.E-2
     mygs.set_coil_reg(coil_reg_mat, reg_weights=coil_reg_weights, reg_targets=coil_reg_targets)
     n_sample = 40
@@ -398,7 +401,11 @@ def run_ITER_case(mesh_resolution,fe_order,mp_q):
     if err_flag != 0:
         mp_q.put(None)
         return
-    eq_info = mygs.get_stats()
+    eq_info = mygs.get_stats(li_normalization='ITER')
+    Lmat = mygs.get_coil_Lmat()
+    eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
+    eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
+    eq_info['Lplasma'] = Lmat[-1,-1]
     mp_q.put([eq_info])
 
 
@@ -443,7 +450,10 @@ def test_ITER(order):
         'dflux': 1.5402746036620532,
         'tflux': 121.86870301036512,
         'l_i': 0.9048845463517069,
-        'beta_tor': 1.768879437469196
+        'beta_tor': 1.768879437469196,
+        'MCS1': 2.5608173430680583e-06,
+        'MCS1_plasma': 8.930926092661585e-07,
+        'Lplasma': 1.1899835061690724e-05
     }
     results = mp_run(run_ITER_case,(1.0,order))
     assert validate_ITER(results,exp_dict)
