@@ -196,6 +196,7 @@ TYPE :: gs_eq
   LOGICAL, POINTER, DIMENSION(:) :: fe_flag => NULL()
   LOGICAL, POINTER, DIMENSION(:) :: saddle_pmask => NULL()
   LOGICAL, POINTER, DIMENSION(:) :: saddle_cmask => NULL()
+  LOGICAL, POINTER, DIMENSION(:) :: saddle_rmask => NULL()
   INTEGER(i4), POINTER, DIMENSION(:) :: limiter_nds => NULL()
   INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL()
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
@@ -254,6 +255,7 @@ TYPE :: gs_eq
   CLASS(oft_vector), POINTER :: psi_dt => NULL() !<
   CLASS(oft_matrix), POINTER :: dels => NULL()
   CLASS(oft_matrix), POINTER :: dels_dt => NULL()
+  CLASS(oft_matrix), POINTER :: dels_full => NULL()
   CLASS(oft_matrix), POINTER :: mrop => NULL()
   CLASS(oft_matrix), POINTER :: mop => NULL()
   CLASS(flux_func), POINTER :: I => NULL() !< F*F' flux function
@@ -1161,6 +1163,11 @@ IF(.NOT.ASSOCIATED(self%mrop))CALL build_mrop(self%mrop,"none")
 IF(.NOT.ASSOCIATED(self%mop))CALL oft_blag_getmop(self%mop,"none")
 !---Setup boundary conditions
 ALLOCATE(node_flag(oft_blagrange%ne),cdofs(oft_blagrange%nce))
+IF(.NOT.ASSOCIATED(self%saddle_rmask))THEN
+  ALLOCATE(self%saddle_rmask(smesh%nreg))
+  self%saddle_rmask=.TRUE.
+  self%saddle_rmask(1)=.FALSE.
+END IF
 ALLOCATE(self%saddle_cmask(smesh%nc),self%saddle_pmask(smesh%np))
 self%spatial_bounds(:,1)=[1.d99,-1.d99]
 self%spatial_bounds(:,2)=[1.d99,-1.d99]
@@ -1173,6 +1180,12 @@ DO i=1,smesh%nc
     DO j=1,oft_blagrange%nce
       node_flag(cdofs(j))=.TRUE.
     END DO
+    IF(.NOT.self%saddle_rmask(smesh%reg(i)))THEN
+      self%saddle_cmask(i)=.FALSE.
+      DO j=1,3
+        self%saddle_pmask(smesh%lc(j,i))=.FALSE.
+      END DO
+    END IF
   ELSE
     self%saddle_cmask(i)=.FALSE.
     DO j=1,3
@@ -1192,9 +1205,9 @@ DO i=1,smesh%np
     self%saddle_cmask(smesh%lpc(j))=.FALSE.
   END DO
 END DO
+self%saddle_pmask=.FALSE.
 DO i=1,smesh%nc
-  IF(self%saddle_cmask(i))CYCLE
-  self%saddle_pmask(smesh%lc(:,i))=.FALSE.
+  IF(self%saddle_cmask(i))self%saddle_pmask(smesh%lc(:,i))=.TRUE.
 END DO
 self%saddle_pmask=self%saddle_pmask.OR.smesh%bp
 CALL get_limiter
@@ -1236,7 +1249,7 @@ END DO
 DO i=1,self%ncoils
   DO j=i,self%ncoils
     CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
-    self%Lcoils(i,j)=self%Lcoils(i,j)!/self%coil_regions(j)%area
+    self%Lcoils(i,j)=self%Lcoils(i,j)
     IF(j>i)self%Lcoils(j,i)=self%Lcoils(i,j)
   END DO
 END DO
@@ -1875,19 +1888,13 @@ DEALLOCATE(btmp,psi_vals,eta_reg,reg_source)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_wall_source
 !---------------------------------------------------------------------------
-! SUBROUTINE gs_coil_mutual
-!---------------------------------------------------------------------------
-!> Needs Docs
-!!
-!! @param[in,out] self G-S object
-!! @param[in,out] a Psi field
-!! @param[in,out] b Source field
+!> Compute inductance between coil and given poloidal flux
 !---------------------------------------------------------------------------
 subroutine gs_coil_mutual(self,iCoil,b,mutual)
-class(gs_eq), intent(inout) :: self
-integer(4), intent(in) :: iCoil
-CLASS(oft_vector), intent(inout) :: b
-real(8), intent(out) :: mutual
+class(gs_eq), intent(inout) :: self !< G-S solver object
+integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
+CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
+real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,psi_tmp,nturns
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
@@ -1928,6 +1935,71 @@ mutual=mu0*2.d0*pi*mutual!/self%coil_regions(iCoil)%area
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_coil_mutual
+!---------------------------------------------------------------------------
+!> Compute inductance between plasma current and given poloidal flux
+!---------------------------------------------------------------------------
+subroutine gs_plasma_mutual(self,b,mutual,itor)
+class(gs_eq), intent(inout) :: self !< G-S solver object
+CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
+real(8), intent(out) :: mutual !< Mutual inductance \f$ \int J_p \psi dV / I_p \f$
+real(8), intent(out) :: itor !< Plasma toroidal current
+real(r8), pointer, dimension(:) :: btmp
+real(8) :: psitmp(1),goptmp(3,3),det,pt(3),v,t1,b_tmp,itor_loc
+real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
+integer(4) :: j,m,l,k
+integer(4), allocatable :: j_lag(:)
+logical :: curved
+type(oft_lag_brinterp), target :: psi_eval
+! t1=omp_get_wtime()
+!---
+NULLIFY(btmp)
+CALL b%get_local(btmp)
+psi_eval%u=>self%psi
+CALL psi_eval%setup()
+!---
+mutual=0.d0
+itor=0.d0
+!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,pt,psitmp,b_tmp,l,rop,itor_loc) reduction(+:mutual) &
+!$omp reduction(+:itor)
+allocate(rop(oft_blagrange%nce))
+allocate(j_lag(oft_blagrange%nce))
+!$omp do schedule(static,1)
+DO j=1,smesh%nc
+  IF(smesh%reg(j)/=1)CYCLE
+  call oft_blagrange%ncdofs(j,j_lag)
+  curved=.TRUE. !trimesh_curved(smesh,j)
+  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
+  do m=1,oft_blagrange%quad%np
+    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(j,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
+    pt=smesh%log2phys(j,oft_blagrange%quad%pts(:,m))
+    !---Compute Magnetic Field
+    IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
+      IF(self%mode==0)THEN
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+      ELSE
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+      END IF
+      b_tmp=0.d0
+      DO l=1,oft_blagrange%nce
+        CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
+        b_tmp=b_tmp+btmp(j_lag(l))*rop(l)
+      END DO
+      det = v*oft_blagrange%quad%wts(m)
+      itor = itor + itor_loc*det
+      mutual = mutual + b_tmp*itor_loc*det
+    END IF
+  end do
+end do
+deallocate(j_lag,rop)
+!$omp end parallel
+mutual=mu0*2.d0*pi*mutual/itor
+CALL psi_eval%delete()
+DEALLOCATE(btmp)
+! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
+end subroutine gs_plasma_mutual
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_fit_isoflux
 !---------------------------------------------------------------------------
@@ -3688,6 +3760,10 @@ DO i=1,smesh%np
         unique_saddles(1:2,n_unique) = saddle_loc
         unique_saddles(3,n_unique) = saddle_psi
         stypes(n_unique) = stype
+        !
+        cell=0
+        CALL bmesh_findcell(smesh,cell,saddle_loc,f)
+        IF(smesh%reg(cell)/=1)CYCLE
         o_psi = MAX(o_psi,saddle_psi)
       END IF
     END IF
@@ -3709,8 +3785,9 @@ DO m=1,n_unique
   cell=0
   CALL bmesh_findcell(smesh,cell,unique_saddles(1:2,m),f)
   IF(oft_debug_print(2))WRITE(*,*)stypes(m),unique_saddles(:,m),smesh%reg(cell)
-  IF(smesh%reg(cell)/=1)CYCLE
+  IF(self%saddle_rmask(smesh%reg(cell)))CYCLE
   IF(ABS(o_psi-unique_saddles(3,m))<1.d-8)THEN
+    IF(smesh%reg(cell)/=1)CYCLE
     o_point=unique_saddles(1:2,m)
     CYCLE
   END IF
@@ -3783,7 +3860,7 @@ IF((cell_active==0).OR.(minval(f)<-1.d-3).OR.(maxval(f)>1.d0+1.d-3))THEN
   ! CALL psi_eval%delete()
   RETURN
 END IF
-IF(smesh%reg(cell_active)/=1)RETURN ! Dont allow saddles outside of plasma region
+IF(self%saddle_rmask(smesh%reg(cell_active)))RETURN ! Dont allow saddles outside of allowable regions
 IF(SQRT(SUM(gpsitmp**2))>psi_scale_len)RETURN
 call psi_eval_active%interp(cell_active,f,goptmp,gpsitmp(1:1))
 psi_x=gpsitmp(1)

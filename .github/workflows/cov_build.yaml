@@ -1,4 +1,4 @@
-name: Open FUSION Toolkit code coverage build
+name: Coverage Build
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
     - name: Install prerequisites
       run: |
         sudo apt -y install lcov
-        pip3 install pytest numpy scipy h5py triangle
+        pip3 install pytest pytest-cov numpy scipy h5py triangle
 
     - name: Cache external libraries
       id: cache-ext-libs
@@ -45,6 +45,7 @@ jobs:
 
     - name: Build external
       shell: bash
+      timeout-minutes: 30
       working-directory: libs
       run: >
         python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=2
@@ -75,6 +76,7 @@ jobs:
 
     - name: Test OFT
       shell: bash
+      timeout-minutes: 60
       working-directory: libs/build_release
       run: make test_cov
     
@@ -88,7 +90,7 @@ jobs:
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v4
       with:
-        file: libs/build_release/cleaned_coverage.txt
+        files: libs/build_release/cleaned_coverage.txt,libs/build_release/tests/coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }}
         slug: hansec/OpenFUSIONToolkit
         verbose: true

@@ -3,7 +3,7 @@
 ########################
 cmake_minimum_required( VERSION 3.12 )
 project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
-set( OFT_VER_SUFFIX "-beta2" CACHE INTERNAL "Version suffix" )
+set( OFT_VER_SUFFIX "-beta3" CACHE INTERNAL "Version suffix" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
 
 option(OFT_BUILD_TESTS "Build tests?" OFF)
@@ -298,6 +298,10 @@ set( OFT_LIBS oftphysics oftfem oftla oftgrid oftbase oftext )
 add_subdirectory( utilities )
 # Build master lib for packaging to reduce size
 if(OFT_PACKAGE_BUILD)
+  find_package( Python REQUIRED )
+  if (Python_VERSION_MAJOR VERSION_LESS 3)
+    message( FATAL_ERROR "Python 3 required for packaging" )
+  endif ()
   file(WRITE null.c "")
   add_library( oft SHARED null.c )
   set_target_properties( oft PROPERTIES LINKER_LANGUAGE Fortran )

@@ -17,3 +17,5 @@ install(FILES ITER/ITER_mesh_ex.ipynb DESTINATION examples/TokaMaker/ITER COMPON
 install(FILES ITER/ITER_baseline_ex.ipynb DESTINATION examples/TokaMaker/ITER COMPONENT examples)
 install(FILES ITER/ITER_geom.json DESTINATION examples/TokaMaker/ITER COMPONENT examples)
 install(FILES ITER/ITER_mesh.h5 DESTINATION examples/TokaMaker/ITER COMPONENT examples)
+#
+install(DIRECTORY DIIID DESTINATION examples/TokaMaker COMPONENT examples)

@@ -15,17 +15,22 @@ USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 ! USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid, ONLY: multigrid_reset
 ! USE multigrid_build, ONLY: multigrid_construct_surf
+!
+USE oft_la_base, ONLY: oft_vector, oft_matrix
+USE oft_solver_base, ONLY: oft_solver
+USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
+!
 USE fem_base, ONLY: oft_afem_type
-USE oft_la_base, ONLY: oft_vector
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
   oft_lag_setup
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, &
-  gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp
+USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
+  gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
+  gs_plasma_mutual, gs_source
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
-USE oft_gs_td, ONLY: setup_gs_td, step_gs_td, eig_gs_td
+USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -46,6 +51,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
 END TYPE tokamaker_settings_type
 !
 TYPE(gs_eq), POINTER :: gs_global => NULL() !< Global G-S object
+TYPE(oft_tmaker_td), POINTER :: gs_td_global => NULL() !< Global time-dependent object
 integer(i4), POINTER :: lc_plot(:,:) => NULL() !< Needs docs
 integer(i4), POINTER :: reg_plot(:) => NULL() !< Needs docs
 real(r8), POINTER :: r_plot(:,:) => NULL() !< Needs docs
@@ -81,20 +87,25 @@ END SUBROUTINE tokamaker_eval_green
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,contig_flag,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
+SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(80) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Needs docs
 real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(i4), POINTER :: contig_tmp(:)
 INTEGER(4) :: i
+INTEGER(4), POINTER :: xpoint_tmp(:)
 CALL copy_string_rev(coil_file,gs_global%coil_file)
 IF(TRIM(gs_global%coil_file)=='none')THEN
-  CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
-  CALL c_f_pointer(contig_flag, contig_tmp, [smesh%nreg])
   !
+  CALL c_f_pointer(xpoint_mask, xpoint_tmp, [smesh%nreg])
+  ALLOCATE(gs_global%saddle_rmask(smesh%nreg))
+  gs_global%saddle_rmask=LOGICAL(xpoint_tmp==0)
+  !
+  CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
   gs_global%ncoil_regs=0
   gs_global%ncond_regs=0
   DO i=2,smesh%nreg
@@ -114,6 +125,7 @@ IF(TRIM(gs_global%coil_file)=='none')THEN
   gs_global%coil_nturns=0.d0
   gs_global%coil_nturns=nturns_tmp
   !
+  CALL c_f_pointer(contig_flag, contig_tmp, [smesh%nreg])
   ALLOCATE(gs_global%cond_regions(gs_global%ncond_regs))
   ALLOCATE(gs_global%coil_regions(gs_global%ncoil_regs))
   gs_global%ncond_regs=0
@@ -270,11 +282,17 @@ END SUBROUTINE tokamaker_analyze
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_td(dt,lin_tol,nl_tol) BIND(C,NAME="tokamaker_setup_td")
+SUBROUTINE tokamaker_setup_td(dt,lin_tol,nl_tol,pre_plasma) BIND(C,NAME="tokamaker_setup_td")
 REAL(c_double), VALUE, INTENT(in) :: dt !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: lin_tol !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: nl_tol !< Needs docs
-CALL setup_gs_td(gs_global,dt,lin_tol,nl_tol)
+LOGICAL(c_bool), VALUE, INTENT(in) :: pre_plasma !< Needs docs
+IF(ASSOCIATED(gs_td_global))THEN
+  CALL gs_td_global%delete()
+  DEALLOCATE(gs_td_global)
+END IF
+ALLOCATE(gs_td_global)
+CALL gs_td_global%setup(gs_global,dt,lin_tol,nl_tol,LOGICAL(pre_plasma))
 END SUBROUTINE tokamaker_setup_td
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -324,7 +342,7 @@ REAL(c_double), INTENT(inout) :: dt !< Needs docs
 INTEGER(c_int), INTENT(out) :: nl_its !< Needs docs
 INTEGER(c_int), INTENT(out) :: lin_its !< Needs docs
 INTEGER(c_int), INTENT(out) :: nretry !< Needs docs
-CALL step_gs_td(time,dt,nl_its,lin_its,nretry)
+CALL gs_td_global%step(time,dt,nl_its,lin_its,nretry)
 END SUBROUTINE tokamaker_step_td
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -389,6 +407,37 @@ END SUBROUTINE tokamaker_get_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_dels_curr(psi_vals) BIND(C,NAME="tokamaker_get_dels_curr")
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: u,v
+CLASS(oft_solver), POINTER :: minv
+IF(.NOT.ASSOCIATED(gs_global%dels_full))CALL build_dels(gs_global%dels_full,gs_global,"none")
+!
+CALL gs_global%psi%new(u)
+CALL gs_global%psi%new(v)
+CALL c_f_pointer(psi_vals, vals_tmp, [gs_global%psi%n])
+CALL u%restore_local(vals_tmp)
+!
+NULLIFY(minv)
+CALL create_cg_solver(minv)
+minv%A=>gs_global%mop
+minv%its=-2
+CALL create_diag_pre(minv%pre) ! Setup Preconditioner
+CALL gs_global%dels_full%apply(u,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL u%get_local(vals_tmp)
+!
+CALL u%delete()
+CALL v%delete()
+CALL minv%pre%delete()
+CALL minv%delete()
+DEALLOCATE(u,v,minv)
+END SUBROUTINE tokamaker_get_dels_curr
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_coil_currents(currents,reg_currents) BIND(C,NAME="tokamaker_get_coil_currents")
 TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Needs docs
@@ -413,6 +462,33 @@ END SUBROUTINE tokamaker_get_coil_currents
 SUBROUTINE tokamaker_get_coil_Lmat(Lmat) BIND(C,NAME="tokamaker_get_coil_Lmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: Lmat !< Needs docs
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
+INTEGER(4) :: i
+REAL(8) :: tmp1,tmp2,tmp3,itor
+CLASS(oft_vector), POINTER :: rhs,vec1,vec2
+!---Update plasma row/column
+IF(gs_global%has_plasma)THEN
+  DO i=1,gs_global%ncoils
+    CALL gs_plasma_mutual(gs_global,gs_global%psi_coil(i)%f,gs_global%Lcoils(i,gs_global%ncoils+1),itor)
+    gs_global%Lcoils(gs_global%ncoils+1,i)=gs_global%Lcoils(i,gs_global%ncoils+1)
+  END DO
+  !
+  CALL gs_global%psi%new(rhs)
+  CALL gs_global%psi%new(vec1)
+  CALL gs_global%psi%new(vec2)
+  CALL gs_source(gs_global,gs_global%psi,rhs,vec1,vec2,tmp1,tmp2,tmp3)
+  CALL vec1%set(0.d0)
+  CALL gs_global%lu_solver%apply(vec1,rhs)
+  CALL gs_plasma_mutual(gs_global,vec1,gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1),itor)
+  gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1)=gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1)/itor
+  CALL rhs%delete()
+  CALL vec1%delete()
+  CALL vec2%delete()
+  DEALLOCATE(rhs,vec1,vec2)
+ELSE
+  gs_global%Lcoils(gs_global%ncoils+1,:)=0.d0
+  gs_global%Lcoils(:,gs_global%ncoils+1)=0.d0
+END IF
+!---Copy out inductance matrix
 CALL c_f_pointer(Lmat, vals_tmp, [gs_global%ncoils+1,gs_global%ncoils+1])
 vals_tmp=gs_global%Lcoils
 END SUBROUTINE tokamaker_get_coil_Lmat
@@ -477,19 +553,18 @@ END SUBROUTINE tokamaker_sauter_fc
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_globals(Itor,centroid,vol,pvol,dflux,tflux,li) BIND(C,NAME="tokamaker_get_globals")
+SUBROUTINE tokamaker_get_globals(Itor,centroid,vol,pvol,dflux,tflux,bp_vol) BIND(C,NAME="tokamaker_get_globals")
 REAL(c_double), INTENT(out) :: Itor !< Needs docs
 REAL(c_double), INTENT(out) :: centroid(2) !< Needs docs
 REAL(c_double), INTENT(out) :: vol !< Needs docs
 REAL(c_double), INTENT(out) :: pvol !< Needs docs
 REAL(c_double), INTENT(out) :: dflux !< Needs docs
 REAL(c_double), INTENT(out) :: tflux !< Needs docs
-REAL(c_double), INTENT(out) :: li !< Needs docs
-CALL gs_comp_globals(gs_global,Itor,centroid,vol,pvol,dflux,tflux,li)
+REAL(c_double), INTENT(out) :: bp_vol !< Needs docs
+CALL gs_comp_globals(gs_global,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
 Itor=Itor/mu0
 vol=vol*2.d0*pi
 pvol=pvol*2.d0*pi/mu0
-li=li*2.d0/(mu0*gs_global%o_point(1))
 END SUBROUTINE tokamaker_get_globals
 !------------------------------------------------------------------------------
 !> Needs docs

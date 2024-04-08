@@ -68,7 +68,7 @@ for i in range(2):
             elif stripped_line.startswith(key):
                 prequisites[key] = stripped_line.split('=>')[1].strip()
     for key in prequisites:
-        path = prequisites[key]
+        path = os.path.normpath(prequisites[key])
         realpath = os.path.realpath(prequisites[key])
         if i == 1:
             if path == realpath:
@@ -82,7 +82,11 @@ for i in range(2):
         if filename == symname:
             shutil.copy(path, key)
         else:
-            shutil.copy(realpath, filename)
+            try:
+                shutil.copy(realpath, filename)
+            except shutil.SameFileError:
+                print('  Skipping copy for existing file: {0} -> {1}'.format(realpath, filename))
+                continue
             try:
                 os.remove(symname)
             except FileNotFoundError:

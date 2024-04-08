@@ -1,66 +1,50 @@
-name: CI Build
+name: CD Build
 
 on:
   push:
     branches:
       - main
-      - ci_debug
-  pull_request:
-    types: [opened, reopened, synchronize]
   
 jobs:
   build:
-    name: ${{ format('{0} ({1})', matrix.config.name, matrix.parallel) }}
+    name: ${{ format('Nightly ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
+    timeout-minutes: 30
     env:
       CC: ${{ matrix.config.cc }}
       CXX: ${{ matrix.config.cxx }}
       FC: ${{ matrix.config.fc }}
-      OMP_NUM_THREADS: 2
     
     strategy:
       fail-fast: false
       matrix:
-        parallel: ["openmp", "mpi_openmp"]
         config:
         - {
-            name: "Ubuntu 20.04 GCC 10",
+            name: "Linux-x86_64",
             os: ubuntu-20.04,
             cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python", pip: "pip"
           }
         - {
-            name: "Ubuntu 22.04 GCC 13",
-            os: ubuntu-22.04,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3"
-          }
-        - {
-            name: "macOS Monterey GCC 12",
+            name: "macOS-x86_64",
             os: macos-12,
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", pip: "pip3"
           }
         - {
-            name: "macOS Ventura GCC 13",
-            os: macos-13,
+            name: "macOS-arm64",
+            os: macos-14,
             cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3"
-          }
+        }
 
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
-
-    - name: Install prerequisites
-      run: ${{ matrix.config.pip }} install pytest numpy scipy h5py triangle
 
     - name: Cache external libraries
       id: cache-ext-libs
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.config.os }}-build-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
-
-    - name: Create build dir
-      if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
-      run: mkdir libs
+        key: ${{ matrix.config.os }}-nightly-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Get OS version (Linux)
       if: startsWith(matrix.config.os, 'ubuntu')
@@ -78,24 +62,25 @@ jobs:
         $CXX --version
         $FC --version
 
-    - name: Build external (OpenMP)
-      if: ${{ matrix.parallel == 'openmp' }}
+    - name: Create build dir
+      if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
+      run: mkdir libs
+
+    - name: Build external (Linux)
+      if: startsWith(matrix.config.os, 'ubuntu')
       shell: bash
-      timeout-minutes: 30
       working-directory: libs
       run: >
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
-        --build_umfpack=1 --build_arpack=1 --oft_build_tests=1
-    
-    - name: Build external (MPI+OpenMP)
-      if: ${{ matrix.parallel == 'mpi_openmp' }}
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
+        --build_umfpack=1 --build_arpack=1 --oblas_dynamic_arch --oft_package
+
+    - name: Build external (macOS)
+      if: startsWith(matrix.config.os, 'macos')
       shell: bash
-      timeout-minutes: 60
       working-directory: libs
       run: >
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --ref_blas
-        --build_mpi=1 --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1
-        --build_arpack=1 --oft_build_tests=1
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
+        --build_umfpack=1 --build_arpack=1 --oft_package
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
@@ -124,8 +109,14 @@ jobs:
       working-directory: libs/build_release
       run: make install
 
-    - name: Test OFT
+    - name: Package OFT
       shell: bash
-      timeout-minutes: 90
       working-directory: libs/build_release
-      run: make test
+      run: make package
+    
+    - name: Upload package artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.config.name }}-${{ github.sha }}
+        path: libs/build_release/OpenFUSIONToolkit_*
+        overwrite: true
