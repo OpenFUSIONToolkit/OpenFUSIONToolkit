@@ -3670,7 +3670,7 @@ DO i=1,smesh%np
   IF(self%saddle_pmask(i))ncuts(i)=-1
 END DO
 !
-psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))/(1.d1*SQRT(self%lim_area))
+psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))*5.d0/(SQRT(self%lim_area))
 unique_saddles=-1.d99
 o_psi=-1.d99
 n_unique=0
