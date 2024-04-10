@@ -3,11 +3,7 @@ ThinCurr Example 4: Using HODLR approximation {#doc_thincurr_ex4}
 
 [TOC]
 
-# Hierarchical Off-Diagonal Low-Rank (HODLR) approximation
-
-
-
-# Running an eigenvalue calculation
+# Running an eigenvalue calculation using Hierarchical Off-Diagonal Low-Rank (HODLR) approximation
 
 To run an eigenstate simulation (compute the characteristic L/R-decaying modes) you can issue the following command from within one of the run directories. Note, make sure `plot_run=F` in the `thincurr_eig_options` group.
 

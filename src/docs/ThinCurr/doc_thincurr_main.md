@@ -23,6 +23,47 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_thincurr_ex3
  - \subpage doc_thincurr_ex4
 
+\section doc_tw_main_settings ThinCurr settings groups
+
+\subsubsection doc_tw_main_settings_fortran Fortran option groups
+Driver-specific settings groups are defined for each of the programs above (eg. `thincurr_td`), follow links for description
+of available settings.
+
+The following driver-wide settings are also available:
+
+**Option group:** `thincurr_hodlr_options` (see \ref doc_tw_main_hodlr "HODLR")
+|  Option                 |  Description  | Type [dim] |
+|-------------------------|---------------|------------|
+|  `target_size=1500`     |  Target size for mesh partitioning | int |
+|  `aca_min_its=20`       |  Minimum nuber of ACA+ iterations to perfom (if used) | int |
+|  `L_svd_tol=-1.0`       |  SVD tolerance for HODLR compression of \f$ \textrm{L} \f$ matrix (negative to disable) | int |
+|  `L_aca_rel_tol=-1.0`   |  ACA tolerance (relative to SVD) for HODLR compression of \f$ \textrm{L} \f$ matrix (negative to disable) | int |
+|  `B_svd_tol=T`          |  SVD tolerance for HODLR compression of B reconstruction operator (negative to disable) | int |
+|  `B_aca_rel_tol=F`      |  ACA tolerance (relative to SVD) for HODLR compression of B reconstruction operator (negative to disable) | int |
+
+\subsubsection doc_tw_main_settings_xml XML input settings
+Settings for ThinCurr runs are contained in the `oft->thincurr` element, with the following elements:
+  * `eta`: Comma separated values for surface resistivity (\f$ \eta_s = \eta / t \f$) in each region
+  * `sens_mask`: Comma separated integer mask for removing regions from sensor signals (optional; default: 0 for all regions)
+  * `icoils`: Definition of coils with fixed current for \ref thincurr_td and \ref thincurr_fr (see \ref doc_tw_main_filament_def)
+  * `vcoils`: Definition of coils with fixed voltage (see \ref doc_tw_main_filament_def)
+
+```xml
+<oft>
+  <thincurr>
+    <eta></eta>
+    <sens_mask></sens_mask>
+    <icoils>
+      ...
+    </icoils>
+    <vcoils>
+      ...
+    </vcoils>
+  </thincurr>
+</oft>
+```
+
+
 \section doc_tw_main_num Description of numerics
 Currents in ThinCurr are represented in terms of a surface current (\f$ \textbf{J}_s = \int \textbf{J} dt_w = \textbf{J} * t_w \f$),
 where \f$ t_w \f$ is the direction through the thickness of the wall, represents a uniform current flowing in a wall of approximately
@@ -62,12 +103,18 @@ mutual coupling of all coils and surfaces. Conversely, for `vcoils` the voltage 
 consistent with the mutual coupling of all coils and surfaces and the coils self-inductance and resistivity.
 
 \subsubsection doc_tw_main_filament_def Defining filaments
+The `icoils` element should contain one or more `coil_set` elements each with one or more `coil` elements.
+ * Individual coil sets can be masked from sensor signals using the `sens_mask` attribute (default: 0).
+ * All coils in a coil_set share the same current waveform with scale factor set by the optional `scale` attribute (default: 1.0).
 
+If two values are given for inside a `coil` element, they are treated as the R,Z position of a circular coil. If a general 3D
+coil is desired, the number of points may be specified using the `npts` attribute and a corresponding list of points (1 per line)
+provided in the element with comma-separated X,Y,Z positions.
 ```xml
 <icoils>
-  <coil_set>
-    <coil scale="-1.0">1.0, 0.1</coil>
-    <coil npts="5">1.0, 0.0, -0.1
+  <coil_set sens_mask="1">
+    <coil scale="1.0">1.0, 0.1</coil>
+    <coil npts="5" scale="1.0">1.0, 0.0, -0.1
       0.0, 1.0, -0.1
       -1.0, 0.0, -0.1
       0.0, -1.0, -0.1
@@ -77,11 +124,20 @@ consistent with the mutual coupling of all coils and surfaces and the coils self
 </icoils>
 ```
 
+The `vcoils` element should contain one or more `coil_set` elements each with one or more `coil` elements.
+ * Individual coil sets can be masked from sensor signals using the `sens_mask` attribute (default: 0).
+ * All coils in a coil_set share the same current waveform with scale factor set by the optional `scale` attribute (default: 1.0).
+ * The `res_per_len` attribute is used to specify the resistance per unit length (\f$ \Omega/m \f$) of the filament
+ * The `radius` attribute is used to set the effective radius of the conductor for calculation of the self-inductance
+
+As above, if two values are given for inside a `coil` element, they are treated as the R,Z position of a circular coil. If a general 3D
+coil is desired, the number of points may be specified using the `npts` attribute and a corresponding list of points (1 per line)
+provided in the element with comma-separated X,Y,Z positions.
 ```xml
 <vcoils>
-  <coil_set>
-    <coil res_per_len="2.195E-4" radius="0.005">1.1, 0.25</coil>
-    <coil res_per_len="2.195E-4" radius="0.005" npts="5">1.0, 0.0, -0.1
+  <coil_set sens_mask="1">
+    <coil res_per_len="2.195E-4" radius="0.005" scale="1.0">1.1, 0.25</coil>
+    <coil res_per_len="2.195E-4" radius="0.005" npts="5" scale="1.0">1.0, 0.0, -0.1
       0.0, 1.0, -0.1
       -1.0, 0.0, -0.1
       0.0, -1.0, -0.1
@@ -169,3 +225,50 @@ Closures are defined using "sidesets" in mesh definition files that mark the tri
 avoid singularities in the system. Sidesets are stored in the `mesh/SIDESET****` fields in native mesh files. These can be
 converted from nodesets defined via the Cubit meshing software, through the Exodus II mesh format, and `convert_cubit.py` or other
 mesh inputs with suitable interfacing scripts.
+
+\subsection doc_tw_main_hodlr Hierarchical Off-Diagonal Low-Rank (HODLR) approximation
+In the standard BFEM approach described above every element interacts with every other element, leading to a dense \f$ \textrm{L} \f$ and
+growth of memory and time requirements at a rate of \f$ O(N^2) \f$, where \f$ N \f$ is the number of elements in the model. This limits
+the size of models on most systems to < 20k elements on a typical laptop with 16GB of RAM and < 180k on even a large workstation with
+1TB of RAM. In addition to memory limits, these models will take a very long time to compute as the number of FLOPs required will also
+scale as \f$ O(N^2) \f$.
+
+To avoid this ThinCurr models can take advantage of the structure of the \f$ \textrm{L} \f$ matrix to generate an approximation of the
+full matrix with some desired tolerance. As application of these models to engineering and other studies often do not require extremely
+high accuracy, this can dramatically reduce the computational requirement while retaining sufficient fidelity for a desired study. This
+is possible as the \f$ \textrm{L} \f$ constructed from the BFEM exhibits a low-rank structure for interactions between elements that are
+physically separated by a large distance relative to their size. If we spatial partition our mesh into regions, the interactions between
+separate regions, so called off-diagonal blocks of the matrix, will possess this low-rank structure, meaning they can be well
+approximated by a matrix with smaller rank (eg. truncated SVD). To improve efficiency and performance such a spatial partitioning
+can be done in a nested fashion, leading to a so-called Hierarchical Off-Diagonal Low-Rank (HODLR) approximation to the matrix.
+
+\image html thincurr_aca_scaling.png "Improvement in required memory (top) and time (bottom) for a eigenvalue calculation using ACA+, compared to the direct approach"
+
+\subsection doc_tw_main_hodlr_part Spatial partitioning
+ThinCurr currently utilizes a binary tree to partition the surface mesh used to discretize currents in the model. Initially, a
+bounding box is created that encloses the full mesh. The mesh is then recursively subdivided by looking at each partition and
+subdividing it in one of the three principal cartesian directions if the number of elements is greater than a given size
+(`target_size`). On each level, the direction of subdivision is chosen to be the direction with largest standard deviation of
+position over the contained points. Near and far interactins between mesh regions are then determined on each level, taking
+into account appropriate "masking" of interactions from higher levels.
+
+\image html thincurr_aca_part.png "Example mesh regions following partition of a ThinCurr mesh for HODLR"
+
+\subsection doc_tw_main_hodlr_aca Adaptive Cross-Approximation (ACA+)
+Once the spatial partitioning is complete the individual matrix blocks can be constructed. First, diagonal blocks are fully assembled
+and stored as dense matrices. Next, low-rank approximations are computed for all off-diagonal blocks. For blocks whose corresponding
+mesh regions are "close" to eachother, as determined by the ratio of the center-center separation to the circumradius of
+each region, the full block is computed and then compressed using an SVD. The compression is set by truncating the SVD
+at a user-specified tolerance (specified by `L_svd_tol`), based on the Frobenius norm of the singular values.
+
+For all other blocks, which correspond to off-diagonal blocks whose corresponding mesh regions are not "close" to eachother
+the Adaptive Cross-Appoximation technique is used. This technique iteratively builds a low-rank approximation
+(\f$ \textrm{M} \approx \textrm{U} \textrm{V}^T \f$) by sampling rows and columns of the block and stopping once a desired
+tolerance, defined relative to the SVD tolerance (`L_aca_rel_tol < 1.0`), has been reached. As ACA+ has some inherent
+random variation, the tolerance specified for ACA+ should be higher than the SVD tolerance (`L_aca_rel_tol < 1.0`).
+After a block's approximation by ACA+ is complete the resulting block is then recompressed using SVD for greater run
+to run consistency.
+
+\note The same techniques can also be applied to the magnetic field reconstruction operator, with corresponding settings of
+`B_svd_tol` and `B_aca_rel_tol`. However, as these tolerances are absolute the magnetic versions should generally be 4-5 orders of
+magnitude larger than those for the \f$ \textrm{L} \f$ matrix.

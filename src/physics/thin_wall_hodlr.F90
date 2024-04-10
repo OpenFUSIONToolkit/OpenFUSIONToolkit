@@ -314,21 +314,6 @@ END DO
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
-!
-! !---
-! ALLOCATE(rpmap(rmesh%np))
-! rpmap = 0
-! DO i=1,nrows
-!   ii=row_obj%pmap_inv(irows(i))
-!   rpmap(ii)=i
-! END DO
-! !---
-! ALLOCATE(cpmap(cmesh%np))
-! cpmap = 0
-! DO i=1,ncols
-!   ii=col_obj%pmap_inv(icols(i))
-!   cpmap(ii)=i
-! END DO
 !---
 counts=0
 f=1.d0/3.d0
@@ -834,8 +819,6 @@ DO i=1,self%nblocks
     END DO
 END DO
 WRITE(*,*)'  Avg block size = ',INT(avg_size/REAL(self%nblocks,8),4)
-! WRITE(*,*)'  # of dense =     ',self%ndense
-! WRITE(*,*)'  # of sparse =    ',self%nsparse
 IF(self%L_aca_tol<=0.d0)THEN
   sparse_count=[0,sparse_count(1)+sparse_count(2)]
 END IF
