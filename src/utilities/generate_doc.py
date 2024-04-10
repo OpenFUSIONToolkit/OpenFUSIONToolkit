@@ -22,7 +22,7 @@ sep_template = """!-------------------------------------------------------------
 ! {0}
 !---------------------------------------------------------------------------
 """
-output_reg = re.compile("    [ ]*[\S]+")
+output_reg = re.compile(r'    [ ]*[\S]+')
 
 def run_command(command, timeout=10):
     # Run shell command
@@ -83,7 +83,7 @@ def parse_fortran_file(fid):
             doc_buffer = doc_buffer + line[2:]
             if read_full:
               # Search for section break
-              if line.find("\subsection") >= 0:
+              if line.find(r'\subsection') >= 0:
                 splits = line.split(" ")
                 term_found = False
                 sec_title = None
@@ -91,7 +91,7 @@ def parse_fortran_file(fid):
                   if(term_found):
                     sec_title = ' '.join(splits[i+1:])
                     break
-                  if term.find("\subsection") >= 0:
+                  if term.find(r'\subsection') >= 0:
                     term_found = True
                 if sec_title != None:
                   full_code = full_code + sep_template.format(sec_title[:-1])
@@ -115,7 +115,7 @@ def parse_fortran_file(fid):
         file_buffer = file_buffer + doc_buffer + "\n"
     # Add full source if needed
     if full_code != "":
-        file_buffer = file_buffer + "\n\section " + ex_prefix + "_full Complete Source\n"
+        file_buffer = file_buffer + r'\n\section " + ex_prefix + "_full Complete Source\n'
         file_buffer = file_buffer + "~~~~~~~~~{.F90}\n"
         file_buffer = file_buffer + full_code
         file_buffer = file_buffer + "~~~~~~~~~\n"
@@ -159,7 +159,7 @@ if __name__ == '__main__':
     print()
     print("\n==========================================")
     print("Converting Jupyter notebooks")
-    eq_reg = re.compile("\$(.*?)\$")
+    eq_reg = re.compile(r'\$(.*?)\$')
     files = glob.glob("examples/*/*/*.ipynb")
     for filename in files:
         print(filename)
