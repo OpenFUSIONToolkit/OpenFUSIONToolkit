@@ -11,3 +11,7 @@ install(FILES cyl/thincurr_ex-cyl.h5 DESTINATION examples/ThinCurr/cyl COMPONENT
 install(FILES torus/oft.in DESTINATION examples/ThinCurr/torus COMPONENT examples)
 install(FILES torus/oft_in.xml DESTINATION examples/ThinCurr/torus COMPONENT examples)
 install(FILES torus/thincurr_ex-torus.h5 DESTINATION examples/ThinCurr/torus COMPONENT examples)
+#
+install(FILES ports/oft.in DESTINATION examples/ThinCurr/ports COMPONENT examples)
+install(FILES ports/oft_in.xml DESTINATION examples/ThinCurr/ports COMPONENT examples)
+install(FILES ports/thincurr_ex-ports.h5 DESTINATION examples/ThinCurr/ports COMPONENT examples)
