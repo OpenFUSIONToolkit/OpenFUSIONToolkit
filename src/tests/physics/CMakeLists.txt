@@ -24,8 +24,9 @@ if( OFT_BUILD_TESTS )
   file( COPY cube.t3d DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 
   # ThinCurr tests
-  file( COPY test_thin_wall.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  file( COPY test_ThinCurr.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   file( COPY tw_test-cyl.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  file( COPY tw_test-cyl_hr.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   file( COPY tw_test-passive.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   file( COPY tw_test-plate.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   file( COPY tw_test-torus.h5 DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )

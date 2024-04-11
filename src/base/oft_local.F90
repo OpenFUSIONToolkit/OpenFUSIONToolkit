@@ -295,5 +295,25 @@ PURE FUNCTION magnitude(a) RESULT(c)
 REAL(r8), INTENT(in) :: a(:) !< Array
 REAL(r8) :: c
 c=SQRT(SUM(a**2))
-END FUNCTION magnitude 
+END FUNCTION magnitude
+!------------------------------------------------------------------------------
+!> Compute the 2-norm of an array
+!!
+!! @result \f$ \sum_i a^2_i \f$
+!------------------------------------------------------------------------------
+PURE FUNCTION time_to_string(a) RESULT(c)
+REAL(r8), INTENT(in) :: a !< Array
+INTEGER(4) :: hours,minutes,seconds
+CHARACTER(LEN=13) :: c
+hours = FLOOR(a/3600.d0)
+minutes = FLOOR((a-hours*3600.d0)/60.d0)
+seconds = FLOOR((a-hours*3600.d0-minutes*60.d0))
+IF(hours>0)THEN
+  WRITE(c,'(I4,A,I2,A,I2,A)')hours,'h ',minutes,'m ',seconds,'s'
+ELSE IF(minutes>0)THEN
+  WRITE(c,'(I2,A,I2,A,6X)')minutes,'m ',seconds,'s'
+ELSE
+  WRITE(c,'(I2,A,10X)')seconds,'s'
+END IF
+END FUNCTION time_to_string
 END MODULE oft_local

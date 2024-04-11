@@ -37,7 +37,7 @@ USE oft_mesh_cubit, ONLY: smesh_cubit_load, cubit_read_nodesets, cubit_read_side
 #endif
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
-USE oft_la_base, ONLY: oft_vector, oft_graph
+USE oft_la_base, ONLY: oft_vector, oft_graph, oft_matrix
 USE oft_lu, ONLY: oft_lusolver, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, oft_native_dense_matrix, &
   partition_graph
@@ -51,8 +51,9 @@ USE oft_arpack, ONLY: oft_iram_eigsolver
 USE axi_green, ONLY: green
 USE mhd_utils, ONLY: mu0
 USE thin_wall
+USE thin_wall_hodlr
 IMPLICIT NONE
-TYPE(tw_type) :: tw_sim
+TYPE(tw_type), TARGET :: tw_sim
 TYPE(tw_sensors) :: sensors
 !
 LOGICAL :: exists
@@ -64,6 +65,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
+TYPE(oft_tw_hodlr_op), TARGET :: tw_hodlr
 !
 REAL(8) :: dt = 1.d-4
 REAL(8) :: cg_tol=1.d-6
@@ -152,11 +154,19 @@ END IF
 !---------------------------------------------------------------------------
 ! Load or build element to element mutual matrix
 !---------------------------------------------------------------------------
+tw_hodlr%tw_obj=>tw_sim
+CALL tw_hodlr%setup()
 IF(.NOT.plot_run)THEN
-  IF(save_L)THEN
-    CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat,'Lmat.save')
+  IF(tw_hodlr%L_svd_tol>0.d0)THEN
+    IF(direct)CALL oft_abort('HODLR compression does not support "direct=T"','thincurr_td',__FILE__)
+    IF(save_L)CALL oft_abort('HODLR compression does not support "save_L=T"','thincurr_td',__FILE__)
+    CALL tw_hodlr%compute_L()
   ELSE
-    CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+    IF(save_L)THEN
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat,'Lmat.save')
+    ELSE
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+    END IF
   END IF
 END IF
 !---------------------------------------------------------------------------
@@ -190,15 +200,17 @@ LOGICAL, INTENT(in) :: direct
 INTEGER(4), INTENT(in) :: nplot
 TYPE(tw_sensors), INTENT(in) :: sensors
 !---
-INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1
+INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits
 REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op
 REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: curr_waveform,volt_waveform,cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
 CLASS(oft_vector), POINTER :: u,g
-TYPE(oft_native_dense_matrix), TARGET :: Lmat,Minv
+CLASS(oft_matrix), POINTER :: Lmat
+TYPE(oft_native_dense_matrix), TARGET :: Lmat_dense,Minv
 TYPE(oft_sum_matrix), TARGET :: fmat,bmat
 CLASS(oft_solver), POINTER :: linv
+TYPE(oft_tw_hodlr_rbjpre), TARGET :: linv_pre
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
@@ -249,9 +261,14 @@ END IF
 CALL self%Uloc%new(u)
 CALL self%Uloc%new(g)
 !---Setup inductance matrix wrapper
-Lmat%nr=self%nelems; Lmat%nc=self%nelems
-Lmat%nrg=self%nelems; Lmat%ncg=self%nelems
-Lmat%M=>self%Lmat
+IF(tw_hodlr%L_svd_tol>0.d0)THEN
+  Lmat=>tw_hodlr
+ELSE
+  Lmat_dense%nr=self%nelems; Lmat_dense%nc=self%nelems
+  Lmat_dense%nrg=self%nelems; Lmat_dense%ncg=self%nelems
+  Lmat_dense%M=>self%Lmat
+  Lmat=>Lmat_dense
+END IF
 !---Setup backward matrix wrapper
 IF(timestep_cn)THEN
   bmat%nr=self%nelems; bmat%nc=self%nelems
@@ -277,7 +294,15 @@ IF(.NOT.direct)THEN
   linv%A=>fmat
   linv%its=-2
   linv%rtol=cg_tol
-  CALL create_diag_pre(linv%pre)
+  IF(tw_hodlr%L_svd_tol>0.d0)THEN
+    linv_pre%mf_obj=>tw_hodlr
+    linv_pre%Rmat=>self%Rmat
+    linv_pre%alpha=1.d0
+    linv_pre%beta=fmat%alam
+    linv%pre=>linv_pre
+  ELSE
+    CALL create_diag_pre(linv%pre)
+  END IF
 ELSE
   !---Setup dense matrix for inverse
   Minv%nr=self%nelems; Minv%nc=self%nelems
@@ -412,12 +437,14 @@ DO i=1,nsteps
   CALL g%restore_local(vals)
   IF(direct)THEN
     CALL Minv%apply(g,u)
+    nits=1
   ELSE
     CALL linv%apply(u,g)
+    nits=linv%cits
   END IF
   uu=SQRT(u%dot(u))
   t=t+dt
-  WRITE(*,*)'Timestep ',i,REAL(t,4),REAL(uu,4)
+  WRITE(*,*)'Timestep ',i,REAL(t,4),REAL(uu,4),nits
   IF(MOD(i,nplot)==0)THEN
     WRITE(pltnum,'(I4.4)')i
     CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
@@ -482,7 +509,7 @@ IF(direct)THEN
   DEALLOCATE(minv%m)
 ELSE
   CALL linv%pre%delete()
-  DEALLOCATE(linv%pre)
+  IF(tw_hodlr%L_svd_tol<=0.d0)DEALLOCATE(linv%pre)
   CALL linv%delete()
   DEALLOCATE(linv)
 END IF
@@ -493,7 +520,7 @@ END SUBROUTINE run_td_sim
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE plot_td_sim(self,dt,nsteps,nplot,sensors)
-TYPE(tw_type), INTENT(inout) :: self
+TYPE(tw_type), TARGET, INTENT(inout) :: self
 REAL(8), INTENT(in) :: dt
 INTEGER(4), INTENT(in) :: nsteps
 INTEGER(4), INTENT(in) :: nplot
@@ -501,10 +528,10 @@ TYPE(tw_sensors), INTENT(in) :: sensors
 !---
 INTEGER(4) :: i,j,jj,k,ntimes_curr,ncols,itime,io_unit,face,ind1,ind2
 REAL(8) :: uu,t,tmp,area,tmp2,val_prev
-REAL(8), ALLOCATABLE, DIMENSION(:) :: bvals,coil_vec,senout,jumpout
+REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_vec,senout,jumpout
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals,coil_waveform
-REAL(8), POINTER, DIMENSION(:) :: vals
-CLASS(oft_vector), POINTER :: u
+REAL(8), POINTER, DIMENSION(:) :: vals,vtmp
+CLASS(oft_vector), POINTER :: u,Bx,By,Bz
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
@@ -527,7 +554,7 @@ ELSE
 END IF
 CALL self%Uloc%new(u)
 !---
-ALLOCATE(vals(self%nelems),bvals(self%nelems))
+ALLOCATE(vals(self%nelems))
 t=0.d0
 IF(ntimes_curr>0)THEN
   DO j=1,self%n_icoils
@@ -592,8 +619,15 @@ IF(sensors%njumpers>0)THEN
   END IF
 END IF
 IF(compute_B)THEN
-  IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%nc))
-  CALL tw_compute_Bops(self)
+  IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%np))
+  IF(tw_hodlr%B_svd_tol>0.d0)THEN
+    CALL tw_hodlr%compute_B()
+    CALL self%Uloc_pts%new(Bx)
+    CALL self%Uloc_pts%new(By)
+    CALL self%Uloc_pts%new(Bz)
+  ELSE
+    CALL tw_compute_Bops(self)
+  END IF
 END IF
 DO i=1,nsteps
   t=t+dt
@@ -611,32 +645,55 @@ DO i=1,nsteps
     CALL tw_save_pfield(self,vals,'J')
     !
     IF(compute_B)THEN
-      ! cc_vals=0.d0
-      !$omp parallel do private(j,jj,tmp)
-      DO k=1,smesh%nc
-        DO jj=1,3
-          tmp=0.d0
-          !$omp simd reduction(+:tmp)
-          DO j=1,self%nelems
-            tmp=tmp+vals(j)*self%Bel(j,k,jj)
+      IF(tw_hodlr%B_svd_tol>0.d0)THEN
+        CALL tw_hodlr%apply_bop(u,Bx,By,Bz)
+        NULLIFY(vtmp)
+        CALL Bx%get_local(vtmp)
+        cc_vals(1,:)=vtmp
+        CALL By%get_local(vtmp)
+        cc_vals(2,:)=vtmp
+        CALL Bz%get_local(vtmp)
+        cc_vals(3,:)=vtmp
+        IF(ntimes_curr>0)THEN
+          !$omp parallel do private(k,tmp) collapse(2)
+          DO j=1,self%n_icoils
+            DO jj=1,3
+              tmp=0.d0
+              !$omp simd reduction(+:tmp)
+              DO k=1,smesh%np
+                tmp=tmp+tw_hodlr%Icoil_Bmat(k,j,jj)
+              END DO
+              cc_vals(jj,k)=cc_vals(jj,k)+tmp*coil_vec(j)
+            END DO
           END DO
-          cc_vals(jj,k)=tmp
-        END DO
-      END DO
-      IF(ntimes_curr>0)THEN
+        END IF
+      ELSE
         !$omp parallel do private(j,jj,tmp)
-        DO k=1,smesh%nc
+        DO k=1,smesh%np
           DO jj=1,3
             tmp=0.d0
             !$omp simd reduction(+:tmp)
-            DO j=1,self%n_icoils
-              tmp=tmp+coil_vec(j)*self%Bdr(j,k,jj)
+            DO j=1,self%nelems
+              tmp=tmp+vals(j)*self%Bel(j,k,jj)
             END DO
-            cc_vals(jj,k)=cc_vals(jj,k)+tmp
+            cc_vals(jj,k)=tmp
           END DO
         END DO
+        IF(ntimes_curr>0)THEN
+          !$omp parallel do private(j,jj,tmp)
+          DO k=1,smesh%np
+            DO jj=1,3
+              tmp=0.d0
+              !$omp simd reduction(+:tmp)
+              DO j=1,self%n_icoils
+                tmp=tmp+coil_vec(j)*self%Bdr(j,k,jj)
+              END DO
+              cc_vals(jj,k)=cc_vals(jj,k)+tmp
+            END DO
+          END DO
+        END IF
       END IF
-      CALL self%mesh%save_cell_vector(cc_vals,'B')
+      CALL self%mesh%save_vertex_vector(cc_vals,'B_v')
     END IF
     !
     IF(sensors%nfloops>0)THEN
@@ -684,7 +741,7 @@ IF(sensors%njumpers>0)THEN
 END IF
 CALL u%delete
 DEALLOCATE(u)
-DEALLOCATE(vals,bvals)
+DEALLOCATE(vals,vtmp)
 IF(ntimes_curr>0)DEALLOCATE(coil_waveform,coil_vec)
 END SUBROUTINE plot_td_sim
 END PROGRAM thincurr_td

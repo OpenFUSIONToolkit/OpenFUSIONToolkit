@@ -1641,7 +1641,7 @@ class gs_Domain:
         @param dx Target mesh size for region
         @param reg_type Type of region ("plasma", "vacuum", "boundary", "conductor", or "coil")
         @param eta Resistivity for "conductor" regions (raises error if region is other type)
-        @param nTurns Number of turns for "cooil" regions (raises error if region is other type)
+        @param nTurns Number of turns for "coil" regions (raises error if region is other type)
         @param allow_xpoints Allow X-points in this region (for non-plasma regions only)
         '''
         if (dx is None) or (dx < 0.0):
