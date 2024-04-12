@@ -16,12 +16,20 @@ ThinCurr is used through four driver programs:
  - \ref thincurr_from_mode to convert plasma mode structures to a current potential source
 
 \section doc_tw_main_ex ThinCurr Examples
-The following examples illustrate usage of ThinCurr to perform calculations using the thin-wall model. 
+The following examples illustrate usage of ThinCurr to perform calculations using the thin-wall model.
 
+**Command line interface**
  - \subpage doc_thincurr_ex1
  - \subpage doc_thincurr_ex2
  - \subpage doc_thincurr_ex3
- - \subpage doc_thincurr_ex4
+ - \subpage doc_thincurr_ex4 
+
+**Python interface**
+ - \subpage doc_tCurr_plate_eig
+ - \subpage doc_tCurr_torus_mode
+ - \subpage doc_tCurr_torus_fr
+ - \subpage doc_tCurr_regcoil
+ - \subpage doc_tCurr_hodlr_eig
 
 \section doc_tw_main_settings ThinCurr settings groups
 

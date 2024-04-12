@@ -1,4 +1,4 @@
-ThinCurr Example 4: Using HODLR approximation {#doc_thincurr_ex4}
+ThinCurr Example: Using HODLR approximation {#doc_thincurr_ex4}
 ==============
 
 [TOC]

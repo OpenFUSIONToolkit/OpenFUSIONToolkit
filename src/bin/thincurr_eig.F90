@@ -45,6 +45,7 @@ USE axi_green, ONLY: green
 USE mhd_utils, ONLY: mu0
 USE thin_wall
 USE thin_wall_hodlr
+USE thin_wall_solvers, ONLY: lr_eigenmodes_direct, lr_eigenmodes_arpack
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4) :: nsensors = 0
@@ -126,7 +127,7 @@ IF(oft_debug_print(1))CALL tw_sim%save_debug()
 WRITE(*,*)
 IF(plot_run)THEN
   !---Load sensors
-  CALL tw_load_sensors(tw_sim,sensors,jumper_nsets)
+  CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
   tw_sim%n_icoils=0
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
   CALL plot_eig(tw_sim,sensors%nfloops,sensors%floops)
@@ -148,27 +149,39 @@ ELSE
   END IF
   !---
   tw_hodlr%tw_obj=>tw_sim
-  CALL tw_hodlr%setup()
+  CALL tw_hodlr%setup(.FALSE.)
   IF(tw_hodlr%L_svd_tol>0.d0)THEN
     IF(direct)CALL oft_abort('HODLR compression does not support "direct=T"','thincurr_eig',__FILE__)
     IF(save_L)CALL oft_abort('HODLR compression does not support "save_L=T"','thincurr_eig',__FILE__)
     CALL tw_hodlr%compute_L()
   ELSE
     IF(save_L)THEN
-      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat,'Lmat.save')
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat,save_file='Lmat.save')
     ELSE
-      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat)
     END IF
   END IF
   !---Setup resistivity matrix
   CALL tw_compute_Rmat(tw_sim,.TRUE.)
   !---Run eigenvalue analysis
   ALLOCATE(eig_rval(neigs),eig_ival(neigs),eig_vec(tw_sim%nelems,neigs))
+  WRITE(*,*)
   IF(direct)THEN
-    CALL decay_eigenmodes(tw_sim,neigs,eig_rval,eig_ival,eig_vec)
+    CALL lr_eigenmodes_direct(tw_sim,neigs,eig_rval,eig_vec,eig_ival)
   ELSE
-    CALL run_eig(tw_sim,neigs,eig_rval,eig_ival,eig_vec)
+#if !defined(HAVE_ARPACK)
+    IF(oft_env%test_run)THEN
+      WRITE(*,*)'SKIP TEST'
+      CALL oft_finalize
+    END IF
+#endif
+    IF(tw_hodlr%L_svd_tol>0.d0)THEN
+      CALL lr_eigenmodes_arpack(tw_sim,neigs,eig_rval,eig_vec,eig_ival=eig_ival,hodlr_op=tw_hodlr)
+    ELSE
+      CALL lr_eigenmodes_arpack(tw_sim,neigs,eig_rval,eig_vec,eig_ival)
+    END IF
   END IF
+  WRITE(*,*)
   !---Save plot files
   CALL tw_sim%Uloc%new(uio)
   OPEN(NEWUNIT=io_unit, FILE="thincurr_eigs.dat")
@@ -185,192 +198,6 @@ END IF
 !---
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE decay_eigenmodes
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-SUBROUTINE decay_eigenmodes(self,neigs,eig_rval,eig_ival,eig_vec)
-TYPE(tw_type), INTENT(in) :: self
-INTEGER(4), INTENT(in) :: neigs
-REAL(8), intent(out) :: eig_rval(:),eig_ival(:),eig_vec(:,:)
-!---
-INTEGER(i4) :: i,j,info,N,LDVL,LDVR,LDA,LWORK
-REAL(r8) :: elapsed_time,chk_var
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ipiv,sort_tmp
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: etatmp,WR,WI,WORK,W_tmp
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: Mmat,Acomp,VL,VR
-CHARACTER(LEN=1) :: JOBVL,JOBVR
-TYPE(oft_timer) :: loctimer
-DEBUG_STACK_PUSH
-!---Invert Mmat
-ALLOCATE(Mmat(self%nelems,self%nelems))
-Mmat=0.d0
-DO i=1,self%Rmat%nr
-  DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
-    Mmat(i,self%Rmat%lc(j))=self%Rmat%M(j)
-  END DO
-END DO
-! CALL lapack_matinv(self%nelems,Mmat,info)
-CALL lapack_cholesky(self%nelems,Mmat,info)
-!---
-ALLOCATE(Acomp(self%nelems,self%nelems))
-N = self%nelems
-CALL dgemm('N','N',N,N,N,1.d0,Mmat,N,self%Lmat,N,0.d0,Acomp,N)
-DEALLOCATE(Mmat)
-!---Compute eigenvalues
-JOBVL = 'N'
-JOBVR = 'V'
-N = self%nelems
-LDA = N
-LDVL = N
-LDVR = N
-WRITE(*,*)
-WRITE(*,*)'Starting eigenvalue solve'
-CALL loctimer%tick
-ALLOCATE(WR(N),WI(N),VL(LDVL,N),VR(LDVR,N),WORK(1))
-LWORK = -1
-CALL DGEEV(JOBVL, JOBVR, N, Acomp, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
-LWORK = INT(WORK(1),4)
-IF(oft_debug_print(1))WRITE(*,*)'  Block size = ',lwork/N
-DEALLOCATE(work)
-ALLOCATE(work(lwork))
-CALL DGEEV(JOBVL, JOBVR, N, Acomp, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
-DEALLOCATE(VL,WORK,Acomp)
-elapsed_time=loctimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time,INFO
-!---Sort eigenvalues
-ALLOCATE(sort_tmp(N))
-sort_tmp=[(N+1-i,i=1,N)]
-ALLOCATE(W_tmp(N))
-W_tmp=ABS(WR)
-sort_tmp=[(i,i=1,N)]
-CALL sort_array(W_tmp,sort_tmp,N)
-DEALLOCATE(W_tmp)
-!---Copy to output
-DO i=1,neigs
-  j = sort_tmp(N+1-i)
-  eig_rval(i)=WR(j)
-  eig_ival(i)=WI(j)
-  eig_vec(:,i)=REAL(VR(:,j),8)
-END DO
-DEALLOCATE(WR,WI,VR,sort_tmp)
-! !---Handle closures
-! DO i=1,self%nclosures
-!   eig_vec(self%closures(i),1:neigs)=0.d0
-! END DO
-WRITE(*,*)'Eigenvalues'
-WRITE(*,*)'  Real: ',eig_rval(1:MIN(5,neigs))
-WRITE(*,*)'  Imag: ',eig_ival(1:MIN(5,neigs))
-WRITE(*,*)
-DEBUG_STACK_POP
-END SUBROUTINE decay_eigenmodes
-!------------------------------------------------------------------------------
-! SUBROUTINE run_eig
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-SUBROUTINE run_eig(self,neigs,eig_rval,eig_ival,eig_vec)
-TYPE(tw_type), INTENT(in) :: self
-INTEGER(4), INTENT(in) :: neigs
-REAL(8), INTENT(out) :: eig_rval(:),eig_ival(:),eig_vec(:,:)
-#ifdef HAVE_ARPACK
-!---
-INTEGER(4) :: i,j,k
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: sort_tmp
-REAL(8) :: lam0,elapsed_time
-REAL(8), ALLOCATABLE, DIMENSION(:) :: W_tmp
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mmat
-LOGICAL :: pm_save
-CLASS(oft_vector), POINTER :: uloc
-TYPE(oft_native_dense_matrix), TARGET :: fmat,bmat
-CLASS(oft_solver), POINTER :: linv
-TYPE(oft_iram_eigsolver) :: arsolver
-TYPE(oft_timer) :: loctimer
-DEBUG_STACK_PUSH
-WRITE(*,*)
-WRITE(*,*)'Starting eigenvalue solve'
-!---Setup local vectors
-CALL self%Uloc%new(uloc)
-CALL self%Rmat%assemble(uloc)
-
-!---Setup R^-1 solver
-NULLIFY(linv)
-CALL create_native_solver(linv,'lu')
-SELECT TYPE(this=>linv)
-  CLASS IS(oft_lusolver)
-    IF(this%package(1:4)=='none')THEN
-      WRITE(*,*)'  Note: LU solver not available, falling back to CG'
-      CALL linv%delete
-      DEALLOCATE(linv)
-    END IF
-  CLASS DEFAULT
-    CALL oft_abort('Unable to allocate LU solver', 'run_eig', __FILE__)
-END SELECT
-IF(.NOT.ASSOCIATED(linv))THEN
-  CALL create_native_solver(linv,'cg')
-  linv%its=-2
-  CALL create_diag_pre(linv%pre)
-END IF
-linv%A=>self%Rmat
-
-!---Setup Arnoldi eig value solver
-IF(tw_hodlr%L_svd_tol>0.d0)THEN
-  arsolver%A=>tw_hodlr
-ELSE
-  fmat%nr=self%nelems; fmat%nc=self%nelems
-  fmat%nrg=self%nelems; fmat%ncg=self%nelems
-  fmat%M => self%Lmat
-  arsolver%A=>fmat
-END IF
-arsolver%M=>self%Rmat
-arsolver%tol=1.E-5_r8
-arsolver%Minv=>linv
-arsolver%nev=neigs
-arsolver%mode=2
-
-!---Compute eigenvalues/vectors
-CALL loctimer%tick
-pm_save=oft_env%pm; oft_env%pm=.false.
-CALL arsolver%apply(uloc,lam0)
-oft_env%pm=pm_save
-elapsed_time=loctimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
-IF(arsolver%info>=0)THEN
-  !---Sort eigenvalues
-  ALLOCATE(sort_tmp(arsolver%nev),W_tmp(arsolver%nev))
-  W_tmp=ABS(arsolver%eig_val(1,1:arsolver%nev))
-  sort_tmp=[(i,i=1,arsolver%nev)]
-  CALL sort_array(W_tmp,sort_tmp,arsolver%nev)
-  DEALLOCATE(W_tmp)
-  !---Copy output
-  DO i=1,neigs
-    j = sort_tmp(arsolver%nev+1-i)
-    eig_rval(i)=arsolver%eig_val(1,j)
-    eig_ival(i)=arsolver%eig_val(2,j)
-    eig_vec(:,i)=arsolver%eig_vec(:,j)
-  END DO
-  DEALLOCATE(sort_tmp)
-  !---Print first few eigenvalues
-  WRITE(*,'(A)')'Eigenvalues'
-  WRITE(*,'(A,5Es14.5)')'  Real: ',eig_rval(1:MIN(5,neigs))
-  WRITE(*,'(A,5Es14.5)')'  Imag: ',eig_ival(1:MIN(5,neigs))
-  WRITE(*,*)
-END IF
-!---Cleanup
-CALL uloc%delete()
-CALL arsolver%delete()
-DEALLOCATE(uloc)
-#else
-IF(oft_env%test_run)THEN
-  WRITE(*,*)'SKIP TEST'
-  CALL oft_finalize
-ELSE
-  CALL oft_abort("Iterative eigenvalue solve requires ARPACK", "run_eig", __FILE__)
-END IF
-#endif
-DEBUG_STACK_POP
-END SUBROUTINE run_eig
 !------------------------------------------------------------------------------
 ! SUBROUTINE plot_eig
 !------------------------------------------------------------------------------
@@ -398,7 +225,7 @@ IF(nsensors>0)ALLOCATE(senout(nsensors,neigs))
 IF(compute_B)THEN
   IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%np))
   tw_hodlr%tw_obj=>self
-  CALL tw_hodlr%setup()
+  CALL tw_hodlr%setup(.FALSE.)
   IF(tw_hodlr%B_svd_tol>0.d0)THEN
     CALL tw_hodlr%compute_B()
     CALL self%Uloc_pts%new(Bx)

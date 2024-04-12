@@ -19,6 +19,7 @@ set( THINCURR_EXES
   thincurr_fr.F90
   thincurr_td.F90
   thincurr_from_mode.F90
+  thincurr_coupling.F90
 )
 
 set( BIN_SRCS ${OFT_EXES} ${MARKLIN_EXES} ${TOKAMAKER_EXES} ${THINCURR_EXES} )
