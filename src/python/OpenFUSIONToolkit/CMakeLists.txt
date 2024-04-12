@@ -1,7 +1,9 @@
 install(PROGRAMS util.py DESTINATION python/OpenFUSIONToolkit COMPONENT app)
 install(PROGRAMS TokaMaker.py DESTINATION python/OpenFUSIONToolkit COMPONENT app)
+install(DIRECTORY ThinCurr DESTINATION python/OpenFUSIONToolkit COMPONENT app)
 install(PROGRAMS Marklin.py DESTINATION python/OpenFUSIONToolkit COMPONENT app)
 
 configure_file( util.py ${CMAKE_CURRENT_BINARY_DIR}/util.py COPYONLY)
 configure_file( TokaMaker.py ${CMAKE_CURRENT_BINARY_DIR}/TokaMaker.py COPYONLY)
+file(COPY ThinCurr DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/ThinCurr)
 configure_file( Marklin.py ${CMAKE_CURRENT_BINARY_DIR}/Marklin.py COPYONLY)

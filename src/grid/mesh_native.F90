@@ -353,7 +353,7 @@ end subroutine native_load_smesh
 !------------------------------------------------------------------------------
 subroutine native_read_nodesets(nsets,native_filename)
 TYPE(oft_1d_int), pointer, intent(inout) :: nsets(:)
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: native_filename
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: native_filename
 INTEGER(4) :: j,num_nsets,ndims
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: dim_sizes
 LOGICAL :: success
@@ -384,7 +384,7 @@ END SUBROUTINE native_read_nodesets
 !------------------------------------------------------------------------------
 subroutine native_read_sidesets(ssets,native_filename)
 TYPE(oft_1d_int), pointer, intent(inout) :: ssets(:)
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: native_filename
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: native_filename
 INTEGER(4) :: j,num_ssets,ndims
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: dim_sizes
 LOGICAL :: success
