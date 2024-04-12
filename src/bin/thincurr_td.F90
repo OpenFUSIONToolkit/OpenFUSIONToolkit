@@ -136,7 +136,7 @@ IF(oft_debug_print(1))CALL tw_sim%save_debug()
 ! Time-dependent run
 !---------------------------------------------------------------------------
 !---Load drivers and sensors
-CALL tw_load_sensors(tw_sim,sensors,jumper_nsets)
+CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
 !---Compute inductances
 WRITE(*,*)
 IF(.NOT.plot_run)THEN
@@ -155,7 +155,7 @@ END IF
 ! Load or build element to element mutual matrix
 !---------------------------------------------------------------------------
 tw_hodlr%tw_obj=>tw_sim
-CALL tw_hodlr%setup()
+CALL tw_hodlr%setup(.FALSE.)
 IF(.NOT.plot_run)THEN
   IF(tw_hodlr%L_svd_tol>0.d0)THEN
     IF(direct)CALL oft_abort('HODLR compression does not support "direct=T"','thincurr_td',__FILE__)
@@ -163,9 +163,9 @@ IF(.NOT.plot_run)THEN
     CALL tw_hodlr%compute_L()
   ELSE
     IF(save_L)THEN
-      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat,'Lmat.save')
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat,save_file='Lmat.save')
     ELSE
-      CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+      CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat)
     END IF
   END IF
 END IF

@@ -70,14 +70,16 @@ CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
 CALL tw_sim%mesh%setup_io(1)
 !---Compute face mutuals
-CALL tw_compute_LmatDirect(tw_sim,tw_sim,tw_sim%Lmat)
+CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat)
 !---Compute and correct perturbation
 ALLOCATE(vtmp(tw_sim%nelems,2))
 vtmp=0.d0
 !$omp parallel do private(j)
 DO i=1,tw_sim%np_active
-  j=tw_sim%pmap_inv(i)
-  vtmp(i,:)=bnorm(j,:)*tw_sim%mesh%va(j)
+  j=tw_sim%lpmap_inv(i)
+  DO j=tw_sim%kpmap_inv(i),tw_sim%kpmap_inv(i+1)-1
+    vtmp(i,:)=bnorm(tw_sim%lpmap_inv(j),:)*tw_sim%mesh%va(tw_sim%lpmap_inv(j))
+  END DO
 END DO
 !---Save B-normal field
 WRITE(*,*)'Flux chk',SUM(vtmp(:,1)),SUM(vtmp(:,2))
@@ -92,30 +94,41 @@ CALL solve_inv(tw_sim,utmp,vtmp)
 CALL tw_save_pfield(tw_sim,utmp(:,1),'JSin')
 CALL tw_save_pfield(tw_sim,utmp(:,2),'JCos')
 !---Save to file
-OPEN(NEWUNIT=io_unit, FILE='thincurr_mode_model.dat')
-WRITE(io_unit,*)tw_sim%mesh%np
-DO i=1,tw_sim%mesh%np
-  WRITE(io_unit,*)tw_sim%mesh%r(:,i)
-END DO
-WRITE(io_unit,*)tw_sim%closures(1)
-WRITE(io_unit,*)tw_sim%mesh%nc
-DO i=1,tw_sim%mesh%nc
-  WRITE(io_unit,*)tw_sim%mesh%lc(:,i)
-END DO
-WRITE(io_unit,*)tw_sim%nholes
-DO i=1,tw_sim%nholes
-  WRITE(io_unit,*)tw_sim%hmesh(i)%n
-  DO j=1,tw_sim%hmesh(i)%n
-    WRITE(io_unit,*)tw_sim%hmesh(i)%lp(j)
-  END DO
-END DO
-WRITE(io_unit,*)2
-DO i=1,tw_sim%nelems
-  WRITE(io_unit,*)utmp(i,:)
-END DO
-CLOSE(io_unit)
+CALL hdf5_create_file('tCurr_mode_model.h5')
+CALL hdf5_create_group('tCurr_mode_model.h5','mesh')
+CALL hdf5_write(tw_sim%mesh%r,'tCurr_mode_model.h5','mesh/R')
+CALL hdf5_write(tw_sim%mesh%lc,'tCurr_mode_model.h5','mesh/LC')
+CALL hdf5_write(1,'tCurr_mode_model.h5','mesh/NUM_SIDESETS')
+CALL hdf5_write(tw_sim%closures(1),'tCurr_mode_model.h5','mesh/SIDESET0001')
+CALL hdf5_write(tw_sim%nholes,'tCurr_mode_model.h5','mesh/NUM_NODESETS')
+CALL hdf5_write(tw_sim%hmesh(1)%lp,'tCurr_mode_model.h5','mesh/NODESET0001')
+CALL hdf5_write(tw_sim%hmesh(2)%lp,'tCurr_mode_model.h5','mesh/NODESET0002')
+CALL hdf5_create_group('tCurr_mode_model.h5','thincurr')
+CALL hdf5_write(utmp,'tCurr_mode_model.h5','thincurr/driver')
+! OPEN(NEWUNIT=io_unit, FILE='thincurr_mode_model.dat')
+! WRITE(io_unit,*)tw_sim%mesh%np
+! DO i=1,tw_sim%mesh%np
+!   WRITE(io_unit,*)tw_sim%mesh%r(:,i)
+! END DO
+! WRITE(io_unit,*)tw_sim%closures(1)
+! WRITE(io_unit,*)tw_sim%mesh%nc
+! DO i=1,tw_sim%mesh%nc
+!   WRITE(io_unit,*)tw_sim%mesh%lc(:,i)
+! END DO
+! WRITE(io_unit,*)tw_sim%nholes
+! DO i=1,tw_sim%nholes
+!   WRITE(io_unit,*)tw_sim%hmesh(i)%n
+!   DO j=1,tw_sim%hmesh(i)%n
+!     WRITE(io_unit,*)tw_sim%hmesh(i)%lp(j)
+!   END DO
+! END DO
+! WRITE(io_unit,*)2
+! DO i=1,tw_sim%nelems
+!   WRITE(io_unit,*)utmp(i,:)
+! END DO
+! CLOSE(io_unit)
 !---Save probe signals
-CALL tw_load_sensors(tw_sim,sensors,jumper_nsets)
+CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
 IF(sensors%nfloops>0)THEN
   tw_sim%n_icoils=0
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
@@ -350,41 +363,39 @@ ELSE IF(dir==2)THEN
   END DO
 END IF
 END SUBROUTINE get_torus_loop
-!------------------------------------------------------------------------------
-! SUBROUTINE svd_mat
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-SUBROUTINE svd_mat(m,n,A)
-INTEGER(4), INTENT(in) :: M,N
-REAL(8), INTENT(inout) :: A(M,N)
-!---
-INTEGER(4) :: LWORK,minsize,info
-REAL(8) :: elapsed_time
-CHARACTER(LEN=1), PARAMETER :: JOBU='A',JOBVT='A'
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: IWORK
-REAL(8), ALLOCATABLE, DIMENSION(:) :: S,WORK
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: VT,U
-TYPE(oft_timer) :: stimer
-!---
-IF(oft_env%pm)THEN
-  WRITE(*,*)'Computing SVD'
-  CALL stimer%tick
-END IF
-minsize = MIN(M,N)
-ALLOCATE(S(minsize),U(M,minsize),VT(minsize,N),WORK(1),IWORK(8*minsize))
-LWORK=-1
-CALL dgesdd( JOBU, M, N, A, M, S, U, M, VT, minsize, WORK, LWORK, IWORK, info )
-LWORK=INT(WORK(1),4)
-IF(oft_debug_print(1).AND.oft_env%pm)WRITE(*,*)'  Work size = ',N*N,LWORK
-DEALLOCATE(WORK)
-ALLOCATE(WORK(LWORK))
-CALL dgesdd( JOBU, M, N, A, M, S, U, M, VT, minsize, WORK, LWORK, IWORK, info )
-IF(info/=0)WRITE(*,*)info
-DEALLOCATE(S,U,VT,WORK)
-IF(oft_env%pm)THEN
-  elapsed_time=stimer%tock()
-  WRITE(*,*)'  Time = ',elapsed_time
-END IF
-END SUBROUTINE svd_mat
+! !------------------------------------------------------------------------------
+! !> Needs Docs
+! !------------------------------------------------------------------------------
+! SUBROUTINE svd_mat(m,n,A)
+! INTEGER(4), INTENT(in) :: M,N
+! REAL(8), INTENT(inout) :: A(M,N)
+! !---
+! INTEGER(4) :: LWORK,minsize,info
+! REAL(8) :: elapsed_time
+! CHARACTER(LEN=1), PARAMETER :: JOBU='A',JOBVT='A'
+! INTEGER(4), ALLOCATABLE, DIMENSION(:) :: IWORK
+! REAL(8), ALLOCATABLE, DIMENSION(:) :: S,WORK
+! REAL(8), ALLOCATABLE, DIMENSION(:,:) :: VT,U
+! TYPE(oft_timer) :: stimer
+! !---
+! IF(oft_env%pm)THEN
+!   WRITE(*,*)'Computing SVD'
+!   CALL stimer%tick
+! END IF
+! minsize = MIN(M,N)
+! ALLOCATE(S(minsize),U(M,minsize),VT(minsize,N),WORK(1),IWORK(8*minsize))
+! LWORK=-1
+! CALL dgesdd( JOBU, M, N, A, M, S, U, M, VT, minsize, WORK, LWORK, IWORK, info )
+! LWORK=INT(WORK(1),4)
+! IF(oft_debug_print(1).AND.oft_env%pm)WRITE(*,*)'  Work size = ',N*N,LWORK
+! DEALLOCATE(WORK)
+! ALLOCATE(WORK(LWORK))
+! CALL dgesdd( JOBU, M, N, A, M, S, U, M, VT, minsize, WORK, LWORK, IWORK, info )
+! IF(info/=0)WRITE(*,*)info
+! DEALLOCATE(S,U,VT,WORK)
+! IF(oft_env%pm)THEN
+!   elapsed_time=stimer%tock()
+!   WRITE(*,*)'  Time = ',elapsed_time
+! END IF
+! END SUBROUTINE svd_mat
 END PROGRAM thincurr_from_mode

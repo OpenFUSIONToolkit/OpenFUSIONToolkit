@@ -70,7 +70,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy 
   type(tw_type), pointer :: tw_obj => NULL()
 contains
-  !> Setup HODLR by performing partitioning and tagging block-block interactionsß
+  !> Setup HODLR by performing partitioning and tagging block-block interactions
   procedure :: setup => tw_hodlr_setup
   !> Compute compressed inductance operator
   procedure :: compute_L => tw_hodlr_Lcompute
@@ -692,8 +692,9 @@ END SUBROUTINE tw_compute_Bops_block
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE tw_hodlr_setup(self)
+SUBROUTINE tw_hodlr_setup(self,required)
 class(oft_tw_hodlr_op), intent(inout) :: self
+LOGICAL, INTENT(in) :: required
 INTEGER(4) :: i,j,k,l,nlast,branch_count,pind_i,pind_j,max_pts,top_level,level,io_unit,ierr
 INTEGER(4) :: size_out,nblocks_progress(9),nblocks_complete,counts(4),iblock,jblock,sparse_count(2)
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: kc_tmp,kr_tmp
@@ -715,13 +716,26 @@ REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d0
 REAL(8) :: B_aca_rel_tol = -1.d0
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,L_svd_tol,L_aca_rel_tol, &
-B_svd_tol,B_aca_rel_tol
+  B_svd_tol,B_aca_rel_tol
+!
+IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
+    WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
+    CALL oft_abort( &
+  "HODLR not supported with periodic grids","tw_hodlr_setup",__FILE__)
+END IF
 !---
 OPEN(NEWUNIT=io_unit, FILE=oft_env%ifile)
 READ(io_unit,thincurr_hodlr_options, IOSTAT=ierr)
 CLOSE(io_unit)
-if(ierr<0)call oft_abort('No "thincurr_hodlr_options" found in input file.', &
-  'tw_hodlr_setup',__FILE__)
+if(ierr<0)THEN
+  IF(required)THEN
+    CALL oft_abort('No "thincurr_hodlr_options" found in input file.', &
+      'tw_hodlr_setup',__FILE__)
+  ELSE
+    WRITE(*,*)'No "thincurr_hodlr_options" found in input file, using full representation'
+    RETURN
+  END IF
+END IF
 if(ierr>0)call oft_abort('Error parsing "thincurr_hodlr_options" in input file.', &
   'tw_hodlr_setup',__FILE__)
 IF((L_svd_tol>0.d0).AND.(min_rank>aca_min_its))CALL oft_abort('"min_rank" must be <= "aca_min_its"', &
@@ -812,7 +826,7 @@ avg_size=0.d0
 DO i=1,self%nblocks
     avg_size=avg_size+self%blocks(i)%nelems
     ! DO j=1,self%blocks(i)%nelems
-    !     point_block(self%tw_obj%pmap_inv(self%blocks(i)%ielem))=i*1.d0
+    !     point_block(self%tw_obj%lpmap_inv(self%blocks(i)%ielem))=i*1.d0
     ! END DO
     DO j=1,self%blocks(i)%np
         point_block(self%blocks(i)%ipts)=i*1.d0
@@ -834,13 +848,13 @@ DO j=1,self%nlevels
     ALLOCATE(self%levels(j)%blocks(i)%inv_map(self%tw_obj%mesh%np))
     self%levels(j)%blocks(i)%inv_map = 0
     DO l=1,self%levels(j)%blocks(i)%nelems
-        k=self%tw_obj%pmap_inv(self%levels(j)%blocks(i)%ielem(l))
+        k=self%tw_obj%lpmap_inv(self%levels(j)%blocks(i)%ielem(l))
         self%levels(j)%blocks(i)%inv_map(k)=l
     END DO
     !
     cell_mark=.FALSE.
     DO l=1,self%levels(j)%blocks(i)%nelems
-        pind_j = self%tw_obj%pmap_inv(self%levels(j)%blocks(i)%ielem(l))
+        pind_j = self%tw_obj%lpmap_inv(self%levels(j)%blocks(i)%ielem(l))
         DO k=self%tw_obj%mesh%kpc(pind_j),self%tw_obj%mesh%kpc(pind_j+1)-1
         cell_mark(self%tw_obj%mesh%lpc(k))=.TRUE.
         END DO
@@ -885,11 +899,13 @@ ALLOCATE(self%aca_U_mats(self%nsparse))
 ALLOCATE(self%aca_V_mats(self%nsparse))
 ALLOCATE(self%aca_dense(self%nsparse))
 compressed_size=0
-nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
-nblocks_complete = 0
 ! WRITE(*,'(4X,A3)')' 0%'!WRITE(*,'(5X,A)',ADVANCE='NO')'['
 WRITE(*,*)'  Building diagonal blocks'
 !$omp parallel private(i,level,j,k,size_out,avg_size) reduction(+:compressed_size)
+!$omp single
+nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
+nblocks_complete = 0
+!$omp end single
 !$omp do schedule(static,1)
 DO i=1,self%ndense
     level = self%dense_blocks(1,i)
@@ -905,6 +921,13 @@ DO i=1,self%ndense
 !    avg_size = avg_size + self%dense_mats(i)%M(k,k)**2
 !  END DO
 !  WRITE(*,*)i,avg_size
+    !$omp critical
+    nblocks_complete = nblocks_complete + 1
+    DO k=1,9
+    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%' !,ADVANCE='NO')k*10,'% '
+    END DO
+    ! IF(ANY(nblocks_complete==nblocks_progress))WRITE(*,'(A)',ADVANCE='NO')'.'
+    !$omp end critical
 END DO
 !$omp single
 IF(self%L_aca_tol>0.d0)THEN
@@ -912,6 +935,8 @@ IF(self%L_aca_tol>0.d0)THEN
 ELSE
     WRITE(*,*)'  Building off-diagonal blocks with SVD compression'
 END IF
+nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
+nblocks_complete = 0
 !$omp end single
 !$omp do schedule(dynamic,1)
 DO i=1,self%nsparse
@@ -1108,11 +1133,11 @@ Jref = INT(tmp*(M-1),4)+1
 ! DO Iref=1,N
 !     IF(prevIstar(Iref))EXIT
 ! END DO
-tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
 tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Iref)
-tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
 tmp_block%ncells=k2-k1+1
 tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
 CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIref, &
@@ -1124,11 +1149,11 @@ CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIref, &
 ! DO Jref=1,M
 !     IF(prevJstar(Jref))EXIT
 ! END DO
-tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
 tmp_block%ielem=self%levels(ilevel)%blocks(jblock)%ielem(Jref)
-tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
 tmp_block%ncells=k2-k1+1
 tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
 CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJref, &
@@ -1151,11 +1176,11 @@ DO k=1,max_iter
     if(Istar_val > Jstar_val)THEN
     ! If we pivot first on the row, then calculate the corresponding row
     ! of the residual matrix.
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Istar)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIstar, &
@@ -1169,11 +1194,11 @@ DO k=1,max_iter
     Jstar = max_masked(ABS(RIstar(:,1)), prevJstar) !argmax_not_in_list(np.abs(RIstar), prevJstar)
 
     ! Calculate the corresponding residual column!
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(jblock)%ielem(Jstar)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJstar, &
@@ -1184,11 +1209,11 @@ DO k=1,max_iter
     else
     ! If we pivot first on the column, then calculate the corresponding column
     ! of the residual matrix.
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(jblock)%ielem(Jstar)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJstar, &
@@ -1202,11 +1227,11 @@ DO k=1,max_iter
     Istar = max_masked(ABS(RJstar(:,1)), prevIstar) !argmax_not_in_list(np.abs(RJstar), prevIstar)
 
     ! Calculate the corresponding residual row!
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Istar)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIstar, &
@@ -1248,11 +1273,11 @@ DO k=1,max_iter
     DO Iref=1,N
         IF(prevIstar(Iref))EXIT
     END DO
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Iref)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIref, &
@@ -1271,11 +1296,11 @@ DO k=1,max_iter
     DO Jref=1,M
         IF(prevJstar(Jref))EXIT
     END DO
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(jblock)%ielem(Jref)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJref, &
@@ -1638,11 +1663,11 @@ Jref = INT(tmp*(M-1),4)+1
 ! DO Iref=1,N
 !     IF(prevIstar(Iref))EXIT
 ! END DO
-tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
 tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Iref)
-tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
 tmp_block%ncells=k2-k1+1
 tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
 CALL tw_compute_Bops_block(self%tw_obj,RIref, &
@@ -1675,11 +1700,11 @@ DO k=1,max_iter
     if(Istar_val > Jstar_val)THEN
     ! If we pivot first on the row, then calculate the corresponding row
     ! of the residual matrix.
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Istar)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
@@ -1714,11 +1739,11 @@ DO k=1,max_iter
     Istar = max_masked(ABS(RJstar(1,:)), prevIstar) !argmax_not_in_list(np.abs(RJstar), prevIstar)
 
     ! Calculate the corresponding residual row!
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Istar)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
@@ -1760,11 +1785,11 @@ DO k=1,max_iter
     DO Iref=1,N
         IF(prevIstar(Iref))EXIT
     END DO
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=0
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Iref)
-    tmp_block%inv_map(self%tw_obj%pmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%pmap_inv(tmp_block%ielem(1))+1)-1
+    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIref, &

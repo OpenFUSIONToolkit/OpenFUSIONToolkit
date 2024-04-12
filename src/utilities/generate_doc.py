@@ -195,5 +195,6 @@ if __name__ == '__main__':
         for img in imgs:
            shutil.copy(img, "docs/generated/images/{0}".format(os.path.basename(img)))
         # Remove temporary files
-        shutil.rmtree("{0}_files".format(base_path))
+        if os.path.isdir("{0}_files".format(base_path)):
+            shutil.rmtree("{0}_files".format(base_path))
         os.remove(base_path+".md")

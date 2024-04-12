@@ -298,13 +298,18 @@ END SUBROUTINE bin_file_flush
 !!
 !! @note One output file is created per MPI task
 !---------------------------------------------------------------------------
-subroutine hdf5_create_files()
+subroutine hdf5_create_files(basepath)
+CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=80) :: pathprefix
+INTEGER(4) :: ierr
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Creating HDF5 plot files'
+pathprefix=''
+IF(PRESENT(basepath))pathprefix=basepath
 CALL oft_increase_indent
-CALL hdf5_create_file(TRIM("scalar_dump."//hdf5_proc_str()//".h5"))
-CALL hdf5_create_file(TRIM("vector_dump."//hdf5_proc_str()//".h5"))
-CALL hdf5_create_file(TRIM("mesh."//hdf5_proc_str()//".h5"))
+CALL hdf5_create_file(TRIM(pathprefix)//"scalar_dump."//hdf5_proc_str()//".h5")
+CALL hdf5_create_file(TRIM(pathprefix)//"vector_dump."//hdf5_proc_str()//".h5")
+CALL hdf5_create_file(TRIM(pathprefix)//"mesh."//hdf5_proc_str()//".h5")
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine hdf5_create_files
@@ -314,14 +319,18 @@ end subroutine hdf5_create_files
 !! Subsequent output will be added to this timestep until another call
 !! to this subroutine
 !---------------------------------------------------------------------------
-subroutine hdf5_create_timestep(t)
+subroutine hdf5_create_timestep(t,basepath)
 real(r8), intent(in) :: t !< Time value
+CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=80) :: pathprefix
 integer(i4) :: io_unit
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
 hdf5_ts=hdf5_ts+1
 if(oft_env%rank==0)then
-  OPEN(NEWUNIT=io_unit,FILE='dump.dat',POSITION="APPEND",STATUS="OLD")
+  pathprefix=''
+  IF(PRESENT(basepath))pathprefix=basepath
+  OPEN(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
   WRITE(io_unit,*)
   WRITE(io_unit,*)'Time Step',REAL(t,4)
   WRITE(io_unit,*)'Field Data'
@@ -1098,15 +1107,19 @@ end subroutine hdf5_rst_destroy
 !! - Writes out mesh sizes
 !! - Initiliazes timestep 0
 !---------------------------------------------------------------------------
-subroutine oft_hdf5_write_dump(mesh_type,vol_sizes,surf_sizes)
+subroutine oft_hdf5_write_dump(mesh_type,vol_sizes,surf_sizes,basepath)
 integer(i4), intent(in) :: mesh_type !< Mesh type flag (Tet/Tri or Hex/Quad)
 integer(i4), intent(in) :: vol_sizes(2) !< Volume mesh counts (np,nc)
 integer(i4), intent(in) :: surf_sizes(2) !< Surface mesh counts (np,nc)
+CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=80) :: pathprefix
 integer(i4) :: i,ntrans(4),ierr,io_unit
 #ifdef HAVE_MPI
 integer(i4) :: mpi_stat(MPI_STATUS_SIZE)
 #endif
 DEBUG_STACK_PUSH
+pathprefix=''
+IF(PRESENT(basepath))pathprefix=basepath
 !---Get local mesh counts
 ntrans(1:2)=vol_sizes
 ntrans(3:4)=surf_sizes
@@ -1117,7 +1130,7 @@ if(oft_env%rank>0)call MPI_SEND(ntrans,4,OFT_MPI_I4,0,1,MPI_COMM_WORLD,ierr)
 !---On lead proc setup metadata file
 if(oft_env%rank==0)then
   !---Setup file
-  open(NEWUNIT=io_unit,FILE='dump.dat')
+  open(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat')
   write(io_unit,*)'Mesh Data'
   !---Local mesh size
   write(io_unit,*)mesh_type
@@ -1140,13 +1153,17 @@ end subroutine oft_hdf5_write_dump
 !---------------------------------------------------------------------------
 !> Adds an output field to the dump file for Xdmf construction
 !---------------------------------------------------------------------------
-subroutine oft_hdf5_add_dump(tag,type)
+subroutine oft_hdf5_add_dump(tag,type,basepath)
 character(LEN=*), intent(in) :: tag !< Name of the field to add
 integer(i4), intent(in) :: type !< Type of field being output
+CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=80) :: pathprefix
 integer(i4) :: io_unit
 DEBUG_STACK_PUSH
 if(oft_env%rank==0)then
-  open(NEWUNIT=io_unit,FILE='dump.dat',POSITION="APPEND",STATUS="OLD")
+  pathprefix=''
+  IF(PRESENT(basepath))pathprefix=basepath
+  open(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
   write(io_unit,*)tag,type
   close(io_unit)
 end if
