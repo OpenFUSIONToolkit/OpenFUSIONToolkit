@@ -1,4 +1,4 @@
-ThinCurr Example 3: Frequency-response of a torus {#doc_thincurr_ex3}
+ThinCurr Example: Frequency-response of a torus {#doc_thincurr_ex3}
 ==============
 
 [TOC]

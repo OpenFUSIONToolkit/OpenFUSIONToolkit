@@ -867,11 +867,11 @@ type, abstract, public :: oft_matrix
   class(oft_vector), pointer :: D => NULL() !< Diagonal entries for scaling
 contains
   procedure(mat_apply_vec), deferred :: apply_real
-  procedure(mat_apply_cvec), deferred :: apply_complex
+  procedure :: apply_complex => matrix_apply_cvec
   !> Apply the matrix
   generic :: apply => apply_real, apply_complex
   procedure(mat_apply_vec), deferred :: applyt_real
-  procedure(mat_apply_cvec), deferred :: applyt_complex
+  procedure :: applyt_complex => matrix_applyt_cvec
   !> Apply the matrix transpose
   generic :: applyt => applyt_real, applyt_complex
   !> Set values of the matrix
@@ -918,11 +918,11 @@ type, abstract, public :: oft_cmatrix
   type(oft_map), pointer, dimension(:) :: j_map => NULL() !< Column block mapping
   class(oft_cvector), pointer :: D => NULL() !< Diagonal entries for scaling
 contains
-  procedure(cmat_apply_vec), deferred :: apply_real
+  procedure :: apply_real => cmatrix_apply_vec
   procedure(cmat_apply_cvec), deferred :: apply_complex
   !> Apply the matrix
   generic :: apply => apply_real, apply_complex
-  procedure(cmat_apply_vec), deferred :: applyt_real
+  procedure :: applyt_real => cmatrix_applyt_vec
   procedure(cmat_apply_cvec), deferred :: applyt_complex
   !> Apply the matrix transpose
   generic :: applyt => applyt_real, applyt_complex
@@ -1046,9 +1046,7 @@ ABSTRACT INTERFACE
   integer(i4), optional, intent(inout) :: loc_cache(n,m)
   end subroutine mat_add_values
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: mat_assemble
-  !------------------------------------------------------------------------------
-  !> Finish assembly of matrix and optionally extract diagonals
+  !> Finish assembly of matrix and optionally extract real diagonal
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
   !! of the member function and catch errors in uninitialized matrices.
@@ -1096,26 +1094,26 @@ ABSTRACT INTERFACE
 END INTERFACE
 !
 ABSTRACT INTERFACE
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cmat_apply_vec
-  !------------------------------------------------------------------------------
-  !> Apply the matrix to a field and optionally add it to an existing field.
-  !!
-  !! b = self * a
-  !!
-  !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] a Source field
-  !! @param[in,out] b Result of matrix product
-  !! @param[in] beta Factor for matrix addition
-  !------------------------------------------------------------------------------
-  subroutine cmat_apply_vec(self,a,b)
-  import oft_cvector, oft_vector, oft_cmatrix
-  class(oft_cmatrix), intent(inout) :: self
-  class(oft_vector), target, intent(inout) :: a
-  class(oft_cvector), intent(inout) :: b
-  end subroutine cmat_apply_vec
+  ! !------------------------------------------------------------------------------
+  ! ! SUBROUTINE: cmat_apply_vec
+  ! !------------------------------------------------------------------------------
+  ! !> Apply the matrix to a field and optionally add it to an existing field.
+  ! !!
+  ! !! b = self * a
+  ! !!
+  ! !! @note This subroutine is a dummy routine used to specify the interface
+  ! !! of the member function and catch errors in uninitialized matrices.
+  ! !!
+  ! !! @param[in] a Source field
+  ! !! @param[in,out] b Result of matrix product
+  ! !! @param[in] beta Factor for matrix addition
+  ! !------------------------------------------------------------------------------
+  ! subroutine cmat_apply_vec(self,a,b)
+  ! import oft_cvector, oft_vector, oft_cmatrix
+  ! class(oft_cmatrix), intent(inout) :: self
+  ! class(oft_vector), target, intent(inout) :: a
+  ! class(oft_cvector), intent(inout) :: b
+  ! end subroutine cmat_apply_vec
   !------------------------------------------------------------------------------
   ! SUBROUTINE: cmat_apply_cvec
   !------------------------------------------------------------------------------
@@ -1268,6 +1266,78 @@ class(oft_cvector), intent(inout) :: self
 call oft_warn('Finalizing general complex vector, this may indicate an error.')
 end subroutine cvector_delete
 !------------------------------------------------------------------------------
+!> Apply the matrix to a field and optionally add it to an existing field.
+!!
+!! b = self^T * a
+!!
+!! @note This subroutine is a dummy routine used to specify the interface
+!! of the member function and catch errors in uninitialized matrices.
+!!
+!! @param[in] a Source field
+!! @param[in,out] b Result of matrix product
+!! @param[in] beta Factor for matrix addition
+!------------------------------------------------------------------------------
+subroutine matrix_apply_cvec(self,a,b)
+class(oft_matrix), intent(inout) :: self
+class(oft_cvector), target, intent(inout) :: a
+class(oft_cvector), intent(inout) :: b
+class(oft_vector), pointer :: atmp,btmp
+complex(c8), pointer :: avals(:)
+CALL a%new(atmp)
+CALL b%new(btmp)
+CALL b%set((0.d0,0.d0))
+nullify(avals)
+CALL a%get_slice(avals)
+!---Apply real part
+CALL atmp%restore_slice(REAL(avals))
+CALL self%apply(atmp,btmp)
+CALL b%add((0.d0,0.d0),(1.d0,0.d0),btmp)
+!---Apply imaginary part
+CALL atmp%restore_slice(AIMAG(avals))
+CALL self%apply(atmp,btmp)
+CALL b%add((1.d0,0.d0),(0.d0,1.d0),btmp)
+!---Cleanup
+CALL atmp%delete()
+CALL btmp%delete()
+DEALLOCATE(atmp,btmp,avals)
+end subroutine matrix_apply_cvec
+!------------------------------------------------------------------------------
+!> Apply the matrix to a field and optionally add it to an existing field.
+!!
+!! b = self^T * a
+!!
+!! @note This subroutine is a dummy routine used to specify the interface
+!! of the member function and catch errors in uninitialized matrices.
+!!
+!! @param[in] a Source field
+!! @param[in,out] b Result of matrix product
+!! @param[in] beta Factor for matrix addition
+!------------------------------------------------------------------------------
+subroutine matrix_applyt_cvec(self,a,b)
+class(oft_matrix), intent(inout) :: self
+class(oft_cvector), target, intent(inout) :: a
+class(oft_cvector), intent(inout) :: b
+class(oft_vector), pointer :: atmp,btmp
+complex(c8), pointer :: avals(:)
+CALL a%new(atmp)
+CALL b%new(btmp)
+CALL b%set((0.d0,0.d0))
+nullify(avals)
+CALL a%get_slice(avals)
+!---Apply real part
+CALL atmp%restore_slice(REAL(avals,r8))
+CALL self%applyt(atmp,btmp)
+CALL b%add((0.d0,0.d0),(1.d0,0.d0),btmp)
+!---Apply imaginary part
+CALL atmp%restore_slice(AIMAG(avals))
+CALL self%applyt(atmp,btmp)
+CALL b%add((1.d0,0.d0),(0.d0,1.d0),btmp)
+!---Cleanup
+CALL atmp%delete()
+CALL btmp%delete()
+DEALLOCATE(atmp,btmp,avals)
+end subroutine matrix_applyt_cvec
+!------------------------------------------------------------------------------
 ! SUBROUTINE: matrix_delete
 !------------------------------------------------------------------------------
 !> Delete matrix
@@ -1279,6 +1349,52 @@ subroutine matrix_delete(self)
 class(oft_matrix), intent(inout) :: self
 call oft_warn('Finalizing general real matrix, this may indicate an error.')
 end subroutine matrix_delete
+!------------------------------------------------------------------------------
+!> Apply the matrix to a field and optionally add it to an existing field.
+!!
+!! b = self * a
+!!
+!! @note This subroutine is a dummy routine used to specify the interface
+!! of the member function and catch errors in uninitialized matrices.
+!!
+!! @param[in] a Source field
+!! @param[in,out] b Result of matrix product
+!! @param[in] beta Factor for matrix addition
+!------------------------------------------------------------------------------
+subroutine cmatrix_apply_vec(self,a,b)
+class(oft_cmatrix), intent(inout) :: self
+class(oft_vector), target, intent(inout) :: a
+class(oft_cvector), intent(inout) :: b
+class(oft_vector), pointer :: atmp
+CALL a%new(atmp)
+CALL atmp%add(0.d0,1.d0,a)
+CALL self%apply(atmp,b)
+CALL atmp%delete()
+DEALLOCATE(atmp)
+end subroutine cmatrix_apply_vec
+!------------------------------------------------------------------------------
+!> Apply the matrix to a field and optionally add it to an existing field.
+!!
+!! b = self * a
+!!
+!! @note This subroutine is a dummy routine used to specify the interface
+!! of the member function and catch errors in uninitialized matrices.
+!!
+!! @param[in] a Source field
+!! @param[in,out] b Result of matrix product
+!! @param[in] beta Factor for matrix addition
+!------------------------------------------------------------------------------
+subroutine cmatrix_applyt_vec(self,a,b)
+class(oft_cmatrix), intent(inout) :: self
+class(oft_vector), target, intent(inout) :: a
+class(oft_cvector), intent(inout) :: b
+class(oft_vector), pointer :: atmp
+CALL a%new(atmp)
+CALL atmp%add(0.d0,1.d0,a)
+CALL self%applyt(atmp,b)
+CALL atmp%delete()
+DEALLOCATE(atmp)
+end subroutine cmatrix_applyt_vec
 !------------------------------------------------------------------------------
 ! SUBROUTINE: cmatrix_delete
 !------------------------------------------------------------------------------

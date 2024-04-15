@@ -726,6 +726,36 @@ END IF
 END SUBROUTINE setup_native
 END SUBROUTINE create_matrix_comp
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+SUBROUTINE csr_remove_redundant(nr,kr,nnz,lc)
+INTEGER(4), INTENT(in) :: nr
+INTEGER(4), INTENT(inout) :: kr(nr+1)
+INTEGER(4), INTENT(inout) :: nnz
+INTEGER(4), POINTER, INTENT(inout) :: lc(:)
+INTEGER(4) :: i,j,nremove,js
+INTEGER(4), POINTER :: lctmp(:)
+nremove=0
+DO i=1,nr
+  js=kr(i)+1
+  IF(kr(i+1)-kr(i)>0)lc(kr(i)-nremove)=lc(kr(i))
+  kr(i)=kr(i)-nremove
+  DO j=js,kr(i+1)-1
+    IF(lc(j)==lc(j-1))THEN
+      nremove=nremove+1
+    ELSE
+      lc(j-nremove)=lc(j)
+    END IF
+  END DO
+END DO
+kr(nr+1)=kr(nr+1)-nremove
+nnz=kr(nr+1)-1
+lctmp=>lc
+ALLOCATE(lc(kr(nr+1)-1))
+lc=lctmp(1:kr(nr+1)-1)
+DEALLOCATE(lctmp)
+END SUBROUTINE csr_remove_redundant
+!------------------------------------------------------------------------------
 ! SUBROUTINE: condense_graph
 !------------------------------------------------------------------------------
 !> Combine a set of non-overlapping CRS-graphs into a graph.
