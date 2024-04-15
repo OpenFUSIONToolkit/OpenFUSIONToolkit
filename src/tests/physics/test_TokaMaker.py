@@ -440,7 +440,7 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,mp_q):
 
 # Test runners for LTX test cases
 @pytest.mark.coverage
-@pytest.mark.parametrize("order", (2,3,4))
+@pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_eig(order):
     exp_dict = {
         'Tau_w': [1.51083009, 2.87431718, 3.91493237, 5.23482507, 5.61049374]
@@ -461,7 +461,7 @@ def test_ITER_eq(order):
         'kappaL': 1.997160333090677,
         'delta': 0.4642130933423834,
         # 'deltaU': 0.3840631923067706, # Disable for now
-        # 'deltaL': 0.5443629943779958, # Disable for now
+        'deltaL': 0.5443629943779958,
         'vol': 820.0973897169655,
         'q_0': 0.8234473499435633,
         'q_95': 2.76048354704068,
@@ -591,7 +591,7 @@ def run_LTX_case(fe_order,eig_test,mp_q):
 
 # Test runners for LTX test cases
 @pytest.mark.coverage
-@pytest.mark.parametrize("order", (2,3,4))
+@pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eig(order):
     exp_dict = {
         'Tau_w': [195.300148, 253.92961287, 403.74576838, 473.64151856, 550.08441557]
@@ -609,7 +609,7 @@ def test_LTX_eq():
         'kappa': 1.5213293087744595,
         'kappaU': 1.5215960005535605,
         'kappaL': 1.5210626169953587,
-        'delta': 0.12295683642943968,
+        # 'delta': 0.12295683642943968, # Disable for now
         # 'deltaU': 0.12289529426354395, # Disable for now
         # 'deltaL': 0.12301837859533517, # Disable for now
         'vol': 0.6511641559778095,

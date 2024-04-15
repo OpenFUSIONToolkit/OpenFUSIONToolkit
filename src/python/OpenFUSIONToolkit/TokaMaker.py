@@ -1514,6 +1514,7 @@ class TokaMaker():
         @param nlevels Number contour lines used for shading (with "psi" only)
         @param colormap Colormap to use for shadings
         @param clabel Label for colorbar (None to disable colorbar)
+        @result Colorbar object
         '''
         if psi is not None:
             mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
@@ -1534,6 +1535,8 @@ class TokaMaker():
         if clabel is not None:
             cb = fig.colorbar(clf,ax=ax)
             cb.set_label(clabel)
+        else:
+            cb = None
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
         return cb
