@@ -3016,7 +3016,7 @@ integer(4) :: j,k,error_flag
 REAL(8) :: psimax
 logical :: pm_save
 !---
-error_flag=0
+ierr=0
 IF(self%use_lu)THEN
   IF(.NOT.ASSOCIATED(self%lu_solver%A))THEN
     self%lu_solver%A=>self%dels
@@ -3101,7 +3101,6 @@ IF(oft_env%pm)WRITE(*,'(A,I4,1ES12.4)')oft_indent,1,psimax
 IF((self%dt>0.d0).AND.oft_env%pm)THEN
   CALL oft_decrease_indent
 END IF
-error_flag=0
 CALL psi_vac%delete
 CALL psi_vcont%delete
 CALL psi_eddy%delete

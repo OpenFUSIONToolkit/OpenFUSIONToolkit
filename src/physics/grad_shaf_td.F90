@@ -1134,18 +1134,20 @@ END IF
 self%gs_eq%psi=>a
 CALL gs_update_bounds(self%gs_eq)
 allocate(bnd_nodes(2*oft_blagrange%nce),lim_weights(oft_blagrange%nce),ax_weights(oft_blagrange%nce))
-cell=0
-CALL bmesh_findcell(smesh,cell,self%gs_eq%lim_point,ftmp)
-call oft_blagrange%ncdofs(cell,bnd_nodes(1:oft_blagrange%nce))
-do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-  call oft_blag_eval(oft_blagrange,cell,jc,ftmp,lim_weights(jc))
-end do
-cell=0
-CALL bmesh_findcell(smesh,cell,self%gs_eq%o_point,ftmp)
-call oft_blagrange%ncdofs(cell,bnd_nodes(oft_blagrange%nce+1:2*oft_blagrange%nce))
-do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-  call oft_blag_eval(oft_blagrange,cell,jc,ftmp,ax_weights(jc))
-end do
+IF(include_bounds)THEN
+    cell=0
+    CALL bmesh_findcell(smesh,cell,self%gs_eq%lim_point,ftmp)
+    call oft_blagrange%ncdofs(cell,bnd_nodes(1:oft_blagrange%nce))
+    do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
+    call oft_blag_eval(oft_blagrange,cell,jc,ftmp,lim_weights(jc))
+    end do
+    cell=0
+    CALL bmesh_findcell(smesh,cell,self%gs_eq%o_point,ftmp)
+    call oft_blagrange%ncdofs(cell,bnd_nodes(oft_blagrange%nce+1:2*oft_blagrange%nce))
+    do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
+    call oft_blag_eval(oft_blagrange,cell,jc,ftmp,ax_weights(jc))
+    end do
+END IF
 !---
 nnonaxi=self%gs_eq%region_info%nnonaxi
 !---------------------------------------------------------------------------
@@ -1167,7 +1169,7 @@ IF(.NOT.ASSOCIATED(lhs_mat))THEN
         ALLOCATE(dense_flag(oft_blagrange%ne))
         dense_flag=0
         DO m=1,self%gs_eq%region_info%nnonaxi
-        dense_flag(self%gs_eq%region_info%noaxi_nodes(m)%v)=m
+            dense_flag(self%gs_eq%region_info%noaxi_nodes(m)%v)=m
         END DO
         CALL graph_add_dense_blocks(graph1,graph2,dense_flag,self%gs_eq%region_info%noaxi_nodes)
         NULLIFY(graph1%kr,graph1%lc)
@@ -1197,11 +1199,13 @@ IF(.NOT.ASSOCIATED(lhs_mat))THEN
         DEALLOCATE(dense_flag)
     END IF
     !---Add dense blocks
-    CALL graph_add_full_col(graph1,graph2,2*oft_blagrange%nce,bnd_nodes)
-    NULLIFY(graph1%kr,graph1%lc)
-    graph1%nnz=graph2%nnz
-    graph1%kr=>graph2%kr
-    graph1%lc=>graph2%lc
+    IF(include_bounds)THEN
+        CALL graph_add_full_col(graph1,graph2,2*oft_blagrange%nce,bnd_nodes)
+        NULLIFY(graph1%kr,graph1%lc)
+        graph1%nnz=graph2%nnz
+        graph1%kr=>graph2%kr
+        graph1%lc=>graph2%lc
+    END IF
     !---Create matrix
     graphs(1,1)%g=>graph1
     CALL create_matrix(lhs_mat,graphs,oft_lag_vec,oft_lag_vec)
