@@ -266,13 +266,27 @@ END SUBROUTINE tokamaker_init_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_run(vacuum,error_flag) BIND(C,NAME="tokamaker_run")
-LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
+SUBROUTINE tokamaker_solve(error_flag) BIND(C,NAME="tokamaker_solve")
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-IF(vacuum)gs_global%has_plasma=.FALSE.
 CALL gs_global%solve(error_flag)
-gs_global%has_plasma=.TRUE.
-END SUBROUTINE tokamaker_run
+END SUBROUTINE tokamaker_solve
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_vac_solve(psi_in,error_flag) BIND(C,NAME="tokamaker_vac_solve")
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Needs docs
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
+CLASS(oft_vector), POINTER :: psi_tmp
+NULLIFY(psi_tmp)
+CALL gs_global%psi%new(psi_tmp)
+CALL c_f_pointer(psi_in, vals_tmp, [gs_global%psi%n])
+CALL psi_tmp%restore_local(vals_tmp)
+CALL gs_global%vac_solve(psi_tmp,error_flag)
+CALL psi_tmp%get_local(vals_tmp)
+CALL psi_tmp%delete()
+DEALLOCATE(psi_tmp)
+END SUBROUTINE tokamaker_vac_solve
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

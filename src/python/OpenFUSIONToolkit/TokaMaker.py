@@ -75,8 +75,12 @@ tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
     [c_char_p, c_double, c_char_p, c_char_p, c_char_p])
 
 # G-S run function
-tokamaker_run = ctypes_subroutine(oftpy_lib.tokamaker_run, 
-    [c_bool, c_int_ptr])
+tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
+    [c_int_ptr])
+
+# tokamaker_vac_solve(psi_in,error_flag)
+tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
+    [ctypes_numpy_array(float64,1),  c_int_ptr])
 
 # G-S info function
 tokamaker_analyze = ctypes_subroutine(oftpy_lib.tokamaker_analyze)
@@ -866,9 +870,26 @@ class TokaMaker():
 
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
+        if vacuum:
+            raise ValueError('"vacuum=True" no longer supported, use "vac_solve()"')
         error_flag = c_int()
-        tokamaker_run(c_bool(vacuum),ctypes.byref(error_flag))
+        tokamaker_solve(ctypes.byref(error_flag))
         return error_flag.value
+    
+    def vac_solve(self,psi=None):
+        '''! Solve for vacuum solution (no plasma), with present coil currents
+        
+        @param psi Boundary values for vacuum solve
+        '''
+        if psi is None:
+            psi = numpy.zeros((self.np,),dtype=numpy.float64)
+        else:
+            if psi.shape[0] != self.np:
+                raise ValueError('Incorrect shape of "psi", should be [np]')
+            psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
+        error_flag = c_int()
+        tokamaker_vac_solve(psi,ctypes.byref(error_flag))
+        return psi, error_flag.value
 
     def get_stats(self,lcfs_pad=0.01,li_normalization='std'):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium

@@ -277,6 +277,8 @@ CONTAINS
   !
   PROCEDURE :: lin_solve => gs_lin_solve
   !
+  PROCEDURE :: vac_solve => gs_vac_solve
+  !
   PROCEDURE :: get_chi => gs_get_chi
   !
   PROCEDURE :: itor => gs_itor
@@ -1431,6 +1433,10 @@ ELSE
 END IF
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
+!
+CALL self%psi%get_local(psi_vals)
+self%plasma_bounds=[0.d0,MAXVAL(ABS(psi_vals))]
+DEALLOCATE(psi_vals)
 ! CALL tmp_vec2%delete()
 ! DEALLOCATE(tmp_vec2)
 IF(self%isoflux_ntargets>0)THEN
@@ -2238,94 +2244,6 @@ IF(self%use_lu)THEN
 ELSE
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 END IF
-!
-IF(.NOT.self%has_plasma)THEN
-  self%o_point(1)=-1.d0
-  CALL self%psi%new(psi_vac)
-  CALL self%psi%new(psi_vcont)
-  CALL self%psi%new(psi_eddy)
-  CALL self%psi%new(psip)
-  IF(self%dt>0.d0)THEN
-    CALL build_dels(self%dels_dt,self,"free",self%dt)
-    self%lu_solver_dt%A=>self%dels_dt
-    self%lu_solver_dt%refactor=.TRUE.
-    CALL self%psi%new(psi_dt)
-    CALL self%psi%new(tmp_vec)
-  END IF
-  !---Update vacuum field part
-  CALL psi_vac%set(0.d0)
-  DO j=1,self%ncoils
-    ! curr = self%coil_regions(j)%curr
-    CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
-  END DO
-  CALL psi_eddy%set(0.d0)
-  DO j=1,self%ncond_regs
-    DO k=1,self%cond_regions(j)%neigs
-      ! ii=self%cond_regions(j)%eig_map(k)
-      ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-      !   self%cond_regions(j)%psi_eig(k)%f)
-      CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-      self%cond_regions(j)%psi_eig(k)%f)
-    END DO
-  END DO
-  CALL psi_vac%add(1.d0,1.d0,psi_eddy)
-  !
-  CALL psi_vcont%set(0.d0)
-  DO j=1,self%ncoils
-    ! curr = self%coil_regions(j)%vcont_gain
-    CALL psi_vcont%add(1.d0,self%coil_vcont(j),self%psi_coil(j)%f)
-  END DO
-  IF((self%dt>0.d0).AND.oft_env%pm)THEN
-    WRITE(*,'(2A)')oft_indent,'Starting vacuum GS solver'
-    CALL oft_increase_indent
-  END IF
-  ! ! Compute inhomogeneous part
-  ! CALL self%psi%new(rhs_bc)
-  ! CALL self%psi%new(psi_bc)
-  ! CALL rhs_bc%add(0.d0,1.d0,self%psi)
-  ! CALL psi_bc%add(0.d0,1.d0,rhs_bc)
-  ! CALL blag_zerob(psi_bc)
-  ! CALL rhs_bc%add(1.d0,-1.d0,psi_bc)
-  ! CALL psi_bc%set(0.d0)
-  ! pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  ! CALL self%lu_solver%apply(psi_bc,rhs_bc)
-  ! oft_env%pm=pm_save
-  ! CALL psi_vac%add(1.d0,1.d0,psi_bc)
-  ! CALL rhs_bc%delete()
-  ! CALL psi_bc%delete()
-  ! DEALLOCATE(rhs_bc,psi_bc)
-  !
-  CALL self%psi%set(0.d0)
-  CALL self%psi%add(0.d0,1.d0,psi_vac)
-  CALL self%psi%add(1.d0,self%vcontrol_val,psi_vcont)
-  IF(self%dt>0.d0)THEN
-    CALL tmp_vec%set(0.d0)
-    CALL tmp_vec%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
-    CALL gs_wall_source(self,tmp_vec,psi_dt)
-    CALL blag_zerob(psi_dt)
-    pm_save=oft_env%pm; oft_env%pm=.FALSE.
-    CALL self%lu_solver_dt%apply(tmp_vec,psi_dt)
-    oft_env%pm=pm_save
-    CALL self%psi%add(1.d0,1.d0,tmp_vec)
-  END IF
-  psimax=self%psi%dot(self%psi)
-  IF(oft_env%pm)WRITE(*,'(A,I4,1ES12.4)')oft_indent,1,psimax
-  IF((self%dt>0.d0).AND.oft_env%pm)THEN
-    CALL oft_decrease_indent
-  END IF
-  error_flag=0
-  CALL psi_vac%delete
-  CALL psi_vcont%delete
-  CALL psi_eddy%delete
-  CALL psip%delete
-  IF(self%dt>0.d0)THEN
-    CALL psi_dt%delete
-    CALL tmp_vec%delete
-    DEALLOCATE(psi_dt,tmp_vec)
-  END IF
-  DEALLOCATE(psi_vac,psi_vcont,psi_eddy,psip)
-  RETURN
-END IF
 !---
 ALLOCATE(vals_tmp(self%psi%n))
 CALL self%psi%new(tmp_vec)
@@ -3086,6 +3004,114 @@ ELSE
   END IF
 END IF
 end subroutine gs_lin_solve
+!---------------------------------------------------------------------------
+!> Compute Grad-Shafranov solution for vacuum (no plasma)
+!---------------------------------------------------------------------------
+subroutine gs_vac_solve(self,psi_sol,ierr)
+class(gs_eq), intent(inout) :: self !< G-S object
+class(oft_vector), intent(inout) :: psi_sol !< Input: BCs for \f$ \psi \f$, Output: solution
+integer(4), optional, intent(out) :: ierr !< Error flag
+class(oft_vector), pointer :: rhs_bc,psi_bc,psi_eddy,psi_dt,tmp_vec,psi_vac,psi_vcont
+integer(4) :: j,k,error_flag
+REAL(8) :: psimax
+logical :: pm_save
+!---
+error_flag=0
+IF(self%use_lu)THEN
+  IF(.NOT.ASSOCIATED(self%lu_solver%A))THEN
+    self%lu_solver%A=>self%dels
+    ALLOCATE(self%lu_solver%sec_rhs(self%psi%n,2))
+  END IF
+ELSE
+  CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
+END IF
+!
+! self%o_point(1)=-1.d0
+CALL self%psi%new(psi_vac)
+CALL self%psi%new(psi_vcont)
+CALL self%psi%new(psi_eddy)
+IF(self%dt>0.d0)THEN
+  CALL build_dels(self%dels_dt,self,"free",self%dt)
+  self%lu_solver_dt%A=>self%dels_dt
+  self%lu_solver_dt%refactor=.TRUE.
+  CALL self%psi%new(psi_dt)
+  CALL self%psi%new(tmp_vec)
+END IF
+!---Update vacuum field part
+CALL psi_vac%set(0.d0)
+DO j=1,self%ncoils
+  ! curr = self%coil_regions(j)%curr
+  CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+END DO
+CALL psi_eddy%set(0.d0)
+DO j=1,self%ncond_regs
+  DO k=1,self%cond_regions(j)%neigs
+    ! ii=self%cond_regions(j)%eig_map(k)
+    ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
+    !   self%cond_regions(j)%psi_eig(k)%f)
+    CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
+    self%cond_regions(j)%psi_eig(k)%f)
+  END DO
+END DO
+CALL psi_vac%add(1.d0,1.d0,psi_eddy)
+!
+CALL psi_vcont%set(0.d0)
+DO j=1,self%ncoils
+  ! curr = self%coil_regions(j)%vcont_gain
+  CALL psi_vcont%add(1.d0,self%coil_vcont(j),self%psi_coil(j)%f)
+END DO
+IF((self%dt>0.d0).AND.oft_env%pm)THEN
+  WRITE(*,'(2A)')oft_indent,'Starting vacuum GS solver'
+  CALL oft_increase_indent
+END IF
+! Compute inhomogeneous part
+psimax=psi_sol%dot(psi_sol)
+IF(psimax>1.d-15)THEN
+  CALL self%psi%new(rhs_bc)
+  CALL self%psi%new(psi_bc)
+  CALL rhs_bc%add(0.d0,1.d0,psi_sol)
+  CALL psi_bc%add(0.d0,1.d0,rhs_bc)
+  CALL blag_zerob(psi_bc)
+  CALL rhs_bc%add(1.d0,-1.d0,psi_bc)
+  CALL psi_bc%set(0.d0)
+  pm_save=oft_env%pm; oft_env%pm=.FALSE.
+  CALL self%lu_solver%apply(psi_bc,rhs_bc)
+  oft_env%pm=pm_save
+  CALL psi_vac%add(1.d0,1.d0,psi_bc)
+  CALL rhs_bc%delete()
+  CALL psi_bc%delete()
+  DEALLOCATE(rhs_bc,psi_bc)
+END IF
+!
+CALL psi_sol%set(0.d0)
+CALL psi_sol%add(0.d0,1.d0,psi_vac)
+CALL psi_sol%add(1.d0,self%vcontrol_val,psi_vcont)
+IF(self%dt>0.d0)THEN
+  CALL tmp_vec%set(0.d0)
+  CALL tmp_vec%add(0.d0,-1.d0/self%dt,psi_sol,1.d0/self%dt,self%psi_dt)
+  CALL gs_wall_source(self,tmp_vec,psi_dt)
+  CALL blag_zerob(psi_dt)
+  pm_save=oft_env%pm; oft_env%pm=.FALSE.
+  CALL self%lu_solver_dt%apply(tmp_vec,psi_dt)
+  oft_env%pm=pm_save
+  CALL psi_sol%add(1.d0,1.d0,tmp_vec)
+END IF
+psimax=psi_sol%dot(psi_sol)
+IF(oft_env%pm)WRITE(*,'(A,I4,1ES12.4)')oft_indent,1,psimax
+IF((self%dt>0.d0).AND.oft_env%pm)THEN
+  CALL oft_decrease_indent
+END IF
+error_flag=0
+CALL psi_vac%delete
+CALL psi_vcont%delete
+CALL psi_eddy%delete
+IF(self%dt>0.d0)THEN
+  CALL psi_dt%delete
+  CALL tmp_vec%delete
+  DEALLOCATE(psi_dt,tmp_vec)
+END IF
+DEALLOCATE(psi_vac,psi_vcont,psi_eddy)
+end subroutine gs_vac_solve
 !---------------------------------------------------------------------------
 ! FUNCTION gs_err_reason
 !---------------------------------------------------------------------------
