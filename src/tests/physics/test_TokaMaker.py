@@ -10,7 +10,9 @@ from scipy.special import jv, jn_zeros
 from scipy.integrate import dblquad
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
-from OpenFUSIONToolkit.TokaMaker import TokaMaker, gs_Domain, save_gs_mesh, load_gs_mesh, create_isoflux
+from OpenFUSIONToolkit.TokaMaker import TokaMaker
+from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
+from OpenFUSIONToolkit.TokaMaker.util import create_isoflux
 
 
 def mp_run(target,args,timeout=30):
