@@ -796,7 +796,7 @@ class TokaMaker():
     def get_field_eval(self,field_type):
         r'''! Create field interpolator for vector potential
 
-        @param imode Index of eigenstate
+        @param field_type Field to interpolate, must be one of ("B", "psi", "F", or "P")
         @result Field interpolation object
         '''
         #
