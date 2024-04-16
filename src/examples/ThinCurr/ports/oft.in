@@ -1,0 +1,26 @@
+&runtime_options
+ debug=0
+/
+
+&mesh_options
+ cad_type=0
+/
+
+&native_mesh_options
+ filename="thincurr_ex-ports.h5"
+/
+
+&thincurr_eig_options
+ direct=F
+ plot_run=F
+ neigs=6
+/
+
+&thincurr_hodlr_options
+ target_size=1200
+ aca_min_its=20
+ L_svd_tol=1.E-8
+ L_aca_rel_tol=0.05
+ B_svd_tol=1.E-3
+ B_aca_rel_tol=0.05
+/

@@ -12,7 +12,7 @@
 !! @ingroup doxy_oft_base
 !-----------------------------------------------------------------------------
 MODULE oft_local
-USE, INTRINSIC :: iso_c_binding, only: c_int
+USE, INTRINSIC :: iso_c_binding, only: c_int, c_ptr, c_long
 #ifdef __INTEL_COMPILER
 USE ifport ! Intel fortran portability library
 #endif
@@ -68,6 +68,17 @@ INTERFACE
     INTEGER(c_int) :: oft_sleep 
     INTEGER(c_int), INTENT(in), VALUE :: seconds !< Length of time to pause in seconds
   END FUNCTION oft_sleep
+!---------------------------------------------------------------------------
+!> Simple in-memory hashing function for dataset checksumming
+!!
+!! @result Checksum of data
+!---------------------------------------------------------------------------
+  FUNCTION oft_simple_hash(key,length)  BIND(C)
+    IMPORT c_int, c_long, c_ptr
+    INTEGER(c_int) :: oft_simple_hash
+    TYPE(c_ptr), VALUE, INTENT(in) :: key !< Location of data
+    INTEGER(c_long), VALUE, INTENT(in) :: length !< Length of data to hash in bytes
+  END FUNCTION oft_simple_hash
 END INTERFACE
 !---------------------------------------------------------------------------
 !> One dimensional integer set
@@ -243,6 +254,44 @@ END IF
 800 RETURN
 end function skip_comment_lines
 !------------------------------------------------------------------------------
+!> Get child element within a given XML node
+!------------------------------------------------------------------------------
+subroutine xml_get_element(parent,name,element,error_flag,index)
+TYPE(fox_node), POINTER, INTENT(in) :: parent
+CHARACTER(LEN=*), INTENT(in) :: name
+TYPE(fox_node), POINTER, INTENT(out) :: element
+INTEGER(i4), INTENT(out) :: error_flag
+INTEGER(i4), OPTIONAL, INTENT(out) :: index
+INTEGER(i4) :: req_index,nelements
+TYPE(fox_nodelist), POINTER :: tmp_list
+IF(.NOT.ASSOCIATED(parent))THEN
+  error_flag=1
+  RETURN
+END IF
+tmp_list=>fox_getElementsByTagname(parent,TRIM(name))
+IF(.NOT.ASSOCIATED(tmp_list))THEN
+  error_flag=2
+  RETURN
+END IF
+req_index=1
+IF(PRESENT(index))req_index=index
+IF(req_index<=0)THEN
+  error_flag=3
+  RETURN
+END IF
+nelements=fox_getLength(tmp_list)
+IF(nelements==0)THEN
+  error_flag=4
+  RETURN
+END IF
+IF(req_index>nelements)THEN
+  error_flag=-nelements
+  RETURN
+END IF
+element=>fox_item(tmp_list,req_index-1)
+error_flag=0
+end subroutine xml_get_element
+!------------------------------------------------------------------------------
 !> integer(i4) implementation of \ref oft_local::get_inverse_map
 !------------------------------------------------------------------------------
 subroutine get_inverse_map_i4(map,n1,imap,n2)
@@ -295,5 +344,25 @@ PURE FUNCTION magnitude(a) RESULT(c)
 REAL(r8), INTENT(in) :: a(:) !< Array
 REAL(r8) :: c
 c=SQRT(SUM(a**2))
-END FUNCTION magnitude 
+END FUNCTION magnitude
+!------------------------------------------------------------------------------
+!> Compute the 2-norm of an array
+!!
+!! @result \f$ \sum_i a^2_i \f$
+!------------------------------------------------------------------------------
+PURE FUNCTION time_to_string(a) RESULT(c)
+REAL(r8), INTENT(in) :: a !< Array
+INTEGER(4) :: hours,minutes,seconds
+CHARACTER(LEN=13) :: c
+hours = FLOOR(a/3600.d0)
+minutes = FLOOR((a-hours*3600.d0)/60.d0)
+seconds = FLOOR((a-hours*3600.d0-minutes*60.d0))
+IF(hours>0)THEN
+  WRITE(c,'(I4,A,I2,A,I2,A)')hours,'h ',minutes,'m ',seconds,'s'
+ELSE IF(minutes>0)THEN
+  WRITE(c,'(I2,A,I2,A,6X)')minutes,'m ',seconds,'s'
+ELSE
+  WRITE(c,'(I2,A,10X)')seconds,'s'
+END IF
+END FUNCTION time_to_string
 END MODULE oft_local

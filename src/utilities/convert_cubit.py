@@ -127,6 +127,7 @@ def read_mesh(filename):
     r_new = r[reindex_flag[1:] == 1]
     rindexed_pts = np.cumsum(reindex_flag)
     lc_new = rindexed_pts[lc[:,:ncp_lin]]
+    node_sets = [rindexed_pts[nodeset] for nodeset in node_sets]
     # Build high-order information
     if mesh_order > 1: # Handle high-order if present
         ed_map = block_types[0]['ed_map']

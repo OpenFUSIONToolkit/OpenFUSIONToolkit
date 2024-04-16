@@ -918,13 +918,13 @@ CALL w%set((0.d0,0.d0))
 allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
-uu = REAL(u%dot(u),r8)
+uu = REAL(u%dot(u))
 IF(uu>0.d0)call A%apply(u,w)
 if(associated(self%bc))call self%bc(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
-gg = REAL(r%dot(r),r8)
+gg = REAL(r%dot(r))
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
@@ -954,8 +954,9 @@ do j=1,u%ng
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc(w)
     !---Arnoldi iteration
-    h(1:i,i)=w%mdot(v(1:i),i)
+    ! h(1:i,i)=w%mdot(v,i)
     do k=1,i
+      h(k,i)=w%dot(v(k)%f)
       call w%add((1.d0,0.d0),-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
@@ -968,7 +969,7 @@ do j=1,u%ng
       h(k-1,i) = c(k-1)*hkmi + s(k-1)*h(k,i)
       h(k,i) = -s(k-1)*hkmi + c(k-1)*h(k,i)
     enddo
-    delta = SQRT( h(i,i)**2 + h(i+1,i)**2 )
+    delta = SQRT( ABS(h(i,i))**2 + ABS(h(i+1,i))**2 )
     c(i) = h(i,i) / delta
     s(i) = h(i+1,i) / delta
     h(i,i) = c(i)*h(i,i) + s(i)*h(i+1,i)
@@ -1001,8 +1002,8 @@ do j=1,u%ng
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
   ggold=gg; uuold=uu
-  gg = REAL(r%dot(r),r8)
-  uu = REAL(u%dot(u),r8)
+  gg = REAL(r%dot(r))
+  uu = REAL(u%dot(u))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF

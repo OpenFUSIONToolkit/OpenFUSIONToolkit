@@ -781,8 +781,6 @@ end select
 STACK_POP
 end FUNCTION petsc_gmres_solver_cast
 !------------------------------------------------------------------------------
-! SUBROUTINE: matrix_assemble
-!------------------------------------------------------------------------------
 !> Solve a linear system using PETSc's implementation of the FGMRES method
 !!
 !! @param[in,out] u Guess/Solution field

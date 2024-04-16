@@ -20,20 +20,17 @@ IMPLICIT NONE
 #include "local.h"
 PRIVATE
 !---------------------------------------------------------------------------
-! TYPE oft_iram_eigsolver
-!---------------------------------------------------------------------------
 !> Implicity Restarted Arnoldi Method
 !---------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_iram_eigsolver
-  INTEGER(i4) :: mode = 1
-  INTEGER(i4) :: nev = 1
-  INTEGER(i4) :: ncv = 0
-  INTEGER(i4) :: init = 0
-  INTEGER(i4) :: info = 0
-  REAL(r8) :: tol = 1.E-10_r8
-  REAL(r8), POINTER, DIMENSION(:,:) :: eig_val => NULL()
-  REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL()
-  CHARACTER(LEN=2) :: which = 'LM'
+  INTEGER(i4) :: mode = 1 !< Operational mode
+  INTEGER(i4) :: nev = 1 !< Number of eigenvalues to compute
+  INTEGER(i4) :: ncv = 0 !< Size of Ritz space (determined in call to `apply`)
+  INTEGER(i4) :: info = 0 !< Solver status/return code
+  REAL(r8) :: tol = 1.E-10_r8 !< Solver tolerance
+  REAL(r8), POINTER, DIMENSION(:,:) :: eig_val => NULL() !< Eigenvalues
+  REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL() !< Eigenvectors
+  CHARACTER(LEN=2) :: which = 'LM' !< Spectrum search flag
   CLASS(oft_solver), POINTER :: Minv => NULL() !< RHS inversion operator
   !> Boundary condition
   PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
@@ -47,19 +44,17 @@ CONTAINS
   PROCEDURE :: delete => iram_delete
 END TYPE oft_iram_eigsolver
 !---------------------------------------------------------------------------
-! TYPE oft_irlm_eigsolver
-!---------------------------------------------------------------------------
 !> Implicity Restarted Lanczos Method
 !---------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_irlm_eigsolver
-  INTEGER(i4) :: mode = 1
-  INTEGER(i4) :: nev = 1
-  INTEGER(i4) :: ncv = 0
-  INTEGER(i4) :: info = 0
-  REAL(r8) :: tol = 1.E-10_r8
-  REAL(r8), POINTER, DIMENSION(:,:) :: eig_val => NULL()
-  REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL()
-  CHARACTER(LEN=2) :: which = 'LM'
+  INTEGER(i4) :: mode = 1 !< Operational mode
+  INTEGER(i4) :: nev = 1 !< Number of eigenvalues to compute
+  INTEGER(i4) :: ncv = 0 !< Size of Ritz space (determined in call to `apply`)
+  INTEGER(i4) :: info = 0 !< Solver status/return code
+  REAL(r8) :: tol = 1.E-10_r8 !< Solver tolerance
+  REAL(r8), POINTER, DIMENSION(:,:) :: eig_val => NULL() !< Eigenvalues
+  REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL() !< Eigenvectors
+  CHARACTER(LEN=2) :: which = 'LM' !< Spectrum search flag
   CLASS(oft_solver), POINTER :: Minv => NULL() !< RHS inversion operator
   !> Boundary condition
   PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
@@ -79,7 +74,8 @@ INTERFACE
 !! Driver subroutine for non-symmetric eigenvalue problems using ARPACK's
 !! Implicitly Restarted Arnoldi Method.
 !---------------------------------------------------------------------------
-  SUBROUTINE dnaupd(ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
+  SUBROUTINE dnaupd(ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr, &
+                    workd,workl,lworkl,info)
   INTEGER :: ido
   CHARACTER(LEN=1) :: bmat
   INTEGER :: n
@@ -100,7 +96,8 @@ INTERFACE
 !---------------------------------------------------------------------------
 !> Interface to pdsaupd from ARPACK
 !---------------------------------------------------------------------------
-  SUBROUTINE dsaupd(ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
+  SUBROUTINE dsaupd(ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr, &
+                    workd,workl,lworkl,info)
   INTEGER :: ido
   CHARACTER(LEN=1) :: bmat
   INTEGER :: n
@@ -153,9 +150,8 @@ INTERFACE
 !---------------------------------------------------------------------------
 !> Interface to dseupd from ARPACK
 !---------------------------------------------------------------------------
-  SUBROUTINE dseupd(rvec,howmny,select,d,z,ldz,sigma, &
-                    bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr,workd,workl, &
-                    lworkl,info)
+  SUBROUTINE dseupd(rvec,howmny,select,d,z,ldz,sigma,bmat,n,which,nev,tol, &
+                    resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
   LOGICAL :: rvec
   CHARACTER(LEN=1) :: howmny
   LOGICAL, DIMENSION(ncv) :: select
@@ -181,14 +177,13 @@ INTERFACE
   END SUBROUTINE dseupd
 #ifdef HAVE_MPI
 !---------------------------------------------------------------------------
-! SUBROUTINE pdnaupd
-!---------------------------------------------------------------------------
 !> Interface to pdnaupd from ARPACK
 !!
 !! Driver subroutine for non-symmetric eigenvalue problems using ARPACK's
 !! Implicitly Restarted Arnoldi Method.
 !---------------------------------------------------------------------------
-  SUBROUTINE pdnaupd(comm,ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
+  SUBROUTINE pdnaupd(comm,ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam, &
+                     ipntr,workd,workl,lworkl,info)
   INTEGER :: comm
   INTEGER :: ido
   CHARACTER(LEN=1) :: bmat
@@ -208,11 +203,10 @@ INTERFACE
   INTEGER :: info
   END SUBROUTINE pdnaupd
 !---------------------------------------------------------------------------
-! SUBROUTINE pdsaupd
-!---------------------------------------------------------------------------
 !> Interface to pdsaupd from ARPACK
 !---------------------------------------------------------------------------
-  SUBROUTINE pdsaupd(comm,ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
+  SUBROUTINE pdsaupd(comm,ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam, &
+                     ipntr,workd,workl,lworkl,info)
   INTEGER :: comm
   INTEGER :: ido
   CHARACTER(LEN=1) :: bmat
@@ -231,8 +225,6 @@ INTERFACE
   INTEGER :: lworkl
   INTEGER :: info
   END SUBROUTINE pdsaupd
-!---------------------------------------------------------------------------
-! SUBROUTINE pdneupd
 !---------------------------------------------------------------------------
 !> Interface to pdneupd from ARPACK
 !---------------------------------------------------------------------------
@@ -267,8 +259,6 @@ INTERFACE
   INTEGER :: info
   END SUBROUTINE pdneupd
 !---------------------------------------------------------------------------
-! SUBROUTINE pdseupd
-!---------------------------------------------------------------------------
 !> Interface to pdseupd from ARPACK
 !---------------------------------------------------------------------------
   SUBROUTINE pdseupd(comm,rvec,howmny,select,d,z,ldz,sigma, &
@@ -302,23 +292,16 @@ INTERFACE
 END INTERFACE
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE: cg_eigsolver_apply
-!---------------------------------------------------------------------------
 !> Compute the eigenvalue and eigenvector of a matrix system (A*x = Lam*M*x) using
 !! an Implicitly Restarted Arnoldi Iteration.
 !!
 !! Solver employs the ARPACK non-symmetric driver routine. The location of the
 !! eigenvalue is set in the calling class.
-!!
-!!
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] alam Eigenvalue
 !---------------------------------------------------------------------------
 SUBROUTINE iram_eig_apply(self,u,alam)
 CLASS(oft_iram_eigsolver), intent(inout) :: self
-CLASS(oft_vector), intent(inout) :: u
-REAL(r8), intent(inout) :: alam
+CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
+REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j,ind,nslice,neigs
 INTEGER(i4) :: ido,ldv,lworkl,info
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(14)
@@ -351,7 +334,7 @@ CASE DEFAULT
 END SELECT
 lworkl=3*(self%ncv**2)+6*self%ncv ! Length of workl array
 ido=0                             ! Reverse communication variable
-info=self%init                    ! Error reporting
+info=0                            ! Error reporting
 iparam(1)=1                       ! Use exact shifts
 IF(self%its>0)THEN                ! Maximum number of Arnoldi iterations
   iparam(3)=self%its
@@ -398,6 +381,7 @@ DEALLOCATE(vslice)
 !---------------------------------------------------------------------------
 ! Begin Reverse Communication
 !---------------------------------------------------------------------------
+i=0
 self%info=0
 DO
   !---Call APRACK driver
@@ -410,6 +394,7 @@ DO
                  resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
   END IF
+  i=i+1
   !IF(head_proc.AND.pm)WRITE(*,*)i,ido
   !---Handle user action request
   IF(ido==-1.OR.ido==1)THEN ! Apply y = OP*x
@@ -522,21 +507,17 @@ CALL tmp2%delete
 DEBUG_STACK_POP
 END SUBROUTINE iram_eig_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: iram_eig_max
-!---------------------------------------------------------------------------
 !> Compute the largest 2 eigenvalues of a matrix system (A*x = Lam*M*x) using
 !! an Implicitly Restarted Arnoldi Iteration.
 !!
 !! Solver employs the ARPACK non-symmetric driver routine. Currently the guess
 !! field is only used to create work vectors and a random initialization is used
 !! for the solver.
-!!
-!! @param[in,out] u Guess field
 !---------------------------------------------------------------------------
 SUBROUTINE iram_eig_max(self,u,alam)
 CLASS(oft_iram_eigsolver), INTENT(inout) :: self
-CLASS(oft_vector), INTENT(inout) :: u
-REAL(r8), INTENT(inout) :: alam
+CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
+REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j
 INTEGER(i4) :: ido,nslice,nev,ncv,ldv,lworkl,info
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(14)
@@ -689,8 +670,6 @@ CALL tmp2%delete
 DEBUG_STACK_POP
 END SUBROUTINE iram_eig_max
 !---------------------------------------------------------------------------
-! SUBROUTINE: iram_delete
-!---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine iram_delete(self)
@@ -701,23 +680,16 @@ IF(ASSOCIATED(self%eig_vec))DEALLOCATE(self%eig_vec)
 self%initialized=.FALSE.
 end subroutine iram_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: irlm_eig_apply
-!---------------------------------------------------------------------------
 !> Compute the eigenvalue and eigenvector of a matrix system (A*x = Lam*M*x) using
-!! an Implicitly Restarted Arnoldi Iteration.
+!! an Implicitly Restarted Lanczos Iteration.
 !!
-!! Solver employs the ARPACK non-symmetric driver routine. The location of the
+!! Solver employs the ARPACK symmetric driver routine `dsaupd`. The location of the
 !! eigenvalue is set in the calling class.
-!!
-!!
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] alam Eigenvalue
 !---------------------------------------------------------------------------
 SUBROUTINE irlm_eig_apply(self,u,alam)
 CLASS(oft_irlm_eigsolver), intent(inout) :: self
-CLASS(oft_vector), intent(inout) :: u
-REAL(r8), intent(inout) :: alam
+CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
+REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j
 INTEGER(i4) :: ido,nslice,ldv,lworkl,info
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(11)
@@ -795,6 +767,7 @@ DEALLOCATE(vslice)
 !---------------------------------------------------------------------------
 ! Begin Reverse Communication
 !---------------------------------------------------------------------------
+i=0
 self%info=0
 DO
   !---Call APRACK driver
@@ -807,18 +780,20 @@ DO
       self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
   END IF
+  i=i+1
+  !IF(head_proc.AND.pm)WRITE(*,*)i,ido
   !---Handle user action request
   IF(ido==-1.OR.ido==1)THEN ! Apply y = OP*x
     !---Propogate local slice to full vector
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
     !---Compute y' = A*x
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%A%apply(tmp1,tmp2)
     oft_env%pm=pm_save
-    CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp2%get_slice(vslice)
@@ -840,7 +815,7 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     !---Compute y = M*x
     IF(bmat=='G')THEN
@@ -849,7 +824,7 @@ DO
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
     oft_env%pm=pm_save
-    CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
     CALL tmp2%get_slice(vslice)
@@ -911,21 +886,17 @@ CALL tmp2%delete
 DEBUG_STACK_POP
 END SUBROUTINE irlm_eig_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: irlm_eig_max
-!---------------------------------------------------------------------------
 !> Compute the largest 2 eigenvalues of a matrix system (A*x = Lam*M*x) using
-!! an Implicitly Restarted Arnoldi Iteration.
+!! an Implicitly Restarted Lanczos Iteration.
 !!
-!! Solver employs the ARPACK non-symmetric driver routine. Currently the guess
+!! Solver employs the ARPACK symmetric driver routine. Currently the guess
 !! field is only used to create work vectors and a random initialization is used
 !! for the solver.
-!!
-!! @param[in,out] u Guess field
 !---------------------------------------------------------------------------
 SUBROUTINE irlm_eig_max(self,u,alam)
 CLASS(oft_irlm_eigsolver), INTENT(inout) :: self
-CLASS(oft_vector), INTENT(inout) :: u
-REAL(r8), INTENT(inout) :: alam
+CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
+REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j
 INTEGER(i4) :: ido,nslice,nev,ncv,ldv,lworkl,info
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(11)
@@ -1090,8 +1061,6 @@ CALL tmp1%delete
 CALL tmp2%delete
 DEBUG_STACK_POP
 END SUBROUTINE irlm_eig_max
-!---------------------------------------------------------------------------
-! SUBROUTINE: irlm_delete
 !---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------

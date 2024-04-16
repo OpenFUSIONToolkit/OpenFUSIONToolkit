@@ -62,14 +62,14 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,nTurns=None,coil_set=None,allow_xpoints=False):
+    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,allow_xpoints=False):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
         @param dx Target mesh size for region
         @param reg_type Type of region ("plasma", "vacuum", "boundary", "conductor", or "coil")
         @param eta Resistivity for "conductor" regions (raises error if region is other type)
-        @param nTurns Number of turns for "cooil" regions (raises error if region is other type)
+        @param nTurns Number of turns for "coil" regions (raises error if region is other type)
         @param allow_xpoints Allow X-points in this region (for non-plasma regions only)
         '''
         if (dx is None) or (dx < 0.0):
@@ -107,6 +107,11 @@ class gs_Domain:
         else:
             if reg_type == 'conductor':
                 raise ValueError('Resistivity not specified for "conductor" region')
+        if noncontinuous is not None:
+            if reg_type != 'conductor':
+                raise ValueError('Non-contiguous specification only valid for "conductor" regions')
+            else:
+                self.region_info[name]['noncontinuous'] = noncontinuous
         if nTurns is not None:
             if reg_type != 'coil':
                 raise ValueError('"nTurns" specification only valid for "coil" regions')
@@ -297,6 +302,7 @@ class gs_Domain:
                     'reg_id': self.region_info[key]['id'],
                     'cond_id': cond_id,
                     'eta': self.region_info[key]['eta'],
+                    'noncontinuous': self.region_info[key].get('noncontinuous',False),
                     'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
                 cond_id += 1

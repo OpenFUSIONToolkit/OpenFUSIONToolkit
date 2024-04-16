@@ -1,4 +1,4 @@
-ThinCurr Example 1: Eigenstates of a square plate {#doc_thincurr_ex1}
+ThinCurr Example: Eigenstates of a square plate {#doc_thincurr_ex1}
 ==============
 
 [TOC]

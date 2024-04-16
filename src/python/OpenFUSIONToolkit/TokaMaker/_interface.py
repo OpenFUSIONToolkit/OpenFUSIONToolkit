@@ -41,7 +41,7 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
+    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
 
 # tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
 #     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
@@ -66,9 +66,14 @@ tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
     [c_char_p, c_double, c_char_p, c_char_p, c_char_p])
 
-# G-S run function
-tokamaker_run = ctypes_subroutine(oftpy_lib.tokamaker_run, 
-    [c_bool, c_int_ptr])
+# tokamaker_solve(error_flag)
+tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
+    [c_int_ptr])
+
+# tokamaker_vac_solve(psi_in,error_flag)
+tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
+    [ctypes_numpy_array(float64,1),  c_int_ptr])
+
 
 # G-S info function
 tokamaker_analyze = ctypes_subroutine(oftpy_lib.tokamaker_analyze)

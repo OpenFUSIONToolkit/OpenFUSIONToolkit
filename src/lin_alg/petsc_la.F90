@@ -1063,6 +1063,7 @@ if(PRESENT(diag))then
     CLASS IS(oft_petsc_vector)
       CALL MatGetDiagonal(self%M,this%v,ierr)
   END SELECT
+  call diag%add(0.d0,1.d0,self%D)
 end if
 !---Common assembly tasks
 DEBUG_STACK_POP

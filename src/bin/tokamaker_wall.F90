@@ -945,7 +945,7 @@ DO i=1,self%ncond_regs
   eig_vec=0.d0
   IF(self%cond_regions(i)%neigs>0)THEN
     WRITE(num_str,'(I2.2)')i
-    IF(.NOT.self%cond_regions(i)%contiguous)THEN
+    IF(.NOT.self%cond_regions(i)%continuous)THEN
       ALLOCATE(correction(nsensor,self%cond_regions(i)%neigs))
       ALLOCATE(corr_axi(ncons,self%cond_regions(i)%neigs))
       DO j=1,self%cond_regions(i)%neigs
