@@ -1,0 +1,46 @@
+reset
+undo off
+
+#{mesh_size=0.03}
+
+# Create simple 1x0.5 torus
+create torus major radius 1 minor radius 0.5
+
+brick x 0.4 y 2 z 0.5
+move Volume 2  x 0 y 2 z 0 include_merged
+Volume 2  copy rotate 36 about z repeat 9
+subtract volume 2 to 11 from volume 1
+surface 112 copy nomesh
+delete volume 1
+
+webcut volume 12  with plane yplane offset 0
+webcut volume 13 12  with plane zplane offset 0
+
+imprint all
+merge all
+
+# Generate mesh
+set trimesher geometry sizing off
+surface all scheme trimesh
+surface all size {mesh_size}
+mesh surface all
+
+# Create mesh blocks
+set duplicate block elements off
+block 1 add surface all
+#nodeset 1 add vertex 180
+nodeset 1 add vertex 176
+nodeset 2 add vertex 172
+nodeset 3 add vertex 168
+nodeset 4 add vertex 164
+nodeset 5 add vertex 200
+nodeset 6 add vertex 196
+nodeset 7 add vertex 192
+nodeset 8 add vertex 188
+nodeset 9 add vertex 184
+nodeset 10 add curve 303 305
+nodeset 11 add curve 302 331
+
+# Export grid
+set large exodus file on
+export Genesis  "thincurr_ex-ports.g" overwrite block 1

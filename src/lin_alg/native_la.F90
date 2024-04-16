@@ -1493,7 +1493,7 @@ IF(PRESENT(iblock))THEN
 ELSE
   IF(ASSOCIATED(self%local_tmp))CALL oft_abort("Existing partial restore found when restoring full vector", &
     "cvec_restore_local",__FILE__)
-  IF(.NOT.do_wait)CALL oft_abort("Wait not supported when restoring full vector", &
+  IF(do_wait)CALL oft_abort("Wait not supported when restoring full vector", &
     "cvec_restore_local",__FILE__)
   ALLOCATE(self%local_tmp(self%n))
   self%local_tmp=array
@@ -1602,6 +1602,7 @@ logical :: dealloc_flag(2)
 integer(i4) :: i
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
 DEBUG_STACK_PUSH
+dealloc_flag=.FALSE.
 IF(self%n/=a%n)CALL oft_abort('First source does not match destination size.','cvec_add_cvec',__FILE__)
 SELECT TYPE(a)
 CLASS IS(oft_native_cvector)
@@ -2076,7 +2077,7 @@ IF(ASSOCIATED(self%lc_small))THEN
   end do
 ELSE
   !$omp parallel do private(j,tmp) schedule(static,20) if(self%nnz>OFT_OMP_VTHRESH)
-    do i=1,self%nr
+  do i=1,self%nr
     tmp=(0.d0,0.d0)
     do j=self%kr(i),self%kr(i+1)-1
       tmp=tmp+self%M(j)*atmp(self%lc(j))
@@ -2454,6 +2455,7 @@ if(present(diag))then
     CALL oft_abort('"diag" is not a vector object.','mat_assemble',__FILE__)
   END SELECT
   call self%D%stitch(1)
+  call diag%add(0.d0,1.d0,self%D)
 end if
 !---Common assembly tasks
 IF(self%nc<2*lc_offset)THEN
@@ -3755,6 +3757,7 @@ if(present(diag))then
     CALL oft_abort('"diag" is not a vector object.','cmat_assemble',__FILE__)
   END SELECT
   call self%D%stitch(1)
+  call diag%add((0.d0,0.d0),(1.d0,0.d0),self%D)
 end if
 !---Common assembly tasks
 IF(self%nc<2*lc_offset)THEN
@@ -4260,6 +4263,7 @@ if(present(diag))then
     CALL oft_abort('"diag" is not a native vector.','dense_mat_assemble',__FILE__)
   END SELECT
   call self%D%stitch(1)
+  call diag%add(0.d0,1.d0,self%D)
 end if
 DEBUG_STACK_POP
 end subroutine dense_mat_assemble
@@ -4718,6 +4722,7 @@ if(present(diag))then
     CALL oft_abort('"diag" is not a native vector.','dense_cmat_assemble',__FILE__)
   END SELECT
   call self%D%stitch(1)
+  call diag%add((0.d0,0.d0),(1.d0,0.d0),self%D)
 end if
 DEBUG_STACK_POP
 end subroutine dense_cmat_assemble

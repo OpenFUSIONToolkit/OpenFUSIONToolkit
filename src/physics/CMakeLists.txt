@@ -17,6 +17,8 @@ set( OBJS
   grad_shaf_fit.F90
   grad_shaf_td.F90
   thin_wall.F90
+  thin_wall_solvers.F90
+  thin_wall_hodlr.F90
 )
 
 add_library( oftphysics ${OBJS} )

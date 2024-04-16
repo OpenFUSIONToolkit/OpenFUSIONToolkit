@@ -1,4 +1,4 @@
-ThinCurr Example 2: Time-dependent model of a cylinder {#doc_thincurr_ex2}
+ThinCurr Example: Time-dependent model of a cylinder {#doc_thincurr_ex2}
 ==============
 
 [TOC]
