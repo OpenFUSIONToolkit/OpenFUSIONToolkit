@@ -87,13 +87,15 @@ END SUBROUTINE tokamaker_eval_green
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,xpoint_mask,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
+SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(80) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Needs docs
 real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
+INTEGER(i4), POINTER :: contig_tmp(:)
 INTEGER(4) :: i
 INTEGER(4), POINTER :: xpoint_tmp(:)
 CALL copy_string_rev(coil_file,gs_global%coil_file)
@@ -123,6 +125,7 @@ IF(TRIM(gs_global%coil_file)=='none')THEN
   gs_global%coil_nturns=0.d0
   gs_global%coil_nturns=nturns_tmp
   !
+  CALL c_f_pointer(contig_flag, contig_tmp, [smesh%nreg])
   ALLOCATE(gs_global%cond_regions(gs_global%ncond_regs))
   ALLOCATE(gs_global%coil_regions(gs_global%ncoil_regs))
   gs_global%ncond_regs=0
@@ -134,6 +137,7 @@ IF(TRIM(gs_global%coil_file)=='none')THEN
         gs_global%cond_regions(gs_global%ncond_regs)%eta=eta_tmp(i)
       END IF
       gs_global%cond_regions(gs_global%ncond_regs)%id=i
+      gs_global%cond_regions(gs_global%ncond_regs)%continuous=(contig_tmp(i)==1)
     ELSE
       gs_global%ncoil_regs=gs_global%ncoil_regs+1
       gs_global%coil_regions(gs_global%ncoil_regs)%id=i
@@ -262,13 +266,27 @@ END SUBROUTINE tokamaker_init_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_run(vacuum,error_flag) BIND(C,NAME="tokamaker_run")
-LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
+SUBROUTINE tokamaker_solve(error_flag) BIND(C,NAME="tokamaker_solve")
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-IF(vacuum)gs_global%has_plasma=.FALSE.
 CALL gs_global%solve(error_flag)
-gs_global%has_plasma=.TRUE.
-END SUBROUTINE tokamaker_run
+END SUBROUTINE tokamaker_solve
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_vac_solve(psi_in,error_flag) BIND(C,NAME="tokamaker_vac_solve")
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Needs docs
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
+CLASS(oft_vector), POINTER :: psi_tmp
+NULLIFY(psi_tmp)
+CALL gs_global%psi%new(psi_tmp)
+CALL c_f_pointer(psi_in, vals_tmp, [gs_global%psi%n])
+CALL psi_tmp%restore_local(vals_tmp)
+CALL gs_global%vac_solve(psi_tmp,error_flag)
+CALL psi_tmp%get_local(vals_tmp)
+CALL psi_tmp%delete()
+DEALLOCATE(psi_tmp)
+END SUBROUTINE tokamaker_vac_solve
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

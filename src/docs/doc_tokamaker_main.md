@@ -29,10 +29,12 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_fixed_ex2
 
 ### Free Boundary Equilibria
+ - \subpage doc_tMaker_ITER_ex2
  - \subpage doc_tMaker_HBT_ex2
  - \subpage doc_tMaker_ITER_ex2
  - \subpage doc_tMaker_DIIID_ex2
  - \subpage doc_tMaker_CUTE_ex2
+ - \subpage doc_tMaker_LTX_ex2
 
 \section doc_gs_main_mesh Building meshes using gs_Domain
 TokaMaker includes built-in meshing functionality through the \ref OpenFUSIONToolkit.TokaMaker.gs_Domain "gs_Domain" class,
@@ -60,3 +62,4 @@ The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.gs_D
  - \subpage doc_tMaker_ITER_ex1
  - \subpage doc_tMaker_DIIID_ex1
  - \subpage doc_tMaker_CUTE_ex1
+ - \subpage doc_tMaker_LTX_ex1

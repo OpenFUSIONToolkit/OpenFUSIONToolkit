@@ -34,4 +34,5 @@ if( OFT_BUILD_TESTS )
   # TokaMaker tests
   file( COPY test_TokaMaker.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
   file( COPY ITER_geom.json DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+  file( COPY LTX_geom.json DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 endif()
