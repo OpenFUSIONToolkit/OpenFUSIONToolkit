@@ -601,8 +601,8 @@ def test_LTX_eig(order):
 
 # Test runners for LTX test cases
 @pytest.mark.coverage
-# @pytest.mark.parametrize("order", (2,3))#,4))
-def test_LTX_eq():
+@pytest.mark.parametrize("order", (2,3))#,4))
+def test_LTX_eq(order):
     exp_dict = {
         'Ip': 90000.1298205169,
         'Ip_centroid': [4.05471907e-01, -3.16176193e-07],
@@ -623,5 +623,5 @@ def test_LTX_eq():
         'l_i': 1.002735427186787,
         'beta_tor': 2.0613500413344603
     }
-    results = mp_run(run_LTX_case,(2,False))
+    results = mp_run(run_LTX_case,(order,False))
     assert validate_dict(results,exp_dict)
