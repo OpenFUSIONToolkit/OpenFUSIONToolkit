@@ -49,7 +49,7 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
+    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
 
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
@@ -75,8 +75,12 @@ tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
     [c_char_p, c_double, c_char_p, c_char_p, c_char_p])
 
 # G-S run function
-tokamaker_run = ctypes_subroutine(oftpy_lib.tokamaker_run, 
-    [c_bool, c_int_ptr])
+tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
+    [c_int_ptr])
+
+# tokamaker_vac_solve(psi_in,error_flag)
+tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
+    [ctypes_numpy_array(float64,1),  c_int_ptr])
 
 # G-S info function
 tokamaker_analyze = ctypes_subroutine(oftpy_lib.tokamaker_analyze)
@@ -576,6 +580,7 @@ class TokaMaker():
         xpoint_mask[0] = 1
         eta_vals = -2.0*numpy.ones((self.nregs,),dtype=numpy.float64)
         eta_vals[0] = -1.0
+        contig_flag = numpy.ones((self.nregs,),dtype=numpy.int32)
         # Process conductors and vacuum regions
         self._vac_dict = {}
         for key in cond_dict:
@@ -583,6 +588,8 @@ class TokaMaker():
                 self._vac_dict[key] = cond_dict[key]
             else:
                 eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
+                if cond_dict[key].get('noncontinuous',False):
+                    contig_flag[cond_dict[key]['reg_id']-1] = 0
             xpoint_mask[cond_dict[key]['reg_id']-1] = int(cond_dict[key].get('allow_xpoints',False))
         # Remove vacuum regions
         for key in self._vac_dict:
@@ -614,7 +621,7 @@ class TokaMaker():
             for sub_coil in self.coil_sets[key]['sub_coils']:
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
         cstring = c_char_p('none'.encode())
-        tokamaker_setup_regions(cstring,eta_vals,xpoint_mask,coil_nturns,nCoils)
+        tokamaker_setup_regions(cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils)
 
     def eval_green(self,x,xc):
         r'''! Evaluate Green's function for a toroidal filament
@@ -863,9 +870,26 @@ class TokaMaker():
 
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
+        if vacuum:
+            raise ValueError('"vacuum=True" no longer supported, use "vac_solve()"')
         error_flag = c_int()
-        tokamaker_run(c_bool(vacuum),ctypes.byref(error_flag))
+        tokamaker_solve(ctypes.byref(error_flag))
         return error_flag.value
+    
+    def vac_solve(self,psi=None):
+        '''! Solve for vacuum solution (no plasma), with present coil currents
+        
+        @param psi Boundary values for vacuum solve
+        '''
+        if psi is None:
+            psi = numpy.zeros((self.np,),dtype=numpy.float64)
+        else:
+            if psi.shape[0] != self.np:
+                raise ValueError('Incorrect shape of "psi", should be [np]')
+            psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
+        error_flag = c_int()
+        tokamaker_vac_solve(psi,ctypes.byref(error_flag))
+        return psi, error_flag.value
 
     def get_stats(self,lcfs_pad=0.01,li_normalization='std'):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
@@ -1281,7 +1305,7 @@ class TokaMaker():
         tokamaker_set_settings(ctypes.byref(self.settings))
     
     def plot_machine(self,fig,ax,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
-                     coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]'):
+                     coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',colorbar=None):
         '''! Plot machine geometry
 
         @param fig Figure to add to
@@ -1294,6 +1318,8 @@ class TokaMaker():
         @param coil_symmap Make coil current colorscale symmetric
         @param coil_scale Scale for coil currents when plotting
         @param coil_clabel Label for coil current colorbar (None to disable colorbar)
+        @param colorbar Colorbar instance to overwrite (None to add)
+        @result Colorbar instance for coil colors or None
         '''
         mask_vals = numpy.ones((self.np,))
         # Shade vacuum region
@@ -1316,7 +1342,10 @@ class TokaMaker():
                 else:
                     clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap)
                 if coil_clabel is not None:
-                    fig.colorbar(clf,ax=ax,label=coil_clabel)
+                    cax = None
+                    if colorbar is not None:
+                        cax = colorbar.ax
+                    colorbar = fig.colorbar(clf,ax=ax,cax=cax,label=coil_clabel)
         else:
             for _, coil_reg in self._coil_dict.items():
                 mask_tmp = (self.reg == coil_reg['reg_id'])
@@ -1330,6 +1359,7 @@ class TokaMaker():
             ax.plot(self.lim_contour[:,0],self.lim_contour[:,1],color=limiter_color)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
+        return colorbar
 
     def plot_constraints(self,fig,ax,isoflux_color='tab:red',isoflux_marker='+',saddle_color='tab:green',saddle_marker='x'):
         '''! Plot geometry constraints
@@ -1447,6 +1477,19 @@ class TokaMaker():
         # Apply 1/R scale (avoiding divide by zero)
         curr = dpsi_dt.copy()
         curr[self.r[:,0]>0.0] /= self.r[self.r[:,0]>0.0,0]
+        # Compute cell areas
+        have_noncontinuous = False
+        for _, cond_reg in self._cond_dict.items():
+            if 'noncontinuous' in cond_reg:
+                have_noncontinuous = True
+                break
+        if have_noncontinuous:
+            area = numpy.zeros((self.lc.shape[0],))
+            for i in range(self.nc):
+                v1 = self.r[self.lc[i,1],:]-self.r[self.lc[i,0],:]
+                v2 = self.r[self.lc[i,2],:]-self.r[self.lc[i,0],:]
+                area[i] = numpy.linalg.norm(numpy.cross(v1,v2))/2.0
+        #
         mesh_currents = numpy.zeros((self.lc.shape[0],))
         # Loop over conducting regions and get mask/fields
         mask = numpy.zeros((self.lc.shape[0],), dtype=numpy.int32)
@@ -1456,6 +1499,8 @@ class TokaMaker():
                 mask_tmp = (self.reg == cond_reg['reg_id'])
                 field_tmp = dpsi_dt/eta
                 mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
+                if cond_reg.get('noncontinuous',False):
+                    mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
                 mask = numpy.logical_or(mask,mask_tmp)
         return mask, mesh_currents
     
@@ -1469,6 +1514,7 @@ class TokaMaker():
         @param nlevels Number contour lines used for shading (with "psi" only)
         @param colormap Colormap to use for shadings
         @param clabel Label for colorbar (None to disable colorbar)
+        @result Colorbar object
         '''
         if psi is not None:
             mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
@@ -1489,8 +1535,11 @@ class TokaMaker():
         if clabel is not None:
             cb = fig.colorbar(clf,ax=ax)
             cb.set_label(clabel)
+        else:
+            cb = None
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
+        return cb
 
     def get_vfixed(self):
         '''! Get required vacuum flux values to balance fixed boundary equilibrium
@@ -1634,7 +1683,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,nTurns=None,coil_set=None,allow_xpoints=False):
+    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,allow_xpoints=False):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -1679,6 +1728,11 @@ class gs_Domain:
         else:
             if reg_type == 'conductor':
                 raise ValueError('Resistivity not specified for "conductor" region')
+        if noncontinuous is not None:
+            if reg_type != 'conductor':
+                raise ValueError('Non-contiguous specification only valid for "conductor" regions')
+            else:
+                self.region_info[name]['noncontinuous'] = noncontinuous
         if nTurns is not None:
             if reg_type != 'coil':
                 raise ValueError('"nTurns" specification only valid for "coil" regions')
@@ -1869,6 +1923,7 @@ class gs_Domain:
                     'reg_id': self.region_info[key]['id'],
                     'cond_id': cond_id,
                     'eta': self.region_info[key]['eta'],
+                    'noncontinuous': self.region_info[key].get('noncontinuous',False),
                     'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
                 cond_id += 1
