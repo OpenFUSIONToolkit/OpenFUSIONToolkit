@@ -1,4 +1,4 @@
-!!Example 7: Slab Reconnection    {#doc_ex7}
+!!Example: Slab Reconnection    {#doc_ex7}
 !!============================
 !!
 !![TOC]
@@ -12,7 +12,6 @@
 ! START SOURCE
 MODULE GEM_helpers
 USE oft_base
-USE oft_io, ONLY: hdf5_rst_read_scalar, hdf5_rst_write_scalar
 USE oft_mesh_type, ONLY: mesh
 USE fem_utils, ONLY: fem_interp
 USE mhd_utils, ONLY: mu0
@@ -134,12 +133,10 @@ END MODULE GEM_helpers
 !!
 !! Need docs
 PROGRAM example_gem
-USE local
 USE oft_base
 !--Grid
 USE oft_mesh_type, ONLY: mesh, rgrnd
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_io, ONLY: hdf5_ntess, hdf5_create_files, hdf5_mesh, hdf5_spdata, hdf5_vpdata
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -200,11 +197,7 @@ CLOSE(io_unit)
 rgrnd=(/0.d0,0.d0,1.d0/)
 CALL multigrid_construct
 !---Setup I/0
-IF(view_ic.OR.plot_run)THEN
-  hdf5_ntess=order
-  CALL hdf5_create_files
-  CALL hdf5_mesh
-END IF
+IF(view_ic.OR.plot_run)CALL mesh%setup_io(order)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
@@ -314,16 +307,16 @@ IF(view_ic)THEN
   ALLOCATE(vec_vals(3,ic_fields%Ne%n))
   !---Plot density
   CALL ic_fields%Ne%get_local(vals) ! Fetch local values
-  CALL hdf5_spdata(vals,'N0') ! Add field to plotting file
+  CALL mesh%save_vertex_scalar(vals,'N0') ! Add field to plotting file
   !---Plot temperature
   CALL ic_fields%Ti%get_local(vals) ! Fetch local values
-  CALL hdf5_spdata(vals,'T0') ! Add field to plotting file
+  CALL mesh%save_vertex_scalar(vals,'T0') ! Add field to plotting file
   !---Plot velocity
   DO i=1,3
     vals=>vec_vals(i,:)
     CALL ic_fields%V%get_local(vals,i)
   END DO
-  CALL hdf5_vpdata(vec_vals,'V0') ! Add field to plotting file
+  CALL mesh%save_vertex_vector(vec_vals,'V0') ! Add field to plotting file
   !---------------------------------------------------------------------------
   ! Project B and J for plotting
   !---------------------------------------------------------------------------
@@ -349,7 +342,7 @@ IF(view_ic)THEN
     vals=>vec_vals(i,:)
     CALL u%get_local(vals,i)
   END DO
-  CALL hdf5_vpdata(vec_vals,'B0') ! Add field to plotting file
+  CALL mesh%save_vertex_vector(vec_vals,'B0') ! Add field to plotting file
   !---Project J onto vector Lagrange basis
   jfield%u=>ic_fields%B
   CALL jfield%setup
@@ -361,7 +354,7 @@ IF(view_ic)THEN
     vals=>vec_vals(i,:)
     CALL u%get_local(vals,i)
   END DO
-  CALL hdf5_vpdata(vec_vals,'J0') ! Add field to plotting file
+  CALL mesh%save_vertex_vector(vec_vals,'J0') ! Add field to plotting file
   !---Cleanup objects used for projection
   CALL u%delete ! Destroy LHS vector
   CALL v%delete ! Destroy RHS vector
@@ -463,4 +456,7 @@ END PROGRAM example_gem
 !! rst_start=0
 !! rst_end=1000
 !!/
+!!
+!! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
+!!
 !!\endverbatim

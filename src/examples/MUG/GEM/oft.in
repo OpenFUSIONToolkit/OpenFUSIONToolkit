@@ -41,7 +41,7 @@
  d_dens=10.        ! Density diffusion
  kappa_par=3914.9  ! Parallel thermal conduction (fixed)
  kappa_perp=3914.9 ! Perpendicular thermal conduction (fixed)
- nsteps=2000       ! Number of time steps to take
+ nsteps=1200       ! Number of time steps to take
  rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
  rst_freq=10       ! Restart file frequency
  xmhd_mfnk=T       ! Use matrix-free method

@@ -318,7 +318,7 @@ END PROGRAM xmhd_cyl
 !! \warning Use of this preconditioner requires OFT be built with the PETSc and
 !! FOX libraries.
 !!
-!!\verbatim
+!!```xml
 !!<oft>
 !!  <xmhd>
 !!    <pre type="mg">
@@ -330,7 +330,7 @@ END PROGRAM xmhd_cyl
 !!            <nlocal>0,0,-1,-1</nlocal>
 !!            <solver type="lu">
 !!              <type>lu</type>
-!!              <package>superd</package>
+!!              <package>umfpack</package>
 !!            </solver>
 !!          </pre>
 !!        </solver>
@@ -343,7 +343,7 @@ END PROGRAM xmhd_cyl
 !!            <nlocal>1</nlocal>
 !!            <solver type="lu">
 !!              <type>lu</type>
-!!              <package>superd</package>
+!!              <package>umfpack</package>
 !!            </solver>
 !!          </pre>
 !!        </solver>
@@ -351,4 +351,4 @@ END PROGRAM xmhd_cyl
 !!    </pre>
 !!  </xmhd>
 !!</oft>
-!!\endverbatim
+!!```

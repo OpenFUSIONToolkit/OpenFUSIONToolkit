@@ -1,0 +1,31 @@
+<oft>
+  <xmhd>
+    <pre type="mg">
+      <smoother direction="both">
+        <solver type="gmres">
+          <its>0,0,2,2</its>
+          <nrits>0,0,2,2</nrits>
+          <pre type="block_jacobi">
+            <nlocal>0,0,1,1</nlocal>
+            <solver type="lu">
+              <type>lu</type>
+              <package>umfpack</package>
+            </solver>
+          </pre>
+        </solver>
+      </smoother>
+      <coarse>
+        <solver type="gmres">
+          <its>8</its>
+          <nrits>8</nrits>
+          <pre type="block_jacobi">
+            <solver type="lu">
+              <type>lu</type>
+              <package>umfpack</package>
+            </solver>
+          </pre>
+        </solver>
+      </coarse>
+    </pre>
+  </xmhd>
+</oft>
