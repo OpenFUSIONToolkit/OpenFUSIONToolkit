@@ -1,5 +1,6 @@
 add_subdirectory( TokaMaker )
 add_subdirectory( ThinCurr )
+add_subdirectory( Marklin )
 
 file(GLOB MY_SOURCES "*.py" )
 foreach(SOURCE_FILE IN LISTS MY_SOURCES)

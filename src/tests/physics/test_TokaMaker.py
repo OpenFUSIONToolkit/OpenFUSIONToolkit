@@ -12,7 +12,7 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
-from OpenFUSIONToolkit.TokaMaker.util import create_isoflux
+from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green
 
 
 def mp_run(target,args,timeout=30):
@@ -232,7 +232,7 @@ def test_spheromak_h3(order):
 #============================================================================
 def run_coil_case(mesh_resolution,fe_order,mp_q):
     def coil_green(rc,zc,r,z,gs_obj):
-        return gs_obj.eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
+        return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
     def masked_err(point_mask,gs_obj,psi,sort_ind):
         bdry_points = gs_obj.r[point_mask,:]
         sort_ind = bdry_points[:,sort_ind].argsort()
