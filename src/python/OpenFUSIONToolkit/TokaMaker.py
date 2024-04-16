@@ -862,7 +862,7 @@ class TokaMaker():
         ffp_NI_file = 'none'
         self.load_profiles(ffp_file,None,pp_file,eta_file,ffp_NI_file)
     
-    def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,nis=None,Zis=[1.],max_iterations=6,initialize_eq=True):
+    def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=[1.],max_iterations=6,initialize_eq=True):
         '''! Self-consistently compute bootstrap contribution from H-mode profiles,
         and iterate solution until all functions of Psi converge. 
 
@@ -915,7 +915,7 @@ class TokaMaker():
         psi_norm = numpy.linspace(0.,1.,len(inductive_jtor))
         n_psi = len(inductive_jtor)
 
-        def profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,nis,Zis,include_jBS=True):
+        def profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,Zis,include_jBS=True):
 
             pprime = numpy.gradient(pressure) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
 
@@ -942,8 +942,7 @@ class TokaMaker():
                                         Ti=Ti,
                                         ne=ne,
                                         p=pressure,
-                                        dp_dpsi=pprime,
-                                        nis=nis,
+                                        nis=[ni,],
                                         Zis=Zis,
                                         Zeff=Zeff,
                                         gEQDSKs=[None],
@@ -966,7 +965,7 @@ class TokaMaker():
                                         dT_e_dpsi=dT_e_dpsi,
                                         dT_i_dpsi=dT_i_dpsi,
                                         dn_e_dpsi=dn_e_dpsi,
-                                        dnis_dpsi=dn_i_dpsi,
+                                        dnis_dpsi=[dn_i_dpsi,],
                                         )[0]
                     
                 inductive_jtor[-1] = 0. ### FORCING inductive_jtor TO BE ZERO AT THE EDGE
@@ -1027,7 +1026,7 @@ class TokaMaker():
             ### Initialize equilibirum on L-mode-like P' and inductive j_tor profiles
             print('>>> Initializing equilibrium with pedestal removed:')
 
-            init_pp_prof, init_ffp_prof, j_BS = profile_iteration(self,init_pressure,init_ne,init_ni,init_Te,init_Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,nis,Zis,include_jBS=False)
+            init_pp_prof, init_ffp_prof, j_BS = profile_iteration(self,init_pressure,init_ne,init_ni,init_Te,init_Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,Zis,include_jBS=False)
 
             init_pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
             init_ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
@@ -1046,7 +1045,7 @@ class TokaMaker():
         while n < max_iterations:
             print('> Iteration '+str(n)+':')
 
-            pp_prof, ffp_prof, j_BS = profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,nis,Zis)
+            pp_prof, ffp_prof, j_BS = profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,Zis)
 
             pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
             ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
