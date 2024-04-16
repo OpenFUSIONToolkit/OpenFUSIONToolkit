@@ -1,4 +1,4 @@
-!!MUG Example 2: Spheromak Heating    {#doc_mhd_ex2}
+!!MUG Example: Spheromak Heating    {#doc_mug_ex2}
 !!============================
 !!
 !![TOC]
@@ -13,7 +13,7 @@
 !!simulation is run long enough evolution of the equilibrium profile will be observed and
 !!eventual instability due to current peaking will occur.
 !!
-!!\section doc_ex6_cubit Mesh Creation with CUBIT
+!!\section doc_mug_ex2_cubit Mesh Creation with CUBIT
 !!
 !!A suitable mesh for this example, with radius of 1m and height of 1m, can be created using
 !!the CUBIT script below.
@@ -30,12 +30,12 @@
 !!refine parallel fileroot 'cyl' overwrite no_execute
 !!\endverbatim
 !!
-!!\section doc_ex6_code Code Walk Through
+!!\section doc_mug_ex2_code Code Walk Through
 !!
 !!The code consists of three basic sections, required imports and variable definitions,
 !!finite element setup, and system creation and solution.
 !!
-!!\subsection doc_ex6_code_inc Module Includes
+!!\subsection doc_mug_ex2_code_inc Module Includes
 ! START SOURCE
 PROGRAM xmhd_cyl
 !---Runtime
@@ -66,7 +66,7 @@ USE taylor, ONLY: taylor_hmodes, taylor_minlev, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, vel_scale, den_scale, &
   den_floor, temp_floor, xmhd_sub_fields
 IMPLICIT NONE
-!!\section doc_ex6_code_vars Local Variables
+!!\section doc_mug_ex2_code_vars Local Variables
 !---H1 divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
@@ -83,7 +83,7 @@ REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
 LOGICAL :: plot_run=.FALSE.
 NAMELIST/cyl_options/order,minlev,b0_scale,n0,t0,plot_run
-!!\section doc_ex6_code_setup OFT Initialization
+!!\section doc_mug_ex2_code_setup OFT Initialization
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -111,7 +111,7 @@ CALL h0_setup_interp
 !---H1 full space
 CALL oft_h1_setup(order)
 CALL h1_setup_interp
-!!\section doc_ex6_code_taylor Computing Initial Conditions
+!!\section doc_mug_ex2_code_taylor Computing Initial Conditions
 !!
 !! For this simulation we only need the spheromak mode, which is the lowest
 !! force-free eignstate in this geometry. As a result the initial condition
@@ -119,7 +119,7 @@ CALL h1_setup_interp
 taylor_minlev=minlev
 CALL taylor_hmodes(1)
 CALL oft_lag_set_level(oft_lagrange_nlevels)
-!!\subsection doc_ex6_code_taylor_gauge Setting Magnetic Boundary Conditions
+!!\subsection doc_mug_ex2_code_taylor_gauge Setting Magnetic Boundary Conditions
 !!
 !! As in \ref doc_ex5 "Example 5" we must transform the gauge of the Taylor
 !! state solution to the appropriate magnetic field BCs. For more information
@@ -144,7 +144,7 @@ CALL oft_h1_create(ic_fields%B)
 CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
-!!\subsection doc_ex6_code_ic Set Initial Conditions
+!!\subsection doc_mug_ex2_code_ic Set Initial Conditions
 !!
 !! Now we set initial conditions for the simulation using the computed taylor
 !! state, flat temperature and density profiles and zero initial velocity. The
@@ -174,7 +174,7 @@ den_floor = n0*1.d-2
 CALL oft_lag_create(ic_fields%Ti)
 CALL ic_fields%Ti%set(t0)
 temp_floor = t0*1.d-2
-!!\section doc_ex6_code_run Run Simulation
+!!\section doc_mug_ex2_code_run Run Simulation
 !!
 !! Finally, the simulation can be run using the driver routine for non-linear
 !! extended MHD (\ref xmhd::xmhd_run "xmhd_run"). This routine advances the
@@ -214,7 +214,7 @@ CALL oft_finalize
 END PROGRAM xmhd_cyl
 ! STOP SOURCE
 !!
-!!\section doc_ex6_input Input file
+!!\section doc_mug_ex2_input Input file
 !!
 !! Below is an input file which can be used with this example in a parallel environment.
 !! As with \ref doc_ex5 "Example 5" this example should only be run with multiple processes.
@@ -287,7 +287,7 @@ END PROGRAM xmhd_cyl
 !!/
 !!\endverbatim
 !!
-!!\subsection doc_ex6_input_plot Post-Processing options
+!!\subsection doc_mug_ex2_input_plot Post-Processing options
 !!
 !! When running the code for post-processing additional run time options are available.
 !!
@@ -300,7 +300,7 @@ END PROGRAM xmhd_cyl
 !!/
 !!\endverbatim
 !!
-!!\subsection doc_ex6_input_solver Solver specification
+!!\subsection doc_mug_ex2_input_solver Solver specification
 !!
 !! Time dependent MHD solvers are accelerated significantly by the use of
 !! a more sophisticated preconditioner than the default method. Below is

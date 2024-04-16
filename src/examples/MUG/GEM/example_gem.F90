@@ -1,4 +1,4 @@
-!!Example: Slab Reconnection    {#doc_ex7}
+!!MUG Example: Slab Reconnection    {#doc_mug_ex3}
 !!============================
 !!
 !![TOC]
@@ -6,7 +6,7 @@
 !!This example demonstrates the use of the \ref xmhd "extended MHD" module in PSI-Tet. In
 !!this example reconnection in a periodic-slab current sheet will be simulated.
 !!
-!!\section doc_ex7_code_helper Helper module
+!!\section doc_mug_ex3_code_helper Helper module
 !!
 !! Need docs
 ! START SOURCE
@@ -52,7 +52,7 @@ CONTAINS
   PROCEDURE :: apply => GEM_probe_apply
 END TYPE GEM_probe
 CONTAINS
-!!\subsection doc_ex7_code_helper_interp Initial condition field interpolator
+!!\subsection doc_mug_ex3_code_helper_interp Initial condition field interpolator
 !!
 !! Need docs
 SUBROUTINE GEM_interp_apply(self,cell,f,gop,val)
@@ -78,7 +78,7 @@ SELECT CASE(self%field)
     CALL oft_abort('Unknown field component','GEM_interp_apply',__FILE__)
 END SELECT
 END SUBROUTINE GEM_interp_apply
-!!\subsection doc_ex7_code_helper_probe Reconnected flux probe
+!!\subsection doc_mug_ex3_code_helper_probe Reconnected flux probe
 !!
 !! Need docs
 SUBROUTINE GEM_probe_apply(self,sub_fields,t)
@@ -382,7 +382,7 @@ CALL oft_finalize
 END PROGRAM example_gem
 ! STOP SOURCE
 !!
-!!\section doc_ex7_input Input file
+!!\section doc_mug_ex3_input Input file
 !!
 !! Below is an input file which can be used with this example in a parallel environment.
 !! As with \ref doc_ex6 "Example 6" this example should only be run with multiple processes.
@@ -445,7 +445,7 @@ END PROGRAM example_gem
 !!/
 !!\endverbatim
 !!
-!!\subsection doc_ex7_input_plot Post-Processing options
+!!\subsection doc_mug_ex3_input_plot Post-Processing options
 !!
 !! When running the code for post-processing additional run time options are available.
 !!
