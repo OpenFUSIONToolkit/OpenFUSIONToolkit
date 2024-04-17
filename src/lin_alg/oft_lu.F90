@@ -52,6 +52,14 @@ IMPLICIT NONE
 PRIVATE
 PUBLIC lapack_matinv, lapack_cholesky
 !---------------------------------------------------------------------------
+!> Native ILU(0) preconditioner information object
+!---------------------------------------------------------------------------
+TYPE :: native_ilu_struc
+  INTEGER(i4), POINTER, DIMENSION(:) :: ju => NULL() !< Diagonal entry indices
+  INTEGER(i4), POINTER, DIMENSION(:) :: jlu => NULL() !< Column values in iLU factors
+  REAL(r8), POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
+END TYPE native_ilu_struc
+!---------------------------------------------------------------------------
 ! TYPE superlu_struc
 !---------------------------------------------------------------------------
 !> SuperLU solver information
@@ -93,6 +101,7 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   REAL(r8), POINTER, DIMENSION(:,:) :: atmp => NULL() !< Local dense matrix ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL()
   CHARACTER(LEN=7) :: package = DEF_LU_PACK !< Factorization package
+  TYPE(native_ilu_struc) :: native_struct
 #if defined( HAVE_SUPERLU ) || defined( HAVE_SUPERLU_DIST ) || defined( HAVE_UMFPACK )
   TYPE(superlu_struc) :: superlu_struct
 #endif
@@ -390,6 +399,11 @@ IF(.NOT.self%initialized)THEN
   SELECT CASE(TRIM(self%package))
     CASE DEFAULT
       IF(self%type=='ilu')CALL oft_abort('iLU not supported by LAPACK','lusolver_apply', __FILE__)
+    CASE("native")
+      IF(self%type/='ilu')CALL oft_abort('Only ILU(0) is supported by "native" package','lusolver_apply', __FILE__)
+      ALLOCATE(self%native_struct%ju(A_native%nr))
+      ALLOCATE(self%native_struct%jlu(A_native%nnz))
+      ALLOCATE(self%native_struct%alu(A_native%nnz))
     CASE("super")
 #ifdef HAVE_SUPERLU
       IF(self%type=='ilu')CALL oft_abort('iLU not supported by SuperLU','lusolver_apply', __FILE__)
@@ -649,6 +663,16 @@ CASE("superd")
       self%refactor=.FALSE.
     END IF
     CALL dgetrs('N',A_native%nr,nrhs,self%atmp,A_native%nr,self%ipiv,vals,ldb,info)
+  CASE("native")
+    IF(self%refactor)THEN
+      CALL ilu0(A_native%nr,mat_vals,A_native%lc,A_native%kr,self%native_struct%alu, &
+        self%native_struct%jlu,self%native_struct%ju, ierr)
+      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      self%refactor=.FALSE.
+      self%update_graph=.FALSE.
+    END IF
+    CALL lusol(A_native%nr,nrhs,vals,self%native_struct%alu,self%native_struct%jlu, &
+      self%native_struct%ju)
   CASE DEFAULT
     CALL oft_abort('Unknown factorization package','lusolver_apply',__FILE__)
 END SELECT
@@ -796,6 +820,10 @@ SELECT CASE(TRIM(self%package))
 #endif
   CASE("lapack")
     DEALLOCATE(self%ipiv,self%atmp)
+  CASE("native")
+    IF(ASSOCIATED(self%native_struct%alu))THEN
+      DEALLOCATE(self%native_struct%alu,self%native_struct%jlu,self%native_struct%ju)
+    END IF
 END SELECT
 DEALLOCATE(ivals,rvals)
 NULLIFY(self%A)
@@ -917,4 +945,101 @@ IF(oft_env%pm)THEN
   WRITE(*,*)'  Time = ',elapsed_time
 END IF
 END SUBROUTINE lapack_cholesky_real
+!------------------------------------------------------------------------------
+!> Native Incomplete LU factorization with no fill
+!!
+!! Based on ILU++ by Mayer (https://dx.doi.org/10.1002/pamm.200700911)
+!!
+!! @note Requires CSR graph with sorted column list and diagonal entries
+!------------------------------------------------------------------------------
+subroutine ilu0(n,a,lc,kr,alu,jlu,ju,ierr)
+integer(4), intent(in) :: n !< Size of matrix
+real(8), dimension(:), intent(in) :: a !< Matrix entries
+real(8), dimension(:), intent(inout) :: alu !< Entries for L/U factors
+integer(4), dimension(:), intent(inout) :: lc !< Column indices
+integer(4), dimension(:), intent(inout) :: kr !< Row pointer
+integer(4), dimension(:), intent(inout) :: jlu !< Column indices for alu
+integer(4), dimension(:), intent(inout) :: ju !< Diagonal indices for alu
+integer(4), intent(out) :: ierr !< Error flag
+integer(4), allocatable, dimension(:) :: iw
+integer(4) :: i,ii,j,jj,jcol,jf,jm,jrow,js,ju0,jw
+real(8) :: tl
+!
+ju0 = n+2
+jlu(1) = ju0
+! initialize work vector to zero's
+ALLOCATE(iw(n))
+do i=1, n
+    iw(i) = 0
+end do
+!---
+ierr = 0
+do ii=1,n
+  js=ju0
+  !---Generating row ii of L and U
+  do j=kr(ii),kr(ii+1)-1
+    ! copy row ii of a, ja, ia into row ii of alu, jlu (L/U) matrix.
+    jcol=lc(j)
+    if(jcol==ii)then
+      alu(ii)=a(j)
+      iw(jcol)=ii
+      ju(ii)=ju0
+    else
+      alu(ju0)=a(j)
+      jlu(ju0)=lc(j)
+      iw(jcol)=ju0
+      ju0=ju0+1
+    endif
+  end do
+  jlu(ii+1)=ju0
+  jf=ju0-1
+  jm=ju(ii)-1
+  !---Move up to diagonal
+  do j=js,jm
+    jrow=jlu(j)
+    tl=alu(j)*alu(jrow)
+    alu(j)=tl
+    do jj=ju(jrow),jlu(jrow+1)-1
+      jw=iw(jlu(jj))
+      if(jw/=0)alu(jw)=alu(jw)-tl*alu(jj)
+    end do
+  end do
+  if(alu(ii)==0.0d0)then
+    ierr = ii
+    exit
+  endif
+  alu(ii)=1.0d0/alu(ii)
+  !---Reset iw pointer
+  iw(ii)=0
+  do i=js,jf
+    iw(jlu(i))=0
+  end do
+end do
+DEALLOCATE(iw)
+END SUBROUTINE
+!------------------------------------------------------------------------------
+!> Approximate solve using ILU(0) factorization produced by ilu0
+!------------------------------------------------------------------------------
+subroutine lusol(n, nrhs, x, alu, jlu, ju)
+integer(4), intent(in) :: n !< Size of matrix
+integer(4), intent(in) :: nrhs !< Number of RHS to solve
+real(8), intent(inout) :: x(n,nrhs) !< Input: RHS, Output: Solution
+real(8), dimension(:), intent(in) :: alu !< Entries for L/U factors
+integer(4), dimension(:), intent(in) :: jlu !< Column indices for alu
+integer(4), dimension(:), intent(in) :: ju !< Diagonal indices for alu
+integer(4) :: i,k
+! forward solve
+do i = 1, n
+  do k=jlu(i),ju(i)-1
+    x(i,:)=x(i,:)-alu(k)*x(jlu(k),:)
+  end do
+end do
+! backward solve
+do i=n,1,-1
+  do k=ju(i),jlu(i+1)-1
+      x(i,:)=x(i,:)-alu(k)*x(jlu(k),:)
+  end do
+  x(i,:) = alu(i)*x(i,:)
+end do
+end subroutine
 END MODULE oft_lu
