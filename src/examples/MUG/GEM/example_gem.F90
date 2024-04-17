@@ -12,6 +12,7 @@
 ! START SOURCE
 MODULE GEM_helpers
 USE oft_base
+USE oft_io, ONLY: oft_bin_file
 USE oft_mesh_type, ONLY: mesh
 USE fem_utils, ONLY: fem_interp
 USE mhd_utils, ONLY: mu0
@@ -47,6 +48,7 @@ TYPE, EXTENDS(oft_xmhd_probe) :: GEM_probe
   LOGICAL :: initialized = .FALSE. !< Flag to indicate setup has been called
   TYPE(oft_h1_rinterp), POINTER :: Bfield => NULL() !< Magnetic field interpolation class
   TYPE(flux_probe) :: flux_probe !< Synthetic flux probe
+  TYPE(oft_bin_file) :: flux_hist
 CONTAINS
   !> Extract probe signals
   PROCEDURE :: apply => GEM_probe_apply
@@ -87,10 +89,7 @@ type(xmhd_sub_fields), intent(inout) :: sub_fields
 REAL(8), INTENT(in) :: t
 REAL(8) :: tflux
 !---History file variables
-INTEGER(4), PARAMETER :: nhist_fields=2
-REAL(4), DIMENSION(nhist_fields) :: output
-CHARACTER(LEN=20), DIMENSION(nhist_fields) :: hist_fields
-CHARACTER(LEN=2), DIMENSION(nhist_fields) :: hist_forms
+REAL(4), DIMENSION(2) :: output
 !---------------------------------------------------------------------------
 ! Setup if necessary
 !---------------------------------------------------------------------------
@@ -103,13 +102,11 @@ IF(.NOT.self%initialized)THEN
   self%flux_probe%B=>self%Bfield
   !---Setup history file I/O
   IF(oft_env%head_proc)THEN
-    hist_fields(1)='time'
-    hist_forms='r4'
-    hist_fields(2)='flux'
-    OPEN(NEWUNIT=self%io_unit,FILE='gem_flux.hist',FORM='UNFORMATTED')
-    WRITE(self%io_unit)nhist_fields
-    WRITE(self%io_unit)hist_fields
-    WRITE(self%io_unit)hist_forms
+    self%flux_hist%filedesc = 'GEM example reconnected flux'
+    CALL self%flux_hist%setup('gem_flux.hist')
+    CALL self%flux_hist%add_field('time', 'r4', desc="Simulation time [s]")
+    CALL self%flux_hist%add_field('flux', 'r4', desc="Reconnected flux [Wb]")
+    CALL self%flux_hist%write_header
   END IF
   self%initialized=.TRUE.
 END IF
@@ -122,10 +119,11 @@ CALL self%Bfield%setup
 !---Sample flux
 CALL self%flux_probe%eval(tflux)
 !---Save results
-output=(/t,tflux/)
+output=REAL([t,tflux],4)
 IF(oft_env%head_proc)THEN
-  WRITE(self%io_unit)output
-  FLUSH(self%io_unit)
+  CALL self%flux_hist%open
+  CALL self%flux_hist%write(data_r4=output)
+  CALL self%flux_hist%close
 END IF
 END SUBROUTINE GEM_probe_apply
 END MODULE GEM_helpers

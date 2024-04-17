@@ -16,14 +16,22 @@
 !!
 !!\verbatim
 !!reset
+!!
 !!create Cylinder height 2 radius 1
+!!
 !!volume 1 scheme Tetmesh
 !!set tetmesher interior points on
 !!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
 !!set tetmesher boundary recovery  off
 !!volume 1 size .2
 !!mesh volume 1
-!!refine parallel fileroot 'cyl' overwrite no_execute
+!!
+!!set duplicate block elements off
+!!block 1 add volume 1 
+!!block 1 element type tetra10
+!!
+!!set large exodus file on
+!!export Genesis  "cyl.g" overwrite block 1
 !!\endverbatim
 !!
 !!\section doc_mug_ex1_code Code Walk Through
@@ -78,8 +86,9 @@ REAL(r8) :: b0_scale = 1.E-1_r8
 REAL(r8) :: b1_scale = 1.E-5_r8
 REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
+LOGICAL :: pm=.FALSE.
 LOGICAL :: plot_run=.FALSE.
-NAMELIST/cyl_options/order,minlev,b0_scale,b1_scale,plot_run,n0,t0
+NAMELIST/cyl_options/order,minlev,b0_scale,b1_scale,plot_run,pm,n0,t0
 !!\section doc_mug_ex1_code_setup OFT Initialization
 CALL oft_init
 !---Read in options
@@ -199,7 +208,7 @@ DEALLOCATE(tmp,lop,db)
 !! \ref xmhd::xmhd_plot "xmhd_plot".
 xmhd_minlev=minlev
 xmhd_taxis=3
-oft_env%pm=.FALSE.
+oft_env%pm=pm
 IF(plot_run)THEN
   !---Setup I/0
   CALL mesh%setup_io(order)
