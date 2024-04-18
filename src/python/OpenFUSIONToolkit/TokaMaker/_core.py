@@ -1070,8 +1070,9 @@ class TokaMaker():
         if (saddle_color is not None) and (self._saddle_targets is not None):
             ax.plot(self._saddle_targets[:,0],self._saddle_targets[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
 
-    def plot_psi(self,fig,ax,psi=None,normalized=True,plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,
-                 vacuum_color='darkgray',vacuum_nlevels=8,vacuum_levels=None,vacuum_colormap=None,
+    def plot_psi(self,fig,ax,psi=None,normalized=True,
+                 plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,plasma_linestyles=None,
+                 vacuum_color='darkgray',vacuum_nlevels=8,vacuum_levels=None,vacuum_colormap=None,vacuum_linestyles=None,
                  xpoint_color='k',xpoint_marker='x',opoint_color='k',opoint_marker='*'):
         r'''! Plot contours of \f$\hat{\psi}\f$
 
@@ -1083,10 +1084,12 @@ class TokaMaker():
         @param plasma_nlevels Number of plasma contours
         @param plasma_levels Explicit levels for plasma contours
         @param plasma_colormap Colormap for plasma contours (cannot be specified with `plasma_color`)
+        @param plasma_linestyles Linestyle for plasma contours
         @param vacuum_color Color for plasma contours
         @param vacuum_nlevels Number of plasma contours
         @param vacuum_levels Explicit levels for plasma contours (cannot be specified with `vacuum_color`)
         @param vacuum_colormap Colormap for plasma contours
+        @param vacuum_linestyles Linestyle for vacuum contours
         @param xpoint_color Color for X-point markers (None to disable)
         @param xpoint_marker Colormap for plasma contours
         @param opoint_color Colormap for plasma contours (None to disable)
@@ -1126,9 +1129,9 @@ class TokaMaker():
         if (plasma_color is None) and (plasma_colormap is None):
             plasma_colormap='viridis'
         if vacuum_levels is not None:
-            ax.tricontour(self.r[:,0],self.r[:,1],self.lc,psi,levels=vacuum_levels,colors=vacuum_color,cmap=vacuum_colormap)
+            ax.tricontour(self.r[:,0],self.r[:,1],self.lc,psi,levels=vacuum_levels,colors=vacuum_color,cmap=vacuum_colormap,linestyles=vacuum_linestyles)
         if plasma_levels is not None:
-            ax.tricontour(self.r[:,0],self.r[:,1],self.lc,psi,levels=plasma_levels,colors=plasma_color,cmap=plasma_colormap)
+            ax.tricontour(self.r[:,0],self.r[:,1],self.lc,psi,levels=plasma_levels,colors=plasma_color,cmap=plasma_colormap,linestyles=plasma_linestyles)
 
         # Plot saddle points
         if xpoint_color is not None:
