@@ -27,7 +27,7 @@
 /
 
 &cyl_options
- order=3
+ order=2
  minlev=3
  b0_scale=1.e-1
  b1_scale=1.e-4
@@ -38,6 +38,8 @@
 /
 
 &xmhd_options
+ xmhd_adv_den=F    ! Do not advance density
+ xmhd_adv_temp=F   ! Do not advance temperature
  bbc='bc'          ! Perfectly-conducting BC for B-field
  vbc='all'         ! Zero-flow BC for velocity
  dt=1.e-7          ! Maximum time step
