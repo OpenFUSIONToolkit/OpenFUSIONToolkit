@@ -30,7 +30,7 @@
  order=3
  minlev=3
  b0_scale=1.e-1
- b1_scale=1.e-5
+ b1_scale=1.e-4
  n0=1.E19
  t0=3.
  plot_run=F
@@ -40,12 +40,12 @@
 &xmhd_options
  bbc='bc'          ! Perfectly-conducting BC for B-field
  vbc='all'         ! Zero-flow BC for velocity
- dt=6.e-8          ! Maximum time step
+ dt=1.e-7          ! Maximum time step
  eta=1.            ! Resistivity
  nu_par=10.        ! Fluid viscosity
  nsteps=2000       ! Number of time steps to take
  rst_freq=10       ! Restart file frequency
- xmhd_mfmnk=T      ! Use matrix-free Jacobian operator
+ xmhd_mfnk=T       ! Use matrix-free Jacobian operator
  lin_tol=1.E-9     ! Linear solver tolerance
  nl_tol=1.E-5      ! Non-linear solver tolerance
  nu_xmhd=0,1,8,2   ! Number of smoother iterations for default preconditioner

@@ -3,12 +3,11 @@
     <pre type="gmres">
       <its>8</its>
       <nrits>8</nrits>
-      <xpre type="jacobi"></xpre>
       <pre type="block_jacobi">
         <nlocal>-1</nlocal>
         <solver type="lu">
-          <type>lu</type>
-          <package>umfpack</package>
+          <type>ilu</type>
+          <package>native</package>
         </solver>
       </pre>
     </pre>

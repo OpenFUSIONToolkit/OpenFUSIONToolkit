@@ -19,7 +19,7 @@
 
 &test_mhd_options
  order=2           ! FE order
- minlev=2          ! Minimum level for MG preconditioning
+ minlev=3          ! Minimum level for MG preconditioning
  view_ic=F         ! View initial conditions but do not run simulation
  plot_run=F        ! Run plotting instead of simulation
 /

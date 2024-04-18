@@ -28,7 +28,7 @@
 
 &cyl_options
  order=3
- minlev=2
+ minlev=4
  b0_scale=1.e-1
  n0=1.e19
  t0=6.
@@ -53,10 +53,11 @@
  rst_freq=10       ! Restart file frequency
  lin_tol=1.E-10    ! Linear solver tolerance
  nl_tol=1.E-5      ! Non-linear solver tolerance
+ xmhd_mfnk=T       !
  nu_xmhd=0,1,8,2   ! Number of smoother iterations for default preconditioner
  rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
  ittarget=40       ! Target for # of linear iterations per time step
- mu_ion=2.          ! Ion mass (atomic units)
+ mu_ion=2.         ! Ion mass (atomic units)
  xmhd_prefreq=20   ! Preconditioner update frequency
 /
 

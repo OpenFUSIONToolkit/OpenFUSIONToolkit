@@ -440,7 +440,7 @@ CONTAINS
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !
 !---------------------------------------------------------------------------
-SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget)
+SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_refactor)
 real(r8), intent(out) :: dt !< Maximum timestep
 real(r8), intent(out) :: lin_tol !< Linear solver tolerance
 real(r8), intent(out) :: nl_tol !< Nonlinear solver tolerance
@@ -450,6 +450,7 @@ integer(i4), intent(out) :: rst_freq !< Frequency to save restart files
 integer(i4), intent(out) :: nclean !< Frequency to clean divergence
 integer(i4), intent(out) :: maxextrap !< Extrapolation order for initial guess
 integer(i4), intent(out) :: ittarget !< Maximum number of linear iterations
+integer(i4), intent(out) :: nl_refactor !< Maximum number of linear iterations
 !---XML solver fields
 #ifdef HAVE_XML
 integer(i4) :: nnodes
@@ -460,7 +461,7 @@ integer(i4) :: io_unit,ierr
 namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,xmhd_ohmic, &
   xmhd_visc_heat,xmhd_brag,xmhd_upwind,xmhd_therm_equil,bbc,vbc,nbc,tbc,visc_type,dt,eta, &
   eta_temp,nu_par,nu_perp,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
-  xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,mu_ion,me_factor,te_factor,xmhd_prefreq, &
+  xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_refactor,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens
 DEBUG_STACK_PUSH
 !---------------------------------------------------------------------------
@@ -556,7 +557,7 @@ type(oft_h1_rinterp), target :: Bfield
 type(oft_h1_dinterp) :: divfield
 type(oft_timer) :: mytimer
 real(r8), pointer :: vals(:)
-integer(i4) :: i,j,k,ierr,io_unit,io_stat,rst_version,rst_tmp,baseit,nredo
+integer(i4) :: i,j,k,ierr,io_unit,io_stat,rst_version,rst_tmp,baseit,nredo,nl_refactor
 integer(i4) :: itcount(XMHD_ITCACHE)
 real(r8) :: dt,dthist(XMHD_ITCACHE)
 real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr,elapsed_time
@@ -580,7 +581,7 @@ DEBUG_STACK_PUSH
 ! Read-in Parameters
 !---------------------------------------------------------------------------
 IF(ASSOCIATED(initial_fields%Te))xmhd_two_temp=.TRUE.
-CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget)
+CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_refactor)
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 !---------------------------------------------------------------------------
@@ -893,7 +894,7 @@ DO i=1,nsteps
     IF(i==2)xmhd_opcount=0
     IF(MOD(xmhd_opcount,xmhd_prefreq)==0.OR.ABS(xmhd_opdt-dt)/dt>.15d0)xmhd_opcount=0
     !---Update preconditioning matrices if necessary
-    IF(xmhd_mfnk.AND.xmhd_opcount/=0.AND.(nksolver%lits>baseit+1.OR.nksolver%nlits>1))THEN
+    IF(xmhd_mfnk.AND.xmhd_opcount/=0.AND.(nksolver%lits>baseit+1.OR.nksolver%nlits>nl_refactor))THEN
        IF(oft_env%head_proc)WRITE(*,*)'Force: update Jacobian',i,nksolver%lits,baseit,nredo
        IF(nredo<1)THEN
          jac_dt=dt/2.d0
@@ -1089,7 +1090,7 @@ type(oft_h1_rinterp) :: Bfield
 type(oft_h1_dinterp) :: divfield
 type(oft_xmhd_massmatrix) :: mop
 type(oft_timer) :: mytimer
-integer(i4) :: i,j,ierr,io_unit,io_stat,rst_version,rst_tmp
+integer(i4) :: i,j,ierr,io_unit,io_stat,rst_version,rst_tmp,nl_refactor
 integer(i4) :: itcount(XMHD_ITCACHE)
 real(r8) :: dt,dthist(XMHD_ITCACHE)
 real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr,elapsed_time
@@ -1117,7 +1118,7 @@ DEBUG_STACK_PUSH
 IF(ASSOCIATED(equil_fields%Te).AND.ASSOCIATED(pert_fields%Te))xmhd_two_temp=.TRUE.
 IF(XOR(ASSOCIATED(equil_fields%Te),ASSOCIATED(pert_fields%Te)))CALL oft_abort( &
   "Te0 and dTe ICs are required for two temp.", "xmhd_lin_run", __FILE__)
-CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget)
+CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_refactor)
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 !---Force heating and conduction terms to zero
@@ -4545,7 +4546,7 @@ TYPE(oft_hcurl_rinterp), TARGET :: J2field
 type(oft_timer) :: mytimer
 real(r8), pointer :: bvout(:,:)
 real(r8), pointer :: vals(:),hcvals(:)
-integer(i4) :: i,j,ip,u_ip,ierr,io_flag,io_unit,io_stat,rst_cur,rst_tmp
+integer(i4) :: i,j,ip,u_ip,ierr,io_flag,io_unit,io_stat,rst_cur,rst_tmp,nl_refactor
 real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr
 real(r8) :: fac,lramp,tflux,tcurr,t,tp,td
 real(r8) :: ndens
@@ -4624,7 +4625,7 @@ END IF
 !---------------------------------------------------------------------------
 ! Read-in run parameters (only `rst_freq` is used)
 !---------------------------------------------------------------------------
-CALL xmhd_read_settings(dt_run,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget)
+CALL xmhd_read_settings(dt_run,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_refactor)
 rst_ind=rst_start
 nsteps=rst_end
 !---------------------------------------------------------------------------
