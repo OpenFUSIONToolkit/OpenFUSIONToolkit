@@ -130,7 +130,7 @@ END MODULE GEM_helpers
 !!\section doc_ex6_code_driver Driver program
 !!
 !! Need docs
-PROGRAM example_gem
+PROGRAM MUG_slab_recon
 USE oft_base
 !--Grid
 USE oft_mesh_type, ONLY: mesh, rgrnd
@@ -377,7 +377,7 @@ oft_env%pm=.FALSE.      ! Do not show linear iteration progress
 CALL xmhd_run(ic_fields)
 !---Finalize enviroment
 CALL oft_finalize
-END PROGRAM example_gem
+END PROGRAM MUG_slab_recon
 ! STOP SOURCE
 !!
 !!\section doc_mug_ex3_input Input file
