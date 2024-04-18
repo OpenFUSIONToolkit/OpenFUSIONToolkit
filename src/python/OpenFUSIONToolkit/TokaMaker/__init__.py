@@ -4,4 +4,4 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
-from ._core import TokaMaker, tokamaker_default_settings
+from ._core import TokaMaker, tokamaker_default_settings, solve_with_bootstrap

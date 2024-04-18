@@ -35,9 +35,13 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_DIIID_ex2
  - \subpage doc_tMaker_CUTE_ex2
  - \subpage doc_tMaker_LTX_ex2
+ - \subpage doc_tMaker_ITER_ex3
+
+### Equilibrium Reconstruction
+ - \subpage doc_tMaker_ITER_ex4
 
 \section doc_gs_main_mesh Building meshes using gs_Domain
-TokaMaker includes built-in meshing functionality through the \ref OpenFUSIONToolkit.TokaMaker.gs_Domain "gs_Domain" class,
+TokaMaker includes built-in meshing functionality through the \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain "gs_Domain" class,
 which leverages the [triangle](https://pypi.org/project/triangle/) python package to generated unstructured triangular grids.
 The process of geometry definition is broken into two stages:
 
@@ -50,13 +54,13 @@ This method's functionality varies based on the type of region being defined, wh
  * `coil`: A region where toroidal current can flow with specified amplitude through \ref OpenFUSIONToolkit.TokaMaker.TokaMaker.set_coil_currents "set_coil_currents()" or via shape optimization \ref OpenFUSIONToolkit.TokaMaker.TokaMaker.set_coil_reg "set_coil_reg()" and \ref OpenFUSIONToolkit.TokaMaker.TokaMaker.set_isoflux "set_isoflux()"
 
 Next, geometric information about each region defined in the prior step is performed using one of the following methods:
- * \ref OpenFUSIONToolkit.TokaMaker.gs_Domain.add_rectangle "add_rectangle()" defines the region as a simple rectangle with a specified center, width, height, and optional rotation.
- * \ref OpenFUSIONToolkit.TokaMaker.gs_Domain.add_polygon "add_polygon()" defines the region as any closed polygon from a list of (R,Z) points.
- * \ref OpenFUSIONToolkit.TokaMaker.gs_Domain.add_annulus "add_annulus()" defines the region as an annulus between two closed polygons that must not cross.
- * \ref OpenFUSIONToolkit.TokaMaker.gs_Domain.add_enclosed "add_enclosed()" defines the region by specifying a point within a space enclosed by other regions (eg. between a VV and a limiter). This is useful to avoid having to define a new curve(s) in complex configurations.
+ * \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain.add_rectangle "add_rectangle()" defines the region as a simple rectangle with a specified center, width, height, and optional rotation.
+ * \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain.add_polygon "add_polygon()" defines the region as any closed polygon from a list of (R,Z) points.
+ * \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain.add_annulus "add_annulus()" defines the region as an annulus between two closed polygons that must not cross.
+ * \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain.add_enclosed "add_enclosed()" defines the region by specifying a point within a space enclosed by other regions (eg. between a VV and a limiter). This is useful to avoid having to define a new curve(s) in complex configurations.
 
 \subsection doc_gs_main_mesh_ex Mesh generation examples using gs_Domain
-The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.gs_Domain "gs_Domain" to create meshes for TokaMaker.
+The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain "gs_Domain" to create meshes for TokaMaker.
 
  - \subpage doc_tMaker_HBT_ex1
  - \subpage doc_tMaker_ITER_ex1
