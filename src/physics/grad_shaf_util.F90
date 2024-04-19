@@ -294,8 +294,12 @@ IF(self%ncoil_regs>0)THEN
 END IF
 IF(self%ncoils_ext>0)THEN
   ALLOCATE(tmpout(self%ncoils_ext,1))
+  tmpout=0.d0
   DO i=1,self%ncoils_ext
-    tmpout(i,1)=self%coils_ext(i)%curr
+    DO j=1,self%ncoils
+      tmpout(i,1)=tmpout(i,1) &
+        + self%coil_currs(j)*self%coil_nturns(smesh%nreg+i,j)
+    END DO
   END DO
   CALL hdf5_write(tmpout(:,1),filename,'gs/ext_coils')
   DEALLOCATE(tmpout)
@@ -395,21 +399,22 @@ IF(self%ncond_eigs>0)THEN
   DEALLOCATE(tmpin)
 END IF
 IF(self%ncoil_regs>0)THEN
-  ALLOCATE(tmpin(self%ncoil_regs,1))
-  CALL hdf5_read(tmpin(:,1),filename,'gs/int_coils')
   CALL oft_abort("Not supported","gs_load",__FILE__)
-  DO i=1,self%ncoil_regs
-    self%coil_regions(i)%curr=tmpin(i,1)
-  END DO
-  DEALLOCATE(tmpin)
+  ! ALLOCATE(tmpin(self%ncoil_regs,1))
+  ! CALL hdf5_read(tmpin(:,1),filename,'gs/int_coils')
+  ! DO i=1,self%ncoil_regs
+  !   self%coil_regions(i)%curr=tmpin(i,1)
+  ! END DO
+  ! DEALLOCATE(tmpin)
 END IF
 IF(self%ncoils_ext>0)THEN
-  ALLOCATE(tmpin(self%ncoils_ext,1))
-  CALL hdf5_read(tmpin(:,1),filename,'gs/ext_coils')
-  DO i=1,self%ncoils_ext
-    self%coils_ext(i)%curr=tmpin(i,1)
-  END DO
-  DEALLOCATE(tmpin)
+  CALL oft_abort("Not supported","gs_load",__FILE__)
+  ! ALLOCATE(tmpin(self%ncoils_ext,1))
+  ! CALL hdf5_read(tmpin(:,1),filename,'gs/ext_coils')
+  ! DO i=1,self%ncoils_ext
+  !   self%coils_ext(i)%curr=tmpin(i,1)
+  ! END DO
+  ! DEALLOCATE(tmpin)
 END IF
 !---Get plasma bounds
 x1=0.d0; x2=1.d0

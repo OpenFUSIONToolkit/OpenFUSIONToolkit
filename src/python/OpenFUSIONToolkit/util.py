@@ -59,6 +59,8 @@ def ctypes_subroutine(function, argtypes=None):
 # Common parameters
 ## Vacuum magnetic permeability
 mu0 = numpy.pi*4.E-7
+## Electron charge
+eC = 1.60217663e-19
 
 ## @cond
 root_path = os.path.realpath(os.path.dirname(__file__))

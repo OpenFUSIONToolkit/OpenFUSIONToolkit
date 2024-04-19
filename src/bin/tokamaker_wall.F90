@@ -830,12 +830,12 @@ mygs%compute_chi=.FALSE.
 IF(TRIM(coil_file)/='none')THEN
   mygs%coil_file=coil_file
   CALL mygs%load_coils(ignore_inmesh=.TRUE.)
-  DO i=1,mygs%ncoils_ext
-    mygs%coils_ext(i)%curr=0.d0 ! Zero all external coils
-  END DO
-  DO i=1,mygs%ncoil_regs
-    mygs%coil_regions(i)%curr=0.d0 ! Zero all internal coil regions
-  END DO
+  ! DO i=1,mygs%ncoils_ext
+  !   mygs%coils_ext(i)%curr=0.d0 ! Zero all external coils
+  ! END DO
+  ! DO i=1,mygs%ncoil_regs
+  !   mygs%coil_regions(i)%curr=0.d0 ! Zero all internal coil regions
+  ! END DO
   DO i=1,mygs%ncond_eigs
     mygs%cond_regions(i)%weights=0.d0 ! Zero all conducting regions
   END DO
