@@ -180,9 +180,10 @@ INTEGER(4) :: i,ierr,io_unit
 !---Input file options
 INTEGER(4) :: order = 2
 INTEGER(4) :: minlev = 1
+LOGICAL :: pm = .FALSE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: view_ic = .FALSE.
-NAMELIST/test_mhd_options/order,minlev,plot_run,view_ic
+NAMELIST/test_mhd_options/order,minlev,plot_run,view_ic,pm
 !!\subsection doc_ex6_code_driver_init Grid and FE setup
 !!
 !! Need docs
@@ -372,7 +373,7 @@ xmhd_minlev=minlev  ! Set minimum level for multigrid preconditioning
 temp_floor=T0*1.d-2 ! Set temperature floor
 den_floor=N0*1.d-2  ! Set density floor
 den_scale=N0        ! Set density scale
-oft_env%pm=.FALSE.      ! Do not show linear iteration progress
+oft_env%pm=pm      ! Do not show linear iteration progress
 !---Run simulation
 CALL xmhd_run(ic_fields)
 !---Finalize enviroment

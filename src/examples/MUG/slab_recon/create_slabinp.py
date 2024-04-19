@@ -40,10 +40,10 @@ region 1 size def boundary surface -51 52 53 -54 -55 56
 #
 import sys
 nargs = len(sys.argv)
-print nargs
+print(nargs)
 if nargs != 5:
-	print 'ERROR: must provide 4 arguments'
-	print 'Example: ./create_slabinp.py 2.5 3. 3. 1.'
+	print('ERROR: must provide 4 arguments')
+	print('Example: ./create_slabinp.py 2.5 3. 3. 1.')
 	sys.exit(1)
 #
 dims = []
@@ -52,7 +52,6 @@ for (i,arg) in enumerate(sys.argv):
 		continue
 	dims.append(float(arg))
 #
-print len(dims)
-f = open('slab2.inp','w+')
-f.write(template.format(dims[0]/2.,dims[1]/2.,dims[2]/2.,dims[3]))
-f.close()
+print(len(dims))
+with open('slab2.inp','w+') as fid:
+	fid.write(template.format(dims[0]/2.,dims[1]/2.,dims[2]/2.,dims[3]))
