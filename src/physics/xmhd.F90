@@ -895,7 +895,7 @@ DO i=1,nsteps
     IF(MOD(xmhd_opcount,xmhd_prefreq)==0.OR.ABS(xmhd_opdt-dt)/dt>.15d0)xmhd_opcount=0
     !---Update preconditioning matrices if necessary
     IF(xmhd_mfnk.AND.xmhd_opcount/=0.AND.(nksolver%lits>baseit+1.OR.nksolver%nlits>nl_refactor))THEN
-       IF(oft_env%head_proc)WRITE(*,*)'Force: update Jacobian',i,nksolver%lits,baseit,nredo
+       IF(oft_env%head_proc)WRITE(*,*)'Update Jacobian',nksolver%lits,baseit,nredo
        IF(nredo<1)THEN
          jac_dt=dt/2.d0
          xmhd_skip_update=.FALSE.
