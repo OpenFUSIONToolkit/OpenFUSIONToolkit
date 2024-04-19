@@ -15,6 +15,7 @@ oft_in_template = """&runtime_options
 &mesh_options
  meshname='none'
  {MESH_TYPE}
+ grid_order={GRID_ORDER:d}
 /
 
 {MESH_DEF}
@@ -59,7 +60,7 @@ class Marklin():
         @param debug_level Level of debug printing (0-3)
         '''
         ## Input file settings
-        self._psin_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'MESH_DEF': ''}
+        self._psin_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'MESH_DEF': '', 'GRID_ORDER': 1}
         self._update_psin()
         oft_init(c_int(nthreads))
         ## Number of regions in mesh
@@ -88,7 +89,7 @@ class Marklin():
         with open('oftpyin','w+') as fid:
             fid.write(oft_in_template.format(**self._psin_dict))
 
-    def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
+    def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None,grid_order=1):
         '''! Setup mesh for Marklin force-free equilibrium calculations
 
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
@@ -107,6 +108,7 @@ class Marklin():
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
             regfake = numpy.ones((1,),dtype=numpy.int32)
             self._psin_dict['MESH_TYPE'] = 'cad_type=0'
+            self._psin_dict['GRID_ORDER'] = grid_order
             self._psin_dict['MESH_DEF'] = """&native_mesh_options
  filename='{0}'
 /""".format(mesh_file)
@@ -128,7 +130,7 @@ class Marklin():
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
 
-    def compute(self,nmodes=1,order=2,minlev=-1,save_rst=True):
+    def compute_eig(self,nmodes=1,order=2,minlev=-1,save_rst=True):
         r'''! Compute force-free eigenmodes
 
         @param nmodes Number of eigenmodes to compute
@@ -137,7 +139,7 @@ class Marklin():
         @param save_rst Save restart files? 
         '''
         cstring = c_char_p(b""*200)
-        marklin_compute(order,minlev,nmodes,save_rst,cstring)
+        marklin_compute_eig(order,minlev,nmodes,save_rst,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
         self.nm = nmodes

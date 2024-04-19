@@ -9,7 +9,7 @@
 !---------------------------------------------------------------------------
 MODULE marklin_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
-    c_f_pointer, c_bool, c_null_ptr
+    c_f_pointer, c_bool, c_null_ptr, c_associated
 !---Base
 USE oft_base
 USE oft_io, ONLY: hdf5_create_file
@@ -194,8 +194,14 @@ REAL(r8), POINTER, DIMENSION(:,:) :: hcpc_tmp,hcpv_tmp
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 CHARACTER(LEN=3) :: pltnum
+CLASS(fem_interp), POINTER :: interp_obj
 TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
 TYPE(oft_taylor_rinterp), POINTER :: binterp_obj
+!---Check that interpolator is allocated
+IF(.NOT.C_ASSOCIATED(int_obj))THEN
+  CALL copy_string('Interpolation object not associated',error_str)
+  RETURN
+END IF
 !---Clear error flag
 CALL copy_string('',error_str)
 !
@@ -203,14 +209,15 @@ NULLIFY(pdop,mop,vals)
 SELECT CASE(int_type)
   CASE(1)
     CALL c_f_pointer(int_obj, ainterp_obj)
-    CALL oft_lag_getpdop(pdop,ainterp_obj,'zerob',k_perp)
+    interp_obj=>ainterp_obj
   CASE(2)
     CALL c_f_pointer(int_obj, binterp_obj)
-    CALL oft_lag_getpdop(pdop,binterp_obj,'zerob',k_perp)
+    interp_obj=>binterp_obj
   CASE DEFAULT
     CALL copy_string('Invalid interpolation type',error_str)
     RETURN
 END SELECT
+CALL oft_lag_getpdop(pdop,interp_obj,'zerob',k_perp)
 !---Setup solver
 CALL create_cg_solver(pdinv)
 CALL create_diag_pre(pdinv%pre)

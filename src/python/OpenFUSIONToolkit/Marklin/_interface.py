@@ -9,7 +9,7 @@ from ..util import *
 
 ## @cond
 # Marklin setup function (mesh and such) order,nmodes,minlev,error_str
-marklin_compute = ctypes_subroutine(oftpy_lib.marklin_compute_eigs,
+marklin_compute_eig = ctypes_subroutine(oftpy_lib.marklin_compute_eigs,
     [c_int, c_int, c_int, c_bool, c_char_p])
 
 # Marklin setup function (mesh and such) order,minlev,nh,hcpc,hcpv,save_rst,error_str
