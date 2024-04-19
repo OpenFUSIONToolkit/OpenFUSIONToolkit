@@ -150,14 +150,14 @@ CALL gs_setup_walls(mygs)
 INQUIRE(EXIST=file_exists,FILE='gs_isoflux.in')
 IF(file_exists)THEN
   OPEN(NEWUNIT=io_unit,FILE='gs_isoflux.in')
-  READ(io_unit,*)mygs%isoflux_ntargets,mygs%isoflux_nsaddles
+  READ(io_unit,*)mygs%isoflux_ntargets,mygs%saddle_ntargets
   ALLOCATE(mygs%isoflux_targets(2,mygs%isoflux_ntargets))
   DO i=1,mygs%isoflux_ntargets
     READ(io_unit,*)mygs%isoflux_targets(:,i)
   END DO
-  ALLOCATE(mygs%isoflux_saddles(2,mygs%isoflux_nsaddles))
-  DO i=1,mygs%isoflux_nsaddles
-    READ(io_unit,*)mygs%isoflux_saddles(:,i)
+  ALLOCATE(mygs%saddle_targets(2,mygs%saddle_ntargets))
+  DO i=1,mygs%saddle_ntargets
+    READ(io_unit,*)mygs%saddle_targets(:,i)
   END DO
   CLOSE(io_unit)
   !---Read coil constraint matrix
