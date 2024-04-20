@@ -21,7 +21,7 @@ USE oft_native_solvers, ONLY: oft_native_cg_solver, native_cg_solver_cast, &
   oft_native_gmres_solver, native_gmres_solver_cast, oft_jblock_precond, &
   oft_ml_precond, oft_veccreate_proto, oft_interp_proto, jblock_precond_cast, &
   ml_precond_cast, oft_diag_scale, diag_scale_cast, oft_bjprecond
-USE oft_lu, ONLY: oft_lusolver
+USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, oft_petsc_matrix_cast
 USE oft_petsc_solvers, ONLY: oft_petsc_sjacobi_solver, oft_petsc_cg_solver, oft_petsc_gmres_solver, &
@@ -636,6 +636,8 @@ SELECT CASE(TRIM(pre_type))
     ALLOCATE(oft_bjprecond::pre)
   CASE("lu")
     ALLOCATE(oft_lusolver::pre)
+  CASE("ilu")
+    ALLOCATE(oft_ilusolver::pre)
   CASE DEFAULT
     CALL oft_abort("Invalid preconditioner type.","create_native_pre",__FILE__)
 END SELECT
@@ -664,6 +666,8 @@ SELECT CASE(TRIM(pre_type))
     ALLOCATE(oft_petsc_asprecond::pre)
   CASE("lu")
     ALLOCATE(oft_petsc_luprecond::pre)
+  ! CASE("ilu")
+  !   ALLOCATE(oft_petsc_luprecond::pre)
   CASE DEFAULT
     CALL oft_abort("Invalid preconditioner type.","create_petsc_pre",__FILE__)
 END SELECT
@@ -688,6 +692,20 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine create_diag_pre
+!---------------------------------------------------------------------------
+!> Create ILU(0) preconditioner (native or MKL)
+!---------------------------------------------------------------------------
+SUBROUTINE create_ilu_pre(pre)
+CLASS(oft_solver), POINTER, INTENT(out) :: pre
+LOGICAL :: native_solver
+DEBUG_STACK_PUSH
+IF(use_petsc)THEN
+  CALL create_petsc_pre(pre,"ilu")
+ELSE
+  CALL create_native_pre(pre,"ilu")
+END IF
+DEBUG_STACK_POP
+end subroutine create_ilu_pre
 !---------------------------------------------------------------------------
 ! SUBROUTINE: create_bjacobi_pre
 !---------------------------------------------------------------------------
@@ -769,6 +787,15 @@ SELECT CASE(TRIM(pre_type))
       CALL create_petsc_pre(pre,"lu")
     ELSE
       CALL create_native_pre(pre,"lu")
+    END IF
+  CASE("ilu")
+    IF(use_petsc)THEN
+      IF(native_solver)THEN
+        CALL oft_abort("LU precon requires PETSc parent solver.","create_pre_xml",__FILE__)
+      END IF
+      CALL create_petsc_pre(pre,"ilu")
+    ELSE
+      CALL create_native_pre(pre,"ilu")
     END IF
   CASE DEFAULT
     CALL oft_abort("Invalid precon type.","create_pre_xml",__FILE__)
