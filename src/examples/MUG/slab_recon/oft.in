@@ -17,7 +17,7 @@
  ref_per=T,T,F     ! Make grid periodic in the X,Y directions
 /
 
-&test_mhd_options
+&slab_recon_options
  order=2           ! FE order
  minlev=3          ! Minimum level for MG preconditioning
  view_ic=F         ! View initial conditions but do not run simulation
@@ -34,7 +34,7 @@
  vbc='all'         ! Zero-flow BC for velocity
  nbc='n'           ! Neumann BC for density
  tbc='n'           ! Neumann BC for temperature
- dt=2.e-7          ! Maximum time step
+ dt=4.e-7          ! Maximum time step
  eta=978.7         ! Constant resistivity
  visc_type='iso'   ! Use isotropic viscosity tensor
  nu_par=9877.0     ! Fluid viscosity
@@ -47,9 +47,9 @@
  xmhd_mfnk=T       ! Use matrix-free method
  lin_tol=1.E-8     ! Linear solver tolerance
  nl_tol=1.E-6      ! Non-linear solver tolerance
- nu_xmhd=0,20,5    ! Number of smoother iterations for default preconditioner
  ittarget=30       ! Target for # of linear iterations per time step
  xmhd_prefreq=20   ! Preconditioner update frequency
+ nl_update=3     ! # of NL iterations that causes preconditioner update
 /
 
 &xmhd_plot_options

@@ -115,7 +115,7 @@ def parse_fortran_file(fid):
         file_buffer = file_buffer + doc_buffer + "\n"
     # Add full source if needed
     if full_code != "":
-        file_buffer = file_buffer + r'\n\section " + ex_prefix + "_full Complete Source\n'
+        file_buffer = file_buffer + "\n" + r'\section ' + ex_prefix + "_full Complete Source\n"
         file_buffer = file_buffer + "~~~~~~~~~{.F90}\n"
         file_buffer = file_buffer + full_code
         file_buffer = file_buffer + "~~~~~~~~~\n"

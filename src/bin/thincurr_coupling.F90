@@ -36,7 +36,7 @@ USE oft_lu, ONLY: oft_lusolver, lapack_matinv
 USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, partition_graph
 USE oft_deriv_matrices, ONLY: oft_sum_matrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_solver_utils, ONLY: create_cg_solver, create_gmres_solver, create_diag_pre, &
+USE oft_solver_utils, ONLY: create_cg_solver, create_gmres_solver, &
   create_native_solver
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_iram_eigsolver

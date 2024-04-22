@@ -1,12 +1,13 @@
-!!MUG Example: Slab Reconnection    {#doc_mug_ex3}
+!!MUG Example: Slab Reconnection    {#doc_mug_recon_ex}
 !!============================
 !!
 !![TOC]
 !!
-!!This example demonstrates the use of the \ref xmhd "extended MHD" module in PSI-Tet. In
-!!this example reconnection in a periodic-slab current sheet will be simulated.
+!! This example demonstrates the use of the \ref xmhd "extended MHD" module in OFT. In
+!! this example reconnection in a periodic-slab current sheet will be simulated following
+!! the setup used to the [GEM Challange](https://doi.org/10.1029/1999JA900449).
 !!
-!!\section doc_mug_ex3_code_helper Helper module
+!!\section doc_mug_recon_ex_code_helper Helper module
 !!
 !! Need docs
 ! START SOURCE
@@ -25,44 +26,40 @@ USE diagnostic, ONLY: flux_probe
 USE xmhd, ONLY: oft_xmhd_driver, oft_xmhd_probe, xmhd_sub_fields
 IMPLICIT NONE
 !---------------------------------------------------------------------------
-! CLASS magnetospheric_interpolator
+! Field interpolation object for intial conditions
 !---------------------------------------------------------------------------
 TYPE, EXTENDS(fem_interp) :: GEM_interp
-  REAL(8) :: dpsi = 1.d-1 !< Amplitude of flux perturbation
-  REAL(8) :: den_inf = 2.d-1 !< Density at infinity
-  REAL(8) :: lam = 0.5d0 !< Wavelength of perturbation
-  REAL(8) :: Lx = 25.6 !< Length of domain in x-direction
-  REAL(8) :: Lz = 12.8 !< Length of domain in z-direction
-  CHARACTER(LEN=1) :: field = 'n' !< Field component to initialize
+  REAL(8) :: dpsi = 1.d-1 ! Amplitude of flux perturbation
+  REAL(8) :: den_inf = 2.d-1 ! Density at infinity
+  REAL(8) :: lam = 0.5d0 ! Wavelength of perturbation
+  REAL(8) :: Lx = 25.6 ! Length of domain in x-direction
+  REAL(8) :: Lz = 12.8 ! Length of domain in z-direction
+  CHARACTER(LEN=1) :: field = 'n' ! Field component to initialize
 CONTAINS
-  !> Reconstruct field
-  PROCEDURE :: interp => GEM_interp_apply
+  PROCEDURE :: interp => GEM_interp_apply ! Reconstruct field
 END TYPE GEM_interp
 !------------------------------------------------------------------------------
-! CLASS GEM_probe
-!------------------------------------------------------------------------------
-!> Reduced MHD probe object for HIT-SI diagnostics
+! Reduced MHD probe object for HIT-SI diagnostics
 !------------------------------------------------------------------------------
 TYPE, EXTENDS(oft_xmhd_probe) :: GEM_probe
-  INTEGER(4) :: io_unit !< I/O unit for history file
-  LOGICAL :: initialized = .FALSE. !< Flag to indicate setup has been called
-  TYPE(oft_h1_rinterp), POINTER :: Bfield => NULL() !< Magnetic field interpolation class
-  TYPE(flux_probe) :: flux_probe !< Synthetic flux probe
-  TYPE(oft_bin_file) :: flux_hist
+  INTEGER(4) :: io_unit ! I/O unit for history file
+  LOGICAL :: initialized = .FALSE. ! Flag to indicate setup has been called
+  TYPE(oft_h1_rinterp), POINTER :: Bfield => NULL() ! Magnetic field interpolation class
+  TYPE(flux_probe) :: flux_probe ! Synthetic flux probe
+  TYPE(oft_bin_file) :: flux_hist ! History file object
 CONTAINS
-  !> Extract probe signals
-  PROCEDURE :: apply => GEM_probe_apply
+  PROCEDURE :: apply => GEM_probe_apply ! Sample probe signals
 END TYPE GEM_probe
 CONTAINS
-!!\subsection doc_mug_ex3_code_helper_interp Initial condition field interpolator
+!!\subsection doc_mug_recon_ex_code_helper_interp Initial condition field interpolator
 !!
 !! Need docs
 SUBROUTINE GEM_interp_apply(self,cell,f,gop,val)
-CLASS(GEM_interp), INTENT(inout) :: self
-INTEGER(4), INTENT(in) :: cell
-REAL(8), INTENT(in) :: f(:)
-REAL(8), INTENT(in) :: gop(3,4)
-REAL(8), INTENT(out) :: val(:)
+CLASS(GEM_interp), INTENT(inout) :: self ! Needs docs
+INTEGER(4), INTENT(in) :: cell ! Needs docs
+REAL(8), INTENT(in) :: f(:) ! Needs docs
+REAL(8), INTENT(in) :: gop(3,4) ! Needs docs
+REAL(8), INTENT(out) :: val(:) ! Needs docs
 REAL(8) :: pt(3),Beq(3),Bper(3)
 ! Map logical positionto physical coordinates
 pt = mesh%log2phys(cell,f)
@@ -80,12 +77,12 @@ SELECT CASE(self%field)
     CALL oft_abort('Unknown field component','GEM_interp_apply',__FILE__)
 END SELECT
 END SUBROUTINE GEM_interp_apply
-!!\subsection doc_mug_ex3_code_helper_probe Reconnected flux probe
+!!\subsection doc_mug_recon_ex_code_helper_probe Reconnected flux probe
 !!
 !! Need docs
 SUBROUTINE GEM_probe_apply(self,sub_fields,t)
-CLASS(GEM_probe), INTENT(inout) :: self
-type(xmhd_sub_fields), intent(inout) :: sub_fields
+CLASS(GEM_probe), INTENT(inout) :: self ! Needs docs
+type(xmhd_sub_fields), intent(inout) :: sub_fields ! Needs docs
 REAL(8), INTENT(in) :: t
 REAL(8) :: tflux
 !---History file variables
@@ -138,7 +135,8 @@ USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
+USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
+  create_ilu_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
@@ -183,14 +181,14 @@ INTEGER(4) :: minlev = 1
 LOGICAL :: pm = .FALSE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: view_ic = .FALSE.
-NAMELIST/test_mhd_options/order,minlev,plot_run,view_ic,pm
+NAMELIST/slab_recon_options/order,minlev,plot_run,view_ic,pm
 !!\subsection doc_ex6_code_driver_init Grid and FE setup
 !!
 !! Need docs
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
-READ(io_unit,test_mhd_options,IOSTAT=ierr)
+READ(io_unit,slab_recon_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 rgrnd=(/0.d0,0.d0,1.d0/)
@@ -222,14 +220,10 @@ END IF
 !!\subsection doc_ex6_code_driver_ic Initial conditions
 !!
 !! Need docs
-!---------------------------------------------------------------------------
-! Set constant initial temperature
-!---------------------------------------------------------------------------
+!---Set constant initial temperature
 CALL oft_lag_create(ic_fields%Ti)
 CALL ic_fields%Ti%set(T0)
-!---------------------------------------------------------------------------
-! Set zero initial velocity
-!---------------------------------------------------------------------------
+!---Set zero initial velocity
 CALL oft_lag_vcreate(ic_fields%V)
 CALL ic_fields%V%set(0.d0)
 !---------------------------------------------------------------------------
@@ -274,7 +268,10 @@ CALL h1_getmop(mop,"none") ! Construct mass matrix with "none" BC
 CALL create_cg_solver(minv)
 minv%A=>mop ! Set matrix to be solved
 minv%its=-2 ! Set convergence type (in this case "full" CG convergence)
-CALL create_diag_pre(minv%pre) ! Setup Preconditioner
+! CALL create_diag_pre(minv%pre) ! Setup Preconditioner
+CALL create_bjacobi_pre(minv%pre,-1)
+DEALLOCATE(minv%pre%pre)
+CALL create_ilu_pre(minv%pre%pre)
 !---Create fields for solver
 CALL oft_h1_create(u)
 CALL oft_h1_create(v)
@@ -293,6 +290,8 @@ CALL u%delete ! Destroy LHS vector
 CALL v%delete ! Destroy RHS vector
 CALL mop%delete ! Destroy mass matrix
 DEALLOCATE(u,v,mop) ! Deallocate objects
+CALL minv%pre%pre%delete ! Destroy preconditioner
+DEALLOCATE(minv%pre%pre)
 CALL minv%pre%delete ! Destroy preconditioner
 DEALLOCATE(minv%pre)
 CALL minv%delete ! Destroy solver
@@ -373,7 +372,7 @@ xmhd_minlev=minlev  ! Set minimum level for multigrid preconditioning
 temp_floor=T0*1.d-2 ! Set temperature floor
 den_floor=N0*1.d-2  ! Set density floor
 den_scale=N0        ! Set density scale
-oft_env%pm=pm      ! Do not show linear iteration progress
+oft_env%pm=pm       ! Show linear iteration progress?
 !---Run simulation
 CALL xmhd_run(ic_fields)
 !---Finalize enviroment
@@ -381,7 +380,7 @@ CALL oft_finalize
 END PROGRAM MUG_slab_recon
 ! STOP SOURCE
 !!
-!!\section doc_mug_ex3_input Input file
+!!\section doc_mug_recon_ex_input Input file
 !!
 !! Below is an input file which can be used with this example in a parallel environment.
 !! As with \ref doc_ex6 "Example 6" this example should only be run with multiple processes.
@@ -408,7 +407,7 @@ END PROGRAM MUG_slab_recon
 !! ref_per=T,T,F     ! Make grid periodic in the X,Y directions
 !!/
 !!
-!!&test_mhd_options
+!!&slab_recon_options
 !! order=2           ! FE order
 !! minlev=2          ! Minimum level for MG preconditioning
 !! view_ic=F         ! View initial conditions but do not run simulation
@@ -425,7 +424,7 @@ END PROGRAM MUG_slab_recon
 !! vbc='all'         ! Zero-flow BC for velocity
 !! nbc='n'           ! Neumann BC for density
 !! tbc='n'           ! Neumann BC for temperature
-!! dt=2.e-7          ! Maximum time step
+!! dt=4.e-7          ! Maximum time step
 !! eta=978.7         ! Constant resistivity
 !! visc_type='iso'   ! Use isotropic viscosity tensor
 !! nu_par=9877.0     ! Fluid viscosity
@@ -444,7 +443,37 @@ END PROGRAM MUG_slab_recon
 !!/
 !!\endverbatim
 !!
-!!\subsection doc_mug_ex3_input_plot Post-Processing options
+!!\subsection doc_mug_recon_ex_input_solver Solver specification
+!!
+!! Time dependent MHD solvers are accelerated significantly by the use of
+!! a more sophisticated preconditioner than the default method. Below is
+!! an example `oft_in.xml` file that constructs an appropriate ILU(0) preconditioner.
+!! Currently, this preconditioner method is the suggest starting preconditioner for all
+!! time-dependent MHD solves.
+!!
+!! This solver can be used by specifying both the FORTRAN input and XML input files
+!! to the executable as below.
+!!
+!!\verbatim
+!!~$ ./MUG_slab_recon oft.in oft_in.xml
+!!\endverbatim
+!!
+!!```xml
+!!<oft>
+!!  <xmhd>
+!!    <pre type="gmres">
+!!      <its>8</its>
+!!      <nrits>8</nrits>
+!!      <pre type="block_jacobi">
+!!        <nlocal>-1</nlocal>
+!!        <solver type="ilu"></solver>
+!!      </pre>
+!!    </pre>
+!!  </xmhd>
+!!</oft>
+!!```
+!!
+!!\subsection doc_mug_recon_ex_input_plot Post-Processing options
 !!
 !! When running the code for post-processing additional run time options are available.
 !!
@@ -455,7 +484,6 @@ END PROGRAM MUG_slab_recon
 !! rst_start=0
 !! rst_end=1000
 !!/
+!!\endverbatim
 !!
 !! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
-!!
-!!\endverbatim

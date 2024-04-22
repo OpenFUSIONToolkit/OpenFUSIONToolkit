@@ -1,47 +1,23 @@
-!!MUG Example: Spheromak Tilt    {#doc_mug_ex1}
+!!MUG Example: Spheromak Tilt    {#doc_mug_sph_ex1}
 !!=========================
 !!
 !![TOC]
 !!
-!!This example demonstrates the use of the \ref xmhd "extended MHD" module in the Open FUSION Toolkit (OFT). It is well known
-!!that a spheromak confined in a cylindrical flux conserver is unstable to an ideal tilt
-!!mode when the ratio of the cylinder's height to radius is greater than 1.3. This result
-!!was shown first by Bondeson and Marklin, where the instablity acts to dissipate energy
-!!and drive the magnetic configuration toward the Taylor state.
+!!This example demonstrates the use of the \ref xmhd "extended MHD" module in the Open FUSION Toolkit (OFT)
+!!to model the ideal tilt instability in a spheromak confined in a "tall" cylindrical flux conserver.
+!!Such a system is unstable to this instability when the ratio of the cylinder's height to radius is
+!!greater than 1.3. This result was shown first by [Bondeson and Marklin](https://doi.org/10.1063/1.863579),
+!!where the instablity acts to dissipate energy and drive the magnetic configuration toward the Taylor state
+!! (see \ref doc_mug_sph_ex1_code_taylor).
 !!
-!!\section doc_mug_ex1_cubit Mesh Creation with CUBIT
-!!
-!!A suitable mesh for this example, with radius of 1m and height of 2m, can be created using
-!!the CUBIT script below.
-!!
-!!\verbatim
-!!reset
-!!
-!!create Cylinder height 2 radius 1
-!!
-!!volume 1 scheme Tetmesh
-!!set tetmesher interior points on
-!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
-!!set tetmesher boundary recovery  off
-!!volume 1 size .2
-!!mesh volume 1
-!!
-!!set duplicate block elements off
-!!block 1 add volume 1 
-!!block 1 element type tetra10
-!!
-!!set large exodus file on
-!!export Genesis  "cyl.g" overwrite block 1
-!!\endverbatim
-!!
-!!\section doc_mug_ex1_code Code Walk Through
+!!\section doc_mug_sph_ex1_code Code Walk Through
 !!
 !!The code consists of three basic sections, required imports and variable definitions,
 !!finite element setup, and system creation and solution.
 !!
-!!\subsection doc_mug_ex1_code_inc Module Includes
+!!\subsection doc_mug_sph_ex1_code_inc Module Includes
 ! START SOURCE
-PROGRAM xmhd_cyl
+PROGRAM MUG_sph_tilt
 !---Runtime
 USE oft_base
 !---Grid
@@ -50,7 +26,8 @@ USE multigrid_build, ONLY: multigrid_construct, multigrid_add_quad
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
+USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
+  create_ilu_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
@@ -69,7 +46,7 @@ USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob, h1_set
 USE taylor, ONLY: taylor_hmodes, taylor_minlev, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, xmhd_sub_fields
 IMPLICIT NONE
-!!\section doc_mug_ex1_code_vars Local Variables
+!!\subsection doc_mug_sph_ex1_code_vars Local Variables
 !---H1 divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
@@ -88,12 +65,12 @@ REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
 LOGICAL :: pm=.FALSE.
 LOGICAL :: plot_run=.FALSE.
-NAMELIST/cyl_options/order,minlev,b0_scale,b1_scale,plot_run,pm,n0,t0
-!!\section doc_mug_ex1_code_setup OFT Initialization
+NAMELIST/sph_tilt_options/order,minlev,b0_scale,b1_scale,plot_run,pm,n0,t0
+!!\subsection doc_mug_sph_ex1_code_setup OFT Initialization
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
-READ(io_unit,cyl_options,IOSTAT=ierr)
+READ(io_unit,sph_tilt_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---------------------------------------------------------------------------
 ! Setup grid
@@ -117,37 +94,54 @@ CALL h0_setup_interp
 !---H1 full space
 CALL oft_h1_setup(order, minlev)
 CALL h1_setup_interp
-!!\section doc_mug_ex1_code_taylor Computing Initial Conditions
+!!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
+!!
+!! To visualize the solution fields once a simulation has completed the \ref xmhd::xmhd_plot
+!! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
+!! produced by \ref xmhd::xmhd_run "xmhd_run" and generates plot files, and optionally
+!! probe signals at evenly spaced points in time as specified in the input file, see
+!! \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex1_input_plot.
+xmhd_minlev=minlev
+IF(plot_run)THEN
+  !---Setup I/0
+  CALL mesh%setup_io(order)
+  !---Run post-processing routine
+  CALL xmhd_plot
+  !---Finalize enviroment and exit
+  CALL oft_finalize()
+END IF
+!!\subsection doc_mug_sph_ex1_code_taylor Computing Initial Conditions
 !!
 !! The spheromak mode corresponds to the thrid lowest force-free eignstate of the
 !! flux conserver. This can be computed using the \ref taylor::taylor_hmodes
 !! "taylor_hmodes" subroutine and with the desired number of modes set to three.
-!! The fact that this mode is the third
-!! eigenstate is indicative of the ideal instability we wish to simulate with this
-!! example as there are two magentic configurations that contain less energy
-!! for a given helicity. As a result, we expect instability to drive the configuration
-!! toward one of these minimum energy states. This also leads us to our choice of an
-!! intial perturbation to the equilibrium, which we will chose to match field of
-!! the lowest eigenstate.
+!! The fact that this mode is the third eigenstate is indicative of the ideal
+!! instability we wish to simulate with this example as there are two magentic
+!! configurations (actually a sin/cosine-like pair) that contain less energy
+!! for a given helicity. As a result, we would expect an instability to exist
+!! that will drive the configuration toward one of these minimum energy states.
+!! This also leads us to our choice of an intial perturbation to the equilibrium,
+!! which we will chose to match field of the lowest eigenstate.
 taylor_minlev=minlev
 CALL taylor_hmodes(3)
 CALL oft_lag_set_level(oft_lagrange_nlevels)
-!!\subsection doc_mug_ex1_code_taylor_gauge Setting Magnetic Boundary Conditions
+!!\subsection doc_mug_sph_ex1_code_taylor_gauge Setting Magnetic Boundary Conditions
 !!
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" subroutine computes the vector
-!! potential for each of the requested eignestates. However, the reduced MHD
+!! potential for each of the requested eignestates. However, the MHD
 !! solver uses magnetic field as the primary variable. With force-free eigenstate
 !! solutions the vector potential and magentic field can be related by a gauge
 !! transformation. Here this fact is used to produce an appropriate initial
 !! condition from the vector potential without changing the representation
 !! order or projecting the field.
 !!
-!! The gauge is transformed using a \ref oft_h1_operators::h1_divout "Divout"
+!! The gauge is transformed using a \ref oft_h1_operators::h1_divout "divergence cleaning"
 !! procedure to remove divergence from the vector potential by adding a gradient.
-!! For a gauge transformation all of the "divergence" is located at the boundary
-!! and the \ref oft_h1_operators::h1_divout "Divout" solver only acts to change
-!! the boundary condition of the field. This process is performed on both the
-!! equilibrium and perturbing fields.
+!! The \ref taylor::taylor_hmodes "taylor_hmodes" already sets the gauge such that
+!! $\nabla \cdot \textbf{A} = 0$, however it does so while enforcing $\textbf{A} \times \hat{\textbf{n}} = 0$.
+!! We now recompute the desired gauge fixing with the boundary condition $\textbf{A} \cdot \hat{\textbf{n}} = 0$,
+!! which provides a suitable initialization magnetic field. This process is performed
+!! on both the equilibrium and perturbing fields.
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
@@ -156,34 +150,54 @@ CALL oft_h0_getlop(lop,"grnd")
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
-CALL create_diag_pre(linv%pre) ! Setup Preconditioner
+CALL create_bjacobi_pre(linv%pre,-1)
+DEALLOCATE(linv%pre%pre)
+CALL create_ilu_pre(linv%pre%pre)
 divout%solver=>linv
 divout%bc=>h0_zerogrnd
+divout%pm=.TRUE.
 !---------------------------------------------------------------------------
 ! Setup initial conditions
 !---------------------------------------------------------------------------
+!---Apply to perturbation field
 CALL oft_h1_create(ic_fields%B)
 CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
-!---
+!---Apply to equilibrium field
 CALL oft_h1_create(db)
 CALL taylor_hffa(3,oft_hcurl_level)%f%get_local(tmp)
 CALL db%restore_local(tmp,1)
 CALL divout%apply(db)
-!!\subsection doc_mug_ex1_code_taylor_combine Set Initial Conditions
+!---Clean up solver
+NULLIFY(divout%solver)
+CALL divout%delete()
+CALL linv%pre%pre%delete()
+DEALLOCATE(linv%pre%pre)
+CALL linv%pre%delete()
+DEALLOCATE(linv%pre)
+CALL linv%delete()
+DEALLOCATE(linv)
+!!\subsection doc_mug_sph_ex1_code_taylor_combine Set Initial Conditions
 !!
-!! With the required fields computed the full field can be initialized. The
-!! full field is simply the equilibrium (3rd eigenmode) field plus a low
-!! amplitude perturbation field (1st eigenmode). The velocity field is also
-!! created but initialized to zero everywhere.
+!! With the required fields computed the full initial condition can be set as
+!! simply the equilibrium (3rd eigenmode) plus a low amplitude of the perturbation
+!! field (1st eigenmode). The velocity field is also created but initialized to zero everywhere.
+!! We also initialize the density and temperature fields with constant values.
 CALL ic_fields%B%scale(b1_scale*taylor_hlam(1,oft_hcurl_level))
 CALL ic_fields%B%add(1.d0,b0_scale*taylor_hlam(3,oft_hcurl_level),db)
+!---Create velocity field
+CALL oft_lag_vcreate(ic_fields%V)
+!---Create static density/temperature
+CALL oft_lag_create(ic_fields%Ne)
+CALL oft_lag_create(ic_fields%Ti)
+CALL ic_fields%Ne%set(n0)
+CALL ic_fields%Ti%set(t0)
 !---Clean up temporary matrices and fields
 CALL lop%delete
 CALL db%delete
 DEALLOCATE(tmp,lop,db)
-!!\section doc_mug_ex1_code_run Run Simulation
+!!\subsection doc_mug_sph_ex1_code_run Run Simulation
 !!
 !! Finally, the simulation can be run using the driver routine for non-linear
 !! MHD (\ref xmhd::xmhd_run "xmhd_run"). This routine advances the
@@ -191,46 +205,94 @@ DEALLOCATE(tmp,lop,db)
 !! documentation for \ref xmhd::xmhd_run "xmhd_run", and produces restart files
 !! that contain the solution at different times.
 !!
-!! By default a MG preconditioner is used with the coarsest level specified by
-!! \ref xmhd::xmhd_minlev "xmhd_minlev"  similar to the Taylor module. Several quantities
-!! are also recorded to a history file \c "xmhd.hist" during the simulation, including the
-!! toroidal current (where the symmetry axis is specified by \ref xmhd::xmhd_taxis
+!! Several quantities are also recorded to a history file \c "xmhd.hist" during
+!! the simulation, including the toroidal current (where the symmetry axis is specified by \ref xmhd::xmhd_taxis
 !! "xmhd_taxis"). The data in the history file may be plotted using the script
-!! \c "src/utilities/scripts/plot_xmhd_hist.py"
+!! \c "src/utilities/scripts/plot_mug_hist.py"
 !!
-!! \note OFT plotting scripts require the python packages NUMPY and MATPLOTLIB as well
-!! as path access to the python modules provided in "src/utilities".
-!!
-!! To visualize the solution fields once a simulation has completed the \ref xmhd::xmhd_plot
-!! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
-!! produced by \ref xmhd::xmhd_run "xmhd_run" and generates plot files, and optionally
-!! probe signals at evenly spaced points in time as specified in the input file, see
-!! \ref xmhd::xmhd_plot "xmhd_plot".
-xmhd_minlev=minlev
+!! \note OFT plotting scripts require the python packages `numpy` and `matplotlib` as well
+!! as path access to the python modules provided in `python` for installations or `src/utilities` in the repo.
 xmhd_taxis=3
 oft_env%pm=pm
-IF(plot_run)THEN
-  !---Setup I/0
-  CALL mesh%setup_io(order)
-  !---Run post-processing routine
-  CALL xmhd_plot
-ELSE
-  !---Create velocity field
-  CALL oft_lag_vcreate(ic_fields%V)
-  !---Create static density/temperature
-  CALL oft_lag_create(ic_fields%Ne)
-  CALL oft_lag_create(ic_fields%Ti)
-  CALL ic_fields%Ne%set(n0)
-  CALL ic_fields%Ti%set(t0)
-  !---Run simulation
-  CALL xmhd_run(ic_fields)
-END IF
-!---Finalize enviroment
+!---Run simulation
+CALL xmhd_run(ic_fields)
+!---Finalize enviroment and exit
 CALL oft_finalize
-END PROGRAM xmhd_cyl
+END PROGRAM MUG_sph_tilt
 ! STOP SOURCE
 !!
-!!\section doc_mug_ex1_input Input file
+!!\section doc_mug_sph_ex1_mesh Mesh Creation
+!!
+!!\subsection doc_mug_sph_ex1_cubit Meshing with CUBIT
+!!
+!!A suitable mesh for this example, with radius of 1m and height of 2m, can be created using
+!!the CUBIT script below.
+!!
+!!\verbatim
+!!reset
+!!
+!!create Cylinder height 2 radius 1
+!!
+!!volume 1 scheme Tetmesh
+!!set tetmesher interior points on
+!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
+!!set tetmesher boundary recovery  off
+!!volume 1 size .2
+!!mesh volume 1
+!!
+!!set duplicate block elements off
+!!block 1 add volume 1 
+!!block 1 element type tetra10
+!!
+!!set large exodus file on
+!!export Genesis  "cyl_tilt.g" overwrite block 1
+!!\endverbatim
+!!
+!!Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
+!!below. The script is located in `bin` following installation or `src/utilities` in the base repo.
+!!
+!!\verbatim
+!!~$ python convert_cubit.py --in_file=cyl_tilt.mesh
+!!\endverbatim
+!!
+!!\subsection doc_mug_sph_ex1_gmsh Meshing with Gmsh
+!!
+!!If the CUBIT mesh generation codes is not avilable the mesh can be created using the Gmsh code and the
+!!geometry script below.
+!!
+!!\verbatim
+!!Coherence;
+!!Point(1) = {0, 0, 0, 1.0};
+!!Point(2) = {1, 0, 0, 1.0};
+!!Point(3) = {0, 1, 0, 1.0};
+!!Point(4) = {-1, 0, 0, 1.0};
+!!Point(5) = {0, -1, 0, 1.0};
+!!Circle(1) = {2, 1, 3};
+!!Circle(2) = {3, 1, 4};
+!!Circle(3) = {4, 1, 5};
+!!Circle(4) = {5, 1, 2};
+!!Line Loop(5) = {2, 3, 4, 1};
+!!Plane Surface(6) = {5};
+!!Extrude {0, 0, 2} {
+!!  Surface{6};
+!!}
+!!\endverbatim
+!!
+!!To generate a mesh, with resolution matching the Cubit example above, place the script contents in a file called
+!!`cyl_tilt.geo` and run the following command.
+!!
+!!\verbatim
+!!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl_tilt.mesh cyl_tilt.geo
+!!\endverbatim
+!!
+!!Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
+!!below. The script is located in `bin` following installation or `src/utilities` in the base repo.
+!!
+!!\verbatim
+!!~$ python convert_gmsh.py --in_file=cyl_tilt.mesh
+!!\endverbatim
+!!
+!!\section doc_mug_sph_ex1_input Input file
 !!
 !! Below is an input file which can be used with this example in a parallel environment. This example
 !! should not be run with only a single process as solving the time-depedent MHD equations is
@@ -245,17 +307,15 @@ END PROGRAM xmhd_cyl
 !!
 !!&mesh_options
 !! meshname='test'
-!! cad_type=2
+!! cad_type=0
 !! nlevels=2
 !! nbase=1
 !! grid_order=2
 !! fix_boundary=true
 !!/
 !!
-!!&cubit_options
-!! filename='cyl.in.e'
-!! inpname='cyl.3dm'
-!! lf_file=T
+!!&native_mesh_options
+!! filename='cyl_tilt.h5'
 !!/
 !!
 !!&hcurl_op_options
@@ -268,7 +328,7 @@ END PROGRAM xmhd_cyl
 !! nu_lop=0,64,2,1
 !!/
 !!
-!!&cyl_options
+!!&sph_tilt_options
 !! order=3
 !! minlev=2
 !! b0_scale=1.e-1
@@ -281,7 +341,7 @@ END PROGRAM xmhd_cyl
 !!&xmhd_options
 !! bbc='bc'          ! Perfectly-conducting BC for B-field
 !! vbc='all'         ! Zero-flow BC for velocity
-!! dt=6.e-8          ! Maximum time step
+!! dt=2.e-7          ! Maximum time step
 !! eta=1.            ! Resistivity
 !! nu_par=10.        ! Fluid viscosity
 !! nsteps=2000       ! Number of time steps to take
@@ -296,7 +356,37 @@ END PROGRAM xmhd_cyl
 !!/
 !!\endverbatim
 !!
-!!\subsection doc_mug_ex1_input_plot Post-Processing options
+!!\subsection doc_mug_sph_ex1_input_solver Solver specification
+!!
+!! Time dependent MHD solvers are accelerated significantly by the use of
+!! a more sophisticated preconditioner than the default method. Below is
+!! an example `oft_in.xml` file that constructs an appropriate ILU(0) preconditioner.
+!! Currently, this preconditioner method is the suggest starting preconditioner for all
+!! time-dependent MHD solves.
+!!
+!! This solver can be used by specifying both the FORTRAN input and XML input files
+!! to the executable as below.
+!!
+!!\verbatim
+!!~$ ./example5 oft.in oft_in.xml
+!!\endverbatim
+!!
+!!```xml
+!!<oft>
+!!  <xmhd>
+!!    <pre type="gmres">
+!!      <its>8</its>
+!!      <nrits>8</nrits>
+!!      <pre type="block_jacobi">
+!!        <nlocal>-1</nlocal>
+!!        <solver type="ilu"></solver>
+!!      </pre>
+!!    </pre>
+!!  </xmhd>
+!!</oft>
+!!```
+!!
+!!\subsection doc_mug_sph_ex1_input_plot Post-Processing options
 !!
 !! When running the code for post-processing additional run time options are available.
 !!
@@ -307,56 +397,4 @@ END PROGRAM xmhd_cyl
 !! rst_start=0
 !! rst_end=2000
 !!/
-!!\endverbatim
-!!
-!!\subsection doc_mug_ex1_input_solver Solver specification
-!!
-!! Time dependent MHD solvers are accelerated significantly by the use of
-!! a more sophisticated preconditioner than the default method. Below is
-!! an example `oft_in.xml` file that constructs an appropriate MG preconditioner.
-!! Currently, this preconditioner method is the suggest preconditioner for all
-!! time-dependent MHD solves.
-!!
-!! This solver can be used by specifying both the FORTRAN input and XML input files
-!! to the executable as below.
-!!
-!!\verbatim
-!!~$ ./example5 oft.in oft_in.xml
-!!\endverbatim
-!!
-!! \warning Use of this preconditioner requires OFT be built with the PETSc and
-!! FOX libraries.
-!!
-!!\verbatim
-!!<oft>
-!!  <xmhd>
-!!    <pre type="mg">
-!!      <smoother direction="both">
-!!        <solver type="gmres">
-!!          <its>0,0,2,2</its>
-!!          <nrits>0,0,2,2</nrits>
-!!          <pre type="block_jacobi">
-!!            <nlocal>0,0,1,1</nlocal>
-!!            <solver type="lu">
-!!              <type>lu</type>
-!!              <package>superd</package>
-!!            </solver>
-!!          </pre>
-!!        </solver>
-!!      </smoother>
-!!      <coarse>
-!!        <solver type="gmres">
-!!          <its>8</its>
-!!          <nrits>8</nrits>
-!!          <pre type="block_jacobi">
-!!            <solver type="lu">
-!!              <type>lu</type>
-!!              <package>superd</package>
-!!            </solver>
-!!          </pre>
-!!        </solver>
-!!      </coarse>
-!!    </pre>
-!!  </xmhd>
-!!</oft>
 !!\endverbatim

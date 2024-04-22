@@ -26,7 +26,7 @@
  nu_lop=0,64,2,1
 /
 
-&cyl_options
+&sph_tilt_options
  order=2
  minlev=3
  b0_scale=1.e-1
@@ -42,7 +42,7 @@
  xmhd_adv_temp=F   ! Do not advance temperature
  bbc='bc'          ! Perfectly-conducting BC for B-field
  vbc='all'         ! Zero-flow BC for velocity
- dt=1.e-7          ! Maximum time step
+ dt=2.e-7          ! Maximum time step
  eta=1.            ! Resistivity
  nu_par=10.        ! Fluid viscosity
  nsteps=2000       ! Number of time steps to take
@@ -50,11 +50,9 @@
  xmhd_mfnk=T       ! Use matrix-free Jacobian operator
  lin_tol=1.E-9     ! Linear solver tolerance
  nl_tol=1.E-5      ! Non-linear solver tolerance
- nu_xmhd=0,1,8,2   ! Number of smoother iterations for default preconditioner
  rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
  ittarget=40       ! Target for # of linear iterations per time step
  mu_ion=2.         ! Ion mass (atomic units)
- nu_xmhd=0,20,4,4  ! Number of smoother iterations for default preconditioner
  xmhd_prefreq=20   ! Preconditioner update frequency
 /
 

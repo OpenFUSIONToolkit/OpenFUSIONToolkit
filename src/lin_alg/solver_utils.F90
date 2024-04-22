@@ -457,6 +457,8 @@ SELECT CASE(TRIM(solver_type))
     ALLOCATE(oft_jblock_precond::solver)
   CASE("lu")
     ALLOCATE(oft_lusolver::solver)
+  CASE("ilu")
+    ALLOCATE(oft_ilusolver::solver)
   CASE DEFAULT
     CALL oft_abort("Invalid solver type.","create_native_solver",__FILE__)
 END SELECT
@@ -601,6 +603,13 @@ SELECT CASE(TRIM(solver_type))
       CALL create_petsc_solver(solver,"lu")
     ELSE
       CALL create_native_solver(solver,"lu")
+      native_solver=.TRUE.
+    END IF
+  CASE("ilu")
+    IF(use_petsc)THEN
+      CALL create_petsc_solver(solver,"ilu")
+    ELSE
+      CALL create_native_solver(solver,"ilu")
       native_solver=.TRUE.
     END IF
   CASE DEFAULT

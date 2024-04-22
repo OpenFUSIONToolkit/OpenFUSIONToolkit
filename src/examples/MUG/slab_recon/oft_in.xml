@@ -5,10 +5,7 @@
       <nrits>8</nrits>
       <pre type="block_jacobi">
         <nlocal>-1</nlocal>
-        <solver type="lu">
-          <type>ilu</type>
-          <package>native</package>
-        </solver>
+        <solver type="ilu"></solver>
       </pre>
     </pre>
   </xmhd>
