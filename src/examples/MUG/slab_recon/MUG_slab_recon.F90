@@ -34,7 +34,7 @@ TYPE, EXTENDS(fem_interp) :: GEM_interp
   REAL(8) :: lam = 0.5d0 ! Wavelength of perturbation
   REAL(8) :: Lx = 25.6 ! Length of domain in x-direction
   REAL(8) :: Lz = 12.8 ! Length of domain in z-direction
-  CHARACTER(LEN=1) :: field = 'n' ! Field component to initialize
+  CHARACTER(LEN=2) :: field = 'n' ! Field component to initialize
 CONTAINS
   PROCEDURE :: interp => GEM_interp_apply ! Reconstruct field
 END TYPE GEM_interp
@@ -64,15 +64,17 @@ REAL(8) :: pt(3),Beq(3),Bper(3)
 ! Map logical positionto physical coordinates
 pt = mesh%log2phys(cell,f)
 ! Return requested field evaluated at "(cell,f) -> pt"
-SELECT CASE(self%field)
-  CASE('n') ! Density
+SELECT CASE(TRIM(self%field))
+  CASE('n0') ! Density
     val = 1.d0/(COSH(pt(3)/self%lam))**2 + self%den_inf
-  CASE('b') ! Magnetic field
+  CASE('b0') ! Equilibrium magnetic field
     Beq = (/TANH(pt(3)/self%lam), 0.d0, 0.d0/)
+    val = Beq 
+  CASE('db') ! Perturbed magnetic field
     Bper(1) = -pi*COS(2.d0*pi*pt(1)/self%Lx)*SIN(pi*pt(3)/self%Lz)/self%Lz
     Bper(2) = 0.d0
     Bper(3) = 2.d0*pi*SIN(2.d0*pi*pt(1)/self%Lx)*COS(pi*pt(3)/self%Lz)/self%Lx
-    val = Beq + self%dpsi*Bper
+    val = Bper
   CASE DEFAULT
     CALL oft_abort('Unknown field component','GEM_interp_apply',__FILE__)
 END SELECT
@@ -155,7 +157,7 @@ USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project, h1grad_z
   oft_h1_rinterp, oft_h1_cinterp
 !---Physics
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, temp_floor, den_floor, den_scale, &
-  xmhd_sub_fields
+  xmhd_sub_fields, xmhd_lin_run
 !---Self
 USE GEM_helpers, ONLY: GEM_interp, GEM_probe
 IMPLICIT NONE
@@ -168,7 +170,7 @@ CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 CLASS(oft_vector), POINTER :: u,v
 !---Local variables
-TYPE(xmhd_sub_fields) :: ic_fields
+TYPE(xmhd_sub_fields) :: ic_fields,pert_fields
 TYPE(oft_h1_rinterp), TARGET :: bfield
 TYPE(oft_h1_cinterp), TARGET :: jfield
 TYPE(GEM_interp), TARGET :: GEM_field
@@ -178,10 +180,12 @@ INTEGER(4) :: i,ierr,io_unit
 !---Input file options
 INTEGER(4) :: order = 2
 INTEGER(4) :: minlev = 1
+REAL(8) :: db = 1.d-1
 LOGICAL :: pm = .FALSE.
+LOGICAL :: linear = .FALSE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: view_ic = .FALSE.
-NAMELIST/slab_recon_options/order,minlev,plot_run,view_ic,pm
+NAMELIST/slab_recon_options/order,minlev,linear,db,plot_run,view_ic,pm
 !!\subsection doc_ex6_code_driver_init Grid and FE setup
 !!
 !! Need docs
@@ -241,7 +245,7 @@ CALL create_diag_pre(minv%pre) ! Setup Preconditioner
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Project onto scalar Lagrange basis
-GEM_field%field='n'
+GEM_field%field='n0'
 CALL oft_lag_project(GEM_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
@@ -276,7 +280,7 @@ CALL create_ilu_pre(minv%pre%pre)
 CALL oft_h1_create(u)
 CALL oft_h1_create(v)
 !---Project onto vector H(Curl) basis
-GEM_field%field='b'
+GEM_field%field='b0'
 CALL oft_h1_project(GEM_field,v)
 CALL h1grad_zerop(v) ! Zero out redundant vertex degrees of freedom
 CALL u%set(0.d0)
@@ -285,6 +289,15 @@ CALL minv%apply(u,v)
 CALL oft_h1_create(ic_fields%B)
 CALL ic_fields%B%add(0.d0,1.d0,u)
 CALL ic_fields%B%scale(B0) ! Scale to desired value
+!---Compute perturbed magnetic field
+GEM_field%field='db'
+CALL oft_h1_project(GEM_field,v)
+CALL h1grad_zerop(v) ! Zero out redundant vertex degrees of freedom
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL oft_h1_create(pert_fields%B)
+CALL pert_fields%B%add(0.d0,1.d0,u)
+CALL pert_fields%B%scale(B0*db) ! Scale to desired value
 !---Cleanup objects used for projection
 CALL u%delete ! Destroy LHS vector
 CALL v%delete ! Destroy RHS vector
@@ -341,6 +354,18 @@ IF(view_ic)THEN
     CALL u%get_local(vals,i)
   END DO
   CALL mesh%save_vertex_vector(vec_vals,'B0') ! Add field to plotting file
+  !---Project B onto vector Lagrange basis
+  bfield%u=>pert_fields%B
+  CALL bfield%setup
+  CALL oft_lag_vproject(bfield,v)
+  CALL u%set(0.d0)
+  CALL minv%apply(u,v)
+  !---Retrieve and save projected magnetic field
+  DO i=1,3
+    vals=>vec_vals(i,:)
+    CALL u%get_local(vals,i)
+  END DO
+  CALL mesh%save_vertex_vector(vec_vals,'dB') ! Add field to plotting file
   !---Project J onto vector Lagrange basis
   jfield%u=>ic_fields%B
   CALL jfield%setup
@@ -369,12 +394,20 @@ END IF
 !!
 !! Need docs
 xmhd_minlev=minlev  ! Set minimum level for multigrid preconditioning
-temp_floor=T0*1.d-2 ! Set temperature floor
-den_floor=N0*1.d-2  ! Set density floor
 den_scale=N0        ! Set density scale
 oft_env%pm=pm       ! Show linear iteration progress?
-!---Run simulation
-CALL xmhd_run(ic_fields)
+IF(linear)THEN
+  CALL oft_lag_vcreate(pert_fields%V)
+  CALL oft_lag_create(pert_fields%Ti)
+  CALL oft_lag_create(pert_fields%Ne)
+  CALL xmhd_lin_run(ic_fields,pert_fields)
+ELSE
+  CALL ic_fields%B%add(1.d0,1.d0,pert_fields%B)
+  !---Run simulation
+  temp_floor=T0*1.d-2 ! Set temperature floor
+  den_floor=N0*1.d-2  ! Set density floor
+  CALL xmhd_run(ic_fields)
+END IF
 !---Finalize enviroment
 CALL oft_finalize
 END PROGRAM MUG_slab_recon
@@ -416,8 +449,6 @@ END PROGRAM MUG_slab_recon
 !!
 !!&xmhd_options
 !! mu_ion=1.         ! Ion mass (atomic units)
-!! me_factor=73.45   ! Electron mass factor
-!! xmhd_hall=T       ! Include Hall physics
 !! xmhd_ohmic=T      ! Include Ohmic heating
 !! xmhd_visc_heat=T  ! Include viscous heating
 !! bbc='bc'          ! Perfectly-conducting BC for B-field

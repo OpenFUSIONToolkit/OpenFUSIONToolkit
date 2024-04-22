@@ -3,17 +3,17 @@
 !!
 !![TOC]
 !!
-!!This example demonstrates the use of the \ref xmhd "extended MHD" module in the Open FUSION Toolkit (OFT)
-!!to model the ideal tilt instability in a spheromak confined in a "tall" cylindrical flux conserver.
-!!Such a system is unstable to this instability when the ratio of the cylinder's height to radius is
-!!greater than 1.3. This result was shown first by [Bondeson and Marklin](https://doi.org/10.1063/1.863579),
-!!where the instablity acts to dissipate energy and drive the magnetic configuration toward the Taylor state
+!! This example demonstrates the use of \ref doc_mhd_main "MUG"
+!! to model the ideal tilt instability in a spheromak confined in a "tall" cylindrical flux conserver.
+!! Such a system is unstable to this instability when the ratio of the cylinder's height to radius is
+!! greater than 1.3. This result was shown first by [Bondeson and Marklin](https://doi.org/10.1063/1.863579),
+!! where the instablity acts to dissipate energy and drive the magnetic configuration toward the Taylor state
 !! (see \ref doc_mug_sph_ex1_code_taylor).
 !!
 !!\section doc_mug_sph_ex1_code Code Walk Through
 !!
-!!The code consists of three basic sections, required imports and variable definitions,
-!!finite element setup, and system creation and solution.
+!! The code consists of three basic sections, required imports and variable definitions,
+!! finite element setup, and system creation and solution.
 !!
 !!\subsection doc_mug_sph_ex1_code_inc Module Includes
 ! START SOURCE
@@ -221,77 +221,6 @@ CALL oft_finalize
 END PROGRAM MUG_sph_tilt
 ! STOP SOURCE
 !!
-!!\section doc_mug_sph_ex1_mesh Mesh Creation
-!!
-!!\subsection doc_mug_sph_ex1_cubit Meshing with CUBIT
-!!
-!!A suitable mesh for this example, with radius of 1m and height of 2m, can be created using
-!!the CUBIT script below.
-!!
-!!\verbatim
-!!reset
-!!
-!!create Cylinder height 2 radius 1
-!!
-!!volume 1 scheme Tetmesh
-!!set tetmesher interior points on
-!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
-!!set tetmesher boundary recovery  off
-!!volume 1 size .2
-!!mesh volume 1
-!!
-!!set duplicate block elements off
-!!block 1 add volume 1 
-!!block 1 element type tetra10
-!!
-!!set large exodus file on
-!!export Genesis  "cyl_tilt.g" overwrite block 1
-!!\endverbatim
-!!
-!!Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
-!!below. The script is located in `bin` following installation or `src/utilities` in the base repo.
-!!
-!!\verbatim
-!!~$ python convert_cubit.py --in_file=cyl_tilt.mesh
-!!\endverbatim
-!!
-!!\subsection doc_mug_sph_ex1_gmsh Meshing with Gmsh
-!!
-!!If the CUBIT mesh generation codes is not avilable the mesh can be created using the Gmsh code and the
-!!geometry script below.
-!!
-!!\verbatim
-!!Coherence;
-!!Point(1) = {0, 0, 0, 1.0};
-!!Point(2) = {1, 0, 0, 1.0};
-!!Point(3) = {0, 1, 0, 1.0};
-!!Point(4) = {-1, 0, 0, 1.0};
-!!Point(5) = {0, -1, 0, 1.0};
-!!Circle(1) = {2, 1, 3};
-!!Circle(2) = {3, 1, 4};
-!!Circle(3) = {4, 1, 5};
-!!Circle(4) = {5, 1, 2};
-!!Line Loop(5) = {2, 3, 4, 1};
-!!Plane Surface(6) = {5};
-!!Extrude {0, 0, 2} {
-!!  Surface{6};
-!!}
-!!\endverbatim
-!!
-!!To generate a mesh, with resolution matching the Cubit example above, place the script contents in a file called
-!!`cyl_tilt.geo` and run the following command.
-!!
-!!\verbatim
-!!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl_tilt.mesh cyl_tilt.geo
-!!\endverbatim
-!!
-!!Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
-!!below. The script is located in `bin` following installation or `src/utilities` in the base repo.
-!!
-!!\verbatim
-!!~$ python convert_gmsh.py --in_file=cyl_tilt.mesh
-!!\endverbatim
-!!
 !!\section doc_mug_sph_ex1_input Input file
 !!
 !! Below is an input file which can be used with this example in a parallel environment. This example
@@ -368,7 +297,7 @@ END PROGRAM MUG_sph_tilt
 !! to the executable as below.
 !!
 !!\verbatim
-!!~$ ./example5 oft.in oft_in.xml
+!!~$ ./MUG_sph_tilt oft.in oft_in.xml
 !!\endverbatim
 !!
 !!```xml
@@ -397,4 +326,79 @@ END PROGRAM MUG_sph_tilt
 !! rst_start=0
 !! rst_end=2000
 !!/
+!!\endverbatim
+!!
+!! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
+!!
+!!\section doc_mug_sph_ex1_mesh Mesh Creation
+!! A mesh file `cyl_tilt.h5` is provided with this example. Instructions to generate your
+!! own mesh for the geometry using [CUBIT](https://cubit.sandia.gov/) and [GMSH](https://gmsh.info/).
+!!
+!!\subsection doc_mug_sph_ex1_cubit Meshing with CUBIT
+!!
+!! A suitable mesh for this example, with radius of 1m and height of 2m, can be created using
+!! the CUBIT script below.
+!!
+!!\verbatim
+!!reset
+!!
+!!create Cylinder height 2 radius 1
+!!
+!!volume 1 scheme Tetmesh
+!!set tetmesher interior points on
+!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
+!!set tetmesher boundary recovery  off
+!!volume 1 size .2
+!!mesh volume 1
+!!
+!!set duplicate block elements off
+!!block 1 add volume 1 
+!!block 1 element type tetra10
+!!
+!!set large exodus file on
+!!export Genesis  "cyl_tilt.g" overwrite block 1
+!!\endverbatim
+!!
+!! Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
+!! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
+!!
+!!\verbatim
+!!~$ python convert_cubit.py --in_file=cyl_tilt.mesh
+!!\endverbatim
+!!
+!!\subsection doc_mug_sph_ex1_gmsh Meshing with Gmsh
+!!
+!! If the CUBIT mesh generation codes is not avilable the mesh can be created using the Gmsh code and the
+!! geometry script below.
+!!
+!!\verbatim
+!!Coherence;
+!!Point(1) = {0, 0, 0, 1.0};
+!!Point(2) = {1, 0, 0, 1.0};
+!!Point(3) = {0, 1, 0, 1.0};
+!!Point(4) = {-1, 0, 0, 1.0};
+!!Point(5) = {0, -1, 0, 1.0};
+!!Circle(1) = {2, 1, 3};
+!!Circle(2) = {3, 1, 4};
+!!Circle(3) = {4, 1, 5};
+!!Circle(4) = {5, 1, 2};
+!!Line Loop(5) = {2, 3, 4, 1};
+!!Plane Surface(6) = {5};
+!!Extrude {0, 0, 2} {
+!!  Surface{6};
+!!}
+!!\endverbatim
+!!
+!! To generate a mesh, with resolution matching the Cubit example above, place the script contents in a file called
+!! `cyl_tilt.geo` and run the following command.
+!!
+!!\verbatim
+!!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl_tilt.mesh cyl_tilt.geo
+!!\endverbatim
+!!
+!! Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
+!! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
+!!
+!!\verbatim
+!!~$ python convert_gmsh.py --in_file=cyl_tilt.mesh
 !!\endverbatim

@@ -3,13 +3,13 @@
 !!
 !![TOC]
 !!
-!! This example demonstrates the use of the \ref xmhd "extended MHD" module in the Open FUSION Toolkit (OFT)
-!! to model self-heating of a spheromak in a unit cylinder will be simulated. This process
-!! provides a simple test case illustrating the basic ascpects of an extended MHD simulation,
+!! This example demonstrates the use of \ref doc_mhd_main "MUG"
+!! to model self-heating of a spheromak in a unit cylinder. This process
+!! provides a simple example case illustrating the basic aspects of an MHD simulation,
 !! including: 1) Temperature dependent resistivity, 2) Anisotropic thermal conduction and 3)
 !! Ohmic and Viscous heating.
 !!
-!! The dynamics in this test case will be prdominetly limited to heating. However, if the
+!! The dynamics in this example will be prdominetly limited to heating. However, if the
 !! simulation is run long enough evolution of the equilibrium profile will be observed and
 !! eventual instability due to current peaking will occur.
 !!
@@ -134,7 +134,7 @@ CALL oft_h0_getlop(lop,"grnd")
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
-! CALL create_diag_pre(linv%pre) ! Setup Preconditioner
+!---Setup Preconditioner
 CALL create_bjacobi_pre(linv%pre,-1)
 DEALLOCATE(linv%pre%pre)
 CALL create_ilu_pre(linv%pre%pre)
@@ -218,77 +218,6 @@ CALL xmhd_run(ic_fields)
 CALL oft_finalize
 END PROGRAM MUG_sph_heat
 ! STOP SOURCE
-!!
-!!\section doc_mug_sph_ex2_mesh Mesh Creation
-!!
-!!\subsection doc_mug_sph_ex2_cubit Meshing with CUBIT
-!!
-!!A suitable mesh for this example, with radius of 1m and height of 1m, can be created using
-!!the CUBIT script below.
-!!
-!!\verbatim
-!!reset
-!!
-!!create Cylinder height 1 radius 1
-!!
-!!volume 1 scheme Tetmesh
-!!set tetmesher interior points on
-!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
-!!set tetmesher boundary recovery  off
-!!volume 1 size .2
-!!mesh volume 1
-!!
-!!set duplicate block elements off
-!!block 1 add volume 1 
-!!block 1 element type tetra10
-!!
-!!set large exodus file on
-!!export Genesis  "cyl_heat.g" overwrite block 1
-!!\endverbatim
-!!
-!!Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
-!!below. The script is located in `bin` following installation or `src/utilities` in the base repo.
-!!
-!!\verbatim
-!!~$ python convert_cubit.py --in_file=cyl_heat.mesh
-!!\endverbatim
-!!
-!!\subsection doc_mug_sph_ex2_gmsh Meshing with Gmsh
-!!
-!!If the CUBIT mesh generation codes is not avilable the mesh can be created using the Gmsh code and the
-!!geometry script below.
-!!
-!!\verbatim
-!!Coherence;
-!!Point(1) = {0, 0, 0, 1.0};
-!!Point(2) = {1, 0, 0, 1.0};
-!!Point(3) = {0, 1, 0, 1.0};
-!!Point(4) = {-1, 0, 0, 1.0};
-!!Point(5) = {0, -1, 0, 1.0};
-!!Circle(1) = {2, 1, 3};
-!!Circle(2) = {3, 1, 4};
-!!Circle(3) = {4, 1, 5};
-!!Circle(4) = {5, 1, 2};
-!!Line Loop(5) = {2, 3, 4, 1};
-!!Plane Surface(6) = {5};
-!!Extrude {0, 0, 1} {
-!!  Surface{6};
-!!}
-!!\endverbatim
-!!
-!!To generate a mesh, with resolution matching the Cubit example above, place the script contents in a file called
-!!`cyl_heat.geo` and run the following command.
-!!
-!!\verbatim
-!!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl_heat.mesh cyl_heat.geo
-!!\endverbatim
-!!
-!!Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
-!!below. The script is located in `bin` following installation or `src/utilities` in the base repo.
-!!
-!!\verbatim
-!!~$ python convert_gmsh.py --in_file=cyl_heat.mesh
-!!\endverbatim
 !!
 !!\section doc_mug_sph_ex2_input Input file
 !!
@@ -402,4 +331,79 @@ END PROGRAM MUG_sph_heat
 !! rst_start=0
 !! rst_end=2000
 !!/
+!!\endverbatim
+!!
+!! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
+!!
+!!\section doc_mug_sph_ex2_mesh Mesh Creation
+!! A mesh file `cyl_heat.h5` is provided with this example. Instructions to generate your
+!! own mesh for the geometry using [CUBIT](https://cubit.sandia.gov/) and [GMSH](https://gmsh.info/).
+!!
+!!\subsection doc_mug_sph_ex2_cubit Meshing with CUBIT
+!!
+!! A suitable mesh for this example, with radius of 1m and height of 1m, can be created using
+!! the CUBIT script below.
+!!
+!!\verbatim
+!!reset
+!!
+!!create Cylinder height 1 radius 1
+!!
+!!volume 1 scheme Tetmesh
+!!set tetmesher interior points on
+!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
+!!set tetmesher boundary recovery  off
+!!volume 1 size .2
+!!mesh volume 1
+!!
+!!set duplicate block elements off
+!!block 1 add volume 1 
+!!block 1 element type tetra10
+!!
+!!set large exodus file on
+!!export Genesis  "cyl_heat.g" overwrite block 1
+!!\endverbatim
+!!
+!! Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
+!! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
+!!
+!!\verbatim
+!!~$ python convert_cubit.py --in_file=cyl_heat.mesh
+!!\endverbatim
+!!
+!!\subsection doc_mug_sph_ex2_gmsh Meshing with Gmsh
+!!
+!! If the CUBIT mesh generation codes is not avilable the mesh can be created using the Gmsh code and the
+!! geometry script below.
+!!
+!!\verbatim
+!!Coherence;
+!!Point(1) = {0, 0, 0, 1.0};
+!!Point(2) = {1, 0, 0, 1.0};
+!!Point(3) = {0, 1, 0, 1.0};
+!!Point(4) = {-1, 0, 0, 1.0};
+!!Point(5) = {0, -1, 0, 1.0};
+!!Circle(1) = {2, 1, 3};
+!!Circle(2) = {3, 1, 4};
+!!Circle(3) = {4, 1, 5};
+!!Circle(4) = {5, 1, 2};
+!!Line Loop(5) = {2, 3, 4, 1};
+!!Plane Surface(6) = {5};
+!!Extrude {0, 0, 1} {
+!!  Surface{6};
+!!}
+!!\endverbatim
+!!
+!! To generate a mesh, with resolution matching the Cubit example above, place the script contents in a file called
+!! `cyl_heat.geo` and run the following command.
+!!
+!!\verbatim
+!!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl_heat.mesh cyl_heat.geo
+!!\endverbatim
+!!
+!! Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
+!! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
+!!
+!!\verbatim
+!!~$ python convert_gmsh.py --in_file=cyl_heat.mesh
 !!\endverbatim

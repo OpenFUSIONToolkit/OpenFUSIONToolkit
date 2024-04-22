@@ -20,14 +20,13 @@
 &slab_recon_options
  order=2           ! FE order
  minlev=3          ! Minimum level for MG preconditioning
+ linear=T          !
  view_ic=F         ! View initial conditions but do not run simulation
  plot_run=F        ! Run plotting instead of simulation
 /
 
 &xmhd_options
  mu_ion=1.         ! Ion mass (atomic units)
- me_factor=73.45   ! Electron mass factor
- xmhd_hall=T       ! Include Hall physics
  xmhd_ohmic=T      ! Include Ohmic heating
  xmhd_visc_heat=T  ! Include viscous heating
  bbc='bc'          ! Perfectly-conducting BC for B-field
@@ -49,7 +48,7 @@
  nl_tol=1.E-6      ! Non-linear solver tolerance
  ittarget=30       ! Target for # of linear iterations per time step
  xmhd_prefreq=20   ! Preconditioner update frequency
- nl_update=3     ! # of NL iterations that causes preconditioner update
+ nl_update=3       ! # of NL iterations that causes preconditioner update
 /
 
 &xmhd_plot_options
