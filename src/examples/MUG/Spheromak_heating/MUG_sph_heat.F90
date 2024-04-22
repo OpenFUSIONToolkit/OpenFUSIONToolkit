@@ -1,43 +1,26 @@
-!!MUG Example 2: Spheromak Heating    {#doc_mhd_ex2}
+!!MUG Example: Spheromak Heating    {#doc_mug_sph_ex2}
 !!============================
 !!
 !![TOC]
 !!
-!!This example demonstrates the use of the \ref xmhd "extended MHD" module in the Open FUSION Toolkit (OFT). In
-!!this example self-heating of a spheromak in a unit cylinder will be simulated. This process
-!!provides a simple test case illustrating the basic ascpects of an extended MHD simulation,
-!!including: 1) Temperature dependent resistivity, 2) Anisotropic thermal conduction and 3)
-!!Ohmic and Viscous heating.
+!! This example demonstrates the use of \ref doc_mhd_main "MUG"
+!! to model self-heating of a spheromak in a unit cylinder. This process
+!! provides a simple example case illustrating the basic aspects of an MHD simulation,
+!! including: 1) Temperature dependent resistivity, 2) Anisotropic thermal conduction and 3)
+!! Ohmic and Viscous heating.
 !!
-!!The dynamics in this test case will be prdominetly limited to heating. However, if the
-!!simulation is run long enough evolution of the equilibrium profile will be observed and
-!!eventual instability due to current peaking will occur.
+!! The dynamics in this example will be prdominetly limited to heating. However, if the
+!! simulation is run long enough evolution of the equilibrium profile will be observed and
+!! eventual instability due to current peaking will occur.
 !!
-!!\section doc_ex6_cubit Mesh Creation with CUBIT
+!!\section doc_mug_sph_ex2_code Code Walk Through
 !!
-!!A suitable mesh for this example, with radius of 1m and height of 1m, can be created using
-!!the CUBIT script below.
+!! The code consists of three basic sections, required imports and variable definitions,
+!! finite element setup, and system creation and solution.
 !!
-!!\verbatim
-!!reset
-!!create Cylinder height 1 radius 1
-!!volume 1 scheme Tetmesh
-!!set tetmesher interior points on
-!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
-!!set tetmesher boundary recovery  off
-!!volume 1 size .15
-!!mesh volume 1
-!!refine parallel fileroot 'cyl' overwrite no_execute
-!!\endverbatim
-!!
-!!\section doc_ex6_code Code Walk Through
-!!
-!!The code consists of three basic sections, required imports and variable definitions,
-!!finite element setup, and system creation and solution.
-!!
-!!\subsection doc_ex6_code_inc Module Includes
+!!\subsection doc_mug_sph_ex2_code_inc Module Includes
 ! START SOURCE
-PROGRAM xmhd_cyl
+PROGRAM MUG_sph_heat
 !---Runtime
 USE oft_base
 !---Grid
@@ -46,7 +29,8 @@ USE multigrid_build, ONLY: multigrid_construct, multigrid_add_quad
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
+USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
+  create_ilu_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
@@ -66,7 +50,7 @@ USE taylor, ONLY: taylor_hmodes, taylor_minlev, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, vel_scale, den_scale, &
   den_floor, temp_floor, xmhd_sub_fields
 IMPLICIT NONE
-!!\section doc_ex6_code_vars Local Variables
+!!\subsection doc_mug_sph_ex2_code_vars Local Variables
 !---H1 divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
@@ -82,12 +66,13 @@ REAL(r8) :: b0_scale = 1.E-1_r8
 REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
 LOGICAL :: plot_run=.FALSE.
-NAMELIST/cyl_options/order,minlev,b0_scale,n0,t0,plot_run
-!!\section doc_ex6_code_setup OFT Initialization
+LOGICAL :: pm=.FALSE.
+NAMELIST/sph_heat_options/order,minlev,b0_scale,n0,t0,plot_run,pm
+!!\subsection doc_mug_sph_ex2_code_setup OFT Initialization
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
-READ(io_unit,cyl_options,IOSTAT=ierr)
+READ(io_unit,sph_heat_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---------------------------------------------------------------------------
 ! Setup grid
@@ -111,7 +96,23 @@ CALL h0_setup_interp
 !---H1 full space
 CALL oft_h1_setup(order)
 CALL h1_setup_interp
-!!\section doc_ex6_code_taylor Computing Initial Conditions
+!!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
+!!
+!! To visualize the solution fields once a simulation has completed the \ref xmhd::xmhd_plot
+!! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
+!! produced by \ref xmhd::xmhd_run "xmhd_run" and generates plot files, and optionally
+!! probe signals at evenly spaced points in time as specified in the input file, see
+!! \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex1_input_plot.
+xmhd_minlev=minlev
+IF(plot_run)THEN
+  !---Setup I/0
+  CALL mesh%setup_io(order)
+  !---Run post-processing routine
+  CALL xmhd_plot
+  !---Finalize enviroment and exit
+  CALL oft_finalize()
+END IF
+!!\subsection doc_mug_sph_ex2_code_taylor Computing Initial Conditions
 !!
 !! For this simulation we only need the spheromak mode, which is the lowest
 !! force-free eignstate in this geometry. As a result the initial condition
@@ -119,7 +120,7 @@ CALL h1_setup_interp
 taylor_minlev=minlev
 CALL taylor_hmodes(1)
 CALL oft_lag_set_level(oft_lagrange_nlevels)
-!!\subsection doc_ex6_code_taylor_gauge Setting Magnetic Boundary Conditions
+!!\subsection doc_mug_sph_ex2_code_taylor_gauge Setting Magnetic Boundary Conditions
 !!
 !! As in \ref doc_ex5 "Example 5" we must transform the gauge of the Taylor
 !! state solution to the appropriate magnetic field BCs. For more information
@@ -133,7 +134,10 @@ CALL oft_h0_getlop(lop,"grnd")
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
-CALL create_diag_pre(linv%pre) ! Setup Preconditioner
+!---Setup Preconditioner
+CALL create_bjacobi_pre(linv%pre,-1)
+DEALLOCATE(linv%pre%pre)
+CALL create_ilu_pre(linv%pre%pre)
 divout%solver=>linv
 divout%bc=>h0_zerogrnd
 divout%keep_boundary=.TRUE.
@@ -144,7 +148,15 @@ CALL oft_h1_create(ic_fields%B)
 CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
-!!\subsection doc_ex6_code_ic Set Initial Conditions
+NULLIFY(divout%solver)
+CALL divout%delete()
+CALL linv%pre%pre%delete()
+DEALLOCATE(linv%pre%pre)
+CALL linv%pre%delete()
+DEALLOCATE(linv%pre)
+CALL linv%delete()
+DEALLOCATE(linv)
+!!\subsection doc_mug_sph_ex2_code_ic Set Initial Conditions
 !!
 !! Now we set initial conditions for the simulation using the computed taylor
 !! state, flat temperature and density profiles and zero initial velocity. The
@@ -174,7 +186,7 @@ den_floor = n0*1.d-2
 CALL oft_lag_create(ic_fields%Ti)
 CALL ic_fields%Ti%set(t0)
 temp_floor = t0*1.d-2
-!!\section doc_ex6_code_run Run Simulation
+!!\subsection doc_mug_sph_ex2_code_run Run Simulation
 !!
 !! Finally, the simulation can be run using the driver routine for non-linear
 !! extended MHD (\ref xmhd::xmhd_run "xmhd_run"). This routine advances the
@@ -199,22 +211,15 @@ temp_floor = t0*1.d-2
 !! \ref xmhd::xmhd_plot "xmhd_plot".
 xmhd_minlev=minlev
 xmhd_taxis=3
-oft_env%pm=.FALSE.
-IF(plot_run)THEN
-  !---Setup I/0
-  CALL mesh%setup_io(order)
-  !---Run post-processing routine
-  CALL xmhd_plot
-ELSE
-  !---Run simulation
-  CALL xmhd_run(ic_fields)
-END IF
+oft_env%pm=pm
+!---Run simulation
+CALL xmhd_run(ic_fields)
 !---Finalize enviroment
 CALL oft_finalize
-END PROGRAM xmhd_cyl
+END PROGRAM MUG_sph_heat
 ! STOP SOURCE
 !!
-!!\section doc_ex6_input Input file
+!!\section doc_mug_sph_ex2_input Input file
 !!
 !! Below is an input file which can be used with this example in a parallel environment.
 !! As with \ref doc_ex5 "Example 5" this example should only be run with multiple processes.
@@ -229,17 +234,15 @@ END PROGRAM xmhd_cyl
 !!
 !!&mesh_options
 !! meshname='test'
-!! cad_type=2
+!! cad_type=0
 !! nlevels=2
 !! nbase=1
 !! grid_order=2
 !! fix_boundary=T
 !!/
 !!
-!!&cubit_options
-!! filename='cyl.in.e'
-!! inpname='cyl.3dm'
-!! lf_file=T
+!!&native_mesh_options
+!! filename='cyl_heat.h5'
 !!/
 !!
 !!&hcurl_op_options
@@ -252,9 +255,9 @@ END PROGRAM xmhd_cyl
 !! nu_lop=0,64,2,1
 !!/
 !!
-!!&cyl_options
+!!&sph_heat_options
 !! order=3
-!! minlev=2
+!! minlev=4
 !! b0_scale=1.e-1
 !! n0=1.e19
 !! t0=6.
@@ -268,7 +271,7 @@ END PROGRAM xmhd_cyl
 !! vbc='all'         ! Zero-flow BC for velocity
 !! nbc='d'           ! Dirichlet BC for density
 !! tbc='d'           ! Dirichlet BC for temperature
-!! dt=6.e-8          ! Maximum time step
+!! dt=1.e-7          ! Maximum time step
 !! eta=25.           ! Resistivity at reference temperature (Spitzer-like)
 !! eta_temp=6.       ! Reference temperature for resistivity
 !! nu_par=400.       ! Fluid viscosity
@@ -277,17 +280,47 @@ END PROGRAM xmhd_cyl
 !! kappa_perp=1.E2   ! Perpendicular thermal conduction (fixed)
 !! nsteps=2000       ! Number of time steps to take
 !! rst_freq=10       ! Restart file frequency
-!! lin_tol=1.E-10    ! Linear solver tolerance
+!! lin_tol=1.E-9     ! Linear solver tolerance
 !! nl_tol=1.E-5      ! Non-linear solver tolerance
-!! nu_xmhd=0,1,8,2   ! Number of smoother iterations for default preconditioner
+!! xmhd_mfnk=T       ! Use matrix-free Jacobian operator
 !! rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
 !! ittarget=40       ! Target for # of linear iterations per time step
-!! mu_ion=2.          ! Ion mass (atomic units)
+!! mu_ion=2.         ! Ion mass (atomic units)
 !! xmhd_prefreq=20   ! Preconditioner update frequency
 !!/
 !!\endverbatim
 !!
-!!\subsection doc_ex6_input_plot Post-Processing options
+!!\subsection doc_mug_sph_ex2_input_solver Solver specification
+!!
+!! Time dependent MHD solvers are accelerated significantly by the use of
+!! a more sophisticated preconditioner than the default method. Below is
+!! an example `oft_in.xml` file that constructs an appropriate ILU(0) preconditioner.
+!! Currently, this preconditioner method is the suggest starting preconditioner for all
+!! time-dependent MHD solves.
+!!
+!! This solver can be used by specifying both the FORTRAN input and XML input files
+!! to the executable as below.
+!!
+!!\verbatim
+!!~$ ./MUG_sph_heat oft.in oft_in.xml
+!!\endverbatim
+!!
+!!```xml
+!!<oft>
+!!  <xmhd>
+!!    <pre type="gmres">
+!!      <its>8</its>
+!!      <nrits>8</nrits>
+!!      <pre type="block_jacobi">
+!!        <nlocal>-1</nlocal>
+!!        <solver type="ilu"></solver>
+!!      </pre>
+!!    </pre>
+!!  </xmhd>
+!!</oft>
+!!```
+!!
+!!\subsection doc_mug_sph_ex2_input_plot Post-Processing options
 !!
 !! When running the code for post-processing additional run time options are available.
 !!
@@ -300,55 +333,77 @@ END PROGRAM xmhd_cyl
 !!/
 !!\endverbatim
 !!
-!!\subsection doc_ex6_input_solver Solver specification
+!! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
 !!
-!! Time dependent MHD solvers are accelerated significantly by the use of
-!! a more sophisticated preconditioner than the default method. Below is
-!! an example `oft_in.xml` file that constructs an appropriate MG preconditioner.
-!! Currently, this preconditioner method is the suggest preconditioner for all
-!! time-dependent MHD solves.
+!!\section doc_mug_sph_ex2_mesh Mesh Creation
+!! A mesh file `cyl_heat.h5` is provided with this example. Instructions to generate your
+!! own mesh for the geometry using [CUBIT](https://cubit.sandia.gov/) and [GMSH](https://gmsh.info/).
 !!
-!! This solver can be used by specifying both the FORTRAN input and XML input files
-!! to the executable as below.
+!!\subsection doc_mug_sph_ex2_cubit Meshing with CUBIT
+!!
+!! A suitable mesh for this example, with radius of 1m and height of 1m, can be created using
+!! the CUBIT script below.
 !!
 !!\verbatim
-!!~$ ./example6 oft.in oft_in.xml
+!!reset
+!!
+!!create Cylinder height 1 radius 1
+!!
+!!volume 1 scheme Tetmesh
+!!set tetmesher interior points on
+!!set tetmesher optimize level 3 optimize overconstrained  off sliver  off
+!!set tetmesher boundary recovery  off
+!!volume 1 size .2
+!!mesh volume 1
+!!
+!!set duplicate block elements off
+!!block 1 add volume 1 
+!!block 1 element type tetra10
+!!
+!!set large exodus file on
+!!export Genesis  "cyl_heat.g" overwrite block 1
 !!\endverbatim
 !!
-!! \warning Use of this preconditioner requires OFT be built with the PETSc and
-!! FOX libraries.
+!! Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
+!! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!<oft>
-!!  <xmhd>
-!!    <pre type="mg">
-!!      <smoother direction="both">
-!!        <solver type="gmres">
-!!          <its>0,0,2,2</its>
-!!          <nrits>0,0,2,2</nrits>
-!!          <pre type="add_schwarz">
-!!            <nlocal>0,0,-1,-1</nlocal>
-!!            <solver type="lu">
-!!              <type>lu</type>
-!!              <package>superd</package>
-!!            </solver>
-!!          </pre>
-!!        </solver>
-!!      </smoother>
-!!      <coarse>
-!!        <solver type="gmres">
-!!          <its>12</its>
-!!          <nrits>12</nrits>
-!!          <pre type="add_schwarz">
-!!            <nlocal>1</nlocal>
-!!            <solver type="lu">
-!!              <type>lu</type>
-!!              <package>superd</package>
-!!            </solver>
-!!          </pre>
-!!        </solver>
-!!      </coarse>
-!!    </pre>
-!!  </xmhd>
-!!</oft>
+!!~$ python convert_cubit.py --in_file=cyl_heat.mesh
+!!\endverbatim
+!!
+!!\subsection doc_mug_sph_ex2_gmsh Meshing with Gmsh
+!!
+!! If the CUBIT mesh generation codes is not avilable the mesh can be created using the Gmsh code and the
+!! geometry script below.
+!!
+!!\verbatim
+!!Coherence;
+!!Point(1) = {0, 0, 0, 1.0};
+!!Point(2) = {1, 0, 0, 1.0};
+!!Point(3) = {0, 1, 0, 1.0};
+!!Point(4) = {-1, 0, 0, 1.0};
+!!Point(5) = {0, -1, 0, 1.0};
+!!Circle(1) = {2, 1, 3};
+!!Circle(2) = {3, 1, 4};
+!!Circle(3) = {4, 1, 5};
+!!Circle(4) = {5, 1, 2};
+!!Line Loop(5) = {2, 3, 4, 1};
+!!Plane Surface(6) = {5};
+!!Extrude {0, 0, 1} {
+!!  Surface{6};
+!!}
+!!\endverbatim
+!!
+!! To generate a mesh, with resolution matching the Cubit example above, place the script contents in a file called
+!! `cyl_heat.geo` and run the following command.
+!!
+!!\verbatim
+!!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl_heat.mesh cyl_heat.geo
+!!\endverbatim
+!!
+!! Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
+!! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
+!!
+!!\verbatim
+!!~$ python convert_gmsh.py --in_file=cyl_heat.mesh
 !!\endverbatim
