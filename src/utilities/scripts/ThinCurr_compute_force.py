@@ -57,9 +57,9 @@ for i in range(nc):
     area[i] = np.linalg.norm(np.cross(v1,v2))/2.0
     rcc[i,:] = (r[lc[i,2],:]+r[lc[i,1],:]+r[lc[i,0],:])/3.0
     rcc_torque[i,:] = rcc[i,:]-torque_cen
-    that = np.r_[-rcc[i,1],rcc[i,0],0.0]; that/=np.linalg.norm(that)
 Btor = np.zeros((nv,3))
 for i in range(nv):
+    that = np.r_[-r[i,1],r[i,0],0.0]; that/=np.linalg.norm(that)
     Btor[i,:] = options.btr0*that/np.sqrt(np.power(r[i,0],2)+np.power(r[i,1],2))
 if not have_torque:
     rcc_torque = None
