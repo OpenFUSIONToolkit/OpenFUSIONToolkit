@@ -22,26 +22,15 @@
 !---------------------------------------------------------------------------
 PROGRAM thincurr_coupling
 USE oft_base
-USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file, hdf5_field_get_sizes
+USE oft_io, ONLY: hdf5_field_get_sizes
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
-USE oft_mesh_cubit, ONLY: smesh_cubit_load, cubit_read_nodesets, cubit_read_sidesets
+USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
-USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
-USE oft_la_base, ONLY: oft_vector, oft_graph
-USE oft_lu, ONLY: oft_lusolver, lapack_matinv
-USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, partition_graph
-USE oft_deriv_matrices, ONLY: oft_sum_matrix
-USE oft_solver_base, ONLY: oft_solver
-USE oft_solver_utils, ONLY: create_cg_solver, create_gmres_solver, create_diag_pre, &
-  create_native_solver
-#ifdef HAVE_ARPACK
-USE oft_arpack, ONLY: oft_iram_eigsolver
-#endif
-USE axi_green, ONLY: green
+USE oft_la_base, ONLY: oft_vector
 USE mhd_utils, ONLY: mu0
 USE thin_wall
 IMPLICIT NONE
