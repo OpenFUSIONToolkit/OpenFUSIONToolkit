@@ -28,6 +28,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE thin_wall
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: ndrivers = 0
 INTEGER(4) :: nsensors = 0
 TYPE(tw_type) :: tw_sim
@@ -40,7 +41,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
 TYPE(tw_sensors) :: sensors
 !---
-CHARACTER(LEN=40) :: filename = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none'
 INTEGER(4) :: ntheta = 40
 INTEGER(4) :: nphi = 90
 LOGICAL :: use_spline = .TRUE.

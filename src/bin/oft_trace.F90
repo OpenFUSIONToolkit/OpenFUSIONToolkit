@@ -63,7 +63,7 @@ REAL(r8) :: f(4)
 REAL(r8), POINTER, DIMENSION(:) :: valtmp => NULL()
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: pt
 CHARACTER(LEN=4) :: pltnum
-CHARACTER(LEN=40) :: filename
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename
 CLASS(oft_vector), POINTER :: u => NULL()
 CLASS(oft_vector), POINTER :: x1 => NULL()
 CLASS(oft_vector), POINTER :: x2 => NULL()
@@ -84,8 +84,8 @@ REAL(r8) :: tracer_timeout = 60.d0
 REAL(r8) :: bscale = 1.d0
 REAL(r8) :: mu_ion = 1.d0
 CHARACTER(LEN=10) :: fields(3) = ''
-CHARACTER(LEN=40) :: pt_file = 'none'
-CHARACTER(LEN=40) :: rst_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: pt_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: rst_file = 'none'
 NAMELIST/oft_trace_options/order,type,fields,bscale,mu_ion,pt_file,rst_file, &
   adv_type,tracer_type,tracer_maxsteps,tracer_maxtrans,tracer_tol,tracer_timeout
 !---Initialize enviroment
