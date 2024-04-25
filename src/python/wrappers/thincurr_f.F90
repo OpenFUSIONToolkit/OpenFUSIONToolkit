@@ -29,6 +29,7 @@ USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
 IMPLICIT NONE
+#include "local.h"
 !
 integer(i4), POINTER :: lc_plot(:,:) !< Needs docs
 integer(i4), POINTER :: reg_plot(:) !< Needs docs
@@ -55,12 +56,14 @@ INTEGER(4) :: ndims,ierr
 integer(i4), allocatable, dimension(:) :: dim_sizes
 INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: rtmp
-CHARACTER(LEN=80) :: filename = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none'
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
+#ifdef HAVE_XML
 TYPE(fox_node), POINTER :: xml_node
+#endif
 CALL copy_string('',error_str)
 CALL copy_string_rev(mesh_file,filename)
 CALL c_f_pointer(sizes, sizes_tmp, [8])
@@ -120,12 +123,17 @@ ELSE
   hole_nsets=>mesh_nsets
 END IF
 IF(c_associated(xml_ptr))THEN
+#ifdef HAVE_XML
   CALL c_f_pointer(xml_ptr, xml_node)
   CALL xml_get_element(xml_node,"thincurr",tw_obj%xml,ierr)
   IF(ierr/=0)THEN
     CALL copy_string('Error getting ThinCurr XML node',error_str)
     RETURN
   END IF
+#else
+  CALL copy_string('OFT not compiled with XML support',error_str)
+  RETURN
+#endif
 END IF
 CALL tw_obj%setup(hole_nsets)
 !
@@ -142,7 +150,7 @@ CHARACTER(KIND=c_char), INTENT(in) :: basepath(80) !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_debug !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
-CHARACTER(LEN=80) :: pathprefix = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix = ''
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
@@ -200,7 +208,7 @@ CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
 REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: Mmat_tmp
-CHARACTER(LEN=80) :: filename = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj1,tw_obj2
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr1, tw_obj1)
@@ -245,7 +253,7 @@ TYPE(c_ptr), INTENT(out) :: Lmat_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
-CHARACTER(LEN=80) :: filename = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
 CALL copy_string('',error_str)
@@ -276,7 +284,7 @@ TYPE(c_ptr), INTENT(out) :: Mc_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
-CHARACTER(LEN=80) :: filename = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
@@ -301,8 +309,8 @@ INTEGER(KIND=c_int), INTENT(out) :: nsensors
 CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
-CHARACTER(LEN=80) :: sensor_filename = ''
-CHARACTER(LEN=80) :: filename = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: sensor_filename = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(tw_sensors) :: sensors
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets

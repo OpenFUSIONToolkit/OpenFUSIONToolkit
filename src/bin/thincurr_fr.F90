@@ -36,6 +36,7 @@ USE thin_wall
 USE thin_wall_hodlr
 USE thin_wall_solvers, ONLY: frequency_response
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: nsensors = 0
 TYPE(tw_type), TARGET :: tw_sim,mode_source
 TYPE(tw_sensors) :: sensors
@@ -60,7 +61,7 @@ LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 REAL(8) :: freq = 1.d3
 REAL(8) :: force_f0 = 0.d0
-CHARACTER(LEN=80) :: mode_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: mode_file = 'none'
 NAMELIST/thincurr_fr_options/direct,save_L,save_Mcoil,save_Msen,freq,mode_file, &
   fr_limit,jumper_start
 !---

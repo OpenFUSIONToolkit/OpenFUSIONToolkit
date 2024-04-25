@@ -48,6 +48,7 @@ USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
 IMPLICIT NONE
+#include "local.h"
 !
 integer(i4), POINTER :: lc_plot(:,:) !< Needs docs
 integer(i4), POINTER :: reg_plot(:) !< Needs docs

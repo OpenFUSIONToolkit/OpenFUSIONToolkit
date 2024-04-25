@@ -34,6 +34,7 @@ USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
+#include "local.h"
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

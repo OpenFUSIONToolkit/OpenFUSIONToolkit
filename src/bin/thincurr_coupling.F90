@@ -34,6 +34,7 @@ USE oft_la_base, ONLY: oft_vector
 USE mhd_utils, ONLY: mu0
 USE thin_wall
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: nsensors = 0
 TYPE(tw_type) :: tw_sim,tw_sim2,mode_source
 TYPE(tw_sensors) :: sensors
@@ -55,7 +56,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets2 => NULL()
 LOGICAL :: success
 !
 INTEGER(4) :: jumper_start = 0
-CHARACTER(LEN=80) :: mesh_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: mesh_file = 'none'
 LOGICAL :: plot_run = .FALSE.
 NAMELIST/thincurr_coupling_options/mesh_file,plot_run
 !---

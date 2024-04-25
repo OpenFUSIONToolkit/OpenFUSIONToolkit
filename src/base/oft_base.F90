@@ -115,8 +115,8 @@ TYPE :: oft_env_type
   LOGICAL :: pm = .TRUE. !< Performance monitor (default T=on, F=off)
   LOGICAL :: test_run = .FALSE. !< Test run
   CHARACTER(LEN=4) :: crank = '' !< Processor rank in character form
-  CHARACTER(LEN=80) :: ifile = 'none' !< Name of input file
-  CHARACTER(LEN=80) :: xml_file = 'none' !< Name of XML input file
+  CHARACTER(LEN=OFT_PATH_SLEN) :: ifile = 'none' !< Name of input file
+  CHARACTER(LEN=OFT_PATH_SLEN) :: xml_file = 'none' !< Name of XML input file
 #ifdef HAVE_XML
   TYPE(fox_node), POINTER :: xml => NULL()
 #endif
@@ -165,7 +165,7 @@ INTEGER(i4) :: ppn=1
 INTEGER(i4) :: debug=0
 INTEGER(i4) :: nparts=1
 INTEGER(i4) :: omp_nthreads=-1
-CHARACTER(LEN=80) :: ifile
+CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
 #ifdef HAVE_XML
 TYPE(fox_node), POINTER :: doc

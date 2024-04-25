@@ -47,6 +47,7 @@ USE mhd_utils, ONLY: mu0
 USE thin_wall
 USE thin_wall_hodlr
 IMPLICIT NONE
+#include "local.h"
 TYPE(tw_type), TARGET :: tw_sim
 TYPE(tw_sensors) :: sensors
 !
@@ -73,8 +74,8 @@ LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: compute_B = .FALSE.
-CHARACTER(LEN=80) :: curr_file="none"
-CHARACTER(LEN=80) :: volt_file="none"
+CHARACTER(LEN=OFT_PATH_SLEN) :: curr_file="none"
+CHARACTER(LEN=OFT_PATH_SLEN) :: volt_file="none"
 NAMELIST/thincurr_td_options/curr_file,volt_file,dt,nsteps,nplot,direct,save_L,save_Mcoil,save_Msen,  &
   plot_run,compute_B,timestep_cn,cg_tol,jumper_start
 !---

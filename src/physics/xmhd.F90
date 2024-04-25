@@ -1097,7 +1097,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror,de_scale
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol
 real(r8), pointer, dimension(:) :: vals => NULL()
 character(LEN=XMHD_RST_LEN) :: rst_char
-character(LEN=40) :: comm_line
+character(LEN=OFT_HIST_SLEN) :: comm_line
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -4552,7 +4552,7 @@ real(r8) :: ndens
 !---
 LOGICAL :: rst,first
 character(LEN=XMHD_RST_LEN) :: rst_char
-CHARACTER(LEN=40) :: file_tmp,file_prev
+CHARACTER(LEN=OFT_PATH_SLEN) :: file_tmp,file_prev
 !---Input variables
 real(r8) :: lin_tol,nl_tol,dt_run
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
@@ -4563,7 +4563,7 @@ LOGICAL :: plot_div=.FALSE.
 real(r8) :: t0=0._r8
 real(r8) :: t1=1._r8
 real(r8) :: dt=1.E-6_r8
-CHARACTER(LEN=40) :: file_list='none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: file_list='none'
 INTEGER(i4) :: rst_start=0
 INTEGER(i4) :: rst_end=2000
 !---
