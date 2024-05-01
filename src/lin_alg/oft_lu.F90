@@ -674,10 +674,8 @@ CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"package")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"package",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN
     self%package=factor_package
@@ -937,10 +935,8 @@ CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"package")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"package",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN
     self%package=factor_package

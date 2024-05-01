@@ -471,14 +471,10 @@ if(ierr>0)call oft_abort('Error parsing MHD options in input file.','xmhd_read_s
 !---Look for xMHD node
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  current_nodes=>fox_getElementsByTagName(oft_env%xml,"xmhd")
-  nnodes=fox_getLength(current_nodes)
-  IF(nnodes>0)THEN
-    xmhd_root_node=>fox_item(current_nodes,0)
+  CALL xml_get_element(oft_env%xml,"xmhd",xmhd_root_node,ierr,1)
+  IF(ierr==0)THEN
     !---Look for pre node
-    current_nodes=>fox_getElementsByTagName(xmhd_root_node,"pre")
-    nnodes=fox_getLength(current_nodes)
-    IF(nnodes>0)xmhd_pre_node=>fox_item(current_nodes,0)
+    CALL xml_get_element(xmhd_root_node,"pre",xmhd_pre_node,ierr,1)
   END IF
 END IF
 #endif
@@ -2465,11 +2461,9 @@ IF(ASSOCIATED(xmhd_root_node))THEN
     DO i=0,nnodes-1
       reg_node=>fox_item(reg_nodes,i)
       !---
-      inner_nodes=>fox_getElementsByTagName(reg_node,"id")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)CALL oft_abort("No regions IDs specified for region group", &
-      "xmhd_setup_regions",__FILE__)
-      inner_node=>fox_item(inner_nodes,0)
+      CALL xml_get_element(reg_node,"id",inner_node,ierr,1)
+      IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
+        "xmhd_setup_regions",__FILE__)
       CALL fox_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
       IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
       "xmhd_setup_regions",__FILE__)
@@ -2478,11 +2472,9 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(ANY(regs(1:nread_id)>mesh%nreg).OR.ANY(regs(1:nread_id)<=0))CALL oft_abort( &
       "Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
-      inner_nodes=>fox_getElementsByTagName(reg_node,"eta")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)CALL oft_abort("No eta values specified for region group", &
-      "xmhd_setup_regions",__FILE__)
-      inner_node=>fox_item(inner_nodes,0)
+      CALL xml_get_element(reg_node,"eta",inner_node,ierr,1)
+      IF(nnodes_inner==0)CALL oft_abort("Error reading eta for group", &
+        "xmhd_setup_regions",__FILE__)
       CALL fox_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
       IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
       "xmhd_setup_regions",__FILE__)
@@ -2491,9 +2483,8 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(eta(1)<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
       __FILE__)
       !---Get region type
-      inner_nodes=>fox_getElementsByTagName(reg_node,"type")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)THEN
+      CALL xml_get_element(reg_node,"type",inner_node,ierr,1)
+      IF(ierr/=0)THEN
         reg_type(1)=2.d0
       ELSE
         inner_node=>fox_item(inner_nodes,0)

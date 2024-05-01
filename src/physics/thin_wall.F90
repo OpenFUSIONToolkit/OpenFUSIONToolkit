@@ -2607,7 +2607,7 @@ WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
 ! thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
 !
-eta_group=>fox_item(fox_getElementsByTagname(self%xml,"eta"),0)
+CALL xml_get_element(self%xml,"eta",eta_group,ierr,1)
 CALL fox_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
 IF(nread/=nreg_mesh)CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
 ! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
@@ -2616,10 +2616,9 @@ DO i=1,nreg_mesh
   self%Eta_reg(i)=self%Eta_reg(i)/mu0 ! Convert to magnetic units
 END DO
 ! Load sensor mask
-sens_list=>fox_getElementsByTagname(self%xml,"sens_mask")
-IF(fox_getLength(sens_list)==1)THEN
+CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr,1)
+IF(ierr==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'
-  sens_node=>fox_item(sens_list,0)
   CALL fox_extractDataContent(sens_node,self%sens_mask,num=nread,iostat=ierr)
   IF(nread/=nreg_mesh)CALL oft_abort('Sensor mask size mismatch','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh

@@ -21,7 +21,8 @@ USE fox_dom, ONLY: fox_node => node, fox_nodelist => nodelist, fox_parsefile => 
   fox_getelementsbytagname => getElementsByTagname, fox_item => item, fox_getLength => getLength, &
   fox_extractDataAttribute => extractDataAttribute, fox_hasAttribute => hasAttribute, &
   fox_extractDataContent => extractDataContent, fox_getAttributeNode => getAttributeNode, &
-  fox_getExceptionCode => getExceptionCode, fox_DOMException => DOMException
+  fox_getExceptionCode => getExceptionCode, fox_DOMException => DOMException, &
+  fox_getChildNodes => getChildNodes, fox_getName => getNodeName
 #endif
 IMPLICIT NONE
 !---Local types sizes
@@ -281,46 +282,6 @@ END IF
 800 RETURN
 end function skip_comment_lines
 !------------------------------------------------------------------------------
-!> Get child element within a given XML node
-!------------------------------------------------------------------------------
-#ifdef HAVE_XML
-subroutine xml_get_element(parent,name,element,error_flag,index)
-TYPE(fox_node), POINTER, INTENT(in) :: parent
-CHARACTER(LEN=*), INTENT(in) :: name
-TYPE(fox_node), POINTER, INTENT(out) :: element
-INTEGER(i4), INTENT(out) :: error_flag
-INTEGER(i4), OPTIONAL, INTENT(out) :: index
-INTEGER(i4) :: req_index,nelements
-TYPE(fox_nodelist), POINTER :: tmp_list
-IF(.NOT.ASSOCIATED(parent))THEN
-  error_flag=1
-  RETURN
-END IF
-tmp_list=>fox_getElementsByTagname(parent,TRIM(name))
-IF(.NOT.ASSOCIATED(tmp_list))THEN
-  error_flag=2
-  RETURN
-END IF
-req_index=1
-IF(PRESENT(index))req_index=index
-IF(req_index<=0)THEN
-  error_flag=3
-  RETURN
-END IF
-nelements=fox_getLength(tmp_list)
-IF(nelements==0)THEN
-  error_flag=4
-  RETURN
-END IF
-IF(req_index>nelements)THEN
-  error_flag=-nelements
-  RETURN
-END IF
-element=>fox_item(tmp_list,req_index-1)
-error_flag=0
-end subroutine xml_get_element
-#endif
-!------------------------------------------------------------------------------
 !> integer(i4) implementation of \ref oft_local::get_inverse_map
 !------------------------------------------------------------------------------
 subroutine get_inverse_map_i4(map,n1,imap,n2)
@@ -394,4 +355,49 @@ ELSE
   WRITE(c,'(I2,A,10X)')seconds,'s'
 END IF
 END FUNCTION time_to_string
+#ifdef HAVE_XML
+!------------------------------------------------------------------------------
+!> Get child element within a given XML node
+!------------------------------------------------------------------------------
+subroutine xml_get_element(parent,name,element,error_flag,index)
+TYPE(fox_node), POINTER, INTENT(in) :: parent
+CHARACTER(LEN=*), INTENT(in) :: name
+TYPE(fox_node), POINTER, INTENT(inout) :: element
+INTEGER(i4), INTENT(out) :: error_flag
+INTEGER(i4), OPTIONAL, INTENT(in) :: index
+INTEGER(i4) :: i,req_index,nchildren,nelements
+TYPE(fox_node), POINTER :: tmp_element
+TYPE(fox_nodelist), POINTER :: tmp_list
+NULLIFY(element)
+IF(.NOT.ASSOCIATED(parent))THEN
+  error_flag=1
+  RETURN
+END IF
+req_index=1
+IF(PRESENT(index))req_index=index
+IF(req_index<=0)THEN
+  error_flag=3
+  RETURN
+END IF
+tmp_list=>fox_getChildNodes(parent)
+nchildren=fox_getLength(tmp_list)
+nelements=0
+DO i=1,nchildren
+  tmp_element=>fox_item(tmp_list,i-1)
+  IF(fox_getName(tmp_element)==TRIM(name))THEN
+    nelements=nelements+1
+    IF(nelements==req_index)element=>tmp_element
+  END IF
+END DO
+IF(nelements==0)THEN
+  error_flag=4
+  RETURN
+END IF
+IF(req_index>nelements)THEN
+  error_flag=-nelements
+  RETURN
+END IF
+error_flag=0
+end subroutine xml_get_element
+#endif
 END MODULE oft_local

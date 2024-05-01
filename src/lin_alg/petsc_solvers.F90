@@ -653,10 +653,8 @@ val_level=1
 IF(PRESENT(level))val_level=level
 ALLOCATE(its(val_level),atol(val_level),rtol(val_level))
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"its")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"its",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough its values specified","cg_setup_xml",__FILE__)
@@ -666,10 +664,8 @@ IF(nnodes==1)THEN
   END IF
 END IF
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"atol")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"atol",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,atol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough atol values specified","cg_setup_xml",__FILE__)
@@ -679,10 +675,8 @@ IF(nnodes==1)THEN
   END IF
 END IF
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"rtol")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"rtol",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough rtol values specified","cg_setup_xml",__FILE__)
@@ -856,10 +850,8 @@ val_level=1
 IF(PRESENT(level))val_level=level
 ALLOCATE(its(val_level),nrits(val_level),atol(val_level),rtol(val_level))
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"its")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"its",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
@@ -869,10 +861,8 @@ IF(nnodes==1)THEN
   END IF
 END IF
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"nrits")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"nrits",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
@@ -882,10 +872,8 @@ IF(nnodes==1)THEN
   END IF
 END IF
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"atol")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"atol",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,atol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
@@ -895,10 +883,8 @@ IF(nnodes==1)THEN
   END IF
 END IF
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"rtol")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"rtol",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
@@ -1218,10 +1204,8 @@ val_level=1
 IF(PRESENT(level))val_level=level
 ALLOCATE(its(val_level),df(val_level))
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"its")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"its",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough its values specified","jblock_setup_xml",__FILE__)
@@ -1231,10 +1215,8 @@ IF(nnodes==1)THEN
   END IF
 END IF
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"df")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"df",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,df,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough df values specified","jblock_setup_xml",__FILE__)
@@ -1852,10 +1834,8 @@ val_level=1
 IF(PRESENT(level))val_level=level
 ALLOCATE(overlaps(val_level),nlocals(val_level))
 !---Read in overlap size
-current_nodes=>fox_getElementsByTagName(solver_node,"overlap")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"overlap",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,overlaps,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough overlap values specified","asprecond_setup_xml",__FILE__)
@@ -1865,10 +1845,8 @@ IF(nnodes==1)THEN
   END IF
 END IF
 !---Read in local field splitting flag
-current_nodes=>fox_getElementsByTagName(solver_node,"nlocal")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"nlocal",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,nlocals,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough local flags specified","asprecond_setup_xml",__FILE__)
@@ -1880,9 +1858,8 @@ END IF
 IF(self%n_local<-1)CALL oft_abort("Slice grouping not supported with PETSc","asprecond_setup_xml",__FILE__)
 IF(self%n_local==-1)self%overlap=0
 !---Read-in desired overlap specification
-current_nodes=>fox_getElementsByTagName(solver_node,"boverlap")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes>=1)CALL oft_abort("Boundary overlap not supported with PETSc","asprecond_setup_xml",__FILE__)
+CALL xml_get_element(solver_node,"boverlap",current_node,ierr,1)
+IF(ierr==0)CALL oft_abort("Boundary overlap not supported with PETSc","asprecond_setup_xml",__FILE__)
 IF(oft_debug_print(1))THEN
   WRITE(*,*)'Additive Schwartz solver setup:'
   WRITE(*,*)' - Overlap:    ',self%overlap
@@ -1975,20 +1952,16 @@ TYPE(fox_nodelist), POINTER :: current_nodes
 CHARACTER(LEN=6) :: factor_type,factor_package
 STACK_PUSH
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"type")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"type",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,factor_type,num=nread,iostat=ierr)
   IF(nread==1)THEN
     self%type=factor_type
   END IF
 END IF
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"package")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"package",current_node,ierr,1)
+IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN
     self%package=factor_package

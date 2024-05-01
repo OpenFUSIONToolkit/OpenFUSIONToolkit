@@ -1804,7 +1804,7 @@ INTEGER(i4), ALLOCATABLE :: levels(:)
 REAL(r8), ALLOCATABLE :: df(:)
 INTEGER(i4), ALLOCATABLE :: nu(:)
 INTEGER(i4) :: minlev,toplev,nl
-INTEGER(i4) :: i,j,levin
+INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 TYPE(fox_node), POINTER :: pre_node
@@ -1857,16 +1857,8 @@ CALL oft_h1_set_level(levin)
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  !---Look for Lagrange node
-  current_nodes=>fox_getElementsByTagName(oft_env%xml,"nedelec_h1")
-  nnodes=fox_getLength(current_nodes)
-  IF(nnodes>0)THEN
-    h1_node=>fox_item(current_nodes,0)
-    !---Look for lop node
-    current_nodes=>fox_getElementsByTagName(h1_node,"mop")
-    nnodes=fox_getLength(current_nodes)
-    IF(nnodes>0)pre_node=>fox_item(current_nodes,0)
-  END IF
+  CALL xml_get_element(oft_env%xml,"nedelec_h1",h1_node,ierr,1)
+  IF(ierr==0)CALL xml_get_element(h1_node,"mop",pre_node,ierr,1)
 END IF
 #endif
 !---------------------------------------------------------------------------

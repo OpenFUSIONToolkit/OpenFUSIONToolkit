@@ -423,7 +423,7 @@ class(gs_eq), intent(inout) :: self
 logical, optional, intent(in) :: ignore_inmesh
 !---XML solver fields
 integer(i4) :: nread
-TYPE(fox_node), POINTER :: doc,group_node,coil_set,coil,psitri_group,pol
+TYPE(fox_node), POINTER :: doc,group_node,coil_set,coil,tmaker_group,pol
 TYPE(fox_nodelist), POINTER :: coil_sets,coils
 !---
 INTEGER(i4) :: i,j,ierr,cell
@@ -438,8 +438,8 @@ WRITE(*,'(2A)')oft_indent,'Loading external coils:'
 CALL oft_increase_indent
 WRITE(*,'(3A)')oft_indent,'coil_file = ',TRIM(self%coil_file)
 doc=>fox_parseFile(TRIM(self%coil_file),iostat=ierr)
-psitri_group=>fox_item(fox_getElementsByTagname(doc,"psitri"),0)
-group_node=>fox_item(fox_getElementsByTagname(psitri_group,"coils"),0)
+CALL xml_get_element(doc,"tokamaker",tmaker_group,ierr,1)
+CALL xml_get_element(tmaker_group,"coils",group_node,ierr,1)
 !---Count coil sets
 coil_sets=>fox_getElementsByTagName(group_node,"coil_set")
 self%ncoils_ext=fox_getLength(coil_sets)
@@ -509,7 +509,7 @@ subroutine gs_load_regions(self)
 class(gs_eq), intent(inout) :: self
 !---XML solver fields
 integer(4) :: nread
-TYPE(fox_node), POINTER :: doc,region,field,psitri_group
+TYPE(fox_node), POINTER :: doc,region,field,tmaker_group
 TYPE(fox_nodelist), POINTER :: regions,fields
 !---
 INTEGER(4) :: i,j,ierr,id,nregions,nreg_defs,nfields
@@ -522,9 +522,9 @@ WRITE(*,'(2A)')oft_indent,'Loading internal coil and wall regions:'
 CALL oft_increase_indent
 WRITE(*,'(3A)')oft_indent,'coil_file = ',TRIM(self%coil_file)
 doc=>fox_parseFile(TRIM(self%coil_file),iostat=ierr)
-psitri_group=>fox_item(fox_getElementsByTagname(doc,"psitri"),0)
+CALL xml_get_element(doc,"tokamaker",tmaker_group,ierr,1)
 !---Count coil regions
-regions=>fox_getElementsByTagName(psitri_group,"region")
+regions=>fox_getElementsByTagName(tmaker_group,"region")
 nreg_defs=fox_getLength(regions)
 nregions=MAXVAL(smesh%reg)
 ALLOCATE(region_map(nreg_defs),region_flag(nreg_defs))
@@ -565,18 +565,14 @@ DO i=1,nreg_defs
       self%ncond_regs=self%ncond_regs+1
       self%cond_regions(self%ncond_regs)%id=region_map(i)
       !---
-      fields=>fox_getElementsByTagName(region,"neigs")
-      nfields=fox_getLength(fields)
-      IF(nfields>0)THEN
-        field=>fox_item(fields,0)
+      CALL xml_get_element(region,"neigs",field,ierr,1)
+      IF(ierr==0)THEN
         CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%neigs, &
              num=nread,iostat=ierr)
       END IF
       !---
-      fields=>fox_getElementsByTagName(region,"eta")
-      nfields=fox_getLength(fields)
-      IF(nfields>0)THEN
-        field=>fox_item(fields,0)
+      CALL xml_get_element(region,"eta",field,ierr,1)
+      IF(ierr==0)THEN
         CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%eta, &
              num=nread,iostat=ierr)
       END IF
@@ -584,74 +580,59 @@ DO i=1,nreg_defs
       IF(self%cond_regions(self%ncond_regs)%neigs>0)THEN
         ALLOCATE(self%cond_regions(self%ncond_regs)%fixed(self%cond_regions(self%ncond_regs)%neigs))
         self%cond_regions(self%ncond_regs)%fixed=.FALSE.
-        fields=>fox_getElementsByTagName(region,"fixed")
-        nfields=fox_getLength(fields)
-        IF(nfields>0)THEN
-          field=>fox_item(fields,0)
+        CALL xml_get_element(region,"fixed",field,ierr,1)
+        IF(ierr==0)THEN
           CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%fixed, &
                num=nread,iostat=ierr)
         END IF
         !
         ALLOCATE(self%cond_regions(self%ncond_regs)%weights(self%cond_regions(self%ncond_regs)%neigs))
         self%cond_regions(self%ncond_regs)%weights=1.d-5
-        fields=>fox_getElementsByTagName(region,"weights")
-        nfields=fox_getLength(fields)
-        IF(nfields>0)THEN
-          field=>fox_item(fields,0)
+        CALL xml_get_element(region,"weights",field,ierr,1)
+        IF(ierr==0)THEN
           CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%weights, &
                num=nread,iostat=ierr)
         END IF
         !
         ALLOCATE(self%cond_regions(self%ncond_regs)%mtype(self%cond_regions(self%ncond_regs)%neigs))
         self%cond_regions(self%ncond_regs)%mtype=1
-        fields=>fox_getElementsByTagName(region,"mtype")
-        nfields=fox_getLength(fields)
-        IF(nfields>0)THEN
-          field=>fox_item(fields,0)
+        CALL xml_get_element(region,"mtype",field,ierr,1)
+        IF(ierr==0)THEN
           CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%mtype, &
                num=nread,iostat=ierr)
         END IF
         !
         ALLOCATE(self%cond_regions(self%ncond_regs)%mind(self%cond_regions(self%ncond_regs)%neigs))
         self%cond_regions(self%ncond_regs)%mind=(/(j,j=1,self%cond_regions(self%ncond_regs)%neigs)/)
-        fields=>fox_getElementsByTagName(region,"mind")
-        nfields=fox_getLength(fields)
-        IF(nfields>0)THEN
-          field=>fox_item(fields,0)
+        CALL xml_get_element(region,"mind",field,ierr,1)
+        IF(ierr==0)THEN
           CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%mind, &
                num=nread,iostat=ierr)
         END IF
         !
-        fields=>fox_getElementsByTagName(region,"pair")
-        nfields=fox_getLength(fields)
-        IF(nfields>0)THEN
-          field=>fox_item(fields,0)
+        CALL xml_get_element(region,"pair",field,ierr,1)
+        IF(ierr==0)THEN
           CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%pair, &
                num=nread,iostat=ierr)
         END IF
         !
         ALLOCATE(self%cond_regions(self%ncond_regs)%fit_scales(self%cond_regions(self%ncond_regs)%neigs))
         self%cond_regions(self%ncond_regs)%fit_scales = ABS(1.d0/self%cond_regions(self%ncond_regs)%weights)
-        fields=>fox_getElementsByTagName(region,"fit_scales")
-        nfields=fox_getLength(fields)
-        IF(nfields>0)THEN
-          field=>fox_item(fields,0)
+        CALL xml_get_element(region,"fit_scales",field,ierr,1)
+        IF(ierr==0)THEN
           CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%fit_scales, &
                num=nread,iostat=ierr)
         END IF
       END IF
       !---
-      fields=>fox_getElementsByTagName(region,"continuous")
-      nfields=fox_getLength(fields)
-      IF(nfields>0)THEN
-        field=>fox_item(fields,0)
+      CALL xml_get_element(region,"continuous",field,ierr,1)
+      IF(ierr==0)THEN
         CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%continuous, &
              num=nread,iostat=ierr)
         IF(.NOT.self%cond_regions(self%ncond_regs)%continuous)THEN
           fields=>fox_getElementsByTagName(region,"extent")
-          nfields=fox_getLength(fields)
-          IF(nfields>0)THEN
-            field=>fox_item(fields,0)
+          CALL xml_get_element(region,"extent",field,ierr,1)
+          IF(ierr==0)THEN
             CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%extent, &
                  num=nread,iostat=ierr)
           ELSE
@@ -659,9 +640,8 @@ DO i=1,nreg_defs
           END IF
           !---Get toroidal coverage
           fields=>fox_getElementsByTagName(region,"coverage")
-          nfields=fox_getLength(fields)
-          IF(nfields>0)THEN
-            field=>fox_item(fields,0)
+          CALL xml_get_element(region,"coverage",field,ierr,1)
+          IF(ierr==0)THEN
             CALL fox_extractDataContent(field,self%cond_regions(self%ncond_regs)%coverage, &
                  num=nread,iostat=ierr)
           END IF
@@ -680,18 +660,15 @@ DO i=1,nreg_defs
       self%coil_regions(self%ncoil_regs)%id=region_map(i)
       !---
       fields=>fox_getElementsByTagName(region,"current")
-      nfields=fox_getLength(fields)
-      IF(nfields>0)THEN
-        field=>fox_item(fields,0)
+      CALL xml_get_element(region,"current",field,ierr,1)
+      IF(ierr==0)THEN
         CALL fox_extractDataContent(field,self%coil_regions(self%ncoil_regs)%curr, &
              num=nread,iostat=ierr)
         self%coil_regions(self%ncoil_regs)%curr=self%coil_regions(self%ncoil_regs)%curr*mu0
       END IF
       !---
-      fields=>fox_getElementsByTagName(region,"vcont_gain")
-      nfields=fox_getLength(fields)
-      IF(nfields>0)THEN
-        field=>fox_item(fields,0)
+      CALL xml_get_element(region,"vcont_gain",field,ierr,1)
+      IF(ierr==0)THEN
         CALL fox_extractDataContent(field,self%coil_regions(self%ncoil_regs)%vcont_gain, &
              num=nread,iostat=ierr)
       END IF

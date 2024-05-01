@@ -2803,16 +2803,8 @@ CALL oft_lag_set_level(levin)
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  !---Look for Lagrange node
-  current_nodes=>fox_getElementsByTagName(oft_env%xml,"lagrange")
-  nnodes=fox_getLength(current_nodes)
-  IF(nnodes>0)THEN
-    lag_node=>fox_item(current_nodes,0)
-    !---Look for lop node
-    current_nodes=>fox_getElementsByTagName(lag_node,"lop")
-    nnodes=fox_getLength(current_nodes)
-    IF(nnodes>0)pre_node=>fox_item(current_nodes,0)
-  END IF
+  CALL xml_get_element(oft_env%xml,"lagrange",lag_node,ierr,1)
+  IF(ierr==0)CALL xml_get_element(lag_node,"jmlb",pre_node,ierr,1)
 END IF
 #endif
 !---------------------------------------------------------------------------

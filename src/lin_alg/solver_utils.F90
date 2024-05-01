@@ -620,10 +620,8 @@ END SELECT
 !---
 CALL solver%setup_from_xml(solver_node,val_level)
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"pre")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  pre_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"pre",pre_node,ierr,1)
+IF(ierr==0)THEN
   CALL create_pre_xml(solver%pre,pre_node,native_solver,val_level)
 END IF
 DEBUG_STACK_POP
@@ -815,10 +813,8 @@ END SELECT
 !---
 CALL pre%setup_from_xml(pre_node,val_level)
 !---
-current_nodes=>fox_getElementsByTagName(pre_node,"solver")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  solver_node=>fox_item(current_nodes,0)
+CALL xml_get_element(pre_node,"solver",solver_node,ierr,1)
+IF(ierr==0)THEN
   CALL create_solver_xml(pre%pre,solver_node,val_level)
 END IF
 DEBUG_STACK_POP
@@ -876,31 +872,25 @@ DO i=1,nnodes
   SELECT CASE(TRIM(dir_type))
     CASE("up")
       up_present=.TRUE.
-      solver_nodes=>fox_getElementsByTagName(current_node,"solver")
-      up_node=>fox_item(solver_nodes,0)
+      CALL xml_get_element(current_node,"solver",up_node,ierr,1)
     CASE("down")
       down_present=.TRUE.
-      solver_nodes=>fox_getElementsByTagName(current_node,"solver")
-      down_node=>fox_item(solver_nodes,0)
+      CALL xml_get_element(current_node,"solver",down_node,ierr,1)
     CASE("both")
       symmetric=.TRUE.
       up_present=.TRUE.
-      solver_nodes=>fox_getElementsByTagName(current_node,"solver")
-      up_node=>fox_item(solver_nodes,0)
+      CALL xml_get_element(current_node,"solver",up_node,ierr,1)
       EXIT
     CASE DEFAULT
       CALL oft_abort("Invalid smoother direction.","create_ml_xml",__FILE__)
   END SELECT
 END DO
 !---
-current_nodes=>fox_getElementsByTagName(pre_node,"coarse")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
+CALL xml_get_element(pre_node,"coarse",current_node,ierr,1)
+IF(ierr==0)THEN
   IF(oft_debug_print(2))WRITE(*,*)'Found coarse solver'
-  current_node=>fox_item(current_nodes,0)
   coarse_present=.TRUE.
-  solver_nodes=>fox_getElementsByTagName(current_node,"solver")
-  coarse_node=>fox_item(solver_nodes,0)
+  CALL xml_get_element(current_node,"solver",coarse_node,ierr,1)
 END IF
 !---Set smoother
 ALLOCATE(oft_ml_precond::pre)

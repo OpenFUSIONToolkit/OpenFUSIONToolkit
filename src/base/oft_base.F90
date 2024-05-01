@@ -293,7 +293,9 @@ IF(oft_env%xml_file(1:4)/='none')THEN
   INQUIRE(FILE=TRIM(oft_env%xml_file),exist=rst)
   IF(.NOT.rst)CALL oft_abort('XML file specified but does not exist.','oft_init',__FILE__)
   doc=>fox_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
-  oft_env%xml=>fox_item(fox_getElementsByTagname(doc,"oft"),0)
+  IF(ierr/=0)CALL oft_abort('Error parsing XML input file','oft_init',__FILE__)
+  CALL xml_get_element(doc,"oft",oft_env%xml,ierr,1)
+  IF(ierr/=0)CALL oft_abort('Error finding "oft" XML root element','oft_init',__FILE__)
 #else
   CALL oft_warn("Open FUSION Toolkit not built wit xml support, ignoring xml input.")
 #endif

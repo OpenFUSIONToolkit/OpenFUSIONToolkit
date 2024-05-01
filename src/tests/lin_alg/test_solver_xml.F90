@@ -79,10 +79,8 @@ CALL oft_lag_getlop(lop,'zerob')
 CALL oft_lag_getmop(mop,'none')
 !---Setup matrix solver
 #ifdef HAVE_XML
-current_nodes=>fox_getElementsByTagName(oft_env%xml,"solver")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes>0)THEN
-  solver_node=>fox_item(current_nodes,0)
+CALL xml_get_element(oft_env%xml,"solver",solver_node,ierr,1)
+IF(ierr==0)THEN
   CALL create_solver_xml(linv,solver_node)
 ELSE
   CALL oft_abort('Could not find XML node.','test_lap',__FILE__)
