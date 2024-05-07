@@ -74,7 +74,7 @@ REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
 LOGICAL :: plot_run=.FALSE.
 LOGICAL :: pm=.FALSE.
-NAMELIST/sph_heat_options/order,b0_scale,n0,t0,plot_run,linear,pm
+NAMELIST/sph_heat_options/order,b0_scale,n0,t0,plot_run,pm
 !!\subsection doc_mug_sph_ex2_code_setup OFT Initialization
 !! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
@@ -242,16 +242,6 @@ END PROGRAM MUG_sph_heat
 !!
 !!&native_mesh_options
 !! filename='cyl_heat.h5'
-!!/
-!!
-!!&hcurl_op_options
-!! df_wop=0.,.65,.372,.324
-!! nu_wop=0,64,2,1
-!!/
-!!
-!!&lag_op_options
-!! df_lop=0.,.9,0.86,0.64
-!! nu_lop=0,64,2,1
 !!/
 !!
 !!&sph_heat_options

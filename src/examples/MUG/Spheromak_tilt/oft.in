@@ -16,19 +16,9 @@
  filename='cyl_tilt.h5'
 /
 
-&hcurl_op_options
- df_wop=0.,.65,.372,.324
- nu_wop=0,64,2,1
-/
-
-&lag_op_options
- df_lop=0.,.9,0.86,0.64
- nu_lop=0,64,2,1
-/
-
 &sph_tilt_options
  order=2
- minlev=3
+ linear=F
  b0_scale=1.e-1
  b1_scale=1.e-4
  n0=1.E19

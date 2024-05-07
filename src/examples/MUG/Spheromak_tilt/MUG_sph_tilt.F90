@@ -163,14 +163,14 @@ divout%pm=.TRUE.
 !---------------------------------------------------------------------------
 ! Setup initial conditions
 !---------------------------------------------------------------------------
-!---Apply to perturbation field
+!---Apply to equilibrium field
 CALL oft_h1_create(ic_fields%B)
-CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
+CALL taylor_hffa(3,oft_hcurl_level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
-!---Apply to equilibrium field
+!---Apply to perturbation field
 CALL oft_h1_create(pert_fields%B)
-CALL taylor_hffa(3,oft_hcurl_level)%f%get_local(tmp)
+CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
 CALL pert_fields%B%restore_local(tmp,1)
 CALL divout%apply(pert_fields%B)
 !---Clean up solver
@@ -189,8 +189,8 @@ DEALLOCATE(linv)
 !! density fields are also created. The velocity field is initialized to zero everywhere,
 !! while the temperature and density fields, which are not evolved in this case, are set to
 !! uniform values for the equilibrium and zero for the perturbation.
-CALL ic_fields%B%scale(b1_scale*taylor_hlam(1,oft_hcurl_level))
-CALL pert_fields%B%scale(b0_scale*taylor_hlam(3,oft_hcurl_level))
+CALL ic_fields%B%scale(b0_scale*taylor_hlam(3,oft_hcurl_level))
+CALL pert_fields%B%scale(b1_scale*taylor_hlam(1,oft_hcurl_level))
 IF(.NOT.linear)THEN
   CALL ic_fields%B%add(1.d0,1.d0,pert_fields%B)
   CALL pert_fields%B%delete
@@ -264,16 +264,6 @@ END PROGRAM MUG_sph_tilt
 !!
 !!&native_mesh_options
 !! filename='cyl_tilt.h5'
-!!/
-!!
-!!&hcurl_op_options
-!! df_wop=0.,.65,.372,.324
-!! nu_wop=0,64,2,1
-!!/
-!!
-!!&lag_op_options
-!! df_lop=0.,.9,0.86,0.64
-!! nu_lop=0,64,2,1
 !!/
 !!
 !!&sph_tilt_options
