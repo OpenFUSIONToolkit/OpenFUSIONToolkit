@@ -355,7 +355,7 @@ INTEGER(i4) :: xmhd_lev = 1 !< Active FE level
 INTEGER(i4) :: xmhd_level = 1 !< Active FE level
 INTEGER(i4) :: xmhd_lin_level = 1 !< Highest linear element level
 INTEGER(i4) :: xmhd_nlevels = 1 !< Number of total levels
-INTEGER(i4) :: xmhd_minlev = 3 !< Lowest MG level
+INTEGER(i4) :: xmhd_minlev = -1 !< Lowest MG level
 INTEGER(i4), DIMENSION(fem_max_levels) :: nu_xmhd = 1 !< Number of smoother iterations
 !---Operators and preconditioning
 TYPE(oft_fem_comp_type), POINTER :: xmhd_rep => NULL() !< Active field representation
@@ -3785,6 +3785,7 @@ xmhd_rep=>ML_xmhd_rep%current_level
 xmhd_blevel=oft_hcurl_blevel
 xmhd_nlevels=oft_hcurl_nlevels
 xmhd_level=oft_hcurl_level
+IF(xmhd_minlev<0)xmhd_minlev=xmhd_nlevels
 end subroutine xmhd_setup_rep
 !---------------------------------------------------------------------------
 !> Set the current level for xMHD model

@@ -8,7 +8,7 @@
 !! Such a system is unstable to this instability when the ratio of the cylinder's height to radius is
 !! greater than 1.3. This result was shown first by [Bondeson and Marklin](https://doi.org/10.1063/1.863579),
 !! where the instablity acts to dissipate energy and drive the magnetic configuration toward the Taylor state
-!! (see \ref doc_mug_sph_ex1_code_taylor).
+!! (see \ref doc_mug_sph_ex1_ic).
 !!
 !!\section doc_mug_sph_ex1_code Code Walk Through
 !!
@@ -16,6 +16,12 @@
 !! finite element setup, and system creation and solution.
 !!
 !!\subsection doc_mug_sph_ex1_code_inc Module Includes
+!! The first thing that we must do is include the OFT modules which contain
+!! the required functions and variables. It is good practice to restrict the included elements
+!! to only those needed. This is done using the `ONLY:` clause to specifically include only
+!! certain definitions. The exceptions to this practice are the \ref oft_local and \ref oft_base
+!! modules, which contain a controlled set of commonly used elements that can be safely imported
+!! as a whole.
 ! START SOURCE
 PROGRAM MUG_sph_tilt
 !---Runtime
@@ -43,10 +49,12 @@ USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob, h1_setup_interp
 !---Physics
-USE taylor, ONLY: taylor_hmodes, taylor_minlev, taylor_hffa, taylor_hlam
-USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, xmhd_sub_fields
+USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
+USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex1_code_vars Local Variables
+!! Next we define the local variables needed to initialize our case and
+!! run the time-dependent solve and post-processing.
 !---H1 divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
@@ -54,19 +62,19 @@ CLASS(oft_matrix), pointer :: lop => NULL()
 !---Local variables
 INTEGER(i4) :: ierr,io_unit
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
-CLASS(oft_vector), POINTER :: db => NULL()
-TYPE(xmhd_sub_fields) :: ic_fields
+TYPE(xmhd_sub_fields) :: ic_fields,pert_fields
 !---Runtime options
 INTEGER(i4) :: order = 2
-INTEGER(i4) :: minlev = 1
 REAL(r8) :: b0_scale = 1.E-1_r8
 REAL(r8) :: b1_scale = 1.E-5_r8
 REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
 LOGICAL :: pm=.FALSE.
+LOGICAL :: linear=.FALSE.
 LOGICAL :: plot_run=.FALSE.
-NAMELIST/sph_tilt_options/order,minlev,b0_scale,b1_scale,plot_run,pm,n0,t0
+NAMELIST/sph_tilt_options/order,b0_scale,b1_scale,plot_run,linear,pm,n0,t0
 !!\subsection doc_mug_sph_ex1_code_setup OFT Initialization
+!! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -81,27 +89,26 @@ CALL multigrid_construct
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(order, minlev)
-CALL lag_setup_interp
-CALL lag_mloptions
+CALL oft_lag_setup(order, -1)
+! CALL lag_setup_interp
+! CALL lag_mloptions
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(order, minlev)
-CALL hcurl_setup_interp
-CALL hcurl_mloptions
+CALL oft_hcurl_setup(order, -1)
+! CALL hcurl_setup_interp
+! CALL hcurl_mloptions
 !---H1(Grad) subspace
-CALL oft_h0_setup(order+1, minlev)
-CALL h0_setup_interp
+CALL oft_h0_setup(order+1, -1)
+! CALL h0_setup_interp
 !---H1 full space
-CALL oft_h1_setup(order, minlev)
-CALL h1_setup_interp
+CALL oft_h1_setup(order, -1)
+! CALL h1_setup_interp
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
-!! To visualize the solution fields once a simulation has completed the \ref xmhd::xmhd_plot
+!! To visualize the solution fields once a simulation has completed, the \ref xmhd::xmhd_plot
 !! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
-!! produced by \ref xmhd::xmhd_run "xmhd_run" and generates plot files, and optionally
-!! probe signals at evenly spaced points in time as specified in the input file, see
-!! \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex1_input_plot.
-xmhd_minlev=minlev
+!! produced by \ref xmhd::xmhd_run "xmhd_run" or \ref xmhd::xmhd_lin_run "xmhd_lin_run" and
+!! generates plot files, and optionally probe signals at evenly spaced points in time as
+!! specified in the input file, see \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex1_input_plot.
 IF(plot_run)THEN
   !---Setup I/0
   CALL mesh%setup_io(order)
@@ -110,7 +117,7 @@ IF(plot_run)THEN
   !---Finalize enviroment and exit
   CALL oft_finalize()
 END IF
-!!\subsection doc_mug_sph_ex1_code_taylor Computing Initial Conditions
+!!\subsection doc_mug_sph_ex1_ic Computing Initial Conditions
 !!
 !! The spheromak mode corresponds to the thrid lowest force-free eignstate of the
 !! flux conserver. This can be computed using the \ref taylor::taylor_hmodes
@@ -122,11 +129,8 @@ END IF
 !! that will drive the configuration toward one of these minimum energy states.
 !! This also leads us to our choice of an intial perturbation to the equilibrium,
 !! which we will chose to match field of the lowest eigenstate.
-taylor_minlev=minlev
 CALL taylor_hmodes(3)
 CALL oft_lag_set_level(oft_lagrange_nlevels)
-!!\subsection doc_mug_sph_ex1_code_taylor_gauge Setting Magnetic Boundary Conditions
-!!
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" subroutine computes the vector
 !! potential for each of the requested eignestates. However, the MHD
 !! solver uses magnetic field as the primary variable. With force-free eigenstate
@@ -165,10 +169,10 @@ CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
 !---Apply to equilibrium field
-CALL oft_h1_create(db)
+CALL oft_h1_create(pert_fields%B)
 CALL taylor_hffa(3,oft_hcurl_level)%f%get_local(tmp)
-CALL db%restore_local(tmp,1)
-CALL divout%apply(db)
+CALL pert_fields%B%restore_local(tmp,1)
+CALL divout%apply(pert_fields%B)
 !---Clean up solver
 NULLIFY(divout%solver)
 CALL divout%delete()
@@ -178,44 +182,59 @@ CALL linv%pre%delete()
 DEALLOCATE(linv%pre)
 CALL linv%delete()
 DEALLOCATE(linv)
-!!\subsection doc_mug_sph_ex1_code_taylor_combine Set Initial Conditions
-!!
-!! With the required fields computed the full initial condition can be set as
-!! simply the equilibrium (3rd eigenmode) plus a low amplitude of the perturbation
-!! field (1st eigenmode). The velocity field is also created but initialized to zero everywhere.
-!! We also initialize the density and temperature fields with constant values.
+!! With the required fields computed the full initial conditions can now be set.
+!! For the linear case we set the magnetic equilibrium (3rd eigenmode) and the perturbation
+!! field (1st eigenmode). For the nonlinear case these fields are combined to yield
+!! the combined initial condition. In both cases, the velocity field, temperature, and
+!! density fields are also created. The velocity field is initialized to zero everywhere,
+!! while the temperature and density fields, which are not evolved in this case, are set to
+!! uniform values for the equilibrium and zero for the perturbation.
 CALL ic_fields%B%scale(b1_scale*taylor_hlam(1,oft_hcurl_level))
-CALL ic_fields%B%add(1.d0,b0_scale*taylor_hlam(3,oft_hcurl_level),db)
+CALL pert_fields%B%scale(b0_scale*taylor_hlam(3,oft_hcurl_level))
+IF(.NOT.linear)THEN
+  CALL ic_fields%B%add(1.d0,1.d0,pert_fields%B)
+  CALL pert_fields%B%delete
+  DEALLOCATE(pert_fields%B)
+END IF
 !---Create velocity field
 CALL oft_lag_vcreate(ic_fields%V)
+IF(linear)CALL oft_lag_vcreate(pert_fields%V)
 !---Create static density/temperature
 CALL oft_lag_create(ic_fields%Ne)
 CALL oft_lag_create(ic_fields%Ti)
 CALL ic_fields%Ne%set(n0)
 CALL ic_fields%Ti%set(t0)
+IF(linear)THEN
+  CALL oft_lag_create(pert_fields%Ne)
+  CALL oft_lag_create(pert_fields%Ti)
+END IF
 !---Clean up temporary matrices and fields
 CALL lop%delete
-CALL db%delete
-DEALLOCATE(tmp,lop,db)
+DEALLOCATE(tmp,lop)
 !!\subsection doc_mug_sph_ex1_code_run Run Simulation
 !!
-!! Finally, the simulation can be run using the driver routine for non-linear
-!! MHD (\ref xmhd::xmhd_run "xmhd_run"). This routine advances the
-!! solution in time with the physics specified in the input file, see the
-!! documentation for \ref xmhd::xmhd_run "xmhd_run", and produces restart files
-!! that contain the solution at different times.
+!! Finally, the simulation can be run using either the driver routine for linear
+!! (\ref xmhd::xmhd_lin_run "xmhd_lin_run") or non-linear MHD (\ref xmhd::xmhd_run "xmhd_run").
+!! These routines both advance the solution in time with the physics specified in the input file,
+!! see the documentation for \ref xmhd::xmhd_lin_run "xmhd_lin_run" and \ref xmhd::xmhd_run "xmhd_run",
+!! and produces restart files that contain the solution at different times.
 !!
-!! Several quantities are also recorded to a history file \c "xmhd.hist" during
+!! Several quantities are also recorded to a history file `xmhd.hist` during
 !! the simulation, including the toroidal current (where the symmetry axis is specified by \ref xmhd::xmhd_taxis
 !! "xmhd_taxis"). The data in the history file may be plotted using the script
-!! \c "src/utilities/scripts/plot_mug_hist.py"
+!! `plot_mug_hist.py`, which is located in `src/utilities/scripts` or `python` directories for the
+!! repository and an installation respectively.
 !!
 !! \note OFT plotting scripts require the python packages `numpy` and `matplotlib` as well
 !! as path access to the python modules provided in `python` for installations or `src/utilities` in the repo.
 xmhd_taxis=3
 oft_env%pm=pm
 !---Run simulation
-CALL xmhd_run(ic_fields)
+IF(linear)THEN
+  CALL xmhd_lin_run(ic_fields,pert_fields)
+ELSE
+  CALL xmhd_run(ic_fields)
+END IF
 !---Finalize enviroment and exit
 CALL oft_finalize
 END PROGRAM MUG_sph_tilt
@@ -226,7 +245,7 @@ END PROGRAM MUG_sph_tilt
 !! Below is an input file which can be used with this example in a parallel environment. This example
 !! should not be run with only a single process as solving the time-depedent MHD equations is
 !! significantly more challenging than previous examples. For more information on the options in the
-!! \c xmhd_options group see \ref xmhd::xmhd_plot "xmhd_plot".
+!! `xmhd_options` group see \ref xmhd::xmhd_plot "xmhd_plot".
 !!
 !!\verbatim
 !!&runtime_options
@@ -259,7 +278,7 @@ END PROGRAM MUG_sph_tilt
 !!
 !!&sph_tilt_options
 !! order=2
-!! minlev=3
+!! linear=F
 !! b0_scale=1.e-1
 !! b1_scale=1.e-4
 !! n0=1.E19
@@ -293,7 +312,7 @@ END PROGRAM MUG_sph_tilt
 !! Time dependent MHD solvers are accelerated significantly by the use of
 !! a more sophisticated preconditioner than the default method. Below is
 !! an example `oft_in.xml` file that constructs an appropriate ILU(0) preconditioner.
-!! Currently, this preconditioner method is the suggest starting preconditioner for all
+!! Currently, this preconditioner method is the suggested starting preconditioner for all
 !! time-dependent MHD solves.
 !!
 !! This solver can be used by specifying both the FORTRAN input and XML input files
