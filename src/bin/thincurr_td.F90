@@ -406,6 +406,7 @@ DO i=1,nsteps
         pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t,1)/2.d0
         pcoil_volt(j)=pcoil_volt(j)+linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)/2.d0
       END DO
+      pcoil_volt=pcoil_volt*dt
     END IF
   ELSE
     CALL Lmat%apply(u,g)
@@ -420,6 +421,7 @@ DO i=1,nsteps
       DO j=1,self%n_vcoils
         pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)
       END DO
+      pcoil_volt=pcoil_volt*dt
     END IF
   END IF
   uu=g%dot(g)

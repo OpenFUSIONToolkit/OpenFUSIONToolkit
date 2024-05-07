@@ -245,7 +245,7 @@ def test_td_plate(direct_flag):
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_plate_volt(direct_flag):
-    sigs_final = (4.E-3, 2.383774E+1, 2.005698E+1)
+    sigs_final = (4.E-3, 4.766694E-4, 4.010512E-4)
     assert ThinCurr_setup("tw_test-plate.h5",1,direct_flag,
                            vcoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
@@ -263,7 +263,7 @@ def test_td_cyl(direct_flag):
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_cyl_volt(direct_flag):
-    sigs_final = (4.E-3, 8.559103E0, 7.268509E0)
+    sigs_final = (4.E-3, 1.710824E-4, 1.453702E-4)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -283,7 +283,7 @@ def test_td_torus(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_torus_volt(direct_flag):
-    sigs_final = (4.E-3, 3.249705E0, 2.3204651E-1)
+    sigs_final = (4.E-3, 6.501287E-5, 4.640848E-6)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,
                            vcoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
@@ -304,7 +304,7 @@ def test_td_passive(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive_volt(direct_flag):
-   sigs_final = (4.E-3, 2.114789E+1, 2.170003E+1)
+   sigs_final = (4.E-3, 4.228515E-4, 4.338835E-4)
    assert ThinCurr_setup("tw_test-passive.h5",1,direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
@@ -401,7 +401,7 @@ def test_td_aca():
 
 @pytest.mark.coverage
 def test_td_volt_aca():
-    sigs_final = (4.E-3, 8.604353E0, 7.353832E0)
+    sigs_final = (4.E-3, 1.720867E-4, 1.470760E-4)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
