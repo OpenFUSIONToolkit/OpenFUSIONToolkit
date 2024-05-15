@@ -540,10 +540,11 @@ END SUBROUTINE xmhd_read_settings
 !! Runtime options are set in the main input file using the group
 !! \c xmhd_options group, see \ref xmhd_read_settings.
 !---------------------------------------------------------------------------
-subroutine xmhd_run(initial_fields,driver,probes)
+subroutine xmhd_run(initial_fields,driver,probes,profile_only)
 TYPE(xmhd_sub_fields), INTENT(inout) :: initial_fields !< Initial conditions
 CLASS(oft_xmhd_driver), OPTIONAL, INTENT(inout) :: driver !< Forcing object
 CLASS(oft_xmhd_probe), OPTIONAL, INTENT(inout) :: probes !< Probe object
+LOGICAL, OPTIONAL, INTENT(in) :: profile_only !< Profile operator timing and stop?
 !---H1 divout solver
 TYPE(oft_h1_divout) :: divout
 !---Jacobian solver
@@ -790,6 +791,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
 END IF
+IF(profile_only)CALL xmhd_profile(u)
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
@@ -4997,4 +4999,49 @@ CALL Jfield%delete
 DEALLOCATE(bvout)
 DEBUG_STACK_POP
 end subroutine xmhd_plot
+!---------------------------------------------------------------------------
+!> Simple subroutine to compute timing of different solve phases
+!---------------------------------------------------------------------------
+subroutine xmhd_profile(u)
+class(oft_vector), intent(inout) :: u
+INTEGER(4) :: i,j,k
+REAL(8) :: elapsed_time,matvec_time,nlop_time,build_optime,dot_time
+class(oft_vector), pointer :: v
+type(oft_timer) :: mytimer
+CALL xmhd_rep%vec_create(v)
+matvec_time=0.d0
+nlop_time=0.d0
+build_optime=0.d0
+dot_time=0.d0
+IF(oft_env%head_proc)WRITE(*,'(A)')'Starting profiling'
+comm_times=0
+DO i=1,10
+  IF(oft_env%head_proc)CALL mytimer%tick
+  CALL xmhd_set_ops(u)
+  IF(oft_env%head_proc)build_optime=build_optime+mytimer%tock()
+  DO j=1,10
+    IF(oft_env%head_proc)CALL mytimer%tick
+    CALL oft_xmhd_ops%A%apply(u, v)
+    IF(oft_env%head_proc)nlop_time=nlop_time+mytimer%tock()
+    !
+    IF(oft_env%head_proc)CALL mytimer%tick
+    DO k=1,10
+      CALL oft_xmhd_ops%J%apply(u, v)
+    END DO
+    IF(oft_env%head_proc)matvec_time=matvec_time+mytimer%tock()
+    IF(oft_env%head_proc)CALL mytimer%tick
+    DO k=1,100
+      elapsed_time=u%dot(v)
+    END DO
+    IF(oft_env%head_proc)dot_time=dot_time+mytimer%tock()
+  END DO
+END DO
+IF(oft_env%head_proc)THEN
+  WRITE(*,'(A,Es11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
+  WRITE(*,'(A,Es11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
+  WRITE(*,'(A,Es11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
+  WRITE(*,'(A,Es11.3)')'  Build  = ',matvec_time/REAL(10,8)
+END IF
+CALL oft_finalize()
+end subroutine xmhd_profile
 end module xmhd
