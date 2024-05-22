@@ -791,7 +791,9 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
 END IF
-IF(profile_only)CALL xmhd_profile(u)
+IF(PRESENT(profile_only))THEN
+  IF(profile_only)CALL xmhd_profile(u)
+END IF
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
