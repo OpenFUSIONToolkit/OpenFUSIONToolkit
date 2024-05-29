@@ -385,7 +385,7 @@ SUBROUTINE oft_warn(error_str)
 CHARACTER(LEN=*) :: error_str
 !---Print warning information
 100 FORMAT (A,I5,2A)
-WRITE(error_unit,100)'[',oft_env%rank,'] WARNING : ',TRIM(error_str)
+WRITE(error_unit,100)'[',oft_env%rank,'] WARNING: ',TRIM(error_str)
 END SUBROUTINE oft_warn
 !---------------------------------------------------------------------------
 !> Output control for performance messages
