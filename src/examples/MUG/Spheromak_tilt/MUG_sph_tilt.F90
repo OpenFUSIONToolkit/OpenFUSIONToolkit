@@ -37,17 +37,16 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pr
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
-USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions, hcurl_zerob
+USE oft_hcurl_operators, ONLY: hcurl_zerob
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, h0_zerogrnd
+USE oft_h0_operators, ONLY: oft_h0_getlop, h0_zerogrnd
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_fields, ONLY: oft_h1_create
-USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob, h1_setup_interp
+USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields
@@ -90,18 +89,12 @@ CALL multigrid_construct
 !---------------------------------------------------------------------------
 !---Lagrange
 CALL oft_lag_setup(order, -1)
-! CALL lag_setup_interp
-! CALL lag_mloptions
 !---H1(Curl) subspace
 CALL oft_hcurl_setup(order, -1)
-! CALL hcurl_setup_interp
-! CALL hcurl_mloptions
 !---H1(Grad) subspace
 CALL oft_h0_setup(order+1, -1)
-! CALL h0_setup_interp
 !---H1 full space
 CALL oft_h1_setup(order, -1)
-! CALL h1_setup_interp
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
 !! To visualize the solution fields once a simulation has completed, the \ref xmhd::xmhd_plot
@@ -375,7 +368,7 @@ END PROGRAM MUG_sph_tilt
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!~$ python convert_cubit.py --in_file=cyl_tilt.mesh
+!!~$ python convert_cubit.py --in_file=cyl_tilt.g
 !!\endverbatim
 !!
 !!\subsection doc_mug_sph_ex1_gmsh Meshing with Gmsh
