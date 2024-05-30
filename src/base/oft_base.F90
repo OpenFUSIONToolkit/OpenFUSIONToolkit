@@ -165,12 +165,13 @@ INTEGER(i4) :: ppn=1
 INTEGER(i4) :: debug=0
 INTEGER(i4) :: nparts=1
 INTEGER(i4) :: omp_nthreads=-1
+LOGICAL :: test_run=.FALSE.
 CHARACTER(LEN=80) :: ifile
 LOGICAL :: called_from_lib
 #ifdef HAVE_XML
 TYPE(fox_node), POINTER :: doc
 #endif
-LOGICAL :: rst,test_run
+LOGICAL :: rst
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,stack_disabled,use_petsc,test_run,nparts
 !---Initialize MPI
 #ifdef HAVE_MPI
