@@ -54,7 +54,10 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install prerequisites
-      run: ${{ matrix.config.pip }} install pytest numpy scipy h5py triangle
+      run: |
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py triangle
 
     - name: Cache external libraries
       id: cache-ext-libs
@@ -106,7 +109,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: failure()
       with:
-        name: Library failure log
+        name: Library_failure_log-${{ matrix.config.os }}_${{ matrix.parallel }}
         path: libs/build/build_error.log
     
     - name: Remove external build directory
@@ -117,7 +120,9 @@ jobs:
     - name: Configure OFT
       shell: bash
       working-directory: libs
-      run: bash config_cmake.sh
+      run: |
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
@@ -133,4 +138,6 @@ jobs:
       shell: bash
       timeout-minutes: 90
       working-directory: libs/build_release
-      run: make test
+      run: |
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        make test

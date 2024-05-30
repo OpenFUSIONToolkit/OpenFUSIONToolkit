@@ -742,7 +742,7 @@ class METIS(package):
             "rm -rf build",
             "mkdir -p build",
             "cd build",
-            "{CMAKE} -DCMAKE_INSTALL_PREFIX={METIS_ROOT} -DCMAKE_C_COMPILER={CC} -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DGKLIB_PATH=$GKLIB_PATH .. ",
+            "{CMAKE} -DCMAKE_INSTALL_PREFIX={METIS_ROOT} -DCMAKE_C_COMPILER={CC} -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DGKRAND:BOOL=ON -DGKLIB_PATH=$GKLIB_PATH .. ",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
