@@ -62,7 +62,7 @@ jobs:
       run: |
         sw_vers -productVersion
         pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
-        xcode-select -s /Library/Developer/CommandLineTools
+        sudo xcode-select -s /Library/Developer/CommandLineTools
         xcode-select -p
 
     - name: Check compilers
