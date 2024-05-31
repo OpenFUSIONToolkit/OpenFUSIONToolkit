@@ -53,6 +53,24 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
 
+    - name: Get OS version (Linux)
+      if: startsWith(matrix.config.os, 'ubuntu')
+      run: lsb_release -d
+
+    - name: Get OS version (macOS)
+      if: startsWith(matrix.config.os, 'macos')
+      run: |
+        sw_vers -productVersion
+        pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
+        xcode-select -s /Library/Developer/CommandLineTools
+        xcode-select -p
+
+    - name: Check compilers
+      run: |
+        $CC --version
+        $CXX --version
+        $FC --version
+
     - name: Install prerequisites
       if: ${{ matrix.config.os != 'macos-14' }}
       run: |
@@ -65,7 +83,7 @@ jobs:
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
-        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py
+        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py setuptools
         git clone https://github.com/drufat/triangle.git
         cd triangle
         git submodule init
@@ -83,23 +101,6 @@ jobs:
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       run: mkdir libs
-
-    - name: Get OS version (Linux)
-      if: startsWith(matrix.config.os, 'ubuntu')
-      run: lsb_release -d
-
-    - name: Get OS version (macOS)
-      if: startsWith(matrix.config.os, 'macos')
-      run: |
-        sw_vers -productVersion
-        pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
-        xcode-select -p
-
-    - name: Check compilers
-      run: |
-        $CC --version
-        $CXX --version
-        $FC --version
 
     - name: Build external (OpenMP)
       if: ${{ matrix.parallel == 'openmp' }}
