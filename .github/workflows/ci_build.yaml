@@ -54,10 +54,24 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install prerequisites
+      if: ${{ matrix.config.os != 'macos-14' }}
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
         ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py triangle
+    
+    - name: Install prerequisites (macos arm64)
+      if: ${{ matrix.config.os == 'macos-14' }}
+      run: |
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py
+        git clone https://github.com/drufat/triangle.git
+        cd triangle
+        git submodule init
+        git submodule update
+        ${{ matrix.config.python }} setup.py build
+        ${{ matrix.config.python }} setup.py install
 
     - name: Cache external libraries
       id: cache-ext-libs
@@ -79,6 +93,7 @@ jobs:
       run: |
         sw_vers -productVersion
         pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
+        xcode-select -p
 
     - name: Check compilers
       run: |
