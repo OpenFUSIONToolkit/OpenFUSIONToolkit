@@ -34,19 +34,14 @@ jobs:
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", pip: "pip3"
           }
         - {
-            name: "macOS Monterey GCC 12",
-            os: macos-12,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", pip: "pip3"
-          }
-        - {
             name: "macOS Ventura GCC 13",
             os: macos-13,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3"
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3", xcode_path: "/Applications/Xcode_15.2.app/Contents/Developer"
           }
         - {
             name: "macOS Sonoma GCC 13",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3"
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
 
     steps:
@@ -62,7 +57,7 @@ jobs:
       run: |
         sw_vers -productVersion
         pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
-        sudo xcode-select -s /Library/Developer/CommandLineTools
+        sudo xcode-select -s ${{ matrix.config.xcode_path }}
         xcode-select -p
 
     - name: Check compilers
