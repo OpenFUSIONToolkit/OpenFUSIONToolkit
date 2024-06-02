@@ -26,22 +26,22 @@ jobs:
         - {
             name: "Ubuntu 20.04 GCC 10",
             os: ubuntu-20.04,
-            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python", pip: "pip"
+            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python"
           }
         - {
             name: "Ubuntu 22.04 GCC 12",
             os: ubuntu-22.04,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", pip: "pip3"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3"
           }
         - {
             name: "macOS Ventura GCC 12",
             os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", pip: "pip3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
           }
         - {
             name: "macOS Sonoma GCC 13",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
 
     steps:
