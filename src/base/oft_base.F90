@@ -128,6 +128,10 @@ INTEGER(i4) :: oft_tid = 0 !< ID of current thread
 REAL(r8), PRIVATE :: start_time !< Time that run began
 INTEGER(i8) :: comm_times(4) = 0 !< Times for blocking communications
 LOGICAL :: use_petsc = .FALSE. !< Use PETSc as linear algebra backend
+INTEGER(i4), PARAMETER :: oft_test_seed(24) = [430470439, -303393496, -476850581, &
+  -964913795, 995391627, 84909391, -586395292, -2070086573, -1010035798, 1012650827, &
+  325297911, 701378007, 392909068, 379156631, 484729024, -292308758, -1669043581, &
+  142231192, 708877466, -1255634259, 593274827, -561530186, -934579426, 900810854]
 !$omp threadprivate(oft_tid)
 !---Debugging stack information
 LOGICAL :: stack_disabled = .FALSE. !< Disable debug/profiling stack
@@ -165,12 +169,13 @@ INTEGER(i4) :: ppn=1
 INTEGER(i4) :: debug=0
 INTEGER(i4) :: nparts=1
 INTEGER(i4) :: omp_nthreads=-1
+LOGICAL :: test_run=.FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
 #ifdef HAVE_XML
 TYPE(fox_node), POINTER :: doc
 #endif
-LOGICAL :: rst,test_run
+LOGICAL :: rst
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,stack_disabled,use_petsc,test_run,nparts
 !---Initialize MPI
 #ifdef HAVE_MPI
@@ -214,6 +219,13 @@ READ(io_unit,runtime_options,IOSTAT=ierr)
 CLOSE(io_unit)
 IF(ierr<0)CALL oft_abort('No runtime options found in input file.','oft_init',__FILE__)
 IF(ierr>0)CALL oft_abort('Error parsing runtime options.','oft_init',__FILE__)
+!---Seed pRNG if test run for repeatability
+IF(test_run)THEN
+  CALL random_seed(size=nargs)
+  IF(nargs>SIZE(oft_test_seed))CALL oft_abort('pRNG seed size exceeds built in values', &
+    'oft_init',__FILE__)
+  CALL random_seed(put=oft_test_seed)
+END IF
 !---Initialize PETSc or exit if requested but not available
 IF(use_petsc)THEN
 #ifdef HAVE_PETSC
@@ -385,7 +397,7 @@ SUBROUTINE oft_warn(error_str)
 CHARACTER(LEN=*) :: error_str
 !---Print warning information
 100 FORMAT (A,I5,2A)
-WRITE(error_unit,100)'[',oft_env%rank,'] WARNING : ',TRIM(error_str)
+WRITE(error_unit,100)'[',oft_env%rank,'] WARNING: ',TRIM(error_str)
 END SUBROUTINE oft_warn
 !---------------------------------------------------------------------------
 !> Output control for performance messages
