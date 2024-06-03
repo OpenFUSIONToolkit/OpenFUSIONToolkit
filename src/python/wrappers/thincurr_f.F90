@@ -200,6 +200,23 @@ END SUBROUTINE thincurr_save_scalar
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
+SUBROUTINE thincurr_scale_va(tw_ptr,vals,div_flag) BIND(C,NAME="thincurr_scale_va")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+LOGICAL, VALUE, INTENT(in) :: div_flag !< Needs docs
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+TYPE(tw_type), POINTER :: tw_obj
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL c_f_pointer(vals, vals_tmp, [tw_obj%mesh%np])
+IF(div_flag)THEN
+  vals_tmp = vals_tmp/tw_obj%mesh%va
+ELSE
+  vals_tmp = vals_tmp*tw_obj%mesh%va
+END IF
+END SUBROUTINE thincurr_scale_va
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE thincurr_cross_coupling(tw_ptr1,tw_ptr2,Mmat,cache_file,error_str) BIND(C,NAME="thincurr_cross_coupling")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr1 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr2 !< Needs docs

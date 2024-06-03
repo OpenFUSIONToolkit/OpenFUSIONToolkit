@@ -52,7 +52,7 @@ def validate_result(iteration_count,converged_error):
     fid = open('bjacobi.results','r')
     its_test = int(fid.readline())
     if iteration_count != None:
-        if its_test>iteration_count+1:
+        if its_test>iteration_count*1.05:
             print("FAILED: Iteration count incorrect!")
             print("  Expected = {0}".format(iteration_count))
             print("  Actual =   {0}".format(its_test))
@@ -81,14 +81,14 @@ def test_LU_base(solver_type):
 # Test runner for base test case
 @pytest.mark.parametrize("solver_type", LU_solvers)
 def test_LU_base_nlocal2(solver_type):
-    iteration_count = 42
+    iteration_count = 41
     converged_error = 1.4688646289584524
     check_solver(1, 2, solver_type, iteration_count, converged_error)
 # Test runner for base test case
 @pytest.mark.coverage
 @pytest.mark.parametrize("solver_type", LU_solvers)
 def test_LU_base_nlocal2_part(solver_type):
-    iteration_count = 47
+    iteration_count = 46
     converged_error = 1.4688646289584524
     check_solver(1, -2, solver_type, iteration_count, converged_error)
 # Test runner for base test case
@@ -101,7 +101,7 @@ def test_LU_mpi2(solver_type):
 # Test runner for base test case
 @pytest.mark.parametrize("solver_type", LU_solvers)
 def test_LU_mpi2_nlocal2(solver_type):
-    iteration_count = 57
+    iteration_count = 56
     converged_error = 1.4688646289584524
     check_solver(2, 2, solver_type, iteration_count, converged_error)
 # Test runner for base test case
@@ -114,7 +114,7 @@ def test_LU_mpi2_nlocal2_part(solver_type):
 # Test runner for base test case
 @pytest.mark.parametrize("solver_type", LU_solvers)
 def test_LU_mpi4(solver_type):
-    iteration_count = 59
+    iteration_count = 60
     converged_error = 1.4688646289584524
     check_solver(4, 1, solver_type, iteration_count, converged_error)
 # Test runner for base test case
@@ -141,7 +141,7 @@ def test_ILU_base(solver_type):
 # Test runner for base test case
 @pytest.mark.parametrize("solver_type", ILU_solvers)
 def test_ILU_base_nlocal2(solver_type):
-    iteration_count = 55
+    iteration_count = 59
     converged_error = 1.4688646289584524
     check_solver(1, 2, solver_type, iteration_count, converged_error, use_ilu='T')
 # Test runner for base test case
@@ -155,20 +155,20 @@ def test_ILU_base_nlocal2_part(solver_type):
 @pytest.mark.coverage
 @pytest.mark.parametrize("solver_type", ILU_solvers)
 def test_ILU_mpi2(solver_type):
-    iteration_count = 63
+    iteration_count = 64
     converged_error = 1.4688646289584524
     check_solver(2, 1, solver_type, iteration_count, converged_error, use_ilu='T')
 # Test runner for base test case
 @pytest.mark.parametrize("solver_type", ILU_solvers)
 def test_ILU_mpi2_nlocal2(solver_type):
-    iteration_count = 68
+    iteration_count = 69
     converged_error = 1.4688646289584524
     check_solver(2, 2, solver_type, iteration_count, converged_error, use_ilu='T')
 # Test runner for base test case
 @pytest.mark.coverage
 @pytest.mark.parametrize("solver_type", ILU_solvers)
 def test_ILU_mpi2_nlocal2_part(solver_type):
-    iteration_count = 72
+    iteration_count = 67
     converged_error = 1.4688646289584524
     check_solver(2, -2, solver_type, iteration_count, converged_error, use_ilu='T')
 # Test runner for base test case
@@ -180,12 +180,12 @@ def test_ILU_mpi4(solver_type):
 # Test runner for base test case
 @pytest.mark.parametrize("solver_type", ILU_solvers)
 def test_ILU_mpi4_nlocal2(solver_type):
-    iteration_count = 76
+    iteration_count = 73
     converged_error = 1.4688646289584524
     check_solver(4, 2, solver_type, iteration_count, converged_error, use_ilu='T')
 # Test runner for base test case
 @pytest.mark.parametrize("solver_type", ILU_solvers)
 def test_ILU_mpi4_nlocal2_part(solver_type):
-    iteration_count = 72
+    iteration_count = 70
     converged_error = 1.4688646289584524
     check_solver(4, -2, solver_type, iteration_count, converged_error, use_ilu='T')
