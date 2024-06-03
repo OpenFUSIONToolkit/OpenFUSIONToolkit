@@ -714,7 +714,6 @@ IF(oft_env%head_proc)THEN
   WRITE(*,100)'Ohmic      = ',xmhd_ohmic
   WRITE(*,100)'Visc Heat  = ',xmhd_visc_heat
   WRITE(*,100)'Upwinding  = ',xmhd_upwind
-  WRITE(*,101)'B-BC       = ',bbc
   WRITE(*,101)'V-BC       = ',vbc
   IF(xmhd_adv_den)WRITE(*,101) 'N-BC       = ',nbc
   IF(xmhd_adv_temp)WRITE(*,101)'T-BC       = ',tbc
