@@ -47,6 +47,7 @@ USE mhd_utils, ONLY: mu0
 USE thin_wall
 USE thin_wall_hodlr
 IMPLICIT NONE
+#include "local.h"
 TYPE(tw_type), TARGET :: tw_sim
 TYPE(tw_sensors) :: sensors
 !
@@ -73,8 +74,8 @@ LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: compute_B = .FALSE.
-CHARACTER(LEN=80) :: curr_file="none"
-CHARACTER(LEN=80) :: volt_file="none"
+CHARACTER(LEN=OFT_PATH_SLEN) :: curr_file="none"
+CHARACTER(LEN=OFT_PATH_SLEN) :: volt_file="none"
 NAMELIST/thincurr_td_options/curr_file,volt_file,dt,nsteps,nplot,direct,save_L,save_Mcoil,save_Msen,  &
   plot_run,compute_B,timestep_cn,cg_tol,jumper_start
 !---
@@ -405,6 +406,7 @@ DO i=1,nsteps
         pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t,1)/2.d0
         pcoil_volt(j)=pcoil_volt(j)+linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)/2.d0
       END DO
+      pcoil_volt=pcoil_volt*dt
     END IF
   ELSE
     CALL Lmat%apply(u,g)
@@ -419,6 +421,7 @@ DO i=1,nsteps
       DO j=1,self%n_vcoils
         pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)
       END DO
+      pcoil_volt=pcoil_volt*dt
     END IF
   END IF
   uu=g%dot(g)

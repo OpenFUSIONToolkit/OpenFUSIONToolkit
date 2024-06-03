@@ -24,10 +24,11 @@ USE oft_mesh_cubit, ONLY: mesh_cubit_id, inpname
 #endif
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
+#include "local.h"
 INTEGER(i4) :: io_unit
 INTEGER(i4) :: ierr
 #if !defined(HAVE_NCDF)
-CHARACTER(LEN=80) :: inpname = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: inpname = 'none'
 #endif
 LOGICAL :: test_surf = .FALSE.
 INTEGER(i4) :: cad_type = 2

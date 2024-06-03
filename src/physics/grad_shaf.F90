@@ -237,8 +237,8 @@ TYPE :: gs_eq
   LOGICAL :: limited_only = .FALSE.
   LOGICAL :: save_visit = .TRUE.
   LOGICAL :: isoflux_grad_weight = .TRUE.
-  CHARACTER(LEN=80) :: coil_file = 'none'
-  CHARACTER(LEN=80) :: limiter_file = 'none'
+  CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
+  CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
   TYPE(oft_lusolver) :: lu_solver
   TYPE(oft_lusolver) :: lu_solver_dt
   ! CLASS(oft_solver), POINTER :: solver => NULL()
