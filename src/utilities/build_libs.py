@@ -150,7 +150,7 @@ def ver_range(ver_string, ver_min, ver_max):
     return ver_gt(ver_string, ver_min) and ver_lt(ver_string, ver_max)
 
 
-def check_c_compiles_and_runs(source, flags, config_dict):
+def check_c_compiles_and_runs(source, flags, config_dict, compiler_key='CC'):
     def cleanup(pwd):
         os.remove('test.c')
         try:
@@ -166,17 +166,48 @@ def check_c_compiles_and_runs(source, flags, config_dict):
         handle.write(source)
     # Compile source
     tmp_dict["TMP_FLAGS"] = flags
-    _, errcode = run_command("{CC} {TMP_FLAGS} test.c -o test".format(**tmp_dict))
+    tmp_dict["TMP_CC"] = tmp_dict[compiler_key]
+    compile_out, errcode = run_command("{TMP_CC} {TMP_FLAGS} test.c -o test".format(**tmp_dict))
     if errcode != 0:
         cleanup(pwd)
-        return False
+        return False, compile_out, 'N/A'
     # Run source
-    _, errcode = run_command("./test")
+    run_out, errcode = run_command("./test")
     cleanup(pwd)
     if errcode != 0:
-        return False
+        return False, compile_out, run_out
     else:
-        return True
+        return True, compile_out, run_out
+
+
+def check_fortran_compiles_and_runs(source, flags, config_dict, compiler_key='FC'):
+    def cleanup(pwd):
+        os.remove('test.f90')
+        try:
+            os.remove('test')
+        except OSError:
+            pass
+        os.chdir(pwd)
+    # Write test file
+    tmp_dict = config_dict.copy()
+    pwd = os.getcwd()
+    os.chdir(tmp_dict['base_dir'])
+    with open('test.f90', "w+") as handle:
+        handle.write(source)
+    # Compile source
+    tmp_dict["TMP_FLAGS"] = flags
+    tmp_dict["TMP_FC"] = tmp_dict[compiler_key]
+    compile_out, errcode = run_command("{TMP_FC} {TMP_FLAGS} test.f90 -o test".format(**tmp_dict))
+    if errcode != 0:
+        cleanup(pwd)
+        return False, compile_out, 'N/A'
+    # Run source
+    run_out, errcode = run_command("./test")
+    cleanup(pwd)
+    if errcode != 0:
+        return False, compile_out, run_out
+    else:
+        return True, compile_out, run_out
 
 
 def setup_build_env(build_dir="build", build_cmake_ver=None):
@@ -444,17 +475,22 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         if "UMFPACK_ROOT" in mydict:
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
     if tmp_dict['OS_TYPE'] == 'Darwin':
-        try:
-            result, errcode = run_command("pkgutil --pkg-info=com.apple.pkg.CLTools_Executables | grep version")
-            result = result.split(':')[1]
-        except:
-            errcode = -1
-        if errcode == 0:
-            if ver_range(result, '14.2', '15.3'):
+        linker_test_source = """
+program test_program
+implicit none
+integer :: i
+write(*,*)'Hello World'
+end program test_program
+        """
+        linker_test, compile_res, run_res = check_fortran_compiles_and_runs(linker_test_source, '', mydict)
+        if not linker_test:
+            if compile_res.find('ld: Assertion failed:') >= 0:
+                print('macOS linker bug detected, adding "-Wl,-ld_classic" flags')
                 cmake_lines.append('-DCMAKE_EXE_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
                 cmake_lines.append('-DCMAKE_SHARED_LINKER_FLAGS:STRING="-Wl,-ld_classic"')
-        else:
-            print('Error detecting macOS version using "sw_vers --productVersion"')
+            else:
+                error_exit("Unable to compile Fortran test program",
+                           ["===Compile output===", compile_res, "===Run output===", run_res])
     cmake_lines += [os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))]
     cmake_lines_str = ' \\\n  '.join(cmake_lines)
     # Template string
@@ -742,7 +778,7 @@ class METIS(package):
             "rm -rf build",
             "mkdir -p build",
             "cd build",
-            "{CMAKE} -DCMAKE_INSTALL_PREFIX={METIS_ROOT} -DCMAKE_C_COMPILER={CC} -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DGKLIB_PATH=$GKLIB_PATH .. ",
+            "{CMAKE} -DCMAKE_INSTALL_PREFIX={METIS_ROOT} -DCMAKE_C_COMPILER={CC} -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DGKRAND:BOOL=ON -DGKLIB_PATH=$GKLIB_PATH .. ",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1068,9 +1104,11 @@ int main(int argc, char** argv) {
         else:
             oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1', 'FCOMMON_OPT="-frecursive -fPIC"']
         if self.config_dict['OS_TYPE'] == 'Darwin':
-            if not check_c_compiles_and_runs(avx_test_source, "-mavx", tmp_dict):
+            avx_test, _, _ = check_c_compiles_and_runs(avx_test_source, "-mavx", tmp_dict)
+            if not avx_test:
                 oblas_options += ['NO_AVX=1']
-            if not check_c_compiles_and_runs(avx2_test_source, "-mavx2", tmp_dict):
+            avx2_test, _, _ = check_c_compiles_and_runs(avx2_test_source, "-mavx2", tmp_dict)
+            if not avx2_test:
                 oblas_options += ['NO_AVX2=1']
         if self.dynamic_arch:
             oblas_options += ['DYNAMIC_ARCH=1']

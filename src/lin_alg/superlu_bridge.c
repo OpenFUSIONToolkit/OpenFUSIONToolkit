@@ -27,7 +27,7 @@ oft_superlu_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
                     double *values, int *colind, int *rowptr,
                     double *b, int *ldb,
                     factors_t **f_factors,
-                    int *perm_spec, int *info)
+                    int perm_spec, int *info)
 
 {
 /*
@@ -85,7 +85,7 @@ trans = TRANS; // Row storage format is passed so we solve the transposed system
             *   permc_spec = 2: minimum degree on structure of A'+A
             *   permc_spec = 3: approximate minimum degree for unsymmetric matrices
             */
-            if ( *perm_spec >= 0 ) options.ColPerm = *perm_spec;
+            if ( perm_spec >= 0 ) options.ColPerm = perm_spec;
             /* */
             L = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
             U = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
@@ -231,7 +231,7 @@ oft_superlu_dgsisx_c(int *iopt, int *n, int *nnz, int *nrhs,
                     double *values, int *colind, int *rowptr,
                     double *b, int *ldb,
                     factors_t **f_factors,
-                    int *perm_spec, int *info)
+                    int perm_spec, double fill_tol, int *info)
 
 {
 /*
@@ -284,7 +284,8 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
         ilu_set_default_options(&options);
         // options.DiagPivotThresh = 1.0;
         // options.RowPerm = NO;
-        // options.ILU_DropTol = 1.e-7;
+        options.ILU_MILU = SMILU_2;
+        options.ILU_DropTol = fill_tol; //1.e-7;
         // options.ILU_FillTol = 1.e-3;
         /*
          * Get column permutation vector perm_c[], according to permc_spec:
@@ -293,7 +294,7 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
          *   permc_spec = 2: minimum degree on structure of A'+A
          *   permc_spec = 3: approximate minimum degree for unsymmetric matrices
          */
-        if ( *perm_spec >= 0 ) options.ColPerm = *perm_spec;
+        if ( perm_spec >= 0 ) options.ColPerm = perm_spec;
         /* */
         L = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
         U = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );

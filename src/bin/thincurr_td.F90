@@ -33,26 +33,21 @@ USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
-USE oft_mesh_cubit, ONLY: smesh_cubit_load, cubit_read_nodesets, cubit_read_sidesets
+USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
-USE oft_la_base, ONLY: oft_vector, oft_graph, oft_matrix
-USE oft_lu, ONLY: oft_lusolver, lapack_cholesky
-USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, oft_native_dense_matrix, &
-  partition_graph
+USE oft_la_base, ONLY: oft_vector, oft_matrix
+USE oft_lu, ONLY: lapack_cholesky
+USE oft_native_la, ONLY: oft_native_dense_matrix
 USE oft_deriv_matrices, ONLY: oft_sum_matrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_solver_utils, ONLY: create_cg_solver, create_gmres_solver, create_diag_pre, &
-  create_native_solver
-#ifdef HAVE_ARPACK
-USE oft_arpack, ONLY: oft_iram_eigsolver
-#endif
-USE axi_green, ONLY: green
+USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE mhd_utils, ONLY: mu0
 USE thin_wall
 USE thin_wall_hodlr
 IMPLICIT NONE
+#include "local.h"
 TYPE(tw_type), TARGET :: tw_sim
 TYPE(tw_sensors) :: sensors
 !
@@ -79,8 +74,8 @@ LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: compute_B = .FALSE.
-CHARACTER(LEN=80) :: curr_file="none"
-CHARACTER(LEN=80) :: volt_file="none"
+CHARACTER(LEN=OFT_PATH_SLEN) :: curr_file="none"
+CHARACTER(LEN=OFT_PATH_SLEN) :: volt_file="none"
 NAMELIST/thincurr_td_options/curr_file,volt_file,dt,nsteps,nplot,direct,save_L,save_Mcoil,save_Msen,  &
   plot_run,compute_B,timestep_cn,cg_tol,jumper_start
 !---
@@ -411,6 +406,7 @@ DO i=1,nsteps
         pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t,1)/2.d0
         pcoil_volt(j)=pcoil_volt(j)+linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)/2.d0
       END DO
+      pcoil_volt=pcoil_volt*dt
     END IF
   ELSE
     CALL Lmat%apply(u,g)
@@ -425,6 +421,7 @@ DO i=1,nsteps
       DO j=1,self%n_vcoils
         pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)
       END DO
+      pcoil_volt=pcoil_volt*dt
     END IF
   END IF
   uu=g%dot(g)

@@ -42,7 +42,7 @@ type :: GMSH_cadlink
   integer(i4), pointer, dimension(:) :: lbfg => NULL() !< Linkage of mesh faces to CAD entities
 end type GMSH_cadlink
 !---Global variables
-character(LEN=40) :: filename = 'none' !< Name of GMSH mesh file
+character(LEN=OFT_PATH_SLEN) :: filename = 'none' !< Name of GMSH mesh file
 integer(i4) :: order = 1 !< Order of base mesh
 type(oft_trimesh) :: cad_mesh !< Surface mesh representation of CAD geometry
 type(GMSH_cadlink), pointer :: cad_link => NULL() !< Linkage of mesh to CAD geometry

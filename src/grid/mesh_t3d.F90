@@ -86,8 +86,8 @@ INTEGER(i4), PARAMETER, PUBLIC :: mesh_t3d_id = 1
 PUBLIC mesh_t3d_load, mesh_t3d_reffix, mesh_t3d_cadsync, mesh_t3d_set_periodic
 PUBLIC mesh_t3d_cadlink, mesh_t3d_add_quad, smesh_t3d_load
 !---Global variables
-character(LEN=40) :: inpname = 'none' !< Name of T3D input file for geometry (Used to retrieve CAD objects)
-character(LEN=40) :: filename = 'none' !< Name of T3D input file for mesh
+character(LEN=OFT_PATH_SLEN) :: inpname = 'none' !< Name of T3D input file for geometry (Used to retrieve CAD objects)
+character(LEN=OFT_PATH_SLEN) :: filename = 'none' !< Name of T3D input file for mesh
 character(LEN=3) :: reflect = '' !< Character flag for mesh reflection (eg. 'xy')
 LOGICAL :: ref_per(3) = .FALSE. !< Character flag for periodic reflections
 real(r8) :: zstretch = 1.d0 !< Scale for z-coordinates (useful for cylindrical pinch studies)

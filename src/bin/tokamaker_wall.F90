@@ -738,6 +738,7 @@ USE axi_green, ONLY: decay_eigenmodes
 USE nonax_wall, ONLY: nonax_rescouple, nonax_indcouple, nonax_eigs
 USE exp_geom, ONLY: exp_setup
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: i,ierr,io_unit
 TYPE(gs_eq) :: mygs
 !---GS input options
@@ -773,11 +774,11 @@ LOGICAL :: has_plasma = .TRUE.
 LOGICAL :: save_mug = .FALSE.
 LOGICAL :: fast_boundary = .TRUE.
 LOGICAL :: limited_only = .FALSE.
-CHARACTER(LEN=40) :: coil_file = 'none'
-CHARACTER(LEN=40) :: limiter_file = 'none'
-CHARACTER(LEN=80) :: eqdsk_filename = 'gTokaMaker'
+CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
 CHARACTER(LEN=39) :: eqdsk_run_info = ''
-CHARACTER(LEN=80) :: eqdsk_limiter_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = 'none'
 !---Wall specific options
 LOGICAL :: mirror_wall = .FALSE.
 LOGICAL :: grid_3d = .FALSE.

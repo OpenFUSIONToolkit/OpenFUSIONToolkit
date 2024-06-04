@@ -20,16 +20,15 @@ PROGRAM thincurr_from_mode
 USE oft_base
 USE spline_mod
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: hdf5_create_timestep
 USE oft_mesh_type, ONLY: oft_bmesh
-USE oft_mesh_local, ONLY: mesh_local_findedge
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_la_base, ONLY: oft_vector
-USE oft_native_la, ONLY: oft_native_vector, oft_native_dense_matrix
+USE oft_native_la, ONLY: oft_native_dense_matrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_solver_utils, ONLY: create_cg_solver, create_gmres_solver, create_diag_pre
+USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE thin_wall
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: ndrivers = 0
 INTEGER(4) :: nsensors = 0
 TYPE(tw_type) :: tw_sim
@@ -42,7 +41,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
 TYPE(tw_sensors) :: sensors
 !---
-CHARACTER(LEN=40) :: filename = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none'
 INTEGER(4) :: ntheta = 40
 INTEGER(4) :: nphi = 90
 LOGICAL :: use_spline = .TRUE.

@@ -22,32 +22,21 @@
 !---------------------------------------------------------------------------
 PROGRAM thincurr_fr
 USE oft_base
-USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file
+USE oft_io, ONLY: oft_bin_file
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
-USE oft_mesh_cubit, ONLY: smesh_cubit_load, cubit_read_nodesets, cubit_read_sidesets
+USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
-USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_graph
-USE oft_lu, ONLY: oft_lusolver, lapack_matinv
-USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, partition_graph, &
-  oft_native_dense_cmatrix
-USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
-USE oft_solver_base, ONLY: oft_solver
-USE oft_native_solvers, ONLY: oft_native_gmres_csolver, oft_diag_cscale
-USE oft_solver_utils, ONLY: create_cg_solver, create_gmres_solver, create_diag_pre, &
-  create_native_solver
-#ifdef HAVE_ARPACK
-USE oft_arpack, ONLY: oft_iram_eigsolver
-#endif
-USE axi_green, ONLY: green
+USE oft_la_base, ONLY: oft_vector
 USE mhd_utils, ONLY: mu0
 USE thin_wall
 USE thin_wall_hodlr
 USE thin_wall_solvers, ONLY: frequency_response
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: nsensors = 0
 TYPE(tw_type), TARGET :: tw_sim,mode_source
 TYPE(tw_sensors) :: sensors
@@ -72,7 +61,7 @@ LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 REAL(8) :: freq = 1.d3
 REAL(8) :: force_f0 = 0.d0
-CHARACTER(LEN=80) :: mode_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: mode_file = 'none'
 NAMELIST/thincurr_fr_options/direct,save_L,save_Mcoil,save_Msen,freq,mode_file, &
   fr_limit,jumper_start
 !---
