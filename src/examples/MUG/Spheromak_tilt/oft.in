@@ -35,7 +35,7 @@
  dt=2.e-7          ! Maximum time step
  eta=1.            ! Resistivity
  nu_par=10.        ! Fluid viscosity
- nsteps=2000       ! Number of time steps to take
+ nsteps=3000       ! Number of time steps to take
  rst_freq=10       ! Restart file frequency
  lin_tol=1.E-9     ! Linear solver tolerance
  nl_tol=1.E-5      ! Non-linear solver tolerance
@@ -48,7 +48,7 @@
 
 &xmhd_plot_options
  t0=1.E-8
- dt=1.E-6
+ dt=1.E-5
  rst_start=0
- rst_end=2000
+ rst_end=3000
 /

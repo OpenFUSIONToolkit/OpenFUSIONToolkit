@@ -101,7 +101,7 @@ CALL oft_h1_setup(order, -1)
 !! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
 !! produced by \ref xmhd::xmhd_run "xmhd_run" or \ref xmhd::xmhd_lin_run "xmhd_lin_run" and
 !! generates plot files, and optionally probe signals at evenly spaced points in time as
-!! specified in the input file, see \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex1_input_plot.
+!! specified in the input file, see \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex1_post.
 IF(plot_run)THEN
   !---Setup I/0
   CALL mesh%setup_io(order)
@@ -278,7 +278,7 @@ END PROGRAM MUG_sph_tilt
 !! dt=2.e-7          ! Maximum time step
 !! eta=1.            ! Resistivity
 !! nu_par=10.        ! Fluid viscosity
-!! nsteps=2000       ! Number of time steps to take
+!! nsteps=3000       ! Number of time steps to take
 !! rst_freq=10       ! Restart file frequency
 !! lin_tol=1.E-10    ! Linear solver tolerance
 !! nl_tol=1.E-5      ! Non-linear solver tolerance
@@ -298,13 +298,6 @@ END PROGRAM MUG_sph_tilt
 !! Currently, this preconditioner method is the suggested starting preconditioner for all
 !! time-dependent MHD solves.
 !!
-!! This solver can be used by specifying both the FORTRAN input and XML input files
-!! to the executable as below.
-!!
-!!\verbatim
-!!~$ ./MUG_sph_tilt oft.in oft_in.xml
-!!\endverbatim
-!!
 !!```xml
 !!<oft>
 !!  <xmhd>
@@ -320,20 +313,48 @@ END PROGRAM MUG_sph_tilt
 !!</oft>
 !!```
 !!
-!!\subsection doc_mug_sph_ex1_input_plot Post-Processing options
+!! This solver can be used by specifying both the FORTRAN input and XML input files
+!! to the executable as below.
 !!
-!! When running the code for post-processing additional run time options are available.
+!!\verbatim
+!!~$ ./MUG_sph_tilt oft.in oft_in.xml
+!!\endverbatim
+!!
+!!\section doc_mug_sph_ex1_post Post-Processing options
+!!
+!! During the simulation the evolution of some global quantities is written to the history file `xmhd.hist`. A utility
+!! script (`plot_mug_hist.py` located in `bin` after installation) is included as part of OFT for plotting the signals in this file.
+!! This is useful for monitoring general progress of the simulation as well as numerical parameters like the iteration
+!! count and solver time. Using this script we can see the instability growth and relaxation of the initial magnetic
+!! equilibrium to the lowest energy state.
+!!
+!!\verbatim
+!!~$ python plot_mug_hist.py xmhd.hist
+!!\endverbatim
+!!
+!! \image html MUG_tilt_ex-Kin.png "Time evolution of kinetic energy throughout simulation, showing initial linear growth of instability."
+!!
+!! \image html MUG_tilt_ex-Curr.png "Time evolution of toroidal current. The rapid drop is current corresponds to the transition from a toroidally symmetric to a helical structure with zero net current."
+!!
+!!\subsection doc_mug_sph_ex1_post_plot Creating plot files
+!!
+!! To generate 3D plots, and perform additional diagnostic sampling (see \ref xmhd::oft_xmhd_probe "oft_xmhd_probe"), a plot run can
+!! be performed by setting `plot_run=T` in the `sph_tilt_options` input group, which calls \ref xmhd::xmhd_plot "xmhd_plot". With this option
+!! additional run time options are available in the `xmhd_plot_options` group that control how restart files are sampled for plotting.
 !!
 !!\verbatim
 !!&xmhd_plot_options
 !! t0=1.E-8
-!! dt=1.E-6
+!! dt=1.E-5
 !! rst_start=0
-!! rst_end=2000
+!! rst_end=3000
 !!/
 !!\endverbatim
 !!
-!! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
+!! Once the post-processing run is complete `bin/build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
+!! [VisIt](https://visit-dav.github.io/visit-website/index.html), [ParaView](https://www.paraview.org/), or other visualization programs.
+!!
+!! \image html MUG_tilt_ex-Fields.png "Magnetic field distribution of the initial (left) and final (right) states"
 !!
 !!\section doc_mug_sph_ex1_mesh Mesh Creation
 !! A mesh file `cyl_tilt.h5` is provided with this example. Instructions to generate your

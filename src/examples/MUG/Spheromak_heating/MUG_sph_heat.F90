@@ -103,7 +103,7 @@ CALL oft_h1_setup(order, -1)
 !! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
 !! produced by \ref xmhd::xmhd_run "xmhd_run" and generates plot files, and optionally
 !! probe signals at evenly spaced points in time as specified in the input file, see
-!! \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex2_input_plot.
+!! \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex2_post.
 IF(plot_run)THEN
   !---Setup I/0
   CALL mesh%setup_io(order)
@@ -252,7 +252,7 @@ END PROGRAM MUG_sph_heat
 !! vbc='all'         ! Zero-flow BC for velocity
 !! nbc='d'           ! Dirichlet BC for density
 !! tbc='d'           ! Dirichlet BC for temperature
-!! dt=1.e-7          ! Maximum time step
+!! dt=2.e-7          ! Maximum time step
 !! eta=25.           ! Resistivity at reference temperature (Spitzer-like)
 !! eta_temp=6.       ! Reference temperature for resistivity
 !! nu_par=400.       ! Fluid viscosity
@@ -279,13 +279,6 @@ END PROGRAM MUG_sph_heat
 !! Currently, this preconditioner method is the suggested starting preconditioner for all
 !! time-dependent MHD solves.
 !!
-!! This solver can be used by specifying both the FORTRAN input and XML input files
-!! to the executable as below.
-!!
-!!\verbatim
-!!~$ ./MUG_sph_heat oft.in oft_in.xml
-!!\endverbatim
-!!
 !!```xml
 !!<oft>
 !!  <xmhd>
@@ -301,20 +294,48 @@ END PROGRAM MUG_sph_heat
 !!</oft>
 !!```
 !!
-!!\subsection doc_mug_sph_ex2_input_plot Post-Processing options
+!! This solver can be used by specifying both the FORTRAN input and XML input files
+!! to the executable as below.
 !!
-!! When running the code for post-processing additional run time options are available.
+!!\verbatim
+!!~$ ./MUG_sph_heat oft.in oft_in.xml
+!!\endverbatim
+!!
+!!\section doc_mug_sph_ex2_post Post-Processing options
+!!
+!! During the simulation the evolution of some global quantities is written to the history file `xmhd.hist`. A utility
+!! script (`plot_mug_hist.py` located in `bin` after installation) is included as part of OFT for plotting the signals in this file.
+!! This is useful for monitoring general progress of the simulation as well as numerical parameters like the iteration
+!! count and solver time. Using this script we can see the increase in the average temperature in time and a brief velocity transient
+!! early in time as equilibrium adjusts slightly to be consistent with the magnetic BCs used in the simulation.
+!!
+!!\verbatim
+!!~$ python plot_mug_hist.py xmhd.hist
+!!\endverbatim
+!!
+!! \image html MUG_heat_ex-Ti.png "Time evolution of volume averaged temperature, showing heating due to Ohmic dissipation of current."
+!!
+!! \image html MUG_heat_ex-Kin.png "Time evolution of kinetic energy throughout simulation, showing an initial transient that damps away."
+!!
+!!\subsection doc_mug_sph_ex2_post_plot Creating plot files
+!!
+!! To generate 3D plots, and perform additional diagnostic sampling (see \ref xmhd::oft_xmhd_probe "oft_xmhd_probe"), a plot run can
+!! be performed by setting `plot_run=T` in the `sph_tilt_options` input group, which calls \ref xmhd::xmhd_plot "xmhd_plot". With this option
+!! additional run time options are available in the `xmhd_plot_options` group that control how restart files are sampled for plotting.
 !!
 !!\verbatim
 !!&xmhd_plot_options
 !! t0=1.E-8
-!! dt=1.E-6
+!! dt=1.E-5
 !! rst_start=0
 !! rst_end=2000
 !!/
 !!\endverbatim
 !!
-!! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
+!! Once the post-processing run is complete `bin/build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
+!! [VisIt](https://visit-dav.github.io/visit-website/index.html), [ParaView](https://www.paraview.org/), or other visualization programs.
+!!
+!! \image html MUG_heat_ex-Fields.png "Resulting temperature distribution (shading) and magnetic field (vectors) at the end of the simulation, showing thermal confinement in the core of the torus."
 !!
 !!\section doc_mug_sph_ex2_mesh Mesh Creation
 !! A mesh file `cyl_heat.h5` is provided with this example. Instructions to generate your
