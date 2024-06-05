@@ -115,7 +115,7 @@ def parse_fortran_file(fid):
         file_buffer = file_buffer + doc_buffer + "\n"
     # Add full source if needed
     if full_code != "":
-        file_buffer = file_buffer + r'\n\section " + ex_prefix + "_full Complete Source\n'
+        file_buffer = file_buffer + "\n" + r'\section ' + ex_prefix + "_full Complete Source\n"
         file_buffer = file_buffer + "~~~~~~~~~{.F90}\n"
         file_buffer = file_buffer + full_code
         file_buffer = file_buffer + "~~~~~~~~~\n"
@@ -136,25 +136,18 @@ if __name__ == '__main__':
     if not os.path.isdir("docs/generated/images"):
         os.mkdir("docs/generated/images")
     # Loop over all example files
-    files = os.listdir("examples")
+    files = glob.glob("examples/*.F90") + glob.glob("examples/*/*/*.F90")
     print("\n==========================================")
     print("Parsing Example Files")
     for filename in files:
-        file_parts = filename.split('.')
-        if len(file_parts) != 2:
-            continue
-        basename = file_parts[0]
-        extension = file_parts[1]
-        # If FORTRAN source file parse to create doc
-        if "F90" == extension:
-            path = "examples/" + filename
-            print(path)
-            with open(path,'r') as fid:
-                new_file = parse_fortran_file(fid)
-            # Write documentation file to doc folder
-            path = "docs/generated/doc_" + basename + ".md"
-            with open(path,"w+") as fid:
-                fid.write(new_file)
+        basename = os.path.basename(filename)
+        print(filename,basename)
+        with open(filename,'r') as fid:
+            new_file = parse_fortran_file(fid)
+        # Write documentation file to doc folder
+        path = "docs/generated/doc_" + basename + ".md"
+        with open(path,"w+") as fid:
+            fid.write(new_file)
     # Add Jupyter notebooks to documentation
     print()
     print("\n==========================================")

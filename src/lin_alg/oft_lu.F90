@@ -1218,12 +1218,12 @@ END SUBROUTINE lapack_cholesky_real
 !------------------------------------------------------------------------------
 subroutine ilu0(n,a,lc,kr,alu,jlu,ju,ierr)
 integer(4), intent(in) :: n !< Size of matrix
-real(8), dimension(:), intent(in) :: a !< Matrix entries
-real(8), dimension(:), intent(inout) :: alu !< Entries for L/U factors
-integer(4), dimension(:), intent(inout) :: lc !< Column indices
-integer(4), dimension(:), intent(inout) :: kr !< Row pointer
-integer(4), dimension(:), intent(inout) :: jlu !< Column indices for alu
-integer(4), dimension(:), intent(inout) :: ju !< Diagonal indices for alu
+real(8), contiguous, dimension(:), intent(in) :: a !< Matrix entries
+real(8), contiguous, dimension(:), intent(inout) :: alu !< Entries for L/U factors
+integer(4), contiguous, dimension(:), intent(inout) :: lc !< Column indices
+integer(4), contiguous, dimension(:), intent(inout) :: kr !< Row pointer
+integer(4), contiguous, dimension(:), intent(inout) :: jlu !< Column indices for alu
+integer(4), contiguous, dimension(:), intent(inout) :: ju !< Diagonal indices for alu
 integer(4), intent(out) :: ierr !< Error flag
 integer(4), allocatable, dimension(:) :: iw
 integer(4) :: i,ii,j,jj,jcol,jf,jm,jrow,js,ju0,jw
@@ -1288,9 +1288,9 @@ subroutine lusol(n, nrhs, x, alu, jlu, ju)
 integer(4), intent(in) :: n !< Size of matrix
 integer(4), intent(in) :: nrhs !< Number of RHS to solve
 real(8), intent(inout) :: x(n,nrhs) !< Input: RHS, Output: Solution
-real(8), dimension(:), intent(in) :: alu !< Entries for L/U factors
-integer(4), dimension(:), intent(in) :: jlu !< Column indices for alu
-integer(4), dimension(:), intent(in) :: ju !< Diagonal indices for alu
+real(8), contiguous, dimension(:), intent(in) :: alu !< Entries for L/U factors
+integer(4), contiguous, dimension(:), intent(in) :: jlu !< Column indices for alu
+integer(4), contiguous, dimension(:), intent(in) :: ju !< Diagonal indices for alu
 integer(4) :: i,k
 ! forward solve
 do i = 1, n
