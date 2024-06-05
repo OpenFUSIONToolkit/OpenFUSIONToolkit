@@ -71,7 +71,7 @@ contains
   procedure :: interp => taylor_rinterp
 end type oft_taylor_rinterp
 !---Force-free eigenmode variables
-integer(i4) :: taylor_minlev=1 !< Lowest FE level for MG solvers
+integer(i4) :: taylor_minlev=-1 !< Lowest FE level for MG solvers
 integer(i4) :: taylor_nm=0 !< Number of force-free fields to be computed
 real(r8), pointer, dimension(:,:) :: taylor_hlam => NULL() !< Homogeneous force-free lambdas
 real(r8), pointer, dimension(:,:) :: taylor_htor => NULL() !< Homogeneous force-free toroidal fluxes
@@ -140,6 +140,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,*)
   CALL mytimer%tick
 END IF
+IF(taylor_minlev<0)taylor_minlev=oft_hcurl_nlevels
 !---Allocate storage
 ALLOCATE(taylor_hffa(taylor_nm,oft_hcurl_nlevels))
 ALLOCATE(taylor_hlam(taylor_nm,oft_hcurl_nlevels))
@@ -382,6 +383,7 @@ IF(taylor_rst)THEN
 ELSE
   rst=.FALSE.
 END IF
+IF(taylor_minlev<0)taylor_minlev=oft_hcurl_nlevels
 IF(.NOT.rst)THEN
 !---------------------------------------------------------------------------
 ! Setup H0::LOP preconditioner
@@ -641,6 +643,7 @@ IF(taylor_rst)THEN
 ELSE
   rst=.FALSE.
 END IF
+IF(taylor_minlev<0)taylor_minlev=oft_hcurl_nlevels
 NULLIFY(mop,kop,wop,jmlb_mat,ml_jmlb)
 IF(.NOT.rst)THEN
   !---Orthogonalize (if within 5% of Taylor state)
@@ -814,6 +817,7 @@ DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(taylor_hcpc))CALL oft_abort("Vacuum fields not available", &
 "taylor_injector_single", __FILE__)
 NULLIFY(mop,kop,wop,ml_jmlb)
+IF(taylor_minlev<0)taylor_minlev=oft_hcurl_nlevels
 !---------------------------------------------------------------------------
 ! Setup H1(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
