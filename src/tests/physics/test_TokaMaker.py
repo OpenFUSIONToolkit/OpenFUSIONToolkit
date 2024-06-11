@@ -12,7 +12,7 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
-from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green
+from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
 
 
 def mp_run(target,args,timeout=30):
@@ -402,24 +402,8 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,mp_q):
     coil_reg_weights[-1] = 1.E-2
     mygs.set_coil_reg(coil_reg_mat, reg_weights=coil_reg_weights, reg_targets=coil_reg_targets)
     #
-    n_sample = 40
-    psi_sample = np.linspace(0.0,1.0,n_sample)
-    alpha = 1.5
-    gamma = 2.0
-    ffp_prof = {
-        'type': 'linterp',
-        'x': psi_sample,
-        'y': np.power(1.0-np.power(psi_sample,alpha),gamma)
-    }
-    ffp_prof['y'] /= ffp_prof['y'][0]
-    alpha = 4.0
-    gamma = 1.0
-    pp_prof = {
-        'type': 'linterp',
-        'x': psi_sample,
-        'y': np.power(1.0-np.power(psi_sample,alpha),gamma)
-    }
-    pp_prof['y'] /= pp_prof['y'][0]
+    ffp_prof = create_power_flux_fun(40,1.5,2.0)
+    pp_prof = create_power_flux_fun(40,4.0,1.0)
     mygs.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
     #
     R0 = 6.3
@@ -559,23 +543,8 @@ def run_LTX_case(fe_order,eig_test,mp_q):
     coil_reg_weights[-1] = 1.E-4
     mygs.set_coil_reg(coil_regmat,reg_weights=coil_reg_weights)
     #
-    psi_sample = np.linspace(0.0,1.0,50)
-    alpha = 1.5
-    gamma = 2.0
-    ffp_prof = {
-        'type': 'linterp',
-        'x': psi_sample,
-        'y': np.power(1.0-np.power(psi_sample,alpha),gamma)
-    }
-    ffp_prof['y'] /= ffp_prof['y'][0]
-    alpha = 4.0
-    gamma = 1.0
-    pp_prof = {
-        'type': 'linterp',
-        'x': psi_sample,
-        'y': np.power(1.0-np.power(psi_sample,alpha),gamma)
-    }
-    pp_prof['y'] /= pp_prof['y'][0]
+    ffp_prof = create_power_flux_fun(50,1.5,2.0)
+    pp_prof = create_power_flux_fun(50,4.0,1.0)
     mygs.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
     #
     mygs.init_psi(0.42,0.0,0.15,1.5,0.6)
