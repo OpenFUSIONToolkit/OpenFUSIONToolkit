@@ -34,7 +34,7 @@ jobs:
 
       - name: Install prerequisites
         run: |
-          sudo apt -y install doxygen graphviz
+          sudo apt-get -y install doxygen graphviz
           pip3 install jupyter nbconvert
 
       - name: Setup Pages
@@ -45,7 +45,7 @@ jobs:
         run: mkdir build_docs
 
       - name: Build OFT documentation (nightly)
-        if: github.ref != 'refs/head/gh-pages'
+        if: github.ref != 'refs/heads/gh-pages'
         shell: bash
         working-directory: build_docs
         run: |
@@ -53,7 +53,7 @@ jobs:
           make docs
       
       - name: Build OFT documentation (deploy)
-        if: github.ref == 'refs/head/gh-pages'
+        if: github.ref == 'refs/heads/gh-pages'
         shell: bash
         working-directory: build_docs
         run: bash ../src/docs/build_doc_versions.sh
