@@ -42,6 +42,50 @@ def create_isoflux(npts, r0, z0, a, kappa, delta, kappaL=None, deltaL=None):
     return isoflux_pts
 
 
+def create_spline_flux_fun(npts,x,y,axis_bc=[1,0.0],edge_bc=[1,0.0],normalize=True):
+    r'''! Build cubic spline flux function
+
+    @param npts Number of points for definition
+    @param x Location of spline "knots" in normalized flux
+    @param y Value of flux function at spline "knots"
+    @param axis_bc [SciPy BC specification](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html) on axis (\f$ \hat{\psi} = 0 \f$)
+    @param edge_bc [SciPy BC specification](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html) on LCFS (\f$ \hat{\psi} = 1 \f$)
+    @result Flux function definition dictionary
+    '''
+    try:
+        from scipy.interpolate import CubicSpline
+    except ImportError:
+        print("Spline flux function requires SciPy")
+        raise
+    prof = CubicSpline(x,y,bc_type=[axis_bc,edge_bc])
+    x_sample = numpy.linspace(0.0,1.0,npts)
+    prof = {
+        'type': 'linterp',
+        'x': x_sample,
+        'y': prof(x_sample)
+    }
+    if normalize:
+        prof['y'] /= prof['y'][0]
+    return prof
+
+
+
+def create_power_flux_fun(npts,alpha,gamma):
+    r'''! Build power law flux function of the form \f$ ((1-\hat{\psi})^{\alpha})^{\gamma} \f$
+
+    @param npts Number of points for definition
+    @param alpha Inner exponent
+    @param gamma Outer exponent
+    @result Flux function definition dictionary
+    '''
+    psi_pts = numpy.linspace(0.0,1.0,npts)
+    return {
+        'type': 'linterp',
+        'x': psi_pts,
+        'y': numpy.power(1.0-numpy.power(psi_pts,alpha),gamma)
+    }
+
+
 def read_eqdsk(filename):
     '''! Read gEQDSK file
 
