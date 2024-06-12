@@ -31,8 +31,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-tags: true
+      
+      - name: Fetch release tags (deploy)
+        if: github.ref == 'refs/heads/gh-pages'
+        run: git fetch --prune --unshallow --tags
 
       - name: Install prerequisites
         run: |
