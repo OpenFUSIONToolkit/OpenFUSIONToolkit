@@ -24,7 +24,7 @@ jobs:
 
     - name: Install prerequisites
       run: |
-        sudo apt -y install lcov
+        sudo apt-get -y install lcov
         pip3 install pytest pytest-cov numpy scipy h5py triangle
 
     - name: Cache external libraries
