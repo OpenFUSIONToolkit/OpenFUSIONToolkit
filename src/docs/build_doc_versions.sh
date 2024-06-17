@@ -35,7 +35,7 @@ echo $CURR_RELEASE >> doc_versions.txt
 MENU_PATCH+='{text:"'$CURR_RELEASE'",url:"'../$CURR_RELEASE'/index.html"},'
 
 # Build previous releases (explicitly set for now)
-for verTag in v1.0.0-beta2 ;
+for verTag in v1.0.0-beta2 v1.0.0-beta3 ;
 do
     git checkout $verTag
     mkdir $verTag && cd $verTag
@@ -48,7 +48,10 @@ done
 
 # Create common output directory and pointer page
 mkdir -p doc/html
-echo '<meta http-equiv="REFRESH" content="0;URL='$CURR_RELEASE'/index.html">' > doc/html/index.html
+echo '<html><head><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />' > doc/html/index.html
+echo '<meta http-equiv="Pragma" content="no-cache" />' >> doc/html/index.html
+echo '<meta http-equiv="Expires" content="0" />' >> doc/html/index.html
+echo '<meta http-equiv="REFRESH" content="0;URL='$CURR_RELEASE'/index.html"></head></html>' >> doc/html/index.html
 
 # Copy other versions to output directory and patch menu
 while read verTag; do
