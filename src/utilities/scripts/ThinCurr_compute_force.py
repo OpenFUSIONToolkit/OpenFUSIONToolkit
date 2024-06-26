@@ -46,19 +46,21 @@ else:
 with h5py.File('mesh.0001.h5', 'r') as fid:
     lc = np.asarray(fid['/LC_surf'])
     r = np.asarray(fid['/R_surf'])
+nv = r.shape[0]
 nc = lc.shape[0]
 area = np.zeros((lc.shape[0],))
 rcc = np.zeros((nc,3))
 rcc_torque = np.zeros((nc,3))
-Btor = np.zeros((nc,3))
 for i in range(nc):
     v1 = r[lc[i,1],:]-r[lc[i,0],:]
     v2 = r[lc[i,2],:]-r[lc[i,0],:]
     area[i] = np.linalg.norm(np.cross(v1,v2))/2.0
     rcc[i,:] = (r[lc[i,2],:]+r[lc[i,1],:]+r[lc[i,0],:])/3.0
     rcc_torque[i,:] = rcc[i,:]-torque_cen
-    that = np.r_[-rcc[i,1],rcc[i,0],0.0]; that/=np.linalg.norm(that)
-    Btor[i,:] = options.btr0*that/np.sqrt(np.power(rcc[i,0],2)+np.power(rcc[i,1],2))
+Btor = np.zeros((nv,3))
+for i in range(nv):
+    that = np.r_[-r[i,1],r[i,0],0.0]; that/=np.linalg.norm(that)
+    Btor[i,:] = options.btr0*that/np.sqrt(np.power(r[i,0],2)+np.power(r[i,1],2))
 if not have_torque:
     rcc_torque = None
 
@@ -72,15 +74,17 @@ with h5py.File('vector_dump.0001.h5', 'r') as fid:
             if '/J{0:04d}'.format(i+1) not in fid:
                 break
             J = np.asarray(fid['/J{0:04d}'.format(i+1)])
-            B = (np.asarray(fid['/B{0:04d}'.format(i+1)])+Btor)
+            Bv = np.asarray(fid['/B_v{0:04d}'.format(i+1)]) + Btor
+            B = (Bv[lc[:,0],:]+Bv[lc[:,1],:]+Bv[lc[:,2],:])/3.0
             compute_force(J,B,area,options.use_slow,options.reg_min,options.reg_max,rcc_torque=rcc_torque,torque_cen=torque_cen)
     else:
         for i in range(abs(options.nmax)):
             if '/J_{0:02d}{1:04d}'.format(i+1,0) not in fid:
                 break
-            if '/B_{0:02d}{1:04d}'.format(i+1,0) not in fid:
+            if '/B_v_{0:02d}{1:04d}'.format(i+1,0) not in fid:
                 break
             J = np.asarray(fid['/J_{0:02d}{1:04d}'.format(i+1,0)])
-            B = (np.asarray(fid['/B_{0:02d}{1:04d}'.format(i+1,0)])+Btor)
+            Bv = np.asarray(fid['/B_v_{0:02d}{1:04d}'.format(i+1,0)]) + Btor
+            B = (Bv[lc[:,0],:]+Bv[lc[:,1],:]+Bv[lc[:,2],:])/3.0
             compute_force(J,B,area,options.use_slow,options.reg_min,options.reg_max,rcc_torque=rcc_torque,torque_cen=torque_cen)
                 

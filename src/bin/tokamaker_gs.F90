@@ -28,6 +28,7 @@ USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_save_decon, gs_save_eqdsk, &
   gs_profile_load
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
 LOGICAL :: file_exists
@@ -71,11 +72,11 @@ LOGICAL :: has_plasma = .TRUE.
 LOGICAL :: save_mug = .FALSE.
 LOGICAL :: fast_boundary = .TRUE.
 LOGICAL :: limited_only = .FALSE.
-CHARACTER(LEN=40) :: coil_file = 'none'
-CHARACTER(LEN=40) :: limiter_file = 'none'
-CHARACTER(LEN=80) :: eqdsk_filename = 'gTokaMaker'
+CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
 CHARACTER(LEN=36) :: eqdsk_run_info = ''
-CHARACTER(LEN=80) :: eqdsk_limiter_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = 'none'
 NAMELIST/tokamaker_options/order,pm,mode,maxits,ninner,urf,nl_tol,itor_target,pnorm, &
 alam,beta_mr,free_boundary,coil_file,limiter_file,f_offset,dcon_npsi,dcon_ntheta, &
 has_plasma,rmin,R0_target,V0_target,save_mug,fast_boundary, &
@@ -150,14 +151,14 @@ CALL gs_setup_walls(mygs)
 INQUIRE(EXIST=file_exists,FILE='gs_isoflux.in')
 IF(file_exists)THEN
   OPEN(NEWUNIT=io_unit,FILE='gs_isoflux.in')
-  READ(io_unit,*)mygs%isoflux_ntargets,mygs%isoflux_nsaddles
+  READ(io_unit,*)mygs%isoflux_ntargets,mygs%saddle_ntargets
   ALLOCATE(mygs%isoflux_targets(2,mygs%isoflux_ntargets))
   DO i=1,mygs%isoflux_ntargets
     READ(io_unit,*)mygs%isoflux_targets(:,i)
   END DO
-  ALLOCATE(mygs%isoflux_saddles(2,mygs%isoflux_nsaddles))
-  DO i=1,mygs%isoflux_nsaddles
-    READ(io_unit,*)mygs%isoflux_saddles(:,i)
+  ALLOCATE(mygs%saddle_targets(2,mygs%saddle_ntargets))
+  DO i=1,mygs%saddle_ntargets
+    READ(io_unit,*)mygs%saddle_targets(:,i)
   END DO
   CLOSE(io_unit)
   !---Read coil constraint matrix

@@ -313,9 +313,10 @@ class(oft_amesh), intent(inout) :: mesh
 integer(i4), intent(inout) :: meshpart(:)
 integer(i4), intent(in) :: part_meth
 integer(i4) :: i,k,m,nctmp,nptmp,ierr
-integer(i4), allocatable, dimension(:) :: lptmp,lctmp,pflag,ncells,cpart
+integer(i4), allocatable, dimension(:) :: lptmp,lctmp,pflag,ncells,cpart,isort
 integer(i4), allocatable, dimension(:,:) :: lcctmp
 real(r8) :: pt(3),zmin,zmax,zrange
+real(r8), allocatable, dimension(:) :: part_sort
 DEBUG_STACK_PUSH
 !---Synchronize before deomposition
 CALL oft_mpi_barrier(ierr) ! Wait for all processes
@@ -327,39 +328,57 @@ if(oft_env%rank==0)then
   if(part_meth==1)THEN ! Metis partitioning
     CALL oft_metis_partMesh(mesh%nc,mesh%np,mesh%cell_np,mesh%lc,oft_env%nnodes,cpart,ierr)
     IF(ierr<0)CALL oft_abort('Mesh partitioning failed','mesh_global_partition',__FILE__)
-  elseif(part_meth==2)THEN ! Axial spatial partitioning
-    zmin = MINVAL(mesh%r(3,:))
-    zmax = MAXVAL(mesh%r(3,:))
+  elseif((part_meth>1).AND.(part_meth<5))THEN ! Axial spatial partitioning
+    zmin = MINVAL(mesh%r(part_meth-1,:))
+    zmax = MAXVAL(mesh%r(part_meth-1,:))
     zrange = (zmax-zmin)/REAL(oft_env%nnodes,8)
-    IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
-    "Partition count invalid for spatial partitioning",'mesh_global_partition',__FILE__)
-    DO i=1,mesh%nc
-      pt = 0.d0
-      DO k=1,mesh%cell_np
-        pt = pt + mesh%r(:,mesh%lc(k,i))
-      END DO
-      pt=pt/REAL(mesh%cell_np,8)
-      DO k=1,oft_env%nnodes
-        IF((pt(3) <= REAL(k,8)*zrange + zmin).AND.(pt(3) > REAL(k-1,8)*zrange + zmin))cpart(i)=k
-      END DO
-      IF(cpart(i)<1)WRITE(*,*)'BAD',i,pt
+    ! IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
+    !   "Partition count invalid for spatial partitioning",'mesh_global_partition',__FILE__)
+    ALLOCATE(pflag(mesh%np),part_sort(mesh%np),isort(mesh%np))
+    pflag=oft_env%nnodes+1
+    isort=[(i,i=1,mesh%np)]
+    part_sort=mesh%r(part_meth-1,:)
+    CALL sort_array(part_sort,isort,mesh%np)
+    k=1
+    DO i=1,mesh%np
+      IF(i>REAL(k*mesh%np,8)/REAL(oft_env%nnodes,8))THEN
+        k=k+1
+      END IF
+      pflag(isort(i))=k
     END DO
-  elseif(part_meth==3)THEN ! Toroidal spatial partitioning
+    WRITE(*,*)'CHK',COUNT(pflag<=0),COUNT(pflag>oft_env%nnodes)
+    DO i=1,mesh%nc
+      cpart(i)=oft_env%nnodes+1
+      DO k=1,mesh%cell_np
+        cpart(i)=MIN(cpart(i),pflag(mesh%lc(k,i)))
+      END DO
+      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
+    END DO
+  elseif(part_meth==5)THEN ! Toroidal spatial partitioning
     zmin = -pi
     zmax = pi
     zrange = (zmax-zmin)/REAL(oft_env%nnodes,8)
-    IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
-    'Partition count invalid for spatial partitioning','mesh_global_partition',__FILE__)
+    ! IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
+    ! 'Partition count invalid for spatial partitioning','mesh_global_partition',__FILE__)
+    ALLOCATE(pflag(mesh%np),part_sort(mesh%np),isort(mesh%np))
+    pflag=oft_env%nnodes+1
+    isort=[(i,i=1,mesh%np)]
+    part_sort=ATAN2(mesh%r(2,:),mesh%r(1,:))
+    CALL sort_array(part_sort,isort,mesh%np)
+    k=1
+    DO i=1,mesh%np
+      IF(i>REAL(k*mesh%np,8)/REAL(oft_env%nnodes,8))THEN
+        k=k+1
+      END IF
+      pflag(isort(i))=k
+    END DO
+    WRITE(*,*)'CHK',COUNT(pflag<=0),COUNT(pflag>oft_env%nnodes)
     DO i=1,mesh%nc
-      pt = 0.d0
+      cpart(i)=oft_env%nnodes+1
       DO k=1,mesh%cell_np
-        pt = pt + mesh%r(:,mesh%lc(k,i))
+        cpart(i)=MIN(cpart(i),pflag(mesh%lc(k,i)))
       END DO
-      pt=pt/REAL(mesh%cell_np,8)
-      DO k=1,oft_env%nnodes
-        IF((ATAN2(pt(2),pt(1)) <= REAL(k,8)*zrange + zmin).AND.(ATAN2(pt(2),pt(1)) > REAL(k-1,8)*zrange + zmin))cpart(i)=k
-      END DO
-      IF(cpart(i)<1)WRITE(*,*)'BAD',i,pt
+      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
     END DO
   else
     CALL oft_abort('Invalid partitioning method', 'mesh_global_partition', __FILE__)

@@ -11,19 +11,25 @@
 !! @ingroup doxy_oft_physics
 !---------------------------------------------------------------------------
 MODULE thin_wall
+USE, INTRINSIC :: iso_c_binding, only: c_loc
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_bmesh
 USE oft_mesh_local, ONLY: bmesh_local_init
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
-USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
+USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file, &
+  hdf5_field_get_sizes, hdf5_create_group
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_tet_quadrature, ONLY: set_quad_2d
-USE oft_la_base, ONLY: oft_vector
+USE oft_la_base, ONLY: oft_vector, oft_cvector
+USE oft_la_utils, ONLY: csr_remove_redundant
+USE oft_deriv_matrices, ONLY: oft_noop_matrix
 USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, native_vector_cast, &
-  native_vector_slice_push, native_vector_slice_pop
+  native_vector_slice_push, native_vector_slice_pop, oft_native_dense_matrix
+USE oft_solver_base, ONLY: oft_solver, oft_csolver
+USE oft_lu, ONLY: lapack_matinv, lapack_cholesky
 USE axi_green, ONLY: green, axi_coil_set
 USE mhd_utils, ONLY: mu0
 #define MAX_EDGE_CONN 6
@@ -106,7 +112,8 @@ TYPE :: tw_type
   INTEGER(i4) :: nfh = 0 !< Number of face-hole interactions
   LOGICAL, POINTER, DIMENSION(:) :: sens_mask => NULL() !< Mask array for sensors [nreg]
   INTEGER(i4), POINTER, DIMENSION(:) :: pmap => NULL() !< Map from mesh vertices to active vertices [mesh%np]
-  INTEGER(i4), POINTER, DIMENSION(:) :: pmap_inv => NULL() !< Map from active vertices to mesh vertices [np_active]
+  INTEGER(i4), POINTER, DIMENSION(:) :: kpmap_inv => NULL() !< Map from active vertices to mesh vertices [np_active]
+  INTEGER(i4), POINTER, DIMENSION(:) :: lpmap_inv => NULL() !< Map from active vertices to mesh vertices [mesh%np]
   INTEGER(i4), POINTER, DIMENSION(:) :: closures => NULL() !< List of closure vertices [nclosures]
   INTEGER(i4), POINTER, DIMENSION(:) :: kfh => NULL() !< Pointer to face-hole interaction list [mesh%nc+1]
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lfh => NULL() !< List of face-hole interactions [nfh]
@@ -124,17 +131,20 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: qbasis => NULL() !< Basis function pre-evaluated at cell centers
   CLASS(oft_vector), POINTER :: Uloc => NULL() !< FE vector for thin-wall model
+  CLASS(oft_vector), POINTER :: Uloc_pts => NULL() !< Needs docs
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL() !< Resistivity matrix for thin-wall model
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Underlying surface mesh
   TYPE(hole_mesh), POINTER, DIMENSION(:) :: hmesh => NULL() !< Hole definitions
   TYPE(tw_coil_set), POINTER, DIMENSION(:) :: vcoils => NULL() !< List of Vcoils
   TYPE(tw_coil_set), POINTER, DIMENSION(:) :: icoils => NULL() !< List of Icoils
+  TYPE(fox_node), POINTER :: xml => NULL()
 CONTAINS
   !> Setup thin-wall model
   PROCEDURE :: setup => tw_setup
   !> Save debug information for model
   PROCEDURE :: save_debug => tw_save_debug
 END TYPE tw_type
+
 !------------------------------------------------------------------------------
 !> Class for thin-wall simulation
 !------------------------------------------------------------------------------
@@ -170,9 +180,12 @@ CONTAINS
 SUBROUTINE tw_setup(self,hole_ns)
 CLASS(tw_type), INTENT(INOUT) :: self !< Thin-wall model object
 TYPE(oft_1d_int), POINTER, INTENT(IN) :: hole_ns(:) !< Hole nodesets
-INTEGER(4) :: i,j,k,l,face,ioffset,ed
-INTEGER(4), ALLOCATABLE :: kfh_tmp(:)
+INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag
+INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
+#ifdef HAVE_XML
+TYPE(fox_node), POINTER :: coil_element
+#endif
 !
 IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
 !---
@@ -180,15 +193,23 @@ WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
+#ifdef HAVE_XML
 !---Load coils
+IF(.NOT.ASSOCIATED(self%xml))THEN
+  CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
+  CALL oft_warn('Unable to find "thincurr" XML node')
+END IF
 WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
-CALL tw_load_coils("vcoils",self%n_vcoils,self%vcoils)
+CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
+IF(error_flag==0)CALL tw_load_coils(coil_element,self%n_vcoils,self%vcoils)
 DO i=1,self%n_vcoils
   IF(ANY(self%vcoils(i)%res_per_len<0.d0))CALL oft_abort("Invalid resistivity for passive coil", &
     "tw_setup", __FILE__)
 END DO
 WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils'
-CALL tw_load_coils("icoils",self%n_icoils,self%icoils)
+CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
+IF(error_flag==0)CALL tw_load_coils(coil_element,self%n_icoils,self%icoils)
+#endif
 WRITE(*,*)
 ! WRITE(*,'(2A)')oft_indent,'Thin-wall model loaded:'
 ! WRITE(*,*)'  filename    = ',TRIM(meshfile)
@@ -276,37 +297,66 @@ IF(self%nholes>0)THEN
     END DO
   END DO
 END IF
-ALLOCATE(self%pmap(self%mesh%np))
-self%pmap=0
-self%np_active=0
-DO i=1,self%mesh%np
-  IF(self%mesh%bp(i))CYCLE
-  self%np_active=self%np_active+1
-  self%pmap(i)=self%np_active
-END DO
-! Convert closure cells to vertices and mark
-DO i=1,self%nclosures
-  j=MAXLOC(self%pmap(self%mesh%lc(:,self%closures(i))),DIM=1)
-  j=self%mesh%lc(j,self%closures(i))
-  IF(self%pmap(j)==0)CALL oft_abort("Error getting closure vertex","tw_setup",__FILE__)
-  self%pmap(j)=-i
-  self%closures(i)=j
-END DO
-self%nclosures=0
-! Reindex, removing closure vertices
-self%np_active=0
-DO i=1,self%mesh%np
-  IF(self%pmap(i)>0)THEN
+IF(.NOT.ASSOCIATED(self%pmap))THEN
+  ALLOCATE(self%pmap(self%mesh%np))
+  self%pmap=0
+  self%np_active=0
+  DO i=1,self%mesh%np
+    IF(self%mesh%bp(i))CYCLE
     self%np_active=self%np_active+1
     self%pmap(i)=self%np_active
-  ELSE
-    self%pmap(i)=0
+  END DO
+  ! Convert closure cells to vertices and mark
+  DO i=1,self%nclosures
+    l=-1
+    j=1
+    DO k=1,3
+      IF(self%pmap(self%mesh%lc(k,self%closures(i)))<=0)CYCLE
+      IF(self%mesh%kpc(self%mesh%lc(k,self%closures(i))+1)-self%mesh%kpc(self%mesh%lc(k,self%closures(i)))>l)THEN
+        l=self%mesh%kpc(self%mesh%lc(k,self%closures(i))+1)-self%mesh%kpc(self%mesh%lc(k,self%closures(i)))
+        j=k
+      END IF
+    END DO
+    j=self%mesh%lc(j,self%closures(i))
+    IF(self%pmap(j)==0)CALL oft_abort("Error getting closure vertex","tw_setup",__FILE__)
+    self%pmap(j)=-i
+    self%closures(i)=j
+  END DO
+  self%nclosures=0 !-self%nclosures
+  ! Reindex, removing closure vertices
+  self%np_active=0
+  DO i=1,self%mesh%np
+    IF(self%pmap(i)>0)THEN
+      self%np_active=self%np_active+1
+      self%pmap(i)=self%np_active
+    ELSE
+      self%pmap(i)=0
+    END IF
+  END DO
+ELSE
+  self%np_active=MAXVAL(self%pmap)
+END IF
+!
+ALLOCATE(self%kpmap_inv(self%np_active+1))
+self%kpmap_inv=0
+DO i=1,self%mesh%np
+  IF(self%pmap(i)/=0)self%kpmap_inv(self%pmap(i))=self%kpmap_inv(self%pmap(i))+1
+END DO
+self%kpmap_inv(self%np_active+1)=SUM(self%kpmap_inv)+1
+DO i=self%np_active,1,-1
+  self%kpmap_inv(i)=self%kpmap_inv(i+1)-self%kpmap_inv(i)
+END DO
+IF(self%kpmap_inv(1)/=1)CALL oft_abort("Invalid inverse point linkage","tw_setup",__FILE__)
+ALLOCATE(self%lpmap_inv(self%mesh%np),np_inverse(self%np_active))
+np_inverse=0
+self%lpmap_inv=0
+DO i=1,self%mesh%np
+  IF(self%pmap(i)/=0)THEN
+    self%lpmap_inv(self%kpmap_inv(self%pmap(i))+np_inverse(self%pmap(i)))=i
+    np_inverse(self%pmap(i))=np_inverse(self%pmap(i))+1
   END IF
 END DO
-ALLOCATE(self%pmap_inv(self%np_active))
-DO i=1,self%mesh%np
-  IF(self%pmap(i)/=0)self%pmap_inv(self%pmap(i))=i
-END DO
+DEALLOCATE(np_inverse)
 self%nelems = self%np_active + self%nholes + self%n_vcoils
 !---Build basis array
 ALLOCATE(self%qbasis(3,3,self%mesh%nc))
@@ -325,6 +375,19 @@ ALLOCATE(oft_native_vector::self%Uloc)
 SELECT TYPE(this=>self%Uloc)
   CLASS IS(oft_native_vector)
     this%n=self%nelems; this%ng=self%nelems
+    this%nslice=this%n
+    ALLOCATE(this%v(this%n))
+    ALLOCATE(this%stitch_info)
+    ALLOCATE(this%stitch_info%be(this%n))
+    this%stitch_info%full=.TRUE.
+    this%stitch_info%nbe=0
+    this%stitch_info%be=.FALSE.
+END SELECT
+!---Create point vector
+ALLOCATE(oft_native_vector::self%Uloc_pts)
+SELECT TYPE(this=>self%Uloc_pts)
+  CLASS IS(oft_native_vector)
+    this%n=self%mesh%np; this%ng=self%mesh%np
     this%nslice=this%n
     ALLOCATE(this%v(this%n))
     ALLOCATE(this%stitch_info)
@@ -623,51 +686,95 @@ END SUBROUTINE tw_compute_Ael2dr
 !------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
 !------------------------------------------------------------------------------
-SUBROUTINE tw_compute_LmatDirect(row_obj,col_obj,Lmat,save_file)
-TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
-TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
-REAL(8), CONTIGUOUS, POINTER, INTENT(out) :: Lmat(:,:) !< Mutual inductance matrix
+SUBROUTINE tw_compute_LmatDirect(row_model,Lmat,col_model,save_file)
+TYPE(tw_type), TARGET, INTENT(in) :: row_model !< Thin-wall model object for rows
+REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
+TYPE(tw_type), TARGET, OPTIONAL, INTENT(in) :: col_model !< Thin-wall model object for columns
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
-INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(2),iquad
+INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(6),hash_tmp(6),iquad
 INTEGER(8) :: counts(4)
 REAL(8) :: tmp,dl_min,dl_max,f(3),elapsed_time
 REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
 REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
-LOGICAL :: vvclose_flag, close_flag,exists
+LOGICAL :: vvclose_flag,close_flag,exists,Lself
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
+TYPE(tw_type), POINTER :: row_obj,col_obj
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
-ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
+row_obj=>row_model
+IF(PRESENT(col_model))THEN
+  Lself=.FALSE.
+  col_obj=>col_model
+ELSE
+  Lself=.TRUE.
+  col_obj=>row_obj
+END IF
+IF(ASSOCIATED(Lmat))THEN
+  IF(SIZE(Lmat,DIM=1)/=col_obj%nelems.OR.SIZE(Lmat,DIM=2)/=row_obj%nelems)THEN
+    CALL oft_abort("Input size incorrect","tw_compute_LmatDirect",__FILE__)
+  END IF
+ELSE
+  ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
+END IF
 !
-IF(PRESENT(save_file).AND.(row_obj%nelems==col_obj%nelems))THEN
+IF(PRESENT(save_file))THEN
+  hash_tmp(3) = oft_simple_hash(C_LOC(row_obj%mesh%lc),INT(4*3*row_obj%mesh%nc,8))
+  hash_tmp(4) = oft_simple_hash(C_LOC(col_obj%mesh%lc),INT(4*3*col_obj%mesh%nc,8))
+  hash_tmp(5) = oft_simple_hash(C_LOC(row_obj%mesh%r),INT(8*3*row_obj%mesh%np,8))
+  hash_tmp(6) = oft_simple_hash(C_LOC(col_obj%mesh%r),INT(8*3*col_obj%mesh%np,8))
   IF(TRIM(save_file)/='none')THEN
     INQUIRE(FILE=TRIM(save_file),EXIST=exists)
     IF(exists)THEN
-      WRITE(*,*)'Reading element<->element inductance matrix'
-      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-      READ(io_unit, IOSTAT=ierr)file_counts
-      IF((ierr==0).AND.ALL(file_counts==[row_obj%nelems,row_obj%mesh%nc]))THEN
-        DO i=1,row_obj%nelems
-          READ(io_unit, IOSTAT=ierr)Lmat(i,i:row_obj%nelems)
-          IF(ierr/=0)THEN
-            WRITE(*,*)'  Error reading matrix from file'
-            exists=.FALSE.
-            EXIT
-          END IF
-        END DO
-        CLOSE(io_unit)
-        IF(exists)THEN
+      IF(Lself)THEN
+        WRITE(*,*)'Reading element<->element self inductance matrix'
+        OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
+        READ(io_unit, IOSTAT=ierr)file_counts
+        hash_tmp(1) = row_obj%nelems
+        hash_tmp(2) = row_obj%mesh%nc
+        IF((ierr==0).AND.ALL(file_counts==hash_tmp))THEN
           DO i=1,row_obj%nelems
-            DO j=i+1,row_obj%nelems
-              Lmat(j,i)=Lmat(i,j)
-            END DO
+            READ(io_unit, IOSTAT=ierr)Lmat(i,i:row_obj%nelems)
+            IF(ierr/=0)THEN
+              WRITE(*,*)'  Error reading matrix from file'
+              exists=.FALSE.
+              EXIT
+            END IF
           END DO
+          CLOSE(io_unit)
+          IF(exists)THEN
+            DO i=1,row_obj%nelems
+              DO j=i+1,row_obj%nelems
+                Lmat(j,i)=Lmat(i,j)
+              END DO
+            END DO
+          END IF
+        ELSE
+          WRITE(*,*)'  Ignoring stored matrix: Model hashes do not match'
+          CLOSE(io_unit)
+          exists=.FALSE.
         END IF
       ELSE
-        WRITE(*,*)'  Ignoring stored matrix: Sizes do not match'
-        CLOSE(io_unit)
-        exists=.FALSE.
+        WRITE(*,*)'Reading element<->element mutual inductance matrix'
+        OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
+        READ(io_unit, IOSTAT=ierr)file_counts
+        hash_tmp(1) = col_obj%nelems
+        hash_tmp(2) = row_obj%nelems
+        IF((ierr==0).AND.ALL(file_counts==hash_tmp))THEN
+          DO i=1,row_obj%nelems
+            READ(io_unit, IOSTAT=ierr)Lmat(:,i)
+            IF(ierr/=0)THEN
+              WRITE(*,*)'  Error reading matrix from file'
+              exists=.FALSE.
+              EXIT
+            END IF
+          END DO
+          CLOSE(io_unit)
+        ELSE
+          WRITE(*,*)'  Ignoring stored matrix: Model hashes do not match'
+          CLOSE(io_unit)
+          exists=.FALSE.
+        END IF
       END IF
     END IF
     IF(exists)THEN
@@ -677,7 +784,11 @@ IF(PRESENT(save_file).AND.(row_obj%nelems==col_obj%nelems))THEN
   END IF
 END IF
 !
-WRITE(*,*)'Building element<->element inductance matrix'
+IF(Lself)THEN
+  WRITE(*,*)'Building element<->element self inductance matrix'
+ELSE
+  WRITE(*,*)'Building element<->element mutual inductance matrix'
+END IF
 Lmat=0.d0
 CALL mytimer%tick
 !---Setup quadrature
@@ -704,7 +815,7 @@ DO i=1,rmesh%nc
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
     evec_i(:,ii)=row_obj%qbasis(:,ii,i)
   END DO
-  IF(row_obj%nelems==col_obj%nelems)THEN
+  IF(Lself)THEN
     imin=MINVAL(row_obj%pmap(rmesh%lc(:,i)))
     DO ii=row_obj%kfh(i),row_obj%kfh(i+1)-1
       imin=MIN(imin,ABS(row_obj%lfh(1,ii))+row_obj%np_active)
@@ -712,7 +823,7 @@ DO i=1,rmesh%nc
   END IF
   !---Compute inter-edge inductances
   DO j=1,cmesh%nc
-    IF(row_obj%nelems==col_obj%nelems)THEN
+    IF(Lself)THEN
       jmax=MAXVAL(col_obj%pmap(cmesh%lc(:,j)))
       DO jj=col_obj%kfh(j),col_obj%kfh(j+1)-1
         jmax=MAX(jmax,ABS(col_obj%lfh(1,jj))+col_obj%np_active)
@@ -773,7 +884,7 @@ DO i=1,rmesh%nc
       IF(ik==0)CYCLE
       DO jj=1,3
         jk=col_obj%pmap(cmesh%lc(jj,j))
-        IF(((row_obj%nelems==col_obj%nelems).AND.jk<ik).OR.jk<=0)CYCLE
+        IF((Lself.AND.jk<ik).OR.jk<=0)CYCLE
         dl_min = DOT_PRODUCT(evec_i(:,ii),evec_j(:,jj))*tmp
         !$omp atomic
         Lmat(jk,ik) = Lmat(jk,ik) + dl_min
@@ -790,35 +901,45 @@ DO i=1,rmesh%nc
       ik=ABS(row_obj%lfh(1,ii))+row_obj%np_active
       DO jj=col_obj%kfh(j),col_obj%kfh(j+1)-1
         jk=ABS(col_obj%lfh(1,jj))+col_obj%np_active
-        IF((row_obj%nelems==col_obj%nelems).AND.jk<ik)CYCLE
+        IF(Lself.AND.jk<ik)CYCLE
         dl_min = SIGN(1,row_obj%lfh(1,ii))*SIGN(1,col_obj%lfh(1,jj))* &
           DOT_PRODUCT(evec_i(:,row_obj%lfh(2,ii)),evec_j(:,col_obj%lfh(2,jj)))*tmp
         !$omp atomic
         Lmat(jk,ik) = Lmat(jk,ik) + dl_min
       END DO
+      !
+      IF(.NOT.Lself)THEN
+        DO jj=1,3
+          jk=col_obj%pmap(cmesh%lc(jj,j))
+          IF(jk<=0)CYCLE
+          dl_min = SIGN(1,row_obj%lfh(1,ii))* &
+            DOT_PRODUCT(evec_i(:,row_obj%lfh(2,ii)),evec_j(:,jj))*tmp
+          !$omp atomic
+          Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+        END DO
+      END IF
     END DO
   END DO
 END DO
 !$omp end do nowait
-!---Add passive coils to model
-!$omp do
-DO i=1,row_obj%np_active+row_obj%nholes
-  DO j=1,col_obj%n_vcoils
-    jj=col_obj%np_active+col_obj%nholes+j
-    Lmat(jj,i) = row_obj%Ael2coil(i,j)
+IF(Lself)THEN
+  !---Add passive coils to model
+  !$omp do
+  DO i=1,row_obj%np_active+row_obj%nholes
+    DO j=1,row_obj%n_vcoils
+      jj=row_obj%np_active+row_obj%nholes+j
+      Lmat(jj,i) = row_obj%Ael2coil(i,j)
+    END DO
   END DO
-END DO
-!$omp end do nowait
-!$omp do
-DO i=1,row_obj%n_vcoils
-  ii=row_obj%np_active+row_obj%nholes+i
-  DO j=i,col_obj%n_vcoils
-    jj=col_obj%np_active+col_obj%nholes+j
-    Lmat(jj,ii) = row_obj%Acoil2coil(i,j)
+  !$omp end do nowait
+  !$omp do
+  DO i=1,row_obj%n_vcoils
+    ii=row_obj%np_active+row_obj%nholes+i
+    DO j=i,row_obj%n_vcoils
+      jj=row_obj%np_active+row_obj%nholes+j
+      Lmat(jj,ii) = row_obj%Acoil2coil(i,j)
+    END DO
   END DO
-END DO
-!---Fill lower diagonal
-IF(row_obj%nelems==col_obj%nelems)THEN
   !$omp do private(j)
   DO i=1,row_obj%nelems
     DO j=1,i-1
@@ -834,14 +955,27 @@ END DO
 DEALLOCATE(quads)
 elapsed_time=mytimer%tock()
 WRITE(*,*)'  Time = ',elapsed_time
-IF(PRESENT(save_file).AND.(row_obj%nelems==col_obj%nelems))THEN
+IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
-    OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-    WRITE(io_unit)row_obj%nelems,row_obj%mesh%nc
-    DO i=1,row_obj%nelems
-      WRITE(io_unit)row_obj%Lmat(i,i:row_obj%nelems)
-    END DO
-    CLOSE(io_unit)
+    IF(Lself)THEN
+      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
+      hash_tmp(1) = row_obj%nelems
+      hash_tmp(2) = row_obj%mesh%nc
+      WRITE(io_unit)hash_tmp
+      DO i=1,row_obj%nelems
+        WRITE(io_unit)row_obj%Lmat(i,i:row_obj%nelems)
+      END DO
+      CLOSE(io_unit)
+    ELSE
+      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
+      hash_tmp(1) = col_obj%nelems
+      hash_tmp(2) = row_obj%nelems
+      WRITE(io_unit)hash_tmp
+      DO i=1,row_obj%nelems
+        WRITE(io_unit)Lmat(:,i)
+      END DO
+      CLOSE(io_unit)
+    END IF
   END IF
 END IF
 DEBUG_STACK_POP
@@ -1431,6 +1565,7 @@ i=ABS(tw_obj%hmesh(ih)%lpc(ihc))
       EXIT
     END IF
   END DO
+  IF(j>max_felems)CALL oft_abort("Exceeded max interaction size","tw_compute_Rmat",__FILE__)
 END DO
 END DO
 END DO
@@ -1552,6 +1687,7 @@ DO i=1,tw_obj%n_vcoils
   Rmat%lc(Rmat%kr(tw_obj%np_active+tw_obj%nholes+i))=tw_obj%np_active+tw_obj%nholes+i
 END DO
 ! !$omp end parallel
+CALL csr_remove_redundant(Rmat%nr,Rmat%kr,Rmat%nnz,Rmat%lc)
 !---Compute resistivity matrix
 ALLOCATE(Rmat%M(Rmat%nnz))
 Rmat%M=0.d0
@@ -1603,6 +1739,7 @@ DO i=1,tw_obj%n_vcoils
   CALL Rmat%add_values(j_add(1:1), j_add(1:1), eta_add(1:1,1:1), 1, 1)
 END DO
 DEALLOCATE(j_add,eta_add)
+! CALL Rmat%assemble()
 !---Handle closures
 ! IF(tw_obj%nclosures>0)THEN
 !   CALL Rmat%zero_rows(tw_obj%nclosures,tw_obj%closures)
@@ -1682,6 +1819,7 @@ TYPE(tw_type), INTENT(inout) :: self
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
+REAL(8), PARAMETER :: B_dx = 1.d-6
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
@@ -1691,41 +1829,35 @@ ALLOCATE(quads(18))
 DO i=1,18
   CALL set_quad_2d(quads(i),i)
 END DO
-ALLOCATE(self%Bel(self%nelems,bmesh%nc,3))
+ALLOCATE(self%Bel(self%nelems,bmesh%np,3))
 self%Bel=0.d0
 f=1.d0/3.d0
-WRITE(*,*)'Building element->face magnetic reconstruction operator'
+WRITE(*,*)'Building element->element magnetic reconstruction operator'
 !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,pt_j,evec_i, &
 !$omp atmp,i,area_i,dl_min,dl_max,norm_j,diffvec,is_neighbor,iquad)
-ALLOCATE(atmp(3,3,bmesh%nc))
+ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
   ! CALL bmesh%jacobian(i,f,rgop,area_i)
   ! CALL bmesh%norm(i,f,norm_i)
-  area_i=bmesh%ca(i)
+  area_i=bmesh%ca(i)*2.d0
   DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
     evec_i(:,ii)=self%qbasis(:,ii,i)
   END DO
+  CALL bmesh%norm(i,f,norm_j)
   !---Compute sensor couplings
   atmp=0.d0
-  DO j=1,bmesh%nc
-    CALL bmesh%norm(j,f,norm_j)
-    pt_j=0.d0
-    DO jj=1,3
-      pt_j = pt_j + bmesh%r(:,bmesh%lc(jj,j))/3.d0
-    END DO
-    !pt_j=pt_j-norm_j*1.d-5 ! Sample just inside face
+  DO j=1,bmesh%np
+    pt_j=bmesh%r(:,j)
     !---Compute minimum separation
     dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,bmesh%ca(j))*2.d0) !-1.d99
+    dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
     !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
     DO ii=1,3
-      DO jj=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-bmesh%r(:,bmesh%lc(jj,j)))**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-bmesh%r(:,bmesh%lc(jj,j)))**2)))
-      END DO
+      dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
+      dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
     END DO
     !---Chose quadrature order based on distance
     IF(dl_min<1.d-8)THEN
@@ -1737,21 +1869,23 @@ DO i=1,bmesh%nc
     END IF
     !
     IF(iquad>10)THEN
+      IF(is_neighbor)THEN
+        ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
+        pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
+      END IF
       diffvec=0.d0
-      !pt_j=pt_j-norm_j*1.d-5 ! Sample just inside face
-      IF(is_neighbor)pt_j=pt_j-norm_j*1.d-5 ! Sample just inside face
       DO ik=1,2
-        IF(ik==2)pt_j=pt_j+norm_j*2.d-5 ! Sample just outside face
+        IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
         DO jj=1,3
           ! Forward step
-          pt_j(jj)=pt_j(jj)+1.d-6
+          pt_j(jj)=pt_j(jj)+B_dx
           tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)+tmp/2.d-6
+          diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
           ! Backward step
-          pt_j(jj)=pt_j(jj)-2.d-6
+          pt_j(jj)=pt_j(jj)-2.d0*B_dx
           tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)-tmp/2.d-6
-          pt_j(jj)=pt_j(jj)+1.d-6 ! Reset point
+          diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
+          pt_j(jj)=pt_j(jj)+B_dx ! Reset point
         END DO
         IF(.NOT.is_neighbor)EXIT
       END DO
@@ -1778,7 +1912,7 @@ DO i=1,bmesh%nc
   DO ii=1,3
     ik=self%pmap(bmesh%lc(ii,i))
     IF(ik==0)CYCLE
-    DO j=1,bmesh%nc
+    DO j=1,bmesh%np
       DO jj=1,3
         !$omp atomic
         self%Bel(ik,j,jj) = self%Bel(ik,j,jj) + atmp(jj,ii,j)
@@ -1787,7 +1921,7 @@ DO i=1,bmesh%nc
   END DO
   DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))+self%np_active
-    DO j=1,bmesh%nc
+    DO j=1,bmesh%np
       DO jj=1,3
         tmp=SIGN(1,self%lfh(1,ii))*atmp(jj,self%lfh(2,ii),j)
         !$omp atomic
@@ -1803,13 +1937,10 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 !
+WRITE(*,*)'Building vcoil->element magnetic reconstruction operator'
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
-DO i=1,bmesh%nc
-  pt_j = 0.d0
-  DO ii=1,3
-    pt_j = pt_j + bmesh%r(:,bmesh%lc(ii,i))
-  END DO
-  pt_j=pt_j/3.d0
+DO i=1,bmesh%np
+  pt_j=bmesh%r(:,i)
   !---Compute driver contributions
   DO j=1,self%n_vcoils
     ecc = 0.d0
@@ -1832,16 +1963,12 @@ DO i=1,bmesh%nc
 END DO
 self%Bel=self%Bel/(4.d0*pi)
 !
-WRITE(*,*)'Building driver-face magnetic reconstruction operator'
-ALLOCATE(self%Bdr(self%n_icoils,bmesh%nc,3))
+WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
+ALLOCATE(self%Bdr(self%n_icoils,bmesh%np,3))
 self%Bdr=0.d0
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
-DO i=1,bmesh%nc
-  pt_j = 0.d0
-  DO ii=1,3
-    pt_j = pt_j + bmesh%r(:,bmesh%lc(ii,i))
-  END DO
-  pt_j=pt_j/3.d0
+DO i=1,bmesh%np
+  pt_j=bmesh%r(:,i)
   !---Compute driver contributions
   DO j=1,self%n_icoils
     ecc = 0.d0
@@ -1989,13 +2116,13 @@ END SUBROUTINE tw_setup_hole
 !---------------------------------------------------------------------------
 !> Read coil sets for "oft_in.xml" file
 !---------------------------------------------------------------------------
-subroutine tw_load_coils(xml_node,ncoils,coils)
-CHARACTER(LEN=*), INTENT(IN) :: xml_node !< XML node for base \c <proteus> node
+subroutine tw_load_coils(group_node,ncoils,coils)
+TYPE(fox_node), POINTER, INTENT(IN) :: group_node !< XML node relative to base `<thincurr>` node
 INTEGER(4), INTENT(out) :: ncoils !< Number of coil sets found
 TYPE(tw_coil_set), POINTER, INTENT(out) :: coils(:) !< List of coil sets
 !---XML solver fields
 integer(4) :: ncoil_sets,nread,coil_type
-TYPE(fox_node), POINTER :: doc,group_node,coil_set,coil,thincurr_group,xml_attr
+TYPE(fox_node), POINTER :: doc,coil_set,coil,thincurr_group,xml_attr
 TYPE(fox_nodelist), POINTER :: coil_sets,coil_list
 !---
 INTEGER(4) :: i,j,k,io_unit,ierr,id,cell
@@ -2003,8 +2130,9 @@ REAL(8) :: pts_tmp(2),res_per_len,radius,dl,theta
 CHARACTER(LEN=4) :: coil_ind
 TYPE(tw_coil_set), POINTER :: coil_tmp
 TYPE(fox_DOMException) :: xml_ex
-thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
-group_node=>fox_item(fox_getElementsByTagname(thincurr_group,TRIM(xml_node)),0)
+! IF(.NOT.ASSOCIATED(oft_env%xml))RETURN
+! thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
+! group_node=>fox_item(fox_getElementsByTagname(thincurr_group,TRIM(xml_node)),0)
 !---Count coil sets
 ncoils=0
 coil_sets=>fox_getElementsByTagName(group_node,"coil_set",ex=xml_ex)
@@ -2134,7 +2262,8 @@ END SUBROUTINE tw_copy_coil
 !---------------------------------------------------------------------------
 !> Load sensors from "floops.loc" and build jumpers from nodesets
 !---------------------------------------------------------------------------
-subroutine tw_load_sensors(self,sensors,jumper_nsets)
+subroutine tw_load_sensors(filename,self,sensors,jumper_nsets)
+CHARACTER(LEN=*), INTENT(in) :: filename !< Thin-wall model object
 CLASS(tw_type), INTENT(inout) :: self !< Thin-wall model object
 TYPE(tw_sensors), INTENT(inout) :: sensors !< Sensor container
 TYPE(oft_1d_int), POINTER, INTENT(in) :: jumper_nsets(:) !< Nodesets definition current jumpers
@@ -2145,11 +2274,11 @@ REAL(8), ALLOCATABLE :: hole_facs(:)
 LOGICAL :: exists
 !---Load flux loops
 sensors%nfloops=0
-INQUIRE(FILE='floops.loc', EXIST=exists)
+INQUIRE(FILE=TRIM(filename), EXIST=exists)
 IF(exists)THEN
   WRITE(*,*)
   WRITE(*,*)'Loading floop information:'
-  OPEN(NEWUNIT=io_unit, FILE='floops.loc')
+  OPEN(NEWUNIT=io_unit, FILE=TRIM(filename))
   ierr=skip_comment_lines(io_unit)
   READ(io_unit,*)sensors%nfloops
   WRITE(*,*)'  # of floops =',sensors%nfloops
@@ -2276,13 +2405,20 @@ TYPE(fox_nodelist), POINTER :: sens_list
 !---
 INTEGER(4) :: i,j,io_unit,ierr,id,cell
 REAL(8) :: location(2)
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
-thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
-!
-eta_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"eta"),0)
 nreg_mesh=MAXVAL(self%mesh%reg)
 ALLOCATE(self%Eta_reg(nreg_mesh))
+self%Eta_reg=1.d0
+ALLOCATE(self%sens_mask(nreg_mesh))
+self%sens_mask=.FALSE.
+IF(.NOT.ASSOCIATED(self%xml))THEN
+  CALL oft_warn('No "thincurr" XML node, using "eta=mu0" for all regions')
+  RETURN
+END IF
+WRITE(*,*)
+WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
+! thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
+!
+eta_group=>fox_item(fox_getElementsByTagname(self%xml,"eta"),0)
 CALL fox_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
 IF(nread/=nreg_mesh)CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
 ! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
@@ -2291,9 +2427,7 @@ DO i=1,nreg_mesh
   self%Eta_reg(i)=self%Eta_reg(i)/mu0 ! Convert to magnetic units
 END DO
 ! Load sensor mask
-ALLOCATE(self%sens_mask(nreg_mesh))
-self%sens_mask=.FALSE.
-sens_list=>fox_getElementsByTagname(oft_env%xml,"sens_mask")
+sens_list=>fox_getElementsByTagname(self%xml,"sens_mask")
 IF(fox_getLength(sens_list)==1)THEN
   WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'
   sens_node=>fox_item(sens_list,0)
@@ -2313,8 +2447,8 @@ CHARACTER(LEN=*) :: filename !< Filename containing mode definition
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model of mode
 REAL(8), POINTER, INTENT(out) :: driver(:,:) !< Sin/Cos pair corresponding to mode
 !---
-INTEGER(4) :: i,j,k,l,face,io_unit,ierr
-INTEGER(4), ALLOCATABLE :: kfh_tmp(:)
+INTEGER(4) :: i,j,k,l,face,io_unit,ierr,ndim
+INTEGER(4), ALLOCATABLE :: kfh_tmp(:),dim_sizes(:)
 REAL(8) :: rgop(3,3),norm_i(3),f(3),area_i
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Loading mode forcing mesh:'
@@ -2322,34 +2456,61 @@ WRITE(*,'(3A)')oft_indent,'  filename    = ',TRIM(filename)
 !---Save to file
 ALLOCATE(oft_trimesh::self%mesh)
 CALL self%mesh%setup(-1,.FALSE.)
-OPEN(NEWUNIT=io_unit, FILE=TRIM(filename))
-READ(io_unit,*)self%mesh%np
+!
+CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/R',ndim,dim_sizes)
+self%mesh%np=dim_sizes(2)
+DEALLOCATE(dim_sizes)
 ALLOCATE(self%mesh%r(3,self%mesh%np))
-DO i=1,self%mesh%np
-  READ(io_unit,*)self%mesh%r(:,i)
-END DO
+CALL hdf5_read(self%mesh%r,'tCurr_mode_model.h5','mesh/R')
+!
+CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/LC',ndim,dim_sizes)
+self%mesh%nc=dim_sizes(2)
+DEALLOCATE(dim_sizes)
+ALLOCATE(self%mesh%lc(3,self%mesh%nc))
+CALL hdf5_read(self%mesh%lc,'tCurr_mode_model.h5','mesh/LC')
+!
 self%nclosures=1
 ALLOCATE(self%closures(self%nclosures))
-READ(io_unit,*)self%closures(1)
-!
-READ(io_unit,*)self%mesh%nc
-ALLOCATE(self%mesh%lc(3,self%mesh%nc),self%mesh%reg(self%mesh%nc))
-self%mesh%reg=1
-DO i=1,self%mesh%nc
-  READ(io_unit,*)self%mesh%lc(:,i)
-END DO
+CALL hdf5_read(self%closures(1),'tCurr_mode_model.h5','mesh/SIDESET0001')
+! OPEN(NEWUNIT=io_unit, FILE=TRIM(filename))
+! READ(io_unit,*)self%mesh%np
+! ALLOCATE(self%mesh%r(3,self%mesh%np))
+! DO i=1,self%mesh%np
+!   READ(io_unit,*)self%mesh%r(:,i)
+! END DO
+! self%nclosures=1
+! ALLOCATE(self%closures(self%nclosures))
+! READ(io_unit,*)self%closures(1)
+! !
+! READ(io_unit,*)self%mesh%nc
+! ALLOCATE(self%mesh%lc(3,self%mesh%nc),self%mesh%reg(self%mesh%nc))
+! self%mesh%reg=1
+! DO i=1,self%mesh%nc
+!   READ(io_unit,*)self%mesh%lc(:,i)
+! END DO
 CALL bmesh_local_init(self%mesh)
 !---
-READ(io_unit,*)self%nholes
+self%nholes=2
+! READ(io_unit,*)self%nholes
 ALLOCATE(self%hmesh(self%nholes))
+CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/NODESET0001',ndim,dim_sizes)
+self%hmesh(1)%n=dim_sizes(1)
+DEALLOCATE(dim_sizes)
+ALLOCATE(self%hmesh(1)%lp(self%hmesh(1)%n))
+CALL hdf5_read(self%hmesh(1)%lp,'tCurr_mode_model.h5','mesh/SIDESET0001')
+CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/NODESET0002',ndim,dim_sizes)
+self%hmesh(2)%n=dim_sizes(1)
+DEALLOCATE(dim_sizes)
+ALLOCATE(self%hmesh(2)%lp(self%hmesh(2)%n))
+CALL hdf5_read(self%hmesh(2)%lp,'tCurr_mode_model.h5','mesh/SIDESET0002')
 ALLOCATE(self%kfh(self%mesh%nc+1))
 self%kfh=0
 DO i=1,self%nholes
-  READ(io_unit,*)self%hmesh(i)%n
-  ALLOCATE(self%hmesh(i)%lp(self%hmesh(i)%n))
-  DO j=1,self%hmesh(i)%n
-    READ(io_unit,*)self%hmesh(i)%lp(j)
-  END DO
+  ! READ(io_unit,*)self%hmesh(i)%n
+  ! ALLOCATE(self%hmesh(i)%lp(self%hmesh(i)%n))
+  ! DO j=1,self%hmesh(i)%n
+  !   READ(io_unit,*)self%hmesh(i)%lp(j)
+  ! END DO
   CALL tw_setup_hole(self%mesh, self%hmesh(i))
 END DO
 !---Build cell list
@@ -2385,12 +2546,13 @@ END DO
 DEALLOCATE(kfh_tmp)
 self%nelems = self%mesh%np + self%nholes - 1
 !
-READ(io_unit,*)
+! READ(io_unit,*)
 ALLOCATE(driver(self%nelems,2))
-DO i=1,self%nelems
-  READ(io_unit,*)driver(i,:)
-END DO
-CLOSE(io_unit)
+CALL hdf5_read(driver,'tCurr_mode_model.h5','thincurr/driver')
+! DO i=1,self%nelems
+!   READ(io_unit,*)driver(i,:)
+! END DO
+! CLOSE(io_unit)
 WRITE(*,'(2A,I8)')oft_indent,'  # of points = ',self%mesh%np
 WRITE(*,'(2A,I8)')oft_indent,'  # of edges  = ',self%mesh%ne
 WRITE(*,'(2A,I8)')oft_indent,'  # of faces  = ',self%mesh%nc
@@ -2408,7 +2570,7 @@ END DO
 DO i=1,self%nclosures
   self%pmap(self%closures(i))=-i
 END DO
-self%nclosures=0
+self%nclosures=-self%nclosures
 ! Reindex, removing closure vertex
 self%np_active=0
 DO i=1,self%mesh%np
@@ -2420,9 +2582,10 @@ DO i=1,self%mesh%np
   END IF
 END DO
 !
-ALLOCATE(self%pmap_inv(self%np_active))
+ALLOCATE(self%kpmap_inv(self%np_active+1),self%lpmap_inv(self%np_active))
+self%kpmap_inv=[(i,i=1,self%np_active+1)]
 DO i=1,self%mesh%np
-  IF(self%pmap(i)/=0)self%pmap_inv(self%pmap(i))=i
+  IF(self%pmap(i)/=0)self%lpmap_inv(self%pmap(i))=i
 END DO
 self%nelems = self%np_active + self%nholes
 !---Build basis array
@@ -2454,7 +2617,7 @@ nwall=self%wall%nelems-self%wall%n_vcoils
 nplasma=self%plasma%nelems-self%plasma%n_vcoils
 ncoils=self%plasma%n_vcoils
 NULLIFY(M_wp,M_pw)
-CALL tw_compute_LmatDirect(self%plasma,self%wall,M_wp)
+CALL tw_compute_LmatDirect(self%plasma,M_wp,col_model=self%wall)
 ALLOCATE(M_pw(nplasma,nwall))
 M_pw=TRANSPOSE(M_wp)
 ! !---Build rho matrix
@@ -2551,7 +2714,7 @@ DO i=1,self%mesh%np
   DO j=self%mesh%kpc(i),self%mesh%kpc(i+1)-1
     ptvec(:,i) = ptvec(:,i) + cellvec(:,self%mesh%lpc(j))*self%mesh%ca(self%mesh%lpc(j))/3.d0
   END DO
-  ptvec(:,i) = ptvec(:,i)/self%mesh%va(i)!/REAL(self%mesh%kpc(i+1)-self%mesh%kpc(i)+1,8)
+  ptvec(:,i) = ptvec(:,i)/self%mesh%va(i)
 END DO
 CALL self%mesh%save_vertex_vector(ptvec/mu0,TRIM(tag)//'_v') ! Convert back to Amps
 !

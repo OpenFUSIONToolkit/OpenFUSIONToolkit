@@ -23,7 +23,8 @@ else()
 endif()
 
 # Add sub-directories and copy testing script
-file( COPY oft_testing.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+configure_file( oft_testing.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+configure_file( conftest.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 add_subdirectory( grid )
 add_subdirectory( lin_alg )
 add_subdirectory( fem )
@@ -60,6 +61,6 @@ add_custom_command(
 add_custom_target(test_cov)
 add_custom_command(
     TARGET  test_cov
-    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} -m \"coverage\" grid lin_alg fem physics
+    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} --cov=OpenFUSIONToolkit --cov-report=xml -m \"coverage\" grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
 )

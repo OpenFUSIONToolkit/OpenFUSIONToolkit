@@ -22,7 +22,7 @@ sep_template = """!-------------------------------------------------------------
 ! {0}
 !---------------------------------------------------------------------------
 """
-output_reg = re.compile("    [ ]*[\S]+")
+output_reg = re.compile(r'    [ ]*[\S]+')
 
 def run_command(command, timeout=10):
     # Run shell command
@@ -83,7 +83,7 @@ def parse_fortran_file(fid):
             doc_buffer = doc_buffer + line[2:]
             if read_full:
               # Search for section break
-              if line.find("\subsection") >= 0:
+              if line.find(r'\subsection') >= 0:
                 splits = line.split(" ")
                 term_found = False
                 sec_title = None
@@ -91,7 +91,7 @@ def parse_fortran_file(fid):
                   if(term_found):
                     sec_title = ' '.join(splits[i+1:])
                     break
-                  if term.find("\subsection") >= 0:
+                  if term.find(r'\subsection') >= 0:
                     term_found = True
                 if sec_title != None:
                   full_code = full_code + sep_template.format(sec_title[:-1])
@@ -115,7 +115,7 @@ def parse_fortran_file(fid):
         file_buffer = file_buffer + doc_buffer + "\n"
     # Add full source if needed
     if full_code != "":
-        file_buffer = file_buffer + "\n\section " + ex_prefix + "_full Complete Source\n"
+        file_buffer = file_buffer + "\n" + r'\section ' + ex_prefix + "_full Complete Source\n"
         file_buffer = file_buffer + "~~~~~~~~~{.F90}\n"
         file_buffer = file_buffer + full_code
         file_buffer = file_buffer + "~~~~~~~~~\n"
@@ -136,30 +136,23 @@ if __name__ == '__main__':
     if not os.path.isdir("docs/generated/images"):
         os.mkdir("docs/generated/images")
     # Loop over all example files
-    files = os.listdir("examples")
+    files = glob.glob("examples/*.F90") + glob.glob("examples/*/*/*.F90")
     print("\n==========================================")
     print("Parsing Example Files")
     for filename in files:
-        file_parts = filename.split('.')
-        if len(file_parts) != 2:
-            continue
-        basename = file_parts[0]
-        extension = file_parts[1]
-        # If FORTRAN source file parse to create doc
-        if "F90" == extension:
-            path = "examples/" + filename
-            print(path)
-            with open(path,'r') as fid:
-                new_file = parse_fortran_file(fid)
-            # Write documentation file to doc folder
-            path = "docs/generated/doc_" + basename + ".md"
-            with open(path,"w+") as fid:
-                fid.write(new_file)
+        basename = os.path.basename(filename)
+        print(filename,basename)
+        with open(filename,'r') as fid:
+            new_file = parse_fortran_file(fid)
+        # Write documentation file to doc folder
+        path = "docs/generated/doc_" + basename + ".md"
+        with open(path,"w+") as fid:
+            fid.write(new_file)
     # Add Jupyter notebooks to documentation
     print()
     print("\n==========================================")
     print("Converting Jupyter notebooks")
-    eq_reg = re.compile("\$(.*?)\$")
+    eq_reg = re.compile(r'\$(.*?)\$')
     files = glob.glob("examples/*/*/*.ipynb")
     for filename in files:
         print(filename)
@@ -195,5 +188,6 @@ if __name__ == '__main__':
         for img in imgs:
            shutil.copy(img, "docs/generated/images/{0}".format(os.path.basename(img)))
         # Remove temporary files
-        shutil.rmtree("{0}_files".format(base_path))
+        if os.path.isdir("{0}_files".format(base_path)):
+            shutil.rmtree("{0}_files".format(base_path))
         os.remove(base_path+".md")

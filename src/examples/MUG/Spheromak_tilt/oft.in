@@ -1,0 +1,54 @@
+&runtime_options
+ ppn=1
+ debug=0
+/
+
+&mesh_options
+ meshname='test'
+ cad_type=0
+ nlevels=2
+ nbase=1
+ grid_order=2
+ fix_boundary=T
+/
+
+&native_mesh_options
+ filename='cyl_tilt.h5'
+/
+
+&sph_tilt_options
+ order=2
+ linear=F
+ b0_scale=1.e-1
+ b1_scale=1.e-4
+ n0=1.E19
+ t0=3.
+ plot_run=F
+ pm=F
+/
+
+&xmhd_options
+ xmhd_adv_den=F    ! Do not advance density
+ xmhd_adv_temp=F   ! Do not advance temperature
+ bbc='bc'          ! Perfectly-conducting BC for B-field
+ vbc='all'         ! Zero-flow BC for velocity
+ dt=2.e-7          ! Maximum time step
+ eta=1.            ! Resistivity
+ nu_par=10.        ! Fluid viscosity
+ nsteps=3000       ! Number of time steps to take
+ rst_freq=10       ! Restart file frequency
+ lin_tol=1.E-9     ! Linear solver tolerance
+ nl_tol=1.E-5      ! Non-linear solver tolerance
+ xmhd_mfnk=T       ! Use matrix-free Jacobian operator
+ rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
+ ittarget=40       ! Target for # of linear iterations per time step
+ mu_ion=2.         ! Ion mass (atomic units)
+ xmhd_prefreq=20   ! Preconditioner update frequency
+/
+
+&xmhd_plot_options
+ t0=1.E-8
+ dt=1.E-5
+ rst_start=0
+ rst_end=3000
+/

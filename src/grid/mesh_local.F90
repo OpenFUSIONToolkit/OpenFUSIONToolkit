@@ -1037,7 +1037,7 @@ end subroutine bmesh_areas
 !------------------------------------------------------------------------------
 subroutine sync_face_normals(self)
 class(oft_bmesh), INTENT(inout) :: self
-integer(i4) :: i
+integer(i4) :: i,max_depth=1
 logical, ALLOCATABLE, DIMENSION(:) :: oriented
 IF(self%nc==0)RETURN
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Ensuring surface normal orientations'
@@ -1047,19 +1047,22 @@ oriented=.FALSE.
 do i=1,self%nc ! loop over cells
   IF(.NOT.oriented(i))THEN
     oriented(i)=.TRUE.
-    CALL orient_neighbors(i)
+    CALL orient_neighbors(i,1)
     IF(oft_debug_print(2))WRITE(*,'(2A,I8,I8)')oft_indent,'Chunk oriented',i,COUNT(oriented)
   END IF
 enddo
+WRITE(*,*)'Orientation depth =',max_depth
 CALL oft_decrease_indent
 IF(COUNT(oriented)/=self%nc)CALL oft_abort("Orientation failed", &
   "sync_face_normals",__FILE__)
 DEALLOCATE(oriented)
 CONTAINS
-recursive subroutine orient_neighbors(face1)
-integer(i4), intent(in) :: face1
+recursive subroutine orient_neighbors(face1,depth)
+integer(i4), intent(in) :: face1,depth
 integer(i4) :: j,face2,k,ed1(2),ed2(2)
-! logical :: mark(3)
+! logical, allocatable :: mark(:)
+max_depth=MAX(depth,max_depth)
+! allocate(mark(self%cell_ne))
 ! mark=.FALSE.
 DO j=1,self%cell_ne
   face2=self%lcc(j,face1)
@@ -1073,17 +1076,15 @@ DO j=1,self%cell_ne
   ed2=self%lc(self%cell_ed(:,k),face2)
   IF(ALL(ed1==ed2))THEN
     CALL self%invert_face(face2)
-    ! self%lf(2:3,face2)=self%lf(3:2:-1,face2) ! Invert face
-    ! self%lfe(:,face2)=-[self%lfe(1,face2),self%lfe(3,face2),self%lfe(2,face2)]
-    ! self%lff(:,face2)=[self%lff(1,face2),self%lff(3,face2),self%lff(2,face2)]
   END IF
   oriented(face2)=.TRUE.
-  CALL orient_neighbors(face2)
+  CALL orient_neighbors(face2,depth+1)
   ! mark(j)=.TRUE.
 END DO
 ! DO j=1,3
-!   IF(mark(j))CALL orient_neighbors(self%lff(j,face1))
+!   IF(mark(j))CALL orient_neighbors(self%lcc(j,face1),depth+1)
 ! END DO
+! DEALLOCATE(mark)
 end subroutine orient_neighbors
 end subroutine sync_face_normals
 !------------------------------------------------------------------------------

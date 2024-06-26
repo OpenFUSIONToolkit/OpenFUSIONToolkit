@@ -28,6 +28,7 @@ USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
   gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent
 USE oft_gs_profiles
 IMPLICIT NONE
+#include "local.h"
 !---------------------------------------------------------------------------
 !> Need docs
 !---------------------------------------------------------------------------
@@ -294,8 +295,12 @@ IF(self%ncoil_regs>0)THEN
 END IF
 IF(self%ncoils_ext>0)THEN
   ALLOCATE(tmpout(self%ncoils_ext,1))
+  tmpout=0.d0
   DO i=1,self%ncoils_ext
-    tmpout(i,1)=self%coils_ext(i)%curr
+    DO j=1,self%ncoils
+      tmpout(i,1)=tmpout(i,1) &
+        + self%coil_currs(j)*self%coil_nturns(smesh%nreg+i,j)
+    END DO
   END DO
   CALL hdf5_write(tmpout(:,1),filename,'gs/ext_coils')
   DEALLOCATE(tmpout)
@@ -395,21 +400,22 @@ IF(self%ncond_eigs>0)THEN
   DEALLOCATE(tmpin)
 END IF
 IF(self%ncoil_regs>0)THEN
-  ALLOCATE(tmpin(self%ncoil_regs,1))
-  CALL hdf5_read(tmpin(:,1),filename,'gs/int_coils')
   CALL oft_abort("Not supported","gs_load",__FILE__)
-  DO i=1,self%ncoil_regs
-    self%coil_regions(i)%curr=tmpin(i,1)
-  END DO
-  DEALLOCATE(tmpin)
+  ! ALLOCATE(tmpin(self%ncoil_regs,1))
+  ! CALL hdf5_read(tmpin(:,1),filename,'gs/int_coils')
+  ! DO i=1,self%ncoil_regs
+  !   self%coil_regions(i)%curr=tmpin(i,1)
+  ! END DO
+  ! DEALLOCATE(tmpin)
 END IF
 IF(self%ncoils_ext>0)THEN
-  ALLOCATE(tmpin(self%ncoils_ext,1))
-  CALL hdf5_read(tmpin(:,1),filename,'gs/ext_coils')
-  DO i=1,self%ncoils_ext
-    self%coils_ext(i)%curr=tmpin(i,1)
-  END DO
-  DEALLOCATE(tmpin)
+  CALL oft_abort("Not supported","gs_load",__FILE__)
+  ! ALLOCATE(tmpin(self%ncoils_ext,1))
+  ! CALL hdf5_read(tmpin(:,1),filename,'gs/ext_coils')
+  ! DO i=1,self%ncoils_ext
+  !   self%coils_ext(i)%curr=tmpin(i,1)
+  ! END DO
+  ! DEALLOCATE(tmpin)
 END IF
 !---Get plasma bounds
 x1=0.d0; x2=1.d0
@@ -592,9 +598,9 @@ end subroutine fit_ff
 !! @param[out] itor Toroidal current
 !! @param[out] centroid Current centroid (optional) [2]
 !---------------------------------------------------------------------------
-subroutine gs_comp_globals(self,itor,centroid,vol,pvol,dflux,tflux,li)
+subroutine gs_comp_globals(self,itor,centroid,vol,pvol,dflux,tflux,bp_vol)
 class(gs_eq), intent(inout) :: self
-real(8), intent(out) :: itor,centroid(2),vol,pvol,dflux,tflux,li
+real(8), intent(out) :: itor,centroid(2),vol,pvol,dflux,tflux,bp_vol
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
@@ -611,10 +617,10 @@ pvol = 0.d0
 vol = 0.d0
 dflux = 0.d0
 tflux = 0.d0
-li = 0.d0
+bp_vol = 0.d0
 !$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol) &
 !$omp reduction(+:itor) reduction(+:centroid) reduction(+:pvol) reduction(+:vol) reduction(+:dflux) &
-!$omp reduction(+:tflux) reduction(+:li)
+!$omp reduction(+:tflux) reduction(+:bp_vol)
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
   do m=1,oft_blagrange%quad%np
@@ -645,7 +651,7 @@ do i=1,smesh%nc
       !---Compute internal inductance
       call psi_geval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,gpsitmp)
       Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+self%eps)
-      li = li + SUM(Bpol**2)*v*oft_blagrange%quad%wts(m)*pt(1)
+      bp_vol = bp_vol + SUM(Bpol**2)*v*oft_blagrange%quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
         Btor = self%alam*(self%I%F(psitmp(1)))/pt(1)
@@ -658,10 +664,11 @@ do i=1,smesh%nc
   end do
 end do
 centroid = centroid/itor
-li=mu0*2*pi*li/(itor**2)
+bp_vol=2*pi*bp_vol
 !
 itor=itor*self%psiscale
 pvol=pvol*self%psiscale*self%psiscale
+bp_vol=bp_vol*self%psiscale*self%psiscale
 dflux=dflux*self%psiscale
 tflux=tflux*self%psiscale
 CALL psi_eval%delete
@@ -741,7 +748,7 @@ SUBROUTINE gs_analyze(self)
 class(gs_eq), intent(inout) :: self
 integer(4) :: i,io_unit
 integer(4), parameter :: npsi = 50
-real(8) :: Itor,centroid(2),vol,pvol,dflux,tflux,pmax,curr,li
+real(8) :: Itor,centroid(2),vol,pvol,dflux,tflux,pmax,curr,bp_vol,li
 real(8) :: psimax,baxis(2),prof(npsi),psi_q(npsi),dl,rbounds(2,2),zbounds(2,2)
 real(8) :: beta(2),q95,tmp,psi0,psi1
 WRITE(*,*)
@@ -761,7 +768,7 @@ IF(self%diverted)THEN
 ELSE
   WRITE(*,'(2A)')oft_indent,'Topology                =   Limited'
 END IF
-CALL gs_comp_globals(self,Itor,centroid,vol,pvol,dflux,tflux,li)
+CALL gs_comp_globals(self,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
 !---Get q-profile
 psi0=0.02d0; psi1=0.98d0 !1.d0
 ! IF(self%plasma_bounds(1)>-1.d98)THEN
@@ -807,7 +814,7 @@ IF(ABS(self%I%f_offset)>0.d0)THEN
 END IF
 WRITE(*,'(2A,ES11.3)')oft_indent,'Diamagnetic flux [Wb]   = ',dflux
 WRITE(*,'(2A,ES11.3)')oft_indent,'Toroidal flux [Wb]      = ',tflux
-WRITE(*,'(2A,ES11.3)')oft_indent,'li                      = ',Li*2.d0/(mu0*self%o_point(1))
+WRITE(*,'(2A,ES11.3)')oft_indent,'li                      = ',(bp_vol/vol)/((Itor/dl)**2)
 ! IF(.NOT.self%free)THEN
 !   CALL gs_helicity(self,dflux,Itor)
 !   WRITE(*,'(2A,ES11.3)')oft_indent,'Magnetic Energy [J]     = ',dflux/(2.d0*mu0)
@@ -1016,13 +1023,13 @@ end subroutine gs_save_decon
 !---------------------------------------------------------------------------
 subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
-CHARACTER(LEN=80), intent(in) :: filename 
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
 integer(4), intent(in) :: nz !< Number of vertical points for flux grid
 real(8), intent(in) :: rbounds(2) !< Radial extents for flux grid
 real(8), intent(in) :: zbounds(2) !< Radial extents for flux grid
 CHARACTER(LEN=36), intent(in) :: run_info !< Run information string [36]
-CHARACTER(LEN=80), intent(in) :: limiter_file !< Path to limiter file [80]
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr

@@ -22,19 +22,19 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_native_la, ONLY: oft_native_matrix
 USE oft_native_solvers, ONLY: oft_bjprecond, oft_native_gmres_solver
-USE oft_lu, ONLY: oft_lusolver
+USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 !---FE imports
 USE fem_utils, ONLY: fem_partition
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
-INTEGER(i4) :: io_unit
+INTEGER(i4) :: io_unit,ierr
 INTEGER(i4), PARAMETER :: order=3
 INTEGER(i4) :: nlocal = 1
 INTEGER(i4) :: sol_type = 1
-INTEGER(i4) :: ierr
-NAMELIST/test_bj_options/nlocal,sol_type
+LOGICAL :: use_ilu = .FALSE.
+NAMELIST/test_bj_options/nlocal,sol_type,use_ilu
 IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
@@ -99,6 +99,7 @@ INTEGER(i4), INTENT(in) :: nlocal,sol_type
 TYPE(oft_native_gmres_solver) :: linv
 TYPE(oft_bjprecond), TARGET :: linv_pre
 TYPE(oft_lusolver), TARGET :: linv_pre_lu
+TYPE(oft_ilusolver), TARGET :: linv_pre_ilu
 !---Local variables
 INTEGER(i4) :: ierr
 REAL(r8) :: uu
@@ -131,19 +132,35 @@ ELSE
       CALL oft_abort("Incorrect matrix type","test_lap",__FILE__)
   END SELECT
 END IF
-linv_pre%pre=>linv_pre_lu
-SELECT CASE(sol_type)
-  CASE(1)
-    linv_pre_lu%package='super'
-  CASE(2)
-    linv_pre_lu%package='superd'
-  CASE(3)
-    linv_pre_lu%package='mumps'
-  CASE(4)
-    linv_pre_lu%package='umfpack'
-  CASE(5)
-    linv_pre_lu%package='pardiso'
-END SELECT
+IF(use_ilu)THEN
+  linv_pre%pre=>linv_pre_ilu
+  SELECT CASE(sol_type)
+    CASE(0)
+      linv_pre_ilu%package='native'
+    ! CASE(1)
+    !   linv_pre_ilu%package='super'
+    CASE(5)
+      linv_pre_ilu%package='mkl'
+    CASE DEFAULT
+      CALL oft_abort("Unknown ILU solver package","test_lap",__FILE__)
+  END SELECT
+ELSE
+  linv_pre%pre=>linv_pre_lu
+  SELECT CASE(sol_type)
+    CASE(1)
+      linv_pre_lu%package='super'
+    CASE(2)
+      linv_pre_lu%package='superd'
+    CASE(3)
+      linv_pre_lu%package='mumps'
+    CASE(4)
+      linv_pre_lu%package='umfpack'
+    CASE(5)
+      linv_pre_lu%package='mkl'
+    CASE DEFAULT
+      CALL oft_abort("Unknown LU solver package","test_lap",__FILE__)
+  END SELECT
+END IF
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)

@@ -23,7 +23,7 @@ USE oft_mesh_global_util, ONLY: mesh_global_resolution
 USE multigrid, ONLY: mg_mesh
 IMPLICIT NONE
 #include "local.h"
-CHARACTER(LEN=80) :: filename = 'none' !< Name of input file for mesh
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none' !< Name of input file for mesh
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_native_id = 0
 REAL(r8), ALLOCATABLE, PUBLIC :: r_mem(:,:)
 INTEGER(i4), ALLOCATABLE, PUBLIC :: lc_mem(:,:)
@@ -353,12 +353,12 @@ end subroutine native_load_smesh
 !------------------------------------------------------------------------------
 subroutine native_read_nodesets(nsets,native_filename)
 TYPE(oft_1d_int), pointer, intent(inout) :: nsets(:)
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: native_filename
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: native_filename
 INTEGER(4) :: j,num_nsets,ndims
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: dim_sizes
 LOGICAL :: success
 CHARACTER(LEN=4) :: blknum
-CHARACTER(LEN=80) :: local_filename
+CHARACTER(LEN=OFT_PATH_SLEN) :: local_filename
 !---Open mesh file
 local_filename=filename
 IF(PRESENT(native_filename))local_filename=native_filename
@@ -384,12 +384,12 @@ END SUBROUTINE native_read_nodesets
 !------------------------------------------------------------------------------
 subroutine native_read_sidesets(ssets,native_filename)
 TYPE(oft_1d_int), pointer, intent(inout) :: ssets(:)
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: native_filename
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: native_filename
 INTEGER(4) :: j,num_ssets,ndims
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: dim_sizes
 LOGICAL :: success
 CHARACTER(LEN=4) :: blknum
-CHARACTER(LEN=80) :: local_filename
+CHARACTER(LEN=OFT_PATH_SLEN) :: local_filename
 !---Open mesh file
 local_filename=filename
 IF(PRESENT(native_filename))local_filename=native_filename

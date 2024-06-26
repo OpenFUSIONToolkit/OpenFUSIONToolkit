@@ -32,7 +32,10 @@ IMPLICIT NONE
 #define HAVE_MKL
 #endif
 #ifdef HAVE_MKL
-#define DEF_LU_PACK "pardiso"
+#define DEF_LU_PACK "mkl"
+#define DEF_ILU_PACK "mkl"
+#else
+#define DEF_ILU_PACK "native"
 #endif
 #if !defined(DEF_LU_PACK) && defined(HAVE_MUMPS)
 #define DEF_LU_PACK "mumps"
@@ -51,6 +54,14 @@ IMPLICIT NONE
 #endif
 PRIVATE
 PUBLIC lapack_matinv, lapack_cholesky
+!---------------------------------------------------------------------------
+!> Native ILU(0) preconditioner information object
+!---------------------------------------------------------------------------
+TYPE :: native_ilu_struc
+  INTEGER(i4), POINTER, DIMENSION(:) :: ju => NULL() !< Diagonal entry indices
+  INTEGER(i4), POINTER, DIMENSION(:) :: jlu => NULL() !< Column values in iLU factors
+  REAL(r8), POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
+END TYPE native_ilu_struc
 !---------------------------------------------------------------------------
 ! TYPE superlu_struc
 !---------------------------------------------------------------------------
@@ -88,7 +99,6 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
   INTEGER(i4) :: nrhs = 1
-  CHARACTER(LEN=3) :: type = 'lu'
   INTEGER(i4), POINTER, DIMENSION(:) :: ipiv => NULL() !< Row pivot array ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: atmp => NULL() !< Local dense matrix ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL()
@@ -114,6 +124,34 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => lusolver_delete
 END TYPE oft_lusolver
+!---------------------------------------------------------------------------
+!> ILU solver class
+!---------------------------------------------------------------------------
+TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
+  LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
+  LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
+  INTEGER(i4) :: nrhs = 1
+  REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL()
+  CHARACTER(LEN=7) :: package = DEF_ILU_PACK !< Factorization package
+  TYPE(native_ilu_struc) :: native_struct
+#if defined( HAVE_SUPERLU )
+  TYPE(superlu_struc) :: superlu_struct
+#endif
+#ifdef HAVE_MKL
+  TYPE(pardiso_struc) :: pardiso_struct
+#endif
+CONTAINS
+  !> Solve linear system
+  PROCEDURE :: apply => ilusolver_apply
+  !> Setup solver from XML node
+  PROCEDURE :: setup_from_xml => ilusolver_setup_xml
+  !> Update solver with new settings/operators and refactor
+  PROCEDURE :: update => ilusolver_update
+  !> Check thread safety
+  PROCEDURE :: check_thread => ilusolver_check_thread
+  !> Clean-up internal storage
+  PROCEDURE :: delete => ilusolver_delete
+END TYPE oft_ilusolver
 INTERFACE
 #ifdef HAVE_SUPERLU
 !---------------------------------------------------------------------------
@@ -151,9 +189,46 @@ INTERFACE
   REAL(c_double), DIMENSION(n), INTENT(inout) :: b
   INTEGER(c_int), INTENT(inout) :: ldb
   TYPE(c_ptr), INTENT(inout) :: f_factors
-  INTEGER(c_int), INTENT(inout) :: col_perm
-  INTEGER(c_int), INTENT(inout) :: info
+  INTEGER(c_int), VALUE, INTENT(in) :: col_perm
+  INTEGER(c_int), INTENT(out) :: info
   END SUBROUTINE oft_superlu_dgssv
+!---------------------------------------------------------------------------
+!> Interface to dgsisx (ILUT) from SuperLU
+!!
+!! @param[in,out] iopt Operation control (1 -> performs LU decomposition for the
+!! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
+!! same non-zero pattern, 4 -> free all the storage in the end)
+!! @param[in,out] n Number of rows
+!! @param[in,out] nnz Number of non-zeros
+!! @param[in,out] nrhs Number of RHS to solve (nrhs=1 only)
+!! @param[in,out] values Matrix values in CRS format [nnz]
+!! @param[in,out] colind Column indices in CRS format [nnz]
+!! @param[in,out] rowptr Row pointer into colind [n+1]
+!! @param[in,out] b Right hand side -> overwritten with solution [n]
+!! @param[in,out] ldb Lowest dimension of vector `b` [n]
+!! @param[in,out] f_factors Pointer to SuperLU internal data storage
+!! @param[in,out] col_perm Column permutation method (0 -> natural ordering,
+!! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
+!! for unsymmetric matrices)
+!! @param[in,out] info Solver return status (not currently used)
+!---------------------------------------------------------------------------
+  SUBROUTINE oft_superlu_dgsisx(iopt,n,nnz,nrhs,values,colind, &
+    rowptr,b,ldb,f_factors,col_perm,fill_tol,info) BIND(C,NAME="oft_superlu_dgsisx_c")
+  IMPORT c_int, c_double, c_ptr
+  INTEGER(c_int), INTENT(inout) :: iopt
+  INTEGER(c_int), INTENT(inout) :: n
+  INTEGER(c_int), INTENT(inout) :: nnz
+  INTEGER(c_int), INTENT(inout) :: nrhs
+  REAL(c_double), DIMENSION(nnz), INTENT(inout) :: values
+  INTEGER(c_int), DIMENSION(nnz), INTENT(inout) :: colind
+  INTEGER(c_int), DIMENSION(n+1), INTENT(inout) :: rowptr
+  REAL(c_double), DIMENSION(n), INTENT(inout) :: b
+  INTEGER(c_int), INTENT(inout) :: ldb
+  TYPE(c_ptr), INTENT(inout) :: f_factors
+  INTEGER(c_int), VALUE, INTENT(in) :: col_perm
+  REAL(c_double), VALUE, INTENT(in) :: fill_tol
+  INTEGER(c_int), INTENT(out) :: info
+  END SUBROUTINE oft_superlu_dgsisx
 #endif
 #ifdef HAVE_SUPERLU_DIST
 !---------------------------------------------------------------------------
@@ -371,6 +446,7 @@ TYPE(oft_timer) :: mytimer
 TYPE(oft_graph) :: csr_graph
 TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
+IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting LU solver: ',self%package,self%refactor
 IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
   'lusolver_apply',__FILE__)
@@ -389,10 +465,11 @@ IF(.NOT.self%initialized)THEN
   !---
   SELECT CASE(TRIM(self%package))
     CASE DEFAULT
-      IF(self%type=='ilu')CALL oft_abort('iLU not supported by LAPACK','lusolver_apply', __FILE__)
+      CALL oft_abort('Unknown LU package','lusolver_apply', __FILE__)
+    CASE("lapack")
+      ! Do nothing
     CASE("super")
 #ifdef HAVE_SUPERLU
-      IF(self%type=='ilu')CALL oft_abort('iLU not supported by SuperLU','lusolver_apply', __FILE__)
       ALLOCATE(self%superlu_struct%kr(A_native%nr+1))
       ALLOCATE(self%superlu_struct%lc(A_native%nnz))
       self%superlu_struct%kr=A_native%kr-1
@@ -402,7 +479,6 @@ IF(.NOT.self%initialized)THEN
 #endif
     CASE("superd")
 #ifdef HAVE_SUPERLU_DIST
-      IF(self%type=='ilu')CALL oft_abort('iLU not supported by SuperLU-DIST','lusolver_apply', __FILE__)
       ALLOCATE(self%superlu_struct%csc_map(A_native%nnz),self%superlu_struct%csc_vals(A_native%nnz))
       csr_graph%nr=A_native%nr; csr_graph%nc=A_native%nc; csr_graph%nnz=A_native%nnz
       csr_graph%kr=>A_native%kr; csr_graph%lc=>A_native%lc
@@ -419,7 +495,6 @@ IF(.NOT.self%initialized)THEN
 #endif
     CASE("umfpack")
 #ifdef HAVE_UMFPACK
-      IF(self%type=='ilu')CALL oft_abort('iLU not supported by UMFPACK','lusolver_apply', __FILE__)
       ALLOCATE(self%superlu_struct%kr(A_native%nr+1))
       ALLOCATE(self%superlu_struct%lc(A_native%nnz))
       self%superlu_struct%kr=A_native%kr-1
@@ -427,21 +502,18 @@ IF(.NOT.self%initialized)THEN
 #else
       CALL oft_abort('OFT not compiled with UMFPACK','lusolver_apply',__FILE__)
 #endif
-    CASE("pardiso")
+    CASE("mkl")
 #ifdef HAVE_MKL
-      IF(self%type=='lu')THEN
-        self%pardiso_struct%pt=0
-        self%pardiso_struct%iparm=0
-        call pardisoinit(self%pardiso_struct%pt,self%pardiso_struct%mtype,self%pardiso_struct%iparm)
-        ALLOCATE(self%pardiso_struct%perm(A_native%nr))
-        self%pardiso_struct%iparm(1)=1
-        self%pardiso_struct%iparm(27)=1
-      END IF
+      self%pardiso_struct%pt=0
+      self%pardiso_struct%iparm=0
+      call pardisoinit(self%pardiso_struct%pt,self%pardiso_struct%mtype,self%pardiso_struct%iparm)
+      ALLOCATE(self%pardiso_struct%perm(A_native%nr))
+      self%pardiso_struct%iparm(1)=1
+      self%pardiso_struct%iparm(27)=1
 #else
       CALL oft_abort('OFT not compiled with MKL-PARDISO','lusolver_apply',__FILE__)
 #endif
     CASE("mumps")
-      IF(self%type=='ilu')CALL oft_abort('iLU not supported by MUMPS','lusolver_apply', __FILE__)
 #ifdef HAVE_MUMPS
       self%mumps_struct%job = -1
       self%mumps_struct%comm = MPI_COMM_SELF
@@ -574,42 +646,29 @@ CASE("superd")
 #else
     CALL oft_abort('OFT not compiled with UMFPACK','lusolver_apply',__FILE__)
 #endif
-  CASE("pardiso")
+  CASE("mkl")
 #ifdef HAVE_MKL
-    IF(self%type=='ilu')THEN
-      IF(self%refactor)THEN
-        !---Update matrix
-        CALL oft_mkl_ilu(1,A_native%nr,A_native%nnz,mat_vals,A_native%lc, &
-          A_native%kr,vals,self%pardiso_struct%f_factors,ierr)
-        IF(ierr/=0)CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
-        self%refactor=.FALSE.
-        self%update_graph=.FALSE.
-      END IF
-      CALL oft_mkl_ilu(2,A_native%nr,A_native%nnz,mat_vals,A_native%lc, &
-        A_native%kr,vals,self%pardiso_struct%f_factors,ierr)
-    ELSE
-      ALLOCATE(b(A_native%nr,self%nrhs))
-      b=vals
-      IF(self%refactor)THEN
-        !---Update matrix
-        mode=22
-        IF(self%update_graph)mode=12
-        CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
-          mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
-          nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
-        IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
-        self%pardiso_struct%iparm(1)=0
-        self%pardiso_struct%iparm(27)=0
-        self%refactor=.FALSE.
-        self%update_graph=.FALSE.
-      END IF
-      mode=33
+    ALLOCATE(b(A_native%nr,self%nrhs))
+    b=vals
+    IF(self%refactor)THEN
+      !---Update matrix
+      mode=22
+      IF(self%update_graph)mode=12
       CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
         mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
         nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
-      IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
-      DEALLOCATE(b)
-  END IF
+      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      self%pardiso_struct%iparm(1)=0
+      self%pardiso_struct%iparm(27)=0
+      self%refactor=.FALSE.
+      self%update_graph=.FALSE.
+    END IF
+    mode=33
+    CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
+      mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
+      nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
+    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
+    DEALLOCATE(b)
 #else
     CALL oft_abort('OFT not compiled with MKL-PARDISO','lusolver_apply',__FILE__)
 #endif
@@ -706,13 +765,6 @@ IF(nnodes==1)THEN
     self%package=factor_package
   END IF
 END IF
-current_nodes=>fox_getElementsByTagName(solver_node,"type")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
-  CALL fox_extractDataContent(current_node,fac_type,num=nread,iostat=ierr)
-  IF(nread==1)self%type=TRIM(fac_type)
-END IF
 IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'LU solver setup:'
   WRITE(*,'(2X,2A)')'- Package:  ',self%package
@@ -784,15 +836,11 @@ SELECT CASE(TRIM(self%package))
     CALL dmumps(self%mumps_struct)
 #endif
 #ifdef HAVE_MKL
-  CASE("pardiso")
-    IF(self%type=='ilu')THEN
-      CALL oft_mkl_ilu(3,1,1,rvals,ivals,ivals,rvals,self%pardiso_struct%f_factors,ierr)
-    ELSE
-      mode=-1
-      CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,nr, &
-        rvals,ivals,ivals,self%pardiso_struct%perm, &
-        1,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,rvals,rvals,ierr)
-    END IF
+  CASE("mkl")
+    mode=-1
+    CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,nr, &
+      rvals,ivals,ivals,self%pardiso_struct%perm, &
+      1,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,rvals,rvals,ierr)
 #endif
   CASE("lapack")
     DEALLOCATE(self%ipiv,self%atmp)
@@ -801,6 +849,250 @@ DEALLOCATE(ivals,rvals)
 NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine lusolver_delete
+!---------------------------------------------------------------------------
+!> Solve a linear system using a direct solve
+!!
+!! @param[in,out] u Guess/Solution field
+!! @param[in,out] g RHS/Residual field
+!---------------------------------------------------------------------------
+RECURSIVE SUBROUTINE ilusolver_apply(self,u,g)
+CLASS(oft_ilusolver), INTENT(inout) :: self
+CLASS(oft_vector), INTENT(inout) :: u,g
+!---
+INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
+INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
+REAL(r8), POINTER, DIMENSION(:) :: mat_vals,csc_vals,vtmp
+REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
+CLASS(oft_native_matrix), POINTER :: A_native
+TYPE(oft_timer) :: mytimer
+TYPE(oft_graph) :: csr_graph
+TYPE(oft_graph) :: csc_graph
+DEBUG_STACK_PUSH
+IF(TRIM(self%package)=='pardiso')self%package='mkl'
+IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting ILU solver: ',self%package,self%refactor
+IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+  'ilusolver_apply',__FILE__)
+IF(ASSOCIATED(A_native%Mfull))THEN
+  mat_vals=>A_native%Mfull
+ELSE
+  mat_vals=>A_native%M
+END IF
+!---Initialize solvers
+IF(.NOT.self%initialized)THEN
+  !---
+  SELECT CASE(TRIM(self%package))
+    CASE DEFAULT
+      CALL oft_abort('Unknown ILU package','ilusolver_apply', __FILE__)
+    CASE("native")
+      ALLOCATE(self%native_struct%ju(A_native%nr))
+      ALLOCATE(self%native_struct%jlu(A_native%nnz+1))
+      ALLOCATE(self%native_struct%alu(A_native%nnz+1))
+!     CASE("super")
+! #ifdef HAVE_SUPERLU
+!       ALLOCATE(self%superlu_struct%kr(A_native%nr+1))
+!       ALLOCATE(self%superlu_struct%lc(A_native%nnz))
+!       self%superlu_struct%kr=A_native%kr-1
+!       self%superlu_struct%lc=A_native%lc-1
+! #else
+!       CALL oft_abort('OFT not compiled with SUPERLU','ilusolver_apply',__FILE__)
+! #endif
+    CASE("mkl")
+#if !defined(HAVE_MKL)
+      CALL oft_abort('OFT not compiled with MKL-PARDISO','ilusolver_apply',__FILE__)
+#endif
+  END SELECT
+  self%initialized=.TRUE.
+END IF
+!---Call factorization
+ALLOCATE(vals(u%n,self%nrhs))
+nrhs=1
+vtmp=>vals(:,1)
+CALL g%get_local(vtmp)
+IF(self%nrhs>1)THEN
+  nrhs=self%nrhs
+  DO i=2,self%nrhs
+    vals(:,i) = self%sec_rhs(:,i-1)
+  END DO
+END IF
+ldb=A_native%nr
+! NULLIFY(vals)
+! CALL g%get_local(vals)
+SELECT CASE(TRIM(self%package))
+  CASE("mkl")
+#ifdef HAVE_MKL
+    IF(self%refactor)THEN
+      !---Update matrix
+      CALL oft_mkl_ilu(1,A_native%nr,A_native%nnz,mat_vals,A_native%lc, &
+        A_native%kr,vals,self%pardiso_struct%f_factors,ierr)
+      IF(ierr/=0)CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
+      self%refactor=.FALSE.
+      self%update_graph=.FALSE.
+    END IF
+    CALL oft_mkl_ilu(2,A_native%nr,A_native%nnz,mat_vals,A_native%lc, &
+      A_native%kr,vals,self%pardiso_struct%f_factors,ierr)
+#else
+    CALL oft_abort('OFT not compiled with MKL-PARDISO','ilusolver_apply',__FILE__)
+#endif
+!   CASE("super")
+! #ifdef HAVE_SUPERLU
+!     IF(self%refactor)THEN
+!       mode=3
+!       IF(self%update_graph)mode=1
+! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+!       !$omp critical (superlu_solve)
+! #endif
+!       CALL oft_superlu_dgsisx(mode,A_native%nr,A_native%nnz,nrhs, &
+!         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
+!         self%superlu_struct%f_factors,self%superlu_struct%col_perm,1.d-1,ierr)
+!       IF(ierr/=0)THEN
+!         WRITE(*,*)ierr,A_native%nr
+!         IF(.NOT.((ierr>=0).AND.(ierr<=A_native%nr)))THEN
+!           CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
+!         END IF
+!       END IF
+! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+!       !$omp end critical (superlu_solve)
+! #endif
+!       self%refactor=.FALSE.
+!       self%update_graph=.FALSE.
+!     END IF
+!     mode=2
+! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+!     !$omp critical (superlu_solve)
+! #endif
+!     CALL oft_superlu_dgsisx(mode,A_native%nr,A_native%nnz,nrhs, &
+!       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
+!       self%superlu_struct%f_factors,self%superlu_struct%col_perm,1.d3,ierr)
+!       IF(ierr/=0)THEN
+!         WRITE(*,*)ierr
+!         CALL oft_abort('Solve failed','ilusolver_apply',__FILE__)
+!       END IF
+! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+!     !$omp end critical (superlu_solve)
+! #endif
+! #else
+!   CALL oft_abort('OFT not compiled with SuperLU','ilusolver_apply',__FILE__)
+! #endif
+  CASE("native")
+    IF(self%refactor)THEN
+      CALL ilu0(A_native%nr,mat_vals,A_native%lc,A_native%kr,self%native_struct%alu, &
+        self%native_struct%jlu,self%native_struct%ju, ierr)
+      IF(ierr/=0)THEN
+        WRITE(*,*)ierr
+        CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
+      END IF
+      self%refactor=.FALSE.
+      self%update_graph=.FALSE.
+    END IF
+    CALL lusol(A_native%nr,nrhs,vals,self%native_struct%alu,self%native_struct%jlu, &
+      self%native_struct%ju)
+  CASE DEFAULT
+    CALL oft_abort('Unknown factorization package','ilusolver_apply',__FILE__)
+END SELECT
+CALL u%restore_local(vals(:,1))
+IF(self%nrhs>1)THEN
+  DO i=2,self%nrhs
+    self%sec_rhs(:,i-1) = vals(:,i)
+  END DO
+END IF
+DEALLOCATE(vals)
+DEBUG_STACK_POP
+END SUBROUTINE ilusolver_apply
+!---------------------------------------------------------------------------
+!> Update solver after changing settings/operators
+!!
+!! @param[in] new_pattern Update matrix pattern (optional)
+!---------------------------------------------------------------------------
+recursive subroutine ilusolver_update(self,new_pattern)
+class(oft_ilusolver), intent(inout) :: self
+LOGICAL, optional, intent(in) :: new_pattern
+self%refactor=.TRUE.
+IF(PRESENT(new_pattern))self%update_graph=new_pattern
+end subroutine ilusolver_update
+!---------------------------------------------------------------------------
+!> Setup solver from XML definition
+!!
+!! @param[in] solver_node XML node containing solver definition
+!! @param[in] level Leve in MG hierarchy (optional)
+!---------------------------------------------------------------------------
+subroutine ilusolver_setup_xml(self,solver_node,level)
+CLASS(oft_ilusolver), INTENT(inout) :: self
+TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+INTEGER(i4), OPTIONAL, INTENT(in) :: level
+#ifdef HAVE_XML
+!---
+INTEGER(i4) :: nnodes,nread
+TYPE(fox_node), POINTER :: current_node
+TYPE(fox_nodelist), POINTER :: current_nodes
+!---
+CHARACTER(LEN=7) :: factor_package
+CHARACTER(LEN=3) :: fac_type
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+!---
+current_nodes=>fox_getElementsByTagName(solver_node,"package")
+nnodes=fox_getLength(current_nodes)
+IF(nnodes==1)THEN
+  current_node=>fox_item(current_nodes,0)
+  CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
+  IF(nread==1)THEN
+    self%package=factor_package
+  END IF
+END IF
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(A)')'LU solver setup:'
+  WRITE(*,'(2X,2A)')'- Package:  ',self%package
+END IF
+DEBUG_STACK_POP
+#else
+CALL oft_abort('OFT not compiled with xml support.','lusolver_setup_xml',__FILE__)
+#endif
+end subroutine ilusolver_setup_xml
+!---------------------------------------------------------------------------
+!> Check for thread safety
+!---------------------------------------------------------------------------
+recursive function ilusolver_check_thread(self) result(thread_safe)
+class(oft_ilusolver), intent(inout) :: self
+logical :: thread_safe
+thread_safe=.TRUE.
+! IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
+! IF(self%package(1:6)=='superd')thread_safe=.FALSE.
+end function ilusolver_check_thread
+!---------------------------------------------------------------------------
+!> Destroy direct solver and deallocate all internal storage
+!---------------------------------------------------------------------------
+subroutine ilusolver_delete(self)
+class(oft_ilusolver), intent(inout) :: self
+INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ivals
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: rvals
+self%refactor=.TRUE.
+self%update_graph=.TRUE.
+IF(.NOT.self%initialized)THEN
+  NULLIFY(self%A)
+  RETURN
+END IF
+ALLOCATE(ivals(1),rvals(1))
+SELECT CASE(TRIM(self%package))
+! #ifdef HAVE_SUPERLU
+!   CASE("super")
+!     mode=4
+!     CALL oft_superlu_dgssv(mode,nrhs,nrhs,nrhs,rvals,ivals,ivals, &
+!       rvals,ldb,self%superlu_struct%f_factors,nrhs,ierr)
+! #endif
+#ifdef HAVE_MKL
+  CASE("mkl")
+    CALL oft_mkl_ilu(3,1,1,rvals,ivals,ivals,rvals,self%pardiso_struct%f_factors,ierr)
+#endif
+  CASE("native")
+    IF(ASSOCIATED(self%native_struct%alu))THEN
+      DEALLOCATE(self%native_struct%alu,self%native_struct%jlu,self%native_struct%ju)
+    END IF
+END SELECT
+DEALLOCATE(ivals,rvals)
+NULLIFY(self%A)
+self%initialized=.FALSE.
+end subroutine ilusolver_delete
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -917,4 +1209,101 @@ IF(oft_env%pm)THEN
   WRITE(*,*)'  Time = ',elapsed_time
 END IF
 END SUBROUTINE lapack_cholesky_real
+!------------------------------------------------------------------------------
+!> Native Incomplete LU factorization with no fill
+!!
+!! Based on ILU++ by Mayer (https://dx.doi.org/10.1002/pamm.200700911)
+!!
+!! @note Requires CSR graph with sorted column list and diagonal entries
+!------------------------------------------------------------------------------
+subroutine ilu0(n,a,lc,kr,alu,jlu,ju,ierr)
+integer(4), intent(in) :: n !< Size of matrix
+real(8), contiguous, dimension(:), intent(in) :: a !< Matrix entries
+real(8), contiguous, dimension(:), intent(inout) :: alu !< Entries for L/U factors
+integer(4), contiguous, dimension(:), intent(inout) :: lc !< Column indices
+integer(4), contiguous, dimension(:), intent(inout) :: kr !< Row pointer
+integer(4), contiguous, dimension(:), intent(inout) :: jlu !< Column indices for alu
+integer(4), contiguous, dimension(:), intent(inout) :: ju !< Diagonal indices for alu
+integer(4), intent(out) :: ierr !< Error flag
+integer(4), allocatable, dimension(:) :: iw
+integer(4) :: i,ii,j,jj,jcol,jf,jm,jrow,js,ju0,jw
+real(8) :: tl
+!
+ju0 = n+2
+jlu(1) = ju0
+! initialize work vector to zero's
+ALLOCATE(iw(n))
+do i=1, n
+    iw(i) = 0
+end do
+!---
+ierr = 0
+do ii=1,n
+  js=ju0
+  !---Generating row ii of L and U
+  do j=kr(ii),kr(ii+1)-1
+    ! copy row ii of a, ja, ia into row ii of alu, jlu (L/U) matrix.
+    jcol=lc(j)
+    if(jcol==ii)then
+      alu(ii)=a(j)
+      iw(jcol)=ii
+      ju(ii)=ju0
+    else
+      alu(ju0)=a(j)
+      jlu(ju0)=lc(j)
+      iw(jcol)=ju0
+      ju0=ju0+1
+    endif
+  end do
+  jlu(ii+1)=ju0
+  jf=ju0-1
+  jm=ju(ii)-1
+  !---Move up to diagonal
+  do j=js,jm
+    jrow=jlu(j)
+    tl=alu(j)*alu(jrow)
+    alu(j)=tl
+    do jj=ju(jrow),jlu(jrow+1)-1
+      jw=iw(jlu(jj))
+      if(jw/=0)alu(jw)=alu(jw)-tl*alu(jj)
+    end do
+  end do
+  if(alu(ii)==0.0d0)then
+    ierr = ii
+    exit
+  endif
+  alu(ii)=1.0d0/alu(ii)
+  !---Reset iw pointer
+  iw(ii)=0
+  do i=js,jf
+    iw(jlu(i))=0
+  end do
+end do
+DEALLOCATE(iw)
+END SUBROUTINE
+!------------------------------------------------------------------------------
+!> Approximate solve using ILU(0) factorization produced by ilu0
+!------------------------------------------------------------------------------
+subroutine lusol(n, nrhs, x, alu, jlu, ju)
+integer(4), intent(in) :: n !< Size of matrix
+integer(4), intent(in) :: nrhs !< Number of RHS to solve
+real(8), intent(inout) :: x(n,nrhs) !< Input: RHS, Output: Solution
+real(8), contiguous, dimension(:), intent(in) :: alu !< Entries for L/U factors
+integer(4), contiguous, dimension(:), intent(in) :: jlu !< Column indices for alu
+integer(4), contiguous, dimension(:), intent(in) :: ju !< Diagonal indices for alu
+integer(4) :: i,k
+! forward solve
+do i = 1, n
+  do k=jlu(i),ju(i)-1
+    x(i,:)=x(i,:)-alu(k)*x(jlu(k),:)
+  end do
+end do
+! backward solve
+do i=n,1,-1
+  do k=ju(i),jlu(i+1)-1
+      x(i,:)=x(i,:)-alu(k)*x(jlu(k),:)
+  end do
+  x(i,:) = alu(i)*x(i,:)
+end do
+end subroutine
 END MODULE oft_lu

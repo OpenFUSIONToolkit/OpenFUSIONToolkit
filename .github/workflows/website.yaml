@@ -31,10 +31,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Fetch release tags (deploy)
+        if: github.ref == 'refs/heads/gh-pages'
+        run: git fetch --prune --unshallow --tags
 
       - name: Install prerequisites
         run: |
-          sudo apt -y install doxygen graphviz
+          sudo apt-get -y install doxygen graphviz
           pip3 install jupyter nbconvert
 
       - name: Setup Pages
@@ -44,22 +48,19 @@ jobs:
       - name: Create build dir
         run: mkdir build_docs
 
-      - name: Configure OFT documentation (nightly)
-        if: github.ref != 'refs/head/gh-pages'
+      - name: Build OFT documentation (nightly)
+        if: github.ref != 'refs/heads/gh-pages'
         shell: bash
         working-directory: build_docs
-        run: cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=ON ../src
+        run: |
+          cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=ON ../src
+          make docs
       
-      - name: Configure OFT documentation (deploy)
-        if: github.ref == 'refs/head/gh-pages'
+      - name: Build OFT documentation (deploy)
+        if: github.ref == 'refs/heads/gh-pages'
         shell: bash
         working-directory: build_docs
-        run: cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=OFF ../src
-
-      - name: Build OFT documentation
-        shell: bash
-        working-directory: build_docs
-        run: make docs
+        run: bash ../src/docs/build_doc_versions.sh
       
       - name: Package full site
         run: |

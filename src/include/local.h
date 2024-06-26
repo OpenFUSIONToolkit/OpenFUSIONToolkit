@@ -22,4 +22,12 @@
 #define HDF5_TLEN 4
 #endif
 
+#if !defined(OFT_PATH_SLEN)
+#define OFT_PATH_SLEN 80
+#endif
+
+#if !defined(OFT_HIST_SLEN)
+#define OFT_HIST_SLEN 40
+#endif
+
 #endif

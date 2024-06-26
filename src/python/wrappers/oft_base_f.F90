@@ -19,6 +19,7 @@ USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
+#include "local.h"
 CONTAINS
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -50,10 +51,34 @@ END SUBROUTINE copy_string_rev
 !------------------------------------------------------------------------------
 SUBROUTINE oftpy_init(nthreads) BIND(C,NAME="oftpy_init")
 INTEGER(c_int), VALUE, INTENT(in) :: nthreads !< Needs docs
-IF(oft_env%nbase>0)RETURN
+IF(oft_env%ifile/='none')RETURN
 oft_env%ifile='oftpyin'
 CALL oft_init(nthreads)
 END SUBROUTINE oftpy_init
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE oftpy_load_xml(xml_file,oft_node_ptr) BIND(C,NAME="oftpy_load_xml")
+CHARACTER(KIND=c_char), INTENT(in) :: xml_file(80) !< Needs docs
+TYPE(c_ptr), INTENT(out) :: oft_node_ptr !< Needs docs
+#ifdef HAVE_XML
+INTEGER(i4) :: ierr
+LOGICAL :: rst
+CHARACTER(LEN=OFT_PATH_SLEN) :: xml_filename = 'none'
+TYPE(fox_node), POINTER :: doc,oft_node
+!---Test for existence of XML file
+CALL copy_string_rev(xml_file,xml_filename)
+INQUIRE(FILE=TRIM(xml_filename),exist=rst)
+IF(.NOT.rst)RETURN
+doc=>fox_parseFile(TRIM(xml_filename),iostat=ierr)
+IF(ierr/=0)RETURN
+CALL xml_get_element(doc,"oft",oft_node,ierr)
+IF(ierr/=0)RETURN
+oft_node_ptr=C_LOC(oft_node)
+#else
+oft_node_ptr=C_NULL_PTR
+#endif
+END SUBROUTINE oftpy_load_xml
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

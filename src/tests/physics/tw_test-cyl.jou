@@ -22,3 +22,13 @@ nodeset 1 add vertex 2
 # Export grid
 set large exodus file on
 export Genesis  "tw_test-cyl.g" overwrite block 1
+
+# Generate high-res mesh
+delete mesh surface 1 propagate
+set trimesher geometry sizing off
+surface all scheme trimesh
+surface all size {mesh_size/2.0}
+mesh surface all
+
+set large exodus file on
+export Genesis  "tw_test-cyl_hr.g" overwrite block 1

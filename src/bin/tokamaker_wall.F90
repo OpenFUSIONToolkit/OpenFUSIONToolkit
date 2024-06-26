@@ -738,6 +738,7 @@ USE axi_green, ONLY: decay_eigenmodes
 USE nonax_wall, ONLY: nonax_rescouple, nonax_indcouple, nonax_eigs
 USE exp_geom, ONLY: exp_setup
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: i,ierr,io_unit
 TYPE(gs_eq) :: mygs
 !---GS input options
@@ -773,11 +774,11 @@ LOGICAL :: has_plasma = .TRUE.
 LOGICAL :: save_mug = .FALSE.
 LOGICAL :: fast_boundary = .TRUE.
 LOGICAL :: limited_only = .FALSE.
-CHARACTER(LEN=40) :: coil_file = 'none'
-CHARACTER(LEN=40) :: limiter_file = 'none'
-CHARACTER(LEN=80) :: eqdsk_filename = 'gTokaMaker'
+CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
 CHARACTER(LEN=39) :: eqdsk_run_info = ''
-CHARACTER(LEN=80) :: eqdsk_limiter_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = 'none'
 !---Wall specific options
 LOGICAL :: mirror_wall = .FALSE.
 LOGICAL :: grid_3d = .FALSE.
@@ -830,12 +831,12 @@ mygs%compute_chi=.FALSE.
 IF(TRIM(coil_file)/='none')THEN
   mygs%coil_file=coil_file
   CALL mygs%load_coils(ignore_inmesh=.TRUE.)
-  DO i=1,mygs%ncoils_ext
-    mygs%coils_ext(i)%curr=0.d0 ! Zero all external coils
-  END DO
-  DO i=1,mygs%ncoil_regs
-    mygs%coil_regions(i)%curr=0.d0 ! Zero all internal coil regions
-  END DO
+  ! DO i=1,mygs%ncoils_ext
+  !   mygs%coils_ext(i)%curr=0.d0 ! Zero all external coils
+  ! END DO
+  ! DO i=1,mygs%ncoil_regs
+  !   mygs%coil_regions(i)%curr=0.d0 ! Zero all internal coil regions
+  ! END DO
   DO i=1,mygs%ncond_eigs
     mygs%cond_regions(i)%weights=0.d0 ! Zero all conducting regions
   END DO
@@ -945,7 +946,7 @@ DO i=1,self%ncond_regs
   eig_vec=0.d0
   IF(self%cond_regions(i)%neigs>0)THEN
     WRITE(num_str,'(I2.2)')i
-    IF(.NOT.self%cond_regions(i)%contiguous)THEN
+    IF(.NOT.self%cond_regions(i)%continuous)THEN
       ALLOCATE(correction(nsensor,self%cond_regions(i)%neigs))
       ALLOCATE(corr_axi(ncons,self%cond_regions(i)%neigs))
       DO j=1,self%cond_regions(i)%neigs

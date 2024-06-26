@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <stdint.h>
 
 void oft_stack_print();
 void oft_finalize();
@@ -31,6 +32,22 @@ void oft_set_signal_handlers()
 	signal(SIGBUS, oft_signal_handler);
 	signal(SIGFPE, oft_signal_handler);
 }
+
+// Jenkins's one_at_a_time hash
+uint32_t oft_simple_hash(const uint8_t* key, long length) {
+  long i = 0;
+  uint32_t hash = 0;
+  while (i != length) {
+    hash += key[i++];
+    hash += hash << 10;
+    hash ^= hash >> 6;
+  }
+  hash += hash << 3;
+  hash ^= hash >> 11;
+  hash += hash << 15;
+  return hash;
+}
+
 /*
 #include <stdint.h>
 int64_t oft_realtime_tick()
