@@ -48,7 +48,7 @@ oft_in_template = """
  direct={1}
  plot_run=F
  neigs={6}
- reduce_model={8}
+ reduce_model={9}
 /
 
 &thincurr_fr_options
@@ -59,9 +59,9 @@ oft_in_template = """
 
 &thincurr_hodlr_options
  target_size=200
- L_svd_tol={6}
+ L_svd_tol={7}
  L_aca_rel_tol=0.05
- B_svd_tol={7}
+ B_svd_tol={8}
  B_aca_rel_tol=0.05
 /
 """
@@ -369,26 +369,30 @@ def test_eig_passive(direct_flag):
 
 #============================================================================
 # Test runners for eigenvalue-based model reduction
-def test_mred_plate():
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+def test_mred_plate(direct_flag):
     eigs = (9.735667E-3, 6.532314E-3, 6.532201E-3, 5.251598E-3)
-    assert thin_wall_setup("tw_test-plate.h5",4,True)
+    assert ThinCurr_setup("tw_test-plate.h5",4,direct_flag)
     assert validate_model_red(eigs)
 
-def test_mred_cyl():
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+def test_mred_cyl(direct_flag):
     eigs = (2.657195E-2, 1.248071E-2, 1.247103E-2, 1.200566E-2)
-    assert thin_wall_setup("tw_test-cyl.h5",4,True)
+    assert ThinCurr_setup("tw_test-cyl.h5",4,direct_flag)
     assert validate_model_red(eigs)
 
 @pytest.mark.coverage
-def test_mred_torus():
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+def test_mred_torus(direct_flag):
     eigs = (4.751344E-2, 2.564491E-2, 2.555695E-2, 2.285850E-2)
-    assert thin_wall_setup("tw_test-torus.h5",4,True)
+    assert ThinCurr_setup("tw_test-torus.h5",4,direct_flag)
     assert validate_model_red(eigs)
 
 @pytest.mark.coverage
-def test_mred_passive():
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+def test_mred_passive(direct_flag):
     eigs = (1.483589E-1, 6.207849E-2, 2.942791E-2, 2.693574E-2)
-    assert thin_wall_setup("tw_test-passive.h5",4,True,eta=1.E4,
+    assert ThinCurr_setup("tw_test-passive.h5",4,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)))
     assert validate_model_red(eigs)
@@ -441,6 +445,12 @@ def test_eig_aca():
     eigs = (2.659575E-2, 1.254552E-2, 1.254536E-2, 1.208636E-2)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",2,'F',use_aca=True)
     assert validate_eigs(eigs)
+
+@pytest.mark.coverage
+def test_mred_aca():
+    eigs = (2.659575E-2, 1.254552E-2, 1.254536E-2, 1.208636E-2)
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",4,'F',use_aca=True)
+    assert validate_model_red(eigs)
 
 @pytest.mark.coverage
 def test_td_aca():

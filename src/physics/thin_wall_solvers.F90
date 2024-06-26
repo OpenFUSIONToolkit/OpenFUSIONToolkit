@@ -13,7 +13,7 @@
 MODULE thin_wall_solvers
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: oft_bin_file
+USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
@@ -615,4 +615,127 @@ END IF
 oft_env%pm=pm
 END SUBROUTINE gmres_comp
 END SUBROUTINE frequency_response
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+SUBROUTINE tw_reduce_model(self,sensors,neigs,eig_vec,filename,hodlr_op)
+TYPE(tw_type), INTENT(in) :: self !< Needs docs
+TYPE(tw_sensors), INTENT(in) :: sensors !< Sensor information
+INTEGER(4), INTENT(in) :: neigs !< Needs docs
+REAL(8), INTENT(in) :: eig_vec(:,:) !< Needs docs
+CHARACTER(LEN=*), INTENT(in) :: filename !< Needs docs
+TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
+!---
+INTEGER(4) :: i,j
+REAL(8), POINTER :: vals(:)
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mattmp,Mat_red
+CHARACTER(LEN=4) :: sub_coil_id
+CLASS(oft_vector), POINTER :: atmp,btmp
+character(LEN=80), dimension(1) :: description
+CALL hdf5_create_file(TRIM(filename))
+!---Setup temporaries
+NULLIFY(vals)
+CALL self%Uloc%new(atmp)
+CALL self%Uloc%new(btmp)
+CALL atmp%get_local(vals)
+ALLOCATE(Mat_red(neigs,neigs),Mattmp(self%nelems,neigs))
+!---Save reduction vectors
+CALL hdf5_write(eig_vec,TRIM(filename),'Basis')
+description=["Basis set used for model reduction"]
+CALL hdf5_add_string_attribute(TRIM(filename),'Basis','description',description)
+!---Reduce L matrix
+IF(PRESENT(hodlr_op))THEN
+    DO i=1,neigs
+        vals=eig_vec(:,i)
+        CALL atmp%restore_local(vals)
+        CALL btmp%set(0.d0)
+        CALL hodlr_op%apply(atmp,btmp)
+        CALL btmp%get_local(vals)
+        Mattmp(:,i) = vals
+    END DO
+ELSE
+    CALL dgemm('N','N',self%nelems,neigs,self%nelems,1.d0, &
+        self%Lmat,self%nelems,eig_vec,self%nelems,0.d0,Mattmp,self%nelems)
+END IF
+CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0,eig_vec, &
+    self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
+CALL hdf5_write(Mat_red,TRIM(filename),'L')
+description=["Self-inductance matrix for reduced model"]
+CALL hdf5_add_string_attribute(TRIM(filename),'L','description',description)
+!---Reduce R matrix
+DO i=1,neigs
+    vals=eig_vec(:,i)
+    CALL atmp%restore_local(vals)
+    CALL btmp%set(0.d0)
+    CALL self%Rmat%apply(atmp,btmp)
+    CALL btmp%get_local(vals)
+    Mattmp(:,i) = vals
+END DO
+CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0, &
+    eig_vec,self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
+CALL hdf5_write(Mat_red,TRIM(filename),'R')
+description=["Resistance matrix for reduced model"]
+CALL hdf5_add_string_attribute(TRIM(filename),'R','description',description)
+CALL atmp%delete()
+CALL btmp%delete()
+DEALLOCATE(Mat_red,Mattmp,vals,atmp,btmp)
+!---Reduce sensor coupling matrix
+IF(sensors%nfloops>0)THEN
+    ! Save sensor names and indexes
+    CALL hdf5_create_group(TRIM(filename),'SENSORS')
+    DO i=1,sensors%nfloops
+        CALL hdf5_create_group(TRIM(filename), &
+            'SENSORS/'//TRIM(sensors%floops(i)%name))
+        CALL hdf5_write(i,TRIM(filename), &
+            'SENSORS/'//TRIM(sensors%floops(i)%name)//'/index')
+        CALL hdf5_write(sensors%floops(i)%scale_fac,TRIM(filename), &
+            'SENSORS/'//TRIM(sensors%floops(i)%name)//'/scale')
+        CALL hdf5_write(sensors%floops(i)%r,TRIM(filename), &
+            'SENSORS/'//TRIM(sensors%floops(i)%name)//'/pts')
+    END DO
+    ! Save mutual coupling matrix
+    ALLOCATE(Mat_red(sensors%nfloops,neigs))
+    CALL dgemm('N','N',sensors%nfloops,neigs,self%nelems,1.d0, &
+        self%Ael2sen,sensors%nfloops,eig_vec,self%nelems,0.d0,Mat_red,sensors%nfloops)
+    CALL hdf5_write(Mat_red,TRIM(filename),'Ms')
+    description=["Model to sensor mutual inductance matrix"]
+    CALL hdf5_add_string_attribute(TRIM(filename),'Ms','description',description)
+    DEALLOCATE(Mat_red)
+END IF
+!---Reduce coil coupling matrix
+IF(self%n_icoils>0)THEN
+    ! Save coil names and indexes
+    CALL hdf5_create_group(TRIM(filename),'COILS')
+    DO i=1,self%n_icoils
+    CALL hdf5_create_group(TRIM(filename), &
+        'COILS/'//TRIM(self%icoils(i)%name))
+    CALL hdf5_write(i,TRIM(filename), &
+        'COILS/'//TRIM(self%icoils(i)%name)//'/index')
+    CALL hdf5_create_group(TRIM(filename), &
+        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS')
+    DO j=1,self%icoils(i)%ncoils
+        WRITE(sub_coil_id,'(I4.4)')j
+        CALL hdf5_create_group(TRIM(filename), &
+        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id)
+        CALL hdf5_write(self%icoils(i)%scales(j),TRIM(filename), &
+        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/scale')
+        CALL hdf5_write(self%icoils(i)%coils(j)%pts,TRIM(filename), &
+        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/pts')
+    END DO
+    END DO
+    ! Save mutual coupling matrix
+    ALLOCATE(Mat_red(neigs,self%n_icoils))
+    CALL dgemm('T','N',neigs,self%n_icoils,self%nelems,1.d0, &
+    eig_vec,self%nelems,self%Ael2dr,self%nelems,0.d0,Mat_red,neigs)
+    CALL hdf5_write(Mat_red,TRIM(filename),'Mc')
+    description=["Model to coil mutual inductance matrix"]
+    CALL hdf5_add_string_attribute(TRIM(filename),'Mc','description',description)
+    DEALLOCATE(Mat_red)
+    IF(sensors%nfloops>0)THEN
+    CALL hdf5_write(self%Adr2sen,TRIM(filename),'Msc')
+    description=["Coil to sensor mutual inductance matrix"]
+    CALL hdf5_add_string_attribute(TRIM(filename),'Msc','description',description)
+    END IF
+END IF
+END SUBROUTINE tw_reduce_model
 END MODULE thin_wall_solvers

@@ -271,12 +271,13 @@ class ThinCurr():
         Ms_loc = c_void_p()
         Msc_loc = c_void_p()
         nsensors = c_int()
+        sensor_loc = c_void_p()
         error_string = c_char_p(b""*200)
-        thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc),ctypes.byref(nsensors),cache_string,error_string)
+        thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc),ctypes.byref(nsensors),ctypes.byref(sensor_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return numpy.ctypeslib.as_array(ctypes.cast(Ms_loc, c_double_ptr),shape=(self.nelems,nsensors.value)), \
-               numpy.ctypeslib.as_array(ctypes.cast(Msc_loc, c_double_ptr),shape=(self.n_icoils,nsensors.value))
+               numpy.ctypeslib.as_array(ctypes.cast(Msc_loc, c_double_ptr),shape=(self.n_icoils,nsensors.value)), sensor_loc
     
     def compute_Rmat(self,copy_out=False):
         '''! Compute the resistance matrix for this model
@@ -371,3 +372,14 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return result
+
+    def build_reduced_model(self,basis_set,filename='tCurr_reduced.h5',sensor_obj=c_void_p()):
+        basis_set = numpy.ascontiguousarray(basis_set, dtype=numpy.float64)
+        nbasis = c_int(basis_set.shape[0])
+        error_string = c_char_p(b""*200)
+        if self.Lmat_hodlr:
+            thincurr_reduce_model(self.tw_obj,c_char_p(filename),nbasis,basis_set,sensor_obj,self.Lmat_hodlr,error_string)
+        else:
+            thincurr_reduce_model(self.tw_obj,c_char_p(filename),nbasis,basis_set,sensor_obj,c_void_p(),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)

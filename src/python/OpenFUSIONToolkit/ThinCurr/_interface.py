@@ -47,7 +47,7 @@ thincurr_Mcoil = ctypes_subroutine(oftpy_lib.thincurr_Mcoil,
 
 # thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,cache_file,error_str)
 thincurr_Msensor = ctypes_subroutine(oftpy_lib.thincurr_Msensor,
-    [c_void_p, c_char_p, c_void_ptr_ptr, c_void_ptr_ptr, c_int_ptr, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_void_ptr_ptr, c_void_ptr_ptr, c_int_ptr, c_void_p, c_char_p, c_char_p])
 
 # Compute model resistivity matrix thincurr_curr_Rmat(tw_ptr,copy_out,Rmat,error_str)
 thincurr_curr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
@@ -64,4 +64,8 @@ thincurr_eigenvalues = ctypes_subroutine(oftpy_lib.thincurr_eigenvalues,
 # thincurr_freq_response(tw_ptr,direct,fr_limit,freq,fr_driver,hodlr_ptr,error_str)
 thincurr_freq_response = ctypes_subroutine(oftpy_lib.thincurr_freq_response,
     [c_void_p, c_bool, c_int, c_double, ctypes_numpy_array(float64,2), c_void_p, c_char_p])
+
+# thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,hodlr_ptr,error_str)
+thincurr_reduce_model = ctypes_subroutine(oftpy_lib.thincurr_reduce_model,
+    [c_void_p, c_char_p, c_int, ctypes_numpy_array(float64,2), c_void_p, c_void_p, c_char_p])
 ## @endcond

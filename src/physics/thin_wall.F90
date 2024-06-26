@@ -125,7 +125,7 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2coil => NULL() !< Coil to coil coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2sen => NULL() !< Coil to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Lmat => NULL() !< Full inductance matrix
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2coil => NULL() !< Driver (icoils) to coil coupling matrix
+  ! REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2coil => NULL() !< Driver (icoils) to coil coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2sen => NULL() !< Driver (icoils) to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
@@ -672,6 +672,9 @@ DO i=1,18
   CALL quads(i)%delete()
 END DO
 DEALLOCATE(quads)
+!
+CALL tw_compute_Lmat_coils(tw_obj)
+!
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
@@ -683,6 +686,107 @@ IF(PRESENT(save_file))THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Ael2dr
+!------------------------------------------------------------------------------
+!> Compute coupling from thin-wall model elements to flux loop sensors
+!------------------------------------------------------------------------------
+SUBROUTINE tw_compute_Lmat_coils(tw_obj)
+TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
+LOGICAL :: exists
+INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
+REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3)
+REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness
+REAL(8) :: rgop(3,3),norm_i(3),area_i,f(3),dl_min,dl_max,pot_last,pot_tmp
+REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
+CLASS(oft_bmesh), POINTER :: bmesh
+INTEGER(4) :: ncoils_tot
+TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
+TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+DEBUG_STACK_PUSH
+!
+ALLOCATE(quads(18))
+DO i=1,18
+  CALL set_quad_2d(quads(i),i)
+END DO
+!---Build temporary coil set from all filaments in model
+ncoils_tot=tw_obj%n_vcoils
+IF(ASSOCIATED(tw_obj%Ael2dr))ncoils_tot=ncoils_tot+tw_obj%n_icoils
+ALLOCATE(coils_tot(ncoils_tot))
+DO i=1,tw_obj%n_vcoils
+  CALL tw_copy_coil(tw_obj%vcoils(i),coils_tot(i))
+END DO
+IF(ASSOCIATED(tw_obj%Ael2dr))THEN
+  DO i=1,tw_obj%n_icoils
+    CALL tw_copy_coil(tw_obj%icoils(i),coils_tot(i+tw_obj%n_vcoils))
+  END DO
+END IF
+bmesh=>tw_obj%mesh
+!---Compute coupling between vertices and sensors
+f=1.d0/3.d0
+!---Compute coupling between coils
+ALLOCATE(Acoil2coil_tmp(tw_obj%n_vcoils,ncoils_tot))
+Acoil2coil_tmp=0.d0
+WRITE(*,*)'Building coil<->coil inductance matrix'
+IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
+  !$omp parallel private(i,ii,j,k,kk,tmp,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness)
+  ALLOCATE(atmp(ncoils_tot,1))
+  !$omp do
+  DO l=1,tw_obj%n_vcoils
+    atmp=0.d0
+    DO i=1,coils_tot(l)%ncoils
+      DO ii=2,coils_tot(l)%coils(i)%npts
+        rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
+        pt_i = (coils_tot(l)%coils(i)%pts(:,ii)+coils_tot(l)%coils(i)%pts(:,ii-1))/2.d0
+        DO j=1,ncoils_tot
+          DO k=1,coils_tot(j)%ncoils
+            coil_thickness=MAX(coils_tot(l)%radius(i),coils_tot(j)%radius(k))
+            tmp=0.d0
+            DO kk=2,coils_tot(j)%coils(k)%npts
+              cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
+              cpt = (coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
+              tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/MAX(coil_thickness,SQRT(SUM((pt_i-cpt)**2)))
+            END DO
+            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
+          END DO
+        END DO
+      END DO
+    END DO
+    DO j=1,ncoils_tot
+      Acoil2coil_tmp(l,j) = atmp(j,1)
+    END DO
+  END DO
+  DEALLOCATE(atmp)
+  !$omp end parallel
+END IF
+DEALLOCATE(coils_tot)
+!---Unpack passive and driver coils
+IF(ASSOCIATED(tw_obj%Acoil2coil))DEALLOCATE(tw_obj%Acoil2coil)
+ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
+DO i=1,tw_obj%n_vcoils
+  tw_obj%Acoil2coil(:,i)=Acoil2coil_tmp(:,i)
+  tw_obj%vcoils(i)%Lself=Acoil2coil_tmp(i,i)
+  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": L [H] = ",tw_obj%vcoils(i)%Lself*1.d-7
+END DO
+!---Compute coupling between elements and drivers
+IF(ASSOCIATED(tw_obj%Ael2dr))THEN
+  ! WRITE(*,*)'Building driver->element inductance matrices'
+  !$omp parallel private(j,ii,jj,ik,jk)
+  !$omp do
+  DO i=1,tw_obj%n_vcoils
+    DO jj=1,tw_obj%n_icoils
+      tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = Acoil2coil_tmp(i,jj+tw_obj%n_vcoils)
+    END DO
+  END DO
+  !$omp end parallel
+  tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
+END IF
+DEALLOCATE(Acoil2coil_tmp)
+!
+DO i=1,18
+  CALL quads(i)%delete()
+END DO
+DEALLOCATE(quads)
+DEBUG_STACK_POP
+END SUBROUTINE tw_compute_Lmat_coils
 !------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
 !------------------------------------------------------------------------------
@@ -786,6 +890,7 @@ END IF
 !
 IF(Lself)THEN
   WRITE(*,*)'Building element<->element self inductance matrix'
+  IF(row_obj%n_vcoils>0.AND.(.NOT.ASSOCIATED(row_obj%Acoil2coil)))CALL tw_compute_Lmat_coils(row_obj)
 ELSE
   WRITE(*,*)'Building element<->element mutual inductance matrix'
 END IF
@@ -1289,6 +1394,7 @@ bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
 WRITE(*,*)'Building element->sensor inductance matrix'
+IF(ASSOCIATED(tw_obj%Ael2sen))DEALLOCATE(tw_obj%Ael2sen)
 ALLOCATE(tw_obj%Ael2sen(nsensors,tw_obj%nelems))
 tw_obj%Ael2sen=0.d0
 IF(nsensors>0)THEN
@@ -1415,10 +1521,12 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
   END DO
 END IF
 !---Unpack passive and driver coils
+IF(ASSOCIATED(tw_obj%Acoil2sen))DEALLOCATE(tw_obj%Acoil2sen)
 ALLOCATE(tw_obj%Acoil2sen(nsensors,tw_obj%n_vcoils))
 DO i=1,tw_obj%n_vcoils
   tw_obj%Acoil2sen(:,i)=Acoil2sen_tmp(:,i)
 END DO
+IF(ASSOCIATED(tw_obj%Adr2sen))DEALLOCATE(tw_obj%Adr2sen)
 ALLOCATE(tw_obj%Adr2sen(nsensors,tw_obj%n_icoils))
 DO i=1,tw_obj%n_icoils
   tw_obj%Adr2sen(:,i)=Acoil2sen_tmp(:,i+tw_obj%n_vcoils)
@@ -1437,68 +1545,6 @@ IF(nsensors>0)THEN
   END DO
   !$omp end parallel
   tw_obj%Ael2sen = tw_obj%Ael2sen/(4.d0*pi)
-END IF
-!---Compute coupling between coils
-ALLOCATE(Acoil2coil_tmp(tw_obj%n_vcoils,ncoils_tot))
-Acoil2coil_tmp=0.d0
-WRITE(*,*)'Building coil<->coil inductance matrix'
-IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
-  !$omp parallel private(i,ii,j,k,kk,tmp,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness)
-  ALLOCATE(atmp(ncoils_tot,1))
-  !$omp do
-  DO l=1,tw_obj%n_vcoils
-    atmp=0.d0
-    DO i=1,coils_tot(l)%ncoils
-      DO ii=2,coils_tot(l)%coils(i)%npts
-        rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
-        pt_i = (coils_tot(l)%coils(i)%pts(:,ii)+coils_tot(l)%coils(i)%pts(:,ii-1))/2.d0
-        DO j=1,ncoils_tot
-          DO k=1,coils_tot(j)%ncoils
-            coil_thickness=MAX(coils_tot(l)%radius(i),coils_tot(j)%radius(k))
-            tmp=0.d0
-            DO kk=2,coils_tot(j)%coils(k)%npts
-              cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
-              cpt = (coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
-              tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/MAX(coil_thickness,SQRT(SUM((pt_i-cpt)**2)))
-            END DO
-            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
-          END DO
-        END DO
-      END DO
-    END DO
-    DO j=1,ncoils_tot
-      Acoil2coil_tmp(l,j) = atmp(j,1)
-    END DO
-  END DO
-  DEALLOCATE(atmp)
-  !$omp end parallel
-END IF
-DEALLOCATE(coils_tot)
-!---Unpack passive and driver coils
-ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
-DO i=1,tw_obj%n_vcoils
-  tw_obj%Acoil2coil(:,i)=Acoil2coil_tmp(:,i)
-  tw_obj%vcoils(i)%Lself=Acoil2coil_tmp(i,i)
-  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": L [H] = ",tw_obj%vcoils(i)%Lself*1.d-7
-END DO
-ALLOCATE(tw_obj%Adr2coil(tw_obj%n_vcoils,tw_obj%n_icoils))
-DO i=1,tw_obj%n_icoils
-  tw_obj%Adr2coil(:,i)=Acoil2coil_tmp(:,i+tw_obj%n_vcoils)
-END DO
-DEALLOCATE(Acoil2coil_tmp)
-!---Compute coupling between elements and drivers
-IF(ASSOCIATED(tw_obj%Ael2dr))THEN
-  WRITE(*,*)'Building driver->element inductance matrices'
-  !$omp parallel private(j,ii,jj,ik,jk)
-  !$omp do
-  DO i=1,tw_obj%n_vcoils
-    DO jj=1,tw_obj%n_icoils
-      tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = tw_obj%Adr2coil(i,jj)
-    END DO
-  END DO
-  !$omp end parallel
-  tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
-  DEALLOCATE(tw_obj%Adr2coil)
 END IF
 !
 DO i=1,18
