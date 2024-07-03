@@ -979,7 +979,6 @@ WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 !
 WRITE(*,*)'  Building hole and Vcoil columns'
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
-    IF(self%tw_obj%n_vcoils>0.AND.(.NOT.ASSOCIATED(self%tw_obj%Acoil2coil)))CALL tw_compute_Lmat_coils(self%tw_obj)
     ALLOCATE(self%hole_Vcoil_mat%M(self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils))
     CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
 END IF

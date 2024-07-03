@@ -491,6 +491,7 @@ call h5open_f(error)
 CALL h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
 IF(error/=0)CALL oft_abort('Error opening file','hdf5_create_group',__FILE__)
 CALL h5gcreate_f(file_id, "/"//TRIM(group_name), grp_id, error)
+CALL h5gclose_f(grp_id, error)
 !---Close vector dump file and finalize HDF5
 call h5fclose_f(file_id, error)
 call h5close_f(error)

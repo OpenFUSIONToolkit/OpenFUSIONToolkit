@@ -274,8 +274,12 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
-CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
+IF((tw_obj%n_vcoils>0).AND.(.NOT.ASSOCIATED(tw_obj%Acoil2coil)))THEN
+  CALL copy_string('Coil mutuals required if, # of Vcoils > 0',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
 !
 IF(use_hodlr)THEN
   ALLOCATE(hodlr_op)
@@ -556,6 +560,10 @@ IF((.NOT.ASSOCIATED(tw_obj%Lmat)).AND.(.NOT.c_associated(hodlr_ptr)))THEN
 END IF
 IF(.NOT.ASSOCIATED(tw_obj%Rmat))THEN
   CALL copy_string('Resistance matrix required, but not computed',error_str)
+  RETURN
+END IF
+IF((tw_obj%n_icoils>0).AND.(.NOT.ASSOCIATED(tw_obj%Ael2dr)))THEN
+  CALL copy_string('Coil mutuals required if, # of Icoils > 0',error_str)
   RETURN
 END IF
 CALL copy_string('',error_str)

@@ -116,7 +116,7 @@ class ThinCurr():
             cstring = c_char_p(b""*200)
             thincurr_setup(filename,idummy,rfake,idummy,lcfake,regfake,pmap,ctypes.byref(self.tw_obj),sizes,cstring,self._xml_ptr)
             if cstring.value != b'':
-                raise Exception(cstring.value)
+                raise Exception(cstring.value.decode())
             self.np = sizes[0]
             self.ne = sizes[1]
             self.nc = sizes[2]
@@ -175,7 +175,7 @@ class ThinCurr():
         cstring = c_char_p(b""*200)
         thincurr_setup_io(self.tw_obj,basepath_c,c_bool(save_debug),cstring)
         if cstring.value != b'':
-            raise Exception(cstring.value)
+            raise Exception(cstring.value.decode())
     
     def save_current(self,potential,tag):
         '''! Save current field from ThinCurr to plot files
@@ -233,7 +233,7 @@ class ThinCurr():
         error_string = c_char_p(b""*200)
         thincurr_curr_Lmat(self.tw_obj,use_hodlr,ctypes.byref(Lmat_loc),cache_string,error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
         if use_hodlr:
             self.Lmat_hodlr = Lmat_loc
         else:
@@ -253,7 +253,7 @@ class ThinCurr():
         error_string = c_char_p(b""*200)
         thincurr_Mcoil(self.tw_obj,ctypes.byref(Mc_loc),cache_string,error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
         return numpy.ctypeslib.as_array(ctypes.cast(Mc_loc, c_double_ptr),shape=(self.n_icoils,self.nelems))
 
     def compute_Msensor(self,sensor_file,cache_file=None):
@@ -275,7 +275,7 @@ class ThinCurr():
         error_string = c_char_p(b""*200)
         thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc),ctypes.byref(nsensors),ctypes.byref(sensor_loc),cache_string,error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
         return numpy.ctypeslib.as_array(ctypes.cast(Ms_loc, c_double_ptr),shape=(self.nelems,nsensors.value)), \
                numpy.ctypeslib.as_array(ctypes.cast(Msc_loc, c_double_ptr),shape=(self.n_icoils,nsensors.value)), sensor_loc
     
@@ -292,7 +292,7 @@ class ThinCurr():
         error_string = c_char_p(b""*200)
         thincurr_curr_Rmat(self.tw_obj,c_bool(copy_out),Rmat_tmp,error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
     
     def cross_coupling(self,model2,cache_file=None):
         '''! Compute the mutual inductance between this and another ThinCurr model
@@ -308,7 +308,7 @@ class ThinCurr():
         error_string = c_char_p(b""*200)
         thincurr_cross_coupling(self.tw_obj,model2.tw_obj,Mmat,cache_string,error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
         return Mmat
     
     def cross_eval(self,model2,field):
@@ -323,7 +323,7 @@ class ThinCurr():
         error_string = c_char_p(b""*200)
         thincurr_cross_eval(self.tw_obj,model2.tw_obj,c_int(nrhs),vec_in,vec_out,error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
         return vec_out
     
     def get_regmat(self):
@@ -333,7 +333,7 @@ class ThinCurr():
         error_string = c_char_p(b""*200)
         thincurr_curr_regmat(self.tw_obj,Rmat,error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
         return Rmat
     
     def get_eigs(self,neigs,direct=False):
@@ -351,7 +351,7 @@ class ThinCurr():
         else:
             thincurr_eigenvalues(self.tw_obj,c_bool(direct),c_int(neigs),eig_vals,eig_vecs,c_void_p(),error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
         return eig_vals, eig_vecs
 
     def compute_freq_response(self,driver,freq=0.0,fr_limit=0,direct=False):
@@ -370,7 +370,7 @@ class ThinCurr():
         else:
             thincurr_freq_response(self.tw_obj,c_bool(direct),c_int(fr_limit),c_double(freq),result,c_void_p(),error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
         return result
 
     def build_reduced_model(self,basis_set,filename='tCurr_reduced.h5',sensor_obj=c_void_p()):
@@ -378,8 +378,89 @@ class ThinCurr():
         nbasis = c_int(basis_set.shape[0])
         error_string = c_char_p(b""*200)
         if self.Lmat_hodlr:
-            thincurr_reduce_model(self.tw_obj,c_char_p(filename),nbasis,basis_set,sensor_obj,self.Lmat_hodlr,error_string)
+            thincurr_reduce_model(self.tw_obj,c_char_p(filename.encode()),nbasis,basis_set,sensor_obj,self.Lmat_hodlr,error_string)
         else:
-            thincurr_reduce_model(self.tw_obj,c_char_p(filename),nbasis,basis_set,sensor_obj,c_void_p(),error_string)
+            thincurr_reduce_model(self.tw_obj,c_char_p(filename.encode()),nbasis,basis_set,sensor_obj,c_void_p(),error_string)
         if error_string.value != b'':
-            raise Exception(error_string.value)
+            raise Exception(error_string.value.decode())
+        return ThinCurr_reduced(filename)
+
+
+class ThinCurr_reduced:
+    def __init__(self, filename):
+        with h5py.File(filename,'r') as file:
+            self.Basis = numpy.asarray(file['Basis'])
+            self.L = numpy.asarray(file['L'])
+            self.R = numpy.asarray(file['R'])
+            if 'Ms' in file:
+                self.Ms = numpy.asarray(file['Ms'])
+            else:
+                self.Ms = None
+            if 'Mc' in file:
+                self.Mc = numpy.asarray(file['Mc'])
+            else:
+                self.Mc = None
+            if 'Msc' in file:
+                self.Msc = numpy.asarray(file['Msc'])
+            else:
+                self.Msc = None
+
+    def get_eigs(self):
+        eig_vals, eig_vecs = numpy.linalg.eig(numpy.dot(numpy.linalg.inv(self.R),self.L))
+        sort_inds = (-eig_vals).argsort()
+        return eig_vals[sort_inds], numpy.dot(eig_vecs[sort_inds,:],self.Basis)
+
+    def run_td(self,dt,nsteps,coil_currs,status_freq=10,plot_freq=10):
+        Lforward = self.L - (dt/2.0)*self.R
+        Lbackward = numpy.linalg.inv(self.L + (dt/2.0)*self.R)
+        #
+        vec_time = []
+        vec_hist = []
+        sen_time = []
+        sen_hist = []
+        pot_tmp = numpy.zeros((self.L.shape[0],))
+        t = 0.0
+        print('Timestep {0} {1:12.4E} {2:12.4E}'.format(0,t,numpy.linalg.norm(pot_tmp)))
+        vec_time.append(t)
+        vec_hist.append(numpy.dot(pot_tmp,self.Basis))
+        if self.Ms is not None:
+            sen_tmp = numpy.dot(pot_tmp,self.Ms)
+            if self.Msc is not None:
+                curr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
+                for j in range(coil_currs.shape[1]-1):
+                    curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+                curr_tmp *= mu0
+                sen_tmp += numpy.dot(curr_tmp,self.Msc)
+            sen_time.append(t)
+            sen_hist.append(sen_tmp)
+        #
+        for i in range(nsteps):
+            rhs = numpy.dot(pot_tmp,Lforward)
+            if self.Mc is not None:
+                dcurr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
+                for j in range(coil_currs.shape[1]-1):
+                    dcurr_tmp[j] = numpy.interp(t+dt/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+                    dcurr_tmp[j] -= numpy.interp(t-dt/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+                    dcurr_tmp[j] += numpy.interp(t+dt*5.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+                    dcurr_tmp[j] -= numpy.interp(t+dt*3.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+                dcurr_tmp *= mu0
+                rhs -= numpy.dot(dcurr_tmp,self.Mc)
+            pot_tmp = numpy.dot(rhs,Lbackward)
+            t += dt
+            if ((i+1) % status_freq) == 0:
+                print('Timestep {0} {1:12.4E} {2:12.4E}'.format(i+1,t,numpy.linalg.norm(pot_tmp)))
+            if ((i+1) % plot_freq) == 0:
+                vec_time.append(t)
+                vec_hist.append(numpy.dot(pot_tmp,self.Basis))
+            if self.Ms is not None:
+                sen_tmp = numpy.dot(pot_tmp,self.Ms)
+                if self.Msc is not None:
+                    curr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
+                    for j in range(coil_currs.shape[1]-1):
+                        curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+                    curr_tmp *= mu0
+                    sen_tmp += numpy.dot(curr_tmp,self.Msc)
+                sen_time.append(t)
+                sen_hist.append(sen_tmp)
+        #
+        return numpy.array(sen_time), numpy.array(sen_hist), numpy.array(vec_time), numpy.array(vec_hist)

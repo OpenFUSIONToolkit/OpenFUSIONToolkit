@@ -123,7 +123,7 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2coil => NULL() !< Element to coil (vcoils+icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2sen => NULL() !< Element to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2coil => NULL() !< Coil to coil coupling matrix
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2sen => NULL() !< Coil to sensor coupling matrix
+  ! REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2sen => NULL() !< Coil to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Lmat => NULL() !< Full inductance matrix
   ! REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2coil => NULL() !< Driver (icoils) to coil coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2sen => NULL() !< Driver (icoils) to sensor coupling matrix
@@ -890,7 +890,6 @@ END IF
 !
 IF(Lself)THEN
   WRITE(*,*)'Building element<->element self inductance matrix'
-  IF(row_obj%n_vcoils>0.AND.(.NOT.ASSOCIATED(row_obj%Acoil2coil)))CALL tw_compute_Lmat_coils(row_obj)
 ELSE
   WRITE(*,*)'Building element<->element mutual inductance matrix'
 END IF
@@ -1350,21 +1349,21 @@ IF(PRESENT(save_file))THEN
         exists=.FALSE.
       END IF
     END IF
-    IF(exists)THEN
-      ALLOCATE(tw_obj%Acoil2sen(tw_obj%n_vcoils,nsensors))
-      READ(io_unit, IOSTAT=ierr)tw_obj%Acoil2sen
-      IF(ierr/=0)THEN
-        WRITE(*,*)'  Error reading matrix from file'
-        DEALLOCATE(tw_obj%Ael2sen,tw_obj%Acoil2sen)
-        exists=.FALSE.
-      END IF
-    END IF
+    ! IF(exists)THEN
+    !   ALLOCATE(tw_obj%Acoil2sen(tw_obj%n_vcoils,nsensors))
+    !   READ(io_unit, IOSTAT=ierr)tw_obj%Acoil2sen
+    !   IF(ierr/=0)THEN
+    !     WRITE(*,*)'  Error reading matrix from file'
+    !     DEALLOCATE(tw_obj%Ael2sen,tw_obj%Acoil2sen)
+    !     exists=.FALSE.
+    !   END IF
+    ! END IF
     IF(exists)THEN
       ALLOCATE(tw_obj%Adr2sen(tw_obj%n_icoils,nsensors))
       READ(io_unit, IOSTAT=ierr)tw_obj%Adr2sen
       IF(ierr/=0)THEN
         WRITE(*,*)'  Error reading matrix from file'
-        DEALLOCATE(tw_obj%Ael2sen,tw_obj%Acoil2sen,tw_obj%Adr2sen)
+        DEALLOCATE(tw_obj%Ael2sen,tw_obj%Adr2sen)
         exists=.FALSE.
       END IF
     END IF
@@ -1521,18 +1520,17 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
   END DO
 END IF
 !---Unpack passive and driver coils
-IF(ASSOCIATED(tw_obj%Acoil2sen))DEALLOCATE(tw_obj%Acoil2sen)
-ALLOCATE(tw_obj%Acoil2sen(nsensors,tw_obj%n_vcoils))
-DO i=1,tw_obj%n_vcoils
-  tw_obj%Acoil2sen(:,i)=Acoil2sen_tmp(:,i)
-END DO
+! IF(ASSOCIATED(tw_obj%Acoil2sen))DEALLOCATE(tw_obj%Acoil2sen)
+! ALLOCATE(tw_obj%Acoil2sen(nsensors,tw_obj%n_vcoils))
+! DO i=1,tw_obj%n_vcoils
+!   tw_obj%Acoil2sen(:,i)=Acoil2sen_tmp(:,i)
+! END DO
 IF(ASSOCIATED(tw_obj%Adr2sen))DEALLOCATE(tw_obj%Adr2sen)
 ALLOCATE(tw_obj%Adr2sen(nsensors,tw_obj%n_icoils))
 DO i=1,tw_obj%n_icoils
   tw_obj%Adr2sen(:,i)=Acoil2sen_tmp(:,i+tw_obj%n_vcoils)
 END DO
 tw_obj%Adr2sen=tw_obj%Adr2sen/(4.d0*pi)
-DEALLOCATE(Acoil2sen_tmp)
 !---Copy coupling between passive coils and sensors
 IF(nsensors>0)THEN
   !$omp parallel private(j,ii,jj,ik,jk)
@@ -1540,12 +1538,13 @@ IF(nsensors>0)THEN
   DO i=1,tw_obj%n_vcoils
     ! Sensors
     DO jj=1,nsensors
-      tw_obj%Ael2sen(jj,tw_obj%np_active+tw_obj%nholes+i) = tw_obj%Acoil2sen(jj,i)
+      tw_obj%Ael2sen(jj,tw_obj%np_active+tw_obj%nholes+i)=Acoil2sen_tmp(jj,i)! tw_obj%Acoil2sen(jj,i)
     END DO
   END DO
   !$omp end parallel
   tw_obj%Ael2sen = tw_obj%Ael2sen/(4.d0*pi)
 END IF
+DEALLOCATE(Acoil2sen_tmp)
 !
 DO i=1,18
   CALL quads(i)%delete()
@@ -1557,7 +1556,7 @@ IF(PRESENT(save_file))THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
     WRITE(io_unit)tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils,nsensors
     WRITE(io_unit)tw_obj%Ael2sen
-    WRITE(io_unit)tw_obj%Acoil2sen
+    ! WRITE(io_unit)tw_obj%Acoil2sen
     WRITE(io_unit)tw_obj%Adr2sen
     CLOSE(io_unit)
   END IF

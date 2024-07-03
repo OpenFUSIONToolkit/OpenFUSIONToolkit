@@ -707,26 +707,26 @@ IF(self%n_icoils>0)THEN
     ! Save coil names and indexes
     CALL hdf5_create_group(TRIM(filename),'COILS')
     DO i=1,self%n_icoils
-    CALL hdf5_create_group(TRIM(filename), &
-        'COILS/'//TRIM(self%icoils(i)%name))
-    CALL hdf5_write(i,TRIM(filename), &
-        'COILS/'//TRIM(self%icoils(i)%name)//'/index')
-    CALL hdf5_create_group(TRIM(filename), &
-        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS')
-    DO j=1,self%icoils(i)%ncoils
-        WRITE(sub_coil_id,'(I4.4)')j
         CALL hdf5_create_group(TRIM(filename), &
-        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id)
-        CALL hdf5_write(self%icoils(i)%scales(j),TRIM(filename), &
-        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/scale')
-        CALL hdf5_write(self%icoils(i)%coils(j)%pts,TRIM(filename), &
-        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/pts')
-    END DO
+            'COILS/'//TRIM(self%icoils(i)%name))
+        CALL hdf5_write(i,TRIM(filename), &
+            'COILS/'//TRIM(self%icoils(i)%name)//'/index')
+        CALL hdf5_create_group(TRIM(filename), &
+            'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS')
+        DO j=1,self%icoils(i)%ncoils
+            WRITE(sub_coil_id,'(I4.4)')j
+            CALL hdf5_create_group(TRIM(filename), &
+                'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id)
+            CALL hdf5_write(self%icoils(i)%scales(j),TRIM(filename), &
+                'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/scale')
+            CALL hdf5_write(self%icoils(i)%coils(j)%pts,TRIM(filename), &
+                'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/pts')
+        END DO
     END DO
     ! Save mutual coupling matrix
     ALLOCATE(Mat_red(neigs,self%n_icoils))
     CALL dgemm('T','N',neigs,self%n_icoils,self%nelems,1.d0, &
-    eig_vec,self%nelems,self%Ael2dr,self%nelems,0.d0,Mat_red,neigs)
+        eig_vec,self%nelems,self%Ael2dr,self%nelems,0.d0,Mat_red,neigs)
     CALL hdf5_write(Mat_red,TRIM(filename),'Mc')
     description=["Model to coil mutual inductance matrix"]
     CALL hdf5_add_string_attribute(TRIM(filename),'Mc','description',description)
