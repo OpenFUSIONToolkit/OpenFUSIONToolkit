@@ -182,7 +182,9 @@ TYPE(oft_1d_int), POINTER, INTENT(IN) :: hole_ns(:) !< Hole nodesets
 INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag
 INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
+#ifdef HAVE_XML
 TYPE(fox_node), POINTER :: coil_element
+#endif
 !
 IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
 !---
@@ -190,11 +192,12 @@ WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
+#ifdef HAVE_XML
+!---Load coils
 IF(.NOT.ASSOCIATED(self%xml))THEN
   CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
   CALL oft_warn('Unable to find "thincurr" XML node')
 END IF
-!---Load coils
 WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
 CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
 IF(error_flag==0)CALL tw_load_coils(coil_element,self%n_vcoils,self%vcoils)
@@ -205,6 +208,7 @@ END DO
 WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils'
 CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
 IF(error_flag==0)CALL tw_load_coils(coil_element,self%n_icoils,self%icoils)
+#endif
 WRITE(*,*)
 ! WRITE(*,'(2A)')oft_indent,'Thin-wall model loaded:'
 ! WRITE(*,*)'  filename    = ',TRIM(meshfile)

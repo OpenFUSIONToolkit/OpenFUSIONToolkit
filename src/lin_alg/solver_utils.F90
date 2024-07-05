@@ -483,6 +483,8 @@ SELECT CASE(TRIM(solver_type))
     ALLOCATE(oft_petsc_sjacobi_solver::solver)
   CASE("lu")
     ALLOCATE(oft_petsc_direct_solver::solver)
+  CASE("ilu")
+    CALL oft_abort("ILU0 not currently supported via PETSc.","create_petsc_solver",__FILE__)
   CASE DEFAULT
     CALL oft_abort("Invalid solver type.","create_petsc_solver",__FILE__)
 END SELECT
@@ -675,7 +677,8 @@ SELECT CASE(TRIM(pre_type))
     ALLOCATE(oft_petsc_asprecond::pre)
   CASE("lu")
     ALLOCATE(oft_petsc_luprecond::pre)
-  ! CASE("ilu")
+  CASE("ilu")
+    CALL oft_abort("ILU0 not currently supported via PETSc.","create_petsc_pre",__FILE__)
   !   ALLOCATE(oft_petsc_luprecond::pre)
   CASE DEFAULT
     CALL oft_abort("Invalid preconditioner type.","create_petsc_pre",__FILE__)
@@ -800,7 +803,7 @@ SELECT CASE(TRIM(pre_type))
   CASE("ilu")
     IF(use_petsc)THEN
       IF(native_solver)THEN
-        CALL oft_abort("LU precon requires PETSc parent solver.","create_pre_xml",__FILE__)
+        CALL oft_abort("ILU precon requires PETSc parent solver.","create_pre_xml",__FILE__)
       END IF
       CALL create_petsc_pre(pre,"ilu")
     ELSE

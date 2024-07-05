@@ -24,6 +24,7 @@ USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_save_decon, gs_save_eqds
   gs_profile_load, gs_profile_save
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 IMPLICIT NONE
+#include "local.h"
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 LOGICAL :: file_exists
 REAL(8), ALLOCATABLE :: pts(:,:)
@@ -65,11 +66,11 @@ LOGICAL :: has_plasma = .TRUE.
 LOGICAL :: save_mug = .FALSE.
 LOGICAL :: fast_boundary = .TRUE.
 LOGICAL :: limited_only = .FALSE.
-CHARACTER(LEN=40) :: coil_file = 'none'
-CHARACTER(LEN=40) :: limiter_file = 'none'
-CHARACTER(LEN=80) :: eqdsk_filename = 'gTokaMaker'
+CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
 CHARACTER(LEN=36) :: eqdsk_run_info = ''
-CHARACTER(LEN=80) :: eqdsk_limiter_file = 'none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = 'none'
 !---Fit Input options
 REAL(8) :: psinorm = 1.d0
 LOGICAL :: adjust_pnorm = .FALSE.

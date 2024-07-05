@@ -44,7 +44,7 @@ TYPE :: Exodus_curve
   INTEGER(i4) :: top_cid = -1 !< Curve ID from geometry file
   INTEGER(i4) :: ne = 0 !< Number of geometry model edges
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lgme => NULL() !< List of geometry model edges
-  CHARACTER(LEN=40) :: name = ''
+  CHARACTER(LEN=OFT_PATH_SLEN) :: name = ''
 END TYPE Exodus_curve
 !------------------------------------------------------------------------------
 ! TYPE Exodus_surf
@@ -58,7 +58,7 @@ TYPE :: Exodus_surf
   INTEGER(i4) :: top_sid = -1 !< Surface ID in OFT ordering
   INTEGER(i4) :: nf = 0 !< Number of geometry model faces
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lgmf => NULL() !< List of geometry model faces
-  CHARACTER(LEN=40) :: name = ''
+  CHARACTER(LEN=OFT_PATH_SLEN) :: name = ''
 END TYPE Exodus_surf
 !------------------------------------------------------------------------------
 ! TYPE Exodus_cadlink
@@ -92,8 +92,8 @@ integer(i4), parameter :: exodus_hex_fmap(4,6) = RESHAPE((/1,2,3,4, 5,6,7,8, 1,4
   2,3,7,6, 1,2,6,5, 3,4,8,7/),(/4,6/))
 !---Global variables
 INTEGER(i4), PARAMETER :: cubit_soffset=1E4
-CHARACTER(LEN=80), PUBLIC :: inpname = 'none' !< Name of Cubit input file for geometry (Used to retrieve CAD objects)
-CHARACTER(LEN=80) :: filename = 'none' !< Name of Cubit input file for mesh
+CHARACTER(LEN=OFT_PATH_SLEN), PUBLIC :: inpname = 'none' !< Name of Cubit input file for geometry (Used to retrieve CAD objects)
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none' !< Name of Cubit input file for mesh
 LOGICAL :: lf_file = .TRUE. !< Large format file flag
 LOGICAL :: tor_mesh = .FALSE. !< Curve grid to toroidal shaping
 LOGICAL :: reflect = .FALSE. !< Logical flag for mesh reflection (z-direction)
@@ -747,7 +747,7 @@ end subroutine smesh_cubit_load
 !------------------------------------------------------------------------------
 subroutine cubit_read_nodesets(nsets,cubit_filename)
 TYPE(oft_1d_int), pointer, intent(inout) :: nsets(:)
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: cubit_filename
+CHARACTER(LEN=OFT_PATH_SLEN), OPTIONAL, INTENT(in) :: cubit_filename
 integer(4) :: i,j,ncid,nsID,num_nsets
 !---Open mesh file
 IF(PRESENT(cubit_filename))THEN
@@ -792,7 +792,7 @@ END SUBROUTINE cubit_read_nodesets
 !------------------------------------------------------------------------------
 subroutine cubit_read_sidesets(ssets,cubit_filename)
 TYPE(oft_1d_int), pointer, intent(inout) :: ssets(:)
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: cubit_filename
+CHARACTER(LEN=OFT_PATH_SLEN), OPTIONAL, INTENT(in) :: cubit_filename
 integer(4) :: i,j,ncid,nsID,num_sidesets
 !---Open mesh file
 IF(PRESENT(cubit_filename))THEN

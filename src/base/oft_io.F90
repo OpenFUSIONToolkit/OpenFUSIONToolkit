@@ -29,12 +29,12 @@ TYPE :: oft_bin_file
   INTEGER(i4) :: nfields = 0 !< Number of fields
   INTEGER(i4) :: nbytes = 0 !< Number of bytes per line
   INTEGER(i4), POINTER, DIMENSION(:) :: field_size => NULL() !< Dimension of each field
-  CHARACTER(LEN=40) :: filename = '' !< Output filename
+  CHARACTER(LEN=OFT_PATH_SLEN) :: filename = '' !< Output filename
   CHARACTER(LEN=80) :: filedesc = '' !< Description string
   CHARACTER(LEN=2), POINTER, DIMENSION(:) :: field_type => NULL() !< Field types
-  CHARACTER(LEN=10), POINTER, DIMENSION(:) :: field_names => NULL() !< Field names
-  CHARACTER(LEN=40), POINTER, DIMENSION(:) :: field_desc => NULL() !< Field descriptions
-  CHARACTER(LEN=40), POINTER, DIMENSION(:) :: comm_lines => NULL() !< Comment lines
+  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: field_names => NULL() !< Field names
+  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: field_desc => NULL() !< Field descriptions
+  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: comm_lines => NULL() !< Comment lines
 CONTAINS
   !> Create object and allocate storage
   PROCEDURE :: setup => bin_file_setup
@@ -106,11 +106,15 @@ SUBROUTINE bin_file_setup(self,filename,desc)
 CLASS(oft_bin_file), INTENT(inout) :: self
 CHARACTER(LEN=*), INTENT(in) :: filename
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: desc
+IF(LEN(filename)>OFT_PATH_SLEN)CALL oft_abort("Filename too long","bin_file_setup",__FILE__)
 self%filename = filename
 self%nfields = 0
 self%ncomm = 0
 self%nbytes = 0
-IF(PRESENT(desc))self%filedesc=desc
+IF(PRESENT(desc))THEN
+  IF(LEN(desc)>LEN(self%filedesc))CALL oft_abort("Description too long","bin_file_setup",__FILE__)
+  self%filedesc=desc
+END IF
 END SUBROUTINE bin_file_setup
 !------------------------------------------------------------------------------
 !> Open Open FUSION Toolkit binary I/O file
@@ -148,9 +152,9 @@ CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: desc !< Description of field
 INTEGER(i4), OPTIONAL, INTENT(in) :: fsize !< Size of field
 INTEGER(i4) :: fsize_tmp
 INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp
-CHARACTER(LEN=10), POINTER, DIMENSION(:) :: names_tmp
+CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: names_tmp
+CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: desc_tmp
 CHARACTER(LEN=2), POINTER, DIMENSION(:) :: types_tmp
-CHARACTER(LEN=40), POINTER, DIMENSION(:) :: desc_tmp
 IF((type_str(1:1)/='i').AND.(type_str(1:1)/='r'))THEN
   CALL oft_abort("Invalid field type", "bin_file_add", __FILE__)
 END IF
@@ -163,6 +167,12 @@ ELSE IF(type_str(2:2)=='8')THEN
   self%nbytes = self%nbytes + 8*fsize_tmp
 ELSE
   CALL oft_abort("Invalid field size", "bin_file_add", __FILE__)
+END IF
+IF(LEN(fieldname)>OFT_HIST_SLEN)CALL oft_abort('Name too long', &
+  "bin_file_add",__FILE__)
+IF(PRESENT(desc))THEN
+  IF(LEN(desc)>OFT_HIST_SLEN)CALL oft_abort('Description too long', &
+    "bin_file_add",__FILE__)
 END IF
 !
 IF(self%nfields>0)THEN
@@ -201,7 +211,9 @@ END SUBROUTINE bin_file_add
 SUBROUTINE bin_file_add_comm(self,comment)
 CLASS(oft_bin_file), INTENT(inout) :: self !< File object
 CHARACTER(LEN=*), INTENT(in) :: comment !< Comment to add
-CHARACTER(LEN=40), POINTER, DIMENSION(:) :: comm_tmp
+CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: comm_tmp
+IF(LEN(comment)>OFT_HIST_SLEN)CALL oft_abort('Comment too long', &
+  "bin_file_add_comm",__FILE__)
 IF(self%ncomm>0)THEN
   comm_tmp=>self%comm_lines
   ALLOCATE(self%comm_lines(self%ncomm+1))
@@ -299,13 +311,17 @@ END SUBROUTINE bin_file_flush
 !! @note One output file is created per MPI task
 !---------------------------------------------------------------------------
 subroutine hdf5_create_files(basepath)
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=80) :: pathprefix
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
 INTEGER(4) :: ierr
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Creating HDF5 plot files'
 pathprefix=''
-IF(PRESENT(basepath))pathprefix=basepath
+IF(PRESENT(basepath))THEN
+  IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
+    "hdf5_create_files", __FILE__)
+  pathprefix=basepath
+END IF
 CALL oft_increase_indent
 CALL hdf5_create_file(TRIM(pathprefix)//"scalar_dump."//hdf5_proc_str()//".h5")
 CALL hdf5_create_file(TRIM(pathprefix)//"vector_dump."//hdf5_proc_str()//".h5")
@@ -321,15 +337,19 @@ end subroutine hdf5_create_files
 !---------------------------------------------------------------------------
 subroutine hdf5_create_timestep(t,basepath)
 real(r8), intent(in) :: t !< Time value
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=80) :: pathprefix
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
 integer(i4) :: io_unit
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
 hdf5_ts=hdf5_ts+1
 if(oft_env%rank==0)then
   pathprefix=''
-  IF(PRESENT(basepath))pathprefix=basepath
+  IF(PRESENT(basepath))THEN
+    IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
+      "hdf5_create_timestep", __FILE__)
+    pathprefix=basepath
+  END IF
   OPEN(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
   WRITE(io_unit,*)
   WRITE(io_unit,*)'Time Step',REAL(t,4)
@@ -1111,15 +1131,19 @@ subroutine oft_hdf5_write_dump(mesh_type,vol_sizes,surf_sizes,basepath)
 integer(i4), intent(in) :: mesh_type !< Mesh type flag (Tet/Tri or Hex/Quad)
 integer(i4), intent(in) :: vol_sizes(2) !< Volume mesh counts (np,nc)
 integer(i4), intent(in) :: surf_sizes(2) !< Surface mesh counts (np,nc)
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=80) :: pathprefix
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
 integer(i4) :: i,ntrans(4),ierr,io_unit
 #ifdef HAVE_MPI
 integer(i4) :: mpi_stat(MPI_STATUS_SIZE)
 #endif
 DEBUG_STACK_PUSH
 pathprefix=''
-IF(PRESENT(basepath))pathprefix=basepath
+IF(PRESENT(basepath))THEN
+  IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
+    "oft_hdf5_write_dump", __FILE__)
+  pathprefix=basepath
+END IF
 !---Get local mesh counts
 ntrans(1:2)=vol_sizes
 ntrans(3:4)=surf_sizes
@@ -1156,13 +1180,17 @@ end subroutine oft_hdf5_write_dump
 subroutine oft_hdf5_add_dump(tag,type,basepath)
 character(LEN=*), intent(in) :: tag !< Name of the field to add
 integer(i4), intent(in) :: type !< Type of field being output
-CHARACTER(LEN=80), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=80) :: pathprefix
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
 integer(i4) :: io_unit
 DEBUG_STACK_PUSH
 if(oft_env%rank==0)then
   pathprefix=''
-  IF(PRESENT(basepath))pathprefix=basepath
+  IF(PRESENT(basepath))THEN
+    IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
+      "oft_hdf5_add_dump", __FILE__)
+    pathprefix=basepath
+  END IF
   open(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
   write(io_unit,*)tag,type
   close(io_unit)

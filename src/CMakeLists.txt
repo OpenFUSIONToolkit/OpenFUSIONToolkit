@@ -3,7 +3,7 @@
 ########################
 cmake_minimum_required( VERSION 3.12 )
 project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
-set( OFT_VER_SUFFIX "-beta3" CACHE INTERNAL "Version suffix" )
+set( OFT_VER_SUFFIX "-beta4" CACHE INTERNAL "Version suffix" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
 
 option(OFT_BUILD_TESTS "Build tests?" OFF)

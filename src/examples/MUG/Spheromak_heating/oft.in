@@ -16,19 +16,8 @@
  filename='cyl_heat.h5'
 /
 
-&hcurl_op_options
- df_wop=0.,.65,.372,.324
- nu_wop=0,64,2,1
-/
-
-&lag_op_options
- df_lop=0.,.9,0.86,0.64
- nu_lop=0,64,2,1
-/
-
 &sph_heat_options
  order=3
- minlev=4
  b0_scale=1.e-1
  n0=1.e19
  t0=6.
@@ -42,7 +31,7 @@
  vbc='all'         ! Zero-flow BC for velocity
  nbc='d'           ! Dirichlet BC for density
  tbc='d'           ! Dirichlet BC for temperature
- dt=1.e-7          ! Maximum time step
+ dt=2.e-7          ! Maximum time step
  eta=25.           ! Resistivity at reference temperature (Spitzer-like)
  eta_temp=6.       ! Reference temperature for resistivity
  nu_par=400.       ! Fluid viscosity
@@ -62,7 +51,7 @@
 
 &xmhd_plot_options
  t0=1.E-8
- dt=1.E-6
+ dt=1.E-5
  rst_start=0
  rst_end=2000
 /

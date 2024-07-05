@@ -339,11 +339,11 @@ REAL(r8) :: temp_gamma = 5.d0/3.d0 !< Ratio of specific heats
 REAL(r8) :: kappa_par = 1.d0 !< Parallel thermal conductivity factor
 REAL(r8) :: kappa_perp = 1.d0 !< Perpendicular thermal conductivity factor
 REAL(r8), PUBLIC :: vel_scale = 1.d3 !< Velocity scale factor
-REAL(r8), PUBLIC :: den_scale = 1.d19 !< Density scale factor
+REAL(r8), PUBLIC :: den_scale = -1.d0 !< Density scale factor
 REAL(r8), PUBLIC :: n2_scale = -1.d0 !< Hyper-diffusivity aux variable scale factor
 REAL(r8), PUBLIC :: j2_scale = -1.d0  !< Hyper-resistivity aux variable scale factor
 REAL(r8), PUBLIC :: den_floor = -1.d0 !< Density floor
-REAL(r8), PUBLIC :: temp_floor = 1.d0 !< Temperature floor
+REAL(r8), PUBLIC :: temp_floor = -1.d0 !< Temperature floor
 REAL(r8), PUBLIC :: g_accel = 0.d0 !< Gravity (oriented in the -Z direction)
 REAL(r8) :: xmhd_eps = 1.d-10 !< Epsilon for magnetic field normalization
 INTEGER(i4) :: xmhd_taxis = 3 !< Axis for toroidal flux and current
@@ -355,7 +355,7 @@ INTEGER(i4) :: xmhd_lev = 1 !< Active FE level
 INTEGER(i4) :: xmhd_level = 1 !< Active FE level
 INTEGER(i4) :: xmhd_lin_level = 1 !< Highest linear element level
 INTEGER(i4) :: xmhd_nlevels = 1 !< Number of total levels
-INTEGER(i4) :: xmhd_minlev = 3 !< Lowest MG level
+INTEGER(i4) :: xmhd_minlev = -1 !< Lowest MG level
 INTEGER(i4), DIMENSION(fem_max_levels) :: nu_xmhd = 1 !< Number of smoother iterations
 !---Operators and preconditioning
 TYPE(oft_fem_comp_type), POINTER :: xmhd_rep => NULL() !< Active field representation
@@ -540,10 +540,11 @@ END SUBROUTINE xmhd_read_settings
 !! Runtime options are set in the main input file using the group
 !! \c xmhd_options group, see \ref xmhd_read_settings.
 !---------------------------------------------------------------------------
-subroutine xmhd_run(initial_fields,driver,probes)
+subroutine xmhd_run(initial_fields,driver,probes,profile_only)
 TYPE(xmhd_sub_fields), INTENT(inout) :: initial_fields !< Initial conditions
 CLASS(oft_xmhd_driver), OPTIONAL, INTENT(inout) :: driver !< Forcing object
 CLASS(oft_xmhd_probe), OPTIONAL, INTENT(inout) :: probes !< Probe object
+LOGICAL, OPTIONAL, INTENT(in) :: profile_only !< Profile operator timing and stop?
 !---H1 divout solver
 TYPE(oft_h1_divout) :: divout
 !---Jacobian solver
@@ -583,6 +584,7 @@ DEBUG_STACK_PUSH
 !---------------------------------------------------------------------------
 IF(ASSOCIATED(initial_fields%Te))xmhd_two_temp=.TRUE.
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
+IF(den_scale<0.d0)den_scale=SQRT(initial_fields%Ne%dot(initial_fields%Ne)/REAL(initial_fields%Ne%ng,8))
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 !---------------------------------------------------------------------------
@@ -776,8 +778,8 @@ IF(oft_env%head_proc)THEN
     WRITE(*,102)'kappa_par  = ',kappa_par
     WRITE(*,102)'kappa_perp = ',kappa_perp
   END IF
-  WRITE(*,102)'temp_floor = ',temp_floor
-  WRITE(*,102)'den_floor  = ',den_floor
+  IF(temp_floor<0.d0)WRITE(*,102)'temp_floor = ',temp_floor
+  IF(den_floor<0.d0)WRITE(*,102)'den_floor  = ',den_floor
   WRITE(*,102)'L-Tol      = ',lin_tol
   WRITE(*,102)'NL-Tol     = ',nl_tol
   WRITE(*,102)'Mag Energy = ',mer
@@ -789,6 +791,9 @@ IF(oft_env%head_proc)THEN
   WRITE(*,102)'# T-DOFs   = ',REAL(oft_lagrange%global%ne,8)
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
+END IF
+IF(PRESENT(profile_only))THEN
+  IF(profile_only)CALL xmhd_profile(u)
 END IF
 !---------------------------------------------------------------------------
 ! Setup linear solver
@@ -1099,7 +1104,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror,de_scale
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol
 real(r8), pointer, dimension(:) :: vals => NULL()
 character(LEN=XMHD_RST_LEN) :: rst_char
-character(LEN=40) :: comm_line
+character(LEN=OFT_HIST_SLEN) :: comm_line
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -1120,6 +1125,7 @@ IF(ASSOCIATED(equil_fields%Te).AND.ASSOCIATED(pert_fields%Te))xmhd_two_temp=.TRU
 IF(XOR(ASSOCIATED(equil_fields%Te),ASSOCIATED(pert_fields%Te)))CALL oft_abort( &
   "Te0 and dTe ICs are required for two temp.", "xmhd_lin_run", __FILE__)
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
+IF(den_scale<0.d0)den_scale=SQRT(equil_fields%Ne%dot(equil_fields%Ne)/REAL(equil_fields%Ne%ng,8))
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 !---Force heating and conduction terms to zero
@@ -1621,9 +1627,9 @@ do ii=1,mesh%tloc_c(ip)%n
     bmag = SQRT(SUM(u0%B**2)) + xmhd_eps
     bhat = u0%B/bmag
     !---Handle density and temperature floors
-    u0%Ti=MAX(temp_floor,u0%Ti)
-    u0%Te=MAX(temp_floor,u0%Te)
-    u0%N=MAX(den_floor,u0%N)
+    IF(temp_floor>0.d0)u0%Ti=MAX(temp_floor,u0%Ti)
+    IF(temp_floor>0.d0)u0%Te=MAX(temp_floor,u0%Te)
+    IF(den_floor>0.d0)u0%N=MAX(den_floor,u0%N)
     !---Transport coefficients
     eta_curr=eta*eta_reg(mesh%reg(i))
     IF(eta_temp>0.d0)THEN
@@ -2918,14 +2924,14 @@ do ii=1,mesh%tloc_c(ip)%n
     IF(u0%N<0.d0)neg_vols(1)=neg_vols(1)+det
     IF(u0%Ti<0.d0)neg_vols(2)=neg_vols(2)+det
     IF(u0%Te<0.d0)neg_vols(3)=neg_vols(3)+det
-    IF(u0%N<den_floor)neg_flag(1,i)=MAX(neg_flag(1,i),(den_floor-u0%N)/den_floor)
-    IF(u0%Ti<temp_floor)neg_flag(2,i)=MAX(neg_flag(2,i),(temp_floor-u0%Ti)/temp_floor)
-    IF(u0%Te<temp_floor)neg_flag(3,i)=MAX(neg_flag(3,i),(temp_floor-u0%Te)/temp_floor)
+    IF((den_floor>0.d0).AND.(u0%N<den_floor))neg_flag(1,i)=MAX(neg_flag(1,i),(den_floor-u0%N)/den_floor)
+    IF((temp_floor>0.d0).AND.(u0%Ti<temp_floor))neg_flag(2,i)=MAX(neg_flag(2,i),(temp_floor-u0%Ti)/temp_floor)
+    IF((temp_floor>0.d0).AND.(u0%Te<temp_floor))neg_flag(3,i)=MAX(neg_flag(3,i),(temp_floor-u0%Te)/temp_floor)
     floor_tmp=(/u0%N,u0%Ti,u0%Te/)
-    u0%Ti=MAX(temp_floor,u0%Ti)
-    u0%Te=MAX(temp_floor,u0%Te)
-    u0%N=MAX(den_floor,u0%N)
-    np0q=MAX(den_floor,np0q)
+    IF(temp_floor>0.d0)u0%Ti=MAX(temp_floor,u0%Ti)
+    IF(temp_floor>0.d0)u0%Te=MAX(temp_floor,u0%Te)
+    IF(den_floor>0.d0)u0%N=MAX(den_floor,u0%N)
+    IF(den_floor>0.d0)np0q=MAX(den_floor,np0q)
     !---Transport coefficients (if fixed)
     eta_curr=eta*eta_reg(mesh%reg(i))
     IF(.NOT.xmhd_brag)THEN
@@ -3785,6 +3791,7 @@ xmhd_rep=>ML_xmhd_rep%current_level
 xmhd_blevel=oft_hcurl_blevel
 xmhd_nlevels=oft_hcurl_nlevels
 xmhd_level=oft_hcurl_level
+IF(xmhd_minlev<0)xmhd_minlev=xmhd_nlevels
 end subroutine xmhd_setup_rep
 !---------------------------------------------------------------------------
 !> Set the current level for xMHD model
@@ -4554,7 +4561,7 @@ real(r8) :: ndens
 !---
 LOGICAL :: rst,first
 character(LEN=XMHD_RST_LEN) :: rst_char
-CHARACTER(LEN=40) :: file_tmp,file_prev
+CHARACTER(LEN=OFT_PATH_SLEN) :: file_tmp,file_prev
 !---Input variables
 real(r8) :: lin_tol,nl_tol,dt_run
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
@@ -4565,7 +4572,7 @@ LOGICAL :: plot_div=.FALSE.
 real(r8) :: t0=0._r8
 real(r8) :: t1=1._r8
 real(r8) :: dt=1.E-6_r8
-CHARACTER(LEN=40) :: file_list='none'
+CHARACTER(LEN=OFT_PATH_SLEN) :: file_list='none'
 INTEGER(i4) :: rst_start=0
 INTEGER(i4) :: rst_end=2000
 !---
@@ -4996,4 +5003,49 @@ CALL Jfield%delete
 DEALLOCATE(bvout)
 DEBUG_STACK_POP
 end subroutine xmhd_plot
+!---------------------------------------------------------------------------
+!> Simple subroutine to compute timing of different solve phases
+!---------------------------------------------------------------------------
+subroutine xmhd_profile(u)
+class(oft_vector), intent(inout) :: u
+INTEGER(4) :: i,j,k
+REAL(8) :: elapsed_time,matvec_time,nlop_time,build_optime,dot_time
+class(oft_vector), pointer :: v
+type(oft_timer) :: mytimer
+CALL xmhd_rep%vec_create(v)
+matvec_time=0.d0
+nlop_time=0.d0
+build_optime=0.d0
+dot_time=0.d0
+IF(oft_env%head_proc)WRITE(*,'(A)')'Starting profiling'
+comm_times=0
+DO i=1,10
+  IF(oft_env%head_proc)CALL mytimer%tick
+  CALL xmhd_set_ops(u)
+  IF(oft_env%head_proc)build_optime=build_optime+mytimer%tock()
+  DO j=1,10
+    IF(oft_env%head_proc)CALL mytimer%tick
+    CALL oft_xmhd_ops%A%apply(u, v)
+    IF(oft_env%head_proc)nlop_time=nlop_time+mytimer%tock()
+    !
+    IF(oft_env%head_proc)CALL mytimer%tick
+    DO k=1,10
+      CALL oft_xmhd_ops%J%apply(u, v)
+    END DO
+    IF(oft_env%head_proc)matvec_time=matvec_time+mytimer%tock()
+    IF(oft_env%head_proc)CALL mytimer%tick
+    DO k=1,100
+      elapsed_time=u%dot(v)
+    END DO
+    IF(oft_env%head_proc)dot_time=dot_time+mytimer%tock()
+  END DO
+END DO
+IF(oft_env%head_proc)THEN
+  WRITE(*,'(A,Es11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
+  WRITE(*,'(A,Es11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
+  WRITE(*,'(A,Es11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
+  WRITE(*,'(A,Es11.3)')'  Build  = ',matvec_time/REAL(10,8)
+END IF
+CALL oft_finalize()
+end subroutine xmhd_profile
 end module xmhd

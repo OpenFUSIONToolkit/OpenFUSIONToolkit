@@ -209,6 +209,16 @@ class ThinCurr():
         '''
         build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
     
+    def scale_va(self,data,div_flag=False):
+        '''! Scale a vertex array by vertex areas (eg. B_n -> flux)
+
+        @param data Data to scale
+        @param div_flag Divide by vertex areas instead?
+        '''
+        data_in = numpy.ascontiguousarray(data.copy(), dtype=numpy.float64)
+        thincurr_scale_va(self.tw_obj,data_in,div_flag)
+        return data_in
+    
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
         '''! Compute the self-inductance matrix for this model
 

@@ -26,30 +26,65 @@ jobs:
         - {
             name: "Ubuntu 20.04 GCC 10",
             os: ubuntu-20.04,
-            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python", pip: "pip"
+            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python"
           }
         - {
-            name: "Ubuntu 22.04 GCC 13",
+            name: "Ubuntu 22.04 GCC 12",
             os: ubuntu-22.04,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3"
           }
         - {
-            name: "macOS Monterey GCC 12",
-            os: macos-12,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", pip: "pip3"
-          }
-        - {
-            name: "macOS Ventura GCC 13",
+            name: "macOS Ventura GCC 12",
             os: macos-13,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", pip: "pip3"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
+          }
+        - {
+            name: "macOS Sonoma GCC 13",
+            os: macos-14,
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
 
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
 
+    - name: Get OS version (Linux)
+      if: startsWith(matrix.config.os, 'ubuntu')
+      run: lsb_release -d
+
+    - name: Get OS version (macOS)
+      if: startsWith(matrix.config.os, 'macos')
+      run: |
+        sw_vers -productVersion
+        pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
+        sudo xcode-select -s ${{ matrix.config.xcode_path }}
+        xcode-select -p
+
+    - name: Check compilers
+      run: |
+        $CC --version
+        $CXX --version
+        $FC --version
+
     - name: Install prerequisites
-      run: ${{ matrix.config.pip }} install pytest numpy scipy h5py triangle
+      if: ${{ matrix.config.os != 'macos-14' }}
+      run: |
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py triangle
+    
+    - name: Install prerequisites (macos arm64)
+      if: ${{ matrix.config.os == 'macos-14' }}
+      run: |
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py setuptools
+        git clone https://github.com/drufat/triangle.git
+        cd triangle
+        git submodule init
+        git submodule update
+        ${{ matrix.config.python }} setup.py build
+        ${{ matrix.config.python }} setup.py install
 
     - name: Cache external libraries
       id: cache-ext-libs
@@ -61,22 +96,6 @@ jobs:
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       run: mkdir libs
-
-    - name: Get OS version (Linux)
-      if: startsWith(matrix.config.os, 'ubuntu')
-      run: lsb_release -d
-
-    - name: Get OS version (macOS)
-      if: startsWith(matrix.config.os, 'macos')
-      run: |
-        sw_vers -productVersion
-        pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
-
-    - name: Check compilers
-      run: |
-        $CC --version
-        $CXX --version
-        $FC --version
 
     - name: Build external (OpenMP)
       if: ${{ matrix.parallel == 'openmp' }}
@@ -101,7 +120,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: failure()
       with:
-        name: Library failure log
+        name: Library_failure_log-${{ matrix.config.os }}_${{ matrix.parallel }}
         path: libs/build/build_error.log
     
     - name: Remove external build directory
@@ -112,7 +131,9 @@ jobs:
     - name: Configure OFT
       shell: bash
       working-directory: libs
-      run: bash config_cmake.sh
+      run: |
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
@@ -128,4 +149,6 @@ jobs:
       shell: bash
       timeout-minutes: 90
       working-directory: libs/build_release
-      run: make test
+      run: |
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        make test

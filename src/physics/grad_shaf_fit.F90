@@ -27,6 +27,7 @@ use oft_gs_profiles, only: twolam_flux_func
 use tracing_2d, only: active_tracer, tracer, set_tracer, tracinginv_fs
 use mhd_utils, only: mu0
 IMPLICIT NONE
+#include "local.h"
 PRIVATE
 !------------------------------------------------------------------------------
 ! TYPE fit_constraint
@@ -1065,7 +1066,7 @@ INTEGER(4) :: i,j,k,n,m,npsi,io_unit,ncons,neddy
 REAL(8) :: rtmp(2)
 REAL(8), ALLOCATABLE :: nax_corr(:,:),nax_tmp(:,:)
 CHARACTER(LEN=2) :: num_str
-CHARACTER(LEN=40) :: dissfile
+CHARACTER(LEN=OFT_HIST_SLEN) :: dissfile
 LOGICAL :: file_exists
 CALL oft_increase_indent()
 !---

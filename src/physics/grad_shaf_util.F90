@@ -28,6 +28,7 @@ USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
   gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent
 USE oft_gs_profiles
 IMPLICIT NONE
+#include "local.h"
 !---------------------------------------------------------------------------
 !> Need docs
 !---------------------------------------------------------------------------
@@ -1022,13 +1023,13 @@ end subroutine gs_save_decon
 !---------------------------------------------------------------------------
 subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
-CHARACTER(LEN=80), intent(in) :: filename 
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
 integer(4), intent(in) :: nz !< Number of vertical points for flux grid
 real(8), intent(in) :: rbounds(2) !< Radial extents for flux grid
 real(8), intent(in) :: zbounds(2) !< Radial extents for flux grid
 CHARACTER(LEN=36), intent(in) :: run_info !< Run information string [36]
-CHARACTER(LEN=80), intent(in) :: limiter_file !< Path to limiter file [80]
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr

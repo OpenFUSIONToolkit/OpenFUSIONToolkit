@@ -1,6 +1,4 @@
 if( OFT_BUILD_TESTS )
-  # Common
-  configure_file( conftest.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # Marklin tests
   oft_add_test( test_taylor.F90 )

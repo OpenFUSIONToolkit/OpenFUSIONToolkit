@@ -19,6 +19,12 @@
 !! finite element setup, and system creation and solution.
 !!
 !!\subsection doc_mug_sph_ex2_code_inc Module Includes
+!! The first thing that we must do is include the OFT modules which contain
+!! the required functions and variables. It is good practice to restrict the included elements
+!! to only those needed. This is done using the `ONLY:` clause to specifically include only
+!! certain definitions. The exceptions to this practice are the \ref oft_local and \ref oft_base
+!! modules, which contain a controlled set of commonly used elements that can be safely imported
+!! as a whole.
 ! START SOURCE
 PROGRAM MUG_sph_heat
 !---Runtime
@@ -34,23 +40,24 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pr
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
-USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions, hcurl_zerob
+USE oft_hcurl_operators, ONLY: hcurl_zerob
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, h0_zerogrnd
+USE oft_h0_operators, ONLY: oft_h0_getlop, h0_zerogrnd
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_fields, ONLY: oft_h1_create
-USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob, h1_setup_interp
+USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob
 !---Physics
-USE taylor, ONLY: taylor_hmodes, taylor_minlev, taylor_hffa, taylor_hlam
-USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, vel_scale, den_scale, &
+USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
+USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, &
   den_floor, temp_floor, xmhd_sub_fields
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex2_code_vars Local Variables
+!! Next we define the local variables needed to initialize our case and
+!! run the time-dependent solve and post-processing.
 !---H1 divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
@@ -61,14 +68,14 @@ REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(xmhd_sub_fields) :: ic_fields
 !---Runtime options
 INTEGER(i4) :: order = 2
-INTEGER(i4) :: minlev = 1
 REAL(r8) :: b0_scale = 1.E-1_r8
 REAL(r8) :: n0 = 1.d19
 REAL(r8) :: t0 = 6.d0
 LOGICAL :: plot_run=.FALSE.
 LOGICAL :: pm=.FALSE.
-NAMELIST/sph_heat_options/order,minlev,b0_scale,n0,t0,plot_run,pm
+NAMELIST/sph_heat_options/order,b0_scale,n0,t0,plot_run,pm
 !!\subsection doc_mug_sph_ex2_code_setup OFT Initialization
+!! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -77,33 +84,26 @@ CLOSE(io_unit)
 !---------------------------------------------------------------------------
 ! Setup grid
 !---------------------------------------------------------------------------
-rgrnd=(/2.d0,0.d0,0.d0/)
+rgrnd=[2.d0,0.d0,0.d0]
 CALL multigrid_construct
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(order)
-CALL lag_setup_interp
-CALL lag_mloptions
+CALL oft_lag_setup(order, -1)
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(order)
-CALL hcurl_setup_interp
-CALL hcurl_mloptions
+CALL oft_hcurl_setup(order, -1)
 !---H1(Grad) subspace
-CALL oft_h0_setup(order+1)
-CALL h0_setup_interp
+CALL oft_h0_setup(order+1, -1)
 !---H1 full space
-CALL oft_h1_setup(order)
-CALL h1_setup_interp
-!!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
+CALL oft_h1_setup(order, -1)
+!!\subsection doc_mug_sph_ex2_code_plot Perform post-processing
 !!
 !! To visualize the solution fields once a simulation has completed the \ref xmhd::xmhd_plot
 !! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
 !! produced by \ref xmhd::xmhd_run "xmhd_run" and generates plot files, and optionally
 !! probe signals at evenly spaced points in time as specified in the input file, see
-!! \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex1_input_plot.
-xmhd_minlev=minlev
+!! \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex2_post.
 IF(plot_run)THEN
   !---Setup I/0
   CALL mesh%setup_io(order)
@@ -112,20 +112,16 @@ IF(plot_run)THEN
   !---Finalize enviroment and exit
   CALL oft_finalize()
 END IF
-!!\subsection doc_mug_sph_ex2_code_taylor Computing Initial Conditions
+!!\subsection doc_mug_sph_ex2_ic Computing Initial Conditions
 !!
 !! For this simulation we only need the spheromak mode, which is the lowest
 !! force-free eignstate in this geometry. As a result the initial condition
 !! is stable to all types of mode activity.
-taylor_minlev=minlev
 CALL taylor_hmodes(1)
 CALL oft_lag_set_level(oft_lagrange_nlevels)
-!!\subsection doc_mug_sph_ex2_code_taylor_gauge Setting Magnetic Boundary Conditions
-!!
-!! As in \ref doc_ex5 "Example 5" we must transform the gauge of the Taylor
+!! As in \ref doc_mug_sph_ex1 we must transform the gauge of the Taylor
 !! state solution to the appropriate magnetic field BCs. For more information
-!! on this see the description in \ref doc_ex5_code_taylor_gauge "Setting Magnetic Boundary Conditions"
-!! of Example 5.
+!! on this see the description in \ref doc_mug_sph_ex1_ic of that example.
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
@@ -156,8 +152,6 @@ CALL linv%pre%delete()
 DEALLOCATE(linv%pre)
 CALL linv%delete()
 DEALLOCATE(linv)
-!!\subsection doc_mug_sph_ex2_code_ic Set Initial Conditions
-!!
 !! Now we set initial conditions for the simulation using the computed taylor
 !! state, flat temperature and density profiles and zero initial velocity. The
 !! lower bound for density (\ref xmhd::den_floor "den_floor") and temperature
@@ -194,22 +188,20 @@ temp_floor = t0*1.d-2
 !! documentation for \ref xmhd::xmhd_run "xmhd_run", and produces restart files
 !! that contain the solution at different times.
 !!
-!! By default a MG preconditioner is used with the coarsest level specified by
-!! \ref xmhd::xmhd_minlev "xmhd_minlev". Several
-!! quantities are also recorded to a history file \c "xmhd.hist" during the simulation,
-!! including the toroidal current (where the symmetry axis is specified by \ref xmhd::xmhd_taxis
+!! Several quantities are also recorded to a history file `xmhd.hist` during
+!! the simulation, including the toroidal current (where the symmetry axis is specified by \ref xmhd::xmhd_taxis
 !! "xmhd_taxis"). The data in the history file may be plotted using the script
-!! \c "src/utilities/scripts/plot_mhd_hist.py"
+!! `plot_mug_hist.py`, which is located in `src/utilities/scripts` or `python` directories for the
+!! repository and an installation respectively.
 !!
-!! \note OFT plotting scripts require the python packages NUMPY and MATPLOTLIB as well
-!! as path access to the python modules provided in "src/utilities".
+!! \note OFT plotting scripts require the python packages `numpy` and `matplotlib` as well
+!! as path access to the python modules provided in `python` for installations or `src/utilities` in the repo.
 !!
 !! To visualize the solution fields once a simulation has completed the \ref xmhd::xmhd_plot
 !! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
 !! produced by \ref xmhd::xmhd_run "xmhd_run" and generates plot files, and optionally
 !! probe signals at evenly spaced points in time as specified in the input file, see
 !! \ref xmhd::xmhd_plot "xmhd_plot".
-xmhd_minlev=minlev
 xmhd_taxis=3
 oft_env%pm=pm
 !---Run simulation
@@ -224,7 +216,7 @@ END PROGRAM MUG_sph_heat
 !! Below is an input file which can be used with this example in a parallel environment.
 !! As with \ref doc_ex5 "Example 5" this example should only be run with multiple processes.
 !! Some annotation of the options is provided inline below, for more information on the
-!! available options in the \c xmhd_options group see \ref xmhd::xmhd_plot "xmhd_plot".
+!! available options in the `xmhd_options` group see \ref xmhd::xmhd_plot "xmhd_plot".
 !!
 !!\verbatim
 !!&runtime_options
@@ -245,19 +237,8 @@ END PROGRAM MUG_sph_heat
 !! filename='cyl_heat.h5'
 !!/
 !!
-!!&hcurl_op_options
-!! df_wop=0.,.65,.372,.324
-!! nu_wop=0,64,2,1
-!!/
-!!
-!!&lag_op_options
-!! df_lop=0.,.9,0.86,0.64
-!! nu_lop=0,64,2,1
-!!/
-!!
 !!&sph_heat_options
 !! order=3
-!! minlev=2
 !! b0_scale=1.e-1
 !! n0=1.e19
 !! t0=6.
@@ -271,7 +252,7 @@ END PROGRAM MUG_sph_heat
 !! vbc='all'         ! Zero-flow BC for velocity
 !! nbc='d'           ! Dirichlet BC for density
 !! tbc='d'           ! Dirichlet BC for temperature
-!! dt=1.e-7          ! Maximum time step
+!! dt=2.e-7          ! Maximum time step
 !! eta=25.           ! Resistivity at reference temperature (Spitzer-like)
 !! eta_temp=6.       ! Reference temperature for resistivity
 !! nu_par=400.       ! Fluid viscosity
@@ -280,9 +261,9 @@ END PROGRAM MUG_sph_heat
 !! kappa_perp=1.E2   ! Perpendicular thermal conduction (fixed)
 !! nsteps=2000       ! Number of time steps to take
 !! rst_freq=10       ! Restart file frequency
-!! lin_tol=1.E-10    ! Linear solver tolerance
+!! lin_tol=1.E-9     ! Linear solver tolerance
 !! nl_tol=1.E-5      ! Non-linear solver tolerance
-!! nu_xmhd=0,1,8,2   ! Number of smoother iterations for default preconditioner
+!! xmhd_mfnk=T       ! Use matrix-free Jacobian operator
 !! rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
 !! ittarget=40       ! Target for # of linear iterations per time step
 !! mu_ion=2.         ! Ion mass (atomic units)
@@ -295,15 +276,8 @@ END PROGRAM MUG_sph_heat
 !! Time dependent MHD solvers are accelerated significantly by the use of
 !! a more sophisticated preconditioner than the default method. Below is
 !! an example `oft_in.xml` file that constructs an appropriate ILU(0) preconditioner.
-!! Currently, this preconditioner method is the suggest starting preconditioner for all
+!! Currently, this preconditioner method is the suggested starting preconditioner for all
 !! time-dependent MHD solves.
-!!
-!! This solver can be used by specifying both the FORTRAN input and XML input files
-!! to the executable as below.
-!!
-!!\verbatim
-!!~$ ./MUG_sph_heat oft.in oft_in.xml
-!!\endverbatim
 !!
 !!```xml
 !!<oft>
@@ -320,20 +294,48 @@ END PROGRAM MUG_sph_heat
 !!</oft>
 !!```
 !!
-!!\subsection doc_mug_sph_ex2_input_plot Post-Processing options
+!! This solver can be used by specifying both the FORTRAN input and XML input files
+!! to the executable as below.
 !!
-!! When running the code for post-processing additional run time options are available.
+!!\verbatim
+!!~$ ./MUG_sph_heat oft.in oft_in.xml
+!!\endverbatim
+!!
+!!\section doc_mug_sph_ex2_post Post-Processing options
+!!
+!! During the simulation the evolution of some global quantities is written to the history file `xmhd.hist`. A utility
+!! script (`plot_mug_hist.py` located in `bin` after installation) is included as part of OFT for plotting the signals in this file.
+!! This is useful for monitoring general progress of the simulation as well as numerical parameters like the iteration
+!! count and solver time. Using this script we can see the increase in the average temperature in time and a brief velocity transient
+!! early in time as equilibrium adjusts slightly to be consistent with the magnetic BCs used in the simulation.
+!!
+!!\verbatim
+!!~$ python plot_mug_hist.py xmhd.hist
+!!\endverbatim
+!!
+!! \image html MUG_heat_ex-Ti.png "Time evolution of volume averaged temperature, showing heating due to Ohmic dissipation of current."
+!!
+!! \image html MUG_heat_ex-Kin.png "Time evolution of kinetic energy throughout simulation, showing an initial transient that damps away."
+!!
+!!\subsection doc_mug_sph_ex2_post_plot Creating plot files
+!!
+!! To generate 3D plots, and perform additional diagnostic sampling (see \ref xmhd::oft_xmhd_probe "oft_xmhd_probe"), a plot run can
+!! be performed by setting `plot_run=T` in the `sph_tilt_options` input group, which calls \ref xmhd::xmhd_plot "xmhd_plot". With this option
+!! additional run time options are available in the `xmhd_plot_options` group that control how restart files are sampled for plotting.
 !!
 !!\verbatim
 !!&xmhd_plot_options
 !! t0=1.E-8
-!! dt=1.E-6
+!! dt=1.E-5
 !! rst_start=0
 !! rst_end=2000
 !!/
 !!\endverbatim
 !!
-!! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
+!! Once the post-processing run is complete `bin/build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
+!! [VisIt](https://visit-dav.github.io/visit-website/index.html), [ParaView](https://www.paraview.org/), or other visualization programs.
+!!
+!! \image html MUG_heat_ex-Fields.png "Resulting temperature distribution (shading) and magnetic field (vectors) at the end of the simulation, showing thermal confinement in the core of the torus."
 !!
 !!\section doc_mug_sph_ex2_mesh Mesh Creation
 !! A mesh file `cyl_heat.h5` is provided with this example. Instructions to generate your
@@ -368,7 +370,7 @@ END PROGRAM MUG_sph_heat
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!~$ python convert_cubit.py --in_file=cyl_heat.mesh
+!!~$ python convert_cubit.py --in_file=cyl_heat.g
 !!\endverbatim
 !!
 !!\subsection doc_mug_sph_ex2_gmsh Meshing with Gmsh

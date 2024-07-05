@@ -23,7 +23,8 @@ else()
 endif()
 
 # Add sub-directories and copy testing script
-file( COPY oft_testing.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+configure_file( oft_testing.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+configure_file( conftest.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 add_subdirectory( grid )
 add_subdirectory( lin_alg )
 add_subdirectory( fem )

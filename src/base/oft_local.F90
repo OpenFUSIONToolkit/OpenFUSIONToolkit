@@ -256,6 +256,7 @@ end function skip_comment_lines
 !------------------------------------------------------------------------------
 !> Get child element within a given XML node
 !------------------------------------------------------------------------------
+#ifdef HAVE_XML
 subroutine xml_get_element(parent,name,element,error_flag,index)
 TYPE(fox_node), POINTER, INTENT(in) :: parent
 CHARACTER(LEN=*), INTENT(in) :: name
@@ -291,6 +292,7 @@ END IF
 element=>fox_item(tmp_list,req_index-1)
 error_flag=0
 end subroutine xml_get_element
+#endif
 !------------------------------------------------------------------------------
 !> integer(i4) implementation of \ref oft_local::get_inverse_map
 !------------------------------------------------------------------------------

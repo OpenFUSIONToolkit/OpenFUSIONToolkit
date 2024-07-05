@@ -12,9 +12,10 @@ jobs:
     name: Code coverage
     runs-on: ubuntu-22.04
     env:
-      CC: gcc-13
-      CXX: g++-13
-      FC: gfortran-13
+      CC: gcc-12
+      CXX: g++-12
+      FC: gfortran-12
+      GCOV: gcov-12
       OMP_NUM_THREADS: 1
 
     steps:
@@ -23,7 +24,7 @@ jobs:
 
     - name: Install prerequisites
       run: |
-        sudo apt -y install lcov
+        sudo apt-get -y install lcov
         pip3 install pytest pytest-cov numpy scipy h5py triangle
 
     - name: Cache external libraries
@@ -42,6 +43,7 @@ jobs:
         $CC --version
         $CXX --version
         $FC --version
+        $GCOV --version
 
     - name: Build external
       shell: bash
@@ -84,7 +86,7 @@ jobs:
       shell: bash
       working-directory: libs/build_release
       run: |
-        lcov -c --directory . --output-file main_coverage.info --gcov-tool gcov-13
+        lcov -c --directory . --output-file main_coverage.info --gcov-tool $GCOV
         lcov --ignore-errors unused -r main_coverage.info -o cleaned_coverage.txt '/opt/*' '/usr/*'
     
     - name: Upload coverage report to Codecov

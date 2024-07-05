@@ -36,7 +36,7 @@ TYPE :: field_probe
   REAL(r8), POINTER, DIMENSION(:,:) :: pts => NULL() !< Location of points in space
   REAL(r8), POINTER, DIMENSION(:,:) :: pts_log => NULL() !< Location of points in logical space
   LOGICAL :: project = .FALSE. !< Project points to mesh boundary
-  CHARACTER(LEN=40) :: filename !< History file name
+  CHARACTER(LEN=OFT_PATH_SLEN) :: filename !< History file name
   CLASS(fem_interp), POINTER :: B => NULL() !< Interpolation operator for field
   TYPE(oft_bin_file) :: hist_file
 CONTAINS
@@ -210,7 +210,7 @@ CHARACTER(LEN=*), INTENT(in) :: filename !< Filename for history file
 INTEGER(i4) :: i,j,io_unit
 CHARACTER(LEN=4) :: fid
 CHARACTER(LEN=2) :: did
-CHARACTER(LEN=40) :: desc_str
+CHARACTER(LEN=OFT_HIST_SLEN) :: desc_str
 self%filename=filename
 !---Setup history file
 IF(oft_env%head_proc)THEN

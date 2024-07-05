@@ -196,9 +196,9 @@ TYPE, PUBLIC, ABSTRACT :: oft_amesh
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lce => NULL() !< List of cell edges (oriented)
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lcc => NULL() !< List of cell neighbor cells
   REAL(r8), POINTER :: r(:,:) => NULL() !< List of node locations
-  CHARACTER(LEN=20) :: meshname = 'none' !< Meshname for mesh
-  CHARACTER(LEN=20) :: filename = 'none' !< Filename for mesh
-  CHARACTER(LEN=80) :: io_path = '' !< Base path for I/O (relative to working directory)
+  CHARACTER(LEN=OFT_PATH_SLEN) :: meshname = 'none' !< Meshname for mesh
+  CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none' !< Filename for mesh
+  CHARACTER(LEN=OFT_PATH_SLEN) :: io_path = '' !< Base path for I/O (relative to working directory)
   TYPE(mesh_global) :: global !< Global mesh information
   TYPE(mesh_base) :: base !< Base mesh information
   TYPE(mesh_save_index) :: save !< Processor to processor linkage information
