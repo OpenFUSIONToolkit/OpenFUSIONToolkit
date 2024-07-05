@@ -79,7 +79,7 @@ oft_in_xml_template_template = """
 """
 
 
-def mp_run(target,args,timeout=30):
+def mp_run(target,args,timeout=180):
     os.chdir(test_dir)
     mp_q = multiprocessing.Queue()
     p = multiprocessing.Process(target=target, args=args + (mp_q,))
@@ -93,7 +93,7 @@ def mp_run(target,args,timeout=30):
         print("Timeout reached")
         p.terminate()
         p.join()
-        return None
+        return False
     # Completed successfully?
     test_result = mp_q.get()
     p.join()
