@@ -239,8 +239,17 @@ class histfile:
     def get(self, keyname, value=None):
         return self._data.get(keyname,value)
 
+    def keys(self):
+        return self._data.keys()
+
+    def items(self):
+        return self._data.items()
+
     def __getitem__(self, key):
         return self._data[key]
+    
+    def __iter__(self):
+        return iter(self._data)
 
     def __repr__(self):
         r'''Print information about the file'''
