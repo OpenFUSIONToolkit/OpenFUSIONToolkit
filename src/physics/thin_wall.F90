@@ -217,7 +217,7 @@ WRITE(*,'(2A,2I12)')oft_indent,'# of points    = ',self%mesh%np
 WRITE(*,'(2A,I12)')oft_indent,'# of edges     = ',self%mesh%ne
 WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
 WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
-WRITE(*,'(2A,I12)')oft_indent,'# of pcoils    = ',self%n_vcoils
+WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',self%n_vcoils
 WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',self%nclosures
 IF(oft_debug_print(1))WRITE(*,*)oft_indent,'  Closures: ',self%closures
 WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',self%n_icoils
@@ -764,7 +764,7 @@ ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
 DO i=1,tw_obj%n_vcoils
   tw_obj%Acoil2coil(:,i)=Acoil2coil_tmp(:,i)
   tw_obj%vcoils(i)%Lself=Acoil2coil_tmp(i,i)
-  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": L [H] = ",tw_obj%vcoils(i)%Lself*1.d-7
+  WRITE(*,"(A,1X,I4,A,ES12.4)")"  Vcoil",i,": L [H] = ",tw_obj%vcoils(i)%Lself*1.d-7
 END DO
 !---Compute coupling between elements and drivers
 IF(ASSOCIATED(tw_obj%Ael2dr))THEN
@@ -1776,7 +1776,7 @@ DO i=1,tw_obj%n_vcoils
     END DO
     tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself + tw_obj%vcoils(i)%res_per_len(j)*dl
   END DO
-  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
+  WRITE(*,"(A,1X,I4,A,ES12.4)")"  Vcoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
   tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself/mu0 ! Convert to magnetic units
   !
   eta_add=tw_obj%vcoils(i)%Rself
