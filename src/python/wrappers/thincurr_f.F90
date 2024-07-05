@@ -25,7 +25,7 @@ USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
 USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
-  tw_reduce_model
+  tw_reduce_model, run_td_sim
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -532,6 +532,74 @@ ELSE
   CALL frequency_response(tw_obj,LOGICAL(direct),fr_limit,freq,driver_tmp)
 END IF
 END SUBROUTINE thincurr_freq_response
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
+REAL(KIND=c_double), VALUE, INTENT(in) :: dt !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nstatus !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vec_ic !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: ncurr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: curr_ptr !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nvolt !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: volt_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+!
+LOGICAL :: pm_save
+REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),curr_waveform(:,:),volt_waveform(:,:)
+TYPE(tw_type), POINTER :: tw_obj
+TYPE(tw_sensors), POINTER :: sensors
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+CALL c_f_pointer(tw_ptr, tw_obj)
+IF(tw_obj%nelems<=0)THEN
+  CALL copy_string('Invalid ThinCurr model, may not be setup yet',error_str)
+  RETURN
+END IF
+IF(direct.AND.(c_associated(hodlr_ptr)))THEN
+  CALL copy_string('"direct=True" not supported with HODLR compression',error_str)
+  RETURN
+END IF
+IF((.NOT.ASSOCIATED(tw_obj%Lmat)).AND.(.NOT.c_associated(hodlr_ptr)))THEN
+  CALL copy_string('Inductance matrix required, but not computed',error_str)
+  RETURN
+END IF
+IF(.NOT.ASSOCIATED(tw_obj%Rmat))THEN
+  CALL copy_string('Resistance matrix required, but not computed',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
+IF(c_associated(sensor_ptr))THEN
+  CALL c_f_pointer(sensor_ptr, sensors)
+ELSE
+  ALLOCATE(sensors)
+END IF
+IF(ncurr>0)THEN
+  CALL c_f_pointer(curr_ptr, curr_waveform, [ncurr,tw_obj%n_icoils+1])
+ELSE
+  NULLIFY(curr_waveform)
+END IF
+IF(nvolt>0)THEN
+  CALL c_f_pointer(volt_ptr, volt_waveform, [nvolt,tw_obj%n_vcoils+1])
+ELSE
+  NULLIFY(volt_waveform)
+END IF
+CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
+!---Run eigenvalue analysis
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr, hodlr_op)
+  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),1.d-6,.TRUE.,nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op=hodlr_op)
+ELSE
+  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),1.d-6,.TRUE.,nstatus,nplot,sensors,curr_waveform,volt_waveform)
+END IF
+oft_env%pm=pm_save
+END SUBROUTINE thincurr_time_domain
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

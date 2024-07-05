@@ -372,6 +372,34 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return result
+    
+    def run_td(self,dt,nsteps,coil_currs=None,coil_volts=None,direct=False,status_freq=10,plot_freq=10,sensor_obj=c_void_p()):
+        vec_ic = numpy.zeros((self.nelems,), dtype=numpy.float64)
+        if coil_currs is None:
+            ncurr = c_int(0)
+            coil_currs = numpy.zeros((1,1), dtype=numpy.float64)
+        else:
+            if coil_currs.shape[1]-1 != self.n_icoils:
+                raise ValueError("# of currents in waveform does not match # of icoils")
+            ncurr = c_int(coil_currs.shape[0])
+            coil_currs = numpy.ascontiguousarray(coil_currs.transpose(), dtype=numpy.float64)
+        if coil_volts is None:
+            nvolt = c_int(0)
+            coil_volts = numpy.zeros((1,1), dtype=numpy.float64)
+        else:
+            if coil_volts.shape[1]-1 != self.n_vcoils:
+                raise ValueError("# of voltages in waveform does not match # of vcoils")
+            nvolt = c_int(coil_volts.shape[0])
+            coil_volts = numpy.ascontiguousarray(coil_volts.transpose(), dtype=numpy.float64)
+        error_string = c_char_p(b""*200)
+        if self.Lmat_hodlr:
+            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_int(status_freq),c_int(plot_freq),vec_ic,
+                                sensor_obj,ncurr,coil_currs,nvolt,coil_volts,self.Lmat_hodlr,error_string)
+        else:
+            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_int(status_freq),c_int(plot_freq),vec_ic,
+                                sensor_obj,ncurr,coil_currs,nvolt,coil_volts,c_void_p(),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
 
     def build_reduced_model(self,basis_set,filename='tCurr_reduced.h5',sensor_obj=c_void_p()):
         basis_set = numpy.ascontiguousarray(basis_set, dtype=numpy.float64)

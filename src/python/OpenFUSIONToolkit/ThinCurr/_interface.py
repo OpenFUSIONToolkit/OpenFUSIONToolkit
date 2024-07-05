@@ -65,6 +65,11 @@ thincurr_eigenvalues = ctypes_subroutine(oftpy_lib.thincurr_eigenvalues,
 thincurr_freq_response = ctypes_subroutine(oftpy_lib.thincurr_freq_response,
     [c_void_p, c_bool, c_int, c_double, ctypes_numpy_array(float64,2), c_void_p, c_char_p])
 
+# thincurr_time_domain(tw_ptr,direct,dt,nsteps,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str)
+thincurr_time_domain = ctypes_subroutine(oftpy_lib.thincurr_time_domain,
+    [c_void_p, c_bool, c_double, c_int, c_int, c_int, ctypes_numpy_array(float64,1), c_void_p, c_int, ctypes_numpy_array(float64,2), c_int,
+     ctypes_numpy_array(float64,2), c_void_p, c_char_p])
+
 # thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,hodlr_ptr,error_str)
 thincurr_reduce_model = ctypes_subroutine(oftpy_lib.thincurr_reduce_model,
     [c_void_p, c_char_p, c_int, ctypes_numpy_array(float64,2), c_void_p, c_void_p, c_char_p])
