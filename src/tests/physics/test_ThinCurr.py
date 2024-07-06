@@ -95,7 +95,11 @@ def mp_run(target,args,timeout=180):
         p.join()
         return False
     # Completed successfully?
-    test_result = mp_q.get()
+    try:
+        test_result = mp_q.get(timeout=5)
+    except:
+        print("Failed to get output")
+        return False
     p.join()
     return test_result
 
@@ -103,7 +107,7 @@ def mp_run(target,args,timeout=180):
 def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,mp_q):
     try:
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr()
+        tw_model = ThinCurr(nthreads=-1)
         tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml')
         tw_model.setup_io()
         if floops is not None:
@@ -131,7 +135,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,mp_q)
 def run_eig(meshfile,direct_flag,use_aca,mp_q):
     try:
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr()
+        tw_model = ThinCurr(nthreads=-1)
         tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml')
         tw_model.setup_io()
         tw_model.compute_Mcoil()
@@ -150,7 +154,7 @@ def run_eig(meshfile,direct_flag,use_aca,mp_q):
 def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,mp_q):
     try:
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr()
+        tw_model = ThinCurr(nthreads=-1)
         tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml')
         tw_model.setup_io()
         if floops is not None:

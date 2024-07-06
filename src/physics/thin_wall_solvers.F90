@@ -240,6 +240,8 @@ LOGICAL :: pm_save
 !---
 WRITE(*,*)
 WRITE(*,*)'Starting Frequency-response run'
+WRITE(*,*)'CHK driver min:',MINVAL(driver,DIM=1)
+WRITE(*,*)'CHK driver max:',MAXVAL(driver,DIM=1)
 !---Setup matrix
 ALLOCATE(b(self%nelems))
 b=-(0.d0,1.d0)*driver(:,1) + (1.d0,0.d0)*driver(:,2) ! -i*L_e*I_e
@@ -300,6 +302,8 @@ x=(0.d0,0.d0)
 IF(direct)THEN
     CALL lapack_matinv(self%nelems,Mmat,info)
     CALL zgemv('N',self%nelems,self%nelems,1.d0,Mmat,self%nelems,b,1,0.d0,x,1)
+    WRITE(*,*)'CHK inverse min:',MINVAL(MINVAL(REAL(Mmat,8),DIM=1)),MINVAL(MINVAL(AIMAG(Mmat),DIM=1))
+    WRITE(*,*)'CHK inverse max:',MAXVAL(MAXVAL(REAL(Mmat,8),DIM=1)),MAXVAL(MAXVAL(AIMAG(Mmat),DIM=1))
 ELSE
     IF(PRESENT(hodlr_op))THEN
         frinv%pre=>frinv_pre
@@ -333,6 +337,8 @@ ELSE
         DEALLOCATE(Mmat)
     END IF
 END IF
+WRITE(*,*)'CHK result min:',MINVAL(REAL(x,8),DIM=1),MINVAL(AIMAG(x),DIM=1)
+WRITE(*,*)'CHK result max:',MAXVAL(REAL(x,8),DIM=1),MAXVAL(AIMAG(x),DIM=1)
 driver(:,1)=REAL(x,8)
 driver(:,2)=AIMAG(x)
 DEALLOCATE(b,x)
