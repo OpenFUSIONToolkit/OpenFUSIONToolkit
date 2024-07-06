@@ -374,6 +374,17 @@ class ThinCurr():
         return result
     
     def run_td(self,dt,nsteps,coil_currs=None,coil_volts=None,direct=False,status_freq=10,plot_freq=10,sensor_obj=c_void_p()):
+        '''! Perform a time-domain simulation
+
+        @param dt Time step for simulation
+        @param nsteps Number of steps to take
+        @param coil_currs Current vs time array for Icoils [:,n_icoils+1] (first index is time)
+        @param coil_volts Voltage vs time array for Vcoils [:,n_vcoils+1] (first index is time)
+        @param direct Use direct solver?
+        @param status_freq Frequency to print status information
+        @param plot_freq Frequency to save plot files
+        @param sensor_obj Sensor object to use
+        '''
         vec_ic = numpy.zeros((self.nelems,), dtype=numpy.float64)
         if coil_currs is None:
             ncurr = c_int(0)
@@ -402,6 +413,13 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
 
     def build_reduced_model(self,basis_set,filename='tCurr_reduced.h5',sensor_obj=c_void_p()):
+        r'''! Build reduced model by projecting full model onto defined basis set of currents
+
+        @param basis_set Basis set for projection [nBasis,:]
+        @param filename Filename for reduction model
+        @param sensor_obj Sensor object to use
+        @result Reduced model (see \ref ThinCurr_reduced)
+        '''
         basis_set = numpy.ascontiguousarray(basis_set, dtype=numpy.float64)
         nbasis = c_int(basis_set.shape[0])
         error_string = c_char_p(b""*200)
@@ -415,7 +433,12 @@ class ThinCurr():
 
 
 class ThinCurr_reduced:
+    '''! Reduced ThinCurr thin-wall eddy current model class'''
     def __init__(self, filename):
+        '''! Initialize Reduced ThinCurr object
+
+        @param filename File containing reduced model
+        '''
         with h5py.File(filename,'r') as file:
             self.Basis = numpy.asarray(file['Basis'])
             self.L = numpy.asarray(file['L'])
@@ -434,11 +457,23 @@ class ThinCurr_reduced:
                 self.Msc = None
 
     def get_eigs(self):
+        '''! Compute eigenmodes for reduced model
+
+        @result Eigenvalues, Eigenvectors
+        '''
         eig_vals, eig_vecs = numpy.linalg.eig(numpy.dot(numpy.linalg.inv(self.R),self.L))
         sort_inds = (-eig_vals).argsort()
         return eig_vals[sort_inds], numpy.dot(eig_vecs[sort_inds,:],self.Basis)
 
     def run_td(self,dt,nsteps,coil_currs,status_freq=10,plot_freq=10):
+        '''! Perform a time-domain simulation
+
+        @param dt Time step for simulation
+        @param nsteps Number of steps to take
+        @param coil_currs Current vs time array for Icoils [:,n_icoils+1] (first index is time)
+        @param status_freq Frequency to print status information
+        @param plot_freq Frequency to save plot files
+        '''
         Lforward = self.L - (dt/2.0)*self.R
         Lbackward = numpy.linalg.inv(self.L + (dt/2.0)*self.R)
         #
