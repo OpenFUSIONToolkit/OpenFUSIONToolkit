@@ -491,11 +491,59 @@ call h5open_f(error)
 CALL h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
 IF(error/=0)CALL oft_abort('Error opening file','hdf5_create_group',__FILE__)
 CALL h5gcreate_f(file_id, "/"//TRIM(group_name), grp_id, error)
+CALL h5gclose_f(grp_id, error)
 !---Close vector dump file and finalize HDF5
 call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_create_group
+!---------------------------------------------------------------------------
+!> Add string attribute to existing object (group or dataset)
+!---------------------------------------------------------------------------
+subroutine hdf5_add_string_attribute(filename,objname,aname,attr_data)
+character(LEN=*), intent(in) :: filename !< Name of HDF5 file
+character(LEN=*), intent(in) :: objname !< Name of object (dataset or group)
+character(LEN=*), intent(in) :: aname !< Attribute name
+character(LEN=80), dimension(:), intent(in) :: attr_data !< Attribute data (80-character lines)
+integer :: arank,error
+integer(HID_T) :: file_id,obj_id,aspace_id,atype_id,attr_id
+INTEGER(SIZE_T) :: attrlen
+INTEGER(HSIZE_T), DIMENSION(1) :: adims
+DEBUG_STACK_PUSH
+!---Initialize HDF5 and open vector dump file
+call h5open_f(error)
+CALL h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
+IF(error/=0)THEN
+  call h5close_f(error)
+  CALL oft_abort('Error opening file','hdf5_add_string_attribute',__FILE__)
+END IF
+!---Open an existing object
+CALL h5oopen_f(file_id, objname, obj_id, error)
+IF(error/=0)THEN
+  call h5fclose_f(file_id, error)
+  call h5close_f(error)
+  CALL oft_abort('Error opening object','hdf5_add_string_attribute',__FILE__)
+END IF
+!---Create scalar data space for the attribute
+arank=1
+adims = SIZE(attr_data)
+CALL h5screate_simple_f(arank, adims, aspace_id, error)
+!---Create datatype for the attribute
+CALL h5tcopy_f(H5T_NATIVE_CHARACTER, atype_id, error)
+attrlen = 80
+CALL h5tset_size_f(atype_id, attrlen, error)
+!---Create attribute and write data
+CALL h5acreate_f(obj_id, aname, atype_id, aspace_id, attr_id, error)
+CALL h5awrite_f(attr_id, atype_id, attr_data, adims, error)
+!---Close HDF5 objects
+CALL h5aclose_f(attr_id, error)
+CALL h5tclose_f(atype_id, error)
+CALL h5sclose_f(aspace_id, error)
+CALL h5oclose_f(obj_id, error)
+call h5fclose_f(file_id, error)
+call h5close_f(error)
+DEBUG_STACK_POP
+end subroutine hdf5_add_string_attribute
 !---------------------------------------------------------------------------
 !> real(r8) scalar implementation of \ref oft_io::hdf5_write
 !---------------------------------------------------------------------------
