@@ -31,7 +31,11 @@ def mp_run(target,args,timeout=30):
         p.join()
         return None
     # Completed successfully
-    test_result = mp_q.get()
+    try:
+        test_result = mp_q.get(timeout=10)
+    except:
+        print("Failed to get output")
+        return None
     p.join()
     return test_result
 
@@ -76,7 +80,7 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(R,0.0,0.12,0.15,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order,F0=1.0,full_domain=True)
@@ -168,7 +172,7 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(0.5,0.5,1.0,1.0,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order)
@@ -254,7 +258,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
@@ -348,7 +352,7 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
@@ -508,7 +512,7 @@ def run_LTX_case(fe_order,eig_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)

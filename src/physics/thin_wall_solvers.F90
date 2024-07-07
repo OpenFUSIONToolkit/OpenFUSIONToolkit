@@ -13,21 +13,21 @@
 MODULE thin_wall_solvers
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: oft_bin_file
+USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
-USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_graph
+USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, partition_graph
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_native_gmres_csolver
-USE oft_solver_utils, ONLY: create_diag_pre, create_native_solver
+USE oft_solver_utils, ONLY: create_diag_pre, create_native_solver, create_cg_solver
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
 USE mhd_utils, ONLY: mu0
 USE thin_wall
-USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op, oft_tw_hodlr_bjpre
+USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op, oft_tw_hodlr_bjpre, oft_tw_hodlr_rbjpre
 IMPLICIT NONE
 #include "local.h"
 CONTAINS
@@ -299,7 +299,7 @@ ALLOCATE(x(self%nelems))
 x=(0.d0,0.d0)
 IF(direct)THEN
     CALL lapack_matinv(self%nelems,Mmat,info)
-    CALL zgemv('N',self%nelems,self%nelems,1.d0,Mmat,self%nelems,b,1,0.d0,x,1)
+    CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),Mmat,self%nelems,b,1,(0.d0,0.d0),x,1)
 ELSE
     IF(PRESENT(hodlr_op))THEN
         frinv%pre=>frinv_pre
@@ -615,4 +615,478 @@ END IF
 oft_env%pm=pm
 END SUBROUTINE gmres_comp
 END SUBROUTINE frequency_response
+!------------------------------------------------------------------------------
+! SUBROUTINE run_td_sim
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tol,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op)
+TYPE(tw_type), INTENT(in) :: self
+REAL(8), INTENT(in) :: dt
+INTEGER(4), INTENT(in) :: nsteps
+REAL(8), INTENT(inout) :: vec(:)
+LOGICAL, INTENT(in) :: direct
+REAL(8), INTENT(in) :: lin_tol
+LOGICAL, INTENT(in) :: use_cn
+INTEGER(4), INTENT(in) :: nstatus
+INTEGER(4), INTENT(in) :: nplot
+TYPE(tw_sensors), INTENT(in) :: sensors
+REAL(8), POINTER, INTENT(in) :: curr_waveform(:,:)
+REAL(8), POINTER, INTENT(in) :: volt_waveform(:,:)
+TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
+!---
+INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits
+REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op
+REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
+REAL(8), POINTER, DIMENSION(:) :: vals
+CLASS(oft_vector), POINTER :: u,g
+CLASS(oft_matrix), POINTER :: Lmat
+TYPE(oft_native_dense_matrix), TARGET :: Lmat_dense,Minv
+TYPE(oft_sum_matrix), TARGET :: fmat,bmat
+CLASS(oft_solver), POINTER :: linv
+TYPE(oft_tw_hodlr_rbjpre), TARGET :: linv_pre
+TYPE(oft_bin_file) :: floop_hist,jumper_hist
+LOGICAL :: exists
+CHARACTER(LEN=4) :: pltnum
+CHARACTER(LEN=15) :: fmt_str
+WRITE(*,*)
+WRITE(*,*)'Starting simulation'
+!---Load coil waveform
+! IF(TRIM(curr_file)/="none")THEN
+!     OPEN(NEWUNIT=io_unit,FILE=TRIM(curr_file))
+!     READ(io_unit,*)ncols,ntimes_curr
+!     IF(ncols-1/=self%n_icoils)CALL oft_abort('# of currents in waveform does not match # of icoils', &
+!         'run_td_sim',__FILE__)
+!     ALLOCATE(curr_waveform(ntimes_curr,ncols))
+!     ALLOCATE(icoil_curr(ncols-1),icoil_dcurr(ncols-1))
+!     DO i=1,ntimes_curr
+!       READ(io_unit,*)curr_waveform(i,:)
+!       curr_waveform(i,2:ncols)=curr_waveform(i,2:ncols)*mu0 ! Convert to magnetic units
+!     END DO
+!     CLOSE(io_unit)
+IF(ASSOCIATED(curr_waveform))THEN
+    ncols=SIZE(curr_waveform,DIM=2)
+    IF(ncols-1/=self%n_icoils)CALL oft_abort('# of currents in waveform does not match # of icoils', &
+        'run_td_sim',__FILE__)
+    ntimes_curr=SIZE(curr_waveform,DIM=1)
+    DO j=1,self%n_icoils
+        curr_waveform(:,j+1)=curr_waveform(:,j+1)*mu0 ! Convert to magnetic units
+    END DO
+    ALLOCATE(icoil_curr(ncols-1),icoil_dcurr(ncols-1))
+ELSE
+    ALLOCATE(icoil_curr(self%n_icoils),icoil_dcurr(self%n_icoils))
+    DO j=1,self%n_icoils
+        icoil_curr=0.d0
+        icoil_dcurr=0.d0
+    END DO
+    ntimes_curr=0
+END IF
+!---Load voltage waveform
+! IF(TRIM(volt_file)/="none")THEN
+!     OPEN(NEWUNIT=io_unit,FILE=TRIM(volt_file))
+!     READ(io_unit,*)ncols,ntimes_volt
+!     IF(ncols-1/=self%n_vcoils)CALL oft_abort('# of voltages in waveform does not match # of pcoils', &
+!     'run_td_sim',__FILE__)
+!     ALLOCATE(volt_waveform(ntimes_volt,ncols))
+!     ALLOCATE(pcoil_volt(ncols-1))
+!     DO i=1,ntimes_volt
+!       READ(io_unit,*)volt_waveform(i,:)
+!     END DO
+!     CLOSE(io_unit)
+IF(ASSOCIATED(volt_waveform))THEN
+    ncols=SIZE(volt_waveform,DIM=2)
+    IF(ncols-1/=self%n_vcoils)CALL oft_abort('# of voltages in waveform does not match # of vcoils', &
+        'run_td_sim',__FILE__)
+    ntimes_volt=SIZE(volt_waveform,DIM=1)
+    ALLOCATE(pcoil_volt(ncols-1))
+ELSE
+    ALLOCATE(pcoil_volt(self%n_vcoils))
+    DO j=1,self%n_vcoils
+        pcoil_volt=0.d0
+    END DO
+    ntimes_volt=0
+END IF
+!---
+CALL self%Uloc%new(u)
+CALL self%Uloc%new(g)
+!---Setup inductance matrix wrapper
+IF(PRESENT(hodlr_op))THEN
+    Lmat=>hodlr_op
+ELSE
+    Lmat_dense%nr=self%nelems; Lmat_dense%nc=self%nelems
+    Lmat_dense%nrg=self%nelems; Lmat_dense%ncg=self%nelems
+    Lmat_dense%M=>self%Lmat
+    Lmat=>Lmat_dense
+END IF
+!---Setup backward matrix wrapper
+IF(use_cn)THEN
+    bmat%nr=self%nelems; bmat%nc=self%nelems
+    bmat%nrg=self%nelems; bmat%ncg=self%nelems
+    bmat%J=>Lmat
+    bmat%K=>self%Rmat
+    bmat%alam = -dt/2.d0 ! L - (dt/2)*R
+    dt_op = dt/2.d0
+ELSE
+    dt_op = dt
+END IF
+!---Setup timestep solvers
+IF(.NOT.direct)THEN
+    !---Setup forward matrix wrapper
+    fmat%nr=self%nelems; fmat%nc=self%nelems
+    fmat%nrg=self%nelems; fmat%ncg=self%nelems
+    fmat%J=>Lmat
+    fmat%K=>self%Rmat
+    fmat%alam = dt_op ! L + dt_op*R
+    CALL fmat%assemble(u)
+    !---Create CG solver for forward matrix
+    CALL create_cg_solver(linv)
+    linv%A=>fmat
+    linv%its=-2
+    linv%rtol=lin_tol
+    IF(PRESENT(hodlr_op))THEN
+        linv_pre%mf_obj=>hodlr_op
+        linv_pre%Rmat=>self%Rmat
+        linv_pre%alpha=1.d0
+        linv_pre%beta=fmat%alam
+        linv%pre=>linv_pre
+    ELSE
+        CALL create_diag_pre(linv%pre)
+    END IF
+ELSE
+    !---Setup dense matrix for inverse
+    Minv%nr=self%nelems; Minv%nc=self%nelems
+    Minv%nrg=self%nelems; Minv%ncg=self%nelems
+    ALLOCATE(Minv%M(Minv%nr,Minv%nr))
+    !---Build forward matrix [L + dt_op*R] (overwritten with inverse)
+    Minv%M=self%Lmat
+    DO i=1,self%Rmat%nr
+    DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
+        Minv%M(i,self%Rmat%lc(j))=Minv%M(i,self%Rmat%lc(j)) + dt_op*self%Rmat%M(j)
+    END DO
+    END DO
+    WRITE(*,*)'Starting factorization'
+    oft_env%pm=.TRUE.
+    ! CALL lapack_matinv(Minv%nr,Minv%M,info)
+    CALL lapack_cholesky(Minv%nr,Minv%M,info)
+    oft_env%pm=.FALSE.
+END IF
+!---
+ALLOCATE(vals(self%nelems))
+vals=vec
+CALL u%restore_local(vals)
+t=0.d0
+IF(ntimes_curr>0)THEN
+    DO j=1,self%n_icoils
+        icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
+    END DO
+END IF
+!---Save sensor data for t=0
+CALL u%get_local(vals)
+IF(sensors%nfloops>0)THEN
+    WRITE(fmt_str,'(I6)')sensors%nfloops+1
+    fmt_str='('//TRIM(fmt_str)//'E24.15)'
+    ALLOCATE(senout(sensors%nfloops+1))
+    senout=0.d0
+    IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
+        sensors%nfloops,icoil_curr,1,0.d0,senout(2),1)
+    !---Setup history file
+    IF(oft_env%head_proc)THEN
+        floop_hist%filedesc = 'ThinCurr flux loop history file'
+        CALL floop_hist%setup('floops.hist')
+        CALL floop_hist%add_field('time', 'r8', desc="Simulation time [s]")
+        DO i=1,sensors%nfloops
+            CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
+        END DO
+        CALL floop_hist%write_header
+        CALL floop_hist%open
+        senout(1)=t
+        CALL floop_hist%write(data_r8=senout)
+    END IF
+END IF
+IF(sensors%njumpers>0)THEN
+    ALLOCATE(jumpout(sensors%njumpers+1))
+    DO j=1,sensors%njumpers
+    tmp=0.d0
+    val_prev=0.d0
+    ind1=self%pmap(sensors%jumpers(j)%points(1))
+    IF(ind1>0)val_prev=vals(ind1)
+    DO k=1,sensors%jumpers(j)%np-1
+        ind1=self%pmap(sensors%jumpers(j)%points(k+1))
+        IF(ind1>0)THEN
+            tmp=tmp+vals(ind1)-val_prev
+            val_prev=vals(ind1)
+        ELSE
+            tmp=tmp-val_prev
+            val_prev=0.d0
+        END IF
+    END DO
+    DO k=1,self%nholes
+        tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
+    END DO
+    jumpout(j+1)=tmp/mu0
+    END DO
+    !---Setup history file
+    IF(oft_env%head_proc)THEN
+        jumper_hist%filedesc = 'ThinCurr current jumper history file'
+        CALL jumper_hist%setup('jumpers.hist')
+        CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
+        DO i=1,sensors%njumpers
+            CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
+        END DO
+        CALL jumper_hist%write_header
+        CALL jumper_hist%open
+        jumpout(1)=t
+        CALL jumper_hist%write(data_r8=jumpout)
+    END IF
+END IF
+!---Advance system in time
+DO i=1,nsteps
+    !---Update driven coil dI/dt waveforms
+    IF(use_cn)THEN
+    CALL bmat%apply(u,g)
+    IF(ntimes_curr>0)THEN
+        DO j=1,self%n_icoils
+        ! Start of step
+        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt/4.d0,1)
+        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t-dt/4.d0,1)
+        ! End of step
+        icoil_dcurr(j)=icoil_dcurr(j)+linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
+        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
+        END DO
+    END IF
+    IF(ntimes_volt>0)THEN
+        DO j=1,self%n_vcoils
+        ! Start of step
+        pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t,1)/2.d0
+        pcoil_volt(j)=pcoil_volt(j)+linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)/2.d0
+        END DO
+        pcoil_volt=pcoil_volt*dt
+    END IF
+    ELSE
+    CALL Lmat%apply(u,g)
+    IF(ntimes_curr>0)THEN
+        DO j=1,self%n_icoils
+        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
+        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
+        END DO
+        icoil_dcurr=icoil_dcurr*2.d0
+    END IF
+    IF(ntimes_volt>0)THEN
+        DO j=1,self%n_vcoils
+        pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)
+        END DO
+        pcoil_volt=pcoil_volt*dt
+    END IF
+    END IF
+    uu=g%dot(g)
+    CALL g%get_local(vals)
+    IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
+    self%nelems,icoil_dcurr,1,1.d0,vals,1)
+    DO j=1,self%n_vcoils
+    vals(self%np_active+self%nholes+j)=vals(self%np_active+self%nholes+j)+pcoil_volt(j)
+    END DO
+    CALL g%restore_local(vals)
+    IF(direct)THEN
+    CALL Minv%apply(g,u)
+    nits=1
+    ELSE
+    CALL linv%apply(u,g)
+    nits=linv%cits
+    END IF
+    uu=SQRT(u%dot(u))
+    t=t+dt
+    IF(MOD(i,nstatus)==0)WRITE(*,*)'Timestep ',i,REAL(t,4),REAL(uu,4),nits
+    IF(MOD(i,nplot)==0)THEN
+        WRITE(pltnum,'(I4.4)')i
+        CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
+    END IF
+    CALL u%get_local(vals)
+    IF(ntimes_curr>0)THEN
+    DO j=1,self%n_icoils
+        icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
+    END DO
+    END IF
+    IF(sensors%nfloops>0)THEN
+    CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen,sensors%nfloops, &
+        vals,1,0.d0,senout(2),1)
+    IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
+        sensors%nfloops,icoil_curr,1,1.d0,senout(2),1)
+    senout(1)=t
+    CALL floop_hist%write(data_r8=senout)
+    END IF
+    IF(sensors%njumpers>0)THEN
+    DO j=1,sensors%njumpers
+        tmp=0.d0
+        val_prev=0.d0
+        ind1=self%pmap(sensors%jumpers(j)%points(1))
+        IF(ind1>0)val_prev=vals(ind1)
+        DO k=1,sensors%jumpers(j)%np-1
+        ind1=self%pmap(sensors%jumpers(j)%points(k+1))
+        IF(ind1>0)THEN
+            tmp=tmp+vals(ind1)-val_prev
+            val_prev=vals(ind1)
+        ELSE
+            tmp=tmp-val_prev
+            val_prev=0.d0
+        END IF
+        END DO
+        DO k=1,self%nholes
+        tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
+        END DO
+        jumpout(j+1)=tmp/mu0
+    END DO
+    jumpout(1)=t
+    CALL jumper_hist%write(data_r8=jumpout)
+    END IF
+END DO
+!---Copy solution to input
+CALL u%get_local(vals)
+vec=vals
+!---Cleanup
+IF(sensors%nfloops>0)THEN
+    CALL floop_hist%close
+    DEALLOCATE(senout)
+END IF
+IF(sensors%njumpers>0)THEN
+    CALL jumper_hist%close
+    DEALLOCATE(jumpout)
+END IF
+CALL u%delete()
+CALL g%delete()
+DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,g)
+! IF(ntimes_curr>0)DEALLOCATE(curr_waveform)
+! IF(ntimes_volt>0)DEALLOCATE(volt_waveform)
+IF(direct)THEN
+    DEALLOCATE(minv%m)
+ELSE
+    CALL linv%pre%delete()
+    IF(.NOT.PRESENT(hodlr_op))DEALLOCATE(linv%pre)
+    CALL linv%delete()
+    DEALLOCATE(linv)
+END IF
+END SUBROUTINE run_td_sim
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+SUBROUTINE tw_reduce_model(self,sensors,neigs,eig_vec,filename,hodlr_op)
+TYPE(tw_type), INTENT(in) :: self !< Needs docs
+TYPE(tw_sensors), INTENT(in) :: sensors !< Sensor information
+INTEGER(4), INTENT(in) :: neigs !< Needs docs
+REAL(8), INTENT(in) :: eig_vec(:,:) !< Needs docs
+CHARACTER(LEN=*), INTENT(in) :: filename !< Needs docs
+TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
+!---
+INTEGER(4) :: i,j
+REAL(8), POINTER :: vals(:)
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mattmp,Mat_red
+CHARACTER(LEN=4) :: sub_coil_id
+CLASS(oft_vector), POINTER :: atmp,btmp
+character(LEN=80), dimension(1) :: description
+CALL hdf5_create_file(TRIM(filename))
+!---Setup temporaries
+NULLIFY(vals)
+CALL self%Uloc%new(atmp)
+CALL self%Uloc%new(btmp)
+CALL atmp%get_local(vals)
+ALLOCATE(Mat_red(neigs,neigs),Mattmp(self%nelems,neigs))
+!---Save reduction vectors
+CALL hdf5_write(eig_vec,TRIM(filename),'Basis')
+description=["Basis set used for model reduction"]
+CALL hdf5_add_string_attribute(TRIM(filename),'Basis','description',description)
+!---Reduce L matrix
+IF(PRESENT(hodlr_op))THEN
+    DO i=1,neigs
+        vals=eig_vec(:,i)
+        CALL atmp%restore_local(vals)
+        CALL btmp%set(0.d0)
+        CALL hodlr_op%apply(atmp,btmp)
+        CALL btmp%get_local(vals)
+        Mattmp(:,i) = vals
+    END DO
+ELSE
+    CALL dgemm('N','N',self%nelems,neigs,self%nelems,1.d0, &
+        self%Lmat,self%nelems,eig_vec,self%nelems,0.d0,Mattmp,self%nelems)
+END IF
+CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0,eig_vec, &
+    self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
+CALL hdf5_write(Mat_red,TRIM(filename),'L')
+description=["Self-inductance matrix for reduced model"]
+CALL hdf5_add_string_attribute(TRIM(filename),'L','description',description)
+!---Reduce R matrix
+DO i=1,neigs
+    vals=eig_vec(:,i)
+    CALL atmp%restore_local(vals)
+    CALL btmp%set(0.d0)
+    CALL self%Rmat%apply(atmp,btmp)
+    CALL btmp%get_local(vals)
+    Mattmp(:,i) = vals
+END DO
+CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0, &
+    eig_vec,self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
+CALL hdf5_write(Mat_red,TRIM(filename),'R')
+description=["Resistance matrix for reduced model"]
+CALL hdf5_add_string_attribute(TRIM(filename),'R','description',description)
+CALL atmp%delete()
+CALL btmp%delete()
+DEALLOCATE(Mat_red,Mattmp,vals,atmp,btmp)
+!---Reduce sensor coupling matrix
+IF(sensors%nfloops>0)THEN
+    ! Save sensor names and indexes
+    CALL hdf5_create_group(TRIM(filename),'SENSORS')
+    DO i=1,sensors%nfloops
+        CALL hdf5_create_group(TRIM(filename), &
+            'SENSORS/'//TRIM(sensors%floops(i)%name))
+        CALL hdf5_write(i,TRIM(filename), &
+            'SENSORS/'//TRIM(sensors%floops(i)%name)//'/index')
+        CALL hdf5_write(sensors%floops(i)%scale_fac,TRIM(filename), &
+            'SENSORS/'//TRIM(sensors%floops(i)%name)//'/scale')
+        CALL hdf5_write(sensors%floops(i)%r,TRIM(filename), &
+            'SENSORS/'//TRIM(sensors%floops(i)%name)//'/pts')
+    END DO
+    ! Save mutual coupling matrix
+    ALLOCATE(Mat_red(sensors%nfloops,neigs))
+    CALL dgemm('N','N',sensors%nfloops,neigs,self%nelems,1.d0, &
+        self%Ael2sen,sensors%nfloops,eig_vec,self%nelems,0.d0,Mat_red,sensors%nfloops)
+    CALL hdf5_write(Mat_red,TRIM(filename),'Ms')
+    description=["Model to sensor mutual inductance matrix"]
+    CALL hdf5_add_string_attribute(TRIM(filename),'Ms','description',description)
+    DEALLOCATE(Mat_red)
+END IF
+!---Reduce coil coupling matrix
+IF(self%n_icoils>0)THEN
+    ! Save coil names and indexes
+    CALL hdf5_create_group(TRIM(filename),'COILS')
+    DO i=1,self%n_icoils
+        CALL hdf5_create_group(TRIM(filename), &
+            'COILS/'//TRIM(self%icoils(i)%name))
+        CALL hdf5_write(i,TRIM(filename), &
+            'COILS/'//TRIM(self%icoils(i)%name)//'/index')
+        CALL hdf5_create_group(TRIM(filename), &
+            'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS')
+        DO j=1,self%icoils(i)%ncoils
+            WRITE(sub_coil_id,'(I4.4)')j
+            CALL hdf5_create_group(TRIM(filename), &
+                'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id)
+            CALL hdf5_write(self%icoils(i)%scales(j),TRIM(filename), &
+                'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/scale')
+            CALL hdf5_write(self%icoils(i)%coils(j)%pts,TRIM(filename), &
+                'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/pts')
+        END DO
+    END DO
+    ! Save mutual coupling matrix
+    ALLOCATE(Mat_red(neigs,self%n_icoils))
+    CALL dgemm('T','N',neigs,self%n_icoils,self%nelems,1.d0, &
+        eig_vec,self%nelems,self%Ael2dr,self%nelems,0.d0,Mat_red,neigs)
+    CALL hdf5_write(Mat_red,TRIM(filename),'Mc')
+    description=["Model to coil mutual inductance matrix"]
+    CALL hdf5_add_string_attribute(TRIM(filename),'Mc','description',description)
+    DEALLOCATE(Mat_red)
+    IF(sensors%nfloops>0)THEN
+    CALL hdf5_write(self%Adr2sen,TRIM(filename),'Msc')
+    description=["Coil to sensor mutual inductance matrix"]
+    CALL hdf5_add_string_attribute(TRIM(filename),'Msc','description',description)
+    END IF
+END IF
+END SUBROUTINE tw_reduce_model
 END MODULE thin_wall_solvers

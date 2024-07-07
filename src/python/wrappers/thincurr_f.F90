@@ -24,7 +24,8 @@ USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
-USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response
+USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
+  tw_reduce_model, run_td_sim
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -273,8 +274,12 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
-CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
+IF((tw_obj%n_vcoils>0).AND.(.NOT.ASSOCIATED(tw_obj%Acoil2coil)))THEN
+  CALL copy_string('Coil mutuals required if, # of Vcoils > 0',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
 !
 IF(use_hodlr)THEN
   ALLOCATE(hodlr_op)
@@ -317,22 +322,37 @@ END SUBROUTINE thincurr_Mcoil
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
+SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,sensor_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: sensor_file(80) !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Ms_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Msc_ptr !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: nsensors
+TYPE(c_ptr), INTENT(inout) :: sensor_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
+INTEGER(4) :: i
 CHARACTER(LEN=OFT_PATH_SLEN) :: sensor_filename = ''
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
-TYPE(tw_sensors) :: sensors
+TYPE(tw_sensors), POINTER :: sensors
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
+!---Deallocate existing object
+IF(c_associated(sensor_ptr))THEN
+  CALL c_f_pointer(sensor_ptr, sensors)
+  DO i=1,sensors%nfloops
+    DEALLOCATE(sensors%floops(i)%r)
+  END DO
+  DEALLOCATE(sensors%floops)
+  DO i=1,sensors%njumpers
+    DEALLOCATE(sensors%jumpers(i)%hole_facs,sensors%jumpers(i)%points)
+  END DO
+  DEALLOCATE(sensors%jumpers)
+END IF
+ALLOCATE(sensors)
 !
 CALL copy_string_rev(sensor_file,sensor_filename)
 NULLIFY(jumper_nsets)
@@ -346,6 +366,7 @@ ELSE
 END IF
 Ms_ptr=C_LOC(tw_obj%Ael2sen)
 Msc_ptr=C_LOC(tw_obj%Adr2sen)
+sensor_ptr=C_LOC(sensors)
 nsensors=sensors%nfloops
 END SUBROUTINE thincurr_Msensor
 !------------------------------------------------------------------------------
@@ -511,4 +532,122 @@ ELSE
   CALL frequency_response(tw_obj,LOGICAL(direct),fr_limit,freq,driver_tmp)
 END IF
 END SUBROUTINE thincurr_freq_response
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
+REAL(KIND=c_double), VALUE, INTENT(in) :: dt !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nstatus !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vec_ic !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: ncurr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: curr_ptr !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nvolt !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: volt_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+!
+LOGICAL :: pm_save
+REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),curr_waveform(:,:),volt_waveform(:,:)
+TYPE(tw_type), POINTER :: tw_obj
+TYPE(tw_sensors), POINTER :: sensors
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+CALL c_f_pointer(tw_ptr, tw_obj)
+IF(tw_obj%nelems<=0)THEN
+  CALL copy_string('Invalid ThinCurr model, may not be setup yet',error_str)
+  RETURN
+END IF
+IF(direct.AND.(c_associated(hodlr_ptr)))THEN
+  CALL copy_string('"direct=True" not supported with HODLR compression',error_str)
+  RETURN
+END IF
+IF((.NOT.ASSOCIATED(tw_obj%Lmat)).AND.(.NOT.c_associated(hodlr_ptr)))THEN
+  CALL copy_string('Inductance matrix required, but not computed',error_str)
+  RETURN
+END IF
+IF(.NOT.ASSOCIATED(tw_obj%Rmat))THEN
+  CALL copy_string('Resistance matrix required, but not computed',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
+IF(c_associated(sensor_ptr))THEN
+  CALL c_f_pointer(sensor_ptr, sensors)
+ELSE
+  ALLOCATE(sensors)
+END IF
+IF(ncurr>0)THEN
+  CALL c_f_pointer(curr_ptr, curr_waveform, [ncurr,tw_obj%n_icoils+1])
+ELSE
+  NULLIFY(curr_waveform)
+END IF
+IF(nvolt>0)THEN
+  CALL c_f_pointer(volt_ptr, volt_waveform, [nvolt,tw_obj%n_vcoils+1])
+ELSE
+  NULLIFY(volt_waveform)
+END IF
+CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
+!---Run eigenvalue analysis
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr, hodlr_op)
+  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),1.d-6,.TRUE.,nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op=hodlr_op)
+ELSE
+  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),1.d-6,.TRUE.,nstatus,nplot,sensors,curr_waveform,volt_waveform)
+END IF
+oft_env%pm=pm_save
+END SUBROUTINE thincurr_time_domain
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_reduce_model")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: neigs !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eig_vec !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+!
+REAL(8), CONTIGUOUS, POINTER :: vals_tmp(:),vec_tmp(:,:)
+CHARACTER(LEN=OFT_PATH_SLEN) :: h5_path = 'none'
+TYPE(tw_type), POINTER :: tw_obj
+TYPE(tw_sensors), POINTER :: sensors
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+CALL c_f_pointer(tw_ptr, tw_obj)
+IF(tw_obj%nelems<=0)THEN
+  CALL copy_string('Invalid ThinCurr model, may not be setup yet',error_str)
+  RETURN
+END IF
+IF((.NOT.ASSOCIATED(tw_obj%Lmat)).AND.(.NOT.c_associated(hodlr_ptr)))THEN
+  CALL copy_string('Inductance matrix required, but not computed',error_str)
+  RETURN
+END IF
+IF(.NOT.ASSOCIATED(tw_obj%Rmat))THEN
+  CALL copy_string('Resistance matrix required, but not computed',error_str)
+  RETURN
+END IF
+IF((tw_obj%n_icoils>0).AND.(.NOT.ASSOCIATED(tw_obj%Ael2dr)))THEN
+  CALL copy_string('Coil mutuals required if, # of Icoils > 0',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
+IF(c_associated(sensor_ptr))THEN
+  CALL c_f_pointer(sensor_ptr, sensors)
+ELSE
+  ALLOCATE(sensors)
+END IF
+CALL copy_string_rev(filename,h5_path)
+CALL c_f_pointer(eig_vec, vec_tmp, [tw_obj%nelems,neigs])
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr, hodlr_op)
+  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path,hodlr_op=hodlr_op)
+ELSE
+  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path)
+END IF
+IF(.NOT.c_associated(sensor_ptr))DEALLOCATE(sensors)
+END SUBROUTINE thincurr_reduce_model
 END MODULE thincurr_f
