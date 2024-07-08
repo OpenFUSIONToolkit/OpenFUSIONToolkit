@@ -5617,14 +5617,16 @@ END IF
 IF(self%ncoil_regs>0)THEN
   DO i=1,self%ncoil_regs
     IF(ASSOCIATED(self%coil_regions(i)%lc))DEALLOCATE(self%coil_regions(i)%lc)
-    IF(ASSOCIATED(self%psi_coil(i)%f))CALL self%psi_coil(i)%f%delete()
   END DO
-  DEALLOCATE(self%coil_regions,self%psi_coil)
+  DEALLOCATE(self%coil_regions)
   self%ncoil_regs=0
 END IF
 !---
 IF(self%ncoils>0)THEN
-  DEALLOCATE(self%coil_currs,self%coil_vcont,self%coil_nturns)
+  DO i=1,self%ncoils
+    IF(ASSOCIATED(self%psi_coil(i)%f))CALL self%psi_coil(i)%f%delete()
+  END DO
+  DEALLOCATE(self%psi_coil,self%coil_currs,self%coil_vcont,self%coil_nturns)
   self%ncoils=0
 END IF
 !---
