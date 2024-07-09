@@ -1043,13 +1043,14 @@ class NETCDF_Fortran(package):
 
 
 class OpenBLAS(package):
-    def __init__(self, build_threaded=False, dynamic_arch=False):
+    def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False):
         self.name = "OpenBLAS"
         self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.23.tar.gz"
         self.build_dir = "OpenBLAS-0.3.23"
         self.install_dir = "OpenBLAS-0_3_23"
         self.threaded = build_threaded
         self.dynamic_arch = dynamic_arch
+        self.no_avx = no_avx
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1103,13 +1104,16 @@ int main(int argc, char** argv) {
             oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1', 'FCOMMON_OPT="-frecursive {OMP_FLAGS} -fPIC"']
         else:
             oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1', 'FCOMMON_OPT="-frecursive -fPIC"']
-        if self.config_dict['OS_TYPE'] == 'Darwin':
-            avx_test, _, _ = check_c_compiles_and_runs(avx_test_source, "-mavx", tmp_dict)
-            if not avx_test:
-                oblas_options += ['NO_AVX=1']
-            avx2_test, _, _ = check_c_compiles_and_runs(avx2_test_source, "-mavx2", tmp_dict)
-            if not avx2_test:
-                oblas_options += ['NO_AVX2=1']
+        if self.no_avx:
+            oblas_options += ['NO_AVX=1', 'NO_AVX2=1']
+        else:
+            if self.config_dict['OS_TYPE'] == 'Darwin':
+                avx_test, _, _ = check_c_compiles_and_runs(avx_test_source, "-mavx", tmp_dict)
+                if not avx_test:
+                    oblas_options += ['NO_AVX=1']
+                avx2_test, _, _ = check_c_compiles_and_runs(avx2_test_source, "-mavx2", tmp_dict)
+                if not avx2_test:
+                    oblas_options += ['NO_AVX2=1']
         if self.dynamic_arch:
             oblas_options += ['DYNAMIC_ARCH=1']
         build_lines = [
@@ -1772,6 +1776,7 @@ group.add_argument("--hdf5_parallel", action="store_true", default=False, help="
 group = parser.add_argument_group("BLAS/LAPACK", "BLAS/LAPACK package options")
 group.add_argument("--oblas_threads", action="store_true", default=False, help="Build OpenBLAS with thread support (OpenMP)")
 group.add_argument("--oblas_dynamic_arch", action="store_true", default=False, help="Build OpenBLAS with multiple architecure support")
+group.add_argument("--oblas_no_avx", action="store_true", default=False, help="Build OpenBLAS without AVX support (for Rosetta)")
 group.add_argument("--ref_blas", action="store_true", default=False, help="Use reference BLAS/LAPACK instead of OpenBLAS")
 group.add_argument("--blas_lapack_wrapper", action="store_true", default=False, help="BLAS/LAPACK included in compilers")
 group.add_argument("--use_mkl", action="store_true", default=False, help="Use MKL BLAS/LAPACK instead of OpenBLAS")
@@ -1871,7 +1876,7 @@ else:
         if options.ref_blas or options.blas_lapack_wrapper:
             packages.append(BLAS_LAPACK(options.blas_lapack_wrapper))
         else:
-            packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch))
+            packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch,options.oblas_no_avx))
 # MPI
 if use_mpi:
     packages.append(MPI())
