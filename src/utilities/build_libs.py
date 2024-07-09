@@ -1097,9 +1097,9 @@ int main(int argc, char** argv) {
         tmp_dict = self.config_dict.copy()
         oblas_options = ['NO_CBLAS=1', 'NO_LAPACKE=1', 'NO_SHARED=1']
         if self.config_dict['MAKE_THREADS'] == 1:
-            oblas_options += ['NO_PARALLEL_MAKE=1']
+            make_thread = ['NO_PARALLEL_MAKE=1']
         else:
-            oblas_options += ['MAKE_NB_JOBS={MAKE_THREADS}']
+            make_thread = ['MAKE_NB_JOBS={MAKE_THREADS}']
         if self.threaded:
             oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1', 'FCOMMON_OPT="-frecursive {OMP_FLAGS} -fPIC"']
         else:
@@ -1120,8 +1120,8 @@ int main(int argc, char** argv) {
             'export CC={CC}',
             'export FC={FC}',
             'make clean',
-            'make {0}'.format(' '.join(oblas_options)),
-            'make NO_PARALLEL_MAKE=1 NO_SHARED=1 PREFIX={OpenBLAS_ROOT} install'
+            'make {0}'.format(' '.join(oblas_options + make_thread)),
+            'make {0} install'.format(' '.join(oblas_options + ['NO_PARALLEL_MAKE=1', 'PREFIX={OpenBLAS_ROOT}']))
         ]
         self.run_build(build_lines, tmp_dict)
 

@@ -22,17 +22,22 @@ jobs:
         - {
             name: "Linux-x86_64",
             os: ubuntu-20.04,
-            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python"
+            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python", build_libs_flags: ""
           }
         - {
             name: "macOS-x86_64",
             os: macos-12,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", build_libs_flags: ""
+          }
+        - {
+            name: "macOS-x86_64-Rosetta",
+            os: macos-12,
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", build_libs_flags: "--oblas_no_avx"
           }
         - {
             name: "macOS-arm64",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer", build_libs_flags: ""
         }
 
     steps:
@@ -74,7 +79,7 @@ jobs:
       working-directory: libs
       run: >
         ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
-        --build_umfpack=1 --build_arpack=1 --oblas_dynamic_arch --oft_package
+        --build_umfpack=1 --build_arpack=1 --oblas_dynamic_arch --oft_package ${{ matrix.config.build_libs_flags }}
 
     - name: Build external (macOS)
       if: startsWith(matrix.config.os, 'macos')
@@ -82,7 +87,7 @@ jobs:
       working-directory: libs
       run: >
         ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
-        --build_umfpack=1 --build_arpack=1 --oft_package
+        --build_umfpack=1 --build_arpack=1 --oft_package ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
