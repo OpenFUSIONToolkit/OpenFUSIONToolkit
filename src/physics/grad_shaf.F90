@@ -4665,6 +4665,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
 type(gsinv_interp), target :: field
+CHARACTER(LEN=80) :: error_str
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -4737,8 +4738,8 @@ do j=1,nr
   pt_last=pt
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN
-    WRITE(*,*)j,pt
-    CALL oft_warn("gs_get_qprof: Trace did not complete")
+    WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
+    CALL oft_warn(error_str)
     CYCLE
   end if
   IF(j==1)THEN
