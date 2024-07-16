@@ -191,9 +191,9 @@ ELSE
   !
   IF(reduce_model)THEN
     IF(tw_hodlr%L_svd_tol>0.d0)THEN
-      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5',hodlr_op=tw_hodlr)
+      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5',compute_B,hodlr_op=tw_hodlr)
     ELSE
-      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5')
+      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5',compute_B)
     END IF
   END IF
   !

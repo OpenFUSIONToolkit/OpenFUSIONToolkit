@@ -1453,6 +1453,7 @@ IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
     ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
     ALLOCATE(self%Icoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils),3))
     CALL tw_compute_Bops_hole(self%tw_obj,self%hole_Vcoil_Bmat,self%Icoil_Bmat)
+    self%tw_obj%Bdr=>self%Icoil_Bmat
 END IF
 !
 compressed_size=0

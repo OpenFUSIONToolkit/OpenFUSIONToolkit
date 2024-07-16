@@ -513,12 +513,13 @@ TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
 INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(3),ierr,io_unit,iquad
-REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3)
+REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3),elapsed_time
 REAL(8) :: pot_tmp,rgop(3,3),area_i,norm_i(3),f(3),dl_min,dl_max,pot_last
 REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
+type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
 IF(PRESENT(save_file))THEN
@@ -575,6 +576,7 @@ END DO
 !
 bmesh=>tw_obj%mesh
 WRITE(*,*)'Building coil<->element inductance matrices'
+CALL mytimer%tick
 ALLOCATE(Ael2coil_tmp(tw_obj%nelems,ncoils_tot))
 Ael2coil_tmp=0.d0
 f=1.d0/3.d0
@@ -672,6 +674,8 @@ DO i=1,18
   CALL quads(i)%delete()
 END DO
 DEALLOCATE(quads)
+elapsed_time=mytimer%tock()
+WRITE(*,*)'  Time = ',elapsed_time
 !
 CALL tw_compute_Lmat_coils(tw_obj)
 !
@@ -2009,7 +2013,7 @@ END DO
 self%Bel=self%Bel/(4.d0*pi)
 !
 WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
-ALLOCATE(self%Bdr(self%n_icoils,bmesh%np,3))
+ALLOCATE(self%Bdr(bmesh%np,self%n_icoils,3))
 self%Bdr=0.d0
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
 DO i=1,bmesh%np
@@ -2029,7 +2033,7 @@ DO i=1,bmesh%np
     END DO
     DO jj=1,3
       !$omp atomic
-      self%Bdr(j,i,jj) = self%Bdr(j,i,jj) + ecc(jj)
+      self%Bdr(i,j,jj) = self%Bdr(i,j,jj) + ecc(jj)
     END DO
   END DO
 END DO

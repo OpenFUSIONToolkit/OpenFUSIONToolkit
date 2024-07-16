@@ -25,7 +25,7 @@ USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
 USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
-  tw_reduce_model, run_td_sim
+  tw_reduce_model, run_td_sim, plot_td_sim
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -603,11 +603,52 @@ END SUBROUTINE thincurr_time_domain
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_reduce_model")
+SUBROUTINE thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot, &
+  sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_B !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: rebuild_sensors !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+!
+LOGICAL :: pm_save
+REAL(8), CONTIGUOUS, POINTER :: curr_waveform(:,:)
+TYPE(tw_type), POINTER :: tw_obj
+TYPE(tw_sensors), POINTER :: sensors
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+CALL c_f_pointer(tw_ptr, tw_obj)
+IF(tw_obj%nelems<=0)THEN
+  CALL copy_string('Invalid ThinCurr model, may not be setup yet',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
+IF(c_associated(sensor_ptr))THEN
+  CALL c_f_pointer(sensor_ptr, sensors)
+ELSE
+  ALLOCATE(sensors)
+END IF
+!---Run eigenvalue analysis
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr, hodlr_op)
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),hodlr_op=hodlr_op)
+ELSE
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors))
+END IF
+oft_env%pm=pm_save
+END SUBROUTINE thincurr_time_domain_plot
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,compute_B,sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_reduce_model")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: neigs !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eig_vec !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_B !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
@@ -644,9 +685,9 @@ CALL copy_string_rev(filename,h5_path)
 CALL c_f_pointer(eig_vec, vec_tmp, [tw_obj%nelems,neigs])
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path,hodlr_op=hodlr_op)
+  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path,LOGICAL(compute_B),hodlr_op=hodlr_op)
 ELSE
-  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path)
+  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path,LOGICAL(compute_B))
 END IF
 IF(.NOT.c_associated(sensor_ptr))DEALLOCATE(sensors)
 END SUBROUTINE thincurr_reduce_model

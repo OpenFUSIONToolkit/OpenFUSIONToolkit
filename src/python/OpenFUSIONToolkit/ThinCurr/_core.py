@@ -411,12 +411,32 @@ class ThinCurr():
                                 sensor_obj,ncurr,coil_currs,nvolt,coil_volts,c_void_p(),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
+    
+    def plot_td(self,nsteps,compute_B=False,rebuild_sensors=False,plot_freq=10,sensor_obj=c_void_p()):
+        '''! Perform a time-domain simulation
 
-    def build_reduced_model(self,basis_set,filename='tCurr_reduced.h5',sensor_obj=c_void_p()):
+        @param nsteps Number of steps to take
+        @param compute_B Compute B-field on grid vertices
+        @param rebuild_sensors Recompute sensor signals (overwriting if present)
+        @param plot_freq Frequency to load plot files
+        @param sensor_obj Sensor object to use
+        '''
+        error_string = c_char_p(b""*200)
+        if self.Lmat_hodlr:
+            thincurr_time_domain_plot(self.tw_obj,c_bool(compute_B),c_bool(rebuild_sensors),c_int(nsteps),c_int(plot_freq),sensor_obj,
+                                      self.Lmat_hodlr,error_string)
+        else:
+            thincurr_time_domain_plot(self.tw_obj,c_bool(compute_B),c_bool(rebuild_sensors),c_int(nsteps),c_int(plot_freq),sensor_obj,
+                                      c_void_p(),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+
+    def build_reduced_model(self,basis_set,filename='tCurr_reduced.h5',compute_B=False,sensor_obj=c_void_p()):
         r'''! Build reduced model by projecting full model onto defined basis set of currents
 
         @param basis_set Basis set for projection [nBasis,:]
-        @param filename Filename for reduction model
+        @param filename Filename for saving reduced model
+        @param compute_B Compute B-field reconstruction operators for reduced model?
         @param sensor_obj Sensor object to use
         @result Reduced model (see \ref ThinCurr_reduced)
         '''
@@ -424,9 +444,9 @@ class ThinCurr():
         nbasis = c_int(basis_set.shape[0])
         error_string = c_char_p(b""*200)
         if self.Lmat_hodlr:
-            thincurr_reduce_model(self.tw_obj,c_char_p(filename.encode()),nbasis,basis_set,sensor_obj,self.Lmat_hodlr,error_string)
+            thincurr_reduce_model(self.tw_obj,c_char_p(filename.encode()),nbasis,basis_set,c_bool(compute_B),sensor_obj,self.Lmat_hodlr,error_string)
         else:
-            thincurr_reduce_model(self.tw_obj,c_char_p(filename.encode()),nbasis,basis_set,sensor_obj,c_void_p(),error_string)
+            thincurr_reduce_model(self.tw_obj,c_char_p(filename.encode()),nbasis,basis_set,c_bool(compute_B),sensor_obj,c_void_p(),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return ThinCurr_reduced(filename)
@@ -443,18 +463,56 @@ class ThinCurr_reduced:
             self.Basis = numpy.asarray(file['Basis'])
             self.L = numpy.asarray(file['L'])
             self.R = numpy.asarray(file['R'])
+            if 'Bx' in file:
+                self.B = [numpy.asarray(file['Bx']), numpy.asarray(file['By']), numpy.asarray(file['Bz'])]
+            else:
+                self.B = None
             if 'Ms' in file:
                 self.Ms = numpy.asarray(file['Ms'])
             else:
                 self.Ms = None
             if 'Mc' in file:
                 self.Mc = numpy.asarray(file['Mc'])
+                if 'Bx_c' in file:
+                    self.Bc = [numpy.asarray(file['Bx_c']), numpy.asarray(file['By_c']), numpy.asarray(file['Bz_c'])]
+                else:
+                    self.Bc = None
             else:
                 self.Mc = None
+                self.Bc = None
             if 'Msc' in file:
                 self.Msc = numpy.asarray(file['Msc'])
             else:
                 self.Msc = None
+    
+    def reconstruct_current(self,weights):
+        '''! Reconstruct full current potential on original grid
+
+        @param weights Reduced model basis weights
+        @result Full current potential on original grid
+        '''
+        return numpy.dot(weights,self.Basis)
+    
+    def reconstruct_Bfield(self,weights,coil_currs=None):
+        '''! Reconstruct magnetic field on original grid
+
+        @param weights Reduced model basis weights
+        @param coil_currs Coil currents
+        @result Full current potential on original grid
+        '''
+        if (self.B is None):
+            raise ValueError('Magnetic field reconstruction operator not part of this model')
+        if coil_currs is not None:
+            if (self.Bc is None):
+                raise ValueError('Coil magnetic field reconstruction operator not part of this model')
+            if coil_currs.shape[0] != self.Bc[0].shape[0]:
+                raise ValueError('Size of "coil_currs" does not match number of coils in reduced model')
+        Bfield = numpy.zeros((self.B[0].shape[1],3))
+        for i in range(3):
+            Bfield[:,i] = numpy.dot(weights,self.B[i])
+            if self.Bc is not None:
+                Bfield[:,i] += numpy.dot(mu0*coil_currs,self.Bc[i])
+        return Bfield
 
     def get_eigs(self):
         '''! Compute eigenmodes for reduced model
@@ -479,21 +537,22 @@ class ThinCurr_reduced:
         #
         vec_time = []
         vec_hist = []
+        coil_hist = []
         sen_time = []
         sen_hist = []
         pot_tmp = numpy.zeros((self.L.shape[0],))
         t = 0.0
         print('Timestep {0} {1:12.4E} {2:12.4E}'.format(0,t,numpy.linalg.norm(pot_tmp)))
         vec_time.append(t)
-        vec_hist.append(numpy.dot(pot_tmp,self.Basis))
+        curr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
+        for j in range(coil_currs.shape[1]-1):
+            curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+        coil_hist.append(curr_tmp)
+        vec_hist.append(pot_tmp)
         if self.Ms is not None:
             sen_tmp = numpy.dot(pot_tmp,self.Ms)
             if self.Msc is not None:
-                curr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
-                for j in range(coil_currs.shape[1]-1):
-                    curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
-                curr_tmp *= mu0
-                sen_tmp += numpy.dot(curr_tmp,self.Msc)
+                sen_tmp += numpy.dot(mu0*curr_tmp,self.Msc)
             sen_time.append(t)
             sen_hist.append(sen_tmp)
         #
@@ -512,18 +571,18 @@ class ThinCurr_reduced:
             t += dt
             if ((i+1) % status_freq) == 0:
                 print('Timestep {0} {1:12.4E} {2:12.4E}'.format(i+1,t,numpy.linalg.norm(pot_tmp)))
+            curr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
+            for j in range(coil_currs.shape[1]-1):
+                curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
             if ((i+1) % plot_freq) == 0:
                 vec_time.append(t)
-                vec_hist.append(numpy.dot(pot_tmp,self.Basis))
+                coil_hist.append(curr_tmp)
+                vec_hist.append(pot_tmp)
             if self.Ms is not None:
                 sen_tmp = numpy.dot(pot_tmp,self.Ms)
                 if self.Msc is not None:
-                    curr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
-                    for j in range(coil_currs.shape[1]-1):
-                        curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
-                    curr_tmp *= mu0
-                    sen_tmp += numpy.dot(curr_tmp,self.Msc)
+                    sen_tmp += numpy.dot(mu0*curr_tmp,self.Msc)
                 sen_time.append(t)
                 sen_hist.append(sen_tmp)
         #
-        return numpy.array(sen_time), numpy.array(sen_hist), numpy.array(vec_time), numpy.array(vec_hist)
+        return numpy.array(sen_time), numpy.array(sen_hist), numpy.array(vec_time), numpy.array(vec_hist), numpy.array(coil_hist)
