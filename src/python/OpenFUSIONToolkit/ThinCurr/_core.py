@@ -89,9 +89,9 @@ class ThinCurr():
     def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None):
         '''! Setup ThinCurr model
 
-        @param r Point list [np,3]
-        @param lc Cell list [nc,3]
-        @param reg Region tag [nc,]
+        @param r Point list `(np,3)`
+        @param lc Cell list `(nc,3)`
+        @param reg Region tag `(nc,)`
         @param mesh_file File containing model in native mesh format
         @param pmap Point map for periodic grids
         @param xml_filename Path to XML file for model
@@ -214,6 +214,7 @@ class ThinCurr():
 
         @param data Data to scale
         @param div_flag Divide by vertex areas instead?
+        @result Scaled data `(:)`
         '''
         data_in = numpy.ascontiguousarray(data.copy(), dtype=numpy.float64)
         thincurr_scale_va(self.tw_obj,data_in,div_flag)
@@ -224,6 +225,7 @@ class ThinCurr():
 
         @param cache_file Path to cache file to store/load matrix
         @param use_hodlr Use HODLR compression for the matrix
+        @result Self-inductance matrix (`(:,:)` if `use_hodlr=False` else reference to HODLR object)
         '''
         if cache_file is None:
             cache_string = c_char_p(b"")
@@ -243,7 +245,7 @@ class ThinCurr():
         '''! Compute the mutual inductance between passive (mesh+vcoils) and active elements (icoils)
 
         @param cache_file Path to cache file to store/load matrix
-        @result Mutual inductance matrix
+        @result Mutual inductance matrix `(:,:)`
         '''
         if cache_file is None:
             cache_string = c_char_p(b"")
@@ -261,7 +263,9 @@ class ThinCurr():
 
         @param sensor_file Path to file contatining flux loop definitions
         @param cache_file Path to cache file to store/load matrix
-        @result Mutual inductance matrix between model and sensors, Mutual inductance matrix between icoils and sensors
+        @result Mutual inductance matrix between model and sensors `(:,:)`
+        @result Mutual inductance matrix between icoils and sensors `(:,:)`
+        @result Internal ThinCurr sensor object
         '''
         if cache_file is None:
             cache_string = c_char_p(b"")
@@ -299,6 +303,7 @@ class ThinCurr():
 
         @param model2 The second model for mutual calculation
         @param cache_file Path to cache file to store/load matrix
+        @result Mutual inductance matrix `(:,:)`
         '''
         Mmat = numpy.zeros((self.nelems,model2.nelems), dtype=numpy.float64)
         if cache_file is None:
@@ -312,10 +317,11 @@ class ThinCurr():
         return Mmat
     
     def cross_eval(self,model2,field):
-        '''! Compute the voltage/current induced on another ThinCurr model from a current structure on this model
+        '''! Compute the voltage/flux induced on another ThinCurr model from a current structure on this model
 
         @param model2 The second model for mutual calculation
         @param field One or more current fields
+        @result Flux on `model2` from `field` on `self` `(field.shape[0],:)`
         '''
         nrhs = field.shape[0]
         vec_out = numpy.zeros((nrhs,model2.nelems), dtype=numpy.float64)
@@ -328,6 +334,8 @@ class ThinCurr():
     
     def get_regmat(self):
         '''! Compute the current regularization matrix for this model
+
+        @result Regularization matrix `(:,:)`
         '''
         Rmat = numpy.zeros((self.nelems,3*self.nc), dtype=numpy.float64)
         error_string = c_char_p(b""*200)
@@ -341,7 +349,8 @@ class ThinCurr():
 
         @param neigs Number of eigenvalues to compute
         @param direct Use direct solver?
-        @result Eigenvalues, Eigenvectors
+        @result Eigenvalues `(neigs)`
+        @result Eigenvectors `(neigs,:)`
         '''
         eig_vals = numpy.zeros((neigs,), dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.nelems), dtype=numpy.float64)
@@ -378,8 +387,8 @@ class ThinCurr():
 
         @param dt Time step for simulation
         @param nsteps Number of steps to take
-        @param coil_currs Current vs time array for Icoils [:,n_icoils+1] (first index is time)
-        @param coil_volts Voltage vs time array for Vcoils [:,n_vcoils+1] (first index is time)
+        @param coil_currs Current vs time array for Icoils `(:,n_icoils+1)` (first column is time)
+        @param coil_volts Voltage vs time array for Vcoils `(:,n_vcoils+1)` (first column is time)
         @param direct Use direct solver?
         @param status_freq Frequency to print status information
         @param plot_freq Frequency to save plot files
@@ -434,7 +443,7 @@ class ThinCurr():
     def build_reduced_model(self,basis_set,filename='tCurr_reduced.h5',compute_B=False,sensor_obj=c_void_p()):
         r'''! Build reduced model by projecting full model onto defined basis set of currents
 
-        @param basis_set Basis set for projection [nBasis,:]
+        @param basis_set Basis set for projection `(nBasis,:)`
         @param filename Filename for saving reduced model
         @param compute_B Compute B-field reconstruction operators for reduced model?
         @param sensor_obj Sensor object to use
@@ -460,36 +469,38 @@ class ThinCurr_reduced:
         @param filename File containing reduced model
         '''
         with h5py.File(filename,'r') as file:
+            ## Current potential basis set
             self.Basis = numpy.asarray(file['Basis'])
+            ## Self-inductance matrix for reduced model
             self.L = numpy.asarray(file['L'])
+            ## Resistance matrix for reduced model
             self.R = numpy.asarray(file['R'])
+            ## B-field reconstruction operator
+            self.B = None
             if 'Bx' in file:
                 self.B = [numpy.asarray(file['Bx']), numpy.asarray(file['By']), numpy.asarray(file['Bz'])]
-            else:
-                self.B = None
+            ## Model-sensor mutual inductance matrix 
+            self.Ms = None
             if 'Ms' in file:
                 self.Ms = numpy.asarray(file['Ms'])
-            else:
-                self.Ms = None
+            ## Model-coil mutual inductance matrix
+            self.Mc = None
+            ## B-field coil reconstruction operator
+            self.Bc = None
             if 'Mc' in file:
                 self.Mc = numpy.asarray(file['Mc'])
                 if 'Bx_c' in file:
                     self.Bc = [numpy.asarray(file['Bx_c']), numpy.asarray(file['By_c']), numpy.asarray(file['Bz_c'])]
-                else:
-                    self.Bc = None
-            else:
-                self.Mc = None
-                self.Bc = None
+            ## Coil-sensor mutual inductance matrix
+            self.Msc = None
             if 'Msc' in file:
                 self.Msc = numpy.asarray(file['Msc'])
-            else:
-                self.Msc = None
     
     def reconstruct_current(self,weights):
         '''! Reconstruct full current potential on original grid
 
         @param weights Reduced model basis weights
-        @result Full current potential on original grid
+        @result Full current potential on original grid `(:)`
         '''
         return numpy.dot(weights,self.Basis)
     
@@ -497,8 +508,8 @@ class ThinCurr_reduced:
         '''! Reconstruct magnetic field on original grid
 
         @param weights Reduced model basis weights
-        @param coil_currs Coil currents
-        @result Full current potential on original grid
+        @param coil_currs Coil currents [A]
+        @result Magnetic field on original grid `(:,3)`
         '''
         if (self.B is None):
             raise ValueError('Magnetic field reconstruction operator not part of this model')
@@ -517,20 +528,28 @@ class ThinCurr_reduced:
     def get_eigs(self):
         '''! Compute eigenmodes for reduced model
 
-        @result Eigenvalues, Eigenvectors
+        @result Eigenvalues `(:)`
+        @result Eigenvectors `(:,:)`
         '''
         eig_vals, eig_vecs = numpy.linalg.eig(numpy.dot(numpy.linalg.inv(self.R),self.L))
         sort_inds = (-eig_vals).argsort()
         return eig_vals[sort_inds], numpy.dot(eig_vecs[sort_inds,:],self.Basis)
 
     def run_td(self,dt,nsteps,coil_currs,status_freq=10,plot_freq=10):
-        '''! Perform a time-domain simulation
+        r'''! Perform a time-domain simulation
 
         @param dt Time step for simulation
         @param nsteps Number of steps to take
-        @param coil_currs Current vs time array for Icoils [:,n_icoils+1] (first index is time)
+        @param coil_currs Current vs time array for Icoils `(:,n_icoils+1)` (first index is time)
         @param status_freq Frequency to print status information
         @param plot_freq Frequency to save plot files
+        @result Sensor signals dictionary
+          - `time` Timebase [s] `(:)`, 
+          - `sensors` Sensor signals `(:,:)`
+        @result Current history dictionary
+          - `time` Timebase [s] `(:)`
+          - `curr` Reduced model basis weights `(:,:)`,
+          - `coil_curr` Coil currents [A / \f$ \mu_0 \f$ ] `(:,:)`
         '''
         Lforward = self.L - (dt/2.0)*self.R
         Lbackward = numpy.linalg.inv(self.L + (dt/2.0)*self.R)
@@ -585,4 +604,13 @@ class ThinCurr_reduced:
                 sen_time.append(t)
                 sen_hist.append(sen_tmp)
         #
-        return numpy.array(sen_time), numpy.array(sen_hist), numpy.array(vec_time), numpy.array(vec_hist), numpy.array(coil_hist)
+        sensor_obj = {
+            'time': numpy.array(sen_time),
+            'sensors': numpy.array(sen_hist)
+        }
+        curr_obj = {
+            'time': numpy.array(vec_time),
+            'curr': numpy.array(vec_hist),
+            'coil_curr': numpy.array(coil_hist)
+        }
+        return sensor_obj, curr_obj
