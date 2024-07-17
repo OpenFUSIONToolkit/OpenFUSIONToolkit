@@ -177,14 +177,49 @@ class ThinCurr():
         if cstring.value != b'':
             raise Exception(cstring.value.decode())
     
+    def reconstruct_current(self,potential,centering='cell'):
+        '''! Reconstruct current field on mesh
+
+        @param potential Current potential
+        @param centering Desired field centering ('cell', 'vertex')
+        @result Current field on selected centering `(:,3)`
+        '''
+        if centering == 'cell':
+            curr = numpy.zeros((self.nc,3), dtype=numpy.float64)
+            cent_key = 1
+        elif centering == 'vertex':
+            curr = numpy.zeros((self.np,3), dtype=numpy.float64)
+            cent_key = 2
+        else:
+            raise ValueError('Unknown centering, should be "cell" or "vertex"')
+        potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
+        thincurr_recon_curr(self.tw_obj,potential,curr,cent_key)
+        return curr/mu0
+    
+    def reconstruct_Bfield(self,potential,coil_currs=None):
+        '''! Reconstruct magnetic field on original grid
+
+        @param weights Reduced model basis weights
+        @param coil_currs Coil currents [A]
+        @result Magnetic field on original grid `(:,3)`
+        '''
+        potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
+        coil_currs = numpy.ascontiguousarray(coil_currs, dtype=numpy.float64)
+        field = numpy.zeros((self.np,3), dtype=numpy.float64)
+        if self.Lmat_hodlr:
+            thincurr_recon_field(self.tw_obj,potential,coil_currs,field,self.Lmat_hodlr)
+        else:
+            thincurr_recon_field(self.tw_obj,potential,coil_currs,field,c_void_p())
+        return field/mu0
+    
     def save_current(self,potential,tag):
         '''! Save current field from ThinCurr to plot files
 
-        @param field Pointwise data to save
+        @param potential Current potential to save
         @param tag Name of field in plot files
         '''
-        # if potential.shape[0] != self.np:
-        #     raise ValueError('Incorrect shape of "psi", should be [np]')
+        if potential.shape[0] != self.nelems:
+            raise ValueError('Incorrect shape of "potential", should be [nelems]')
         potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
         cstring = c_char_p(tag.encode())
         thincurr_save_field(self.tw_obj,potential,cstring)
@@ -195,8 +230,8 @@ class ThinCurr():
         @param field Pointwise data to save
         @param tag Name of field in plot files
         '''
-        # if field.shape[0] >= self.np:
-        #     raise ValueError('Incorrect shape of "psi", should be [np]')
+        if field.shape[0] >= self.np:
+            raise ValueError('Incorrect shape of "field", should be [np]')
         field = numpy.ascontiguousarray(field, dtype=numpy.float64)
         ctag = c_char_p(tag.encode())
         thincurr_save_scalar(self.tw_obj,field,ctag)
@@ -496,8 +531,11 @@ class ThinCurr_reduced:
             if 'Msc' in file:
                 self.Msc = numpy.asarray(file['Msc'])
     
-    def reconstruct_current(self,weights):
-        '''! Reconstruct full current potential on original grid
+    def reconstruct_potential(self,weights):
+        r'''! Reconstruct full current potential on original grid
+
+        @note To reconstruct the full current pass the output to @ref ThinCurr.reconstruct_current "reconstruct_current()"
+        with the original model
 
         @param weights Reduced model basis weights
         @result Full current potential on original grid `(:)`
@@ -533,7 +571,7 @@ class ThinCurr_reduced:
         '''
         eig_vals, eig_vecs = numpy.linalg.eig(numpy.dot(numpy.linalg.inv(self.R),self.L))
         sort_inds = (-eig_vals).argsort()
-        return eig_vals[sort_inds], numpy.dot(eig_vecs[sort_inds,:],self.Basis)
+        return eig_vals[sort_inds], eig_vecs[sort_inds,:]
 
     def run_td(self,dt,nsteps,coil_currs,status_freq=10,plot_freq=10):
         r'''! Perform a time-domain simulation

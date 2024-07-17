@@ -22,7 +22,8 @@ USE oft_la_base, ONLY: oft_vector
 !---
 USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
-  tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF
+  tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF, &
+  tw_recon_curr
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
 USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
   tw_reduce_model, run_td_sim, plot_td_sim
@@ -181,6 +182,112 @@ CALL c_f_pointer(vals, vals_tmp, [tw_obj%nelems])
 !---Save plot fields
 CALL tw_save_pfield(tw_obj,vals_tmp,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_field
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_recon_curr(tw_ptr,vals,curr,format) BIND(C,NAME="thincurr_recon_curr")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: curr !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: format !< Needs docs
+INTEGER(4) :: i,j
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: ptvec,cellvec
+TYPE(tw_type), POINTER :: tw_obj
+DEBUG_STACK_PUSH
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL c_f_pointer(vals, vals_tmp, [tw_obj%nelems])
+IF(format==1)THEN
+  CALL c_f_pointer(curr, cellvec, [3,tw_obj%mesh%nc])
+ELSE IF(format==2)THEN
+  CALL c_f_pointer(curr, ptvec, [3,tw_obj%mesh%np])
+  ALLOCATE(cellvec(3,tw_obj%mesh%nc))
+END IF
+!---Avg to cells
+CALL tw_recon_curr(tw_obj,vals_tmp,cellvec)
+!---Avg to points
+IF(format==2)THEN
+  DO i=1,tw_obj%mesh%np
+    ptvec(:,i)=0.d0
+    DO j=tw_obj%mesh%kpc(i),tw_obj%mesh%kpc(i+1)-1
+      ptvec(:,i) = ptvec(:,i) + cellvec(:,tw_obj%mesh%lpc(j))*tw_obj%mesh%ca(tw_obj%mesh%lpc(j))/3.d0
+    END DO
+    ptvec(:,i) = ptvec(:,i)/tw_obj%mesh%va(i)
+  END DO
+  DEALLOCATE(cellvec)
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE thincurr_recon_curr
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_recon_field(tw_ptr,pot,coils,field,hodlr_ptr) BIND(C,NAME="thincurr_recon_field")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: pot !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: coils !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: field !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+INTEGER(4) :: k,j,jj
+REAL(8) :: tmp
+REAL(8), POINTER, DIMENSION(:) :: pot_tmp,coils_tmp,vtmp
+REAL(8), POINTER, DIMENSION(:,:) :: field_tmp
+TYPE(tw_type), POINTER :: tw_obj
+CLASS(oft_vector), POINTER :: u,Bx,By,Bz
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+DEBUG_STACK_PUSH
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL c_f_pointer(pot, pot_tmp, [tw_obj%nelems])
+CALL c_f_pointer(coils, coils_tmp, [tw_obj%n_icoils])
+CALL c_f_pointer(field, field_tmp, [3,tw_obj%mesh%np])
+!
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr, hodlr_op)
+  IF(.NOT.ASSOCIATED(hodlr_op%aca_B_dense))CALL hodlr_op%compute_B()
+  CALL tw_obj%Uloc%new(u)
+  CALL tw_obj%Uloc_pts%new(Bx)
+  CALL tw_obj%Uloc_pts%new(By)
+  CALL tw_obj%Uloc_pts%new(Bz)
+  CALL u%restore_local(pot_tmp)
+  CALL hodlr_op%apply_bop(u,Bx,By,Bz)
+  NULLIFY(vtmp)
+  CALL Bx%get_local(vtmp)
+  field_tmp(1,:)=vtmp
+  CALL By%get_local(vtmp)
+  field_tmp(2,:)=vtmp
+  CALL Bz%get_local(vtmp)
+  field_tmp(3,:)=vtmp
+  DEALLOCATE(vtmp)
+  CALL u%delete()
+  CALL Bx%delete()
+  CALL By%delete()
+  CALL Bz%delete()
+  DEALLOCATE(u,Bx,By,Bz)
+ELSE
+  !$omp parallel do private(j,jj,tmp)
+  DO k=1,tw_obj%mesh%np
+    DO jj=1,3
+      tmp=0.d0
+      !$omp simd reduction(+:tmp)
+      DO j=1,tw_obj%nelems
+        tmp=tmp+pot_tmp(j)*tw_obj%Bel(j,k,jj)
+      END DO
+      field_tmp(jj,k)=tmp
+    END DO
+  END DO
+END IF
+IF(tw_obj%n_icoils>0)THEN
+  !$omp parallel do private(k,tmp) collapse(2)
+  DO j=1,tw_obj%n_icoils
+    DO jj=1,3
+      !$omp simd
+      DO k=1,tw_obj%mesh%np
+        field_tmp(jj,k)=field_tmp(jj,k)+coils_tmp(j)*tw_obj%Bdr(k,j,jj)
+      END DO
+    END DO
+  END DO
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE thincurr_recon_field
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

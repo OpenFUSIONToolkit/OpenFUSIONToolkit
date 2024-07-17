@@ -2720,25 +2720,23 @@ END SUBROUTINE tw_build_boozer
 !------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
 !------------------------------------------------------------------------------
-SUBROUTINE tw_save_pfield(self,a,tag)
+SUBROUTINE tw_recon_curr(self,pot,curr)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-real(8), intent(in) :: a(:) !< Solution values [self%nelems]
-character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
+real(8), intent(in) :: pot(:) !< Solution values [self%nelems]
+real(8), intent(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec
 DEBUG_STACK_PUSH
 !---Avg to cells
-ALLOCATE(cellvec(3,self%mesh%nc))
 ftmp=1.d0/3.d0
 DO i=1,self%mesh%nc
-  cellvec(:,i)=0.d0
+  curr(:,i)=0.d0
   CALL self%mesh%jacobian(i,ftmp,gop,area)
   CALL self%mesh%norm(i,ftmp,norm)
   DO j=1,3
     pt=self%pmap(self%mesh%lc(j,i))
     IF(pt==0)CYCLE
-    cellvec(:,i) = cellvec(:,i) + a(pt)*cross_product(gop(:,j),norm)
+    curr(:,i) = curr(:,i) + pot(pt)*cross_product(gop(:,j),norm)
   END DO
 END DO
 DO ih=1,self%nholes
@@ -2750,11 +2748,27 @@ i=ABS(self%hmesh(ih)%lpc(ihc))
   END DO
   CALL self%mesh%jacobian(i,ftmp,gop,area)
   CALL self%mesh%norm(i,ftmp,norm)
-  cellvec(:,i) = cellvec(:,i) &
-    + a(self%np_active+ih)*cross_product(gop(:,j),norm)*SIGN(1,self%hmesh(ih)%lpc(ihc))
+  curr(:,i) = curr(:,i) &
+    + pot(self%np_active+ih)*cross_product(gop(:,j),norm)*SIGN(1,self%hmesh(ih)%lpc(ihc))
 END DO
 END DO
 END DO
+DEBUG_STACK_POP
+END SUBROUTINE tw_recon_curr
+!------------------------------------------------------------------------------
+!> Save solution vector for thin-wall model for plotting in VisIt
+!------------------------------------------------------------------------------
+SUBROUTINE tw_save_pfield(self,a,tag)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+real(8), intent(in) :: a(:) !< Solution values [self%nelems]
+character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
+INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
+REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec
+DEBUG_STACK_PUSH
+!---Avg to cells
+ALLOCATE(cellvec(3,self%mesh%nc))
+CALL tw_recon_curr(self,a,cellvec)
 CALL self%mesh%save_cell_vector(cellvec/mu0,TRIM(tag)) ! Convert back to Amps
 !---Avg to points
 ALLOCATE(ptvec(3,self%mesh%np))

@@ -17,6 +17,14 @@ thincurr_setup = ctypes_subroutine(oftpy_lib.thincurr_setup,
 thincurr_setup_io = ctypes_subroutine(oftpy_lib.thincurr_setup_io,
     [c_void_p, c_char_p, c_bool, c_char_p])
 
+# thincurr_recon_curr(tw_ptr,vals,curr,format)
+thincurr_recon_curr = ctypes_subroutine(oftpy_lib.thincurr_recon_curr,
+    [c_void_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,2), c_int])
+
+# thincurr_recon_field(tw_ptr,pot,coils,field,hodlr_ptr)
+thincurr_recon_field = ctypes_subroutine(oftpy_lib.thincurr_recon_field,
+    [c_void_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,2), c_void_p])
+
 # ThinCurr save current potential field (tw_ptr,vals,fieldname)
 thincurr_save_field = ctypes_subroutine(oftpy_lib.thincurr_save_field,
     [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
