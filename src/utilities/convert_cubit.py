@@ -125,6 +125,8 @@ def read_mesh(filename):
     reindex_flag = np.zeros((r.shape[0]+1,), dtype=np.int32)
     reindex_flag[lc[:,:ncp_lin].flatten()] = 1
     r_new = r[reindex_flag[1:] == 1]
+    for i, nodeset in enumerate(node_sets):
+        node_sets[i] = np.array([node for node in nodeset if reindex_flag[node] == 1])
     rindexed_pts = np.cumsum(reindex_flag)
     lc_new = rindexed_pts[lc[:,:ncp_lin]]
     node_sets = [rindexed_pts[nodeset] for nodeset in node_sets]
