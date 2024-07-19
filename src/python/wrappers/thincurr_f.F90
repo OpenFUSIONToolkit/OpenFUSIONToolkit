@@ -105,7 +105,11 @@ ELSE
   ALLOCATE(tw_obj%mesh%lc(3,tw_obj%mesh%nc))
   CALL hdf5_read(tw_obj%mesh%lc,TRIM(filename),"mesh/LC",success)
   ALLOCATE(tw_obj%mesh%reg(tw_obj%mesh%nc))
-  tw_obj%mesh%reg=1.d0
+  IF(hdf5_field_exist(TRIM(filename),'mesh/REG'))THEN
+    CALL hdf5_read(tw_obj%mesh%reg,TRIM(filename),"mesh/REG",success)
+  ELSE
+    tw_obj%mesh%reg=1.d0
+  END IF
   !
   IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
     ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))

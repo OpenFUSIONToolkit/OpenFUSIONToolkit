@@ -1063,13 +1063,15 @@ DO i=0,nsteps
       END DO
     END IF
     IF(self%n_icoils>0)THEN
-      !$omp parallel do private(k,tmp) collapse(2)
-      DO j=1,self%n_icoils
+      !$omp parallel do private(j,tmp) collapse(2)
+      DO k=1,self%mesh%np
         DO jj=1,3
-          !$omp simd
-          DO k=1,self%mesh%np
-            cc_vals(jj,k)=cc_vals(jj,k)+coil_vec(j)*self%Bdr(k,j,jj)
+          tmp = 0.d0
+          !$omp simd reduction(+:tmp)
+          DO j=1,self%n_icoils
+            tmp=tmp+coil_vec(j)*self%Bdr(k,j,jj)
           END DO
+          cc_vals(jj,k)=cc_vals(jj,k)+tmp
         END DO
       END DO
     ! END IF

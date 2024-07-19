@@ -197,7 +197,7 @@ CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 !---Load coils
 IF(.NOT.ASSOCIATED(self%xml))THEN
   CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
-  CALL oft_warn('Unable to find "thincurr" XML node')
+  IF(error_flag/=0)CALL oft_warn('Unable to find "thincurr" XML node')
 END IF
 WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
 CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
@@ -773,14 +773,16 @@ END DO
 !---Compute coupling between elements and drivers
 IF(ASSOCIATED(tw_obj%Ael2dr))THEN
   ! WRITE(*,*)'Building driver->element inductance matrices'
-  !$omp parallel private(j,ii,jj,ik,jk)
-  !$omp do
-  DO i=1,tw_obj%n_vcoils
-    DO jj=1,tw_obj%n_icoils
-      tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = Acoil2coil_tmp(i,jj+tw_obj%n_vcoils)
+  IF(tw_obj%n_vcoils>0)THEN
+    !$omp parallel private(j,ii,jj,ik,jk)
+    !$omp do
+    DO i=1,tw_obj%n_vcoils
+      DO jj=1,tw_obj%n_icoils
+        tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = Acoil2coil_tmp(i,jj+tw_obj%n_vcoils)
+      END DO
     END DO
-  END DO
-  !$omp end parallel
+    !$omp end parallel
+  END IF
   tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
 END IF
 DEALLOCATE(Acoil2coil_tmp)
@@ -1889,7 +1891,7 @@ ALLOCATE(atmp(3,3,bmesh%np))
 DO i=1,bmesh%nc
   ! CALL bmesh%jacobian(i,f,rgop,area_i)
   ! CALL bmesh%norm(i,f,norm_i)
-  area_i=bmesh%ca(i)*2.d0
+  area_i=bmesh%ca(i)
   DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)

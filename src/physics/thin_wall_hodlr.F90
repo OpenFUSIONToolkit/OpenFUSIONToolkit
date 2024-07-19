@@ -428,149 +428,147 @@ f=1.d0/3.d0
 ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
-    IF(self%kfh(i+1)-self%kfh(i)==0)CYCLE
-    ! CALL bmesh%jacobian(i,f,rgop,area_i)
-    ! CALL bmesh%norm(i,f,norm_i)
-    area_i=bmesh%ca(i)*2.d0
-    DO ii=1,3
+  IF(self%kfh(i+1)-self%kfh(i)==0)CYCLE
+  ! CALL bmesh%jacobian(i,f,rgop,area_i)
+  ! CALL bmesh%norm(i,f,norm_i)
+  area_i=bmesh%ca(i)
+  DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
     evec_i(:,ii)=self%qbasis(:,ii,i)
-    END DO
-    CALL bmesh%norm(i,f,norm_j)
-    !---Compute sensor couplings
-    atmp=0.d0
-    DO j=1,bmesh%np
+  END DO
+  CALL bmesh%norm(i,f,norm_j)
+  !---Compute sensor couplings
+  atmp=0.d0
+  DO j=1,bmesh%np
     pt_j=bmesh%r(:,j)
     !---Compute minimum separation
     dl_min=1.d99
     dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
     !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
     DO ii=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
+      dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
+      dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
     END DO
     !---Chose quadrature order based on distance
     IF(dl_min<1.d-8)THEN
-        iquad = 18
-        is_neighbor=.TRUE.
+      iquad = 18
+      is_neighbor=.TRUE.
     ELSE
-        iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-        is_neighbor=.FALSE.
+      iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
+      is_neighbor=.FALSE.
     END IF
     !
     IF(iquad>10)THEN
-        IF(is_neighbor)THEN
-            ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
-            pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
-        END IF
-        diffvec=0.d0
-        DO ik=1,2
-            IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
-            DO jj=1,3
-                ! Forward step
-                pt_j(jj)=pt_j(jj)+B_dx
-                tmp=tw_compute_phipot(pts_i,pt_j)
-                diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-                ! Backward step
-                pt_j(jj)=pt_j(jj)-2.d0*B_dx
-                tmp=tw_compute_phipot(pts_i,pt_j)
-                diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-                pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-            END DO
-            IF(.NOT.is_neighbor)EXIT
+      IF(is_neighbor)THEN
+        ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
+        pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
+      END IF
+      diffvec=0.d0
+      DO ik=1,2
+        IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
+        DO jj=1,3
+          ! Forward step
+          pt_j(jj)=pt_j(jj)+B_dx
+          tmp=tw_compute_phipot(pts_i,pt_j)
+          diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
+          ! Backward step
+          pt_j(jj)=pt_j(jj)-2.d0*B_dx
+          tmp=tw_compute_phipot(pts_i,pt_j)
+          diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
+          pt_j(jj)=pt_j(jj)+B_dx ! Reset point
         END DO
-        IF(is_neighbor)diffvec=diffvec/2.d0
-        DO ik=1,3
-            atmp(1,ik,j) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
-            atmp(2,ik,j) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
-            atmp(3,ik,j) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
-        END DO
+        IF(.NOT.is_neighbor)EXIT
+      END DO
+      IF(is_neighbor)diffvec=diffvec/2.d0
+      DO ik=1,3
+        atmp(1,ik,j) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
+        atmp(2,ik,j) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
+        atmp(3,ik,j) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
+      END DO
     ELSE
-        DO ik=1,3
+      DO ik=1,3
         diffvec=0.d0
         ! !$omp simd private(pt_i) reduction(+:diffvec)
         DO ii=1,quads(iquad)%np
-            pt_i = pt_j - (quads(iquad)%pts(1,ii)*pts_i(:,1) &
+          pt_i = pt_j - (quads(iquad)%pts(1,ii)*pts_i(:,1) &
             + quads(iquad)%pts(2,ii)*pts_i(:,2) &
             + quads(iquad)%pts(3,ii)*pts_i(:,3))
-            diffvec = diffvec + cross_product(evec_i(:,ik),pt_i)*quads(iquad)%wts(ii)/(SUM(pt_i**2))**1.5d0
+          diffvec = diffvec + cross_product(evec_i(:,ik),pt_i)*quads(iquad)%wts(ii)/(SUM(pt_i**2))**1.5d0
         END DO
         atmp(:,ik,j) = diffvec*area_i
-        END DO
+      END DO
     END IF
-    END DO
-    DO ii=self%kfh(i),self%kfh(i+1)-1
+  END DO
+  DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))!+self%np_active
     DO j=1,bmesh%np
-        DO jj=1,3
+      DO jj=1,3
         tmp=SIGN(1,self%lfh(1,ii))*atmp(jj,self%lfh(2,ii),j)
         !$omp atomic
         Bop(j,ik,jj) = Bop(j,ik,jj) + tmp
-        END DO
+      END DO
     END DO
-    END DO
+  END DO
 END DO
 DEALLOCATE(atmp)
 !$omp end parallel
 DO i=1,18
-    CALL quads(i)%delete()
+  CALL quads(i)%delete()
 END DO
 DEALLOCATE(quads)
 !
 ! WRITE(*,*)'Building vcoil->element magnetic reconstruction operator'
 IF(self%n_vcoils>0)THEN
-    !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
-    DO i=1,bmesh%np
-        pt_j=bmesh%r(:,i)
-        !---Compute driver contributions
-        DO j=1,self%n_vcoils
-        ecc = 0.d0
-        IF(self%vcoils(j)%sens_mask)CYCLE
-        DO k=1,self%vcoils(j)%ncoils
-            diffvec=0.d0
-            DO kk=2,self%vcoils(j)%coils(k)%npts
-            cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
-            cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
-            diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-            END DO
-            ecc=ecc+self%vcoils(j)%scales(k)*diffvec
+  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+  DO i=1,bmesh%np
+    pt_j=bmesh%r(:,i)
+    !---Compute driver contributions
+    DO j=1,self%n_vcoils
+      ecc = 0.d0
+      IF(self%vcoils(j)%sens_mask)CYCLE
+      DO k=1,self%vcoils(j)%ncoils
+        diffvec=0.d0
+        DO kk=2,self%vcoils(j)%coils(k)%npts
+          cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
+          cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
+          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
         END DO
-        DO jj=1,3
-            !$omp atomic
-            Bop(i,self%nholes+j,jj) = &
-                Bop(i,self%nholes+j,jj) + ecc(jj)
-        END DO
-        END DO
+        ecc=ecc+self%vcoils(j)%scales(k)*diffvec
+      END DO
+      DO jj=1,3
+        Bop(i,self%nholes+j,jj) = &
+          Bop(i,self%nholes+j,jj) + ecc(jj)
+      END DO
     END DO
+  END DO
 END IF
 Bop=Bop/(4.d0*pi)
 !
 Bop_dr=0.d0
 ! WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
 IF(self%n_icoils>0)THEN
-    !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
-    DO i=1,bmesh%np
-        pt_j=bmesh%r(:,i)
-        !---Compute driver contributions
-        DO j=1,self%n_icoils
-        ecc = 0.d0
-        IF(self%icoils(j)%sens_mask)CYCLE
-        DO k=1,self%icoils(j)%ncoils
-            diffvec=0.d0
-            DO kk=2,self%icoils(j)%coils(k)%npts
-            cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
-            cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
-            diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-            END DO
-            ecc=ecc+self%icoils(j)%scales(k)*diffvec
+  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+  DO i=1,bmesh%np
+    pt_j=bmesh%r(:,i)
+    !---Compute driver contributions
+    DO j=1,self%n_icoils
+      ecc = 0.d0
+      IF(self%icoils(j)%sens_mask)CYCLE
+      DO k=1,self%icoils(j)%ncoils
+        diffvec=0.d0
+        DO kk=2,self%icoils(j)%coils(k)%npts
+          cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
+          cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
+          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
         END DO
-        DO jj=1,3
-            !$omp atomic
-            Bop_dr(i,j,jj) = Bop_dr(i,j,jj) + ecc(jj)
-        END DO
-        END DO
+        ecc=ecc+self%icoils(j)%scales(k)*diffvec
+      END DO
+      DO jj=1,3
+        Bop_dr(i,j,jj) = Bop_dr(i,j,jj) + ecc(jj)
+      END DO
     END DO
+  END DO
 END IF
 Bop_dr=Bop_dr/(4.d0*pi)
 END SUBROUTINE tw_compute_Bops_hole
@@ -604,7 +602,7 @@ DO irow=1,row_block%ncells
     i = row_block%icell(irow)
     ! CALL bmesh%jacobian(i,f,rgop,area_i)
     ! CALL bmesh%norm(i,f,norm_i)
-    area_i=bmesh%ca(i)*2.d0
+    area_i=bmesh%ca(i)
     DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
@@ -908,65 +906,63 @@ nblocks_complete = 0
 !$omp end single
 !$omp do schedule(static,1)
 DO i=1,self%ndense
-    level = self%dense_blocks(1,i)
-    j = self%dense_blocks(2,i)
-    k = self%dense_blocks(3,i)
-    !---Build full representation
-    ALLOCATE(self%dense_mats(i)%M(self%levels(level)%blocks(j)%nelems,self%levels(level)%blocks(k)%nelems))
-    CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%dense_mats(i)%M, &
-    self%levels(level)%blocks(k),self%levels(level)%blocks(j))
-    compressed_size = compressed_size + self%levels(level)%blocks(j)%nelems*self%levels(level)%blocks(k)%nelems
+  level = self%dense_blocks(1,i)
+  j = self%dense_blocks(2,i)
+  k = self%dense_blocks(3,i)
+  !---Build full representation
+  ALLOCATE(self%dense_mats(i)%M(self%levels(level)%blocks(j)%nelems,self%levels(level)%blocks(k)%nelems))
+  CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%dense_mats(i)%M, &
+  self%levels(level)%blocks(k),self%levels(level)%blocks(j))
+  compressed_size = compressed_size + self%levels(level)%blocks(j)%nelems*self%levels(level)%blocks(k)%nelems
 !  avg_size = 0.d0
 !  DO k=1,self%levels(level)%blocks(j)%nelems
 !    avg_size = avg_size + self%dense_mats(i)%M(k,k)**2
 !  END DO
 !  WRITE(*,*)i,avg_size
-    !$omp critical
-    nblocks_complete = nblocks_complete + 1
-    DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%' !,ADVANCE='NO')k*10,'% '
-    END DO
-    ! IF(ANY(nblocks_complete==nblocks_progress))WRITE(*,'(A)',ADVANCE='NO')'.'
-    !$omp end critical
+  !$omp critical
+  nblocks_complete = nblocks_complete + 1
+  DO k=1,9
+  IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%'
+  END DO
+  !$omp end critical
 END DO
 !$omp single
 IF(self%L_aca_tol>0.d0)THEN
-    WRITE(*,*)'  Building off-diagonal blocks using ACA+'
+  WRITE(*,*)'  Building off-diagonal blocks using ACA+'
 ELSE
-    WRITE(*,*)'  Building off-diagonal blocks with SVD compression'
+  WRITE(*,*)'  Building off-diagonal blocks with SVD compression'
 END IF
 nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
 !$omp do schedule(dynamic,1)
 DO i=1,self%nsparse
-    level = self%sparse_blocks(1,i)
-    j = self%sparse_blocks(2,i)
-    k = self%sparse_blocks(3,i)
-    !---Build full representation
-    size_out=-1
-    IF((self%L_aca_tol>0.d0).AND.self%levels(level)%mat_mask(j,k)==2)THEN
-    CALL aca_approx(i,self%L_aca_tol,size_out)
-    IF(size_out>0)CALL compress_aca(i,self%L_svd_tol,size_out)
-    IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
-        self%levels(level)%blocks(k)%nelems
-    END IF
-    !---IF ACA+ failed or diagonal compute dense matrix
-    IF(size_out<0)THEN
-    ALLOCATE(self%aca_dense(i)%M(self%levels(level)%blocks(k)%nelems,self%levels(level)%blocks(j)%nelems))
-    CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%aca_dense(i)%M, &
-        self%levels(level)%blocks(j),self%levels(level)%blocks(k))
-    CALL compress_block(i,self%L_svd_tol,size_out)
-    ! size_out = self%levels(level)%blocks(j)%nelems*self%levels(level)%blocks(k)%nelems
-    END IF
-    compressed_size = compressed_size + size_out
-    !$omp critical
-    nblocks_complete = nblocks_complete + 1
-    DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%' !,ADVANCE='NO')k*10,'% '
-    END DO
-    ! IF(ANY(nblocks_complete==nblocks_progress))WRITE(*,'(A)',ADVANCE='NO')'.'
-    !$omp end critical
+  level = self%sparse_blocks(1,i)
+  j = self%sparse_blocks(2,i)
+  k = self%sparse_blocks(3,i)
+  !---Build full representation
+  size_out=-1
+  IF((self%L_aca_tol>0.d0).AND.self%levels(level)%mat_mask(j,k)==2)THEN
+  CALL aca_approx(i,self%L_aca_tol,size_out)
+  IF(size_out>0)CALL compress_aca(i,self%L_svd_tol,size_out)
+  IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
+    self%levels(level)%blocks(k)%nelems
+  END IF
+  !---IF ACA+ failed or diagonal compute dense matrix
+  IF(size_out<0)THEN
+  ALLOCATE(self%aca_dense(i)%M(self%levels(level)%blocks(k)%nelems,self%levels(level)%blocks(j)%nelems))
+  CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%aca_dense(i)%M, &
+    self%levels(level)%blocks(j),self%levels(level)%blocks(k))
+  CALL compress_block(i,self%L_svd_tol,size_out)
+  ! size_out = self%levels(level)%blocks(j)%nelems*self%levels(level)%blocks(k)%nelems
+  END IF
+  compressed_size = compressed_size + size_out
+  !$omp critical
+  nblocks_complete = nblocks_complete + 1
+  DO k=1,9
+    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%'
+  END DO
+  !$omp end critical
 END DO
 !$omp end parallel
 elapsed_time=mytimer%tock()
@@ -1030,27 +1026,27 @@ CALL DGESDD('S', M, N, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO 
 ! END DO
 frob_K=0.d0
 DO i=MIN_DIM,1,-1
-    frob_K = frob_K + S(i)**2
-    IF(SQRT(frob_K)>tol)EXIT
+  frob_K = frob_K + S(i)**2
+  IF(SQRT(frob_K)>tol)EXIT
 END DO
 i=MAX(MIN(self%min_rank,MIN_DIM),i)
 IF(i<full_size/INT(M+N,8))THEN
-    ALLOCATE(self%aca_U_mats(isparse)%M(M,i))
-    self%aca_U_mats(isparse)%M=U(:,1:i)
-    ALLOCATE(self%aca_V_mats(isparse)%M(i,N))
-    DO j=1,i
-    self%aca_V_mats(isparse)%M(j,:)=VT(j,:)*S(j)
-    END DO
-    DEALLOCATE(self%aca_dense(isparse)%M)
-    ! WRITE(*,*)'Savings:',iblock,jblock,i,M,N
-    size_out=INT(i,8)*INT(M+N,8)
+  ALLOCATE(self%aca_U_mats(isparse)%M(M,i))
+  self%aca_U_mats(isparse)%M=U(:,1:i)
+  ALLOCATE(self%aca_V_mats(isparse)%M(i,N))
+  DO j=1,i
+  self%aca_V_mats(isparse)%M(j,:)=VT(j,:)*S(j)
+  END DO
+  DEALLOCATE(self%aca_dense(isparse)%M)
+  ! WRITE(*,*)'Savings:',iblock,jblock,i,M,N
+  size_out=INT(i,8)*INT(M+N,8)
 ELSE
-    ! WRITE(*,*)'No savings:',iblock,jblock
-    size_out=full_size
+  ! WRITE(*,*)'No savings:',iblock,jblock
+  size_out=full_size
 END IF
 !
 IF( INFO.NE.0 ) THEN
-    CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_block",__FILE__)
+  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_block",__FILE__)
 END IF
 ! CALL oft_abort("","",__FILE__)
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp)
@@ -1063,10 +1059,10 @@ REAL(8) :: max_tmp
 INTEGER(4) :: i,iloc
 max_tmp = -1.d99
 DO i=1,SIZE(vals)
-    IF((vals(i)>max_tmp).AND.mask(i))THEN
-    max_tmp=vals(i)
-    iloc=i
-    END IF
+  IF((vals(i)>max_tmp).AND.mask(i))THEN
+  max_tmp=vals(i)
+  iloc=i
+  END IF
 END DO
 END FUNCTION max_masked
 !
@@ -1141,7 +1137,7 @@ k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
 tmp_block%ncells=k2-k1+1
 tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
 CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIref, &
-    tmp_block,self%levels(ilevel)%blocks(jblock))
+  tmp_block,self%levels(ilevel)%blocks(jblock))
 ! DO i=1,nterms
 !   RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
 ! END DO
@@ -1157,23 +1153,23 @@ k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
 tmp_block%ncells=k2-k1+1
 tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
 CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJref, &
-    tmp_block,self%levels(ilevel)%blocks(iblock))
+  tmp_block,self%levels(ilevel)%blocks(iblock))
 ! DO i=1,nterms
 !   RJref(:,1) = RJref(:,1) - us(:,i)*vs(i,Jref)
 ! END DO
 
 step_size = -1.d0
 DO k=1,max_iter
-    ! Find the column in RIref with the largest entry (step 1 above).
-    Jstar = max_masked(ABS(RIref(:,1)), prevJstar) !argmax_not_in_list(maxabsRIref, prevJstar)
+  ! Find the column in RIref with the largest entry (step 1 above).
+  Jstar = max_masked(ABS(RIref(:,1)), prevJstar) !argmax_not_in_list(maxabsRIref, prevJstar)
 
-    ! Find the row in RJref with the largest entry (step 1 above).
-    Istar = max_masked(ABS(RJref(:,1)), prevIstar) !argmax_not_in_list(maxabsRJref, prevIstar)
+  ! Find the row in RJref with the largest entry (step 1 above).
+  Istar = max_masked(ABS(RJref(:,1)), prevIstar) !argmax_not_in_list(maxabsRJref, prevIstar)
 
-    ! Check if we should pivot first based on row or based on column (step 2 above)
-    Jstar_val = ABS(RIref(Jstar,1)) !maxabsRIref[Jstar]
-    Istar_val = ABS(RJref(Istar,1)) !maxabsRJref[Istar]
-    if(Istar_val > Jstar_val)THEN
+  ! Check if we should pivot first based on row or based on column (step 2 above)
+  Jstar_val = ABS(RIref(Jstar,1)) !maxabsRIref[Jstar]
+  Istar_val = ABS(RJref(Istar,1)) !maxabsRJref[Istar]
+  IF(Istar_val > Jstar_val)THEN
     ! If we pivot first on the row, then calculate the corresponding row
     ! of the residual matrix.
     tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
@@ -1184,9 +1180,9 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIstar, &
-        tmp_block,self%levels(ilevel)%blocks(jblock))
+      tmp_block,self%levels(ilevel)%blocks(jblock))
     DO i=1,nterms
-        RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
+      RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
     END DO
 
     ! Then find the largest entry in that row vector to identify which
@@ -1202,11 +1198,11 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJstar, &
-        tmp_block,self%levels(ilevel)%blocks(iblock))
+      tmp_block,self%levels(ilevel)%blocks(iblock))
     DO i=1,nterms
-        RJstar(:,1) = RJstar(:,1) - us(:,i)*vs(i,Jstar)
+      RJstar(:,1) = RJstar(:,1) - us(:,i)*vs(i,Jstar)
     END DO
-    else
+  ELSE
     ! If we pivot first on the column, then calculate the corresponding column
     ! of the residual matrix.
     tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
@@ -1217,9 +1213,9 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJstar, &
-        tmp_block,self%levels(ilevel)%blocks(iblock))
+      tmp_block,self%levels(ilevel)%blocks(iblock))
     DO i=1,nterms
-        RJstar(:,1) = RJstar(:,1) - us(:,i)*vs(i,Jstar)
+      RJstar(:,1) = RJstar(:,1) - us(:,i)*vs(i,Jstar)
     END DO
 
     ! Then find the largest entry in that row vector to identify which
@@ -1235,43 +1231,41 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIstar, &
-        tmp_block,self%levels(ilevel)%blocks(jblock))
+      tmp_block,self%levels(ilevel)%blocks(jblock))
     DO i=1,nterms
-        RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
+      RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
     END DO
-    END IF
-    ! Record the pivot row and column so that we don't re-use them.
-    prevIstar(Istar) = .FALSE. !prevIstar.append(Istar)
-    prevJstar(Jstar) = .FALSE. !prevJstar.append(Jstar)
+  END IF
+  ! Record the pivot row and column so that we don't re-use them.
+  prevIstar(Istar) = .FALSE. !prevIstar.append(Istar)
+  prevJstar(Jstar) = .FALSE. !prevJstar.append(Jstar)
 
-    ! Add the new rank-1 outer product to the approximation (see step 4 above)
-    nterms = nterms + 1
-    vs(nterms,:) = RIstar(:,1)/RIstar(Jstar,1) !vs.append(RIstar / RIstar[Jstar])
-    us(:,nterms) = RJstar(:,1) !us.append(RJstar.copy())
+  ! Add the new rank-1 outer product to the approximation (see step 4 above)
+  nterms = nterms + 1
+  vs(nterms,:) = RIstar(:,1)/RIstar(Jstar,1) !vs.append(RIstar / RIstar[Jstar])
+  us(:,nterms) = RJstar(:,1) !us.append(RJstar.copy())
 
-    ! How "large" was this update to the approximation?
-    step_size = SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
-    IF(oft_debug_print(2))WRITE(*,*)k,Istar,Jstar,step_size,tol
+  ! How "large" was this update to the approximation?
+  step_size = SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
+  IF(oft_debug_print(2))WRITE(*,*)k,Istar,Jstar,step_size,tol
 
-    ! The convergence criteria will simply be whether the Frobenius norm of the
-    ! step is smaller than the user provided tolerance.
-    if ((k>=self%aca_min_its).AND.(step_size < tol))THEN
-    EXIT
-    END IF
+  ! The convergence criteria will simply be whether the Frobenius norm of the
+  ! step is smaller than the user provided tolerance.
+  IF((k>=self%aca_min_its).AND.(step_size < tol))EXIT
 
-    ! We also break here if this is the last iteration to avoid wasting effort
-    ! updating the reference row/column
-    if (k == max_iter - 1)THEN
+  ! We also break here if this is the last iteration to avoid wasting effort
+  ! updating the reference row/column
+  IF(k == max_iter - 1)THEN
     step_size = -1.d0
     EXIT !None, None
-    END IF
+  END IF
 
-    !! If we didn't converge, let's prep the reference residual row and column for the next iteration:
+  !! If we didn't converge, let's prep the reference residual row and column for the next iteration:
 
-    ! If we pivoted on the reference row, then choose a new reference row.
-    if(Iref==Istar)THEN
+  ! If we pivoted on the reference row, then choose a new reference row.
+  IF(Iref==Istar)THEN
     DO Iref=1,N
-        IF(prevIstar(Iref))EXIT
+      IF(prevIstar(Iref))EXIT
     END DO
     tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Iref)
@@ -1281,58 +1275,58 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RIref, &
-        tmp_block,self%levels(ilevel)%blocks(jblock))
+      tmp_block,self%levels(ilevel)%blocks(jblock))
     DO i=1,nterms
-        RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
+      RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
     END DO
-    else
+  ELSE
     ! If we didn't change the reference row of the residual matrix "R",
     ! update the row to account for the new components of the approximation.
     RIref(:,1) = RIref(:,1) - us(Iref,nterms)*vs(nterms,:) !RIref -= us[-1][Iref : Iref + 1][:, None] * vs[-1][None, :]
-    END IF
+  END IF
 
-    ! If we pivoted on the reference column, then choose a new reference column.
-    if(Jref==Jstar)THEN
-    DO Jref=1,M
-        IF(prevJstar(Jref))EXIT
-    END DO
-    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
-    tmp_block%ielem=self%levels(ilevel)%blocks(jblock)%ielem(Jref)
-    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
-    tmp_block%ncells=k2-k1+1
-    tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
-    CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJref, &
-        tmp_block,self%levels(ilevel)%blocks(iblock))
-    DO i=1,nterms
-        RJref(:,1) = RJref(:,1) - us(:,i)*vs(i,Jref)
-    END DO
-    else
-    ! If we didn't change the reference column of the residual matrix "R",
-    ! update the column to account for the new components of the approximation.
-    RJref(:,1) = RJref(:,1) - us(:,nterms)*vs(nterms,Jref) !RJref -= vs[-1][Jref : Jref + 1][None, :] * us[-1][:, None]
-    END IF
+  ! If we pivoted on the reference column, then choose a new reference column.
+  if(Jref==Jstar)THEN
+  DO Jref=1,M
+    IF(prevJstar(Jref))EXIT
+  END DO
+  tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
+  tmp_block%ielem=self%levels(ilevel)%blocks(jblock)%ielem(Jref)
+  tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
+  k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
+  k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
+  tmp_block%ncells=k2-k1+1
+  tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
+  CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,RJref, &
+    tmp_block,self%levels(ilevel)%blocks(iblock))
+  DO i=1,nterms
+    RJref(:,1) = RJref(:,1) - us(:,i)*vs(i,Jref)
+  END DO
+  else
+  ! If we didn't change the reference column of the residual matrix "R",
+  ! update the column to account for the new components of the approximation.
+  RJref(:,1) = RJref(:,1) - us(:,nterms)*vs(nterms,Jref) !RJref -= vs[-1][Jref : Jref + 1][None, :] * us[-1][:, None]
+  END IF
 END DO
 IF(step_size > 0.d0)THEN
-    ! WRITE(*,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
-    ! Return the left and right approximation matrices.
-    ! The approximate is such that:
-    ! M ~ U_ACA.dot(V_ACA)
-    ALLOCATE(self%aca_U_mats(isparse)%M(M,nterms))
-    DO i=1,nterms
+  ! WRITE(*,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
+  ! Return the left and right approximation matrices.
+  ! The approximate is such that:
+  ! M ~ U_ACA.dot(V_ACA)
+  ALLOCATE(self%aca_U_mats(isparse)%M(M,nterms))
+  DO i=1,nterms
     DO k=1,M
-        self%aca_U_mats(isparse)%M(k,i)=vs(i,k)
+      self%aca_U_mats(isparse)%M(k,i)=vs(i,k)
     END DO
-    END DO
-    ALLOCATE(self%aca_V_mats(isparse)%M(nterms,N))
-    DO i=1,nterms
+  END DO
+  ALLOCATE(self%aca_V_mats(isparse)%M(nterms,N))
+  DO i=1,nterms
     DO k=1,N
-        self%aca_V_mats(isparse)%M(i,k)=us(k,i)
+      self%aca_V_mats(isparse)%M(i,k)=us(k,i)
     END DO
-    END DO
-    ! DEALLOCATE(self%sparse_dense(isparse)%M)
-    size_out=INT(nterms,8)*INT(M+N,8)
+  END DO
+  ! DEALLOCATE(self%sparse_dense(isparse)%M)
+  size_out=INT(nterms,8)*INT(M+N,8)
 END IF
 DEALLOCATE(RIstar,RJstar,RIref,RJref)
 DEALLOCATE(us,vs,prevIstar,prevJstar)
@@ -1381,7 +1375,7 @@ LWORK = -1
 ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
 IF( INFO.NE.0 ) THEN
-    CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
+  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 LWORK = INT(WORK(1))
 DEALLOCATE(WORK)
@@ -1389,18 +1383,18 @@ DEALLOCATE(WORK)
 ALLOCATE(WORK(LWORK))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
 IF( INFO.NE.0 ) THEN
-    CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
+  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 !---Truncate at desired accuracy
 frob_K=0.d0
 DO i=MIN_DIM,1,-1
-    frob_K = frob_K + S(i)**2
-    IF(SQRT(frob_K)>tol)EXIT
+  frob_K = frob_K + S(i)**2
+  IF(SQRT(frob_K)>tol)EXIT
 END DO
 i=MAX(MIN(self%min_rank,MIN_DIM),i)
 IF((i==MIN_DIM).AND.(MIN_DIM>self%aca_min_its))THEN
-    i=MIN_DIM
-    WRITE(*,*)'SVD recompression failed'
+  i=MIN_DIM
+  WRITE(*,*)'SVD recompression failed'
 END IF
 !i=MIN(i,MIN_DIM)
 !---Replace U and V matrices
@@ -1410,7 +1404,7 @@ ALLOCATE(self%aca_V_mats(isparse)%M(i,self%levels(ilevel)%blocks(iblock)%nelems)
 ! U = UQ.dot(U[:, :r] * S[:r])
 ! V = VT[:r, :].dot(VQ.T)
 DO j=1,i
-    U(:,j) = U(:,j)*S(j)
+  U(:,j) = U(:,j)*S(j)
 END DO
 CALL DGEMM('N', 'N', M, i, K, 1.d0, QU, M, U, K, 0.d0, self%aca_U_mats(isparse)%M, M)
 !self%aca_U_mats(isparse)%M = MATMUL(QU,U(:,1:i))
@@ -1448,76 +1442,86 @@ ALLOCATE(self%aca_BU_mats(2*self%nsparse,3))
 ALLOCATE(self%aca_BV_mats(2*self%nsparse,3))
 ALLOCATE(self%aca_B_dense(2*self%nsparse,3))
 ! WRITE(*,'(4X,A3)')' 0%'!WRITE(*,'(5X,A)',ADVANCE='NO')'['
-WRITE(*,*)'  Building diagonal blocks'
+WRITE(*,*)'  Building hole and Vcoil columns'
 IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
-    ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
-    ALLOCATE(self%Icoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils),3))
-    CALL tw_compute_Bops_hole(self%tw_obj,self%hole_Vcoil_Bmat,self%Icoil_Bmat)
-    self%tw_obj%Bdr=>self%Icoil_Bmat
+  ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
+  ALLOCATE(self%Icoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils),3))
+  CALL tw_compute_Bops_hole(self%tw_obj,self%hole_Vcoil_Bmat,self%Icoil_Bmat)
+  self%tw_obj%Bdr=>self%Icoil_Bmat
 END IF
 !
+WRITE(*,*)'  Building diagonal blocks'
 compressed_size=0
-nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
-nblocks_complete = 0
 !$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip) reduction(+:compressed_size)
+!$omp single
+nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
+nblocks_complete = 0
+!$omp end single
 !$omp do schedule(static,1)
 DO i=1,self%ndense
-    level = self%dense_blocks(1,i)
-    j = self%dense_blocks(2,i)
-    k = self%dense_blocks(3,i)
-    !---Build full representation
-    DO dim=1,3
-        ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
-        CALL tw_compute_Bops_block(self%tw_obj,self%dense_B_mats(i,dim)%M, &
-            self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim)
-    END DO
-    compressed_size = compressed_size + 3*self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
+  level = self%dense_blocks(1,i)
+  j = self%dense_blocks(2,i)
+  k = self%dense_blocks(3,i)
+  !---Build full representation
+  DO dim=1,3
+    ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
+    CALL tw_compute_Bops_block(self%tw_obj,self%dense_B_mats(i,dim)%M, &
+      self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim)
+  END DO
+  compressed_size = compressed_size + 3*self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
+  !$omp critical
+  nblocks_complete = nblocks_complete + 1
+  DO k=1,9
+    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%'
+  END DO
+  !$omp end critical
 END DO
 !$omp single
 IF(self%B_aca_tol>0.d0)THEN
-    WRITE(*,*)'  Building off-diagonal blocks using ACA+'
+  WRITE(*,*)'  Building off-diagonal blocks using ACA+'
 ELSE
-    WRITE(*,*)'  Building off-diagonal blocks with SVD compression'
+  WRITE(*,*)'  Building off-diagonal blocks with SVD compression'
 END IF
+nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
+nblocks_complete = 0
 !$omp end single
 !$omp do schedule(dynamic,1)
 DO i=1,self%nsparse
-    level = self%sparse_blocks(1,i)
-    j = self%sparse_blocks(2,i)
-    k = self%sparse_blocks(3,i)
-    DO flip=1,2
-        ii=(i-1)*2+flip
-        IF(flip==2)THEN
-            k = self%sparse_blocks(2,i)
-            j = self%sparse_blocks(3,i)
-        END IF
+  level = self%sparse_blocks(1,i)
+  j = self%sparse_blocks(2,i)
+  k = self%sparse_blocks(3,i)
+  DO flip=1,2
+    ii=(i-1)*2+flip
+    IF(flip==2)THEN
+      k = self%sparse_blocks(2,i)
+      j = self%sparse_blocks(3,i)
+    END IF
     DO dim=1,3
-        !---Build full representation
-        size_out=-1
-        IF((self%B_aca_tol>0.d0).AND.ABS(self%levels(level)%mat_mask(j,k))==2)THEN
-        CALL aca_approx(ii,level,j,k,dim,self%B_aca_tol,size_out)
-        IF(size_out>0)CALL compress_aca(ii,level,j,k,dim,self%B_svd_tol,size_out)
-        IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%np, &
-            self%levels(level)%blocks(k)%nelems
-        END IF
-        !---IF ACA+ failed or diagonal compute dense matrix
-        IF(size_out<0)THEN
-            ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
-            CALL tw_compute_Bops_block(self%tw_obj,self%aca_B_dense(ii,dim)%M, &
-                self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim)
-            CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
-            ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
-        END IF
-        compressed_size = compressed_size + size_out
+      !---Build full representation
+      size_out=-1
+      IF((self%B_aca_tol>0.d0).AND.ABS(self%levels(level)%mat_mask(j,k))==2)THEN
+      CALL aca_approx(ii,level,j,k,dim,self%B_aca_tol,size_out)
+      IF(size_out>0)CALL compress_aca(ii,level,j,k,dim,self%B_svd_tol,size_out)
+      IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%np, &
+        self%levels(level)%blocks(k)%nelems
+      END IF
+      !---IF ACA+ failed or diagonal compute dense matrix
+      IF(size_out<0)THEN
+        ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
+        CALL tw_compute_Bops_block(self%tw_obj,self%aca_B_dense(ii,dim)%M, &
+          self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim)
+        CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
+        ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
+      END IF
+      compressed_size = compressed_size + size_out
     END DO
-    END DO
-    !$omp critical
-    nblocks_complete = nblocks_complete + 1
-    DO k=1,9
-        IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%' !,ADVANCE='NO')k*10,'% '
-    END DO
-    ! IF(ANY(nblocks_complete==nblocks_progress))WRITE(*,'(A)',ADVANCE='NO')'.'
-    !$omp end critical
+  END DO
+  !$omp critical
+  nblocks_complete = nblocks_complete + 1
+  DO k=1,9
+    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%'
+  END DO
+  !$omp end critical
 END DO
 !$omp end parallel
 elapsed_time=mytimer%tock()
@@ -1563,27 +1567,27 @@ CALL DGESDD('S', M, N, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO 
 !---Truncate at desired accuracy
 frob_K=0.d0
 DO i=MIN_DIM,1,-1
-    frob_K = frob_K + S(i)**2
-    IF(SQRT(frob_K)>tol)EXIT
+  frob_K = frob_K + S(i)**2
+  IF(SQRT(frob_K)>tol)EXIT
 END DO
 i=MAX(MIN(self%min_rank,MIN_DIM),i)
 IF(i<full_size/INT(M+N,8))THEN
-    ALLOCATE(self%aca_BU_mats(isparse,dim)%M(M,i))
-    self%aca_BU_mats(isparse,dim)%M=U(:,1:i)
-    ALLOCATE(self%aca_BV_mats(isparse,dim)%M(i,N))
-    DO j=1,i
-        self%aca_BV_mats(isparse,dim)%M(j,:)=VT(j,:)*S(j)
-    END DO
-    DEALLOCATE(self%aca_B_dense(isparse,dim)%M)
-    ! WRITE(*,*)'Savings SVD:',isparse,dim,i,M,N
-    size_out=INT(i,8)*INT(M+N,8)
+  ALLOCATE(self%aca_BU_mats(isparse,dim)%M(M,i))
+  self%aca_BU_mats(isparse,dim)%M=U(:,1:i)
+  ALLOCATE(self%aca_BV_mats(isparse,dim)%M(i,N))
+  DO j=1,i
+      self%aca_BV_mats(isparse,dim)%M(j,:)=VT(j,:)*S(j)
+  END DO
+  DEALLOCATE(self%aca_B_dense(isparse,dim)%M)
+  ! WRITE(*,*)'Savings SVD:',isparse,dim,i,M,N
+  size_out=INT(i,8)*INT(M+N,8)
 ELSE
-    ! WRITE(*,*)'No savings:',iblock,jblock
-    size_out=full_size
+  ! WRITE(*,*)'No savings:',iblock,jblock
+  size_out=full_size
 END IF
 !
 IF( INFO.NE.0 ) THEN
-    CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_Bsetup::compress_block",__FILE__)
+  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_Bsetup::compress_block",__FILE__)
 END IF
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp)
 END SUBROUTINE compress_block
@@ -1595,10 +1599,10 @@ REAL(8) :: max_tmp
 INTEGER(4) :: i,iloc
 max_tmp = -1.d99
 DO i=1,SIZE(vals)
-    IF((vals(i)>max_tmp).AND.mask(i))THEN
+  IF((vals(i)>max_tmp).AND.mask(i))THEN
     max_tmp=vals(i)
     iloc=i
-    END IF
+  END IF
 END DO
 END FUNCTION max_masked
 !
@@ -1672,7 +1676,7 @@ k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
 tmp_block%ncells=k2-k1+1
 tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
 CALL tw_compute_Bops_block(self%tw_obj,RIref, &
-    tmp_block,self%levels(ilevel)%blocks(jblock),dim)
+  tmp_block,self%levels(ilevel)%blocks(jblock),dim)
 ! DO i=1,nterms
 !   RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
 ! END DO
@@ -1682,23 +1686,23 @@ CALL tw_compute_Bops_block(self%tw_obj,RIref, &
 ! END DO
 tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jref)
 CALL tw_compute_Bops_block(self%tw_obj,RJref, &
-    self%levels(ilevel)%blocks(iblock),tmp_block,dim)
+  self%levels(ilevel)%blocks(iblock),tmp_block,dim)
 ! DO i=1,nterms
 !   RJref(:,1) = RJref(:,1) - us(:,i)*vs(i,Jref)
 ! END DO
 
 step_size = -1.d0
 DO k=1,max_iter
-    ! Find the column in RIref with the largest entry (step 1 above).
-    Jstar = max_masked(ABS(RIref(:,1)), prevJstar) !argmax_not_in_list(maxabsRIref, prevJstar)
+  ! Find the column in RIref with the largest entry (step 1 above).
+  Jstar = max_masked(ABS(RIref(:,1)), prevJstar) !argmax_not_in_list(maxabsRIref, prevJstar)
 
-    ! Find the row in RJref with the largest entry (step 1 above).
-    Istar = max_masked(ABS(RJref(1,:)), prevIstar) !argmax_not_in_list(maxabsRJref, prevIstar)
+  ! Find the row in RJref with the largest entry (step 1 above).
+  Istar = max_masked(ABS(RJref(1,:)), prevIstar) !argmax_not_in_list(maxabsRJref, prevIstar)
 
-    ! Check if we should pivot first based on row or based on column (step 2 above)
-    Jstar_val = ABS(RIref(Jstar,1)) !maxabsRIref[Jstar]
-    Istar_val = ABS(RJref(1,Istar)) !maxabsRJref[Istar]
-    if(Istar_val > Jstar_val)THEN
+  ! Check if we should pivot first based on row or based on column (step 2 above)
+  Jstar_val = ABS(RIref(Jstar,1)) !maxabsRIref[Jstar]
+  Istar_val = ABS(RJref(1,Istar)) !maxabsRJref[Istar]
+  IF(Istar_val > Jstar_val)THEN
     ! If we pivot first on the row, then calculate the corresponding row
     ! of the residual matrix.
     tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
@@ -1709,9 +1713,9 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
-        tmp_block,self%levels(ilevel)%blocks(jblock),dim)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim)
     DO i=1,nterms
-        RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
+      RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
     END DO
 
     ! Then find the largest entry in that row vector to identify which
@@ -1721,18 +1725,18 @@ DO k=1,max_iter
     ! Calculate the corresponding residual column!
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jstar)
     CALL tw_compute_Bops_block(self%tw_obj,RJstar, &
-        self%levels(ilevel)%blocks(iblock),tmp_block,dim)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim)
     DO i=1,nterms
-        RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
+      RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
     END DO
-    else
+  ELSE
     ! If we pivot first on the column, then calculate the corresponding column
     ! of the residual matrix.
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jstar)
     CALL tw_compute_Bops_block(self%tw_obj,RJstar, &
-        self%levels(ilevel)%blocks(iblock),tmp_block,dim)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim)
     DO i=1,nterms
-        RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
+      RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
     END DO
 
     ! Then find the largest entry in that row vector to identify which
@@ -1748,43 +1752,41 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
-        tmp_block,self%levels(ilevel)%blocks(jblock),dim)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim)
     DO i=1,nterms
-        RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
+      RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
     END DO
-    END IF
-    ! Record the pivot row and column so that we don't re-use them.
-    prevIstar(Istar) = .FALSE. !prevIstar.append(Istar)
-    prevJstar(Jstar) = .FALSE. !prevJstar.append(Jstar)
+  END IF
+  ! Record the pivot row and column so that we don't re-use them.
+  prevIstar(Istar) = .FALSE. !prevIstar.append(Istar)
+  prevJstar(Jstar) = .FALSE. !prevJstar.append(Jstar)
 
-    ! Add the new rank-1 outer product to the approximation (see step 4 above)
-    nterms = nterms + 1
-    vs(nterms,:) = RIstar(:,1)/RIstar(Jstar,1) !vs.append(RIstar / RIstar[Jstar])
-    us(:,nterms) = RJstar(1,:) !us.append(RJstar.copy())
+  ! Add the new rank-1 outer product to the approximation (see step 4 above)
+  nterms = nterms + 1
+  vs(nterms,:) = RIstar(:,1)/RIstar(Jstar,1) !vs.append(RIstar / RIstar[Jstar])
+  us(:,nterms) = RJstar(1,:) !us.append(RJstar.copy())
 
-    ! How "large" was this update to the approximation?
-    step_size = SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
-    IF(oft_debug_print(2))WRITE(*,*)k,Istar,Jstar,step_size,tol
+  ! How "large" was this update to the approximation?
+  step_size = SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
+  IF(oft_debug_print(2))WRITE(*,*)k,Istar,Jstar,step_size,tol
 
-    ! The convergence criteria will simply be whether the Frobenius norm of the
-    ! step is smaller than the user provided tolerance.
-    if ((k>=self%aca_min_its).AND.(step_size < tol))THEN
-    EXIT
-    END IF
+  ! The convergence criteria will simply be whether the Frobenius norm of the
+  ! step is smaller than the user provided tolerance.
+  IF((k>=self%aca_min_its).AND.(step_size < tol))EXIT
 
-    ! We also break here if this is the last iteration to avoid wasting effort
-    ! updating the reference row/column
-    if (k == max_iter - 1)THEN
+  ! We also break here if this is the last iteration to avoid wasting effort
+  ! updating the reference row/column
+  IF(k == max_iter - 1)THEN
     step_size = -1.d0
     EXIT !None, None
-    END IF
+  END IF
 
-    !! If we didn't converge, let's prep the reference residual row and column for the next iteration:
+  !! If we didn't converge, let's prep the reference residual row and column for the next iteration:
 
-    ! If we pivoted on the reference row, then choose a new reference row.
-    if(Iref==Istar)THEN
+  ! If we pivoted on the reference row, then choose a new reference row.
+  IF(Iref==Istar)THEN
     DO Iref=1,N
-        IF(prevIstar(Iref))EXIT
+      IF(prevIstar(Iref))EXIT
     END DO
     tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
     tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Iref)
@@ -1794,52 +1796,52 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIref, &
-        tmp_block,self%levels(ilevel)%blocks(jblock),dim)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim)
     DO i=1,nterms
-        RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
+      RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
     END DO
-    else
+  ELSE
     ! If we didn't change the reference row of the residual matrix "R",
     ! update the row to account for the new components of the approximation.
     RIref(:,1) = RIref(:,1) - us(Iref,nterms)*vs(nterms,:) !RIref -= us[-1][Iref : Iref + 1][:, None] * vs[-1][None, :]
-    END IF
+  END IF
 
-    ! If we pivoted on the reference column, then choose a new reference column.
-    if(Jref==Jstar)THEN
+  ! If we pivoted on the reference column, then choose a new reference column.
+  IF(Jref==Jstar)THEN
     DO Jref=1,M
         IF(prevJstar(Jref))EXIT
     END DO
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jref)
     CALL tw_compute_Bops_block(self%tw_obj,RJref, &
-        self%levels(ilevel)%blocks(iblock),tmp_block,dim)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim)
     DO i=1,nterms
-        RJref(1,:) = RJref(1,:) - us(:,i)*vs(i,Jref)
+      RJref(1,:) = RJref(1,:) - us(:,i)*vs(i,Jref)
     END DO
-    else
+  ELSE
     ! If we didn't change the reference column of the residual matrix "R",
     ! update the column to account for the new components of the approximation.
-        RJref(1,:) = RJref(1,:) - us(:,nterms)*vs(nterms,Jref) !RJref -= vs[-1][Jref : Jref + 1][None, :] * us[-1][:, None]
-    END IF
+    RJref(1,:) = RJref(1,:) - us(:,nterms)*vs(nterms,Jref) !RJref -= vs[-1][Jref : Jref + 1][None, :] * us[-1][:, None]
+  END IF
 END DO
 IF(step_size > 0.d0)THEN
-    ! WRITE(*,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
-    ! Return the left and right approximation matrices.
-    ! The approximate is such that:
-    ! M ~ U_ACA.dot(V_ACA)
-    ALLOCATE(self%aca_BU_mats(isparse,dim)%M(M,nterms))
-    DO i=1,nterms
+  ! WRITE(*,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
+  ! Return the left and right approximation matrices.
+  ! The approximate is such that:
+  ! M ~ U_ACA.dot(V_ACA)
+  ALLOCATE(self%aca_BU_mats(isparse,dim)%M(M,nterms))
+  DO i=1,nterms
     DO k=1,M
-        self%aca_BU_mats(isparse,dim)%M(k,i)=vs(i,k)
+      self%aca_BU_mats(isparse,dim)%M(k,i)=vs(i,k)
     END DO
-    END DO
-    ALLOCATE(self%aca_BV_mats(isparse,dim)%M(nterms,N))
-    DO i=1,nterms
+  END DO
+  ALLOCATE(self%aca_BV_mats(isparse,dim)%M(nterms,N))
+  DO i=1,nterms
     DO k=1,N
-        self%aca_BV_mats(isparse,dim)%M(i,k)=us(k,i)
+      self%aca_BV_mats(isparse,dim)%M(i,k)=us(k,i)
     END DO
-    END DO
-    ! DEALLOCATE(self%sparse_dense(isparse,dim)%M)
-    size_out=INT(nterms,8)*INT(M+N,8)
+  END DO
+  ! DEALLOCATE(self%sparse_dense(isparse,dim)%M)
+  size_out=INT(nterms,8)*INT(M+N,8)
 END IF
 DEALLOCATE(RIstar,RJstar,RIref,RJref)
 DEALLOCATE(us,vs,prevIstar,prevJstar)
@@ -1882,7 +1884,7 @@ LWORK = -1
 ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
 IF( INFO.NE.0 ) THEN
-    CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
+  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 LWORK = INT(WORK(1))
 DEALLOCATE(WORK)
@@ -1890,18 +1892,18 @@ DEALLOCATE(WORK)
 ALLOCATE(WORK(LWORK))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
 IF( INFO.NE.0 ) THEN
-    CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
+  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 !---Truncate at desired accuracy
 tol_loc = tol!*MAX(1.d0,S(1))
 frob_K=0.d0
 DO i=MIN_DIM,1,-1
-    frob_K = frob_K + S(i)**2
-    IF(SQRT(frob_K)>tol_loc)EXIT
+  frob_K = frob_K + S(i)**2
+  IF(SQRT(frob_K)>tol_loc)EXIT
 END DO
 i=MAX(MIN(self%min_rank,MIN_DIM),i)
 IF((i==MIN_DIM).AND.(MIN_DIM>self%min_rank))THEN
-    WRITE(*,*)'SVD recompression failed',S(1),S(MIN_DIM),tol_loc
+  WRITE(*,*)'SVD recompression failed',S(1),S(MIN_DIM),tol_loc
 END IF
 !i=MIN(i,MIN_DIM)
 !---Replace U and V matrices
@@ -1911,7 +1913,7 @@ ALLOCATE(self%aca_BV_mats(isparse,dim)%M(i,self%levels(ilevel)%blocks(iblock)%ne
 ! U = UQ.dot(U[:, :r] * S[:r])
 ! V = VT[:r, :].dot(VQ.T)
 DO j=1,i
-    U(:,j) = U(:,j)*S(j)
+  U(:,j) = U(:,j)*S(j)
 END DO
 CALL DGEMM('N', 'N', M, i, K, 1.d0, QU, M, U, K, 0.d0, self%aca_BU_mats(isparse,dim)%M, M)
 !self%aca_BU_mats(isparse,dim)%M = MATMUL(QU,U(:,1:i))
@@ -1950,78 +1952,78 @@ ALLOCATE(int_tmp1(self%tw_obj%np_active),int_tmp2(self%tw_obj%np_active))
 int_tmp2=0.d0
 !$omp do schedule(dynamic,1)
 DO j=1,self%nsparse
-    level = self%sparse_blocks(1,j)
-    iblock = self%sparse_blocks(2,j)
-    jblock = self%sparse_blocks(3,j)
-    IF(ASSOCIATED(self%aca_dense(j)%M))THEN
+  level = self%sparse_blocks(1,j)
+  iblock = self%sparse_blocks(2,j)
+  jblock = self%sparse_blocks(3,j)
+  IF(ASSOCIATED(self%aca_dense(j)%M))THEN
     !$omp simd
     DO k=1,self%levels(level)%blocks(iblock)%nelems
-        col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
+      col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
     END DO
     CALL dgemv('N',self%levels(level)%blocks(jblock)%nelems,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_dense(j)%M, &
-        self%levels(level)%blocks(jblock)%nelems,col_tmp,1,0.d0,row_tmp,1)
+      self%levels(level)%blocks(jblock)%nelems,col_tmp,1,0.d0,row_tmp,1)
     !$omp simd
     DO k=1,self%levels(level)%blocks(jblock)%nelems
-        int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))  + row_tmp(k)
+      int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))  + row_tmp(k)
     END DO
     !
     !$omp simd
     DO k=1,self%levels(level)%blocks(jblock)%nelems
-        col_tmp(k)=avals(self%levels(level)%blocks(jblock)%ielem(k))
+      col_tmp(k)=avals(self%levels(level)%blocks(jblock)%ielem(k))
     END DO
     CALL dgemv('T',self%levels(level)%blocks(jblock)%nelems,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_dense(j)%M, &
-        self%levels(level)%blocks(jblock)%nelems,col_tmp,1,0.d0,row_tmp,1)
+      self%levels(level)%blocks(jblock)%nelems,col_tmp,1,0.d0,row_tmp,1)
     !$omp simd
     DO k=1,self%levels(level)%blocks(iblock)%nelems
-        int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(iblock)%ielem(k)) + row_tmp(k)
+      int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(iblock)%ielem(k)) + row_tmp(k)
     END DO
-    ELSE
+  ELSE
     !---Upper side
     !$omp simd
     DO k=1,self%levels(level)%blocks(iblock)%nelems
-        col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
+      col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
     END DO
     k=SIZE(self%aca_V_mats(j)%M,DIM=1)
     CALL dgemv('N',k,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_V_mats(j)%M, &
-        k,col_tmp,1,0.d0,int_tmp1,1)
+      k,col_tmp,1,0.d0,int_tmp1,1)
     CALL dgemv('N',self%levels(level)%blocks(jblock)%nelems,k,1.d0,self%aca_U_mats(j)%M, &
-        self%levels(level)%blocks(jblock)%nelems,int_tmp1,1,0.d0,row_tmp,1)
+      self%levels(level)%blocks(jblock)%nelems,int_tmp1,1,0.d0,row_tmp,1)
     !$omp simd
     DO k=1,self%levels(level)%blocks(jblock)%nelems
-        int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))+row_tmp(k)
+      int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))+row_tmp(k)
     END DO
     !---Apply other side of diagonal
     !$omp simd
     DO k=1,self%levels(level)%blocks(jblock)%nelems
-        col_tmp(k)=avals(self%levels(level)%blocks(jblock)%ielem(k))
+      col_tmp(k)=avals(self%levels(level)%blocks(jblock)%ielem(k))
     END DO
     k=SIZE(self%aca_V_mats(j)%M,DIM=1)
     CALL dgemv('T',self%levels(level)%blocks(jblock)%nelems,k,1.d0,self%aca_U_mats(j)%M, &
-        self%levels(level)%blocks(jblock)%nelems,col_tmp,1,0.d0,int_tmp1,1)
+      self%levels(level)%blocks(jblock)%nelems,col_tmp,1,0.d0,int_tmp1,1)
     CALL dgemv('T',k,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_V_mats(j)%M, &
-        k,int_tmp1,1,0.d0,row_tmp,1)
+      k,int_tmp1,1,0.d0,row_tmp,1)
     !$omp simd
     DO k=1,self%levels(level)%blocks(iblock)%nelems
-        int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))+row_tmp(k)
+      int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))+row_tmp(k)
     END DO
-    END IF
+  END IF
 END DO
 !$omp end do nowait
 !$omp do schedule(static,1)
 DO j=1,self%ndense
-    level = self%dense_blocks(1,j)
-    iblock = self%dense_blocks(2,j)
-    jblock = self%dense_blocks(3,j)
-    !$omp simd
-    DO k=1,self%levels(level)%blocks(iblock)%nelems
+  level = self%dense_blocks(1,j)
+  iblock = self%dense_blocks(2,j)
+  jblock = self%dense_blocks(3,j)
+  !$omp simd
+  DO k=1,self%levels(level)%blocks(iblock)%nelems
     col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
-    END DO
-    CALL dgemv('N',self%levels(level)%blocks(jblock)%nelems,self%levels(level)%blocks(iblock)%nelems,1.d0,self%dense_mats(j)%M, &
+  END DO
+  CALL dgemv('N',self%levels(level)%blocks(jblock)%nelems,self%levels(level)%blocks(iblock)%nelems,1.d0,self%dense_mats(j)%M, &
     self%levels(level)%blocks(jblock)%nelems,col_tmp,1,0.d0,row_tmp,1)
-    !$omp simd
-    DO k=1,self%levels(level)%blocks(jblock)%nelems
+  !$omp simd
+  DO k=1,self%levels(level)%blocks(jblock)%nelems
     int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))+row_tmp(k)
-    END DO
+  END DO
 END DO
 !$omp critical
 bvals(1:self%tw_obj%np_active)=bvals(1:self%tw_obj%np_active)+int_tmp2
@@ -2029,10 +2031,10 @@ bvals(1:self%tw_obj%np_active)=bvals(1:self%tw_obj%np_active)+int_tmp2
 DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
 !$omp end parallel
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
-    CALL dgemv('N',self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
+  CALL dgemv('N',self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
     self%tw_obj%nelems,avals(self%tw_obj%np_active+1:self%tw_obj%nelems),1,1.d0,bvals,1)
-    avals(self%tw_obj%np_active+1:self%tw_obj%nelems)=0.d0 ! Prevent double diagonal contributions
-    CALL dgemv('T',self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
+  avals(self%tw_obj%np_active+1:self%tw_obj%nelems)=0.d0 ! Prevent double diagonal contributions
+  CALL dgemv('T',self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
     self%tw_obj%nelems,avals,1,1.d0,bvals(self%tw_obj%np_active+1:self%tw_obj%nelems),1)
 END IF
 CALL b%restore_local(bvals)
@@ -2074,76 +2076,76 @@ ALLOCATE(int_tmp1(self%tw_obj%mesh%np),int_tmp2(self%tw_obj%mesh%np,3))
 int_tmp2=0.d0
 !$omp do schedule(dynamic,1)
 DO j=1,self%nsparse
-    level = self%sparse_blocks(1,j)
-    iblock = self%sparse_blocks(2,j)
-    jblock = self%sparse_blocks(3,j)
-    DO flip=1,2
-        jj=(j-1)*2+flip
+  level = self%sparse_blocks(1,j)
+  iblock = self%sparse_blocks(2,j)
+  jblock = self%sparse_blocks(3,j)
+  DO flip=1,2
+    jj=(j-1)*2+flip
     IF(flip==2)THEN
-        jblock = self%sparse_blocks(2,j)
-        iblock = self%sparse_blocks(3,j)
+      jblock = self%sparse_blocks(2,j)
+      iblock = self%sparse_blocks(3,j)
     END IF
     DO dim=1,3
-    IF(ASSOCIATED(self%aca_B_dense(jj,dim)%M))THEN
+      IF(ASSOCIATED(self%aca_B_dense(jj,dim)%M))THEN
         !$omp simd
         DO k=1,self%levels(level)%blocks(iblock)%nelems
-            col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
+          col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
         END DO
         CALL dgemv('N',self%levels(level)%blocks(jblock)%np,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_B_dense(jj,dim)%M, &
-            self%levels(level)%blocks(jblock)%np,col_tmp,1,0.d0,row_tmp,1)
+          self%levels(level)%blocks(jblock)%np,col_tmp,1,0.d0,row_tmp,1)
         !$omp simd
         DO k=1,self%levels(level)%blocks(jblock)%np
-            int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)  + row_tmp(k)
+          int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)  + row_tmp(k)
         END DO
-    ELSE
+      ELSE
         !$omp simd
         DO k=1,self%levels(level)%blocks(iblock)%nelems
-            col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
+          col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
         END DO
         k=SIZE(self%aca_BV_mats(jj,dim)%M,DIM=1)
         CALL dgemv('N',k,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_BV_mats(jj,dim)%M, &
-            k,col_tmp,1,0.d0,int_tmp1,1)
+          k,col_tmp,1,0.d0,int_tmp1,1)
         CALL dgemv('N',self%levels(level)%blocks(jblock)%np,k,1.d0,self%aca_BU_mats(jj,dim)%M, &
-            self%levels(level)%blocks(jblock)%np,int_tmp1,1,0.d0,row_tmp,1)
+          self%levels(level)%blocks(jblock)%np,int_tmp1,1,0.d0,row_tmp,1)
         !$omp simd
         DO k=1,self%levels(level)%blocks(jblock)%np
-            int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)+row_tmp(k)
+          int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)+row_tmp(k)
         END DO
-    END IF
+      END IF
     END DO
-    END DO
+  END DO
 END DO
 ! !$omp end do nowait
 !$omp do schedule(static,1)
 DO j=1,self%ndense
-    level = self%dense_blocks(1,j)
-    iblock = self%dense_blocks(2,j)
-    jblock = self%dense_blocks(3,j)
+  level = self%dense_blocks(1,j)
+  iblock = self%dense_blocks(2,j)
+  jblock = self%dense_blocks(3,j)
+  !$omp simd
+  DO k=1,self%levels(level)%blocks(iblock)%nelems
+    col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
+  END DO
+  DO dim=1,3
+    CALL dgemv('N',self%levels(level)%blocks(jblock)%np,self%levels(level)%blocks(iblock)%nelems,1.d0,self%dense_B_mats(j,dim)%M, &
+      self%levels(level)%blocks(jblock)%np,col_tmp,1,0.d0,row_tmp,1)
     !$omp simd
-    DO k=1,self%levels(level)%blocks(iblock)%nelems
-      col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
+    DO k=1,self%levels(level)%blocks(jblock)%np
+      int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)+row_tmp(k)
     END DO
-    DO dim=1,3
-        CALL dgemv('N',self%levels(level)%blocks(jblock)%np,self%levels(level)%blocks(iblock)%nelems,1.d0,self%dense_B_mats(j,dim)%M, &
-            self%levels(level)%blocks(jblock)%np,col_tmp,1,0.d0,row_tmp,1)
-        !$omp simd
-        DO k=1,self%levels(level)%blocks(jblock)%np
-            int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)+row_tmp(k)
-        END DO
-    END DO
+  END DO
 END DO
 !$omp critical
 DO dim=1,3
-    bvals(1:self%tw_obj%mesh%np,dim)=bvals(1:self%tw_obj%mesh%np,dim)+int_tmp2(:,dim)
+  bvals(1:self%tw_obj%mesh%np,dim)=bvals(1:self%tw_obj%mesh%np,dim)+int_tmp2(:,dim)
 END DO
 !$omp end critical
 DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
 !$omp end parallel
-IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
-    DO dim=1,3
-        CALL dgemv('N',self%tw_obj%mesh%np,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_Bmat(:,:,dim), &
-            self%tw_obj%mesh%np,avals(self%tw_obj%np_active+1:self%tw_obj%nelems),1,1.d0,bvals(:,dim),1)
-    END DO
+IF((self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
+  DO dim=1,3
+    CALL dgemv('N',self%tw_obj%mesh%np,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_Bmat(:,:,dim), &
+      self%tw_obj%mesh%np,avals(self%tw_obj%np_active+1:self%tw_obj%nelems),1,1.d0,bvals(:,dim),1)
+  END DO
 END IF
 CALL bx%restore_local(bvals(:,1))
 CALL by%restore_local(bvals(:,2))
@@ -2158,28 +2160,28 @@ class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), optional, target, intent(inout) :: diag
 integer(4) :: i,j,level,iblock
 real(8), POINTER, DIMENSION(:) :: vals
-if(present(diag))then
-    if(associated(self%D))call self%D%delete
-    call diag%new(self%D)
-    NULLIFY(vals)
-    CALL self%D%get_local(vals)
-    !---Get hole diagonal values
-    IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
+IF(present(diag))THEN
+  IF(associated(self%D))CALL self%D%delete
+  CALL diag%new(self%D)
+  NULLIFY(vals)
+  CALL self%D%get_local(vals)
+  !---Get hole diagonal values
+  IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
     DO i=1,self%tw_obj%nholes+self%tw_obj%n_vcoils
-        vals(i+self%tw_obj%np_active)=self%hole_Vcoil_mat%M(i+self%tw_obj%np_active,i)
+      vals(i+self%tw_obj%np_active)=self%hole_Vcoil_mat%M(i+self%tw_obj%np_active,i)
     END DO
-    END IF
-    DO i=1,self%ndense
+  END IF
+  DO i=1,self%ndense
     level=self%dense_blocks(1,i)
     iblock=self%dense_blocks(2,i)
     DO j=1,self%levels(level)%blocks(iblock)%nelems
-        vals(self%levels(level)%blocks(iblock)%ielem(j))=self%dense_mats(i)%M(j,j)
+      vals(self%levels(level)%blocks(iblock)%ielem(j))=self%dense_mats(i)%M(j,j)
     END DO
-    END DO
-    CALL self%D%restore_local(vals)
-    DEALLOCATE(vals)
-    CALL diag%add(0.d0,1.d0,self%D)
-end if
+  END DO
+  CALL self%D%restore_local(vals)
+  DEALLOCATE(vals)
+  CALL diag%add(0.d0,1.d0,self%D)
+END IF
 self%nr=self%tw_obj%nelems; self%nrg=self%tw_obj%nelems
 self%nc=self%tw_obj%nelems; self%ncg=self%tw_obj%nelems
 end subroutine tw_hodlr_Lassemble
@@ -2200,17 +2202,17 @@ REAL(8), ALLOCATABLE, DIMENSION(:,:) :: active_pts
 !> Need docs
 !------------------------------------------------------------------------------
 TYPE :: tw_oct_tree
-    INTEGER(4) :: npts = 0
-    INTEGER(4) :: nchildren = 0
-    INTEGER(4) :: depth = -1
-    INTEGER(4) :: dind = -1
-    INTEGER(4) :: pind = -1
-    REAL(8) :: bounds(2,3) = 0.d0
-    REAL(8) :: extent = 1.d99
-    REAL(8) :: center(3) = 0.d0
-    INTEGER(4), POINTER, CONTIGUOUS, DIMENSION(:) :: pts => NULL()
-    TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: children => NULL()
-    TYPE(tw_oct_tree), POINTER :: parent => NULL()
+  INTEGER(4) :: npts = 0
+  INTEGER(4) :: nchildren = 0
+  INTEGER(4) :: depth = -1
+  INTEGER(4) :: dind = -1
+  INTEGER(4) :: pind = -1
+  REAL(8) :: bounds(2,3) = 0.d0
+  REAL(8) :: extent = 1.d99
+  REAL(8) :: center(3) = 0.d0
+  INTEGER(4), POINTER, CONTIGUOUS, DIMENSION(:) :: pts => NULL()
+  TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: children => NULL()
+  TYPE(tw_oct_tree), POINTER :: parent => NULL()
 END TYPE tw_oct_tree
 !------------------------------------------------------------------------------
 ! CLASS tw_oct_tree_list
@@ -2218,18 +2220,18 @@ END TYPE tw_oct_tree
 !> Need docs
 !------------------------------------------------------------------------------
 TYPE :: tw_oct_tree_level
-    INTEGER(4) :: nblocks = 0
-    INTEGER(4) :: nc_dense = 0
-    INTEGER(4) :: nc_sparse = 0
-    INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr_dense => NULL()
-    INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_dense => NULL()
-    INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kc_dense => NULL()
-    INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lr_dense => NULL()
-    INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lrm_dense => NULL()
-    INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr_sparse => NULL()
-    INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_sparse => NULL()
-    INTEGER(4), POINTER, DIMENSION(:,:) :: dense_mask => NULL()
-    TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: block => NULL()
+  INTEGER(4) :: nblocks = 0
+  INTEGER(4) :: nc_dense = 0
+  INTEGER(4) :: nc_sparse = 0
+  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr_dense => NULL()
+  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_dense => NULL()
+  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kc_dense => NULL()
+  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lr_dense => NULL()
+  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lrm_dense => NULL()
+  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr_sparse => NULL()
+  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_sparse => NULL()
+  INTEGER(4), POINTER, DIMENSION(:,:) :: dense_mask => NULL()
+  TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: block => NULL()
 END TYPE tw_oct_tree_level
 
 TYPE(tw_oct_tree) :: mesh_tree
@@ -2239,23 +2241,23 @@ mesh_tree%npts=self%mesh%np !self%np_active
 ALLOCATE(mesh_tree%pts(mesh_tree%npts))
 ALLOCATE(active_pts(3,mesh_tree%npts))
 DO i=1,self%mesh%np
-    ! IF(self%pmap(i)==0)CYCLE
-    ! mesh_tree%pts(self%pmap(i))=self%pmap(i)
-    ! active_pts(:,self%pmap(i))=self%mesh%r(:,i)
-    mesh_tree%pts(i)=i
-    active_pts(:,i)=self%mesh%r(:,i)
+  ! IF(self%pmap(i)==0)CYCLE
+  ! mesh_tree%pts(self%pmap(i))=self%pmap(i)
+  ! active_pts(:,self%pmap(i))=self%mesh%r(:,i)
+  mesh_tree%pts(i)=i
+  active_pts(:,i)=self%mesh%r(:,i)
 END DO
 !---find bounding box around mesh
 DO i=1,3
-    mesh_tree%bounds(1,i)=MINVAL(active_pts(i,:))
-    mesh_tree%bounds(2,i)=MAXVAL(active_pts(i,:))
-    IF(mesh_tree%bounds(2,i)-mesh_tree%bounds(1,i)<1.d-3)THEN
-    mesh_tree%bounds(1,i)=mesh_tree%bounds(1,i)-5.d-4
-    mesh_tree%bounds(2,i)=mesh_tree%bounds(2,i)+5.d-4
-    END IF
-    xs = mesh_tree%bounds(2,i) - mesh_tree%bounds(1,i)
-    mesh_tree%bounds(1,i) = mesh_tree%bounds(1,i) - xs*1.d-2
-    mesh_tree%bounds(2,i) = mesh_tree%bounds(2,i) + xs*1.d-2
+  mesh_tree%bounds(1,i)=MINVAL(active_pts(i,:))
+  mesh_tree%bounds(2,i)=MAXVAL(active_pts(i,:))
+  IF(mesh_tree%bounds(2,i)-mesh_tree%bounds(1,i)<1.d-3)THEN
+  mesh_tree%bounds(1,i)=mesh_tree%bounds(1,i)-5.d-4
+  mesh_tree%bounds(2,i)=mesh_tree%bounds(2,i)+5.d-4
+  END IF
+  xs = mesh_tree%bounds(2,i) - mesh_tree%bounds(1,i)
+  mesh_tree%bounds(1,i) = mesh_tree%bounds(1,i) - xs*1.d-2
+  mesh_tree%bounds(2,i) = mesh_tree%bounds(2,i) + xs*1.d-2
 END DO
 ! mesh_tree%extents=mesh_tree%bounds
 !mesh_tree%center=SUM(mesh_tree%bounds,DIM=1)/2.d0
@@ -2264,16 +2266,16 @@ mesh_tree%depth=1
 !---Recursively subdivide
 nlevels=1
 IF(mesh_tree%npts>leaf_target)THEN
-    CALL subdivide_leaf(mesh_tree,2)
+  CALL subdivide_leaf(mesh_tree,2)
 ELSE
-    nlevels=1
+  nlevels=1
 END IF
 DEALLOCATE(active_pts)
 ALLOCATE(levels(nlevels))
 CALL count_levels(mesh_tree,1)
 DO i=1,nlevels
-    ALLOCATE(levels(i)%blocks(levels(i)%nblocks))
-    levels(i)%nblocks=0
+  ALLOCATE(levels(i)%blocks(levels(i)%nblocks))
+  levels(i)%nblocks=0
 END DO
 CALL fill_levels(mesh_tree,1,1)
 CONTAINS
@@ -2284,13 +2286,13 @@ INTEGER(4), INTENT(in) :: depth
 INTEGER(4) :: j
 !---Ensure we are at the bottom of each tree
 IF(leaf%nchildren>0)THEN
-    DO j=1,leaf%nchildren
+  DO j=1,leaf%nchildren
     CALL count_levels(leaf%children(j),depth+1)
-    END DO
+  END DO
 ELSE
-    DO j=depth+1,nlevels
+  DO j=depth+1,nlevels
     levels(j)%nblocks=levels(j)%nblocks+1
-    END DO
+  END DO
 END IF
 !---Add leaf if non-empty
 IF(leaf%npts>0)levels(depth)%nblocks=levels(depth)%nblocks+1
@@ -2310,15 +2312,15 @@ ALLOCATE(levels(depth)%blocks(block_id)%ipts(leaf%npts))
 levels(depth)%blocks(block_id)%ipts=leaf%pts
 levels(depth)%blocks(block_id)%nelems=0
 DO i=1,leaf%npts
-    IF(self%pmap(leaf%pts(i))==0)CYCLE
-    levels(depth)%blocks(block_id)%nelems=levels(depth)%blocks(block_id)%nelems+1
+  IF(self%pmap(leaf%pts(i))==0)CYCLE
+  levels(depth)%blocks(block_id)%nelems=levels(depth)%blocks(block_id)%nelems+1
 END DO
 ALLOCATE(levels(depth)%blocks(block_id)%ielem(levels(depth)%blocks(block_id)%nelems))
 levels(depth)%blocks(block_id)%nelems=0
 DO i=1,leaf%npts
-    IF(self%pmap(leaf%pts(i))==0)CYCLE
-    levels(depth)%blocks(block_id)%nelems=levels(depth)%blocks(block_id)%nelems+1
-    levels(depth)%blocks(block_id)%ielem(levels(depth)%blocks(block_id)%nelems)=self%pmap(leaf%pts(i))
+  IF(self%pmap(leaf%pts(i))==0)CYCLE
+  levels(depth)%blocks(block_id)%nelems=levels(depth)%blocks(block_id)%nelems+1
+  levels(depth)%blocks(block_id)%ielem(levels(depth)%blocks(block_id)%nelems)=self%pmap(leaf%pts(i))
 END DO
 ! levels(depth)%blocks(block_id)%ielem=leaf%pts
 levels(depth)%blocks(block_id)%center=leaf%center
@@ -2326,11 +2328,11 @@ levels(depth)%blocks(block_id)%extent=leaf%extent
 levels(depth)%blocks(block_id)%parent=parent
 !---Ensure we are at the bottom of each tree
 IF(leaf%nchildren>0)THEN
-    DO j=1,leaf%nchildren
+  DO j=1,leaf%nchildren
     CALL fill_levels(leaf%children(j),depth+1,block_id)
-    END DO
+  END DO
 ELSE
-    DO j=depth+1,nlevels
+  DO j=depth+1,nlevels
     levels(j)%nblocks=levels(j)%nblocks+1
     !
     block_id=levels(j)%nblocks
@@ -2339,22 +2341,22 @@ ELSE
     levels(j)%blocks(block_id)%ipts=leaf%pts
     levels(j)%blocks(block_id)%nelems=0
     DO i=1,leaf%npts
-        IF(self%pmap(leaf%pts(i))==0)CYCLE
-        levels(j)%blocks(block_id)%nelems=levels(j)%blocks(block_id)%nelems+1
+      IF(self%pmap(leaf%pts(i))==0)CYCLE
+      levels(j)%blocks(block_id)%nelems=levels(j)%blocks(block_id)%nelems+1
     END DO
     ALLOCATE(levels(j)%blocks(block_id)%ielem(levels(j)%blocks(block_id)%nelems))
     levels(j)%blocks(block_id)%nelems=0
     DO i=1,leaf%npts
-        IF(self%pmap(leaf%pts(i))==0)CYCLE
-        levels(j)%blocks(block_id)%nelems=levels(j)%blocks(block_id)%nelems+1
-        levels(j)%blocks(block_id)%ielem(levels(j)%blocks(block_id)%nelems)=self%pmap(leaf%pts(i))
+      IF(self%pmap(leaf%pts(i))==0)CYCLE
+      levels(j)%blocks(block_id)%nelems=levels(j)%blocks(block_id)%nelems+1
+      levels(j)%blocks(block_id)%ielem(levels(j)%blocks(block_id)%nelems)=self%pmap(leaf%pts(i))
     END DO
     ! ALLOCATE(levels(j)%blocks(block_id)%ielem(leaf%npts))
     ! levels(j)%blocks(block_id)%ielem=leaf%pts
     levels(j)%blocks(block_id)%center=leaf%center
     levels(j)%blocks(block_id)%extent=leaf%extent
     levels(j)%blocks(block_id)%parent=levels(j-1)%nblocks
-    END DO
+  END DO
 END IF
 !---Destroy leaf on way back up
 leaf%npts=0
@@ -2377,10 +2379,10 @@ ALLOCATE(vals(leaf%npts),child_mark(leaf%npts))
 child_mark=0
 locs=0.d0
 DO j=1,3
-    vals=active_pts(j,leaf%pts)
-    CALL sort_array(vals,child_mark,leaf%npts)
-    split_center(j)=vals(INT(leaf%npts/2,4))
-    locs(j)=SUM((vals-split_center(j))**2)
+  vals=active_pts(j,leaf%pts)
+  CALL sort_array(vals,child_mark,leaf%npts)
+  split_center(j)=vals(INT(leaf%npts/2,4))
+  locs(j)=SUM((vals-split_center(j))**2)
 END DO
 DEALLOCATE(vals,child_mark)
 !---Split cell in half in each direction
@@ -2388,9 +2390,9 @@ xm = split_center(1) !(leaf%bounds(1,1)+leaf%bounds(2,1))/2.d0
 ym = split_center(2) !(leaf%bounds(1,2)+leaf%bounds(2,2))/2.d0
 zm = split_center(3) !(leaf%bounds(1,3)+leaf%bounds(2,3))/2.d0
 DO k=1,leaf%npts
-    IF(ABS(active_pts(1,leaf%pts(k))-xm)<1.d-8)xm=xm+(leaf%bounds(2,1)-leaf%bounds(1,1))*1.d-4
-    IF(ABS(active_pts(2,leaf%pts(k))-ym)<1.d-8)ym=ym+(leaf%bounds(2,2)-leaf%bounds(1,2))*1.d-4
-    IF(ABS(active_pts(3,leaf%pts(k))-zm)<1.d-8)zm=zm+(leaf%bounds(2,3)-leaf%bounds(1,3))*1.d-4
+  IF(ABS(active_pts(1,leaf%pts(k))-xm)<1.d-8)xm=xm+(leaf%bounds(2,1)-leaf%bounds(1,1))*1.d-4
+  IF(ABS(active_pts(2,leaf%pts(k))-ym)<1.d-8)ym=ym+(leaf%bounds(2,2)-leaf%bounds(1,2))*1.d-4
+  IF(ABS(active_pts(3,leaf%pts(k))-zm)<1.d-8)zm=zm+(leaf%bounds(2,3)-leaf%bounds(1,3))*1.d-4
 END DO
 !---Split cell in half
 child_tmp(1)%bounds=leaf%bounds
@@ -2416,38 +2418,38 @@ ALLOCATE(child_mark(leaf%npts))
 child_mark=0
 leaf%nchildren=0
 DO j=1,2
-    child_tmp(j)%depth=depth
-    child_tmp(j)%parent=>leaf
-    ! child_mark=0
-    rleft = child_tmp(j)%bounds(1,:)
-    rdenom = child_tmp(j)%bounds(2,:)-child_tmp(j)%bounds(1,:)
-    DO k=1,leaf%npts
+  child_tmp(j)%depth=depth
+  child_tmp(j)%parent=>leaf
+  ! child_mark=0
+  rleft = child_tmp(j)%bounds(1,:)
+  rdenom = child_tmp(j)%bounds(2,:)-child_tmp(j)%bounds(1,:)
+  DO k=1,leaf%npts
     locs = (active_pts(:,leaf%pts(k))-rleft)/rdenom
     IF(ALL(locs>=-pt_tol).AND.ALL(locs<1.d0+pt_tol).AND.child_mark(k)==0)child_mark(k)=j
-    END DO
-    child_tmp(j)%npts=COUNT(child_mark==j)
-    IF(child_tmp(j)%npts==0)CYCLE
-    ! IF(child_tmp(j)%npts<200)WRITE(*,*)'Small leaf',child_tmp(j)%npts
-    leaf%nchildren=leaf%nchildren+1
-    ALLOCATE(child_tmp(j)%pts(child_tmp(j)%npts))
-    extents(1,:)=1.d99
-    extents(2,:)=-1.d99
-    child_tmp(j)%npts=0
-    child_tmp(j)%center=0.d0
-    DO k=1,leaf%npts
+  END DO
+  child_tmp(j)%npts=COUNT(child_mark==j)
+  IF(child_tmp(j)%npts==0)CYCLE
+  ! IF(child_tmp(j)%npts<200)WRITE(*,*)'Small leaf',child_tmp(j)%npts
+  leaf%nchildren=leaf%nchildren+1
+  ALLOCATE(child_tmp(j)%pts(child_tmp(j)%npts))
+  extents(1,:)=1.d99
+  extents(2,:)=-1.d99
+  child_tmp(j)%npts=0
+  child_tmp(j)%center=0.d0
+  DO k=1,leaf%npts
     IF(child_mark(k)/=j)CYCLE
     child_tmp(j)%npts=child_tmp(j)%npts+1
     child_tmp(j)%pts(child_tmp(j)%npts)=leaf%pts(k)
     child_tmp(j)%center=child_tmp(j)%center+active_pts(:,leaf%pts(k))
     DO kk=1,3
-        extents(1,kk)=MIN(extents(1,kk),active_pts(kk,leaf%pts(k)))
-        extents(2,kk)=MAX(extents(2,kk),active_pts(kk,leaf%pts(k)))
+      extents(1,kk)=MIN(extents(1,kk),active_pts(kk,leaf%pts(k)))
+      extents(2,kk)=MAX(extents(2,kk),active_pts(kk,leaf%pts(k)))
     END DO
-    END DO
-    DO kk=1,3
+  END DO
+  DO kk=1,3
     IF(extents(2,kk)-extents(1,kk)<1.d-8)THEN
-        extents(1,kk)=extents(1,kk)-5.d-9
-        extents(2,kk)=extents(2,kk)+5.d-9
+      extents(1,kk)=extents(1,kk)-5.d-9
+      extents(2,kk)=extents(2,kk)+5.d-9
     END IF
     xs = extents(2,kk) - extents(1,kk)
     extents(1,kk) = MAX(child_tmp(j)%bounds(1,kk),extents(1,kk) - xs*1.d-2)
@@ -2455,30 +2457,30 @@ DO j=1,2
     !---Shrink bounds to match extent
     child_tmp(j)%bounds(1,kk) = MAX(child_tmp(j)%bounds(1,kk),extents(1,kk))
     child_tmp(j)%bounds(2,kk) = MIN(child_tmp(j)%bounds(2,kk),extents(2,kk))
-    END DO
-    child_tmp(j)%center=child_tmp(j)%center/REAL(child_tmp(j)%npts,8)
-    child_tmp(j)%extent=0.d0
-    DO k=1,child_tmp(j)%npts
+  END DO
+  child_tmp(j)%center=child_tmp(j)%center/REAL(child_tmp(j)%npts,8)
+  child_tmp(j)%extent=0.d0
+  DO k=1,child_tmp(j)%npts
     child_tmp(j)%extent=MAX(child_tmp(j)%extent,magnitude(active_pts(:,child_tmp(j)%pts(k))-child_tmp(j)%center))
-    END DO
+  END DO
 END DO
 IF(ANY(child_mark==0))THEN
-    WRITE(*,*)leaf%depth
-    WRITE(*,*)leaf%bounds(1,:)
-    WRITE(*,*)leaf%bounds(2,:)
-    WRITE(*,*)"---"
-    DO k=1,leaf%npts
+  WRITE(*,*)leaf%depth
+  WRITE(*,*)leaf%bounds(1,:)
+  WRITE(*,*)leaf%bounds(2,:)
+  WRITE(*,*)"---"
+  DO k=1,leaf%npts
     IF(child_mark(k)==0)THEN
-        WRITE(*,*)active_pts(:,leaf%pts(k))
-        DO j=1,2!8
+      WRITE(*,*)active_pts(:,leaf%pts(k))
+      DO j=1,2!8
         rleft = child_tmp(j)%bounds(1,:)
         rdenom = child_tmp(j)%bounds(2,:)-child_tmp(j)%bounds(1,:)
         locs = (active_pts(:,leaf%pts(k))-rleft)/rdenom
         WRITE(*,*)j,locs
-        END DO
+      END DO
     END IF
-    END DO
-    CALL oft_abort("Lost element in partitioning","",__FILE__)
+  END DO
+  CALL oft_abort("Lost element in partitioning","",__FILE__)
 END IF
 DEALLOCATE(child_mark)
 !---Subdivide further
@@ -2487,7 +2489,7 @@ IF(leaf%nchildren==0)RETURN
 ALLOCATE(leaf%children(leaf%nchildren))
 leaf%nchildren=0
 DO j=1,2
-    IF(child_tmp(j)%npts>0)THEN
+  IF(child_tmp(j)%npts>0)THEN
     leaf%nchildren=leaf%nchildren+1
     CALL clone_tree(child_tmp(j),leaf%children(leaf%nchildren))
     ! WRITE(*,*)'  Child block',child_tmp(j)%ncells,child_tmp(j)%ncells<=branch_target
@@ -2495,11 +2497,11 @@ DO j=1,2
     !   WRITE(*,*)'    ',child_tmp(j)%bounds(:,kk)
     ! END DO
     IF(leaf%children(leaf%nchildren)%npts>leaf_target)THEN
-        CALL subdivide_leaf(leaf%children(leaf%nchildren),depth+1)
+      CALL subdivide_leaf(leaf%children(leaf%nchildren),depth+1)
     ! ELSE
     !   nleaves=nleaves+1
     END IF
-    END IF
+  END IF
 END DO
 ! WRITE(*,*)'Exit',depth
 END SUBROUTINE subdivide_leaf
@@ -2543,9 +2545,9 @@ DEALLOCATE(WORK)
 ALLOCATE(R(K,K))
 R=0.d0
 DO i=1,M
-    DO j=i,N
+  DO j=i,N
     R(i,j)=Q(i,j)
-    END DO
+  END DO
 END DO
 ALLOCATE(WORK(1))
 LWORK=-1
@@ -2575,10 +2577,10 @@ INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap
 COMPLEX(8), POINTER, DIMENSION(:) :: utmp,gtmp,uloc,gloc
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
-    ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
-    self%max_block_size = 0
-    ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
-    DO i=1,self%mf_obj%ndense
+  ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
+  self%max_block_size = 0
+  ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
+  DO i=1,self%mf_obj%ndense
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
@@ -2587,58 +2589,58 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
     self%inverse_mats(i)%M=self%alpha*self%mf_obj%dense_mats(i)%M
     imap=0
     DO j=1,n
-        imap(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=j
+      imap(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=j
     END DO
     DO j=1,n
-        k=self%mf_obj%levels(level)%blocks(iblock)%ielem(j)
-        DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
+      k=self%mf_obj%levels(level)%blocks(iblock)%ielem(j)
+      DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
         IF(imap(self%Rmat%lc(l))>0)THEN
-            self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
-            self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
+          self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
+          self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
         END IF
-        END DO
+      END DO
     END DO
-    END DO
-    !---Get holes
-    n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-    IF(n>0)THEN
+  END DO
+  !---Get holes
+  n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+  IF(n>0)THEN
     i = self%mf_obj%ndense+1
     self%max_block_size = MAX(self%max_block_size,n)
     ALLOCATE(self%inverse_mats(i)%M(n,n))
     imap=0
     DO j=1,n
-        DO k=1,n
+      DO k=1,n
         self%inverse_mats(i)%M(j,k) = &
-            self%alpha*self%mf_obj%hole_Vcoil_mat%M(j+self%mf_obj%tw_obj%np_active,k)
-        END DO
-        imap(j+self%mf_obj%tw_obj%np_active)=j
+          self%alpha*self%mf_obj%hole_Vcoil_mat%M(j+self%mf_obj%tw_obj%np_active,k)
+      END DO
+      imap(j+self%mf_obj%tw_obj%np_active)=j
     END DO
     DO j=1,n
-        k=j+self%mf_obj%tw_obj%np_active
-        DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
+      k=j+self%mf_obj%tw_obj%np_active
+      DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
         IF(imap(self%Rmat%lc(l))>0)THEN
-            self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
-            self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
+          self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
+          self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
         END IF
-        END DO
+      END DO
     END DO
-    END IF
-    DEALLOCATE(imap)
-    DO i=1,self%mf_obj%ndense+1
+  END IF
+  DEALLOCATE(imap)
+  DO i=1,self%mf_obj%ndense+1
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     IF(i==self%mf_obj%ndense+1)THEN
-        IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))EXIT
-        n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+      IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))EXIT
+      n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
     ELSE
-        n = self%mf_obj%levels(level)%blocks(iblock)%nelems
+      n = self%mf_obj%levels(level)%blocks(iblock)%nelems
     END IF
     ! oft_env%pm=.TRUE.
     CALL lapack_matinv(n,self%inverse_mats(i)%M,info)
     ! CALL lapack_cholesky(n,self%inverse_mats(i)%M,info)
     IF(info/=0)CALL oft_abort("factorization failed","",__FILE__)
     ! oft_env%pm=.FALSE.
-    END DO
+  END DO
 END IF
 !
 NULLIFY(utmp,gtmp)
@@ -2647,31 +2649,31 @@ CALL g%get_local(gtmp)
 utmp=(0.d0,0.d0)
 ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
 DO i=1,self%mf_obj%ndense
-    level=self%mf_obj%dense_blocks(1,i)
-    iblock=self%mf_obj%dense_blocks(2,i)
-    n = self%mf_obj%levels(level)%blocks(iblock)%nelems
-    DO j=1,n
+  level=self%mf_obj%dense_blocks(1,i)
+  iblock=self%mf_obj%dense_blocks(2,i)
+  n = self%mf_obj%levels(level)%blocks(iblock)%nelems
+  DO j=1,n
     gloc(j) = gtmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
-    END DO
-    uloc=0.d0
-    CALL zgemv('N',n,n,(1.d0,0.d0),self%inverse_mats(i)%M,n,gloc,1,(0.d0,0.d0),uloc,1)
-    DO j=1,n
+  END DO
+  uloc=0.d0
+  CALL zgemv('N',n,n,(1.d0,0.d0),self%inverse_mats(i)%M,n,gloc,1,(0.d0,0.d0),uloc,1)
+  DO j=1,n
     utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = uloc(j)
-    END DO
-    ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
+  END DO
+  ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
 END DO
 
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 IF(n > 0)THEN
-    DO j=1,n
+  DO j=1,n
     gloc(j) = gtmp(self%mf_obj%tw_obj%np_active+j)
-    END DO
-    uloc=0.d0
-    i = self%mf_obj%ndense+1
-    CALL zgemv('N',n,n,(1.d0,0.d0),self%inverse_mats(i)%M,n,gloc,1,(0.d0,0.d0),uloc,1)
-    DO j=1,n
+  END DO
+  uloc=0.d0
+  i = self%mf_obj%ndense+1
+  CALL zgemv('N',n,n,(1.d0,0.d0),self%inverse_mats(i)%M,n,gloc,1,(0.d0,0.d0),uloc,1)
+  DO j=1,n
     utmp(self%mf_obj%tw_obj%np_active+j) = uloc(j)
-    END DO
+  END DO
 END IF
 CALL u%restore_local(utmp)
 CALL g%set((0.d0,0.d0))
@@ -2687,10 +2689,10 @@ INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers
 IF(ASSOCIATED(self%inverse_mats))THEN
-    DO i=1,self%mf_obj%nblocks+1
+  DO i=1,self%mf_obj%nblocks+1
     IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
-    END DO
-    DEALLOCATE(self%inverse_mats)
+  END DO
+  DEALLOCATE(self%inverse_mats)
 END IF
 !---Reset
 self%max_block_size=0
@@ -2714,10 +2716,10 @@ INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap
 REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp,uloc,gloc
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
-    ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
-    self%max_block_size = 0
-    ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
-    DO i=1,self%mf_obj%ndense
+  ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
+  self%max_block_size = 0
+  ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
+  DO i=1,self%mf_obj%ndense
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
@@ -2726,58 +2728,58 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
     self%inverse_mats(i)%M=self%alpha*self%mf_obj%dense_mats(i)%M
     imap=0
     DO j=1,n
-        imap(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=j
+      imap(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=j
     END DO
     DO j=1,n
-        k=self%mf_obj%levels(level)%blocks(iblock)%ielem(j)
-        DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
+      k=self%mf_obj%levels(level)%blocks(iblock)%ielem(j)
+      DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
         IF(imap(self%Rmat%lc(l))>0)THEN
-            self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
-            self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
+          self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
+          self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
         END IF
-        END DO
+      END DO
     END DO
-    END DO
-    !---Get holes
-    n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-    IF(n>0)THEN
+  END DO
+  !---Get holes
+  n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+  IF(n>0)THEN
     i = self%mf_obj%ndense+1
     self%max_block_size = MAX(self%max_block_size,n)
     ALLOCATE(self%inverse_mats(i)%M(n,n))
     imap=0
     DO j=1,n
-        DO k=1,n
+      DO k=1,n
         self%inverse_mats(i)%M(j,k) = &
-            self%alpha*self%mf_obj%hole_Vcoil_mat%M(j+self%mf_obj%tw_obj%np_active,k)
-        END DO
-        imap(j+self%mf_obj%tw_obj%np_active)=j
+          self%alpha*self%mf_obj%hole_Vcoil_mat%M(j+self%mf_obj%tw_obj%np_active,k)
+      END DO
+      imap(j+self%mf_obj%tw_obj%np_active)=j
     END DO
     DO j=1,n
-        k=j+self%mf_obj%tw_obj%np_active
-        DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
+      k=j+self%mf_obj%tw_obj%np_active
+      DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
         IF(imap(self%Rmat%lc(l))>0)THEN
-            self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
-            self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
+          self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
+          self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
         END IF
-        END DO
+      END DO
     END DO
-    END IF
-    DEALLOCATE(imap)
-    DO i=1,self%mf_obj%ndense+1
+  END IF
+  DEALLOCATE(imap)
+  DO i=1,self%mf_obj%ndense+1
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     IF(i==self%mf_obj%ndense+1)THEN
-        IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))EXIT
-        n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+      IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))EXIT
+      n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
     ELSE
-        n = self%mf_obj%levels(level)%blocks(iblock)%nelems
+      n = self%mf_obj%levels(level)%blocks(iblock)%nelems
     END IF
     ! oft_env%pm=.TRUE.
     ! CALL lapack_matinv(n,self%inverse_mats(i)%M,info)
     CALL lapack_cholesky(n,self%inverse_mats(i)%M,info)
     IF(info/=0)CALL oft_abort("factorization failed","",__FILE__)
     ! oft_env%pm=.FALSE.
-    END DO
+  END DO
 END IF
 !
 NULLIFY(utmp,gtmp)
@@ -2786,31 +2788,31 @@ CALL g%get_local(gtmp)
 utmp=0.d0
 ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
 DO i=1,self%mf_obj%ndense
-    level=self%mf_obj%dense_blocks(1,i)
-    iblock=self%mf_obj%dense_blocks(2,i)
-    n = self%mf_obj%levels(level)%blocks(iblock)%nelems
-    DO j=1,n
+  level=self%mf_obj%dense_blocks(1,i)
+  iblock=self%mf_obj%dense_blocks(2,i)
+  n = self%mf_obj%levels(level)%blocks(iblock)%nelems
+  DO j=1,n
     gloc(j) = gtmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
-    END DO
-    uloc=0.d0
-    CALL dgemv('N',n,n,1.d0,self%inverse_mats(i)%M,n,gloc,1,0.d0,uloc,1)
-    DO j=1,n
+  END DO
+  uloc=0.d0
+  CALL dgemv('N',n,n,1.d0,self%inverse_mats(i)%M,n,gloc,1,0.d0,uloc,1)
+  DO j=1,n
     utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = uloc(j)
-    END DO
-    ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
+  END DO
+  ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
 END DO
 
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 IF(n > 0)THEN
-    DO j=1,n
+  DO j=1,n
     gloc(j) = gtmp(self%mf_obj%tw_obj%np_active+j)
-    END DO
-    uloc=0.d0
-    i = self%mf_obj%ndense+1
-    CALL dgemv('N',n,n,1.d0,self%inverse_mats(i)%M,n,gloc,1,0.d0,uloc,1)
-    DO j=1,n
+  END DO
+  uloc=0.d0
+  i = self%mf_obj%ndense+1
+  CALL dgemv('N',n,n,1.d0,self%inverse_mats(i)%M,n,gloc,1,0.d0,uloc,1)
+  DO j=1,n
     utmp(self%mf_obj%tw_obj%np_active+j) = uloc(j)
-    END DO
+  END DO
 END IF
 CALL u%restore_local(utmp)
 CALL g%set(0.d0)
@@ -2826,10 +2828,10 @@ INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers
 IF(ASSOCIATED(self%inverse_mats))THEN
-    DO i=1,self%mf_obj%nblocks+1
+  DO i=1,self%mf_obj%nblocks+1
     IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
-    END DO
-    DEALLOCATE(self%inverse_mats)
+  END DO
+  DEALLOCATE(self%inverse_mats)
 END IF
 !---Reset
 self%max_block_size=0
