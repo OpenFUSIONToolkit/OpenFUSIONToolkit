@@ -632,7 +632,7 @@ REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op
 REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
-CLASS(oft_vector), POINTER :: u,g
+CLASS(oft_vector), POINTER :: u,g,up
 CLASS(oft_matrix), POINTER :: Lmat
 TYPE(oft_native_dense_matrix), TARGET :: Lmat_dense,Minv
 TYPE(oft_sum_matrix), TARGET :: fmat,bmat
@@ -678,6 +678,7 @@ ELSE
 END IF
 !---
 CALL self%Uloc%new(u)
+CALL self%Uloc%new(up)
 CALL self%Uloc%new(g)
 !---Setup inductance matrix wrapper
 IF(PRESENT(hodlr_op))THEN
@@ -815,6 +816,7 @@ IF(sensors%njumpers>0)THEN
   END IF
 END IF
 !---Advance system in time
+CALL up%add(0.d0,1.d0,u)
 DO i=1,nsteps
   !---Update driven coil dI/dt waveforms
   IF(use_cn)THEN
@@ -865,6 +867,9 @@ DO i=1,nsteps
     CALL Minv%apply(g,u)
     nits=1
   ELSE
+    CALL up%add(-1.d0,1.d0,u)
+    CALL u%add(1.d0,1.d0,up)
+    CALL up%add(0.d0,1.d0,u)
     CALL linv%apply(u,g)
     nits=linv%cits
   END IF
@@ -932,8 +937,9 @@ IF(sensors%njumpers>0)THEN
   DEALLOCATE(jumpout)
 END IF
 CALL u%delete()
+CALL up%delete()
 CALL g%delete()
-DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,g)
+DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,g)
 IF(direct)THEN
   DEALLOCATE(minv%m)
 ELSE

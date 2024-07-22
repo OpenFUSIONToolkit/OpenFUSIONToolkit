@@ -2647,7 +2647,9 @@ NULLIFY(utmp,gtmp)
 CALL u%get_local(utmp)
 CALL g%get_local(gtmp)
 utmp=(0.d0,0.d0)
+!$omp parallel private(uloc,gloc,i,level,iblock,n,j)
 ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
+!$omp do schedule(static,1)
 DO i=1,self%mf_obj%ndense
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)
@@ -2662,7 +2664,8 @@ DO i=1,self%mf_obj%ndense
   END DO
   ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
 END DO
-
+!$omp end do nowait
+!$omp single
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 IF(n > 0)THEN
   DO j=1,n
@@ -2675,9 +2678,12 @@ IF(n > 0)THEN
     utmp(self%mf_obj%tw_obj%np_active+j) = uloc(j)
   END DO
 END IF
+!$omp end single
+DEALLOCATE(uloc,gloc)
+!$omp end parallel
 CALL u%restore_local(utmp)
 CALL g%set((0.d0,0.d0))
-DEALLOCATE(utmp,gtmp,uloc,gloc)
+DEALLOCATE(utmp,gtmp)
 DEBUG_STACK_POP
 END SUBROUTINE bjprecond_apply
 !---------------------------------------------------------------------------
@@ -2786,7 +2792,9 @@ NULLIFY(utmp,gtmp)
 CALL u%get_local(utmp)
 CALL g%get_local(gtmp)
 utmp=0.d0
+!$omp parallel private(uloc,gloc,i,level,iblock,n,j)
 ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
+!$omp do schedule(static,1)
 DO i=1,self%mf_obj%ndense
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)
@@ -2801,7 +2809,8 @@ DO i=1,self%mf_obj%ndense
   END DO
   ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
 END DO
-
+!$omp end do nowait
+!$omp single
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 IF(n > 0)THEN
   DO j=1,n
@@ -2814,9 +2823,12 @@ IF(n > 0)THEN
     utmp(self%mf_obj%tw_obj%np_active+j) = uloc(j)
   END DO
 END IF
+!$omp end single
+DEALLOCATE(uloc,gloc)
+!$omp end parallel
 CALL u%restore_local(utmp)
 CALL g%set(0.d0)
-DEALLOCATE(utmp,gtmp,uloc,gloc)
+DEALLOCATE(utmp,gtmp)
 DEBUG_STACK_POP
 END SUBROUTINE rbjprecond_apply
 !---------------------------------------------------------------------------

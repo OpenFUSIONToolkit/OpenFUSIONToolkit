@@ -603,7 +603,7 @@ class ThinCurr_reduced:
         vec_time.append(t)
         curr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
         for j in range(coil_currs.shape[1]-1):
-            curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+            curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
         coil_hist.append(curr_tmp)
         vec_hist.append(pot_tmp)
         if self.Ms is not None:
@@ -618,10 +618,10 @@ class ThinCurr_reduced:
             if self.Mc is not None:
                 dcurr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
                 for j in range(coil_currs.shape[1]-1):
-                    dcurr_tmp[j] = numpy.interp(t+dt/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
-                    dcurr_tmp[j] -= numpy.interp(t-dt/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
-                    dcurr_tmp[j] += numpy.interp(t+dt*5.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
-                    dcurr_tmp[j] -= numpy.interp(t+dt*3.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+                    dcurr_tmp[j] = numpy.interp(t+dt/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
+                    dcurr_tmp[j] -= numpy.interp(t-dt/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
+                    dcurr_tmp[j] += numpy.interp(t+dt*5.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
+                    dcurr_tmp[j] -= numpy.interp(t+dt*3.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
                 dcurr_tmp *= mu0
                 rhs -= numpy.dot(dcurr_tmp,self.Mc)
             pot_tmp = numpy.dot(rhs,Lbackward)
@@ -630,7 +630,7 @@ class ThinCurr_reduced:
                 print('Timestep {0} {1:12.4E} {2:12.4E}'.format(i+1,t,numpy.linalg.norm(pot_tmp)))
             curr_tmp = numpy.zeros((coil_currs.shape[1]-1,))
             for j in range(coil_currs.shape[1]-1):
-                curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1])
+                curr_tmp[j] = numpy.interp(t,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
             if ((i+1) % plot_freq) == 0:
                 vec_time.append(t)
                 coil_hist.append(curr_tmp)

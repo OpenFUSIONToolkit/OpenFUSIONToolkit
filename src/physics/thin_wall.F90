@@ -675,7 +675,7 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 elapsed_time=mytimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 !
 CALL tw_compute_Lmat_coils(tw_obj)
 !
@@ -1064,7 +1064,7 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 elapsed_time=mytimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     IF(Lself)THEN
@@ -1312,7 +1312,7 @@ b = b/(4.d0*pi)
 CALL quad%delete()
 CALL quad2%delete()
 elapsed_time=mytimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_MF
 !------------------------------------------------------------------------------
