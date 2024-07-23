@@ -23,7 +23,7 @@ USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF, &
-  tw_recon_curr
+  tw_recon_curr, tw_compute_Bops
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
 USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
   tw_reduce_model, run_td_sim, plot_td_sim
@@ -392,14 +392,18 @@ IF((tw_obj%n_vcoils>0).AND.(.NOT.ASSOCIATED(tw_obj%Acoil2coil)))THEN
 END IF
 CALL copy_string('',error_str)
 !
+CALL copy_string_rev(cache_file,filename)
 IF(use_hodlr)THEN
   ALLOCATE(hodlr_op)
   hodlr_op%tw_obj=>tw_obj
   CALL hodlr_op%setup(.TRUE.)
-  CALL hodlr_op%compute_L()
+  IF(TRIM(filename)=='')THEN
+    CALL hodlr_op%compute_L()
+  ELSE
+    CALL hodlr_op%compute_L(save_file=filename)
+  END IF
   Lmat_ptr=C_LOC(hodlr_op)
 ELSE
-  CALL copy_string_rev(cache_file,filename)
   IF(TRIM(filename)=='')THEN
     CALL tw_compute_LmatDirect(tw_obj,tw_obj%Lmat)
   ELSE
@@ -408,6 +412,43 @@ ELSE
   Lmat_ptr=C_LOC(tw_obj%Lmat)
 END IF
 END SUBROUTINE thincurr_Lmat
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+TYPE(c_ptr), INTENT(out) :: Bmat_ptr !< Needs docs
+TYPE(c_ptr), INTENT(out) :: Bdr_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+!
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
+TYPE(tw_type), POINTER :: tw_obj
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL copy_string('',error_str)
+!
+CALL copy_string_rev(cache_file,filename)
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr,hodlr_op)
+  IF(TRIM(filename)=='')THEN
+    CALL hodlr_op%compute_B()
+  ELSE
+    CALL hodlr_op%compute_B(save_file=filename)
+  END IF
+  Bmat_ptr=c_null_ptr
+  Bdr_ptr=C_LOC(hodlr_op%Icoil_Bmat)
+ELSE
+  IF(TRIM(filename)=='')THEN
+    CALL tw_compute_Bops(tw_obj)
+  ELSE
+    CALL tw_compute_Bops(tw_obj,save_file=filename)
+  END IF
+  Bmat_ptr=C_LOC(tw_obj%Bel)
+  Bdr_ptr=C_LOC(tw_obj%Bdr)
+END IF
+END SUBROUTINE thincurr_Bmat
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

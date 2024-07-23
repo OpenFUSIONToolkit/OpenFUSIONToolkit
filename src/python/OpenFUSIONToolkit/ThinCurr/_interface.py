@@ -45,9 +45,13 @@ thincurr_cross_coupling = ctypes_subroutine(oftpy_lib.thincurr_cross_coupling,
 thincurr_cross_eval = ctypes_subroutine(oftpy_lib.thincurr_cross_eval,
     [c_void_p, c_void_p, c_int, ctypes_numpy_array(float64,2), ctypes_numpy_array(float64,2), c_char_p])
 
-# Compute model inductance matrix thincurr_curr_Lmat(tw_ptr,Lmat,error_str)
-thincurr_curr_Lmat = ctypes_subroutine(oftpy_lib.thincurr_Lmat,
+# Compute model inductance matrix thincurr_Lmat(tw_ptr,Lmat,error_str)
+thincurr_Lmat = ctypes_subroutine(oftpy_lib.thincurr_Lmat,
     [c_void_p, c_bool, c_void_ptr_ptr, c_char_p, c_char_p])
+
+# thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str)
+thincurr_Bmat = ctypes_subroutine(oftpy_lib.thincurr_Bmat,
+    [c_void_p, c_void_p, c_void_ptr_ptr, c_void_ptr_ptr, c_char_p, c_char_p])
 
 # thincurr_Mcoil(tw_ptr,Mc_ptr,cache_file,error_str)
 thincurr_Mcoil = ctypes_subroutine(oftpy_lib.thincurr_Mcoil,

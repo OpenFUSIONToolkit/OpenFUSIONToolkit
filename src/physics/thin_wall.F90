@@ -1865,16 +1865,43 @@ END FUNCTION tw_compute_phipot
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops(self)
+SUBROUTINE tw_compute_Bops(self,save_file)
 TYPE(tw_type), INTENT(inout) :: self
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 REAL(8), PARAMETER :: B_dx = 1.d-6
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
-LOGICAL :: is_neighbor
+INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,hash_tmp(4),file_counts(4)
+LOGICAL :: is_neighbor,exists
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+IF(TRIM(save_file)/='none')THEN
+  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
+  IF(exists)THEN
+    hash_tmp(1) = self%nelems
+    hash_tmp(2) = self%mesh%nc
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+    WRITE(*,*)'  Loading B-field operator from file: ',TRIM(save_file)
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
+    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+      ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
+      CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
+      IF(exists)THEN
+        ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
+        CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
+      END IF
+    END IF
+  END IF
+  IF(exists)RETURN
+  DEALLOCATE(self%Bel,self%Bdr)
+END IF
+!
 bmesh=>self%mesh
 ALLOCATE(quads(18))
 DO i=1,18
@@ -2040,6 +2067,26 @@ DO i=1,bmesh%np
   END DO
 END DO
 self%Bdr=self%Bdr/(4.d0*pi)
+!
+IF(TRIM(save_file)/='none')THEN
+  hash_tmp(1) = self%nelems
+  hash_tmp(2) = self%mesh%nc
+  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+  hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+  WRITE(*,*)'  Saving B-field operator to file: ',TRIM(save_file)
+  CALL hdf5_create_file(TRIM(save_file))
+  CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
+  IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+    CALL hdf5_write(self%Bel(:,:,1),TRIM(save_file),'Bel_X')
+    CALL hdf5_write(self%Bel(:,:,2),TRIM(save_file),'Bel_Y')
+    CALL hdf5_write(self%Bel(:,:,3),TRIM(save_file),'Bel_Z')
+    IF(exists)THEN
+      CALL hdf5_write(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X')
+      CALL hdf5_write(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y')
+      CALL hdf5_write(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z')
+    END IF
+  END IF
+END IF
 END SUBROUTINE tw_compute_Bops
 !------------------------------------------------------------------------------
 !> Setup hole definition for ordered chain of vertices

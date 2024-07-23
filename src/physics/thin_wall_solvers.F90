@@ -1013,12 +1013,12 @@ END IF
 IF(compute_B)THEN
   IF(.NOT.ALLOCATED(cc_vals))ALLOCATE(cc_vals(3,self%mesh%np))
   IF(PRESENT(hodlr_op))THEN
-    CALL hodlr_op%compute_B()
+    IF(.NOT.ASSOCIATED(hodlr_op%aca_B_dense))CALL hodlr_op%compute_B()
     CALL self%Uloc_pts%new(Bx)
     CALL self%Uloc_pts%new(By)
     CALL self%Uloc_pts%new(Bz)
   ELSE
-    CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
   END IF
 END IF
 !
@@ -1146,7 +1146,7 @@ END SUBROUTINE plot_td_sim
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE tw_reduce_model(self,sensors,neigs,eig_vec,filename,compute_B,hodlr_op)
-TYPE(tw_type), INTENT(in) :: self !< Needs docs
+TYPE(tw_type), INTENT(inout) :: self !< Needs docs
 TYPE(tw_sensors), INTENT(in) :: sensors !< Sensor information
 INTEGER(4), INTENT(in) :: neigs !< Needs docs
 REAL(8), INTENT(in) :: eig_vec(:,:) !< Needs docs
@@ -1287,6 +1287,7 @@ IF(compute_B)THEN
     END DO
     DEALLOCATE(pvals)
   ELSE
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
       self%Bel(:,:,1),self%mesh%np,eig_vec,self%nelems,0.d0,Bxtmp,self%mesh%np)
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &

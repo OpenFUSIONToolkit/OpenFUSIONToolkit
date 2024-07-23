@@ -268,13 +268,39 @@ class ThinCurr():
             cache_string = c_char_p(cache_file.encode())
         Lmat_loc = c_void_p()
         error_string = c_char_p(b""*200)
-        thincurr_curr_Lmat(self.tw_obj,use_hodlr,ctypes.byref(Lmat_loc),cache_string,error_string)
+        thincurr_Lmat(self.tw_obj,use_hodlr,ctypes.byref(Lmat_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         if use_hodlr:
             self.Lmat_hodlr = Lmat_loc
         else:
             self.Lmat = numpy.ctypeslib.as_array(ctypes.cast(Lmat_loc, c_double_ptr),shape=(self.nelems,self.nelems))
+    
+    def compute_Bmat(self,cache_file=None):
+        '''! Compute magnetic field reconstruction operators for this model
+
+        @param cache_file Path to cache file to store/load matrix
+        @result Element B-field reconstruction matrix (`(:,:)` if HODLR is available else `None`)
+        @result Icoil B-field reconstruction matrix `(:,:)`
+        '''
+        if cache_file is None:
+            cache_string = c_char_p(b"")
+        else:
+            cache_string = c_char_p(cache_file.encode())
+        Bmat_loc = c_void_p()
+        Bdr_ptr = c_void_p()
+        error_string = c_char_p(b""*200)
+        if self.Lmat_hodlr:
+            thincurr_Bmat(self.tw_obj,self.Lmat_hodlr,ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
+        else:
+            thincurr_Bmat(self.tw_obj,c_void_p(),ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+        if self.Lmat_hodlr:
+            return None, numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
+        else:
+            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.nelems,self.np)), \
+                numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
     
     def compute_Mcoil(self,cache_file=None):
         '''! Compute the mutual inductance between passive (mesh+vcoils) and active elements (icoils)

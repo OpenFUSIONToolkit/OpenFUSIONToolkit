@@ -873,14 +873,15 @@ END SUBROUTINE tw_hodlr_setup
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE tw_hodlr_Lcompute(self)
+SUBROUTINE tw_hodlr_Lcompute(self,save_file)
 class(oft_tw_hodlr_op), intent(inout) :: self
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 INTEGER(4) :: i,j,k,l,nlast,branch_count,pind_i,pind_j,max_pts,top_level,level
 INTEGER(4) :: nblocks_progress(9),nblocks_complete,counts(4),iblock,jblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: kc_tmp,kr_tmp
 INTEGER(4), ALLOCATABLE, DIMENSION(:,:) :: block_interaction,row_count
 INTEGER(8) :: mat_size(3),compressed_size,size_out
-LOGICAL :: is_masked,is_neighbor
+LOGICAL :: is_masked,is_neighbor,mat_updated
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: near_closure,cell_mark
 LOGICAL, ALLOCATABLE, DIMENSION(:,:) :: dense_blocks
 REAL(8) :: corners_i(3,8),corners_j(3,8),rmin(3),elapsed_time,avg_size
@@ -895,10 +896,17 @@ ALLOCATE(self%dense_mats(self%ndense))
 ALLOCATE(self%aca_U_mats(self%nsparse))
 ALLOCATE(self%aca_V_mats(self%nsparse))
 ALLOCATE(self%aca_dense(self%nsparse))
+WRITE(*,*)'  Building hole and Vcoil columns'
+IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
+  ALLOCATE(self%hole_Vcoil_mat%M(self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils))
+  CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
+END IF
+CALL load_from_file()
 compressed_size=0
-! WRITE(*,'(4X,A3)')' 0%'!WRITE(*,'(5X,A)',ADVANCE='NO')'['
+mat_updated=.FALSE.
 WRITE(*,*)'  Building diagonal blocks'
-!$omp parallel private(i,level,j,k,size_out,avg_size) reduction(+:compressed_size)
+!$omp parallel private(i,level,j,k,size_out,avg_size) reduction(+:compressed_size) &
+!$omp reduction(.OR.:mat_updated)
 !$omp single
 nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
@@ -909,9 +917,12 @@ DO i=1,self%ndense
   j = self%dense_blocks(2,i)
   k = self%dense_blocks(3,i)
   !---Build full representation
-  ALLOCATE(self%dense_mats(i)%M(self%levels(level)%blocks(j)%nelems,self%levels(level)%blocks(k)%nelems))
-  CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%dense_mats(i)%M, &
-    self%levels(level)%blocks(k),self%levels(level)%blocks(j))
+  IF(.NOT.ASSOCIATED(self%dense_mats(i)%M))THEN
+    mat_updated=.TRUE.
+    ALLOCATE(self%dense_mats(i)%M(self%levels(level)%blocks(j)%nelems,self%levels(level)%blocks(k)%nelems))
+    CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%dense_mats(i)%M, &
+      self%levels(level)%blocks(k),self%levels(level)%blocks(j))
+  END IF
   compressed_size = compressed_size + self%levels(level)%blocks(j)%nelems*self%levels(level)%blocks(k)%nelems
   !$omp critical
   nblocks_complete = nblocks_complete + 1
@@ -935,19 +946,26 @@ DO i=1,self%nsparse
   j = self%sparse_blocks(2,i)
   k = self%sparse_blocks(3,i)
   !---Build full representation
-  size_out=-1
-  IF((self%L_aca_tol>0.d0).AND.self%levels(level)%mat_mask(j,k)==2)THEN
-  CALL aca_approx(i,self%L_aca_tol,size_out)
-  IF(size_out>0)CALL compress_aca(i,self%L_svd_tol,size_out)
-  IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
-    self%levels(level)%blocks(k)%nelems
-  END IF
-  !---IF ACA+ failed or diagonal compute dense matrix
-  IF(size_out<0)THEN
-  ALLOCATE(self%aca_dense(i)%M(self%levels(level)%blocks(k)%nelems,self%levels(level)%blocks(j)%nelems))
-  CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%aca_dense(i)%M, &
-    self%levels(level)%blocks(j),self%levels(level)%blocks(k))
-  CALL compress_block(i,self%L_svd_tol,size_out)
+  IF(ASSOCIATED(self%aca_dense(i)%M))THEN
+    size_out=self%levels(level)%blocks(k)%nelems*self%levels(level)%blocks(j)%nelems
+  ELSE IF(ASSOCIATED(self%aca_U_mats(i)%M))THEN
+    size_out=SIZE(self%aca_V_mats(i)%M,DIM=1)*(self%levels(level)%blocks(k)%nelems+self%levels(level)%blocks(j)%nelems)
+  ELSE
+    mat_updated=.TRUE.
+    size_out=-1
+    IF((self%L_aca_tol>0.d0).AND.self%levels(level)%mat_mask(j,k)==2)THEN
+      CALL aca_approx(i,self%L_aca_tol,size_out)
+      IF(size_out>0)CALL compress_aca(i,self%L_svd_tol,size_out)
+      IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
+        self%levels(level)%blocks(k)%nelems
+    END IF
+    !---IF ACA+ failed or diagonal compute dense matrix
+    IF(size_out<0)THEN
+      ALLOCATE(self%aca_dense(i)%M(self%levels(level)%blocks(k)%nelems,self%levels(level)%blocks(j)%nelems))
+      CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%aca_dense(i)%M, &
+        self%levels(level)%blocks(j),self%levels(level)%blocks(k))
+      CALL compress_block(i,self%L_svd_tol,size_out)
+    END IF
   END IF
   compressed_size = compressed_size + size_out
   !$omp critical
@@ -963,12 +981,131 @@ WRITE(*,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:',compressed_size*1.d
     "%  (",REAL(compressed_size,8),"/",REAL(self%tw_obj%np_active,8)**2,")"
 WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 !
-WRITE(*,*)'  Building hole and Vcoil columns'
-IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
-  ALLOCATE(self%hole_Vcoil_mat%M(self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils))
-  CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
-END IF
+IF(mat_updated)CALL save_to_file()
 CONTAINS
+SUBROUTINE save_to_file()
+INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
+CHARACTER(LEN=5) :: matrix_id
+!---Save computed matrix to file
+IF(TRIM(save_file)/='none')THEN
+  hash_tmp(1) = self%tw_obj%nelems
+  hash_tmp(2) = self%tw_obj%mesh%nc
+  hash_tmp(3) = self%ndense
+  hash_tmp(4) = self%nsparse
+  hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
+  hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
+  WRITE(*,*)'  Saving HODLR matrix to file: ',TRIM(save_file)
+  CALL hdf5_create_file(TRIM(save_file))
+  CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
+  !
+  hash_tmp(6)=0
+  DO i=1,self%ndense
+    level = self%dense_blocks(1,i)
+    j = self%dense_blocks(2,i)
+    k = self%dense_blocks(3,i)
+    hash_tmp(1:3) = [level,j,k]
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+    hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+    WRITE(matrix_id,'(I5)')i
+    CALL hdf5_write(hash_tmp,TRIM(save_file),'DENSE_hash_'//TRIM(ADJUSTL(matrix_id)))
+    CALL hdf5_write(self%dense_mats(i)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id)))
+  END DO
+  !
+  DO i=1,self%nsparse
+    level = self%sparse_blocks(1,i)
+    j = self%sparse_blocks(2,i)
+    k = self%sparse_blocks(3,i)
+    hash_tmp(1:3) = [level,j,k]
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+    hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+    WRITE(matrix_id,'(I5)')i
+    IF(ASSOCIATED(self%aca_dense(i)%M))THEN
+      hash_tmp(6)=-1
+      CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)))
+      CALL hdf5_write(self%aca_dense(i)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id)))
+    ELSE
+      hash_tmp(6)=SIZE(self%aca_V_mats(i)%M,DIM=1)
+      CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)))
+      CALL hdf5_write(self%aca_U_mats(i)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id)))
+      CALL hdf5_write(self%aca_V_mats(i)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id)))
+    END IF
+  END DO
+  ! TODO: Save create appropriate hash to enable saving Vcoil matrix
+  ! WRITE(io_unit)hash_tmp
+  ! WRITE(io_unit)self%hole_Vcoil_mat%M
+  ! CLOSE(io_unit)
+END IF
+END SUBROUTINE save_to_file
+!
+SUBROUTINE load_from_file()
+LOGICAL :: exists
+INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
+CHARACTER(LEN=5) :: matrix_id
+!---Try to load from file
+IF(TRIM(save_file)/='none')THEN
+  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
+  IF(exists)THEN
+    hash_tmp(1) = self%tw_obj%nelems
+    hash_tmp(2) = self%tw_obj%mesh%nc
+    hash_tmp(3) = self%ndense
+    hash_tmp(4) = self%nsparse
+    hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
+    hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
+    WRITE(*,*)'  Reading HODLR matrix from file: ',TRIM(save_file)
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
+    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+      hash_tmp(6)=0
+      DO i=1,self%ndense
+        level = self%dense_blocks(1,i)
+        j = self%dense_blocks(2,i)
+        k = self%dense_blocks(3,i)
+        hash_tmp(1:3) = [level,j,k]
+        hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+        hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+        WRITE(matrix_id,'(I5)')i
+        CALL hdf5_read(file_counts,TRIM(save_file),'DENSE_hash_'//TRIM(ADJUSTL(matrix_id)),success=exists)
+        IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+          ALLOCATE(self%dense_mats(i)%M(self%levels(level)%blocks(j)%nelems,self%levels(level)%blocks(k)%nelems))
+          CALL hdf5_read(self%dense_mats(i)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id)),success=exists)
+          IF(.NOT.exists)DEALLOCATE(self%dense_mats(i)%M)
+        END IF
+      END DO
+      !
+      DO i=1,self%nsparse
+        level = self%sparse_blocks(1,i)
+        j = self%sparse_blocks(2,i)
+        k = self%sparse_blocks(3,i)
+        hash_tmp(1:3) = [level,j,k]
+        hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+        hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+        WRITE(matrix_id,'(I5)')i
+        CALL hdf5_read(file_counts,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)),success=exists)
+        READ(io_unit, IOSTAT=ierr)file_counts
+        IF(exists.AND.ALL(file_counts(1:5)==hash_tmp(1:5)))THEN
+          IF(file_counts(6)<0)THEN
+            ALLOCATE(self%aca_dense(i)%M(self%levels(level)%blocks(k)%nelems,self%levels(level)%blocks(j)%nelems))
+            CALL hdf5_read(self%aca_dense(i)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id)),success=exists)
+            IF(.NOT.exists)DEALLOCATE(self%aca_dense(i)%M)
+          ELSE
+            ALLOCATE(self%aca_U_mats(i)%M(self%levels(level)%blocks(k)%nelems,file_counts(6)))
+            CALL hdf5_read(self%aca_U_mats(i)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id)),success=exists)
+            IF(.NOT.exists)THEN
+              DEALLOCATE(self%aca_U_mats(i)%M)
+            ELSE
+              ALLOCATE(self%aca_V_mats(i)%M(file_counts(6),self%levels(level)%blocks(j)%nelems))
+              CALL hdf5_read(self%aca_V_mats(i)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id)),success=exists)
+              IF(.NOT.exists)DEALLOCATE(self%aca_U_mats(i)%M,self%aca_V_mats(i)%M)
+            END IF
+          END IF
+        END IF
+      END DO
+    ELSE
+      WRITE(*,*)'    Ignoring stored matrix, Model hashes do not match'
+    END IF
+  END IF
+END IF
+END SUBROUTINE load_from_file
+!
 SUBROUTINE compress_block(isparse,tol,size_out)
 INTEGER(4), INTENT(in) :: isparse
 REAL(8), INTENT(in) :: tol
@@ -1408,14 +1545,15 @@ END SUBROUTINE tw_hodlr_Lcompute
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE tw_hodlr_Bcompute(self)
+SUBROUTINE tw_hodlr_Bcompute(self,save_file)
 class(oft_tw_hodlr_op), intent(inout) :: self
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 INTEGER(4) :: i,ii,j,k,l,nlast,branch_count,pind_i,pind_j,max_pts,top_level,level,dim,flip
 INTEGER(4) :: nblocks_progress(9),nblocks_complete,counts(4),iblock,jblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: kc_tmp,kr_tmp
 INTEGER(4), ALLOCATABLE, DIMENSION(:,:) :: block_interaction,row_count
 INTEGER(8) :: mat_size(3),compressed_size,size_out
-LOGICAL :: is_masked,is_neighbor
+LOGICAL :: is_masked,is_neighbor,mat_updated
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: near_closure,cell_mark
 LOGICAL, ALLOCATABLE, DIMENSION(:,:) :: dense_blocks
 REAL(8) :: corners_i(3,8),corners_j(3,8),rmin(3),elapsed_time,avg_size
@@ -1431,7 +1569,7 @@ ALLOCATE(self%dense_B_mats(self%ndense,3))
 ALLOCATE(self%aca_BU_mats(2*self%nsparse,3))
 ALLOCATE(self%aca_BV_mats(2*self%nsparse,3))
 ALLOCATE(self%aca_B_dense(2*self%nsparse,3))
-! WRITE(*,'(4X,A3)')' 0%'!WRITE(*,'(5X,A)',ADVANCE='NO')'['
+!
 WRITE(*,*)'  Building hole and Vcoil columns'
 IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
@@ -1440,9 +1578,12 @@ IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   self%tw_obj%Bdr=>self%Icoil_Bmat
 END IF
 !
+CALL read_from_file()
 WRITE(*,*)'  Building diagonal blocks'
 compressed_size=0
-!$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip) reduction(+:compressed_size)
+mat_updated=.FALSE.
+!$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip) reduction(+:compressed_size) &
+!$omp reduction(.OR.:mat_updated)
 !$omp single
 nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
@@ -1454,9 +1595,12 @@ DO i=1,self%ndense
   k = self%dense_blocks(3,i)
   !---Build full representation
   DO dim=1,3
-    ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
-    CALL tw_compute_Bops_block(self%tw_obj,self%dense_B_mats(i,dim)%M, &
-      self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim)
+    IF(.NOT.ASSOCIATED(self%dense_B_mats(i,dim)%M))THEN
+      mat_updated=.TRUE.
+      ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
+      CALL tw_compute_Bops_block(self%tw_obj,self%dense_B_mats(i,dim)%M, &
+        self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim)
+    END IF
   END DO
   compressed_size = compressed_size + 3*self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
   !$omp critical
@@ -1487,21 +1631,28 @@ DO i=1,self%nsparse
       j = self%sparse_blocks(3,i)
     END IF
     DO dim=1,3
-      !---Build full representation
-      size_out=-1
-      IF((self%B_aca_tol>0.d0).AND.ABS(self%levels(level)%mat_mask(j,k))==2)THEN
-      CALL aca_approx(ii,level,j,k,dim,self%B_aca_tol,size_out)
-      IF(size_out>0)CALL compress_aca(ii,level,j,k,dim,self%B_svd_tol,size_out)
-      IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%np, &
-        self%levels(level)%blocks(k)%nelems
-      END IF
-      !---IF ACA+ failed or diagonal compute dense matrix
-      IF(size_out<0)THEN
-        ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
-        CALL tw_compute_Bops_block(self%tw_obj,self%aca_B_dense(ii,dim)%M, &
-          self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim)
-        CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
-        ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
+      IF(ASSOCIATED(self%aca_B_dense(ii,dim)%M))THEN
+        size_out=self%levels(level)%blocks(k)%nelems*self%levels(level)%blocks(j)%nelems
+      ELSE IF(ASSOCIATED(self%aca_BU_mats(ii,dim)%M))THEN
+        size_out=SIZE(self%aca_BV_mats(ii,dim)%M,DIM=1)*(self%levels(level)%blocks(k)%nelems+self%levels(level)%blocks(j)%nelems)
+      ELSE
+        mat_updated=.TRUE.
+        !---Build full representation
+        size_out=-1
+        IF((self%B_aca_tol>0.d0).AND.ABS(self%levels(level)%mat_mask(j,k))==2)THEN
+        CALL aca_approx(ii,level,j,k,dim,self%B_aca_tol,size_out)
+        IF(size_out>0)CALL compress_aca(ii,level,j,k,dim,self%B_svd_tol,size_out)
+        IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%np, &
+          self%levels(level)%blocks(k)%nelems
+        END IF
+        !---IF ACA+ failed or diagonal compute dense matrix
+        IF(size_out<0)THEN
+          ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
+          CALL tw_compute_Bops_block(self%tw_obj,self%aca_B_dense(ii,dim)%M, &
+            self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim)
+          CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
+          ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
+        END IF
       END IF
       compressed_size = compressed_size + size_out
     END DO
@@ -1515,14 +1666,172 @@ DO i=1,self%nsparse
 END DO
 !$omp end parallel
 elapsed_time=mytimer%tock()
-! WRITE(*,'(3X,A4)')'100%'
-! WRITE(*,'(A)')'100%]'
 WRITE(*,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:', &
   compressed_size*1.d2/(3*REAL(self%tw_obj%np_active,8)*REAL(self%tw_obj%mesh%np,8)), &
   "%  (",REAL(compressed_size,8),"/",3*REAL(self%tw_obj%np_active,8)*REAL(self%tw_obj%mesh%np,8),")"
 WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
-! CALL oft_abort("","",__FILE__)
+!
+IF(mat_updated)CALL save_to_file()
 CONTAINS
+SUBROUTINE save_to_file()
+INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
+CHARACTER(LEN=1) :: dim_id
+CHARACTER(LEN=5) :: matrix_id
+!---Save computed matrix to file
+IF(TRIM(save_file)/='none')THEN
+  hash_tmp(1) = self%tw_obj%nelems
+  hash_tmp(2) = self%tw_obj%mesh%nc
+  hash_tmp(3) = self%ndense
+  hash_tmp(4) = self%nsparse
+  hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
+  hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
+  WRITE(*,*)'  Saving HODLR matrix from file: ',TRIM(save_file)
+  CALL hdf5_create_file(TRIM(save_file))
+  CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
+  !
+  hash_tmp(6)=0
+  DO i=1,self%ndense
+    level = self%dense_blocks(1,i)
+    j = self%dense_blocks(2,i)
+    k = self%dense_blocks(3,i)
+    hash_tmp(1:3) = [level,j,k]
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ipts),INT(4*self%levels(level)%blocks(j)%np,8))
+    hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+    WRITE(matrix_id,'(I5)')i
+    CALL hdf5_write(hash_tmp,TRIM(save_file),'DENSE_hash_'//TRIM(ADJUSTL(matrix_id)))
+    DO dim=1,3
+      WRITE(dim_id,'(I1)')dim
+      CALL hdf5_write(self%dense_B_mats(i,dim)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+    END DO
+  END DO
+  !
+  DO i=1,self%nsparse
+    level = self%sparse_blocks(1,i)
+    j = self%sparse_blocks(2,i)
+    k = self%sparse_blocks(3,i)
+    DO flip=1,2
+      ii=(i-1)*2+flip
+      IF(flip==2)THEN
+        k = self%sparse_blocks(2,i)
+        j = self%sparse_blocks(3,i)
+      END IF
+      WRITE(matrix_id,'(I5)')ii
+      DO dim=1,3
+        hash_tmp(1:3) = [level,j,k]
+        hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+        hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ipts),INT(4*self%levels(level)%blocks(k)%np,8))
+        WRITE(dim_id,'(I1)')dim
+        IF(ASSOCIATED(self%aca_B_dense(ii,dim)%M))THEN
+          hash_tmp(6)=-1
+          CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+          CALL hdf5_write(self%aca_B_dense(ii,dim)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+        ELSE
+          hash_tmp(6)=SIZE(self%aca_BV_mats(ii,dim)%M,DIM=1)
+          CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+          CALL hdf5_write(self%aca_BU_mats(ii,dim)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+          CALL hdf5_write(self%aca_BV_mats(ii,dim)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+        END IF
+      END DO
+    END DO
+  END DO
+  ! TODO: Save create appropriate hash to enable saving coil matrices
+  ! WRITE(io_unit)hash_tmp
+  ! WRITE(io_unit)self%hole_Vcoil_mat%M
+  ! CLOSE(io_unit)
+END IF
+END SUBROUTINE save_to_file
+SUBROUTINE read_from_file()
+INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
+LOGICAL :: exists
+CHARACTER(LEN=1) :: dim_id
+CHARACTER(LEN=5) :: matrix_id
+!---Try to load from file
+IF(TRIM(save_file)/='none')THEN
+  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
+  IF(exists)THEN
+    hash_tmp(1) = self%tw_obj%nelems
+    hash_tmp(2) = self%tw_obj%mesh%nc
+    hash_tmp(3) = self%ndense
+    hash_tmp(4) = self%nsparse
+    hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
+    hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
+    WRITE(*,*)'  Reading HODLR matrix from file: ',TRIM(save_file)
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
+    ! OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
+    ! READ(io_unit, IOSTAT=ierr)file_counts
+    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+      hash_tmp(6)=0
+      DO i=1,self%ndense
+        level = self%dense_blocks(1,i)
+        j = self%dense_blocks(2,i)
+        k = self%dense_blocks(3,i)
+        hash_tmp(1:3) = [level,j,k]
+        hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ipts),INT(4*self%levels(level)%blocks(j)%np,8))
+        hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
+        WRITE(matrix_id,'(I5)')i
+        CALL hdf5_read(file_counts,TRIM(save_file),'DENSE_hash_'//TRIM(ADJUSTL(matrix_id)),success=exists)
+        ! READ(io_unit, IOSTAT=ierr)file_counts
+        IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+          DO dim=1,3
+            ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
+            WRITE(dim_id,'(I1)')dim
+            CALL hdf5_read(self%dense_B_mats(i,dim)%M,TRIM(save_file),'DENSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id,success=exists)
+            ! READ(io_unit, IOSTAT=ierr)self%dense_B_mats(i,dim)%M
+            IF(.NOT.exists)DEALLOCATE(self%dense_B_mats(i,dim)%M)
+          END DO
+        END IF
+      END DO
+      !
+      DO i=1,self%nsparse
+        level = self%sparse_blocks(1,i)
+        j = self%sparse_blocks(2,i)
+        k = self%sparse_blocks(3,i)
+        DO flip=1,2
+          ii=(i-1)*2+flip
+          IF(flip==2)THEN
+            k = self%sparse_blocks(2,i)
+            j = self%sparse_blocks(3,i)
+          END IF
+          WRITE(matrix_id,'(I5)')ii
+          DO dim=1,3
+            WRITE(dim_id,'(I1)')dim
+            hash_tmp(1:3) = [level,j,k]
+            hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(level)%blocks(j)%ielem),INT(4*self%levels(level)%blocks(j)%nelems,8))
+            hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ipts),INT(4*self%levels(level)%blocks(k)%np,8))
+            CALL hdf5_read(file_counts,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id,success=exists)
+            ! READ(io_unit, IOSTAT=ierr)file_counts
+            IF(exists.AND.ALL(file_counts(1:5)==hash_tmp(1:5)))THEN
+              IF(file_counts(6)<0)THEN
+                ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
+                CALL hdf5_read(self%aca_B_dense(ii,dim)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id,success=exists)
+                ! READ(io_unit, IOSTAT=ierr)self%aca_B_dense(ii,dim)%M
+                IF(.NOT.exists)DEALLOCATE(self%aca_B_dense(ii,dim)%M)
+              ELSE
+                ALLOCATE(self%aca_BU_mats(ii,dim)%M(self%levels(level)%blocks(k)%np,file_counts(6)))
+                CALL hdf5_read(self%aca_BU_mats(ii,dim)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id,success=exists)
+                ! READ(io_unit, IOSTAT=ierr)self%aca_BU_mats(ii,dim)%M
+                IF(.NOT.exists)THEN
+                  DEALLOCATE(self%aca_BU_mats(ii,dim)%M)
+                ELSE
+                  ALLOCATE(self%aca_BV_mats(ii,dim)%M(file_counts(6),self%levels(level)%blocks(j)%nelems))
+                  CALL hdf5_read(self%aca_BV_mats(ii,dim)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id,success=exists)
+                  ! READ(io_unit, IOSTAT=ierr)self%aca_BV_mats(ii,dim)%M
+                  IF(.NOT.exists)DEALLOCATE(self%aca_BU_mats(ii,dim)%M,self%aca_BV_mats(ii,dim)%M)
+                END IF
+              END IF
+            END IF
+          END DO
+        END DO
+      END DO
+      ! CLOSE(io_unit)
+    ELSE
+      WRITE(*,*)'  Ignoring stored matrix: Model hashes do not match'
+      ! CLOSE(io_unit)
+    END IF
+  END IF
+END IF
+END SUBROUTINE read_from_file
+!
 SUBROUTINE compress_block(isparse,iblock,jblock,dim,tol,size_out)
 INTEGER(4), INTENT(in) :: isparse,iblock,jblock,dim
 REAL(8), INTENT(in) :: tol

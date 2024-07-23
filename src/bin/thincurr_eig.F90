@@ -231,12 +231,12 @@ IF(compute_B)THEN
   tw_hodlr%tw_obj=>self
   CALL tw_hodlr%setup(.FALSE.)
   IF(tw_hodlr%B_svd_tol>0.d0)THEN
-    CALL tw_hodlr%compute_B()
+    IF(.NOT.ASSOCIATED(tw_hodlr%aca_B_dense))CALL tw_hodlr%compute_B()
     CALL self%Uloc_pts%new(Bx)
     CALL self%Uloc_pts%new(By)
     CALL self%Uloc_pts%new(Bz)
   ELSE
-    CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
   END IF
 END IF
 DO i=1,neigs
