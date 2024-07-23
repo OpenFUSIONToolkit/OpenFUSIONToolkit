@@ -717,9 +717,9 @@ NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,L_svd_tol,L_aca
   B_svd_tol,B_aca_rel_tol
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
-    WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
-    CALL oft_abort( &
-  "HODLR not supported with periodic grids","tw_hodlr_setup",__FILE__)
+  WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
+  CALL oft_abort( &
+    "HODLR not supported with periodic grids","tw_hodlr_setup",__FILE__)
 END IF
 !---
 OPEN(NEWUNIT=io_unit, FILE=oft_env%ifile)
@@ -751,67 +751,67 @@ WRITE(*,*)'Partitioning grid for block low rank compressed operators'
 CALL tw_part_mesh(self%tw_obj,self%leaf_target,self%nlevels,self%levels)
 sparse_count=0
 DO i=1,self%nlevels
-    ! WRITE(*,*)i,self%levels(i)%nblocks
-    ALLOCATE(self%levels(i)%mat_mask(self%levels(i)%nblocks,self%levels(i)%nblocks))
-    self%levels(i)%mat_mask = 0
-    IF(i>1)THEN
+  ! WRITE(*,*)i,self%levels(i)%nblocks
+  ALLOCATE(self%levels(i)%mat_mask(self%levels(i)%nblocks,self%levels(i)%nblocks))
+  self%levels(i)%mat_mask = 0
+  IF(i>1)THEN
     DO j=1,self%levels(i)%nblocks
-        DO k=1,self%levels(i)%nblocks
+      DO k=1,self%levels(i)%nblocks
         IF(self%levels(i-1)%mat_mask(self%levels(i)%blocks(j)%parent,self%levels(i)%blocks(k)%parent)/=0)THEN
-            ! WRITE(*,*)'Masking',i,j,k
-            self%levels(i)%mat_mask(j,k)=-1
-            self%levels(i)%mat_mask(k,j)=-1
+          ! WRITE(*,*)'Masking',i,j,k
+          self%levels(i)%mat_mask(j,k)=-1
+          self%levels(i)%mat_mask(k,j)=-1
         END IF
-        END DO
+      END DO
     END DO
-    END IF
-    DO j=1,self%levels(i)%nblocks
+  END IF
+  DO j=1,self%levels(i)%nblocks
     DO k=j+1,self%levels(i)%nblocks
-        ! WRITE(*,*)i,j,k,magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center), &
-        ! (self%levels(i)%blocks(j)%extent+self%levels(i)%blocks(k)%extent)
-        IF(self%levels(i)%mat_mask(j,k)/=0)CYCLE
-        IF(magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center)/ &
+      ! WRITE(*,*)i,j,k,magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center), &
+      ! (self%levels(i)%blocks(j)%extent+self%levels(i)%blocks(k)%extent)
+      IF(self%levels(i)%mat_mask(j,k)/=0)CYCLE
+      IF(magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center)/ &
         (self%levels(i)%blocks(j)%extent+self%levels(i)%blocks(k)%extent) > 1.1d0)THEN
-            self%levels(i)%mat_mask(j,k)=2
-            self%levels(i)%mat_mask(k,j)=-2
-        ELSE IF(i==self%nlevels)THEN
-            IF(magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center)/ &
-            (self%levels(i)%blocks(j)%extent+self%levels(i)%blocks(k)%extent) > 1.1d0)THEN
-                self%levels(i)%mat_mask(j,k)=2
-                self%levels(i)%mat_mask(k,j)=-2
-            ELSE
-                self%levels(i)%mat_mask(j,k)=3
-                self%levels(i)%mat_mask(k,j)=-3
-            END IF
+        self%levels(i)%mat_mask(j,k)=2
+        self%levels(i)%mat_mask(k,j)=-2
+      ELSE IF(i==self%nlevels)THEN
+        IF(magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center)/ &
+          (self%levels(i)%blocks(j)%extent+self%levels(i)%blocks(k)%extent) > 1.1d0)THEN
+          self%levels(i)%mat_mask(j,k)=2
+          self%levels(i)%mat_mask(k,j)=-2
+        ELSE
+          self%levels(i)%mat_mask(j,k)=3
+          self%levels(i)%mat_mask(k,j)=-3
         END IF
+      END IF
     END DO
     IF(i==self%nlevels)self%levels(i)%mat_mask(j,j)=1
-    END DO
-    counts(1) = SUM(COUNT(self%levels(i)%mat_mask==0,DIM=1))
-    counts(2) = SUM(COUNT(self%levels(i)%mat_mask==1,DIM=1))
-    counts(3) = SUM(COUNT(self%levels(i)%mat_mask==2,DIM=1))
-    counts(4) = SUM(COUNT(self%levels(i)%mat_mask==3,DIM=1))
-    ! WRITE(*,*)'  ',counts
-    self%ndense=self%ndense+counts(2)
-    self%nsparse=self%nsparse+counts(3)+counts(4)
-    sparse_count=sparse_count+counts(3:4)
+  END DO
+  counts(1) = SUM(COUNT(self%levels(i)%mat_mask==0,DIM=1))
+  counts(2) = SUM(COUNT(self%levels(i)%mat_mask==1,DIM=1))
+  counts(3) = SUM(COUNT(self%levels(i)%mat_mask==2,DIM=1))
+  counts(4) = SUM(COUNT(self%levels(i)%mat_mask==3,DIM=1))
+  ! WRITE(*,*)'  ',counts
+  self%ndense=self%ndense+counts(2)
+  self%nsparse=self%nsparse+counts(3)+counts(4)
+  sparse_count=sparse_count+counts(3:4)
 END DO
 ! WRITE(*,*)self%ndense,self%nsparse
 ALLOCATE(self%dense_blocks(3,self%ndense),self%sparse_blocks(3,self%nsparse))
 self%ndense=0
 self%nsparse=0
 DO i=1,self%nlevels
-    DO j=1,self%levels(i)%nblocks
+  DO j=1,self%levels(i)%nblocks
     DO k=1,self%levels(i)%nblocks
-        IF(self%levels(i)%mat_mask(j,k)==1)THEN
+      IF(self%levels(i)%mat_mask(j,k)==1)THEN
         self%ndense=self%ndense+1
         self%dense_blocks(:,self%ndense)=[i,j,k]
-        ELSE IF(self%levels(i)%mat_mask(j,k)>=2)THEN
+      ELSE IF(self%levels(i)%mat_mask(j,k)>=2)THEN
         self%nsparse=self%nsparse+1
         self%sparse_blocks(:,self%nsparse)=[i,j,k]
-        END IF
+      END IF
     END DO
-    END DO
+  END DO
 END DO
 ! WRITE(*,*)self%ndense,self%nsparse
 ! CALL oft_abort("","",__FILE__)
@@ -822,13 +822,13 @@ ALLOCATE(point_block(self%tw_obj%mesh%np))
 point_block=0.d0
 avg_size=0.d0
 DO i=1,self%nblocks
-    avg_size=avg_size+self%blocks(i)%nelems
-    ! DO j=1,self%blocks(i)%nelems
-    !     point_block(self%tw_obj%lpmap_inv(self%blocks(i)%ielem))=i*1.d0
-    ! END DO
-    DO j=1,self%blocks(i)%np
-        point_block(self%blocks(i)%ipts)=i*1.d0
-    END DO
+  avg_size=avg_size+self%blocks(i)%nelems
+  ! DO j=1,self%blocks(i)%nelems
+  !     point_block(self%tw_obj%lpmap_inv(self%blocks(i)%ielem))=i*1.d0
+  ! END DO
+  DO j=1,self%blocks(i)%np
+    point_block(self%blocks(i)%ipts)=i*1.d0
+  END DO
 END DO
 WRITE(*,*)'  Avg block size = ',INT(avg_size/REAL(self%nblocks,8),4)
 IF(self%L_aca_tol<=0.d0)THEN
@@ -839,34 +839,34 @@ WRITE(*,*)'  # of ACA =       ',sparse_count(1)
 CALL self%tw_obj%mesh%save_vertex_scalar(point_block, 'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
 DO j=1,self%nlevels
-    DO i=1,self%levels(j)%nblocks
+  DO i=1,self%levels(j)%nblocks
     IF(oft_debug_print(1))WRITE(*,*)i,self%levels(j)%blocks(i)%nelems
     !
     IF(ASSOCIATED(self%levels(j)%blocks(i)%inv_map))CYCLE
     ALLOCATE(self%levels(j)%blocks(i)%inv_map(self%tw_obj%mesh%np))
     self%levels(j)%blocks(i)%inv_map = 0
     DO l=1,self%levels(j)%blocks(i)%nelems
-        k=self%tw_obj%lpmap_inv(self%levels(j)%blocks(i)%ielem(l))
-        self%levels(j)%blocks(i)%inv_map(k)=l
+      k=self%tw_obj%lpmap_inv(self%levels(j)%blocks(i)%ielem(l))
+      self%levels(j)%blocks(i)%inv_map(k)=l
     END DO
     !
     cell_mark=.FALSE.
     DO l=1,self%levels(j)%blocks(i)%nelems
-        pind_j = self%tw_obj%lpmap_inv(self%levels(j)%blocks(i)%ielem(l))
-        DO k=self%tw_obj%mesh%kpc(pind_j),self%tw_obj%mesh%kpc(pind_j+1)-1
+      pind_j = self%tw_obj%lpmap_inv(self%levels(j)%blocks(i)%ielem(l))
+      DO k=self%tw_obj%mesh%kpc(pind_j),self%tw_obj%mesh%kpc(pind_j+1)-1
         cell_mark(self%tw_obj%mesh%lpc(k))=.TRUE.
-        END DO
+      END DO
     END DO
     self%levels(j)%blocks(i)%ncells=COUNT(cell_mark)
     ALLOCATE(self%levels(j)%blocks(i)%icell(self%levels(j)%blocks(i)%ncells))
     self%levels(j)%blocks(i)%ncells=0
     DO l=1,self%tw_obj%mesh%nc
-        IF(cell_mark(l))THEN
+      IF(cell_mark(l))THEN
         self%levels(j)%blocks(i)%ncells=self%levels(j)%blocks(i)%ncells+1
         self%levels(j)%blocks(i)%icell(self%levels(j)%blocks(i)%ncells)=l
-        END IF
+      END IF
     END DO
-    END DO
+  END DO
 END DO
 DEALLOCATE(cell_mark)
 END SUBROUTINE tw_hodlr_setup
@@ -889,8 +889,7 @@ TYPE(oft_native_dense_matrix), POINTER :: mat_tmp => NULL()
 type(oft_timer) :: mytimer
 WRITE(*,*)'Building block low rank inductance operator'
 IF(self%L_svd_tol<0.d0)CALL oft_abort('"L_svd_tol" must be > 0','tw_Lmat_MF_Lcompute',__FILE__)
-!---Build matrix with SVD compression of off-diagonal blocks
-! approximation with ACA+ planned
+!---Build matrix with ACA+ or SVD compression of off-diagonal blocks
 CALL mytimer%tick()
 ALLOCATE(self%dense_mats(self%ndense))
 ALLOCATE(self%aca_U_mats(self%nsparse))
@@ -912,13 +911,8 @@ DO i=1,self%ndense
   !---Build full representation
   ALLOCATE(self%dense_mats(i)%M(self%levels(level)%blocks(j)%nelems,self%levels(level)%blocks(k)%nelems))
   CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%dense_mats(i)%M, &
-  self%levels(level)%blocks(k),self%levels(level)%blocks(j))
+    self%levels(level)%blocks(k),self%levels(level)%blocks(j))
   compressed_size = compressed_size + self%levels(level)%blocks(j)%nelems*self%levels(level)%blocks(k)%nelems
-!  avg_size = 0.d0
-!  DO k=1,self%levels(level)%blocks(j)%nelems
-!    avg_size = avg_size + self%dense_mats(i)%M(k,k)**2
-!  END DO
-!  WRITE(*,*)i,avg_size
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
@@ -954,7 +948,6 @@ DO i=1,self%nsparse
   CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%aca_dense(i)%M, &
     self%levels(level)%blocks(j),self%levels(level)%blocks(k))
   CALL compress_block(i,self%L_svd_tol,size_out)
-  ! size_out = self%levels(level)%blocks(j)%nelems*self%levels(level)%blocks(k)%nelems
   END IF
   compressed_size = compressed_size + size_out
   !$omp critical
@@ -966,17 +959,14 @@ DO i=1,self%nsparse
 END DO
 !$omp end parallel
 elapsed_time=mytimer%tock()
-! WRITE(*,'(3X,A4)')'100%'
-! WRITE(*,'(A)')'100%]'
 WRITE(*,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:',compressed_size*1.d2/(REAL(self%tw_obj%np_active,8)**2), &
     "%  (",REAL(compressed_size,8),"/",REAL(self%tw_obj%np_active,8)**2,")"
 WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
-! CALL oft_abort("","",__FILE__)
 !
 WRITE(*,*)'  Building hole and Vcoil columns'
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
-    ALLOCATE(self%hole_Vcoil_mat%M(self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils))
-    CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
+  ALLOCATE(self%hole_Vcoil_mat%M(self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils))
+  CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
 END IF
 CONTAINS
 SUBROUTINE compress_block(isparse,tol,size_out)

@@ -582,8 +582,8 @@ DO j=1,ncoils
   gg = REAL(vec_comp_dot(ncoils,r,r),8)
   uu = REAL(vec_comp_dot(ncoils,u,u),8)
   IF(pm)WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
-  IF(its==-1.AND.sqrt(gg/uu)<1.d-10)EXIT
-  IF(its==-2.AND.sqrt(gg/uu)<1.d-15)EXIT
+  IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
+  IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
   IF(nits==its)EXIT
   IF(uu==uuold)EXIT
 END DO
