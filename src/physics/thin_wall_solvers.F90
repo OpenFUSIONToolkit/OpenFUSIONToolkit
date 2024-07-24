@@ -713,7 +713,7 @@ IF(.NOT.direct)THEN
   CALL create_cg_solver(linv)
   linv%A=>fmat
   linv%its=-2
-  linv%rtol=lin_tol
+  linv%atol=lin_tol
   IF(PRESENT(hodlr_op))THEN
     linv_pre%mf_obj=>hodlr_op
     linv_pre%Rmat=>self%Rmat
