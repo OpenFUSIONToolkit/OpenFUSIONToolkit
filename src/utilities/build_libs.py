@@ -52,7 +52,8 @@ def fetch_file(url, file):
     # Download file from url
     try:
         if PY3K:
-            response = urllib.request.urlopen(url)
+            req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"}) 
+            response = urllib.request.urlopen(req)
             resolved_url = response.geturl()
             if resolved_url != url: # Handle redirects
                 response = urllib.request.urlopen(resolved_url)
@@ -61,7 +62,8 @@ def fetch_file(url, file):
             except:
                 file_size = -1
         else:
-            response = urllib.urlopen(url)
+            req = urllib.Request(url, headers={'User-Agent' : "Magic Browser"})
+            response = urllib.urlopen(req)
             resolved_url = response.geturl()
             if resolved_url != url: # Handle redirects
                 response = urllib.request.urlopen(resolved_url)
@@ -928,6 +930,7 @@ class NETCDF(package):
     def __init__(self, comp_wrapper=False):
         self.name = "NETCDF"
         self.url = "https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.6.2.tar.gz"
+        self.build_dir = "netcdf-c-4.6.2"
         self.install_dir = "netcdf-4_6_2"
         self.comp_wrapper = comp_wrapper
         self.children = [NETCDF_Fortran(comp_wrapper)]
@@ -995,6 +998,7 @@ class NETCDF_Fortran(package):
     def __init__(self, comp_wrapper=False):
         self.name = "NETCDF_Fortran"
         self.url = "https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.4.4.tar.gz"
+        self.build_dir = "netcdf-fortran-4.4.4"
         self.install_dir = "netcdf-4_6_2"
         self.comp_wrapper = comp_wrapper
 
@@ -1236,6 +1240,7 @@ class ARPACK(package):
     def __init__(self, parallel=False, link_omp=False):
         self.name = "ARPACK"
         self.url = "https://github.com/opencollab/arpack-ng/archive/refs/tags/3.5.0.tar.gz"
+        self.build_dir = "arpack-ng-3.5.0"
         self.parallel = parallel
         self.link_omp = link_omp
 
@@ -1318,6 +1323,7 @@ class SUPERLU(package):
     def __init__(self, comp_wrapper=False):
         self.name = "SUPERLU"
         self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v5.2.0.tar.gz"
+        self.build_dir = 'superlu-5.2.0'
         self.libname = '-lsuperlu'
         self.libpath = 'libsuperlu.a'
         self.comp_wrapper = comp_wrapper
@@ -1506,7 +1512,7 @@ class FOX(package):
     def __init__(self):
         self.name = "FOX"
         self.url = "https://github.com/andreww/fox/archive/refs/tags/4.1.2.tar.gz"
-        self.build_dir = "FoX-4.1.2"
+        self.build_dir = "fox-4.1.2"
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
