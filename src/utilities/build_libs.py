@@ -727,7 +727,7 @@ class CMAKE(package):
 class METIS(package):
     def __init__(self, comp_wrapper=False):
         self.name = "METIS"
-        self.url = "https://www.columbia.edu/~cjh2199/libs/metis-5.1.0-mod.tar.gz"
+        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/metis-5.1.0-mod.tar.gz"
         self.build_dir = "metis-5.1.0"
         self.comp_wrapper = comp_wrapper
 
@@ -1553,7 +1553,7 @@ class FOX(package):
 class ONURBS(package):
     def __init__(self):
         self.name = "ONURBS"
-        self.url = "https://www.columbia.edu/~cjh2199/libs/opennurbs-5.0.tar.gz"
+        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/opennurbs-5.0.tar.gz"
         self.install_dir = "opennurbs-5_0"
 
     def setup(self, config_dict):
