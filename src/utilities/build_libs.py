@@ -52,7 +52,8 @@ def fetch_file(url, file):
     # Download file from url
     try:
         if PY3K:
-            response = urllib.request.urlopen(url)
+            req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"}) 
+            response = urllib.request.urlopen(req)
             resolved_url = response.geturl()
             if resolved_url != url: # Handle redirects
                 response = urllib.request.urlopen(resolved_url)
@@ -61,7 +62,8 @@ def fetch_file(url, file):
             except:
                 file_size = -1
         else:
-            response = urllib.urlopen(url)
+            req = urllib.Request(url, headers={'User-Agent' : "Magic Browser"})
+            response = urllib.urlopen(req)
             resolved_url = response.geturl()
             if resolved_url != url: # Handle redirects
                 response = urllib.request.urlopen(resolved_url)
@@ -725,7 +727,7 @@ class CMAKE(package):
 class METIS(package):
     def __init__(self, comp_wrapper=False):
         self.name = "METIS"
-        self.url = "http://faculty.washington.edu/hansec/libs/metis-5.1.0-mod.tar.gz"
+        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/metis-5.1.0-mod.tar.gz"
         self.build_dir = "metis-5.1.0"
         self.comp_wrapper = comp_wrapper
 
@@ -788,7 +790,7 @@ class METIS(package):
 class MPI(package):
     def __init__(self):
         self.name = "MPI"
-        self.url = "http://faculty.washington.edu/hansec/libs/mpich-3.3.2.tar.gz"
+        self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
         self.build_timeout = 20
 
     def setup(self, config_dict):
@@ -927,7 +929,8 @@ class HDF5(package):
 class NETCDF(package):
     def __init__(self, comp_wrapper=False):
         self.name = "NETCDF"
-        self.url = "http://faculty.washington.edu/hansec/libs/netcdf-c-4.6.2.tar.gz"
+        self.url = "https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.6.2.tar.gz"
+        self.build_dir = "netcdf-c-4.6.2"
         self.install_dir = "netcdf-4_6_2"
         self.comp_wrapper = comp_wrapper
         self.children = [NETCDF_Fortran(comp_wrapper)]
@@ -994,7 +997,8 @@ class NETCDF(package):
 class NETCDF_Fortran(package):
     def __init__(self, comp_wrapper=False):
         self.name = "NETCDF_Fortran"
-        self.url = "http://faculty.washington.edu/hansec/libs/netcdf-fortran-4.4.4.tar.gz"
+        self.url = "https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.4.4.tar.gz"
+        self.build_dir = "netcdf-fortran-4.4.4"
         self.install_dir = "netcdf-4_6_2"
         self.comp_wrapper = comp_wrapper
 
@@ -1164,7 +1168,7 @@ class MKL(package):
 class BLAS_LAPACK(package):
     def __init__(self, comp_wrapper=False, blas_lib_path=None, lapack_lib_path=None):
         self.name = "BLAS_LAPACK"
-        self.url = "http://faculty.washington.edu/hansec/libs/lapack-3.5.0.tgz"
+        self.url = "http://www.netlib.org/lapack/lapack-3.5.0.tgz"
         self.comp_wrapper = comp_wrapper
         self.blas_lib_path = blas_lib_path
         self.lapack_lib_path = lapack_lib_path
@@ -1235,7 +1239,8 @@ class BLAS_LAPACK(package):
 class ARPACK(package):
     def __init__(self, parallel=False, link_omp=False):
         self.name = "ARPACK"
-        self.url = "http://faculty.washington.edu/hansec/libs/arpack-ng-3.5.0.tar.gz"
+        self.url = "https://github.com/opencollab/arpack-ng/archive/refs/tags/3.5.0.tar.gz"
+        self.build_dir = "arpack-ng-3.5.0"
         self.parallel = parallel
         self.link_omp = link_omp
 
@@ -1317,7 +1322,8 @@ class ARPACK(package):
 class SUPERLU(package):
     def __init__(self, comp_wrapper=False):
         self.name = "SUPERLU"
-        self.url = "http://faculty.washington.edu/hansec/libs/SuperLU_5.2.0.tar.gz"
+        self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v5.2.0.tar.gz"
+        self.build_dir = 'superlu-5.2.0'
         self.libname = '-lsuperlu'
         self.libpath = 'libsuperlu.a'
         self.comp_wrapper = comp_wrapper
@@ -1505,8 +1511,8 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
 class FOX(package):
     def __init__(self):
         self.name = "FOX"
-        self.url = "http://faculty.washington.edu/hansec/libs/FoX-4.1.2-dom.tar.gz"
-        self.build_dir = "FoX-4.1.2"
+        self.url = "https://github.com/andreww/fox/archive/refs/tags/4.1.2.tar.gz"
+        self.build_dir = "fox-4.1.2"
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1547,7 +1553,7 @@ class FOX(package):
 class ONURBS(package):
     def __init__(self):
         self.name = "ONURBS"
-        self.url = "http://faculty.washington.edu/hansec/libs/opennurbs-5.0.tar.gz"
+        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/opennurbs-5.0.tar.gz"
         self.install_dir = "opennurbs-5_0"
 
     def setup(self, config_dict):
