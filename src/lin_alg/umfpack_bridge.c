@@ -38,6 +38,7 @@ oft_umfpack_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
   int status = 0;
   double Info [UMFPACK_INFO];
   factors_t *LUfactors;
+  bool refactor;
 
     if ( *iopt == 1 || *iopt == 3 ) { /* Perform full factorization */
 
@@ -48,17 +49,25 @@ oft_umfpack_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
         umfpack_di_defaults( LUfactors->Control);
         LUfactors->Control[UMFPACK_IRSTEP] = 0;
         *f_factors = LUfactors;
+        refactor = false;
       } else {
         LUfactors = *f_factors;
+        refactor = true;
       }
 
       // Perform factorization
       if ( *iopt == 1 ) {
+        if (refactor) {
+          umfpack_di_free_symbolic( &LUfactors->Symbolic);
+        }
         status = umfpack_di_symbolic( *n, *n, rowptr, colind, values, &LUfactors->Symbolic, LUfactors->Control, Info);
         if ( status != 0 ){
           *info = status;
           return;
         }
+      }
+      if (refactor) {
+        umfpack_di_free_numeric( &LUfactors->Numeric);
       }
       status = umfpack_di_numeric( rowptr, colind, values, LUfactors->Symbolic, &LUfactors->Numeric, LUfactors->Control, Info);
       *info = status;
