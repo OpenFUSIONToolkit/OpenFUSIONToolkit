@@ -1048,6 +1048,18 @@ class TokaMaker():
         '''! Update settings after changes to values in python'''
         tokamaker_set_settings(ctypes.byref(self.settings))
     
+    def area_integral(field,reg_mask=-1):
+        r'''! Compute area integral of field over a specified region
+
+        @param field Field to integrate [np,]
+        @param reg_mask ID of region for integration (negative for whole mesh)
+        @result \f$ \int f dA \f$
+        '''
+        result = c_double(0.0)
+        field = numpy.ascontiguousarray(field, dtype=numpy.float64)
+        tokamaker_area_int(field,c_int(reg_mask),ctypes.byref(result))
+        return result.value
+
     def plot_machine(self,fig,ax,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
                      coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',colorbar=None):
         '''! Plot machine geometry
