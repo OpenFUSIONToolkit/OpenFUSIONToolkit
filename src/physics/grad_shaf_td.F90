@@ -688,7 +688,7 @@ NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
 CALL a%get_local(pol_vals)
 !---
 self%gs_eq%psi=>a ! HERE
-CALL gs_update_bounds(self%gs_eq)
+CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 !
 self%F%plasma_bounds=self%gs_eq%plasma_bounds
 self%P%plasma_bounds=self%gs_eq%plasma_bounds
@@ -970,7 +970,7 @@ NULLIFY(pol_vals)
 CALL a%get_local(pol_vals)
 !---Update plasma boundary
 self%gs_eq%psi=>a
-CALL gs_update_bounds(self%gs_eq)
+CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 allocate(lim_weights(oft_blagrange%nce))
 cell=0
 CALL bmesh_findcell(smesh,cell,self%gs_eq%lim_point,ftmp)
@@ -1132,7 +1132,7 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Update plasma boundary
 self%gs_eq%psi=>a
-CALL gs_update_bounds(self%gs_eq)
+CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 allocate(bnd_nodes(2*oft_blagrange%nce),lim_weights(oft_blagrange%nce),ax_weights(oft_blagrange%nce))
 IF(include_bounds)THEN
     cell=0
