@@ -17,6 +17,14 @@ thincurr_setup = ctypes_subroutine(oftpy_lib.thincurr_setup,
 thincurr_setup_io = ctypes_subroutine(oftpy_lib.thincurr_setup_io,
     [c_void_p, c_char_p, c_bool, c_char_p])
 
+# thincurr_recon_curr(tw_ptr,vals,curr,format)
+thincurr_recon_curr = ctypes_subroutine(oftpy_lib.thincurr_recon_curr,
+    [c_void_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,2), c_int])
+
+# thincurr_recon_field(tw_ptr,pot,coils,field,hodlr_ptr)
+thincurr_recon_field = ctypes_subroutine(oftpy_lib.thincurr_recon_field,
+    [c_void_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,2), c_void_p])
+
 # ThinCurr save current potential field (tw_ptr,vals,fieldname)
 thincurr_save_field = ctypes_subroutine(oftpy_lib.thincurr_save_field,
     [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
@@ -37,9 +45,13 @@ thincurr_cross_coupling = ctypes_subroutine(oftpy_lib.thincurr_cross_coupling,
 thincurr_cross_eval = ctypes_subroutine(oftpy_lib.thincurr_cross_eval,
     [c_void_p, c_void_p, c_int, ctypes_numpy_array(float64,2), ctypes_numpy_array(float64,2), c_char_p])
 
-# Compute model inductance matrix thincurr_curr_Lmat(tw_ptr,Lmat,error_str)
-thincurr_curr_Lmat = ctypes_subroutine(oftpy_lib.thincurr_Lmat,
+# Compute model inductance matrix thincurr_Lmat(tw_ptr,Lmat,error_str)
+thincurr_Lmat = ctypes_subroutine(oftpy_lib.thincurr_Lmat,
     [c_void_p, c_bool, c_void_ptr_ptr, c_char_p, c_char_p])
+
+# thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str)
+thincurr_Bmat = ctypes_subroutine(oftpy_lib.thincurr_Bmat,
+    [c_void_p, c_void_p, c_void_ptr_ptr, c_void_ptr_ptr, c_char_p, c_char_p])
 
 # thincurr_Mcoil(tw_ptr,Mc_ptr,cache_file,error_str)
 thincurr_Mcoil = ctypes_subroutine(oftpy_lib.thincurr_Mcoil,
@@ -65,12 +77,16 @@ thincurr_eigenvalues = ctypes_subroutine(oftpy_lib.thincurr_eigenvalues,
 thincurr_freq_response = ctypes_subroutine(oftpy_lib.thincurr_freq_response,
     [c_void_p, c_bool, c_int, c_double, ctypes_numpy_array(float64,2), c_void_p, c_char_p])
 
-# thincurr_time_domain(tw_ptr,direct,dt,nsteps,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str)
+# thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str)
 thincurr_time_domain = ctypes_subroutine(oftpy_lib.thincurr_time_domain,
-    [c_void_p, c_bool, c_double, c_int, c_int, c_int, ctypes_numpy_array(float64,1), c_void_p, c_int, ctypes_numpy_array(float64,2), c_int,
+    [c_void_p, c_bool, c_double, c_int, c_double, c_bool, c_int, c_int, ctypes_numpy_array(float64,1), c_void_p, c_int, ctypes_numpy_array(float64,2), c_int,
      ctypes_numpy_array(float64,2), c_void_p, c_char_p])
 
-# thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,hodlr_ptr,error_str)
+# thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot,sensor_ptr,hodlr_ptr,error_str)
+thincurr_time_domain_plot = ctypes_subroutine(oftpy_lib.thincurr_time_domain_plot,
+    [c_void_p, c_bool, c_bool, c_int, c_int, c_void_p, c_void_p, c_char_p])
+
+# thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,compute_B,sensor_ptr,hodlr_ptr,error_str)
 thincurr_reduce_model = ctypes_subroutine(oftpy_lib.thincurr_reduce_model,
-    [c_void_p, c_char_p, c_int, ctypes_numpy_array(float64,2), c_void_p, c_void_p, c_char_p])
+    [c_void_p, c_char_p, c_int, ctypes_numpy_array(float64,2), c_bool, c_void_p, c_void_p, c_char_p])
 ## @endcond

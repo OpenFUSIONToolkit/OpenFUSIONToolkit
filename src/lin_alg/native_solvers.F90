@@ -739,8 +739,8 @@ do j=1,u%ng
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
-  IF(its==-1.AND.sqrt(gg/uu)<1.d-10)EXIT
-  IF(its==-2.AND.sqrt(gg/uu)<1.d-15)EXIT
+  IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
+  IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
   IF(SQRT(gg)<self%atol)EXIT
   IF(SQRT(gg/ggin)<self%rtol)EXIT
   IF(nits==its)EXIT
@@ -1007,8 +1007,8 @@ do j=1,u%ng
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
-  IF(its==-1.AND.sqrt(gg/uu)<1.d-10)EXIT
-  IF(its==-2.AND.sqrt(gg/uu)<1.d-15)EXIT
+  IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
+  IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
   IF(SQRT(gg)<self%atol)EXIT
   IF(SQRT(gg/ggin)<self%rtol)EXIT
   IF(nits==its)EXIT

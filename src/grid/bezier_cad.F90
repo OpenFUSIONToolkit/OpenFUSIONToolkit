@@ -338,7 +338,7 @@ do i=1,40
   call cad_curve_eval(self,rt,u+du,v)
   val(3)=sqrt(sum((pt-rt)**2))
   !---Prevent divide by zero
-  if(abs(val(3)-val(1))<1.d-15)then
+  if(abs(val(3)-val(1))<1.d-14)then
     u=u-du/2
     cycle
   endif
@@ -570,7 +570,7 @@ do i=1,3000
   val(3)=sqrt(sum((pt-rt)**2))
   grad(2)=(val(3)-val(1))/(2*du)
   !---Prevent divide by zero
-  if(sum(grad**2)<1.d-15)then
+  if(sum(grad**2)<1.d-14)then
     u=u-du/2.d0
     v=v-du/2.d0
     cycle

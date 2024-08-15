@@ -22,10 +22,11 @@ USE oft_la_base, ONLY: oft_vector
 !---
 USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
-  tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF
+  tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF, &
+  tw_recon_curr, tw_compute_Bops
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
 USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
-  tw_reduce_model, run_td_sim
+  tw_reduce_model, run_td_sim, plot_td_sim
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -104,7 +105,11 @@ ELSE
   ALLOCATE(tw_obj%mesh%lc(3,tw_obj%mesh%nc))
   CALL hdf5_read(tw_obj%mesh%lc,TRIM(filename),"mesh/LC",success)
   ALLOCATE(tw_obj%mesh%reg(tw_obj%mesh%nc))
-  tw_obj%mesh%reg=1.d0
+  IF(hdf5_field_exist(TRIM(filename),'mesh/REG'))THEN
+    CALL hdf5_read(tw_obj%mesh%reg,TRIM(filename),"mesh/REG",success)
+  ELSE
+    tw_obj%mesh%reg=1.d0
+  END IF
   !
   IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
     ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
@@ -181,6 +186,112 @@ CALL c_f_pointer(vals, vals_tmp, [tw_obj%nelems])
 !---Save plot fields
 CALL tw_save_pfield(tw_obj,vals_tmp,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_field
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_recon_curr(tw_ptr,vals,curr,format) BIND(C,NAME="thincurr_recon_curr")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: curr !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: format !< Needs docs
+INTEGER(4) :: i,j
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: ptvec,cellvec
+TYPE(tw_type), POINTER :: tw_obj
+DEBUG_STACK_PUSH
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL c_f_pointer(vals, vals_tmp, [tw_obj%nelems])
+IF(format==1)THEN
+  CALL c_f_pointer(curr, cellvec, [3,tw_obj%mesh%nc])
+ELSE IF(format==2)THEN
+  CALL c_f_pointer(curr, ptvec, [3,tw_obj%mesh%np])
+  ALLOCATE(cellvec(3,tw_obj%mesh%nc))
+END IF
+!---Avg to cells
+CALL tw_recon_curr(tw_obj,vals_tmp,cellvec)
+!---Avg to points
+IF(format==2)THEN
+  DO i=1,tw_obj%mesh%np
+    ptvec(:,i)=0.d0
+    DO j=tw_obj%mesh%kpc(i),tw_obj%mesh%kpc(i+1)-1
+      ptvec(:,i) = ptvec(:,i) + cellvec(:,tw_obj%mesh%lpc(j))*tw_obj%mesh%ca(tw_obj%mesh%lpc(j))/3.d0
+    END DO
+    ptvec(:,i) = ptvec(:,i)/tw_obj%mesh%va(i)
+  END DO
+  DEALLOCATE(cellvec)
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE thincurr_recon_curr
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_recon_field(tw_ptr,pot,coils,field,hodlr_ptr) BIND(C,NAME="thincurr_recon_field")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: pot !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: coils !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: field !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+INTEGER(4) :: k,j,jj
+REAL(8) :: tmp
+REAL(8), POINTER, DIMENSION(:) :: pot_tmp,coils_tmp,vtmp
+REAL(8), POINTER, DIMENSION(:,:) :: field_tmp
+TYPE(tw_type), POINTER :: tw_obj
+CLASS(oft_vector), POINTER :: u,Bx,By,Bz
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+DEBUG_STACK_PUSH
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL c_f_pointer(pot, pot_tmp, [tw_obj%nelems])
+CALL c_f_pointer(coils, coils_tmp, [tw_obj%n_icoils])
+CALL c_f_pointer(field, field_tmp, [3,tw_obj%mesh%np])
+!
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr, hodlr_op)
+  IF(.NOT.ASSOCIATED(hodlr_op%aca_B_dense))CALL hodlr_op%compute_B()
+  CALL tw_obj%Uloc%new(u)
+  CALL tw_obj%Uloc_pts%new(Bx)
+  CALL tw_obj%Uloc_pts%new(By)
+  CALL tw_obj%Uloc_pts%new(Bz)
+  CALL u%restore_local(pot_tmp)
+  CALL hodlr_op%apply_bop(u,Bx,By,Bz)
+  NULLIFY(vtmp)
+  CALL Bx%get_local(vtmp)
+  field_tmp(1,:)=vtmp
+  CALL By%get_local(vtmp)
+  field_tmp(2,:)=vtmp
+  CALL Bz%get_local(vtmp)
+  field_tmp(3,:)=vtmp
+  DEALLOCATE(vtmp)
+  CALL u%delete()
+  CALL Bx%delete()
+  CALL By%delete()
+  CALL Bz%delete()
+  DEALLOCATE(u,Bx,By,Bz)
+ELSE
+  !$omp parallel do private(j,jj,tmp)
+  DO k=1,tw_obj%mesh%np
+    DO jj=1,3
+      tmp=0.d0
+      !$omp simd reduction(+:tmp)
+      DO j=1,tw_obj%nelems
+        tmp=tmp+pot_tmp(j)*tw_obj%Bel(j,k,jj)
+      END DO
+      field_tmp(jj,k)=tmp
+    END DO
+  END DO
+END IF
+IF(tw_obj%n_icoils>0)THEN
+  !$omp parallel do private(k,tmp) collapse(2)
+  DO j=1,tw_obj%n_icoils
+    DO jj=1,3
+      !$omp simd
+      DO k=1,tw_obj%mesh%np
+        field_tmp(jj,k)=field_tmp(jj,k)+coils_tmp(j)*tw_obj%Bdr(k,j,jj)
+      END DO
+    END DO
+  END DO
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE thincurr_recon_field
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -281,14 +392,19 @@ IF((tw_obj%n_vcoils>0).AND.(.NOT.ASSOCIATED(tw_obj%Acoil2coil)))THEN
 END IF
 CALL copy_string('',error_str)
 !
+CALL copy_string_rev(cache_file,filename)
 IF(use_hodlr)THEN
   ALLOCATE(hodlr_op)
   hodlr_op%tw_obj=>tw_obj
   CALL hodlr_op%setup(.TRUE.)
-  CALL hodlr_op%compute_L()
+  WRITE(*,*)
+  IF(TRIM(filename)=='')THEN
+    CALL hodlr_op%compute_L()
+  ELSE
+    CALL hodlr_op%compute_L(save_file=filename)
+  END IF
   Lmat_ptr=C_LOC(hodlr_op)
 ELSE
-  CALL copy_string_rev(cache_file,filename)
   IF(TRIM(filename)=='')THEN
     CALL tw_compute_LmatDirect(tw_obj,tw_obj%Lmat)
   ELSE
@@ -297,6 +413,43 @@ ELSE
   Lmat_ptr=C_LOC(tw_obj%Lmat)
 END IF
 END SUBROUTINE thincurr_Lmat
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+TYPE(c_ptr), INTENT(out) :: Bmat_ptr !< Needs docs
+TYPE(c_ptr), INTENT(out) :: Bdr_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+!
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
+TYPE(tw_type), POINTER :: tw_obj
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL copy_string('',error_str)
+!
+CALL copy_string_rev(cache_file,filename)
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr,hodlr_op)
+  IF(TRIM(filename)=='')THEN
+    CALL hodlr_op%compute_B()
+  ELSE
+    CALL hodlr_op%compute_B(save_file=filename)
+  END IF
+  Bmat_ptr=c_null_ptr
+  Bdr_ptr=C_LOC(hodlr_op%Icoil_Bmat)
+ELSE
+  IF(TRIM(filename)=='')THEN
+    CALL tw_compute_Bops(tw_obj)
+  ELSE
+    CALL tw_compute_Bops(tw_obj,save_file=filename)
+  END IF
+  Bmat_ptr=C_LOC(tw_obj%Bel)
+  Bdr_ptr=C_LOC(tw_obj%Bdr)
+END IF
+END SUBROUTINE thincurr_Bmat
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -535,11 +688,14 @@ END SUBROUTINE thincurr_freq_response
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
+SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot, &
+  vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
 REAL(KIND=c_double), VALUE, INTENT(in) :: dt !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Needs docs
+REAL(KIND=c_double), VALUE, INTENT(in) :: cg_tol !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: timestep_cn !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nstatus !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vec_ic !< Needs docs
@@ -594,20 +750,63 @@ CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),1.d-6,.TRUE.,nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op=hodlr_op)
+  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),cg_tol,LOGICAL(timestep_cn), &
+    nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op=hodlr_op)
 ELSE
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),1.d-6,.TRUE.,nstatus,nplot,sensors,curr_waveform,volt_waveform)
+  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),cg_tol,LOGICAL(timestep_cn), &
+    nstatus,nplot,sensors,curr_waveform,volt_waveform)
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_reduce_model")
+SUBROUTINE thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot, &
+  sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_B !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: rebuild_sensors !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+!
+LOGICAL :: pm_save
+REAL(8), CONTIGUOUS, POINTER :: curr_waveform(:,:)
+TYPE(tw_type), POINTER :: tw_obj
+TYPE(tw_sensors), POINTER :: sensors
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+CALL c_f_pointer(tw_ptr, tw_obj)
+IF(tw_obj%nelems<=0)THEN
+  CALL copy_string('Invalid ThinCurr model, may not be setup yet',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
+IF(c_associated(sensor_ptr))THEN
+  CALL c_f_pointer(sensor_ptr, sensors)
+ELSE
+  ALLOCATE(sensors)
+END IF
+!---Run eigenvalue analysis
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr, hodlr_op)
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),hodlr_op=hodlr_op)
+ELSE
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors))
+END IF
+oft_env%pm=pm_save
+END SUBROUTINE thincurr_time_domain_plot
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,compute_B,sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_reduce_model")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: neigs !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eig_vec !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_B !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
@@ -644,9 +843,9 @@ CALL copy_string_rev(filename,h5_path)
 CALL c_f_pointer(eig_vec, vec_tmp, [tw_obj%nelems,neigs])
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path,hodlr_op=hodlr_op)
+  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path,LOGICAL(compute_B),hodlr_op=hodlr_op)
 ELSE
-  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path)
+  CALL tw_reduce_model(tw_obj,sensors,neigs,vec_tmp,h5_path,LOGICAL(compute_B))
 END IF
 IF(.NOT.c_associated(sensor_ptr))DEALLOCATE(sensors)
 END SUBROUTINE thincurr_reduce_model
