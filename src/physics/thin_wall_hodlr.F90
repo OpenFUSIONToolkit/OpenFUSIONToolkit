@@ -901,7 +901,7 @@ IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
   ALLOCATE(self%hole_Vcoil_mat%M(self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils))
   CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
 END IF
-CALL load_from_file()
+IF(PRESENT(save_file))CALL load_from_file()
 compressed_size=0
 mat_updated=.FALSE.
 WRITE(*,*)'  Building diagonal blocks'
@@ -981,7 +981,7 @@ WRITE(*,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:',compressed_size*1.d
     "%  (",REAL(compressed_size,8),"/",REAL(self%tw_obj%np_active,8)**2,")"
 WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 !
-IF(mat_updated)CALL save_to_file()
+IF(mat_updated.AND.PRESENT(save_file))CALL save_to_file()
 CONTAINS
 SUBROUTINE save_to_file()
 INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
@@ -1578,7 +1578,7 @@ IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   self%tw_obj%Bdr=>self%Icoil_Bmat
 END IF
 !
-CALL read_from_file()
+IF(PRESENT(save_file))CALL read_from_file()
 WRITE(*,*)'  Building diagonal blocks'
 compressed_size=0
 mat_updated=.FALSE.
@@ -1671,7 +1671,7 @@ WRITE(*,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:', &
   "%  (",REAL(compressed_size,8),"/",3*REAL(self%tw_obj%np_active,8)*REAL(self%tw_obj%mesh%np,8),")"
 WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 !
-IF(mat_updated)CALL save_to_file()
+IF(mat_updated.AND.PRESENT(save_file))CALL save_to_file()
 CONTAINS
 SUBROUTINE save_to_file()
 INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)

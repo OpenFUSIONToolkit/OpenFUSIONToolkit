@@ -688,11 +688,14 @@ END SUBROUTINE thincurr_freq_response
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
+SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot, &
+  vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
 REAL(KIND=c_double), VALUE, INTENT(in) :: dt !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Needs docs
+REAL(KIND=c_double), VALUE, INTENT(in) :: cg_tol !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: timestep_cn !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nstatus !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vec_ic !< Needs docs
@@ -747,9 +750,11 @@ CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),1.d-6,.TRUE.,nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op=hodlr_op)
+  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),cg_tol,LOGICAL(timestep_cn), &
+    nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op=hodlr_op)
 ELSE
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),1.d-6,.TRUE.,nstatus,nplot,sensors,curr_waveform,volt_waveform)
+  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),cg_tol,LOGICAL(timestep_cn), &
+    nstatus,nplot,sensors,curr_waveform,volt_waveform)
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain

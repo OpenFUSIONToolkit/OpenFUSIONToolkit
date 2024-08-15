@@ -443,7 +443,7 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return result
     
-    def run_td(self,dt,nsteps,coil_currs=None,coil_volts=None,direct=False,status_freq=10,plot_freq=10,sensor_obj=c_void_p()):
+    def run_td(self,dt,nsteps,coil_currs=None,coil_volts=None,direct=False,status_freq=10,plot_freq=10,sensor_obj=c_void_p(),lin_tol=1.E-6,timestep_cn=True):
         '''! Perform a time-domain simulation
 
         @param dt Time step for simulation
@@ -454,6 +454,8 @@ class ThinCurr():
         @param status_freq Frequency to print status information
         @param plot_freq Frequency to save plot files
         @param sensor_obj Sensor object to use
+        @param lin_tol Tolerance for linear solver when `direct=False`
+        @param timestep_cn Use Crank-Nicolson timestep?
         '''
         vec_ic = numpy.zeros((self.nelems,), dtype=numpy.float64)
         if coil_currs is None:
@@ -474,11 +476,11 @@ class ThinCurr():
             coil_volts = numpy.ascontiguousarray(coil_volts.transpose(), dtype=numpy.float64)
         error_string = c_char_p(b""*200)
         if self.Lmat_hodlr:
-            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_int(status_freq),c_int(plot_freq),vec_ic,
-                                sensor_obj,ncurr,coil_currs,nvolt,coil_volts,self.Lmat_hodlr,error_string)
+            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_bool(timestep_cn),
+                                 c_int(status_freq),c_int(plot_freq),vec_ic,sensor_obj,ncurr,coil_currs,nvolt,coil_volts,self.Lmat_hodlr,error_string)
         else:
-            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_int(status_freq),c_int(plot_freq),vec_ic,
-                                sensor_obj,ncurr,coil_currs,nvolt,coil_volts,c_void_p(),error_string)
+            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_bool(timestep_cn),
+                                 c_int(status_freq),c_int(plot_freq),vec_ic,sensor_obj,ncurr,coil_currs,nvolt,coil_volts,c_void_p(),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
     
