@@ -41,7 +41,7 @@ oft_in_template = """
  nsteps=200
  nplot=10
  direct={1}
- cg_tol=1.E-8
+ cg_tol={10}
  save_L=F
  save_Mcoil=F
  plot_run=F
@@ -104,7 +104,7 @@ def mp_run(target,args,timeout=180):
     return test_result
 
 
-def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,mp_q):
+def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,mp_q):
     try:
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
         tw_model = ThinCurr(nthreads=-1)
@@ -125,7 +125,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,mp_q)
         tw_model.compute_Mcoil()
         tw_model.compute_Lmat(use_hodlr=use_aca)
         tw_model.compute_Rmat()
-        tw_model.run_td(2.E-5,200,direct=(direct_flag == 'T'),status_freq=10,coil_currs=curr_waveform,coil_volts=volt_waveform,sensor_obj=sensor_obj)
+        tw_model.run_td(2.E-5,200,direct=(direct_flag == 'T'),lin_tol=lin_tol,coil_currs=curr_waveform,coil_volts=volt_waveform,sensor_obj=sensor_obj)
         mp_q.put(True)
     except BaseException as e:
         print(e)
@@ -183,7 +183,7 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,mp_q):
 
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
-                    python=False):
+                    python=False,lin_tol=1.E-9):
     """
     Common setup and run operations for thin-wall physics module test cases
     """
@@ -212,7 +212,10 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
         L_svd_tol = -1.0
         B_svd_tol = -1.0
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(meshfile,direct_flag,freq,fr_limit,coil_file_line,volt_file_line,neigs,L_svd_tol,B_svd_tol,reduce_model_flag))
+        fid.write(oft_in_template.format(
+            meshfile,direct_flag,freq,fr_limit,coil_file_line,volt_file_line,
+            neigs,L_svd_tol,B_svd_tol,reduce_model_flag,lin_tol
+        ))
     # Create XML input file for coils
     coil_string = ""
     if icoils is not None:
@@ -266,7 +269,7 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
     # Run thin-wall model
     if run_type == 1:
         if python:
-            return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform))
+            return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol))
         else:
             return run_OFT("../../bin/thincurr_td oft.in oft_in.xml", 1, 180)
     elif run_type == 2:
@@ -446,6 +449,7 @@ def test_td_torus(direct_flag,python):
                            icoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
                            curr_waveform=((-1.0, 0.0), (0.0, 0.0), (1.0, 1.0)),
+                           lin_tol=1.E-10,
                            python=python)
     assert validate_td(sigs_final)
 
@@ -458,6 +462,7 @@ def test_td_torus_volt(direct_flag,python):
                            vcoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
+                           lin_tol=1.E-11,
                            python=python)
     assert validate_td(sigs_final)
 

@@ -197,7 +197,7 @@ CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 !---Load coils
 IF(.NOT.ASSOCIATED(self%xml))THEN
   CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
-  CALL oft_warn('Unable to find "thincurr" XML node')
+  IF(error_flag/=0)CALL oft_warn('Unable to find "thincurr" XML node')
 END IF
 WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
 CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
@@ -513,12 +513,13 @@ TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
 INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(3),ierr,io_unit,iquad
-REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3)
+REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3),elapsed_time
 REAL(8) :: pot_tmp,rgop(3,3),area_i,norm_i(3),f(3),dl_min,dl_max,pot_last
 REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
+type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
 IF(PRESENT(save_file))THEN
@@ -575,6 +576,7 @@ END DO
 !
 bmesh=>tw_obj%mesh
 WRITE(*,*)'Building coil<->element inductance matrices'
+CALL mytimer%tick
 ALLOCATE(Ael2coil_tmp(tw_obj%nelems,ncoils_tot))
 Ael2coil_tmp=0.d0
 f=1.d0/3.d0
@@ -672,6 +674,8 @@ DO i=1,18
   CALL quads(i)%delete()
 END DO
 DEALLOCATE(quads)
+elapsed_time=mytimer%tock()
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 !
 CALL tw_compute_Lmat_coils(tw_obj)
 !
@@ -769,14 +773,16 @@ END DO
 !---Compute coupling between elements and drivers
 IF(ASSOCIATED(tw_obj%Ael2dr))THEN
   ! WRITE(*,*)'Building driver->element inductance matrices'
-  !$omp parallel private(j,ii,jj,ik,jk)
-  !$omp do
-  DO i=1,tw_obj%n_vcoils
-    DO jj=1,tw_obj%n_icoils
-      tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = Acoil2coil_tmp(i,jj+tw_obj%n_vcoils)
+  IF(tw_obj%n_vcoils>0)THEN
+    !$omp parallel private(j,ii,jj,ik,jk)
+    !$omp do
+    DO i=1,tw_obj%n_vcoils
+      DO jj=1,tw_obj%n_icoils
+        tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = Acoil2coil_tmp(i,jj+tw_obj%n_vcoils)
+      END DO
     END DO
-  END DO
-  !$omp end parallel
+    !$omp end parallel
+  END IF
   tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
 END IF
 DEALLOCATE(Acoil2coil_tmp)
@@ -1058,7 +1064,7 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 elapsed_time=mytimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     IF(Lself)THEN
@@ -1306,7 +1312,7 @@ b = b/(4.d0*pi)
 CALL quad%delete()
 CALL quad2%delete()
 elapsed_time=mytimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_MF
 !------------------------------------------------------------------------------
@@ -1859,16 +1865,43 @@ END FUNCTION tw_compute_phipot
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops(self)
+SUBROUTINE tw_compute_Bops(self,save_file)
 TYPE(tw_type), INTENT(inout) :: self
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 REAL(8), PARAMETER :: B_dx = 1.d-6
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
-LOGICAL :: is_neighbor
+INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,hash_tmp(4),file_counts(4)
+LOGICAL :: is_neighbor,exists
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+IF(TRIM(save_file)/='none')THEN
+  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
+  IF(exists)THEN
+    hash_tmp(1) = self%nelems
+    hash_tmp(2) = self%mesh%nc
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+    WRITE(*,*)'  Loading B-field operator from file: ',TRIM(save_file)
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
+    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+      ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
+      CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
+      IF(exists)THEN
+        ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
+        CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
+      END IF
+    END IF
+  END IF
+  IF(exists)RETURN
+  DEALLOCATE(self%Bel,self%Bdr)
+END IF
+!
 bmesh=>self%mesh
 ALLOCATE(quads(18))
 DO i=1,18
@@ -1885,7 +1918,7 @@ ALLOCATE(atmp(3,3,bmesh%np))
 DO i=1,bmesh%nc
   ! CALL bmesh%jacobian(i,f,rgop,area_i)
   ! CALL bmesh%norm(i,f,norm_i)
-  area_i=bmesh%ca(i)*2.d0
+  area_i=bmesh%ca(i)
   DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
@@ -2009,7 +2042,7 @@ END DO
 self%Bel=self%Bel/(4.d0*pi)
 !
 WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
-ALLOCATE(self%Bdr(self%n_icoils,bmesh%np,3))
+ALLOCATE(self%Bdr(bmesh%np,self%n_icoils,3))
 self%Bdr=0.d0
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
 DO i=1,bmesh%np
@@ -2029,11 +2062,31 @@ DO i=1,bmesh%np
     END DO
     DO jj=1,3
       !$omp atomic
-      self%Bdr(j,i,jj) = self%Bdr(j,i,jj) + ecc(jj)
+      self%Bdr(i,j,jj) = self%Bdr(i,j,jj) + ecc(jj)
     END DO
   END DO
 END DO
 self%Bdr=self%Bdr/(4.d0*pi)
+!
+IF(TRIM(save_file)/='none')THEN
+  hash_tmp(1) = self%nelems
+  hash_tmp(2) = self%mesh%nc
+  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+  hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+  WRITE(*,*)'  Saving B-field operator to file: ',TRIM(save_file)
+  CALL hdf5_create_file(TRIM(save_file))
+  CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
+  IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+    CALL hdf5_write(self%Bel(:,:,1),TRIM(save_file),'Bel_X')
+    CALL hdf5_write(self%Bel(:,:,2),TRIM(save_file),'Bel_Y')
+    CALL hdf5_write(self%Bel(:,:,3),TRIM(save_file),'Bel_Z')
+    IF(exists)THEN
+      CALL hdf5_write(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X')
+      CALL hdf5_write(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y')
+      CALL hdf5_write(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z')
+    END IF
+  END IF
+END IF
 END SUBROUTINE tw_compute_Bops
 !------------------------------------------------------------------------------
 !> Setup hole definition for ordered chain of vertices
@@ -2716,25 +2769,23 @@ END SUBROUTINE tw_build_boozer
 !------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
 !------------------------------------------------------------------------------
-SUBROUTINE tw_save_pfield(self,a,tag)
+SUBROUTINE tw_recon_curr(self,pot,curr)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-real(8), intent(in) :: a(:) !< Solution values [self%nelems]
-character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
+real(8), intent(in) :: pot(:) !< Solution values [self%nelems]
+real(8), intent(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec
 DEBUG_STACK_PUSH
 !---Avg to cells
-ALLOCATE(cellvec(3,self%mesh%nc))
 ftmp=1.d0/3.d0
 DO i=1,self%mesh%nc
-  cellvec(:,i)=0.d0
+  curr(:,i)=0.d0
   CALL self%mesh%jacobian(i,ftmp,gop,area)
   CALL self%mesh%norm(i,ftmp,norm)
   DO j=1,3
     pt=self%pmap(self%mesh%lc(j,i))
     IF(pt==0)CYCLE
-    cellvec(:,i) = cellvec(:,i) + a(pt)*cross_product(gop(:,j),norm)
+    curr(:,i) = curr(:,i) + pot(pt)*cross_product(gop(:,j),norm)
   END DO
 END DO
 DO ih=1,self%nholes
@@ -2746,11 +2797,27 @@ i=ABS(self%hmesh(ih)%lpc(ihc))
   END DO
   CALL self%mesh%jacobian(i,ftmp,gop,area)
   CALL self%mesh%norm(i,ftmp,norm)
-  cellvec(:,i) = cellvec(:,i) &
-    + a(self%np_active+ih)*cross_product(gop(:,j),norm)*SIGN(1,self%hmesh(ih)%lpc(ihc))
+  curr(:,i) = curr(:,i) &
+    + pot(self%np_active+ih)*cross_product(gop(:,j),norm)*SIGN(1,self%hmesh(ih)%lpc(ihc))
 END DO
 END DO
 END DO
+DEBUG_STACK_POP
+END SUBROUTINE tw_recon_curr
+!------------------------------------------------------------------------------
+!> Save solution vector for thin-wall model for plotting in VisIt
+!------------------------------------------------------------------------------
+SUBROUTINE tw_save_pfield(self,a,tag)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+real(8), intent(in) :: a(:) !< Solution values [self%nelems]
+character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
+INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
+REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec
+DEBUG_STACK_PUSH
+!---Avg to cells
+ALLOCATE(cellvec(3,self%mesh%nc))
+CALL tw_recon_curr(self,a,cellvec)
 CALL self%mesh%save_cell_vector(cellvec/mu0,TRIM(tag)) ! Convert back to Amps
 !---Avg to points
 ALLOCATE(ptvec(3,self%mesh%np))

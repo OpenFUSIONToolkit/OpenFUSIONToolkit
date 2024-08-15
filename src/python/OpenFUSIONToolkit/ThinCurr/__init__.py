@@ -4,4 +4,4 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
-from ._core import ThinCurr
+from ._core import ThinCurr, ThinCurr_reduced

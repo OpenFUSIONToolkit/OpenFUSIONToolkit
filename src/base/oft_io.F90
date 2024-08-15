@@ -873,11 +873,14 @@ character(LEN=*), intent(in) :: filename !< Path to file
 character(LEN=*), intent(in) :: path !< Variable path in file
 logical, optional, intent(out) :: success !< Successful read?
 integer(i4) :: error
-integer(i4), parameter :: one=1
+integer(i4), parameter :: one=1,zero=0
 integer(HID_T) :: file_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(1) :: dims
 ! DEBUG_STACK_PUSH
-IF(PRESENT(success))success=.FALSE.
+IF(PRESENT(success))THEN
+  success=.FALSE.
+  CALL h5eset_auto_f(zero, error)
+END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDONLY_F, file_id, error)
@@ -893,11 +896,15 @@ call h5dclose_f(dset_id, error)
 call h5fclose_f(file_id, error)
 call h5close_f(error)
 ! DEBUG_STACK_POP
-IF(PRESENT(success))success=.TRUE.
+IF(PRESENT(success))THEN
+  success=.TRUE.
+  CALL h5eset_auto_f(one, error)
+END IF
 RETURN
 100 CALL h5dclose_f(dset_id, error)
 101 CALL h5fclose_f(file_id, error)
 102 CALL h5close_f(error)
+IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_1d_r8
 !---------------------------------------------------------------------------
 !> integer(i8) 1D array implementation of \ref oft_io::hdf5_write
@@ -908,11 +915,14 @@ character(LEN=*), intent(in) :: filename !< Path to file
 character(LEN=*), intent(in) :: path !< Variable path in file
 logical, optional, intent(out) :: success !< Successful read?
 integer(i4) :: error
-integer(i4), parameter :: one=1
+integer(i4), parameter :: one=1,zero=0
 integer(HID_T) :: file_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(1) :: dims
 ! DEBUG_STACK_PUSH
-IF(PRESENT(success))success=.FALSE.
+IF(PRESENT(success))THEN
+  success=.FALSE.
+  CALL h5eset_auto_f(zero, error)
+END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDONLY_F, file_id, error)
@@ -928,11 +938,15 @@ call h5dclose_f(dset_id, error)
 call h5fclose_f(file_id, error)
 call h5close_f(error)
 ! DEBUG_STACK_POP
-IF(PRESENT(success))success=.TRUE.
+IF(PRESENT(success))THEN
+  success=.TRUE.
+  CALL h5eset_auto_f(one, error)
+END IF
 RETURN
 100 CALL h5dclose_f(dset_id, error)
 101 CALL h5fclose_f(file_id, error)
 102 CALL h5close_f(error)
+IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_1d_i4
 !---------------------------------------------------------------------------
 !> real(r8) 2D array implementation of \ref oft_io::hdf5_write
@@ -943,11 +957,14 @@ character(LEN=*), intent(in) :: filename !< Path to file
 character(LEN=*), intent(in) :: path !< Variable path in file
 logical, optional, intent(out) :: success !< Successful read?
 integer(i4) :: error
-integer(i4), parameter :: two=2
+integer(i4), parameter :: two=2,one=1,zero=0
 integer(HID_T) :: file_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(2) :: dims
 ! DEBUG_STACK_PUSH
-IF(PRESENT(success))success=.FALSE.
+IF(PRESENT(success))THEN
+  success=.FALSE.
+  CALL h5eset_auto_f(zero, error)
+END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDONLY_F, file_id, error)
@@ -963,11 +980,15 @@ call h5dclose_f(dset_id, error)
 call h5fclose_f(file_id, error)
 call h5close_f(error)
 ! DEBUG_STACK_POP
-IF(PRESENT(success))success=.TRUE.
+IF(PRESENT(success))THEN
+  success=.TRUE.
+  CALL h5eset_auto_f(one, error)
+END IF
 RETURN
 100 CALL h5dclose_f(dset_id, error)
 101 CALL h5fclose_f(file_id, error)
 102 CALL h5close_f(error)
+IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_2d_r8
 !---------------------------------------------------------------------------
 !> integer(i4) 2D array implementation of \ref oft_io::hdf5_write
@@ -978,11 +999,14 @@ character(LEN=*), intent(in) :: filename !< Path to file
 character(LEN=*), intent(in) :: path !< Variable path in file
 logical, optional, intent(out) :: success !< Successful read?
 integer(i4) :: error
-integer(i4), parameter :: two=2
+integer(i4), parameter :: two=2,one=1,zero=0
 integer(HID_T) :: file_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(2) :: dims
 ! DEBUG_STACK_PUSH
-IF(PRESENT(success))success=.FALSE.
+IF(PRESENT(success))THEN
+  success=.FALSE.
+  CALL h5eset_auto_f(zero, error)
+END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDONLY_F, file_id, error)
@@ -998,11 +1022,15 @@ call h5dclose_f(dset_id, error)
 call h5fclose_f(file_id, error)
 call h5close_f(error)
 ! DEBUG_STACK_POP
-IF(PRESENT(success))success=.TRUE.
+IF(PRESENT(success))THEN
+  success=.TRUE.
+  CALL h5eset_auto_f(one, error)
+END IF
 RETURN
 100 CALL h5dclose_f(dset_id, error)
 101 CALL h5fclose_f(file_id, error)
 102 CALL h5close_f(error)
+IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_2d_i4
 !---------------------------------------------------------------------------
 !> FE vector implementation of \ref oft_io::hdf5_write

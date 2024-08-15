@@ -3106,7 +3106,7 @@ IF((self%dt>0.d0).AND.oft_env%pm)THEN
 END IF
 ! Compute inhomogeneous part
 psimax=psi_sol%dot(psi_sol)
-IF(psimax>1.d-15)THEN
+IF(psimax>1.d-14)THEN
   CALL self%psi%new(rhs_bc)
   CALL self%psi%new(psi_bc)
   CALL rhs_bc%add(0.d0,1.d0,psi_sol)

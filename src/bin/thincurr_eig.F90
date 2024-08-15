@@ -191,9 +191,9 @@ ELSE
   !
   IF(reduce_model)THEN
     IF(tw_hodlr%L_svd_tol>0.d0)THEN
-      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5',hodlr_op=tw_hodlr)
+      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5',compute_B,hodlr_op=tw_hodlr)
     ELSE
-      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5')
+      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5',compute_B)
     END IF
   END IF
   !
@@ -231,12 +231,12 @@ IF(compute_B)THEN
   tw_hodlr%tw_obj=>self
   CALL tw_hodlr%setup(.FALSE.)
   IF(tw_hodlr%B_svd_tol>0.d0)THEN
-    CALL tw_hodlr%compute_B()
+    IF(.NOT.ASSOCIATED(tw_hodlr%aca_B_dense))CALL tw_hodlr%compute_B()
     CALL self%Uloc_pts%new(Bx)
     CALL self%Uloc_pts%new(By)
     CALL self%Uloc_pts%new(Bz)
   ELSE
-    CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
   END IF
 END IF
 DO i=1,neigs
