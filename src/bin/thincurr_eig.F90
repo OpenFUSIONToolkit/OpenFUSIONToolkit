@@ -21,7 +21,8 @@
 PROGRAM thincurr_eig
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: oft_bin_file
+USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file, hdf5_create_file, hdf5_write, &
+  hdf5_create_group, hdf5_add_string_attribute
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
@@ -33,7 +34,7 @@ USE oft_la_base, ONLY: oft_vector
 USE mhd_utils, ONLY: mu0
 USE thin_wall
 USE thin_wall_hodlr
-USE thin_wall_solvers, ONLY: lr_eigenmodes_direct, lr_eigenmodes_arpack
+USE thin_wall_solvers, ONLY: lr_eigenmodes_direct, lr_eigenmodes_arpack, tw_reduce_model
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4) :: nsensors = 0
@@ -59,8 +60,9 @@ LOGICAL :: save_L = .FALSE.
 LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 LOGICAL :: compute_B = .FALSE.
+LOGICAL :: reduce_model = .FALSE.
 NAMELIST/thincurr_eig_options/direct,plot_run,save_L,save_Mcoil,save_Msen, &
-  compute_B,neigs,jumper_start
+  compute_B,neigs,jumper_start,reduce_model
 !---
 CALL oft_init
 !---Read in options
@@ -120,10 +122,14 @@ IF(plot_run)THEN
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
   CALL plot_eig(tw_sim,sensors%nfloops,sensors%floops)
 ELSE
-  tw_sim%n_icoils=0
-  sensors%nfloops=0
-  ALLOCATE(sensors%floops(sensors%nfloops))
-  IF(tw_sim%n_vcoils>0)THEN
+  IF(reduce_model)THEN
+    CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
+  ELSE
+    tw_sim%n_icoils=0
+    sensors%nfloops=0
+    ALLOCATE(sensors%floops(sensors%nfloops))
+  END IF
+  IF((tw_sim%n_vcoils>0).OR.(tw_sim%n_icoils>0))THEN
     IF(save_Mcoil)THEN
       CALL tw_compute_Ael2dr(tw_sim,'Mcoil.save')
     ELSE
@@ -181,7 +187,17 @@ ELSE
   END DO
   CLOSE(io_unit)
   CALL uio%delete()
-  DEALLOCATE(uio,eig_rval,eig_ival,eig_vec)
+  DEALLOCATE(uio)
+  !
+  IF(reduce_model)THEN
+    IF(tw_hodlr%L_svd_tol>0.d0)THEN
+      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5',compute_B,hodlr_op=tw_hodlr)
+    ELSE
+      CALL tw_reduce_model(tw_sim,sensors,neigs,eig_vec,'tCurr_reduced.h5',compute_B)
+    END IF
+  END IF
+  !
+  DEALLOCATE(eig_rval,eig_ival,eig_vec)
 END IF
 !---
 CALL oft_finalize
@@ -215,12 +231,12 @@ IF(compute_B)THEN
   tw_hodlr%tw_obj=>self
   CALL tw_hodlr%setup(.FALSE.)
   IF(tw_hodlr%B_svd_tol>0.d0)THEN
-    CALL tw_hodlr%compute_B()
+    IF(.NOT.ASSOCIATED(tw_hodlr%aca_B_dense))CALL tw_hodlr%compute_B()
     CALL self%Uloc_pts%new(Bx)
     CALL self%Uloc_pts%new(By)
     CALL self%Uloc_pts%new(Bz)
   ELSE
-    CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
   END IF
 END IF
 DO i=1,neigs

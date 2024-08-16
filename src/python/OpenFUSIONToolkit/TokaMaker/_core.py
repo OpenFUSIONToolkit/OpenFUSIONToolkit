@@ -1273,7 +1273,10 @@ class TokaMaker():
             zbounds = numpy.r_[self.lim_contour[:,1].min(), self.lim_contour[:,1].max()]
             dr = zbounds[1]-zbounds[0]
             zbounds += numpy.r_[-1.0,1.0]*dr*0.05
-        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad))
+        cstring = c_char_p(b""*200)
+        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),cstring)
+        if cstring.value != b'':
+            raise Exception(cstring.value)
 
     def eig_wall(self,neigs=4,pm=False):
         '''! Compute eigenvalues (1 / Tau_L/R) for conducting structures

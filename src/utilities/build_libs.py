@@ -52,7 +52,8 @@ def fetch_file(url, file):
     # Download file from url
     try:
         if PY3K:
-            response = urllib.request.urlopen(url)
+            req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"}) 
+            response = urllib.request.urlopen(req)
             resolved_url = response.geturl()
             if resolved_url != url: # Handle redirects
                 response = urllib.request.urlopen(resolved_url)
@@ -61,7 +62,8 @@ def fetch_file(url, file):
             except:
                 file_size = -1
         else:
-            response = urllib.urlopen(url)
+            req = urllib.Request(url, headers={'User-Agent' : "Magic Browser"})
+            response = urllib.urlopen(req)
             resolved_url = response.geturl()
             if resolved_url != url: # Handle redirects
                 response = urllib.request.urlopen(resolved_url)
@@ -725,7 +727,7 @@ class CMAKE(package):
 class METIS(package):
     def __init__(self, comp_wrapper=False):
         self.name = "METIS"
-        self.url = "http://faculty.washington.edu/hansec/libs/metis-5.1.0-mod.tar.gz"
+        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/metis-5.1.0-mod.tar.gz"
         self.build_dir = "metis-5.1.0"
         self.comp_wrapper = comp_wrapper
 
@@ -788,7 +790,7 @@ class METIS(package):
 class MPI(package):
     def __init__(self):
         self.name = "MPI"
-        self.url = "http://faculty.washington.edu/hansec/libs/mpich-3.3.2.tar.gz"
+        self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
         self.build_timeout = 20
 
     def setup(self, config_dict):
@@ -927,7 +929,8 @@ class HDF5(package):
 class NETCDF(package):
     def __init__(self, comp_wrapper=False):
         self.name = "NETCDF"
-        self.url = "http://faculty.washington.edu/hansec/libs/netcdf-c-4.6.2.tar.gz"
+        self.url = "https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.6.2.tar.gz"
+        self.build_dir = "netcdf-c-4.6.2"
         self.install_dir = "netcdf-4_6_2"
         self.comp_wrapper = comp_wrapper
         self.children = [NETCDF_Fortran(comp_wrapper)]
@@ -994,7 +997,8 @@ class NETCDF(package):
 class NETCDF_Fortran(package):
     def __init__(self, comp_wrapper=False):
         self.name = "NETCDF_Fortran"
-        self.url = "http://faculty.washington.edu/hansec/libs/netcdf-fortran-4.4.4.tar.gz"
+        self.url = "https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.4.4.tar.gz"
+        self.build_dir = "netcdf-fortran-4.4.4"
         self.install_dir = "netcdf-4_6_2"
         self.comp_wrapper = comp_wrapper
 
@@ -1043,13 +1047,14 @@ class NETCDF_Fortran(package):
 
 
 class OpenBLAS(package):
-    def __init__(self, build_threaded=False, dynamic_arch=False):
+    def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False):
         self.name = "OpenBLAS"
         self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.23.tar.gz"
         self.build_dir = "OpenBLAS-0.3.23"
         self.install_dir = "OpenBLAS-0_3_23"
         self.threaded = build_threaded
         self.dynamic_arch = dynamic_arch
+        self.no_avx = no_avx
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1096,28 +1101,31 @@ int main(int argc, char** argv) {
         tmp_dict = self.config_dict.copy()
         oblas_options = ['NO_CBLAS=1', 'NO_LAPACKE=1', 'NO_SHARED=1']
         if self.config_dict['MAKE_THREADS'] == 1:
-            oblas_options += ['NO_PARALLEL_MAKE=1']
+            make_thread = ['NO_PARALLEL_MAKE=1']
         else:
-            oblas_options += ['MAKE_NB_JOBS={MAKE_THREADS}']
+            make_thread = ['MAKE_NB_JOBS={MAKE_THREADS}']
         if self.threaded:
             oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1', 'FCOMMON_OPT="-frecursive {OMP_FLAGS} -fPIC"']
         else:
             oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1', 'FCOMMON_OPT="-frecursive -fPIC"']
-        if self.config_dict['OS_TYPE'] == 'Darwin':
-            avx_test, _, _ = check_c_compiles_and_runs(avx_test_source, "-mavx", tmp_dict)
-            if not avx_test:
-                oblas_options += ['NO_AVX=1']
-            avx2_test, _, _ = check_c_compiles_and_runs(avx2_test_source, "-mavx2", tmp_dict)
-            if not avx2_test:
-                oblas_options += ['NO_AVX2=1']
+        if self.no_avx:
+            oblas_options += ['NO_AVX=1', 'NO_AVX2=1']
+        else:
+            if self.config_dict['OS_TYPE'] == 'Darwin':
+                avx_test, _, _ = check_c_compiles_and_runs(avx_test_source, "-mavx", tmp_dict)
+                if not avx_test:
+                    oblas_options += ['NO_AVX=1']
+                avx2_test, _, _ = check_c_compiles_and_runs(avx2_test_source, "-mavx2", tmp_dict)
+                if not avx2_test:
+                    oblas_options += ['NO_AVX2=1']
         if self.dynamic_arch:
             oblas_options += ['DYNAMIC_ARCH=1']
         build_lines = [
             'export CC={CC}',
             'export FC={FC}',
             'make clean',
-            'make {0}'.format(' '.join(oblas_options)),
-            'make NO_PARALLEL_MAKE=1 NO_SHARED=1 PREFIX={OpenBLAS_ROOT} install'
+            'make {0}'.format(' '.join(oblas_options + make_thread)),
+            'make {0} install'.format(' '.join(oblas_options + ['NO_PARALLEL_MAKE=1', 'PREFIX={OpenBLAS_ROOT}']))
         ]
         self.run_build(build_lines, tmp_dict)
 
@@ -1160,7 +1168,7 @@ class MKL(package):
 class BLAS_LAPACK(package):
     def __init__(self, comp_wrapper=False, blas_lib_path=None, lapack_lib_path=None):
         self.name = "BLAS_LAPACK"
-        self.url = "http://faculty.washington.edu/hansec/libs/lapack-3.5.0.tgz"
+        self.url = "http://www.netlib.org/lapack/lapack-3.5.0.tgz"
         self.comp_wrapper = comp_wrapper
         self.blas_lib_path = blas_lib_path
         self.lapack_lib_path = lapack_lib_path
@@ -1231,7 +1239,8 @@ class BLAS_LAPACK(package):
 class ARPACK(package):
     def __init__(self, parallel=False, link_omp=False):
         self.name = "ARPACK"
-        self.url = "http://faculty.washington.edu/hansec/libs/arpack-ng-3.5.0.tar.gz"
+        self.url = "https://github.com/opencollab/arpack-ng/archive/refs/tags/3.5.0.tar.gz"
+        self.build_dir = "arpack-ng-3.5.0"
         self.parallel = parallel
         self.link_omp = link_omp
 
@@ -1313,7 +1322,8 @@ class ARPACK(package):
 class SUPERLU(package):
     def __init__(self, comp_wrapper=False):
         self.name = "SUPERLU"
-        self.url = "http://faculty.washington.edu/hansec/libs/SuperLU_5.2.0.tar.gz"
+        self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v5.2.0.tar.gz"
+        self.build_dir = 'superlu-5.2.0'
         self.libname = '-lsuperlu'
         self.libpath = 'libsuperlu.a'
         self.comp_wrapper = comp_wrapper
@@ -1501,8 +1511,8 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
 class FOX(package):
     def __init__(self):
         self.name = "FOX"
-        self.url = "http://faculty.washington.edu/hansec/libs/FoX-4.1.2-dom.tar.gz"
-        self.build_dir = "FoX-4.1.2"
+        self.url = "https://github.com/andreww/fox/archive/refs/tags/4.1.2.tar.gz"
+        self.build_dir = "fox-4.1.2"
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1543,7 +1553,7 @@ class FOX(package):
 class ONURBS(package):
     def __init__(self):
         self.name = "ONURBS"
-        self.url = "http://faculty.washington.edu/hansec/libs/opennurbs-5.0.tar.gz"
+        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/opennurbs-5.0.tar.gz"
         self.install_dir = "opennurbs-5_0"
 
     def setup(self, config_dict):
@@ -1772,6 +1782,7 @@ group.add_argument("--hdf5_parallel", action="store_true", default=False, help="
 group = parser.add_argument_group("BLAS/LAPACK", "BLAS/LAPACK package options")
 group.add_argument("--oblas_threads", action="store_true", default=False, help="Build OpenBLAS with thread support (OpenMP)")
 group.add_argument("--oblas_dynamic_arch", action="store_true", default=False, help="Build OpenBLAS with multiple architecure support")
+group.add_argument("--oblas_no_avx", action="store_true", default=False, help="Build OpenBLAS without AVX support (for Rosetta)")
 group.add_argument("--ref_blas", action="store_true", default=False, help="Use reference BLAS/LAPACK instead of OpenBLAS")
 group.add_argument("--blas_lapack_wrapper", action="store_true", default=False, help="BLAS/LAPACK included in compilers")
 group.add_argument("--use_mkl", action="store_true", default=False, help="Use MKL BLAS/LAPACK instead of OpenBLAS")
@@ -1871,7 +1882,7 @@ else:
         if options.ref_blas or options.blas_lapack_wrapper:
             packages.append(BLAS_LAPACK(options.blas_lapack_wrapper))
         else:
-            packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch))
+            packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch,options.oblas_no_avx))
 # MPI
 if use_mpi:
     packages.append(MPI())

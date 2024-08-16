@@ -251,8 +251,10 @@ oft_env%nthreads=omp_get_num_threads()
 !$omp end single
 oft_tid=omp_get_thread_num()
 !$omp end parallel
-IF(PRESENT(nthreads).AND.(oft_env%nthreads/=MAX(omp_nthreads,1)))CALL oft_abort( &
+IF(PRESENT(nthreads))THEN
+  IF((nthreads>0).AND.(oft_env%nthreads/=MAX(omp_nthreads,1)))CALL oft_abort( &
   'Error setting number of threads','oft_init',__FILE__)
+END IF
 !---Parse xml file if necessary
 IF(oft_env%xml_file(1:4)/='none')THEN
 #ifdef HAVE_XML

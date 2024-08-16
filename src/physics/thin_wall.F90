@@ -57,14 +57,14 @@ TYPE :: floop_sensor
   INTEGER(i4) :: np = 0 !< Number of points in loop
   REAL(r8) :: scale_fac = 1.d0 !< Scale factor to apply to signal
   REAL(r8), POINTER, DIMENSION(:,:) :: r => NULL() !< List of points [3,np]
-  CHARACTER(LEN=20) :: name = '' !< Name of sensor
+  CHARACTER(LEN=40) :: name = '' !< Name of sensor
 END TYPE floop_sensor
 !------------------------------------------------------------------------------
 !> Structure containing definition of a current jumper sensor
 !------------------------------------------------------------------------------
 TYPE :: jumper_sensor
   INTEGER(i4) :: np = 0 !< Number of points on jumper
-  CHARACTER(LEN=20) :: name = '' !< Name of sensor
+  CHARACTER(LEN=40) :: name = '' !< Name of sensor
   INTEGER(i4), POINTER, DIMENSION(:) :: points => NULL() !< List of points on jumper
   REAL(r8), POINTER, DIMENSION(:) :: hole_facs => NULL() !< Coupling weight to "holes"
 END TYPE jumper_sensor
@@ -96,6 +96,7 @@ TYPE :: tw_coil_set
   REAL(r8), POINTER, DIMENSION(:) :: res_per_len => NULL() !< Resistance/length of each coil (if required)
   REAL(r8), POINTER, DIMENSION(:) :: radius => NULL() !< Effective radius of each coil (for calculation of Lself)
   ! REAL(r8), POINTER, DIMENSION(:,:) :: axi_pt => NULL() !< Coil definitions for axisymmetric coils
+  CHARACTER(LEN=40) :: name = '' !< Name of coil set
   TYPE(tw_gen_coil), POINTER, DIMENSION(:) :: coils => NULL() !< List of coils
 END TYPE tw_coil_set
 !------------------------------------------------------------------------------
@@ -122,9 +123,9 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2coil => NULL() !< Element to coil (vcoils+icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2sen => NULL() !< Element to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2coil => NULL() !< Coil to coil coupling matrix
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2sen => NULL() !< Coil to sensor coupling matrix
+  ! REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2sen => NULL() !< Coil to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Lmat => NULL() !< Full inductance matrix
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2coil => NULL() !< Driver (icoils) to coil coupling matrix
+  ! REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2coil => NULL() !< Driver (icoils) to coil coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2sen => NULL() !< Driver (icoils) to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
@@ -196,7 +197,7 @@ CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 !---Load coils
 IF(.NOT.ASSOCIATED(self%xml))THEN
   CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
-  CALL oft_warn('Unable to find "thincurr" XML node')
+  IF(error_flag/=0)CALL oft_warn('Unable to find "thincurr" XML node')
 END IF
 WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
 CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
@@ -216,7 +217,7 @@ WRITE(*,'(2A,2I12)')oft_indent,'# of points    = ',self%mesh%np
 WRITE(*,'(2A,I12)')oft_indent,'# of edges     = ',self%mesh%ne
 WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
 WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
-WRITE(*,'(2A,I12)')oft_indent,'# of pcoils    = ',self%n_vcoils
+WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',self%n_vcoils
 WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',self%nclosures
 IF(oft_debug_print(1))WRITE(*,*)oft_indent,'  Closures: ',self%closures
 WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',self%n_icoils
@@ -512,12 +513,13 @@ TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
 INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(3),ierr,io_unit,iquad
-REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3)
+REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3),elapsed_time
 REAL(8) :: pot_tmp,rgop(3,3),area_i,norm_i(3),f(3),dl_min,dl_max,pot_last
 REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
+type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
 IF(PRESENT(save_file))THEN
@@ -574,6 +576,7 @@ END DO
 !
 bmesh=>tw_obj%mesh
 WRITE(*,*)'Building coil<->element inductance matrices'
+CALL mytimer%tick
 ALLOCATE(Ael2coil_tmp(tw_obj%nelems,ncoils_tot))
 Ael2coil_tmp=0.d0
 f=1.d0/3.d0
@@ -671,6 +674,11 @@ DO i=1,18
   CALL quads(i)%delete()
 END DO
 DEALLOCATE(quads)
+elapsed_time=mytimer%tock()
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
+!
+CALL tw_compute_Lmat_coils(tw_obj)
+!
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
@@ -682,6 +690,109 @@ IF(PRESENT(save_file))THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Ael2dr
+!------------------------------------------------------------------------------
+!> Compute coupling from thin-wall model elements to flux loop sensors
+!------------------------------------------------------------------------------
+SUBROUTINE tw_compute_Lmat_coils(tw_obj)
+TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
+LOGICAL :: exists
+INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
+REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3)
+REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness
+REAL(8) :: rgop(3,3),norm_i(3),area_i,f(3),dl_min,dl_max,pot_last,pot_tmp
+REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
+CLASS(oft_bmesh), POINTER :: bmesh
+INTEGER(4) :: ncoils_tot
+TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
+TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+DEBUG_STACK_PUSH
+!
+ALLOCATE(quads(18))
+DO i=1,18
+  CALL set_quad_2d(quads(i),i)
+END DO
+!---Build temporary coil set from all filaments in model
+ncoils_tot=tw_obj%n_vcoils
+IF(ASSOCIATED(tw_obj%Ael2dr))ncoils_tot=ncoils_tot+tw_obj%n_icoils
+ALLOCATE(coils_tot(ncoils_tot))
+DO i=1,tw_obj%n_vcoils
+  CALL tw_copy_coil(tw_obj%vcoils(i),coils_tot(i))
+END DO
+IF(ASSOCIATED(tw_obj%Ael2dr))THEN
+  DO i=1,tw_obj%n_icoils
+    CALL tw_copy_coil(tw_obj%icoils(i),coils_tot(i+tw_obj%n_vcoils))
+  END DO
+END IF
+bmesh=>tw_obj%mesh
+!---Compute coupling between vertices and sensors
+f=1.d0/3.d0
+!---Compute coupling between coils
+ALLOCATE(Acoil2coil_tmp(tw_obj%n_vcoils,ncoils_tot))
+Acoil2coil_tmp=0.d0
+WRITE(*,*)'Building coil<->coil inductance matrix'
+IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
+  !$omp parallel private(i,ii,j,k,kk,tmp,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness)
+  ALLOCATE(atmp(ncoils_tot,1))
+  !$omp do
+  DO l=1,tw_obj%n_vcoils
+    atmp=0.d0
+    DO i=1,coils_tot(l)%ncoils
+      DO ii=2,coils_tot(l)%coils(i)%npts
+        rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
+        pt_i = (coils_tot(l)%coils(i)%pts(:,ii)+coils_tot(l)%coils(i)%pts(:,ii-1))/2.d0
+        DO j=1,ncoils_tot
+          DO k=1,coils_tot(j)%ncoils
+            coil_thickness=MAX(coils_tot(l)%radius(i),coils_tot(j)%radius(k))
+            tmp=0.d0
+            DO kk=2,coils_tot(j)%coils(k)%npts
+              cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
+              cpt = (coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
+              tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/MAX(coil_thickness,SQRT(SUM((pt_i-cpt)**2)))
+            END DO
+            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
+          END DO
+        END DO
+      END DO
+    END DO
+    DO j=1,ncoils_tot
+      Acoil2coil_tmp(l,j) = atmp(j,1)
+    END DO
+  END DO
+  DEALLOCATE(atmp)
+  !$omp end parallel
+END IF
+DEALLOCATE(coils_tot)
+!---Unpack passive and driver coils
+IF(ASSOCIATED(tw_obj%Acoil2coil))DEALLOCATE(tw_obj%Acoil2coil)
+ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
+DO i=1,tw_obj%n_vcoils
+  tw_obj%Acoil2coil(:,i)=Acoil2coil_tmp(:,i)
+  tw_obj%vcoils(i)%Lself=Acoil2coil_tmp(i,i)
+  WRITE(*,"(A,1X,I4,A,ES12.4)")"  Vcoil",i,": L [H] = ",tw_obj%vcoils(i)%Lself*1.d-7
+END DO
+!---Compute coupling between elements and drivers
+IF(ASSOCIATED(tw_obj%Ael2dr))THEN
+  ! WRITE(*,*)'Building driver->element inductance matrices'
+  IF(tw_obj%n_vcoils>0)THEN
+    !$omp parallel private(j,ii,jj,ik,jk)
+    !$omp do
+    DO i=1,tw_obj%n_vcoils
+      DO jj=1,tw_obj%n_icoils
+        tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = Acoil2coil_tmp(i,jj+tw_obj%n_vcoils)
+      END DO
+    END DO
+    !$omp end parallel
+  END IF
+  tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
+END IF
+DEALLOCATE(Acoil2coil_tmp)
+!
+DO i=1,18
+  CALL quads(i)%delete()
+END DO
+DEALLOCATE(quads)
+DEBUG_STACK_POP
+END SUBROUTINE tw_compute_Lmat_coils
 !------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
 !------------------------------------------------------------------------------
@@ -953,7 +1064,7 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 elapsed_time=mytimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     IF(Lself)THEN
@@ -1201,7 +1312,7 @@ b = b/(4.d0*pi)
 CALL quad%delete()
 CALL quad2%delete()
 elapsed_time=mytimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
+WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_MF
 !------------------------------------------------------------------------------
@@ -1244,21 +1355,21 @@ IF(PRESENT(save_file))THEN
         exists=.FALSE.
       END IF
     END IF
-    IF(exists)THEN
-      ALLOCATE(tw_obj%Acoil2sen(tw_obj%n_vcoils,nsensors))
-      READ(io_unit, IOSTAT=ierr)tw_obj%Acoil2sen
-      IF(ierr/=0)THEN
-        WRITE(*,*)'  Error reading matrix from file'
-        DEALLOCATE(tw_obj%Ael2sen,tw_obj%Acoil2sen)
-        exists=.FALSE.
-      END IF
-    END IF
+    ! IF(exists)THEN
+    !   ALLOCATE(tw_obj%Acoil2sen(tw_obj%n_vcoils,nsensors))
+    !   READ(io_unit, IOSTAT=ierr)tw_obj%Acoil2sen
+    !   IF(ierr/=0)THEN
+    !     WRITE(*,*)'  Error reading matrix from file'
+    !     DEALLOCATE(tw_obj%Ael2sen,tw_obj%Acoil2sen)
+    !     exists=.FALSE.
+    !   END IF
+    ! END IF
     IF(exists)THEN
       ALLOCATE(tw_obj%Adr2sen(tw_obj%n_icoils,nsensors))
       READ(io_unit, IOSTAT=ierr)tw_obj%Adr2sen
       IF(ierr/=0)THEN
         WRITE(*,*)'  Error reading matrix from file'
-        DEALLOCATE(tw_obj%Ael2sen,tw_obj%Acoil2sen,tw_obj%Adr2sen)
+        DEALLOCATE(tw_obj%Ael2sen,tw_obj%Adr2sen)
         exists=.FALSE.
       END IF
     END IF
@@ -1288,6 +1399,7 @@ bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
 WRITE(*,*)'Building element->sensor inductance matrix'
+IF(ASSOCIATED(tw_obj%Ael2sen))DEALLOCATE(tw_obj%Ael2sen)
 ALLOCATE(tw_obj%Ael2sen(nsensors,tw_obj%nelems))
 tw_obj%Ael2sen=0.d0
 IF(nsensors>0)THEN
@@ -1414,16 +1526,17 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
   END DO
 END IF
 !---Unpack passive and driver coils
-ALLOCATE(tw_obj%Acoil2sen(nsensors,tw_obj%n_vcoils))
-DO i=1,tw_obj%n_vcoils
-  tw_obj%Acoil2sen(:,i)=Acoil2sen_tmp(:,i)
-END DO
+! IF(ASSOCIATED(tw_obj%Acoil2sen))DEALLOCATE(tw_obj%Acoil2sen)
+! ALLOCATE(tw_obj%Acoil2sen(nsensors,tw_obj%n_vcoils))
+! DO i=1,tw_obj%n_vcoils
+!   tw_obj%Acoil2sen(:,i)=Acoil2sen_tmp(:,i)
+! END DO
+IF(ASSOCIATED(tw_obj%Adr2sen))DEALLOCATE(tw_obj%Adr2sen)
 ALLOCATE(tw_obj%Adr2sen(nsensors,tw_obj%n_icoils))
 DO i=1,tw_obj%n_icoils
   tw_obj%Adr2sen(:,i)=Acoil2sen_tmp(:,i+tw_obj%n_vcoils)
 END DO
 tw_obj%Adr2sen=tw_obj%Adr2sen/(4.d0*pi)
-DEALLOCATE(Acoil2sen_tmp)
 !---Copy coupling between passive coils and sensors
 IF(nsensors>0)THEN
   !$omp parallel private(j,ii,jj,ik,jk)
@@ -1431,74 +1544,13 @@ IF(nsensors>0)THEN
   DO i=1,tw_obj%n_vcoils
     ! Sensors
     DO jj=1,nsensors
-      tw_obj%Ael2sen(jj,tw_obj%np_active+tw_obj%nholes+i) = tw_obj%Acoil2sen(jj,i)
+      tw_obj%Ael2sen(jj,tw_obj%np_active+tw_obj%nholes+i)=Acoil2sen_tmp(jj,i)! tw_obj%Acoil2sen(jj,i)
     END DO
   END DO
   !$omp end parallel
   tw_obj%Ael2sen = tw_obj%Ael2sen/(4.d0*pi)
 END IF
-!---Compute coupling between coils
-ALLOCATE(Acoil2coil_tmp(tw_obj%n_vcoils,ncoils_tot))
-Acoil2coil_tmp=0.d0
-WRITE(*,*)'Building coil<->coil inductance matrix'
-IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
-  !$omp parallel private(i,ii,j,k,kk,tmp,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness)
-  ALLOCATE(atmp(ncoils_tot,1))
-  !$omp do
-  DO l=1,tw_obj%n_vcoils
-    atmp=0.d0
-    DO i=1,coils_tot(l)%ncoils
-      DO ii=2,coils_tot(l)%coils(i)%npts
-        rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
-        pt_i = (coils_tot(l)%coils(i)%pts(:,ii)+coils_tot(l)%coils(i)%pts(:,ii-1))/2.d0
-        DO j=1,ncoils_tot
-          DO k=1,coils_tot(j)%ncoils
-            coil_thickness=MAX(coils_tot(l)%radius(i),coils_tot(j)%radius(k))
-            tmp=0.d0
-            DO kk=2,coils_tot(j)%coils(k)%npts
-              cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
-              cpt = (coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
-              tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/MAX(coil_thickness,SQRT(SUM((pt_i-cpt)**2)))
-            END DO
-            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
-          END DO
-        END DO
-      END DO
-    END DO
-    DO j=1,ncoils_tot
-      Acoil2coil_tmp(l,j) = atmp(j,1)
-    END DO
-  END DO
-  DEALLOCATE(atmp)
-  !$omp end parallel
-END IF
-DEALLOCATE(coils_tot)
-!---Unpack passive and driver coils
-ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
-DO i=1,tw_obj%n_vcoils
-  tw_obj%Acoil2coil(:,i)=Acoil2coil_tmp(:,i)
-  tw_obj%vcoils(i)%Lself=Acoil2coil_tmp(i,i)
-  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": L [H] = ",tw_obj%vcoils(i)%Lself*1.d-7
-END DO
-ALLOCATE(tw_obj%Adr2coil(tw_obj%n_vcoils,tw_obj%n_icoils))
-DO i=1,tw_obj%n_icoils
-  tw_obj%Adr2coil(:,i)=Acoil2coil_tmp(:,i+tw_obj%n_vcoils)
-END DO
-DEALLOCATE(Acoil2coil_tmp)
-!---Compute coupling between elements and drivers
-IF(ASSOCIATED(tw_obj%Ael2dr))THEN
-  WRITE(*,*)'Building driver->element inductance matrices'
-  !$omp parallel private(j,ii,jj,ik,jk)
-  !$omp do
-  DO i=1,tw_obj%n_vcoils
-    DO jj=1,tw_obj%n_icoils
-      tw_obj%Ael2dr(tw_obj%np_active+tw_obj%nholes+i,jj) = tw_obj%Adr2coil(i,jj)
-    END DO
-  END DO
-  !$omp end parallel
-  tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
-  DEALLOCATE(tw_obj%Adr2coil)
-END IF
+DEALLOCATE(Acoil2sen_tmp)
 !
 DO i=1,18
   CALL quads(i)%delete()
@@ -1510,7 +1562,7 @@ IF(PRESENT(save_file))THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
     WRITE(io_unit)tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils,nsensors
     WRITE(io_unit)tw_obj%Ael2sen
-    WRITE(io_unit)tw_obj%Acoil2sen
+    ! WRITE(io_unit)tw_obj%Acoil2sen
     WRITE(io_unit)tw_obj%Adr2sen
     CLOSE(io_unit)
   END IF
@@ -1730,7 +1782,7 @@ DO i=1,tw_obj%n_vcoils
     END DO
     tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself + tw_obj%vcoils(i)%res_per_len(j)*dl
   END DO
-  WRITE(*,"(A,1X,I4,A,ES12.4)")"  pCoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
+  WRITE(*,"(A,1X,I4,A,ES12.4)")"  Vcoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
   tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself/mu0 ! Convert to magnetic units
   !
   eta_add=tw_obj%vcoils(i)%Rself
@@ -1813,16 +1865,43 @@ END FUNCTION tw_compute_phipot
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops(self)
+SUBROUTINE tw_compute_Bops(self,save_file)
 TYPE(tw_type), INTENT(inout) :: self
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 REAL(8), PARAMETER :: B_dx = 1.d-6
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
-LOGICAL :: is_neighbor
+INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,hash_tmp(4),file_counts(4)
+LOGICAL :: is_neighbor,exists
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+IF(TRIM(save_file)/='none')THEN
+  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
+  IF(exists)THEN
+    hash_tmp(1) = self%nelems
+    hash_tmp(2) = self%mesh%nc
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+    WRITE(*,*)'  Loading B-field operator from file: ',TRIM(save_file)
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
+    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+      ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
+      CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
+      IF(exists)THEN
+        ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
+        CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
+      END IF
+    END IF
+  END IF
+  IF(exists)RETURN
+  DEALLOCATE(self%Bel,self%Bdr)
+END IF
+!
 bmesh=>self%mesh
 ALLOCATE(quads(18))
 DO i=1,18
@@ -1839,7 +1918,7 @@ ALLOCATE(atmp(3,3,bmesh%np))
 DO i=1,bmesh%nc
   ! CALL bmesh%jacobian(i,f,rgop,area_i)
   ! CALL bmesh%norm(i,f,norm_i)
-  area_i=bmesh%ca(i)*2.d0
+  area_i=bmesh%ca(i)
   DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
@@ -1963,7 +2042,7 @@ END DO
 self%Bel=self%Bel/(4.d0*pi)
 !
 WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
-ALLOCATE(self%Bdr(self%n_icoils,bmesh%np,3))
+ALLOCATE(self%Bdr(bmesh%np,self%n_icoils,3))
 self%Bdr=0.d0
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
 DO i=1,bmesh%np
@@ -1983,11 +2062,31 @@ DO i=1,bmesh%np
     END DO
     DO jj=1,3
       !$omp atomic
-      self%Bdr(j,i,jj) = self%Bdr(j,i,jj) + ecc(jj)
+      self%Bdr(i,j,jj) = self%Bdr(i,j,jj) + ecc(jj)
     END DO
   END DO
 END DO
 self%Bdr=self%Bdr/(4.d0*pi)
+!
+IF(TRIM(save_file)/='none')THEN
+  hash_tmp(1) = self%nelems
+  hash_tmp(2) = self%mesh%nc
+  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+  hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+  WRITE(*,*)'  Saving B-field operator to file: ',TRIM(save_file)
+  CALL hdf5_create_file(TRIM(save_file))
+  CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
+  IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+    CALL hdf5_write(self%Bel(:,:,1),TRIM(save_file),'Bel_X')
+    CALL hdf5_write(self%Bel(:,:,2),TRIM(save_file),'Bel_Y')
+    CALL hdf5_write(self%Bel(:,:,3),TRIM(save_file),'Bel_Z')
+    IF(exists)THEN
+      CALL hdf5_write(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X')
+      CALL hdf5_write(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y')
+      CALL hdf5_write(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z')
+    END IF
+  END IF
+END IF
 END SUBROUTINE tw_compute_Bops
 !------------------------------------------------------------------------------
 !> Setup hole definition for ordered chain of vertices
@@ -2152,6 +2251,13 @@ DO i=1,ncoils
   coil_tmp%res_per_len=-1.d0
   coil_tmp%radius=-1.d0
   coil_tmp%Rself=0.d0
+  !---Get coil set name
+  xml_attr=>fox_getAttributeNode(coil_set,"name")
+  IF(ASSOCIATED(xml_attr))THEN
+    CALL fox_extractDataContent(xml_attr,coil_tmp%name,num=nread,iostat=ierr)
+  ELSE
+    WRITE(coil_tmp%name,'(A8,I5.5)')'UNKNOWN_',i
+  END IF
   !---Get coil set resistivity per unit length (can be overriden)
   xml_attr=>fox_getAttributeNode(coil_set,"res_per_len")
   IF(ASSOCIATED(xml_attr))THEN
@@ -2663,25 +2769,23 @@ END SUBROUTINE tw_build_boozer
 !------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
 !------------------------------------------------------------------------------
-SUBROUTINE tw_save_pfield(self,a,tag)
+SUBROUTINE tw_recon_curr(self,pot,curr)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-real(8), intent(in) :: a(:) !< Solution values [self%nelems]
-character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
+real(8), intent(in) :: pot(:) !< Solution values [self%nelems]
+real(8), intent(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec
 DEBUG_STACK_PUSH
 !---Avg to cells
-ALLOCATE(cellvec(3,self%mesh%nc))
 ftmp=1.d0/3.d0
 DO i=1,self%mesh%nc
-  cellvec(:,i)=0.d0
+  curr(:,i)=0.d0
   CALL self%mesh%jacobian(i,ftmp,gop,area)
   CALL self%mesh%norm(i,ftmp,norm)
   DO j=1,3
     pt=self%pmap(self%mesh%lc(j,i))
     IF(pt==0)CYCLE
-    cellvec(:,i) = cellvec(:,i) + a(pt)*cross_product(gop(:,j),norm)
+    curr(:,i) = curr(:,i) + pot(pt)*cross_product(gop(:,j),norm)
   END DO
 END DO
 DO ih=1,self%nholes
@@ -2693,11 +2797,27 @@ i=ABS(self%hmesh(ih)%lpc(ihc))
   END DO
   CALL self%mesh%jacobian(i,ftmp,gop,area)
   CALL self%mesh%norm(i,ftmp,norm)
-  cellvec(:,i) = cellvec(:,i) &
-    + a(self%np_active+ih)*cross_product(gop(:,j),norm)*SIGN(1,self%hmesh(ih)%lpc(ihc))
+  curr(:,i) = curr(:,i) &
+    + pot(self%np_active+ih)*cross_product(gop(:,j),norm)*SIGN(1,self%hmesh(ih)%lpc(ihc))
 END DO
 END DO
 END DO
+DEBUG_STACK_POP
+END SUBROUTINE tw_recon_curr
+!------------------------------------------------------------------------------
+!> Save solution vector for thin-wall model for plotting in VisIt
+!------------------------------------------------------------------------------
+SUBROUTINE tw_save_pfield(self,a,tag)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+real(8), intent(in) :: a(:) !< Solution values [self%nelems]
+character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
+INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
+REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec
+DEBUG_STACK_PUSH
+!---Avg to cells
+ALLOCATE(cellvec(3,self%mesh%nc))
+CALL tw_recon_curr(self,a,cellvec)
 CALL self%mesh%save_cell_vector(cellvec/mu0,TRIM(tag)) ! Convert back to Amps
 !---Avg to points
 ALLOCATE(ptvec(3,self%mesh%np))

@@ -223,7 +223,7 @@ IF(sensors%nfloops>0)THEN
     !---Setup history file
     IF(oft_env%head_proc)THEN
     floop_hist%filedesc = 'ThinCurr frequency-response flux loop signals (Re, Im, Re_vac, Im_vac)'
-    CALL floop_hist%setup('thincurr_fr.dat')
+    CALL floop_hist%setup('thincurr_fr.hist')
     DO i=1,sensors%nfloops
         CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
     END DO
