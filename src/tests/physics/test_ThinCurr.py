@@ -410,7 +410,7 @@ def test_td_plate(direct_flag,python):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (False, True))
 def test_td_plate_volt(direct_flag,python):
-    sigs_final = (4.E-3, 4.766694E-4, 4.010512E-4)
+    sigs_final = (4.E-3, 4.580643E-4, 3.854292E-4)
     assert ThinCurr_setup("tw_test-plate.h5",1,direct_flag,
                            vcoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
@@ -432,7 +432,7 @@ def test_td_cyl(direct_flag,python):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (False, True))
 def test_td_cyl_volt(direct_flag,python):
-    sigs_final = (4.E-3, 1.710824E-4, 1.453702E-4)
+    sigs_final = (4.E-3, 1.504279E-4, 1.276624E-4)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -457,7 +457,7 @@ def test_td_torus(direct_flag,python):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (False, True))
 def test_td_torus_volt(direct_flag,python):
-    sigs_final = (4.E-3, 6.501287E-5, 4.640848E-6)
+    sigs_final = (4.E-3, 5.653338E-5, 4.035387E-6)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,
                            vcoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
@@ -470,7 +470,7 @@ def test_td_torus_volt(direct_flag,python):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (False, True))
 def test_td_passive(direct_flag,python):
-   sigs_final = (4.E-3, 7.706778E-4, 7.903190E-4)
+   sigs_final = (4.E-3, 8.349309E-4, 8.364054E-4)
    assert ThinCurr_setup("tw_test-passive.h5",1,direct_flag,eta=1.E4,
                           icoils=((0.5, 0.1),),
                           vcoils=((0.5, 0.0),),
@@ -483,7 +483,7 @@ def test_td_passive(direct_flag,python):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (False, True))
 def test_td_passive_volt(direct_flag,python):
-   sigs_final = (4.E-3, 4.228515E-4, 4.338835E-4)
+   sigs_final = (4.E-3, 4.379235E-4, 4.389248E-4)
    assert ThinCurr_setup("tw_test-passive.h5",1,direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
@@ -519,7 +519,7 @@ def test_eig_torus(direct_flag,python):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (False, True))
 def test_eig_passive(direct_flag,python):
-    eigs = (1.483589E-1, 6.207849E-2, 2.942791E-2, 2.693574E-2)
+    eigs = (1.504155E-1, 6.423383E-2, 3.190175E-2, 2.942398E-2)
     assert ThinCurr_setup("tw_test-passive.h5",2,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)),python=python)
@@ -549,7 +549,7 @@ def test_mred_torus(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_mred_passive(direct_flag):
-    eigs = (1.483589E-1, 6.207849E-2, 2.942791E-2, 2.693574E-2)
+    eigs = (1.504155E-1, 6.423383E-2, 3.190175E-2, 2.942398E-2)
     assert ThinCurr_setup("tw_test-passive.h5",4,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)))
@@ -595,8 +595,8 @@ def test_fr_torus(direct_flag,python):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (False, True))
 def test_fr_passive(direct_flag,python):
-    fr_real = (1.777366E-1, 1.868689E-1)
-    fr_imag = (-2.331033E-4, -1.671967E-4)
+    fr_real = (1.947713E-1, 1.990873E-1)
+    fr_imag = (-2.174952E-4, -1.560016E-4)
     assert ThinCurr_setup("tw_test-passive.h5",3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
                            icoils=((0.5, 0.1),),
                            vcoils=((0.5, 0.0),),
@@ -633,7 +633,7 @@ def test_td_aca(python):
 @pytest.mark.coverage
 @pytest.mark.parametrize("python", (False, True))
 def test_td_volt_aca(python):
-    sigs_final = (4.E-3, 1.720867E-4, 1.470760E-4)
+    sigs_final = (4.E-3, 1.512679E-4, 1.291681E-4)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
