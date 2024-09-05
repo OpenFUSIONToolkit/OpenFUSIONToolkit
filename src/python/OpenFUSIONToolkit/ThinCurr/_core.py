@@ -230,7 +230,7 @@ class ThinCurr():
         @param field Pointwise data to save
         @param tag Name of field in plot files
         '''
-        if field.shape[0] >= self.np:
+        if field.shape[0] != self.np:
             raise ValueError('Incorrect shape of "field", should be [np]')
         field = numpy.ascontiguousarray(field, dtype=numpy.float64)
         ctag = c_char_p(tag.encode())
