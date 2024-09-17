@@ -1304,23 +1304,24 @@ DO i=1,rmesh%nc
   END DO
 END DO
 !$omp end do nowait
-!---Add passive coils to model
-!$omp do
-DO i=1,row_obj%np_active+row_obj%nholes
-  DO j=1,col_obj%n_vcoils
-    jj=col_obj%np_active+col_obj%nholes+j
-    b(jj,:) = row_obj%Ael2coil(i,j)*a(i,:)
-  END DO
-END DO
-!$omp end do nowait
-!$omp do
-DO i=1,row_obj%n_vcoils
-  ii=row_obj%np_active+row_obj%nholes+i
-  DO j=1,col_obj%n_vcoils
-    jj=col_obj%np_active+col_obj%nholes+j
-    b(jj,:) = b(jj,:) + row_obj%Acoil2coil(i,j)*a(ii,:)
-  END DO
-END DO
+IF((col_obj%n_vcoils>0).OR.(row_obj%n_vcoils>0))CALL oft_warn("V-coil contributions were not computed.")
+! !---Add passive coils to model
+! !$omp do
+! DO i=1,col_obj%n_vcoils
+!   ii=col_obj%np_active+col_obj%nholes+i
+!   DO j=1,row_obj%np_active+row_obj%nholes
+!     b(ii,:) = b(ii,:) + row_obj%Ael2coil(j,i)*a(j,:)
+!   END DO
+! END DO
+! !$omp end do nowait
+! !$omp do
+! DO i=1,col_obj%n_vcoils
+!   ii=col_obj%np_active+col_obj%nholes+i
+!   DO j=1,row_obj%n_vcoils
+!     jj=row_obj%np_active+row_obj%nholes+j
+!     b(ii,:) = b(ii,:) + row_obj%Acoil2coil(j,i)*a(jj,:)
+!   END DO
+! END DO
 !$omp end parallel
 b = b/(4.d0*pi)
 CALL quad%delete()

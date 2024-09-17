@@ -422,16 +422,16 @@ class TokaMaker():
         @param reg_weights Weights for regularization terms [nregularize] (default: 1)
         '''
         if reg_mat.shape[1] != self.ncoils+1:
-            raise ValueError('Incorrect shape of "reg_mat", should be [nregularize,ncoils+1]')
+            raise IndexError('Incorrect shape of "reg_mat", should be [nregularize,ncoils+1]')
         nregularize = reg_mat.shape[0]
         if reg_targets is None:
             reg_targets = numpy.zeros((nregularize,), dtype=numpy.float64)
         if reg_weights is None:
             reg_weights = numpy.ones((nregularize,), dtype=numpy.float64)
         if reg_targets.shape[0] != nregularize:
-            raise ValueError('Incorrect shape of "reg_targets", should be [nregularize]')
+            raise IndexError('Incorrect shape of "reg_targets", should be [nregularize]')
         if reg_weights.shape[0] != nregularize:
-            raise ValueError('Incorrect shape of "reg_weights", should be [nregularize]')
+            raise IndexError('Incorrect shape of "reg_weights", should be [nregularize]')
         reg_mat = numpy.ascontiguousarray(reg_mat.transpose(), dtype=numpy.float64)
         reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
         reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
@@ -446,8 +446,8 @@ class TokaMaker():
         @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
         '''
         if (coil_bounds.shape[0] != self.ncoils+1) or (coil_bounds.shape[1] != 2):
-            raise ValueError('Incorrect shape of "coil_bounds", should be [ncoils+1,2]')
-        boucoil_boundsnds = numpy.ascontiguousarray(coil_bounds, dtype=numpy.float64)
+            raise IndexError('Incorrect shape of "coil_bounds", should be [ncoils+1,2]')
+        coil_bounds = numpy.ascontiguousarray(coil_bounds, dtype=numpy.float64)
         tokamaker_set_coil_bounds(coil_bounds)
 
     def set_coil_vsc(self,coil_gains):
@@ -456,7 +456,7 @@ class TokaMaker():
         @param coil_gains Gains for each coil (absolute scale is arbitrary)
         '''
         if coil_gains.shape[0] != self.ncoils:
-            raise ValueError('Incorrect shape of "coil_gains", should be [ncoils]')
+            raise IndexError('Incorrect shape of "coil_gains", should be [ncoils]')
         coil_gains = numpy.ascontiguousarray(coil_gains, dtype=numpy.float64)
         tokamaker_set_coil_vsc(coil_gains)
 
@@ -552,7 +552,7 @@ class TokaMaker():
             psi = numpy.zeros((self.np,),dtype=numpy.float64)
         else:
             if psi.shape[0] != self.np:
-                raise ValueError('Incorrect shape of "psi", should be [np]')
+                raise IndexError('Incorrect shape of "psi", should be [np]')
             psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         error_flag = c_int()
         tokamaker_vac_solve(psi,ctypes.byref(error_flag))
@@ -778,7 +778,7 @@ class TokaMaker():
         @param psi Poloidal flux values (should not be normalized!)
         '''
         if psi.shape[0] != self.np:
-            raise ValueError('Incorrect shape of "psi", should be [np]')
+            raise IndexError('Incorrect shape of "psi", should be [np]')
         psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         tokamaker_set_psi(psi)
     
@@ -789,7 +789,7 @@ class TokaMaker():
         @param dt Time since reference poloidal flux
         '''
         if psi0.shape[0] != self.np:
-            raise ValueError('Incorrect shape of "psi0", should be [np]')
+            raise IndexError('Incorrect shape of "psi0", should be [np]')
         psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
         tokamaker_set_psi_dt(psi0,c_double(dt))
     
@@ -990,7 +990,7 @@ class TokaMaker():
         @param currents Current in each coil [A]
         '''
         if currents.shape[0] != self.ncoils:
-            raise ValueError('Incorrect shape of "currents", should be [ncoils]')
+            raise IndexError('Incorrect shape of "currents", should be [ncoils]')
         currents = numpy.ascontiguousarray(currents, dtype=numpy.float64)
         tokamaker_set_coil_currents(currents)
 
