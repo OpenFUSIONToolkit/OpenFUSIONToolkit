@@ -452,35 +452,80 @@ SUBROUTINE order_hole_list(list_in,list_out,n)
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered list
 INTEGER(4), INTENT(in) :: n !< Number of points in list
-INTEGER(4) :: ii,jj,k,ipt,eprev,ed,ptp
-INTEGER(4), ALLOCATABLE :: lloop_tmp(:)
+INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
+INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
 !---Find loop points and edges
-ALLOCATE(lloop_tmp(n))
+ALLOCATE(lloop_tmp(n),flag_list(n))
+flag_list=0
 lloop_tmp=list_in
 CALL sort_array(lloop_tmp, n)
 !
-ipt=lloop_tmp(1)
+! DO i0=1,n
+!   nlinks=0
+!   DO l=self%mesh%kpe(lloop_tmp(i0)),self%mesh%kpe(lloop_tmp(i0)+1)-1
+!     ed2 = self%mesh%lpe(l)
+!     ptp2 = SUM(self%mesh%le(:,ed2))-lloop_tmp(i0)
+!     candidate2=search_array(ptp2, lloop_tmp, n)
+!     IF(candidate2==0)CYCLE
+!     nlinks=nlinks+1
+!   END DO
+!   IF(nlinks==2)EXIT
+! END DO
+i0=1
+flag_list(i0)=1
+ipt=lloop_tmp(i0)
 k=1
 list_out(k)=ipt
 eprev=0
 DO jj=1,n
+  IF(jj==n-2)flag_list(1)=0 ! Unflag first point for last link (needs to be 2 offset for link count check below)
+  last_item=-1
   DO ii=self%mesh%kpe(ipt),self%mesh%kpe(ipt+1)-1
     ed = self%mesh%lpe(ii)
     IF(ed==eprev)CYCLE
     ptp = SUM(self%mesh%le(:,ed))-ipt
-    IF(search_array(ptp, lloop_tmp, n)==0)CYCLE
+    candidate=search_array(ptp, lloop_tmp, n)
+    IF(candidate==0)THEN
+      CYCLE
+    ELSE
+      IF(flag_list(candidate)==1)CYCLE
+      nlinks=0
+      DO l=self%mesh%kpe(ptp),self%mesh%kpe(ptp+1)-1
+        ed2 = self%mesh%lpe(l)
+        ptp2 = SUM(self%mesh%le(:,ed2))-ptp
+        candidate2=search_array(ptp2, lloop_tmp, n)
+        IF(candidate2==0)CYCLE
+        IF(flag_list(candidate2)==1)CYCLE
+        nlinks=nlinks+1
+      END DO
+      last_item=[ptp,candidate,ed]
+      IF(nlinks>1)CYCLE
+      last_item=-1
+    END IF
+    flag_list(candidate)=1
     ipt=ptp
-    IF(jj==n)EXIT
-    k=k+1
-    list_out(k)=ipt
-    eprev=ed
+    IF(jj<n)THEN
+      k=k+1
+      list_out(k)=ipt
+      eprev=ed
+    END IF
     EXIT
   END DO
-  ! IF(ipt==lloop_tmp(1))EXIT
+  IF(last_item(1)>0)THEN
+    flag_list(last_item(2))=1
+    ipt=last_item(1)
+    IF(jj<n)THEN
+      k=k+1
+      list_out(k)=ipt
+      eprev=last_item(3)
+    END IF
+  END IF
 END DO
-IF(ipt/=lloop_tmp(1))CALL oft_abort('Error building hole mesh, path is not periodic', &
+IF(jj<n+1)CALL oft_abort('Error building hole mesh, unmatched points exist', &
   'tw_setup::order_hole_list', __FILE__)
-DEALLOCATE(lloop_tmp)
+IF(ipt/=lloop_tmp(i0))CALL oft_abort('Error building hole mesh, path is not periodic', &
+  'tw_setup::order_hole_list', __FILE__)
+DEALLOCATE(lloop_tmp,flag_list)
 END SUBROUTINE order_hole_list
 END SUBROUTINE tw_setup
 !------------------------------------------------------------------------------
