@@ -1194,7 +1194,7 @@ class TokaMaker():
             eta = cond_reg.get('eta',-1.0)
             if eta > 0:
                 mask_tmp = (self.reg == cond_reg['reg_id'])
-                field_tmp = dpsi_dt/eta
+                field_tmp = -dpsi_dt/eta
                 mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
                 if cond_reg.get('noncontinuous',False):
                     mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
