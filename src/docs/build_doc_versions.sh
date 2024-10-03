@@ -37,6 +37,9 @@ do
     MENU_PATCH+='{text:"'$verTag'",url:"'../$verTag'/index.html"},'
 done
 
+# Reset to head for following steps
+git checkout $COMMIT_HASH
+
 # Create common output directory and pointer page
 mkdir -p doc/html
 echo '<html><head><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />' > doc/html/index.html
