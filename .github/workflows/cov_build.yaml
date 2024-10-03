@@ -94,5 +94,5 @@ jobs:
       with:
         files: libs/build_release/cleaned_coverage.txt,libs/build_release/tests/coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }}
-        slug: hansec/OpenFUSIONToolkit
+        slug: openfusiontoolkit/OpenFUSIONToolkit
         verbose: true

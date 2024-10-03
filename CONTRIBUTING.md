@@ -7,10 +7,10 @@ TODO: Create a suitable place for questions/discussion (eg. Discord).
 
 ### Did you find a bug?
 Before opening an issue:
-* **Ensure this is a bug!** While we make an effort to provide a robust and clear tool there are many nuances that still exist. Please view the [FAQs on the wiki](https://github.com/hansec/OpenFUSIONToolkit/wiki) and other documentation to ensure the behavior is truly unexpected.
-* **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/hansec/OpenFUSIONToolkit/issues).
+* **Ensure this is a bug!** While we make an effort to provide a robust and clear tool there are many nuances that still exist. Please view the [FAQs on the wiki](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki) and other documentation to ensure the behavior is truly unexpected.
+* **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues).
 
-If you're unable to find an open issue addressing the problem, [open a new one](https://github.com/hansec/OpenFUSIONToolkit/issues/new). Be sure to include a **title and clear description** and as much relevant information as possible, but *at least* the following:
+If you're unable to find an open issue addressing the problem, [open a new one](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues/new). Be sure to include a **title and clear description** and as much relevant information as possible, but *at least* the following:
  * OS type and version where the bug occurs (eg. Ubuntu 20.04)
  * CPU for machine where bug occurs (eg. Apple M2)
  * Whether you are using a binary or built the code from source
@@ -21,9 +21,9 @@ Additionally, if at all possible please include **sample code** or input files t
 Please note that in general feature suggestions/requests will not be able to be supported unless a developer is willing to volunteer or the feature is already within the scope of a developer's planned work. Therefore **features should only be suggested if the requesting party is planning to primarily develop the feature themselves**.
 
 Before opening an issue:
-* **Ensure the feature is not already planned** by searching on GitHub under [Issues](https://github.com/hansec/OpenFUSIONToolkit/issues).
+* **Ensure the feature is not already planned** by searching on GitHub under [Issues](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues).
 
-If you unable to find an open issue related to the suggested feature **and you plan to primarily develop the feature yourself**, [open a new issue](https://github.com/hansec/OpenFUSIONToolkit/issues/new) with the `enhancement` tag.
+If you unable to find an open issue related to the suggested feature **and you plan to primarily develop the feature yourself**, [open a new issue](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues/new) with the `enhancement` tag.
 
 ## Contributing new code, examples, and documentation
 
@@ -46,7 +46,7 @@ Once the above is satisfied,
 
 ### Do you intend to add a new feature or change an existing one?
 
-Suggest your change as a [new issue](https://github.com/hansec/OpenFUSIONToolkit/issues) with the `enhancement` tag. Although you are free to start writing code and testing ahead of time, if you'd like feedback first please provide at least one week for response from one of the main developers.
+Suggest your change as a [new issue](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues) with the `enhancement` tag. Although you are free to start writing code and testing ahead of time, if you'd like feedback first please provide at least one week for response from one of the main developers.
 
 Before requesting a merge of your fix, please ensure the following:
  * Ensure that only changes **necessary for the feature or change to function properly** are included in the patch
@@ -58,7 +58,7 @@ When ready to merge, open a new GitHub pull request with the patch. Be sure to m
 
 ### Do you want to contribute to the documentation and examples?
 
-* Please read [writing documentation for OFT](https://github.com/hansec/OpenFUSIONToolkit/wiki/Writing-documentation-for-OFT) or [adding an example to OFT](https://github.com/hansec/OpenFUSIONToolkit/wiki/Adding-an-example-to-OFT).
+* Please read [writing documentation for OFT](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki/Writing-documentation-for-OFT) or [adding an example to OFT](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki/Adding-an-example-to-OFT).
 
 ### Did you fix whitespace, format code, or make a purely cosmetic patch?
 
