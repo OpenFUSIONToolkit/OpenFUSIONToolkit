@@ -1168,7 +1168,7 @@ class MKL(package):
 class BLAS_LAPACK(package):
     def __init__(self, comp_wrapper=False, blas_lib_path=None, lapack_lib_path=None):
         self.name = "BLAS_LAPACK"
-        self.url = "http://www.netlib.org/lapack/lapack-3.5.0.tgz"
+        self.url = "https://www.netlib.org/lapack/lapack-3.5.0.tgz"
         self.comp_wrapper = comp_wrapper
         self.blas_lib_path = blas_lib_path
         self.lapack_lib_path = lapack_lib_path

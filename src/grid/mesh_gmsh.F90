@@ -9,7 +9,7 @@
 !! - Mesh file read-in
 !! - Boundary point location and refinement
 !!
-!! The CAD interface to [GMSH](http://geuz.org/gmsh/) uses a high-order, currently
+!! The CAD interface to [GMSH](https://geuz.org/gmsh/) uses a high-order, currently
 !! quadratic, triangular tessellation of the boundary. This representation is used
 !! to provide refinement and high order node placement. Note that this is not
 !! equivalent to the CAD interface for @ref oft_mesh_cubit "CUBIT" or @ref oft_mesh_t3d

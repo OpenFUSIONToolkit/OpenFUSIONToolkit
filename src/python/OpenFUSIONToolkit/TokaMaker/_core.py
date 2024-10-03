@@ -562,7 +562,7 @@ class TokaMaker():
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
-        in [Jackson et al.](http://dx.doi.org/10.1088/0029-5515/48/12/125002)
+        in [Jackson et al.](https://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
         @param lcfs_pad Padding at LCFS for boundary calculations
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')

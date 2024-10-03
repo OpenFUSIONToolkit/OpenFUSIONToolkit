@@ -69,6 +69,6 @@ see \ref doc_doxygen.
 
 \section doc_main_git Using GIT
 
-OFT uses [GIT](http://git-scm.com/) for version control. For information on how to use GIT
-see the official [documentation](http://git-scm.com/documentation) or the unofficial example
-based [documentation](http://gitready.com/).
+OFT uses [GIT](https://git-scm.com/) for version control. For information on how to use GIT
+see the official [documentation](https://git-scm.com/documentation) or the unofficial example
+based [documentation](https://gitready.com/).
