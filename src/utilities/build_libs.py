@@ -1253,9 +1253,9 @@ class BLAS_LAPACK(package):
                 'export FCFLAGS="{0}"'.format(" ".join(fflags))
             ]
         cmake_options = [
-            "-DCMAKE_INSTALL_PREFIX:PATH={BLAS_LAPACK_ROOT}"
-            "-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON"
-            "-Wno-dev"
+            "-DCMAKE_INSTALL_PREFIX:PATH={BLAS_LAPACK_ROOT}",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON",
+            "-Wno-dev",
             "-DCMAKE_BUILD_TYPE=Release"
         ]
         if 'MACOS_SDK_PATH' in self.config_dict:
