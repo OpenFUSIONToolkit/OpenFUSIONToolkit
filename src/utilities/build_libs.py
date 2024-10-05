@@ -922,7 +922,7 @@ class HDF5(package):
                 "--enable-shared=no",
                 "--enable-static=yes",
                 "--enable-tests=no",
-                "--enable-examples=no",
+                # "--enable-examples=no",
                 "--with-pic"
             ]
         if self.parallel and ("MPI_CC" in self.config_dict):
@@ -953,7 +953,7 @@ class HDF5(package):
         if self.cmake_build:
             build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
         else:
-            build_lines.append("../configure " + " ".join(configure_options) + " ..")
+            build_lines.append("../configure " + " ".join(configure_options))
         build_lines += [
             "make -j{MAKE_THREADS}",
             "make install"
