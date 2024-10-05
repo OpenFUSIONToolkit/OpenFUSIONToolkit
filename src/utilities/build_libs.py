@@ -108,9 +108,12 @@ def extract_archive(file):
         error_exit('Extraction failed for file: "{0}"'.format(file))
 
 
-def run_command(command, timeout=10):
+def run_command(command, timeout=10, env_vars={}):
     # Run shell command
-    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    my_env = os.environ.copy()
+    for key, val in env_vars.items():
+        my_env[key] = val
+    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=my_env)
     # Wait for process to complete or timeout
     try:
         outs, _ = pid.communicate(timeout=timeout)
@@ -406,6 +409,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
     tmp_dict['LD'] = mydict['FC']
     tmp_dict['cmake_install_dir'] = "install_debug" if build_debug else "install_release"
     tmp_dict['cmake_build_dir'] = "build_debug" if build_debug else "build_release"
+    env_lines = []
     cmake_lines = [
         "{CMAKE}",
         "-DCMAKE_BUILD_TYPE={0}".format("Debug" if build_debug else "Release"),
@@ -423,6 +427,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DCMAKE_Fortran_COMPILER:FILEPATH={FC}"
     ]
     if 'MACOS_SDK_PATH' in tmp_dict:
+        env_lines.append('export SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
         cmake_lines.append('-DCMAKE_OSX_SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
     if mydict['BASE_CFLAGS'] != '':
         cmake_lines.append('-DCMAKE_C_FLAGS:STRING="{BASE_CFLAGS}"')
@@ -497,6 +502,10 @@ end program test_program
                            ["===Compile output===", compile_res, "===Run output===", run_res])
     cmake_lines += [os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))]
     cmake_lines_str = ' \\\n  '.join(cmake_lines)
+    if len(env_lines) > 0:
+        env_lines_str = '# Environment modifications\n' + '\n'.join(env_lines) + '\n\n'
+    else:
+        env_lines_str = ''
     # Template string
     template = """# Auto-Generated on {date}
 # using library build at {base_dir}
@@ -510,7 +519,7 @@ ROOT_PATH=$(pwd)
 rm -rf {cmake_build_dir}
 mkdir {cmake_build_dir} && cd {cmake_build_dir}
 
-""" + cmake_lines_str + '\n'
+""" + env_lines_str + cmake_lines_str + '\n'
     string = template.format(**tmp_dict)
     # Output
     with open('config_cmake.sh', 'w+') as fid:
@@ -661,7 +670,10 @@ class package:
             fid.write("\n".join(script_lines))
         if self.config_dict['SETUP_ONLY']:
             return
-        result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60)
+        addl_envs = {}
+        if 'MACOS_SDK_PATH' in config_dict:
+            addl_envs['SDKROOT'] = self.config_dict['MACOS_SDK_PATH']
+        result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60, env_vars=addl_envs)
         with open("build_tmp.log", "w+") as fid:
             fid.write(result)
         # Check for build success
@@ -858,12 +870,11 @@ class MPI(package):
 
 
 class HDF5(package):
-    def __init__(self, parallel=False, legacy_build=False):
+    def __init__(self, parallel=False, cmake_build=False):
         self.name = "HDF5"
         self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.5/hdf5-1.14.5.tar.gz"
-        # self.url = "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.10/src/hdf5-1.10.10.tar.gz"
         self.parallel = parallel
-        self.cmake_build = (not legacy_build)
+        self.cmake_build = cmake_build
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -914,7 +925,7 @@ class HDF5(package):
                 "--enable-examples=no",
                 "--with-pic"
             ]
-        if "MPI_CC" in self.config_dict:
+        if self.parallel and ("MPI_CC" in self.config_dict):
             build_lines += [
                 "export CC={MPI_CC}",
                 "export FC={MPI_FC}"
@@ -936,7 +947,7 @@ class HDF5(package):
                     'export LDFLAGS="-L{MPI_LIB}"',
                     'export LIBS="{MPI_LIBS}"'
                 ]
-        if 'MACOS_SDK_PATH' in self.config_dict:
+        if self.cmake_build and ('MACOS_SDK_PATH' in self.config_dict):
             cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         #
         if self.cmake_build:
@@ -1824,7 +1835,7 @@ group = parser.add_argument_group("HDF5", "HDF5 package options")
 group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wrapper")
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
-group.add_argument("--hdf5_legacy_build", action="store_true", default=False, help="Use legacy build instead of CMake?")
+group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
 #
 group = parser.add_argument_group("BLAS/LAPACK", "BLAS/LAPACK package options")
 group.add_argument("--oblas_threads", action="store_true", default=False, help="Build OpenBLAS with thread support (OpenMP)")
@@ -1893,7 +1904,7 @@ if options.ld_flags is not None:
 if options.cross_compile_host is not None:
     config_dict['CROSS_COMPILE_HOST'] = options.cross_compile_host
 if options.macos_sdk_path is not None:
-    if options.hdf5_legacy_build:
+    if not options.hdf5_cmake_build:
         parser.exit(-1, 'Use of "--macos_sdk_path" requires CMake build for HDF5\n')
     if not os.path.isdir(options.macos_sdk_path):
         parser.exit(-1, 'Specified "--macos_sdk_path={0}" directory does not exist\n'.format(options.macos_sdk_path))
@@ -1948,9 +1959,9 @@ else:
 if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     config_dict['HDF5_CC'] = options.hdf5_cc
     config_dict['HDF5_FC'] = options.hdf5_fc
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),legacy_build=options.hdf5_legacy_build))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build))
 else:
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),legacy_build=options.hdf5_legacy_build))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build))
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())
