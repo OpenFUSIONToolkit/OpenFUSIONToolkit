@@ -162,9 +162,9 @@ if( BLA_VENDOR MATCHES "^Intel" )
   add_definitions( -DHAVE_MKL )
 endif()
 # HDF5
-find_package( HDF5 COMPONENTS C Fortran HL REQUIRED )
+find_package( HDF5 COMPONENTS C Fortran REQUIRED )
 include_directories( ${HDF5_INCLUDE_DIRS} )
-set( OFT_HDF5_LIBS ${HDF5_HL_LIBRARIES} ${HDF5_LIBRARIES} )
+set( OFT_HDF5_LIBS ${HDF5_LIBRARIES} )
 list(REVERSE OFT_HDF5_LIBS)
 list(REMOVE_DUPLICATES OFT_HDF5_LIBS) # HDF5 often provides several duplicates
 list(REVERSE OFT_HDF5_LIBS)
