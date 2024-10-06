@@ -1371,8 +1371,8 @@ class ARPACK(package):
 class SUPERLU(package):
     def __init__(self, comp_wrapper=False):
         self.name = "SUPERLU"
-        self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v5.2.0.tar.gz"
-        self.build_dir = 'superlu-5.2.0'
+        self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v5.3.0.tar.gz"
+        self.build_dir = 'superlu-5.3.0'
         self.libname = '-lsuperlu'
         self.libpath = 'libsuperlu.a'
         self.comp_wrapper = comp_wrapper
