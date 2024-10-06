@@ -40,6 +40,9 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 ### Equilibrium Reconstruction
  - \subpage doc_tMaker_ITER_ex4
 
+### Other workflows/emaples
+ - \subpage doc_tMaker_ITER_ex5
+
 \section doc_gs_main_mesh Building meshes using gs_Domain
 TokaMaker includes built-in meshing functionality through the \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain "gs_Domain" class,
 which leverages the [triangle](https://pypi.org/project/triangle/) python package to generated unstructured triangular grids.

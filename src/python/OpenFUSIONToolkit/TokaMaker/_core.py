@@ -1048,7 +1048,7 @@ class TokaMaker():
         '''! Update settings after changes to values in python'''
         tokamaker_set_settings(ctypes.byref(self.settings))
     
-    def area_integral(field,reg_mask=-1):
+    def area_integral(self,field,reg_mask=-1):
         r'''! Compute area integral of field over a specified region
 
         @param field Field to integrate [np,]
