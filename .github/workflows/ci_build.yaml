@@ -160,7 +160,7 @@ jobs:
         mv tests/OFT.junit.xml OFT.junit.xml
     
     - name: Upload test results to Codecov
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && startsWith(matrix.config.os, 'ubuntu') }}
       uses: codecov/test-results-action@v1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
