@@ -298,7 +298,11 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
     cc_version = 'unknown'
     if line.find('gcc') >= 0:
         cc_vendor = 'gnu'
-        cc_version = line.split()[-1]
+        try:
+            cc_version = line.split(')')[1].split()[0]
+        except:
+            print('Unable to determine GCC version, assuming version 12+')
+            cc_version = '12.0.0'
     elif (line.find('icc') >= 0) or (line.find('oneAPI') >= 0):
         cc_vendor = 'intel'
     # Make sure we are using compaitble C and Fortran compilers
