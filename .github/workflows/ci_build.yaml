@@ -34,6 +34,11 @@ jobs:
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3"
           }
         - {
+            name: "Ubuntu 24.04 GCC 14",
+            os: ubuntu-24.04,
+            cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14", python: "python3"
+          }
+        - {
             name: "macOS Ventura GCC 12",
             os: macos-13,
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
@@ -152,3 +157,11 @@ jobs:
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate
         make test
+        mv tests/OFT.junit.xml OFT.junit.xml
+    
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() && startsWith(matrix.config.os, 'ubuntu') }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true

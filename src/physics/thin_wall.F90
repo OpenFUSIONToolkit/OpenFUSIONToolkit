@@ -171,6 +171,7 @@ END TYPE tw_plasma_boozer
 REAL(r8) :: quad_tols(3) = [0.75d0, 0.95d0, 0.995d0] !< Distance tolerances for quadrature order selection
 INTEGER(i4) :: quad_orders(3) = [18, 10, 6] !< Quadrature order for each tolerance
 REAL(r8), PARAMETER :: target_err = 1.d-8
+REAL(r8), PARAMETER :: coil_min_rad = 1.d-6
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
 CONTAINS
@@ -205,10 +206,17 @@ IF(error_flag==0)CALL tw_load_coils(coil_element,self%n_vcoils,self%vcoils)
 DO i=1,self%n_vcoils
   IF(ANY(self%vcoils(i)%res_per_len<0.d0))CALL oft_abort("Invalid resistivity for passive coil", &
     "tw_setup", __FILE__)
+  IF(ANY(self%vcoils(i)%radius<coil_min_rad))CALL oft_abort("Invalid radius for passive coil", &
+    "tw_setup", __FILE__)
 END DO
 WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils'
 CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
 IF(error_flag==0)CALL tw_load_coils(coil_element,self%n_icoils,self%icoils)
+DO i=1,self%n_icoils
+  DO j=1,self%icoils(i)%ncoils
+    self%icoils(i)%radius(j)=MAX(coil_min_rad,self%icoils(i)%radius(j)) ! Remove dummy radius on Icoils
+  END DO
+END DO
 #endif
 WRITE(*,*)
 ! WRITE(*,'(2A)')oft_indent,'Thin-wall model loaded:'
@@ -444,35 +452,80 @@ SUBROUTINE order_hole_list(list_in,list_out,n)
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered list
 INTEGER(4), INTENT(in) :: n !< Number of points in list
-INTEGER(4) :: ii,jj,k,ipt,eprev,ed,ptp
-INTEGER(4), ALLOCATABLE :: lloop_tmp(:)
+INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
+INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
 !---Find loop points and edges
-ALLOCATE(lloop_tmp(n))
+ALLOCATE(lloop_tmp(n),flag_list(n))
+flag_list=0
 lloop_tmp=list_in
 CALL sort_array(lloop_tmp, n)
 !
-ipt=lloop_tmp(1)
+! DO i0=1,n
+!   nlinks=0
+!   DO l=self%mesh%kpe(lloop_tmp(i0)),self%mesh%kpe(lloop_tmp(i0)+1)-1
+!     ed2 = self%mesh%lpe(l)
+!     ptp2 = SUM(self%mesh%le(:,ed2))-lloop_tmp(i0)
+!     candidate2=search_array(ptp2, lloop_tmp, n)
+!     IF(candidate2==0)CYCLE
+!     nlinks=nlinks+1
+!   END DO
+!   IF(nlinks==2)EXIT
+! END DO
+i0=1
+flag_list(i0)=1
+ipt=lloop_tmp(i0)
 k=1
 list_out(k)=ipt
 eprev=0
 DO jj=1,n
+  IF(jj==n-2)flag_list(1)=0 ! Unflag first point for last link (needs to be 2 offset for link count check below)
+  last_item=-1
   DO ii=self%mesh%kpe(ipt),self%mesh%kpe(ipt+1)-1
     ed = self%mesh%lpe(ii)
     IF(ed==eprev)CYCLE
     ptp = SUM(self%mesh%le(:,ed))-ipt
-    IF(search_array(ptp, lloop_tmp, n)==0)CYCLE
+    candidate=search_array(ptp, lloop_tmp, n)
+    IF(candidate==0)THEN
+      CYCLE
+    ELSE
+      IF(flag_list(candidate)==1)CYCLE
+      nlinks=0
+      DO l=self%mesh%kpe(ptp),self%mesh%kpe(ptp+1)-1
+        ed2 = self%mesh%lpe(l)
+        ptp2 = SUM(self%mesh%le(:,ed2))-ptp
+        candidate2=search_array(ptp2, lloop_tmp, n)
+        IF(candidate2==0)CYCLE
+        IF(flag_list(candidate2)==1)CYCLE
+        nlinks=nlinks+1
+      END DO
+      last_item=[ptp,candidate,ed]
+      IF(nlinks>1)CYCLE
+      last_item=-1
+    END IF
+    flag_list(candidate)=1
     ipt=ptp
-    IF(jj==n)EXIT
-    k=k+1
-    list_out(k)=ipt
-    eprev=ed
+    IF(jj<n)THEN
+      k=k+1
+      list_out(k)=ipt
+      eprev=ed
+    END IF
     EXIT
   END DO
-  ! IF(ipt==lloop_tmp(1))EXIT
+  IF(last_item(1)>0)THEN
+    flag_list(last_item(2))=1
+    ipt=last_item(1)
+    IF(jj<n)THEN
+      k=k+1
+      list_out(k)=ipt
+      eprev=last_item(3)
+    END IF
+  END IF
 END DO
-IF(ipt/=lloop_tmp(1))CALL oft_abort('Error building hole mesh, path is not periodic', &
+IF(jj<n+1)CALL oft_abort('Error building hole mesh, unmatched points exist', &
   'tw_setup::order_hole_list', __FILE__)
-DEALLOCATE(lloop_tmp)
+IF(ipt/=lloop_tmp(i0))CALL oft_abort('Error building hole mesh, path is not periodic', &
+  'tw_setup::order_hole_list', __FILE__)
+DEALLOCATE(lloop_tmp,flag_list)
 END SUBROUTINE order_hole_list
 END SUBROUTINE tw_setup
 !------------------------------------------------------------------------------
@@ -692,13 +745,18 @@ DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Ael2dr
 !------------------------------------------------------------------------------
 !> Compute coupling from thin-wall model elements to flux loop sensors
+!!
+!! @note The asymptotic form of self-inductance for thin circular coils derived
+!! by Hurwitz and Landreman [arXiv:2310.09313 (2023)] is used for all inductance
+!! calculations. Note that this is not strictly valid for mutual inductances,
+!! but is instead used to avoid integration challenges with very-closely-spaced coils.
 !------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Lmat_coils(tw_obj)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 LOGICAL :: exists
 INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
 REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3)
-REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness
+REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness,sqrt_e
 REAL(8) :: rgop(3,3),norm_i(3),area_i,f(3),dl_min,dl_max,pot_last,pot_tmp
 REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
@@ -731,6 +789,7 @@ ALLOCATE(Acoil2coil_tmp(tw_obj%n_vcoils,ncoils_tot))
 Acoil2coil_tmp=0.d0
 WRITE(*,*)'Building coil<->coil inductance matrix'
 IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
+  sqrt_e=SQRT(EXP(1.d0))
   !$omp parallel private(i,ii,j,k,kk,tmp,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness)
   ALLOCATE(atmp(ncoils_tot,1))
   !$omp do
@@ -742,12 +801,12 @@ IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
         pt_i = (coils_tot(l)%coils(i)%pts(:,ii)+coils_tot(l)%coils(i)%pts(:,ii-1))/2.d0
         DO j=1,ncoils_tot
           DO k=1,coils_tot(j)%ncoils
-            coil_thickness=MAX(coils_tot(l)%radius(i),coils_tot(j)%radius(k))
+            coil_thickness=(MAX(coils_tot(l)%radius(i),coils_tot(j)%radius(k))**2)/sqrt_e
             tmp=0.d0
             DO kk=2,coils_tot(j)%coils(k)%npts
               cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
               cpt = (coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
-              tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/MAX(coil_thickness,SQRT(SUM((pt_i-cpt)**2)))
+              tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/SQRT(SUM((pt_i-cpt)**2) + coil_thickness)
             END DO
             atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
           END DO
@@ -1290,23 +1349,24 @@ DO i=1,rmesh%nc
   END DO
 END DO
 !$omp end do nowait
-!---Add passive coils to model
-!$omp do
-DO i=1,row_obj%np_active+row_obj%nholes
-  DO j=1,col_obj%n_vcoils
-    jj=col_obj%np_active+col_obj%nholes+j
-    b(jj,:) = row_obj%Ael2coil(i,j)*a(i,:)
-  END DO
-END DO
-!$omp end do nowait
-!$omp do
-DO i=1,row_obj%n_vcoils
-  ii=row_obj%np_active+row_obj%nholes+i
-  DO j=1,col_obj%n_vcoils
-    jj=col_obj%np_active+col_obj%nholes+j
-    b(jj,:) = b(jj,:) + row_obj%Acoil2coil(i,j)*a(ii,:)
-  END DO
-END DO
+IF((col_obj%n_vcoils>0).OR.(row_obj%n_vcoils>0))CALL oft_warn("V-coil contributions were not computed.")
+! !---Add passive coils to model
+! !$omp do
+! DO i=1,col_obj%n_vcoils
+!   ii=col_obj%np_active+col_obj%nholes+i
+!   DO j=1,row_obj%np_active+row_obj%nholes
+!     b(ii,:) = b(ii,:) + row_obj%Ael2coil(j,i)*a(j,:)
+!   END DO
+! END DO
+! !$omp end do nowait
+! !$omp do
+! DO i=1,col_obj%n_vcoils
+!   ii=col_obj%np_active+col_obj%nholes+i
+!   DO j=1,row_obj%n_vcoils
+!     jj=row_obj%np_active+row_obj%nholes+j
+!     b(ii,:) = b(ii,:) + row_obj%Acoil2coil(j,i)*a(jj,:)
+!   END DO
+! END DO
 !$omp end parallel
 b = b/(4.d0*pi)
 CALL quad%delete()
