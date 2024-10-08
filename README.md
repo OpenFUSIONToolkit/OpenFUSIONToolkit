@@ -37,7 +37,7 @@ To use the python interfaces add the `python` directory for your installation to
 Documentation
 ------------
 
-Detailed documentation is included in the binary packages at `/path/to/oft/install/doc/Documentation.html` (note `/path/to/oft/install` is a placeholder for the actual install path). In the future this documentation will also be made available online.
+Detailed documentation is [available online](https://openfusiontoolkit.github.io/OpenFUSIONToolkit/docs/index.html) and is also included in the binary packages at `/path/to/oft/install/doc/Documentation.html` (please note `/path/to/oft/install` is a placeholder for the actual install path).
 
 Contributing
 -----------
