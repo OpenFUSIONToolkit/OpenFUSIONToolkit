@@ -914,11 +914,24 @@ class OpenMPI(package):
             "mkdir build",
             "cd build",
             "export CC={CC}",
-            "export FC={FC}"]
+            "export FC={FC}"
+        ]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
             build_lines.append('export FFLAGS=-fallow-argument-mismatch')
+        config_options = [
+            "--prefix={MPI_ROOT}",
+            "--enable-mpi-fortran=yes",
+            "--enable-shared=no",
+            "--with-pic",
+            "--disable-sphinx",
+            "--disable-opencl",
+            "--disable-nvml",
+            "--disable-cuda"
+        ]
+        if self.config_dict['OS_TYPE'] == 'Darwin':
+            config_options.append('--with-libevent="internal"')
         build_lines += [
-            "../configure --prefix={MPI_ROOT} --enable-mpi-fortran=yes --enable-shared=no --with-pic --disable-sphinx --disable-opencl --disable-nvml --disable-cuda",
+            "../configure " + " ".join(config_options),
             "make -j{MAKE_THREADS}",
             "make install"
         ]
