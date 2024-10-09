@@ -597,6 +597,8 @@ class TokaMaker():
             'delta': ((rbounds[1,0]+rbounds[0,0])/2.0-(zbounds[1,0]+zbounds[0,0])/2.0)*2.0/(rbounds[1,0]-rbounds[0,0]),
             'deltaU': ((rbounds[1,0]+rbounds[0,0])/2.0-zbounds[1,0])*2.0/(rbounds[1,0]-rbounds[0,0]),
             'deltaL': ((rbounds[1,0]+rbounds[0,0])/2.0-zbounds[0,0])*2.0/(rbounds[1,0]-rbounds[0,0]),
+            'R_geo': (rbounds[1,0]+rbounds[0,0])/2.0,
+            'a_geo': (rbounds[1,0]-rbounds[0,0])/2.0,
             'vol': vol,
             'q_0': qvals[2],
             'q_95': qvals[1],
@@ -626,6 +628,7 @@ class TokaMaker():
         print("  Toroidal Current [A]    =   {0:11.4E}".format(eq_stats['Ip']))
         print("  Current Centroid [m]    =   {0:6.3F} {1:6.3F}".format(*eq_stats['Ip_centroid']))
         print("  Magnetic Axis [m]       =   {0:6.3F} {1:6.3F}".format(*self.o_point))
+        print("  R_geo, a_geo [m]        =   {0:6.3F} {1:6.3F}".format(eq_stats['R_geo'],eq_stats['a_geo']))
         print("  Elongation              =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['kappa'],eq_stats['kappaU'],eq_stats['kappaL']))
         print("  Triangularity           =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['delta'],eq_stats['deltaU'],eq_stats['deltaL']))
         print("  Plasma Volume [m^3]     =   {0:6.3F}".format(eq_stats['vol']))
@@ -1250,7 +1253,7 @@ class TokaMaker():
         return numpy.ctypeslib.as_array(pts_loc,shape=(npts.value, 2)), \
             numpy.ctypeslib.as_array(flux_loc,shape=(npts.value,))
 
-    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01):
+    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None):
         '''! Save current equilibrium to gEQDSK format
 
         @param filename Filename to save equilibrium to
@@ -1258,8 +1261,9 @@ class TokaMaker():
         @param nz Number of vertical sampling points
         @param rbounds Extents of grid in R
         @param zbounds Extents of grid in Z
-        @param run_info Run information for EQDSK file (maximum of 36 characters)
+        @param run_info Run information for gEQDSK file (maximum of 36 characters)
         @param lcfs_pad Padding in normalized flux at LCFS
+        @param rcentr `RCENTR` value for gEQDSK file (if `None`, magnetic axis is used)
         '''
         cfilename = c_char_p(filename.encode())
         if len(run_info) > 36:
@@ -1273,8 +1277,10 @@ class TokaMaker():
             zbounds = numpy.r_[self.lim_contour[:,1].min(), self.lim_contour[:,1].max()]
             dr = zbounds[1]-zbounds[0]
             zbounds += numpy.r_[-1.0,1.0]*dr*0.05
+        if rcentr is None:
+            rcentr = -1.0
         cstring = c_char_p(b""*200)
-        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),cstring)
+        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
 
