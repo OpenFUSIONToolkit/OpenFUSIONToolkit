@@ -41,12 +41,12 @@ jobs:
         - {
             name: "macOS Ventura GCC 12",
             os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3.12", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
           }
         - {
             name: "macOS Sonoma GCC 13",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3.12", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
 
     steps:
@@ -78,8 +78,8 @@ jobs:
         source ${{ github.workspace }}/oft_venv/bin/activate
         ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py triangle
     
-    - name: Install prerequisites (macos arm64)
-      if: ${{ matrix.config.os == 'macos-14' }}
+    - name: Install prerequisites (macos)
+      if: startsWith(matrix.config.os, 'macos')
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
