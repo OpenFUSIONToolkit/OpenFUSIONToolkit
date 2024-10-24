@@ -71,14 +71,14 @@ jobs:
         $CXX --version
         $FC --version
 
-    - name: Install prerequisites
-      if: ${{ matrix.config.os != 'macos-14' }}
+    - name: Install prerequisites (Linux)
+      if: startsWith(matrix.config.os, 'ubuntu')
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
         ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py triangle
     
-    - name: Install prerequisites (macos)
+    - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
