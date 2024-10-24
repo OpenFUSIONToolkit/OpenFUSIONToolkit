@@ -558,7 +558,7 @@ class TokaMaker():
         tokamaker_vac_solve(psi,ctypes.byref(error_flag))
         return psi, error_flag.value
 
-    def get_stats(self,lcfs_pad=0.01,li_normalization='std'):
+    def get_stats(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
@@ -566,6 +566,7 @@ class TokaMaker():
 
         @param lcfs_pad Padding at LCFS for boundary calculations
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @result Dictionary of equilibrium parameters
         '''
         _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02]) # Given backward so last point is LCFS (for dl)
@@ -587,7 +588,20 @@ class TokaMaker():
             li = 2.0*Bp_vol/(numpy.power(mu0*Ip,2)*self.o_point[0])
         else:
             raise ValueError('Invalid "li_normalization"')
-        #
+        # Compute geometric major/minor radius
+        if geom_type == 'mid':
+            rlcfs = self.trace_surf(1.0-lcfs_pad)
+            rlcfs = rlcfs[rlcfs[:,0]<self.o_point[0],:]
+            iLFS = 0
+            iHFS = (numpy.abs(rlcfs[:,1]-self.o_point[1])).argmin()
+            R_geo = (rlcfs[iLFS,0]+rlcfs[iHFS,0])/2.0
+            a_geo = (rlcfs[iLFS,0]-rlcfs[iHFS,0])/2.0
+        elif geom_type == 'max':
+            R_geo = (rbounds[1,0]+rbounds[0,0])/2.0
+            a_geo = (rbounds[1,0]-rbounds[0,0])/2.0
+        else:
+            raise ValueError('Invalid "geom_type"')
+        # Build dictionary
         eq_stats = {
             'Ip': Ip,
             'Ip_centroid': centroid,
@@ -597,8 +611,8 @@ class TokaMaker():
             'delta': ((rbounds[1,0]+rbounds[0,0])/2.0-(zbounds[1,0]+zbounds[0,0])/2.0)*2.0/(rbounds[1,0]-rbounds[0,0]),
             'deltaU': ((rbounds[1,0]+rbounds[0,0])/2.0-zbounds[1,0])*2.0/(rbounds[1,0]-rbounds[0,0]),
             'deltaL': ((rbounds[1,0]+rbounds[0,0])/2.0-zbounds[0,0])*2.0/(rbounds[1,0]-rbounds[0,0]),
-            'R_geo': (rbounds[1,0]+rbounds[0,0])/2.0,
-            'a_geo': (rbounds[1,0]-rbounds[0,0])/2.0,
+            'R_geo': R_geo,
+            'a_geo': a_geo,
             'vol': vol,
             'q_0': qvals[2],
             'q_95': qvals[1],
@@ -610,16 +624,18 @@ class TokaMaker():
             'l_i': li
         }
         if self._F0 > 0.0:
-            eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(self._F0/centroid[0],2))
+            eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(self._F0/R_geo,2))
+            eq_stats['beta_n'] = eq_stats['beta_tor']*eq_stats['a_geo']*(self._F0/R_geo)/(Ip/1.E6)
         return eq_stats
 
-    def print_info(self,lcfs_pad=0.01,li_normalization='std'):
+    def print_info(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):
         '''! Print information (Ip, q, etc.) about current G-S equilbirium
         
         @param lcfs_pad Padding at LCFS for boundary calculations
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         '''
-        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,li_normalization=li_normalization)
+        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,li_normalization=li_normalization,geom_type=geom_type)
         print("Equilibrium Statistics:")
         if self.diverted:
             print("  Topology                =   Diverted")
@@ -628,7 +644,6 @@ class TokaMaker():
         print("  Toroidal Current [A]    =   {0:11.4E}".format(eq_stats['Ip']))
         print("  Current Centroid [m]    =   {0:6.3F} {1:6.3F}".format(*eq_stats['Ip_centroid']))
         print("  Magnetic Axis [m]       =   {0:6.3F} {1:6.3F}".format(*self.o_point))
-        print("  R_geo, a_geo [m]        =   {0:6.3F} {1:6.3F}".format(eq_stats['R_geo'],eq_stats['a_geo']))
         print("  Elongation              =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['kappa'],eq_stats['kappaU'],eq_stats['kappaL']))
         print("  Triangularity           =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['delta'],eq_stats['deltaU'],eq_stats['deltaL']))
         print("  Plasma Volume [m^3]     =   {0:6.3F}".format(eq_stats['vol']))
@@ -638,6 +653,8 @@ class TokaMaker():
         print("  <Beta_pol> [%]          =   {0:7.4F}".format(eq_stats['beta_pol']))
         if 'beta_tor' in eq_stats:
             print("  <Beta_tor> [%]          =   {0:7.4F}".format(eq_stats['beta_tor']))
+        if 'beta_n' in eq_stats:
+            print("  <Beta_n>   [%]          =   {0:7.4F}".format(eq_stats['beta_n']))
         print("  Diamagnetic flux [Wb]   =   {0:11.4E}".format(eq_stats['dflux']))
         print("  Toroidal flux [Wb]      =   {0:11.4E}".format(eq_stats['tflux']))
         print("  l_i                     =   {0:7.4F}".format(eq_stats['l_i']))

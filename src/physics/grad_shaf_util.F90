@@ -1067,7 +1067,7 @@ INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
-REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum
+REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
 REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 !---
@@ -1165,6 +1165,15 @@ do j=1,nr
     END IF
   END IF
   IF(j==nr)THEN
+    ! !---Get midplane extents
+    ! rLFS=ptout(2,1)
+    ! zHFS=1.d99
+    ! DO k=2,active_tracer%nsteps+1
+    !   IF(ABS(ptout(3,k)-zaxis)<zHFS)THEN
+    !     zHFS=ABS(ptout(3,k)-zaxis)
+    !     rHFS=ptout(2,k)
+    !   END IF
+    ! END DO
     !---------------------------------------------------------------------------
     ! Perform Cubic Spline Interpolation
     !---------------------------------------------------------------------------
@@ -1238,7 +1247,7 @@ zmid = (zbounds(2)+zbounds(1))/2.d0
 IF(PRESENT(rcentr_in))THEN
   rcentr = rcentr_in
 ELSE
-  rcentr = raxis
+  rcentr = (MAXVAL(rout)+MINVAL(rout))/2.d0 !raxis
 END IF
 bcentr = gseq%I%f_offset/rcentr
 CALL gs_itor_nl(gseq,itor)
