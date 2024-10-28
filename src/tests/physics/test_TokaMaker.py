@@ -461,7 +461,8 @@ def test_ITER_eq(order):
         'dflux': 1.5402746036620532,
         'tflux': 121.86870301036512,
         'l_i': 0.9048845463517069,
-        'beta_tor': 1.768879437469196,
+        'beta_tor': 1.7816206668692283,
+        'beta_n': 1.1868590722509704,
         'MCS1': 2.5608173430680583e-06,
         'MCS1_plasma': 8.930926092661585e-07,
         'Lplasma': 1.1899835061690724e-05
@@ -596,7 +597,8 @@ def test_LTX_eq(order):
         'dflux': 0.0009602066573419095,
         'tflux': 0.08571976036037239,
         'l_i': 1.002735427186787,
-        'beta_tor': 2.0613500413344603
+        'beta_tor': 1.9398553532544882,
+        'beta_n': 1.38790732317241
     }
     results = mp_run(run_LTX_case,(order,False))
     assert validate_dict(results,exp_dict)
