@@ -96,4 +96,5 @@ jobs:
         files: libs/build_release/cleaned_coverage.txt,libs/build_release/tests/coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }}
         disable_search: true
+        plugin: noop
         verbose: true
