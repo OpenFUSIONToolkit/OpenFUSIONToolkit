@@ -177,7 +177,9 @@ if( HDF5_IS_PARALLEL )
   endif()
 endif()
 # PETSc
-find_package( OFT_PETSc )
+if( OFT_PETSc_ROOT ) # Only search if PETSc root is specified
+  find_package( OFT_PETSc )
+endif()
 if( NOT OFT_PETSc_FOUND )
   # METIS
   find_package( OFT_METIS REQUIRED )

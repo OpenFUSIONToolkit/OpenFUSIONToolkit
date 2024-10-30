@@ -1,7 +1,7 @@
 # FindOFT_UMFPACK.cmake
 #
-# Finds the SuperLU library for use with the Open FUSION Toolkit
-# as installed by version "4.3+" of SuperLU.
+# Finds the UMFPACK library for use with the Open FUSION Toolkit
+# as installed by version "7.0+" of SuiteSparse.
 #
 # This will define the following variables
 #
@@ -18,6 +18,10 @@ find_library(UMFPACK_BASE_LIBRARY
 find_library(UMFPACK_AMD_LIBRARY
   NAMES amd
 )
+
+# find_library(UMFPACK_CHOLMOD_LIBRARY
+#   NAMES cholmod
+# )
 
 find_library(UMFPACK_SSC_LIBRARY
   NAMES suitesparseconfig

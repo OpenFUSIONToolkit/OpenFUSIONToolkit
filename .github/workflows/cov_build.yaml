@@ -88,10 +88,13 @@ jobs:
       run: |
         lcov -c --directory . --output-file main_coverage.info --gcov-tool $GCOV
         lcov --ignore-errors unused -r main_coverage.info -o cleaned_coverage.txt '/opt/*' '/usr/*'
+        lcov -l cleaned_coverage.txt
     
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v4
       with:
         files: libs/build_release/cleaned_coverage.txt,libs/build_release/tests/coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }}
+        disable_search: true
+        plugin: noop
         verbose: true
