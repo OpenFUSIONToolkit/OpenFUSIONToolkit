@@ -16,6 +16,8 @@ from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_
 
 
 def mp_run(target,args,timeout=30):
+    if os.environ.get('OFT_DEBUG_TEST', 0):
+        timeout *= 4
     os.chdir(test_dir)
     mp_q = multiprocessing.Queue()
     p = multiprocessing.Process(target=target, args=args + (mp_q,))
