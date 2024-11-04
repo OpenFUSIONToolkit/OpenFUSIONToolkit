@@ -5,6 +5,17 @@
 
 void oft_stack_print();
 void oft_finalize();
+#ifdef OFT_COVERAGE
+void __gcov_dump();
+#endif
+
+// Dump coverage information (needed for library usage)
+void dump_cov()
+{
+#ifdef OFT_COVERAGE
+	__gcov_dump();
+#endif
+}
 
 // Define the function to be called when ctrl-c (SIGINT) signal is sent to process
 void oft_signal_handler(int signum)
