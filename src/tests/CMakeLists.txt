@@ -61,6 +61,6 @@ add_custom_command(
 add_custom_target(test_cov)
 add_custom_command(
     TARGET  test_cov
-    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} --cov=OpenFUSIONToolkit --cov-report=xml -m \"coverage\" grid lin_alg fem physics
+    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=1 ${OFT_PYTEST_EXE} --cov=OpenFUSIONToolkit --cov-report=xml -m \"coverage\" grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
 )
