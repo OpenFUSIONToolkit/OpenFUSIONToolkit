@@ -13,9 +13,12 @@ sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
+from OpenFUSIONToolkit.util import oftpy_dump_cov
 
 
 def mp_run(target,args,timeout=30):
+    if os.environ.get('OFT_DEBUG_TEST', 0):
+        timeout *= 4
     os.chdir(test_dir)
     mp_q = multiprocessing.Queue()
     p = multiprocessing.Process(target=target, args=args + (mp_q,))
@@ -108,6 +111,7 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
             diff[1] = x_points[i,1]+rz_x[1]
         X_err += np.linalg.norm(diff)
     mp_q.put([psi_err, X_err])
+    oftpy_dump_cov()
 
 
 def validate_solo(results,psi_err_exp,X_err_exp):
@@ -198,6 +202,7 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     # Compute error in psi
     psi_err = np.linalg.norm(psi_TM-psi_eig_TM)/np.linalg.norm(psi_eig_TM)
     mp_q.put([psi_err])
+    oftpy_dump_cov()
 
 
 def validate_sph(results,psi_err_exp):
@@ -276,6 +281,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     psi_full = np.hstack((psi1[1:], psi2, psi3[1:]))
     psi_err = np.linalg.norm(green_full+psi_full)/np.linalg.norm(green_full)
     mp_q.put([psi_err])
+    oftpy_dump_cov()
 
 
 def validate_coil(results,psi_err_exp):
@@ -426,6 +432,7 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,mp_q):
     eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
     eq_info['Lplasma'] = Lmat[-1,-1]
     mp_q.put([eq_info])
+    oftpy_dump_cov()
 
 
 # Test runners for LTX test cases
@@ -564,6 +571,7 @@ def run_LTX_case(fe_order,eig_test,mp_q):
     mygs.solve()
     #
     mp_q.put([mygs.get_stats()])
+    oftpy_dump_cov()
 
 # Test runners for LTX test cases
 @pytest.mark.coverage

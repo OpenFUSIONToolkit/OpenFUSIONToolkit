@@ -173,8 +173,11 @@ IF(fr_limit/=2)THEN
   CALL tw_hodlr%setup(.FALSE.)
   IF(tw_hodlr%L_svd_tol>0.d0)THEN
     IF(direct)CALL oft_abort('HODLR compression does not support "direct=T"','thincurr_fr',__FILE__)
-    IF(save_L)CALL oft_abort('HODLR compression does not support "save_L=T"','thincurr_fr',__FILE__)
-    CALL tw_hodlr%compute_L()
+    IF(save_L)THEN
+      CALL tw_hodlr%compute_L(save_file='Lmat.save')
+    ELSE
+      CALL tw_hodlr%compute_L()
+    END IF
   ELSE
     IF(save_L)THEN
       CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat,save_file='Lmat.save')
