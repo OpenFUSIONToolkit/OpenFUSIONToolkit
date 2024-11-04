@@ -25,7 +25,7 @@ USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
   gs_set_cond_weights, gs_estored, gs_dflux, gs_tflux, gs_helicity, gs_itor_nl, &
   gs_psimax, gs_test_bounds, gs_b_interp, oft_indent, gs_get_qprof, gsinv_interp, &
-  gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent
+  gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent, gs_psi2pt
 USE oft_gs_profiles
 IMPLICIT NONE
 #include "local.h"
@@ -1051,10 +1051,10 @@ real(8), intent(in) :: zbounds(2) !< Radial extents for flux grid
 CHARACTER(LEN=36), intent(in) :: run_info !< Run information string [36]
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
-REAL(8), optional, intent(in) :: rcentr_in !< Padding at LCFS in normalized units
+REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
 !
-real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr
+real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp) :: psi_int
 real(8), pointer :: ptout(:,:),rout(:),zout(:)
@@ -1084,11 +1084,7 @@ x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
   x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
 END IF
-! IF(gseq%diverted)THEN
-  xr = (x2-x1)
-  x1 = x1 + xr*psi_pad !0.001d0
-  ! x2 = x2 - xr*1.d-3
-! END IF
+xr = (x2-x1)
 psi_int%u=>gseq%psi
 CALL psi_int%setup()
 !---Find Rmax along Zaxis
@@ -1133,9 +1129,10 @@ do j=1,nr
   !---------------------------------------------------------------------------
   ! Trace contour
   !---------------------------------------------------------------------------
-  psi_surf=(x2-x1)*((j-1)/REAL(nr-1,8))! + x1!**2
-  psi_surf=x2 - psi_surf
-  IF(gseq%diverted.AND.(psi_surf-x1)/(x2-x1)<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
+  psi_trace = psi_surf
+  IF((psi_trace-x1)/xr<psi_pad)psi_trace = x1 + xr*psi_pad
+  IF(gseq%diverted.AND.(psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near divertor
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
@@ -1143,7 +1140,7 @@ do j=1,nr
   IF(j>1)THEN
     pt=pt_last
     !$omp critical
-    CALL gs_psi2r(gseq,psi_surf,pt)
+    CALL gs_psi2r(gseq,psi_trace,pt)
     !$omp end critical
     IF(j==nr)THEN
       ALLOCATE(ptout(3,active_tracer%maxsteps+1))
@@ -1156,7 +1153,7 @@ do j=1,nr
     IF(active_tracer%status/=1)THEN
       IF(PRESENT(error_str))THEN
         !$omp critical
-        WRITE(error_str,"(A,F10.4)")"Tracing failed at psi = ",1.d0-(psi_surf-x1)/(x2-x1)
+        WRITE(error_str,"(A,F10.4)")"Tracing failed at psi = ",1.d0-(psi_trace-x1)/xr
         !$omp end critical
         CYCLE
       ELSE
@@ -1225,6 +1222,15 @@ f(1) = x2
 f(2) = x2 - (x2-x1)*(1.d0/REAL(nr-1,8))
 f(3) = x2 - (x2-x1)*(2.d0/REAL(nr-1,8))
 qpsi(1) = (qpsi(3)-qpsi(2))*(f(1)-f(2))/(f(3)-f(2)) + qpsi(2)
+!---Extrapolate to LCFS
+DO i=1,nr
+  pt=[rout(i),zout(i),0.d0]
+  pt_last(1:2)=pt(1:2)-gseq%o_point
+  pt_last=pt_last/SQRT(SUM(pt_last(1:2)**2))
+  CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_last)
+  rout(i)=pt(1)
+  zout(i)=pt(2)
+END DO
 !---Sample flux grid
 rdim = rbounds(2)-rbounds(1)
 zdim = zbounds(2)-zbounds(1)
