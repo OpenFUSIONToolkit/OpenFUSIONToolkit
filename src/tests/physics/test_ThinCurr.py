@@ -10,6 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from oft_testing import run_OFT
 from OpenFUSIONToolkit.io import histfile
+from OpenFUSIONToolkit.util import oftpy_dump_cov
 
 mu0 = np.pi*4.E-7
 
@@ -128,10 +129,12 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
         tw_model.compute_Rmat()
         tw_model.run_td(2.E-5,200,direct=(direct_flag == 'T'),lin_tol=lin_tol,coil_currs=curr_waveform,coil_volts=volt_waveform,sensor_obj=sensor_obj)
-        mp_q.put(True)
+        result = True
     except BaseException as e:
         print(e)
-        mp_q.put(False)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
 
 
 def run_eig(meshfile,direct_flag,use_aca,mp_q):
@@ -147,10 +150,12 @@ def run_eig(meshfile,direct_flag,use_aca,mp_q):
         eig_file = '\n'.join(['{0} 0.0'.format(eig_val) for eig_val in eig_vals])
         with open('thincurr_eigs.dat','w+') as fid:
             fid.write(eig_file)
-        mp_q.put(True)
+        result = True
     except BaseException as e:
         print(e)
-        mp_q.put(False)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
 
 
 def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,mp_q):
@@ -177,10 +182,12 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,mp_q):
         fr_file = '\n'.join(['{0} {1}'.format(*probe_signals[:,i]) for i in range(probe_signals.shape[1])])
         with open('thincurr_fr.dat','w+') as fid:
             fid.write(fr_file)
-        mp_q.put(True)
+        result = True
     except BaseException as e:
         print(e)
-        mp_q.put(False)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
     
 
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
