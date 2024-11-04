@@ -87,6 +87,9 @@ oft_setup_smesh = ctypes_subroutine(oftpy_lib.oft_setup_smesh,
 # Set mesh in memory: (ndim,np,r_loc,npc,nc,lc_loc,reg_loc)
 oft_setup_vmesh = ctypes_subroutine(oftpy_lib.oft_setup_vmesh,
     [c_int,c_int, ctypes_numpy_array(float64,2) ,c_int, c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), c_int_ptr])
+
+# Dump coverage information if needed
+oftpy_dump_cov = ctypes_subroutine(oftpy_lib.dump_cov)
 ## @endcond
 
 
