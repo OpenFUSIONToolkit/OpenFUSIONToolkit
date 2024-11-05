@@ -7,6 +7,7 @@ import subprocess
 import tarfile
 import re
 import argparse
+import math
 try:
     import urllib.request
 except ImportError:
@@ -597,7 +598,11 @@ class package:
         #
         os.chdir(self.build_dir)
         print("  Excecuting build (this may take a few minutes)")
+        build_start = time.time()
         self.build()
+        build_duration = time.time() - build_start
+        build_minutes = math.floor(build_duration/60)
+        print("    Elapsed Time = {0}:{1}".format(build_minutes,int(build_duration-build_minutes*60)))
         os.chdir(self.root_path)
         # Check to make sure Installation succeeded
         config_dict = self.post_install(config_dict)
