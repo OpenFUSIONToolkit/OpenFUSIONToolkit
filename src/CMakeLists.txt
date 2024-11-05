@@ -95,6 +95,7 @@ elseif("${CMAKE_Fortran_COMPILER_ID}" MATCHES "GNU")
   if(OFT_COVERAGE)
     set( CMAKE_C_FLAGS_DEBUG "-Og --coverage -fprofile-update=atomic -g -Wuninitialized" ) # -fprofile-arcs -ftest-coverage
     set( CMAKE_C_FLAGS_RELEASE "-Og --coverage -fprofile-update=atomic -g" ) # -fprofile-arcs -ftest-coverage
+    add_definitions( -DOFT_COVERAGE )
     set(CMAKE_C_OUTPUT_EXTENSION_REPLACE ON)
     set(CMAKE_CXX_OUTPUT_EXTENSION_REPLACE ON)
     set(CMAKE_Fortran_OUTPUT_EXTENSION_REPLACE ON)
@@ -162,9 +163,9 @@ if( BLA_VENDOR MATCHES "^Intel" )
   add_definitions( -DHAVE_MKL )
 endif()
 # HDF5
-find_package( HDF5 COMPONENTS C Fortran HL REQUIRED )
+find_package( HDF5 COMPONENTS C Fortran REQUIRED )
 include_directories( ${HDF5_INCLUDE_DIRS} )
-set( OFT_HDF5_LIBS ${HDF5_HL_LIBRARIES} ${HDF5_LIBRARIES} )
+set( OFT_HDF5_LIBS ${HDF5_LIBRARIES} )
 list(REVERSE OFT_HDF5_LIBS)
 list(REMOVE_DUPLICATES OFT_HDF5_LIBS) # HDF5 often provides several duplicates
 list(REVERSE OFT_HDF5_LIBS)
@@ -177,7 +178,9 @@ if( HDF5_IS_PARALLEL )
   endif()
 endif()
 # PETSc
-find_package( OFT_PETSc )
+if( OFT_PETSc_ROOT ) # Only search if PETSc root is specified
+  find_package( OFT_PETSc )
+endif()
 if( NOT OFT_PETSc_FOUND )
   # METIS
   find_package( OFT_METIS REQUIRED )

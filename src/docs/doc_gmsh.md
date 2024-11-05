@@ -3,7 +3,7 @@ GMSH Mesh Interface    {#doc_gmsh}
 
 [TOC]
 
-The Open FUSION Toolkit includes an interface to the free [GMSH](http://www.geuz.org/gmsh) mesh generation program, pre-built binary versions of
+The Open FUSION Toolkit includes an interface to the free [GMSH](https://www.geuz.org/gmsh) mesh generation program, pre-built binary versions of
 this software are available for most operating systems. Currently this interface only supports import and non-conformal refinement
 and is designed to allow the use of OFT when one of the other proprietary mesh programs is not available. In the future we
 hope to update this interface to support some form of boundary conformal refinement, most likely based on a quadratic input mesh.

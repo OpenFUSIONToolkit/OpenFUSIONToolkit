@@ -219,7 +219,7 @@ class ThinCurr():
         @param tag Name of field in plot files
         '''
         if potential.shape[0] != self.nelems:
-            raise ValueError('Incorrect shape of "potential", should be [nelems]')
+            raise IndexError('Incorrect shape of "potential", should be [nelems]')
         potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
         cstring = c_char_p(tag.encode())
         thincurr_save_field(self.tw_obj,potential,cstring)
@@ -230,8 +230,8 @@ class ThinCurr():
         @param field Pointwise data to save
         @param tag Name of field in plot files
         '''
-        if field.shape[0] >= self.np:
-            raise ValueError('Incorrect shape of "field", should be [np]')
+        if field.shape[0] != self.np:
+            raise IndexError('Incorrect shape of "field", should be [np]')
         field = numpy.ascontiguousarray(field, dtype=numpy.float64)
         ctag = c_char_p(tag.encode())
         thincurr_save_scalar(self.tw_obj,field,ctag)
@@ -385,6 +385,8 @@ class ThinCurr():
         @result Flux on `model2` from `field` on `self` `(field.shape[0],:)`
         '''
         nrhs = field.shape[0]
+        if field.shape[1] != self.nelems:
+            raise IndexError('Incorrect shape of "field", should be [nelems]')
         vec_out = numpy.zeros((nrhs,model2.nelems), dtype=numpy.float64)
         vec_in = numpy.ascontiguousarray(field.copy(), dtype=numpy.float64)
         error_string = c_char_p(b""*200)

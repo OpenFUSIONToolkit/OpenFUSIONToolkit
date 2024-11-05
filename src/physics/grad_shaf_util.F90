@@ -1041,7 +1041,7 @@ end subroutine gs_save_decon
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !---------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1051,6 +1051,7 @@ real(8), intent(in) :: zbounds(2) !< Radial extents for flux grid
 CHARACTER(LEN=36), intent(in) :: run_info !< Run information string [36]
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
+REAL(8), optional, intent(in) :: rcentr_in !< Padding at LCFS in normalized units
 CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr
@@ -1066,7 +1067,7 @@ INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
-REAL(8) :: rdim,zdim,rleft,zmid,bcentr,itor,xdum
+REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
 REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 !---
@@ -1164,6 +1165,15 @@ do j=1,nr
     END IF
   END IF
   IF(j==nr)THEN
+    ! !---Get midplane extents
+    ! rLFS=ptout(2,1)
+    ! zHFS=1.d99
+    ! DO k=2,active_tracer%nsteps+1
+    !   IF(ABS(ptout(3,k)-zaxis)<zHFS)THEN
+    !     zHFS=ABS(ptout(3,k)-zaxis)
+    !     rHFS=ptout(2,k)
+    !   END IF
+    ! END DO
     !---------------------------------------------------------------------------
     ! Perform Cubic Spline Interpolation
     !---------------------------------------------------------------------------
@@ -1234,7 +1244,12 @@ END DO
 WRITE(eqdsk_case,'(A,X,A)')'TokaMaker: ',run_info
 rleft = rbounds(1)
 zmid = (zbounds(2)+zbounds(1))/2.d0
-bcentr = gseq%I%f_offset/raxis
+IF(PRESENT(rcentr_in))THEN
+  rcentr = rcentr_in
+ELSE
+  rcentr = (MAXVAL(rout)+MINVAL(rout))/2.d0 !raxis
+END IF
+bcentr = gseq%I%f_offset/rcentr
 CALL gs_itor_nl(gseq,itor)
 itor = itor/mu0
 idum = 0 ! dummy variable
@@ -1267,7 +1282,7 @@ END IF
 2022 format(2i5)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 WRITE (io_unit,2000) eqdsk_case,0,nr,nz
-WRITE (io_unit,2020) rdim,zdim,raxis,rleft,zmid
+WRITE (io_unit,2020) rdim,zdim,rcentr,rleft,zmid
 WRITE (io_unit,2020) raxis,zaxis,x2,x1,bcentr
 WRITE (io_unit,2020) itor,x2,xdum,raxis,xdum
 WRITE (io_unit,2020) zaxis,xdum,x1,xdum,xdum

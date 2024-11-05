@@ -173,6 +173,7 @@ TYPE :: gs_eq
   REAL(r8) :: pnorm = 1.d0
   REAL(r8) :: rmin = 0.d0
   REAL(r8) :: dt = -1.d0
+  REAL(r8) :: dt_last = -1.d0
   REAL(r8) :: Itor_target = -1.d0
   REAL(r8) :: estore_target = -1.d0
   REAL(r8) :: pax_target = -1.d0
@@ -2322,9 +2323,12 @@ CALL self%p%update(self)
 !---Get J_phi source term
 CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
 IF(self%dt>0.d0)THEN
-  CALL build_dels(self%dels_dt,self,"free",self%dt)
+  IF(self%dt/=self%dt_last)THEN
+    CALL build_dels(self%dels_dt,self,"free",self%dt)
+    self%dt_last=self%dt
+    self%lu_solver_dt%refactor=.TRUE.
+  END IF
   self%lu_solver_dt%A=>self%dels_dt
-  self%lu_solver_dt%refactor=.TRUE.
 END IF
 !---Update vacuum field part
 CALL psi_vac%set(0.d0)
@@ -3071,9 +3075,12 @@ CALL self%psi%new(psi_vac)
 CALL self%psi%new(psi_vcont)
 CALL self%psi%new(psi_eddy)
 IF(self%dt>0.d0)THEN
-  CALL build_dels(self%dels_dt,self,"free",self%dt)
+  IF(self%dt/=self%dt_last)THEN
+    CALL build_dels(self%dels_dt,self,"free",self%dt)
+    self%dt_last=self%dt
+    self%lu_solver_dt%refactor=.TRUE.
+  END IF
   self%lu_solver_dt%A=>self%dels_dt
-  self%lu_solver_dt%refactor=.TRUE.
   CALL self%psi%new(psi_dt)
   CALL self%psi%new(tmp_vec)
 END IF

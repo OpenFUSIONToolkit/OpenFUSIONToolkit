@@ -7,6 +7,7 @@ import subprocess
 import tarfile
 import re
 import argparse
+import math
 try:
     import urllib.request
 except ImportError:
@@ -108,9 +109,12 @@ def extract_archive(file):
         error_exit('Extraction failed for file: "{0}"'.format(file))
 
 
-def run_command(command, timeout=10):
+def run_command(command, timeout=10, env_vars={}):
     # Run shell command
-    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    my_env = os.environ.copy()
+    for key, val in env_vars.items():
+        my_env[key] = val
+    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=my_env)
     # Wait for process to complete or timeout
     try:
         outs, _ = pid.communicate(timeout=timeout)
@@ -295,7 +299,11 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
     cc_version = 'unknown'
     if line.find('gcc') >= 0:
         cc_vendor = 'gnu'
-        cc_version = line.split()[-1]
+        try:
+            cc_version = line.split(')')[1].split()[0]
+        except:
+            print('Unable to determine GCC version, assuming version 12+')
+            cc_version = '12.0.0'
     elif (line.find('icc') >= 0) or (line.find('oneAPI') >= 0):
         cc_vendor = 'intel'
     # Make sure we are using compaitble C and Fortran compilers
@@ -406,6 +414,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
     tmp_dict['LD'] = mydict['FC']
     tmp_dict['cmake_install_dir'] = "install_debug" if build_debug else "install_release"
     tmp_dict['cmake_build_dir'] = "build_debug" if build_debug else "build_release"
+    env_lines = []
     cmake_lines = [
         "{CMAKE}",
         "-DCMAKE_BUILD_TYPE={0}".format("Debug" if build_debug else "Release"),
@@ -422,6 +431,9 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
         "-DCMAKE_Fortran_COMPILER:FILEPATH={FC}"
     ]
+    if 'MACOS_SDK_PATH' in tmp_dict:
+        env_lines.append('export SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
+        cmake_lines.append('-DCMAKE_OSX_SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
     if mydict['BASE_CFLAGS'] != '':
         cmake_lines.append('-DCMAKE_C_FLAGS:STRING="{BASE_CFLAGS}"')
     if mydict['BASE_FFLAGS'] != '':
@@ -495,6 +507,10 @@ end program test_program
                            ["===Compile output===", compile_res, "===Run output===", run_res])
     cmake_lines += [os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))]
     cmake_lines_str = ' \\\n  '.join(cmake_lines)
+    if len(env_lines) > 0:
+        env_lines_str = '# Environment modifications\n' + '\n'.join(env_lines) + '\n\n'
+    else:
+        env_lines_str = ''
     # Template string
     template = """# Auto-Generated on {date}
 # using library build at {base_dir}
@@ -508,7 +524,7 @@ ROOT_PATH=$(pwd)
 rm -rf {cmake_build_dir}
 mkdir {cmake_build_dir} && cd {cmake_build_dir}
 
-""" + cmake_lines_str + '\n'
+""" + env_lines_str + cmake_lines_str + '\n'
     string = template.format(**tmp_dict)
     # Output
     with open('config_cmake.sh', 'w+') as fid:
@@ -582,7 +598,11 @@ class package:
         #
         os.chdir(self.build_dir)
         print("  Excecuting build (this may take a few minutes)")
+        build_start = time.time()
         self.build()
+        build_duration = time.time() - build_start
+        build_minutes = math.floor(build_duration/60)
+        print("    Elapsed Time = {0}:{1}".format(build_minutes,int(build_duration-build_minutes*60)))
         os.chdir(self.root_path)
         # Check to make sure Installation succeeded
         config_dict = self.post_install(config_dict)
@@ -659,7 +679,10 @@ class package:
             fid.write("\n".join(script_lines))
         if self.config_dict['SETUP_ONLY']:
             return
-        result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60)
+        addl_envs = {}
+        if 'MACOS_SDK_PATH' in config_dict:
+            addl_envs['SDKROOT'] = self.config_dict['MACOS_SDK_PATH']
+        result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60, env_vars=addl_envs)
         with open("build_tmp.log", "w+") as fid:
             fid.write(result)
         # Check for build success
@@ -775,12 +798,22 @@ class METIS(package):
 
     def build(self):
         build_dir = os.getcwd()
+        cmake_options = [
+            '-DCMAKE_INSTALL_PREFIX={METIS_ROOT}',
+            '-DCMAKE_C_COMPILER={CC}',
+            '-DCMAKE_CXX_COMPILER={CXX}',
+            '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+            '-DGKRAND:BOOL=ON',
+            '-DGKLIB_PATH=$GKLIB_PATH'
+        ]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         build_lines = [
             "GKLIB_PATH={0}".format(os.path.join(build_dir,"GKlib")),
             "rm -rf build",
             "mkdir -p build",
             "cd build",
-            "{CMAKE} -DCMAKE_INSTALL_PREFIX={METIS_ROOT} -DCMAKE_C_COMPILER={CC} -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DGKRAND:BOOL=ON -DGKLIB_PATH=$GKLIB_PATH .. ",
+            "{CMAKE} " + " ".join(cmake_options) + " .. ",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -846,11 +879,11 @@ class MPI(package):
 
 
 class HDF5(package):
-    def __init__(self, parallel=False):
+    def __init__(self, parallel=False, cmake_build=False):
         self.name = "HDF5"
-        # self.url = "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.2/src/hdf5-1.14.2.tar.gz"
-        self.url = "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.10/src/hdf5-1.10.10.tar.gz"
+        self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.5/hdf5-1.14.5.tar.gz"
         self.parallel = parallel
+        self.cmake_build = cmake_build
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -879,24 +912,29 @@ class HDF5(package):
             "mkdir build",
             "cd build"
         ]
-        # cmake_options = [
-        #     '-DCMAKE_INSTALL_PREFIX:PATH="{HDF5_ROOT}"',
-        #     '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-        #     '-DHDF5_BUILD_FORTRAN:BOOL=ON',
-        #     '-DBUILD_SHARED_LIBS:BOOL=OFF',
-        #     '-DHDF5_BUILD_CPP_LIB=OFF',
-        #     '-DBUILD_TESTING=OFF',
-        #     '-DHDF5_BUILD_EXAMPLES=OFF'
-        # ]
-        options = [
-            "--prefix={HDF5_ROOT}",
-            "--enable-fortran",
-            "--enable-shared=no",
-            "--disable-tests",
-            "--disable-examples",
-            "--with-pic"
-        ]
-        if "MPI_CC" in self.config_dict:
+        if self.cmake_build:
+            cmake_options = [
+                '-DCMAKE_INSTALL_PREFIX:PATH="{HDF5_ROOT}"',
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DHDF5_BUILD_FORTRAN:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON',
+                '-DBUILD_STATIC_LIBS:BOOL=OFF',
+                '-DHDF5_BUILD_CPP_LIB=OFF',
+                '-DBUILD_TESTING=OFF',
+                '-DHDF5_BUILD_EXAMPLES=OFF'
+            ]
+        else:
+            configure_options = [
+                "--prefix={HDF5_ROOT}",
+                "--enable-fortran",
+                "--enable-hl=no",
+                "--enable-shared=no",
+                "--enable-static=yes",
+                "--enable-tests=no",
+                # "--enable-examples=no",
+                "--with-pic"
+            ]
+        if self.parallel and ("MPI_CC" in self.config_dict):
             build_lines += [
                 "export CC={MPI_CC}",
                 "export FC={MPI_FC}"
@@ -907,8 +945,10 @@ class HDF5(package):
                 "export FC={FC}"
             ]
         if self.parallel:
-            # cmake_options += ["-DHDF5_ENABLE_PARALLEL:BOOL=ON"]
-            options += ["--enable-parallel"]
+            if self.cmake_build:
+                cmake_options.append("-DHDF5_ENABLE_PARALLEL:BOOL=ON")
+            else:
+                configure_options.append("--enable-parallel")
             if "MPI_LIBS" in self.config_dict:
                 build_lines += [
                     'export CPPFLAGS="-I{MPI_INCLUDE}"',
@@ -916,10 +956,14 @@ class HDF5(package):
                     'export LDFLAGS="-L{MPI_LIB}"',
                     'export LIBS="{MPI_LIBS}"'
                 ]
+        if self.cmake_build and ('MACOS_SDK_PATH' in self.config_dict):
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         #
+        if self.cmake_build:
+            build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
+        else:
+            build_lines.append("../configure " + " ".join(configure_options))
         build_lines += [
-            # "cmake " + " ".join(cmake_options) + " ..",
-            "../configure " + " ".join(options),
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1168,7 +1212,7 @@ class MKL(package):
 class BLAS_LAPACK(package):
     def __init__(self, comp_wrapper=False, blas_lib_path=None, lapack_lib_path=None):
         self.name = "BLAS_LAPACK"
-        self.url = "http://www.netlib.org/lapack/lapack-3.5.0.tgz"
+        self.url = "https://www.netlib.org/lapack/lapack-3.5.0.tgz"
         self.comp_wrapper = comp_wrapper
         self.blas_lib_path = blas_lib_path
         self.lapack_lib_path = lapack_lib_path
@@ -1228,8 +1272,16 @@ class BLAS_LAPACK(package):
                 'export FFLAGS="{0}"'.format(" ".join(fflags)),
                 'export FCFLAGS="{0}"'.format(" ".join(fflags))
             ]
+        cmake_options = [
+            "-DCMAKE_INSTALL_PREFIX:PATH={BLAS_LAPACK_ROOT}",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON",
+            "-Wno-dev",
+            "-DCMAKE_BUILD_TYPE=Release"
+        ]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         build_lines += [    
-            "{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={BLAS_LAPACK_ROOT} -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -Wno-dev -DCMAKE_BUILD_TYPE=Release ..",
+            "{CMAKE} " + " ".join(cmake_options) + " .. ",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1262,7 +1314,7 @@ class ARPACK(package):
 
     def build(self):
         tmp_dict = self.config_dict.copy()
-        options = [
+        cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={ARPACK_ROOT}",
             "-DCMAKE_INSTALL_LIBDIR=lib",
             "-DEXAMPLES=OFF",
@@ -1270,7 +1322,7 @@ class ARPACK(package):
             "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
         ]
         if "BLAS_LIB_PATH" in self.config_dict:
-            options += [
+            cmake_options += [
                 '-DBLAS_LIBRARIES:PATH={BLAS_LIB_PATH}',
                 '-DLAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}'
             ]
@@ -1285,7 +1337,7 @@ class ARPACK(package):
         if self.link_omp:
             fflags.append("{0}".format(tmp_dict['OMP_FLAGS']))
         if self.parallel:
-            options.append("-DMPI=ON")
+            cmake_options.append("-DMPI=ON")
             if "MPI_CC" in tmp_dict:
                 build_lines += [
                     "export CC={MPI_CC}",
@@ -1303,16 +1355,18 @@ class ARPACK(package):
                     'export CPPFLAGS="-I{MPI_INCLUDE}"'
                 ]
         else:
-            options.append("-DMPI=OFF")
+            cmake_options.append("-DMPI=OFF")
             build_lines += [
                 "export CC={CC}",
                 "export F77={FC}",
                 "export FC={FC}"
             ]
+        if 'MACOS_SDK_PATH' in tmp_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
         #
         build_lines += [
             'export FFLAGS="{0}"'.format(" ".join(fflags)),
-            "{CMAKE} " + " ".join(options) + " ..",
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1322,8 +1376,8 @@ class ARPACK(package):
 class SUPERLU(package):
     def __init__(self, comp_wrapper=False):
         self.name = "SUPERLU"
-        self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v5.2.0.tar.gz"
-        self.build_dir = 'superlu-5.2.0'
+        self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v5.3.0.tar.gz"
+        self.build_dir = 'superlu-5.3.0'
         self.libname = '-lsuperlu'
         self.libpath = 'libsuperlu.a'
         self.comp_wrapper = comp_wrapper
@@ -1350,6 +1404,14 @@ class SUPERLU(package):
         return self.config_dict
 
     def build(self):
+        cmake_options = [
+            "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT}",
+            "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
+            "-Denable_blaslib:BOOL=TRUE",
+        ]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -1357,10 +1419,7 @@ class SUPERLU(package):
             "export CC={CC}",
             "export CXX={CXX}",
             "export FC={FC}",
-            "{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT} \\",
-            "  -DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH} \\",
-            "  -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE \\",
-            "  -Denable_blaslib:BOOL=TRUE ..",
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1399,10 +1458,24 @@ SUPERLU_DIST_LIB = -L{SUPERLU_DIST_LIB} {SUPERLU_DIST_LIBS}
     def build(self):
         #
         tmp_dict = self.config_dict.copy()
+        cmake_options = [
+            "-DTPL_ENABLE_PARMETISLIB:BOOL=FALSE",
+            "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT}",
+            "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
+            "-DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}",
+            "-Denable_tests=OFF -Denable_examples=OFF",
+            "-DBUILD_SHARED_LIBS:BOOL=FALSE",
+            "-DMPI_Fortran_COMPILER={MPI_FC}",
+            "-DMPI_C_COMPILER={MPI_CC}",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
+            "-DCMAKE_INSTALL_LIBDIR=lib",
+        ]
         if self.build_openmp:
-            tmp_dict["SUPERLU_DIST_OMP_FLAG"] = "TRUE"
+            cmake_options.append("-Denable_openmp:BOOL=TRUE")
         else:
-            tmp_dict["SUPERLU_DIST_OMP_FLAG"] = "FALSE"
+            cmake_options.append("-Denable_openmp:BOOL=FALSE")
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         build_lines = [
             "rm -rf build_dir",
             "mkdir build_dir",
@@ -1410,17 +1483,7 @@ SUPERLU_DIST_LIB = -L{SUPERLU_DIST_LIB} {SUPERLU_DIST_LIBS}
             "export CC={CC}",
             "export CXX={CXX}",
             "export FC={FC}",
-            "{CMAKE} -DTPL_ENABLE_PARMETISLIB:BOOL=FALSE \\",
-            "  -DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT} \\",
-            "  -DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH} \\",
-            "  -DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH} \\",
-            "  -Denable_openmp:BOOL={SUPERLU_DIST_OMP_FLAG} \\",
-            "  -Denable_tests=OFF -Denable_examples=OFF \\",
-            "  -DBUILD_SHARED_LIBS:BOOL=FALSE \\",
-            "  -DMPI_Fortran_COMPILER={MPI_FC} \\",
-            "  -DMPI_C_COMPILER={MPI_CC} \\",
-            "  -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE \\",
-            "  -DCMAKE_INSTALL_LIBDIR=lib ..",
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1467,6 +1530,8 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
         ]
         if self.config_dict.get('OpenBLAS_THREADS',False):
             AMD_CMAKE_options.append("-DCMAKE_EXE_LINKER_FLAGS={0}".format(self.config_dict['OMP_FLAGS']))
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            AMD_CMAKE_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         config_CMAKE_options = AMD_CMAKE_options.copy() + [
             "-DBLAS_ROOT:PATH={BLAS_ROOT}",
             "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
@@ -1751,23 +1816,24 @@ parser.add_argument("--setup_only", action="store_true", default=False, help="Do
 parser.add_argument("--nthread", default=1, type=int, help="Number of threads to use for make (default=1)")
 parser.add_argument("--opt_flags", default=None, type=str, help="Compiler optimization flags")
 parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
+parser.add_argument("--macos_sdk_path", default=None, type=str, help="Path to macos SDK to use for building")
 parser.add_argument("--cross_compile_host", default=None, type=str, help="Host type for cross-compilation")
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
 group = parser.add_argument_group("CMAKE", "CMAKE configure options for the Open FUSION Toolkit")
-group.add_argument("--build_cmake", default=0, type=int, choices=(0,1), help="Build CMAKE instead of using system version?")
-group.add_argument("--oft_build_debug", default=0, type=int, choices=(0,1), help="Build debug version of OFT?")
+group.add_argument("--build_cmake", default=0, type=int, choices=(0,1), help="Build CMAKE instead of using system version? (default: 0)")
+group.add_argument("--oft_build_debug", default=0, type=int, choices=(0,1), help="Build debug version of OFT? (default: 0)")
 group.add_argument("--oft_build_python", default=1, type=int, choices=(0,1), help="Build OFT Python libraries? (default: 1)")
-group.add_argument("--oft_use_openmp", default=1, type=int, choices=(0,1), help="Build OFT with OpenMP support? (default)")
-group.add_argument("--oft_build_tests", default=0, type=int, choices=(0,1), help="Build OFT tests?")
-group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples?")
-group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help="Build OFT documentation? (requires doxygen)")
+group.add_argument("--oft_use_openmp", default=1, type=int, choices=(0,1), help="Build OFT with OpenMP support? (default: 1)")
+group.add_argument("--oft_build_tests", default=0, type=int, choices=(0,1), help="Build OFT tests? (default: 0)")
+group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples? (default: 0)")
+group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help="Build OFT documentation (requires doxygen)? (default: 0)")
 group.add_argument("--oft_package", action="store_true", default=False, help="Perform a packaging build of OFT?")
 group.add_argument("--oft_package_release", action="store_true", default=False, help="Perform a release package of OFT?")
 group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
 #
 group = parser.add_argument_group("MPI", "MPI package options")
-group.add_argument("--build_mpi", default=0, type=int, choices=(0,1), help="Build MPI libraries?")
+group.add_argument("--build_mpi", default=0, type=int, choices=(0,1), help="Build MPI libraries? (default: 0)")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
@@ -1778,6 +1844,7 @@ group = parser.add_argument_group("HDF5", "HDF5 package options")
 group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wrapper")
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
+group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
 #
 group = parser.add_argument_group("BLAS/LAPACK", "BLAS/LAPACK package options")
 group.add_argument("--oblas_threads", action="store_true", default=False, help="Build OpenBLAS with thread support (OpenMP)")
@@ -1794,39 +1861,39 @@ group = parser.add_argument_group("METIS", "METIS package options")
 group.add_argument("--metis_wrapper", action="store_true", default=False, help="METIS included in compilers")
 #
 group = parser.add_argument_group("FoX XML", "FoX XML package options")
-group.add_argument("--build_fox", default=1, type=int, choices=(0,1), help="Build Fox XML library? (default)")
+group.add_argument("--build_fox", default=1, type=int, choices=(0,1), help="Build Fox XML library? (default: 1)")
 #
 group = parser.add_argument_group("OpenNURBS", "OpenNURBS package options")
-group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="Build OpenNURBS library?")
+group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="Build OpenNURBS library? (default: 0)")
 #
 group = parser.add_argument_group("NETCDF", "NETCDF package options")
-group.add_argument("--build_netcdf", default=0, type=int, choices=(0,1), help="Build NETCDF library?")
+group.add_argument("--build_netcdf", default=0, type=int, choices=(0,1), help="Build NETCDF library? (default: 0)")
 group.add_argument("--netcdf_wrapper", action="store_true", default=False, help="NETCDF included in compilers")
 #
 group = parser.add_argument_group("ARPACK", "ARPACK package options")
-group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="Build ARPACK library?")
+group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="Build ARPACK library? (default: 0)")
 #
 group = parser.add_argument_group("SuperLU", "SuperLU package options")
-group.add_argument("--build_superlu", default=0, type=int, choices=(0,1), help="Build SuperLU library?")
+group.add_argument("--build_superlu", default=0, type=int, choices=(0,1), help="Build SuperLU library? (default: 0)")
 group.add_argument("--superlu_wrapper", action="store_true", default=False, help="SuperLU included in compilers")
 #
 group = parser.add_argument_group("SuperLU-DIST", "SuperLU-DIST package options")
-group.add_argument("--build_superlu_dist", default=0, type=int, choices=(0,1), help="Build SuperLU-DIST library?")
+group.add_argument("--build_superlu_dist", default=0, type=int, choices=(0,1), help="Build SuperLU-DIST library? (default: 0)")
 group.add_argument("--superlu_dist_threads", action="store_true", default=False, help="Build SuperLU-DIST with thread support (OpenMP)")
 group.add_argument("--superlu_dist_wrapper", action="store_true", default=False, help="SuperLU-DIST included in compilers")
 #
 group = parser.add_argument_group("UMFPACK", "UMFPACK package options")
-group.add_argument("--build_umfpack", default=0, type=int, choices=(0,1), help="Build UMFPACK library?")
+group.add_argument("--build_umfpack", default=0, type=int, choices=(0,1), help="Build UMFPACK library? (default: 0)")
 group.add_argument("--umfpack_wrapper", action="store_true", default=False, help="UMFPACK included in compilers")
 #
 group = parser.add_argument_group("PETSc", "PETSc package options")
-group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library?")
-group.add_argument("--petsc_debug", default=1, type=int, choices=(0,1), help="Build PETSc with debugging information (default)")
-group.add_argument("--petsc_superlu", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU (default)")
-group.add_argument("--petsc_mumps", default=1, type=int, choices=(0,1), help="Build PETSc with MUMPS (default)")
-group.add_argument("--petsc_umfpack", default=0, type=int, choices=(0,1), help="Build PETSc with UMFPACK")
+group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library? (default: 0)")
+group.add_argument("--petsc_debug", default=1, type=int, choices=(0,1), help="Build PETSc with debugging information (default: 1)")
+group.add_argument("--petsc_superlu", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU (default: 1)")
+group.add_argument("--petsc_mumps", default=1, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 1)")
+group.add_argument("--petsc_umfpack", default=0, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 0)")
 group.add_argument("--petsc_version", default="3.8", type=str,
-    help="Use different version of PETSc [3.6,3.7,3.8,3.9,3.10] (default is 3.8)")
+    help="Use different version of PETSc [3.6,3.7,3.8,3.9,3.10] (default: 3.8)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
 #
 options = parser.parse_args()
@@ -1845,6 +1912,12 @@ if options.ld_flags is not None:
     config_dict['LD_FLAGS'] = options.ld_flags
 if options.cross_compile_host is not None:
     config_dict['CROSS_COMPILE_HOST'] = options.cross_compile_host
+if options.macos_sdk_path is not None:
+    if not options.hdf5_cmake_build:
+        parser.exit(-1, 'Use of "--macos_sdk_path" requires CMake build for HDF5\n')
+    if not os.path.isdir(options.macos_sdk_path):
+        parser.exit(-1, 'Specified "--macos_sdk_path={0}" directory does not exist\n'.format(options.macos_sdk_path))
+    config_dict['MACOS_SDK_PATH'] = options.macos_sdk_path
 # Building with MPI?
 use_mpi = False
 if (options.mpi_cc is not None) and (options.mpi_fc is not None):
@@ -1858,11 +1931,11 @@ else:
         if options.mpi_libs is not None:
             config_dict['MPI_LIBS'] = options.mpi_libs
         else:
-            parser.exit(-1, '"MPI_LIBS" required when "MPI_LIB" is specified')
+            parser.exit(-1, '"MPI_LIBS" required when "MPI_LIB" is specified\n')
         if options.mpi_include_dir is not None:
             config_dict['MPI_INCLUDE'] = options.mpi_include_dir
         else:
-            parser.exit(-1, '"MPI_INCLUDE" required when "MPI_LIB" is specified')
+            parser.exit(-1, '"MPI_INCLUDE" required when "MPI_LIB" is specified\n')
     elif options.build_mpi:
         use_mpi = True
 # Setup library builds (in order of dependency)
@@ -1876,7 +1949,7 @@ if options.use_mkl:
 else:
     if (options.blas_lib_path is not None) or (options.lapack_lib_path is not None):
         if (options.blas_lib_path is None) or (options.lapack_lib_path is None):
-            parser.exit(-1, 'Both "blas_lib_path" and "lapack_lib_path" must be specified to use pre-built BLAS/LAPACK')
+            parser.exit(-1, 'Both "blas_lib_path" and "lapack_lib_path" must be specified to use pre-built BLAS/LAPACK\n')
         packages.append(BLAS_LAPACK(blas_lib_path=options.blas_lib_path, lapack_lib_path=options.lapack_lib_path))
     else:
         if options.ref_blas or options.blas_lapack_wrapper:
@@ -1890,14 +1963,14 @@ else:
     if options.hdf5_parallel:
         print('Warning: Reverting to serial HDF5 library without MPI')
     if (options.build_petsc == 1) or options.petsc_wrapper:
-        parser.exit(-1, 'PETSc requires MPI')
+        parser.exit(-1, 'PETSc requires MPI\n')
 # HDF5
 if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     config_dict['HDF5_CC'] = options.hdf5_cc
     config_dict['HDF5_FC'] = options.hdf5_fc
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi)))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build))
 else:
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi)))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build))
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())
@@ -1921,7 +1994,7 @@ else:
         packages.append(SUPERLU(options.superlu_wrapper))
     if (options.build_superlu_dist == 1) or options.superlu_dist_wrapper:
         if not use_mpi:
-            parser.exit(-1, 'SuperLU-DIST requires MPI')
+            parser.exit(-1, 'SuperLU-DIST requires MPI\n')
         packages.append(SUPERLU_DIST(options.superlu_dist_threads, options.superlu_dist_wrapper))
     if (options.build_umfpack == 1) or options.umfpack_wrapper:
         packages.append(UMFPACK(options.umfpack_wrapper))
