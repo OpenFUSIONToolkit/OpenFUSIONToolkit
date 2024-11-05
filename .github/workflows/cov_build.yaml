@@ -71,7 +71,9 @@ jobs:
     - name: Configure OFT
       shell: bash
       working-directory: libs
-      run: bash config_cmake.sh
+      run: |
+        source ${{ github.workspace }}/oft_venv/bin/activate
+        bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
