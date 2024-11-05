@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 import argparse
 import numpy as np
 import scipy
@@ -7,6 +8,7 @@ import h5py
 import matplotlib.pyplot as plt
 
 tri_ed = np.asarray([[2,1], [0,2], [1,0]]) # Triangle edge list
+indent_level = ''
 
 class trimesh:
 
@@ -24,11 +26,11 @@ class trimesh:
         self.setup_boundary()
         self.surf_tag = self.sync_normals()
         self.nsurfs = np.max(self.surf_tag)+1
-        print("Mesh constructed:")
-        print("  Found {0} distinct surface(s)".format(self.nsurfs))
-        print("  # of vertices = {0} ({1})".format(self.np, self.nbp))
-        print("  # of edges    = {0} ({1})".format(self.ne, self.nbe))
-        print("  # of faces    = {0} ({1})".format(self.nf, self.nbf))
+        print(indent_level+"Mesh constructed:")
+        print(indent_level+"  Found {0} distinct surface(s)".format(self.nsurfs))
+        print(indent_level+"  # of vertices = {0} ({1})".format(self.np, self.nbp))
+        print(indent_level+"  # of edges    = {0} ({1})".format(self.ne, self.nbe))
+        print(indent_level+"  # of faces    = {0} ({1})".format(self.nf, self.nbf))
     
     def setup_edges(self):
         nr=np.zeros((self.np+1,), dtype=np.int32) # initialize raw edge counter
@@ -236,7 +238,7 @@ class trimesh:
         k = 0
         for cycle_list in cycle_lists:
             k += len(cycle_list)
-        print('  Found {0} boundary cycles'.format(k))
+        print(indent_level+'  Found {0} boundary cycles'.format(k))
         return cycle_lists
     
     def sync_normals(self):
@@ -380,7 +382,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
         basis_cycles.append(np.hstack((pi,np.flip(pj))))
     return basis_cycles
 
-def fixup_loop(cycle,mesh,boundary_cycles):
+def fixup_loop(cycle,mesh,boundary_cycles,debug):
     # # Shrink corners
     # while True:
     #     # print(len(cycle))
@@ -417,7 +419,8 @@ def fixup_loop(cycle,mesh,boundary_cycles):
                 for j in (-1,1):
                     if cycle[i+j] in boundary_cycles[bCycle][2:-2]:
                         sCycle = np.where(boundary_cycles[bCycle]==cycle[i+j])[0][0]
-                        print("  Reconnecting pts {0} -> {1}".format(cycle[i],cycle[i+j]))
+                        if debug:
+                            print("  Reconnecting pts {0} -> {1}".format(cycle[i],cycle[i+j]))
                         if sCycle > len(boundary_cycles[bCycle])/2:
                             insert_loop = boundary_cycles[bCycle][sCycle:].tolist()
                         else:
@@ -436,12 +439,14 @@ def fixup_loop(cycle,mesh,boundary_cycles):
 
 
 parser = argparse.ArgumentParser()
-parser.description = "Compute holes for ThinCurr meshes"
+parser.description = "Compute holes for ThinCurr meshes using a Greedy Homotopy approach"
 parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
 parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
-parser.add_argument("--plot", action="store_true", default=False, help="Show final homology basis")
-parser.add_argument("--plot_all", action="store_true", default=False, help="Show intermediate bases for each distinct surface")
-parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point')
+parser.add_argument("--plot_final", action="store_true", default=False, help="Show final homology basis?")
+parser.add_argument("--plot_steps", action="store_true", default=False, help="Show intermediate bases for each distinct surface?")
+parser.add_argument("--show_omitted", action="store_true", default=False, help="Show boundary cycles that are omitted?")
+parser.add_argument("--debug", action="store_true", default=False, help="Print additional debug information?")
+parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
 options = parser.parse_args()
 
 out_file = options.out_file
@@ -463,6 +468,7 @@ with h5py.File(options.in_file) as fid:
 
 full_mesh = trimesh(vertex_full,face_full)
 boundary_cycles = full_mesh.boundary_cycles()
+indent_level = '  '
 
 internal_holes = []
 holes = []
@@ -512,8 +518,8 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
         closures.append(ind)
     
     print("  Computing Homology Basis")
+    print('    Euler Characteristic (covered) = {0} ({1})'.format(mesh.np-mesh.ne+mesh.nf,mesh.np-(mesh.ne+new_ne)+(mesh.nf+new_nf)))
     print("    # of boundary cycles = {0}".format(len(boundary_cycles[surf_id])))
-    print('    Euler Characteristic = {0} ({1})'.format(mesh.np-mesh.ne+mesh.nf,mesh.np-(mesh.ne+new_ne)+(mesh.nf+new_nf)))
 
 
     # Compute Homotopy basis
@@ -521,7 +527,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
     hb = compute_greedy_homotopy_basis(face_covered,vertex,ind,face_sweight=mesh.nf)
     print("    # of internal cycles = {0}".format(len(hb)))
     for i in range(len(hb)):
-        hb[i] = fixup_loop(hb[i],mesh,new_bcycles)
+        hb[i] = fixup_loop(hb[i],mesh,new_bcycles,options.debug)
     
     for k, cycle in enumerate(boundary_cycles[surf_id]):
         if k == cycle_max[1]:
@@ -532,52 +538,66 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
         internal_holes.append(reindex_inv[basis_cycle])
 
     # Plot intermediate cycles
-    if options.plot_all:
+    if options.plot_steps:
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1, projection='3d')
         ax.plot_trisurf(vertex[:,0], vertex[:,1], vertex[:,2], triangles=face, edgecolor=[0.0, 0.0, 0.0, 0.1] , color='none')
         for k, cycle in enumerate(new_bcycles):
             if k == cycle_max[1]:
-                ax.plot(vertex[cycle,0], vertex[cycle,1], vertex[cycle,2], color='tab:green')
+                if options.show_omitted:
+                    ax.plot(vertex[cycle,0], vertex[cycle,1], vertex[cycle,2], color='k')
             else:
-                ax.plot(vertex[cycle,0], vertex[cycle,1], vertex[cycle,2], color='tab:red')
+                ax.plot(vertex[cycle,0], vertex[cycle,1], vertex[cycle,2], color='tab:blue')
         for basis_cycle in hb:
-            ax.plot(vertex[basis_cycle,0], vertex[basis_cycle,1], vertex[basis_cycle,2], color='tab:blue')
-        ax.plot(vertex[ind,0], vertex[ind,1], vertex[ind,2],'ro')
+            ax.plot(vertex[basis_cycle,0], vertex[basis_cycle,1], vertex[basis_cycle,2], color='tab:orange')
+        ax.plot(vertex[ind,0], vertex[ind,1], vertex[ind,2], 'o', color='tab:orange')
         ax.set_aspect('equal','box')
         plt.show()
 
-# Plot final cycles
-if options.plot:
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1, projection='3d')
-    ax.plot_trisurf(vertex_full[:,0], vertex_full[:,1], vertex_full[:,2], triangles=face_full, color=[0.0, 0.0, 0.0, 0.1])
-    for k, cycle in enumerate(holes):
-        ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:red')
-    for k, cycle in enumerate(skipped_holes):
-        ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:green')
-    for k, cycle in enumerate(internal_holes):
-        ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:blue')
-    for closure_cell in closures:
-        closure = full_mesh.lf[closure_cell,0]
-        ax.plot(vertex_full[closure,0], vertex_full[closure,1], vertex_full[closure,2], 'o', color='tab:orange')
-    ax.set_aspect('equal','box')
-
-# Save to new mesh file
+# Display final stats
 all_cycles = holes + internal_holes
 print()
-with h5py.File(out_file,'w') as h5_file:
-    h5_file.create_dataset('mesh/R', data=vertex_full, dtype='f8')
-    h5_file.create_dataset('mesh/LC', data=face_full+1, dtype='i4')
-    h5_file.create_dataset('mesh/REG', data=reg_full, dtype='i4')
+print("Final model:")
+print("    # of holes = {0}".format(len(all_cycles)))
+print("    # of closures = {0}".format(len(closures)))
+
+# Copy mesh to new file and replace holes/closures
+shutil.copyfile(options.in_file,out_file)
+with h5py.File(out_file,'r+') as h5_file:
+    # Replace nodesets
+    if 'mesh/NUM_NODESETS' in h5_file:
+        for j in range(h5_file['mesh/NUM_NODESETS'][0]):
+            del h5_file['mesh/NODESET{0:04d}'.format(j+1)]
+        del h5_file['mesh/NUM_NODESETS']
     if len(all_cycles) > 0:
         h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(all_cycles),], dtype='i4')
         j=0
         for k, cycle in enumerate(all_cycles):
             j+=1
             h5_file.create_dataset('mesh/NODESET{0:04d}'.format(j), data=cycle[:-1]+1, dtype='i4')
+    # Replace sidesets
+    if 'mesh/NUM_SIDESETS' in h5_file:
+        for j in range(h5_file['mesh/NUM_SIDESETS'][0]):
+            del h5_file['mesh/SIDESET{0:04d}'.format(j+1)]
+        del h5_file['mesh/NUM_SIDESETS']
     if len(closures) > 0:
         h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(closures),], dtype='i4')
         h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(1), data=closures, dtype='i4')
 
-plt.show()
+# Plot final cycles
+if options.plot_final:
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1, projection='3d')
+    ax.plot_trisurf(vertex_full[:,0], vertex_full[:,1], vertex_full[:,2], triangles=face_full, color=[0.0, 0.0, 0.0, 0.1])
+    for k, cycle in enumerate(holes):
+        ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:blue')
+    if options.show_omitted:
+        for k, cycle in enumerate(skipped_holes):
+            ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='k')
+    for k, cycle in enumerate(internal_holes):
+        ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:orange')
+    for closure_cell in closures:
+        closure = full_mesh.lf[closure_cell,0]
+        ax.plot(vertex_full[closure,0], vertex_full[closure,1], vertex_full[closure,2], 'o', color='k')
+    ax.set_aspect('equal','box')
+    plt.show()
