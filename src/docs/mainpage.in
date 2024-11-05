@@ -8,7 +8,7 @@ plasma and fusion science and engineering in complex 2D and 3D geometries. The c
 the use of high order finite element methods on an unstructured hexahedral/quadrilateral and
 tetrahedral/triangular grids.
 
-The code is fully open-source and available on [GitHub](https://github.com/hansec/OpenFUSIONToolkit).
+The code is fully open-source and available on [GitHub](https://github.com/openfusiontoolkit/OpenFUSIONToolkit).
 
 \section doc_main_modules Physics Modules
 
@@ -20,7 +20,7 @@ Currently the framework is used to implement the following physics modules:
  - \ref doc_taylor_main "Marklin": 3D force-free, uniform \f$ \lambda \f$ equilibrium solver
 
 \section doc_main_build Building OFT
-The documentation for [Building OFT](https://github.com/hansec/OpenFUSIONToolkit/wiki) on different platforms
+The documentation for [Building OFT](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki) on different platforms
 is maintained on GitHub along with the source code. At present, OFT is actively used both on macOS and Linux.
 
 \section doc_main_api Framework modules and API
@@ -69,6 +69,6 @@ see \ref doc_doxygen.
 
 \section doc_main_git Using GIT
 
-OFT uses [GIT](http://git-scm.com/) for version control. For information on how to use GIT
-see the official [documentation](http://git-scm.com/documentation) or the unofficial example
-based [documentation](http://gitready.com/).
+OFT uses [GIT](https://git-scm.com/) for version control. For information on how to use GIT
+see the official [documentation](https://git-scm.com/documentation) or the unofficial example
+based [documentation](https://gitready.com/).

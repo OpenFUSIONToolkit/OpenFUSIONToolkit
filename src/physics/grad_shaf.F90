@@ -173,6 +173,7 @@ TYPE :: gs_eq
   REAL(r8) :: pnorm = 1.d0
   REAL(r8) :: rmin = 0.d0
   REAL(r8) :: dt = -1.d0
+  REAL(r8) :: dt_last = -1.d0
   REAL(r8) :: Itor_target = -1.d0
   REAL(r8) :: estore_target = -1.d0
   REAL(r8) :: pax_target = -1.d0
@@ -2322,9 +2323,12 @@ CALL self%p%update(self)
 !---Get J_phi source term
 CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
 IF(self%dt>0.d0)THEN
-  CALL build_dels(self%dels_dt,self,"free",self%dt)
+  IF(self%dt/=self%dt_last)THEN
+    CALL build_dels(self%dels_dt,self,"free",self%dt)
+    self%dt_last=self%dt
+    self%lu_solver_dt%refactor=.TRUE.
+  END IF
   self%lu_solver_dt%A=>self%dels_dt
-  self%lu_solver_dt%refactor=.TRUE.
 END IF
 !---Update vacuum field part
 CALL psi_vac%set(0.d0)
@@ -3071,9 +3075,12 @@ CALL self%psi%new(psi_vac)
 CALL self%psi%new(psi_vcont)
 CALL self%psi%new(psi_eddy)
 IF(self%dt>0.d0)THEN
-  CALL build_dels(self%dels_dt,self,"free",self%dt)
+  IF(self%dt/=self%dt_last)THEN
+    CALL build_dels(self%dels_dt,self,"free",self%dt)
+    self%dt_last=self%dt
+    self%lu_solver_dt%refactor=.TRUE.
+  END IF
   self%lu_solver_dt%A=>self%dels_dt
-  self%lu_solver_dt%refactor=.TRUE.
   CALL self%psi%new(psi_dt)
   CALL self%psi%new(tmp_vec)
 END IF
@@ -3106,7 +3113,7 @@ IF((self%dt>0.d0).AND.oft_env%pm)THEN
 END IF
 ! Compute inhomogeneous part
 psimax=psi_sol%dot(psi_sol)
-IF(psimax>1.d-15)THEN
+IF(psimax>1.d-14)THEN
   CALL self%psi%new(rhs_bc)
   CALL self%psi%new(psi_bc)
   CALL rhs_bc%add(0.d0,1.d0,psi_sol)
@@ -3556,8 +3563,9 @@ end subroutine gs_itor_nl
 !---------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------
-subroutine gs_update_bounds(self)
+subroutine gs_update_bounds(self,track_opoint)
 class(gs_eq), intent(inout) :: self
+logical, optional, intent(in) :: track_opoint
 type(oft_lag_brinterp) :: psi_interp
 integer(4) :: i,j,cell,ierr,ind_sort(max_xpoints),trace_err,itmp
 REAL(8) :: old_bounds(2),f(3),goptmp(3,3),v,psitmp(1),alt_max
@@ -3577,6 +3585,11 @@ CALL self%psi%get_local(psi_vals)
 ! CALL vector_cast(psiv,self%psi)
 
 ! t1=omp_get_wtime()
+IF(PRESENT(track_opoint))THEN
+  IF(.NOT.track_opoint)self%o_point(1)=-1.d0
+ELSE
+  self%o_point(1)=-1.d0
+END IF
 CALL gs_analyze_saddles(self, self%o_point, self%plasma_bounds(2), x_point, x_psi)
 ! t2=omp_get_wtime()
 ! WRITE(*,*)'Analyze',t2-t1
@@ -3756,7 +3769,8 @@ end subroutine gs_update_bounds
 !---------------------------------------------------------------------------
 subroutine gs_analyze_saddles(self, o_point, o_psi, x_point, x_psi)
 class(gs_eq), intent(inout) :: self
-real(8), intent(out) :: o_point(2),o_psi,x_point(2,max_xpoints),x_psi(max_xpoints)
+real(8), intent(inout) :: o_point(2)
+real(8), intent(out) :: o_psi,x_point(2,max_xpoints),x_psi(max_xpoints)
 integer(4), PARAMETER :: npts = 10, max_unique = 20
 integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
 integer(4), allocatable :: ncuts(:)
@@ -3806,7 +3820,11 @@ n_unique=0
 !
 DO i=1,smesh%np
   IF((ncuts(i)==0).OR.(ncuts(i)>3))THEN
-    saddle_loc=smesh%r(1:2,i)
+    IF((ncuts(i)==0).AND.(o_point(1)>0.d0))THEN
+      saddle_loc=o_point
+    ELSE
+      saddle_loc=smesh%r(1:2,i)
+    END IF
     ! IF(ALL(smesh%reg(smesh%lpc(smesh%kpc(i):smesh%kpc(i+1)-1))/=1))CYCLE
     IF(oft_blagrange%order>1)THEN
       CALL gs_find_saddle(self,psi_scale_len,saddle_psi,saddle_loc,stype)
@@ -3907,7 +3925,7 @@ maxfev = 100
 ftol = 1.d-9
 xtol = 1.d-8
 gtol = 1.d-8
-epsfcn = 1.d-4
+epsfcn = SQRT(smesh%ca(cell_active)*2.d0)/REAL(oft_blagrange%order,8)*0.04d0 !5.d-4
 nprint = 0
 ldfjac = ncons
 ptmp=pt
@@ -4665,6 +4683,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
 type(gsinv_interp), target :: field
+CHARACTER(LEN=80) :: error_str
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -4737,8 +4756,8 @@ do j=1,nr
   pt_last=pt
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN
-    WRITE(*,*)j,pt
-    CALL oft_warn("gs_get_qprof: Trace did not complete")
+    WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
+    CALL oft_warn(error_str)
     CYCLE
   end if
   IF(j==1)THEN
@@ -5617,14 +5636,16 @@ END IF
 IF(self%ncoil_regs>0)THEN
   DO i=1,self%ncoil_regs
     IF(ASSOCIATED(self%coil_regions(i)%lc))DEALLOCATE(self%coil_regions(i)%lc)
-    IF(ASSOCIATED(self%psi_coil(i)%f))CALL self%psi_coil(i)%f%delete()
   END DO
-  DEALLOCATE(self%coil_regions,self%psi_coil)
+  DEALLOCATE(self%coil_regions)
   self%ncoil_regs=0
 END IF
 !---
 IF(self%ncoils>0)THEN
-  DEALLOCATE(self%coil_currs,self%coil_vcont,self%coil_nturns)
+  DO i=1,self%ncoils
+    IF(ASSOCIATED(self%psi_coil(i)%f))CALL self%psi_coil(i)%f%delete()
+  END DO
+  DEALLOCATE(self%psi_coil,self%coil_currs,self%coil_vcont,self%coil_nturns)
   self%ncoils=0
 END IF
 !---

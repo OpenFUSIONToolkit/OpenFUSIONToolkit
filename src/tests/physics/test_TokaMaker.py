@@ -13,9 +13,12 @@ sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
+from OpenFUSIONToolkit.util import oftpy_dump_cov
 
 
 def mp_run(target,args,timeout=30):
+    if os.environ.get('OFT_DEBUG_TEST', 0):
+        timeout *= 4
     os.chdir(test_dir)
     mp_q = multiprocessing.Queue()
     p = multiprocessing.Process(target=target, args=args + (mp_q,))
@@ -31,7 +34,11 @@ def mp_run(target,args,timeout=30):
         p.join()
         return None
     # Completed successfully
-    test_result = mp_q.get()
+    try:
+        test_result = mp_q.get(timeout=10)
+    except:
+        print("Failed to get output")
+        return None
     p.join()
     return test_result
 
@@ -76,7 +83,7 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(R,0.0,0.12,0.15,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order,F0=1.0,full_domain=True)
@@ -104,6 +111,7 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
             diff[1] = x_points[i,1]+rz_x[1]
         X_err += np.linalg.norm(diff)
     mp_q.put([psi_err, X_err])
+    oftpy_dump_cov()
 
 
 def validate_solo(results,psi_err_exp,X_err_exp):
@@ -131,7 +139,7 @@ def test_solo_h1(order):
     errs = [
         [3.2048631614233643e-07,0.00014929412629149645],
         [8.919954733021135e-10,4.659825491095631e-07],
-        [5.084454462338564e-15,3.1842881888709607e-12]
+        [5.084454462338564e-15,4.224329766330554e-12]
     ]
     results = mp_run(run_solo_case,(0.015,order))
     assert validate_solo(results,errs[order-2][0],errs[order-2][1])
@@ -140,7 +148,7 @@ def test_solo_h2(order):
     errs = [
         [7.725262474858205e-08,4.9243688140144384e-05],
         [1.1190059530634016e-10,2.919838380657025e-08],
-        [1.0424769098635496e-14,3.434564147191569e-12]
+        [1.0424769098635496e-14,1.3388421173180407e-12]
     ]
     results = mp_run(run_solo_case,(0.015/2.0,order))
     assert validate_solo(results,errs[order-2][0],errs[order-2][1])
@@ -150,7 +158,7 @@ def test_solo_h3(order):
     errs = [
         [2.0607919004158514e-08,5.955338556344096e-06],
         [1.3950375633902016e-11,1.154542061756696e-09],
-        [2.0552832098467707e-14,6.859186868795993e-12]
+        [2.0552832098467707e-14,1.1263537155091759e-12]
     ]
     results = mp_run(run_solo_case,(0.015/4.0,order))
     assert validate_solo(results,errs[order-2][0],errs[order-2][1])
@@ -168,7 +176,7 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(0.5,0.5,1.0,1.0,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order)
@@ -194,6 +202,7 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     # Compute error in psi
     psi_err = np.linalg.norm(psi_TM-psi_eig_TM)/np.linalg.norm(psi_eig_TM)
     mp_q.put([psi_err])
+    oftpy_dump_cov()
 
 
 def validate_sph(results,psi_err_exp):
@@ -254,7 +263,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
@@ -272,6 +281,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     psi_full = np.hstack((psi1[1:], psi2, psi3[1:]))
     psi_err = np.linalg.norm(green_full+psi_full)/np.linalg.norm(green_full)
     mp_q.put([psi_err])
+    oftpy_dump_cov()
 
 
 def validate_coil(results,psi_err_exp):
@@ -348,7 +358,7 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
@@ -422,6 +432,7 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,mp_q):
     eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
     eq_info['Lplasma'] = Lmat[-1,-1]
     mp_q.put([eq_info])
+    oftpy_dump_cov()
 
 
 # Test runners for LTX test cases
@@ -457,7 +468,8 @@ def test_ITER_eq(order):
         'dflux': 1.5402746036620532,
         'tflux': 121.86870301036512,
         'l_i': 0.9048845463517069,
-        'beta_tor': 1.768879437469196,
+        'beta_tor': 1.7816206668692283,
+        'beta_n': 1.1868590722509704,
         'MCS1': 2.5608173430680583e-06,
         'MCS1_plasma': 8.930926092661585e-07,
         'Lplasma': 1.1899835061690724e-05
@@ -508,7 +520,7 @@ def run_LTX_case(fe_order,eig_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
-    mygs = TokaMaker()
+    mygs = TokaMaker(nthreads=-1)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
@@ -559,6 +571,7 @@ def run_LTX_case(fe_order,eig_test,mp_q):
     mygs.solve()
     #
     mp_q.put([mygs.get_stats()])
+    oftpy_dump_cov()
 
 # Test runners for LTX test cases
 @pytest.mark.coverage
@@ -592,7 +605,8 @@ def test_LTX_eq(order):
         'dflux': 0.0009602066573419095,
         'tflux': 0.08571976036037239,
         'l_i': 1.002735427186787,
-        'beta_tor': 2.0613500413344603
+        'beta_tor': 1.9398553532544882,
+        'beta_n': 1.38790732317241
     }
     results = mp_run(run_LTX_case,(order,False))
     assert validate_dict(results,exp_dict)

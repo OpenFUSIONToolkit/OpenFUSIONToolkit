@@ -157,7 +157,7 @@ if __name__ == '__main__':
     - Base tetrahedron [(0.,0.,0.), (1.,0.,0.), (.5,1.,0.), (.5,.5,1.)]
 
     Tessellation is produced using a Delaunay triangulation of node points on the
-    base elements using the SCIPY [http://www.scipy.org] "spatial" module.
+    base elements using the SCIPY [https://www.scipy.org] "spatial" module.
     ==========================================
     ''')
     #----------------------------------------------------------------

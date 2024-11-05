@@ -3,7 +3,7 @@ from __future__ import print_function
 import sys
 import numpy
 import matplotlib.pyplot as plt
-import oft_io
+from OpenFUSIONToolkit.io import histfile
 import oft_mpl
 
 mu0 = numpy.pi*(4.E-7)
@@ -58,7 +58,7 @@ gr_plot = None
 for (i, file) in enumerate(files):
     # Read fields from MUG history file
     print('Reading file: "{0}"'.format(file))
-    dump = oft_io.oft_histfile(file)
+    dump = histfile(file)
     ts = numpy.r_[dump.data['ts']]
     time = numpy.r_[dump.data['time']]*1.E3
     dt = time[1:-1] - time[0:-2]

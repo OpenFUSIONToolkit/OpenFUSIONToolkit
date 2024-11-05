@@ -135,8 +135,8 @@ CALL oft_lag_set_level(oft_lagrange_nlevels)
 !! The gauge is transformed using a \ref oft_h1_operators::h1_divout "divergence cleaning"
 !! procedure to remove divergence from the vector potential by adding a gradient.
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" already sets the gauge such that
-!! $\nabla \cdot \textbf{A} = 0$, however it does so while enforcing $\textbf{A} \times \hat{\textbf{n}} = 0$.
-!! We now recompute the desired gauge fixing with the boundary condition $\textbf{A} \cdot \hat{\textbf{n}} = 0$,
+!! \f$ \nabla \cdot \textbf{A} = 0 \f$, however it does so while enforcing \f$ \textbf{A} \times \hat{\textbf{n}} = 0 \f$.
+!! We now recompute the desired gauge fixing with the boundary condition \f$ \textbf{A} \cdot \hat{\textbf{n}} = 0 \f$,
 !! which provides a suitable initialization magnetic field. This process is performed
 !! on both the equilibrium and perturbing fields.
 !---------------------------------------------------------------------------

@@ -845,10 +845,11 @@ END SUBROUTINE gs_analyze
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine gs_save_decon(gseq,npsi,ntheta)
+subroutine gs_save_decon(gseq,npsi,ntheta,error_str)
 class(gs_eq), intent(inout) :: gseq
 integer(4), intent(in) :: npsi
 integer(4), intent(in) :: ntheta
+CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
 type(gsinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
@@ -859,6 +860,7 @@ real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
 TYPE(spline_type) :: rz
 !---
+IF(PRESENT(error_str))error_str=""
 WRITE(*,'(2A)')oft_indent,'Saving DCON file'
 CALL oft_increase_indent
 !---
@@ -911,6 +913,9 @@ active_tracer%inv=.TRUE.
 ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,npsi-1
+  IF(PRESENT(error_str))THEN
+    IF(error_str/="")CYCLE
+  END IF
   !---------------------------------------------------------------------------
   ! Trace contour
   !---------------------------------------------------------------------------
@@ -928,7 +933,16 @@ do j=1,npsi-1
   CALL tracinginv_fs(pt,ptout)
   pt_last=pt
   !---Exit if trace fails
-  if(active_tracer%status/=1)call oft_abort('Trace did not complete.','gs_save_decon',__FILE__)
+  IF(active_tracer%status/=1)THEN
+    IF(PRESENT(error_str))THEN
+      !$omp critical
+      WRITE(error_str,"(A,F10.4)")"Tracing failed at psi = ",1.d0-psi_surf
+      !$omp end critical
+      CYCLE
+    ELSE
+      call oft_abort('Trace did not complete.','gs_save_decon',__FILE__)
+    END IF
+  END IF
   !---------------------------------------------------------------------------
   ! Perform cubic spline interpolation
   !---------------------------------------------------------------------------
@@ -964,6 +978,12 @@ end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 !$omp end parallel
+IF(PRESENT(error_str))THEN
+  IF(error_str/="")THEN
+    DEALLOCATE(cout,rout,zout)
+    RETURN
+  END IF
+END IF
 !---Information for O-point
 rout(npsi,:)=raxis
 zout(npsi,:)=zaxis
@@ -1021,7 +1041,7 @@ end subroutine gs_save_decon
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !---------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1031,6 +1051,8 @@ real(8), intent(in) :: zbounds(2) !< Radial extents for flux grid
 CHARACTER(LEN=36), intent(in) :: run_info !< Run information string [36]
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
+REAL(8), optional, intent(in) :: rcentr_in !< Padding at LCFS in normalized units
+CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
@@ -1045,10 +1067,11 @@ INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
-REAL(8) :: rdim,zdim,rleft,zmid,bcentr,itor,xdum
+REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
 REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 !---
+IF(PRESENT(error_str))error_str=""
 WRITE(*,'(2A)')oft_indent,'Saving EQDSK file'
 CALL oft_increase_indent
 !---
@@ -1104,6 +1127,9 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 !$omp do schedule(dynamic,1)
 do j=1,nr
+  IF(PRESENT(error_str))THEN
+    IF(error_str/="")CYCLE
+  END IF
   !---------------------------------------------------------------------------
   ! Trace contour
   !---------------------------------------------------------------------------
@@ -1127,9 +1153,27 @@ do j=1,nr
     END IF
     pt_last=pt
     !---Exit if trace fails
-    if(active_tracer%status/=1)call oft_abort('Trace did not complete.','gs_save_eqdsk',__FILE__)
+    IF(active_tracer%status/=1)THEN
+      IF(PRESENT(error_str))THEN
+        !$omp critical
+        WRITE(error_str,"(A,F10.4)")"Tracing failed at psi = ",1.d0-(psi_surf-x1)/(x2-x1)
+        !$omp end critical
+        CYCLE
+      ELSE
+        call oft_abort('Trace did not complete.','gs_save_eqdsk',__FILE__)
+      END IF
+    END IF
   END IF
   IF(j==nr)THEN
+    ! !---Get midplane extents
+    ! rLFS=ptout(2,1)
+    ! zHFS=1.d99
+    ! DO k=2,active_tracer%nsteps+1
+    !   IF(ABS(ptout(3,k)-zaxis)<zHFS)THEN
+    !     zHFS=ABS(ptout(3,k)-zaxis)
+    !     rHFS=ptout(2,k)
+    !   END IF
+    ! END DO
     !---------------------------------------------------------------------------
     ! Perform Cubic Spline Interpolation
     !---------------------------------------------------------------------------
@@ -1169,6 +1213,13 @@ do j=1,nr
 end do
 CALL active_tracer%delete
 !$omp end parallel
+IF(PRESENT(error_str))THEN
+  IF(error_str/="")THEN
+    DEALLOCATE(rout,zout)
+    DEALLOCATE(fpol,pres,ffprim,pprime,qpsi,psirz)
+    RETURN
+  END IF
+END IF
 !---Extrapolate q on axis
 f(1) = x2
 f(2) = x2 - (x2-x1)*(1.d0/REAL(nr-1,8))
@@ -1193,7 +1244,12 @@ END DO
 WRITE(eqdsk_case,'(A,X,A)')'TokaMaker: ',run_info
 rleft = rbounds(1)
 zmid = (zbounds(2)+zbounds(1))/2.d0
-bcentr = gseq%I%f_offset/raxis
+IF(PRESENT(rcentr_in))THEN
+  rcentr = rcentr_in
+ELSE
+  rcentr = (MAXVAL(rout)+MINVAL(rout))/2.d0 !raxis
+END IF
+bcentr = gseq%I%f_offset/rcentr
 CALL gs_itor_nl(gseq,itor)
 itor = itor/mu0
 idum = 0 ! dummy variable
@@ -1226,7 +1282,7 @@ END IF
 2022 format(2i5)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 WRITE (io_unit,2000) eqdsk_case,0,nr,nz
-WRITE (io_unit,2020) rdim,zdim,raxis,rleft,zmid
+WRITE (io_unit,2020) rdim,zdim,rcentr,rleft,zmid
 WRITE (io_unit,2020) raxis,zaxis,x2,x1,bcentr
 WRITE (io_unit,2020) itor,x2,xdum,raxis,xdum
 WRITE (io_unit,2020) zaxis,xdum,x1,xdum,xdum
@@ -1249,7 +1305,7 @@ IF(oft_debug_print(1))THEN
 END IF
 CALL oft_decrease_indent
 !---
-DEALLOCATE(rout,zout)
+DEALLOCATE(rout,zout,rlim,zlim)
 DEALLOCATE(fpol,pres,ffprim,pprime,qpsi,psirz)
 end subroutine gs_save_eqdsk
 !---------------------------------------------------------------------------
