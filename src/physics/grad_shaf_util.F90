@@ -1048,7 +1048,7 @@ integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
 integer(4), intent(in) :: nz !< Number of vertical points for flux grid
 real(8), intent(in) :: rbounds(2) !< Radial extents for flux grid
 real(8), intent(in) :: zbounds(2) !< Radial extents for flux grid
-CHARACTER(LEN=36), intent(in) :: run_info !< Run information string [36]
+CHARACTER(LEN=40), intent(in) :: run_info !< Run information string [40]
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Padding at LCFS in normalized units
@@ -1072,7 +1072,7 @@ REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 !---
 IF(PRESENT(error_str))error_str=""
-WRITE(*,'(2A)')oft_indent,'Saving EQDSK file'
+WRITE(*,'(3A)')oft_indent,'Saving EQDSK file: ',TRIM(filename)
 CALL oft_increase_indent
 !---
 ALLOCATE(fpol(nr),pres(nr),ffprim(nr),pprime(nr),qpsi(nr))
@@ -1241,7 +1241,7 @@ END DO
 !---------------------------------------------------------------------------
 ! Create output file
 !---------------------------------------------------------------------------
-WRITE(eqdsk_case,'(A,X,A)')'TokaMaker: ',run_info
+WRITE(eqdsk_case,'(A,X,A)')'tMaker:',run_info
 rleft = rbounds(1)
 zmid = (zbounds(2)+zbounds(1))/2.d0
 IF(PRESENT(rcentr_in))THEN
@@ -1255,7 +1255,6 @@ itor = itor/mu0
 idum = 0 ! dummy variable
 xdum = 0.d0 ! dummy variable
 ! Read or set limiting contour
-WRITE(*,*)'"',TRIM(limiter_file),'"'
 IF(TRIM(limiter_file)=='none')THEN
   nlim=gseq%nlim_con+1
   ALLOCATE(rlim(nlim),zlim(nlim))
@@ -1268,6 +1267,7 @@ IF(TRIM(limiter_file)=='none')THEN
   ! rlim=[rbounds(1),rbounds(1),rbounds(2),rbounds(2),rbounds(1)]
   ! zlim=[zbounds(1),zbounds(2),zbounds(2),zbounds(1),zbounds(1)]
 ELSE
+  WRITE(*,*)'  Limiter file: "',TRIM(limiter_file),'"'
   OPEN(NEWUNIT=io_unit,FILE=TRIM(limiter_file))
   READ(io_unit,*)nlim
   ALLOCATE(rlim(nlim),zlim(nlim))

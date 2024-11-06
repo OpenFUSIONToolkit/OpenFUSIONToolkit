@@ -922,7 +922,7 @@ END SUBROUTINE tokamaker_set_coil_vsc
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
 CHARACTER(KIND=c_char), INTENT(in) :: filename(80) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: run_info(36) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nr !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nz !< Needs docs
 REAL(c_double), INTENT(in) :: rbounds(2) !< Needs docs

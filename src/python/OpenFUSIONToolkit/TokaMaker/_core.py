@@ -1278,13 +1278,13 @@ class TokaMaker():
         @param nz Number of vertical sampling points
         @param rbounds Extents of grid in R
         @param zbounds Extents of grid in Z
-        @param run_info Run information for gEQDSK file (maximum of 36 characters)
+        @param run_info Run information for gEQDSK file (maximum of 40 characters)
         @param lcfs_pad Padding in normalized flux at LCFS
-        @param rcentr `RCENTR` value for gEQDSK file (if `None`, magnetic axis is used)
+        @param rcentr `RCENTR` value for gEQDSK file (if `None`, geometric axis is used)
         '''
         cfilename = c_char_p(filename.encode())
-        if len(run_info) > 36:
-            raise ValueError('"run_info" cannot be longer than 36 characters')
+        if len(run_info) > 40:
+            raise ValueError('"run_info" cannot be longer than 40 characters')
         crun_info = c_char_p(run_info.encode())
         if rbounds is None:
             rbounds = numpy.r_[self.lim_contour[:,0].min(), self.lim_contour[:,0].max()]
