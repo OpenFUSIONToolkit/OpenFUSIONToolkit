@@ -729,9 +729,7 @@ class TokaMaker():
     def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,retain_previous=False):
         r'''! Set global target values
 
-        Once set, values are retained until they are explicitly set to their respective disabled
-        values (see below). By default, all targets are disabled so this function should be called
-        at least once to set "sane" values for `alam` and `pnorm`.
+        @note Values that are not specified are reset to their defaults on each call unless `retain_previous=True`.
 
         @param alam Scale factor for \f$F*F'\f$ term (disabled if `Ip` is set)
         @param pnorm Scale factor for \f$P'\f$ term (disabled if `pax`, `estore`, or `R0` are set)
@@ -765,6 +763,27 @@ class TokaMaker():
         if V0 is not None:
             self._V0_target.value=V0
         tokamaker_set_targets(self._Ip_target,self._Ip_ratio_target,self._pax_target,self._estore_target,self._R0_target,self._V0_target)
+    
+    def get_targets(self):
+        r'''! Get global target values
+
+        @result Dictionary of global target values
+        '''
+        # Get targets
+        target_dict = {}
+        if self._Ip_target.value > 0.0:
+            target_dict['Ip'] = self._Ip_target.value
+        if self._estore_target.value > 0.0:
+            target_dict['estore'] = self._estore_target.value
+        if self._pax_target.value > 0.0:
+            target_dict['pax'] = self._pax_target.value
+        if self._Ip_ratio_target.value > -1.E98:
+            target_dict['Ip_ratio'] = self._Ip_ratio_target.value
+        if self._R0_target.value > 0.0:
+            target_dict['R0'] = self._R0_target.value
+        if self._V0_target.value > -1.E98:
+            target_dict['V0'] = self._V0_target.value
+        return target_dict
 
     def get_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
