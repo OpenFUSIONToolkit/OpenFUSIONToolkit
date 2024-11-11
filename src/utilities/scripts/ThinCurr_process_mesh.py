@@ -111,9 +111,9 @@ class trimesh:
                 if self.llpe[jp+self.lfe[i,j]] != je:
                     print(self.llpe[jp:jp+jn],je)
                     raise ValueError('Face edge not found!')
-                self.lfe[i,j]+=jp
+                self.lfe[i,j] += jp+1
                 if k[tri_ed[j,1]]-k[tri_ed[j,0]]<0:
-                    self.lfe[i,j]*=-1 # apply orientation
+                    self.lfe[i,j] *= -1 # apply orientation
     
     def setup_neighbors(self):
         self.kpf=np.zeros((self.np+1,), dtype=np.int32)
@@ -140,7 +140,7 @@ class trimesh:
         self.lff=np.zeros((self.nf,3), dtype=np.int32)
         for i in range(self.nf):      # loop over cells & index to edges
             for j in range(3):        # loop over edges
-                k=abs(self.lfe[i,j])  # edge numbers
+                k=abs(self.lfe[i,j])-1  # edge numbers
                 if self.lef[k,0]<0:
                     self.lef[k,0]=i   # record first cell
                 else:
@@ -148,7 +148,7 @@ class trimesh:
         #!$omp parallel do private(j,k)
         for i in range(self.nf):     # loop over cells & locate neighbors
             for j in range(3):       # loop over edges
-                k=abs(self.lfe[i,j]) # edge numbers
+                k=abs(self.lfe[i,j])-1 # edge numbers
                 self.lff[i,j]=np.sum(self.lef[k,:])-i
     
     def setup_boundary(self):
@@ -203,7 +203,7 @@ class trimesh:
                         face = self.lpf[k]
                         if self.bf[face]:
                             for l in range(3):
-                                k = abs(self.lfe[face,l])
+                                k = abs(self.lfe[face,l])-1
                                 if (edge_marker[k] >= 0) or (not self.be[k]):
                                     continue
                                 if np.any(self.le[k,:] == next_pt) and np.all(self.le[k,:] != last_pt):
@@ -221,12 +221,9 @@ class trimesh:
                                 continue
                             break
                 # Detect orientation
-                itmp = i
-                if i == 0:
-                    itmp = cycle_edges[1]
-                face = self.lef[itmp,0]
+                face = self.lef[i,0]
                 for l in range(3):
-                    if abs(self.lfe[face,l]) == itmp:
+                    if abs(self.lfe[face,l])-1 == i:
                         if self.lfe[face,l] < 0:
                             flip = False
                         else:
@@ -243,6 +240,7 @@ class trimesh:
     
     def sync_normals(self):
         def orient_neighbors(face,oriented):
+            next_faces = []
             for j in range(3):
                 face2 = self.lff[face,j]
                 if face2 < 0:
@@ -254,12 +252,16 @@ class trimesh:
                 for k in range(3):
                     if(self.lff[face2,k]==face):
                         break
+                else:
+                    raise ValueError("Could not find face!!")
                 ed2 = self.lf[face2,tri_ed[k,:]]
                 if (ed[0]==ed2[0]) and (ed[1]==ed2[1]):
                     self.lf[face2,[1,2]] = self.lf[face2,[2,1]]
                     self.lfe[face2,:] = -self.lfe[face2,[0,2,1]]
                     self.lff[face2,:] = self.lff[face2,[0,2,1]]
                 oriented[face2] = surf_id
+                next_faces.append(face2)
+            for face2 in next_faces:
                 orient_neighbors(face2,oriented)
         #
         oriented = [-1 for _ in range(self.nf)]
