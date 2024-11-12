@@ -433,18 +433,21 @@ END SUBROUTINE tokamaker_get_mesh
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_limiter(np,r_loc) BIND(C,NAME="tokamaker_get_limiter")
+SUBROUTINE tokamaker_get_limiter(np,r_loc,nloops,loop_ptr) BIND(C,NAME="tokamaker_get_limiter")
 TYPE(c_ptr), INTENT(out) :: r_loc !< Needs docs
+TYPE(c_ptr), INTENT(out) :: loop_ptr !< Needs docs
 INTEGER(c_int), INTENT(out) :: np !< Needs docs
+INTEGER(c_int), INTENT(out) :: nloops !< Needs docs
 INTEGER(4) :: i
 REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
-np=gs_global%nlim_con+1
-ALLOCATE(r_tmp(2,gs_global%nlim_con+1))
+np=gs_global%nlim_con
+ALLOCATE(r_tmp(2,gs_global%nlim_con))
 r_loc=C_LOC(r_tmp)
 DO i=1,gs_global%nlim_con
   r_tmp(:,i)=smesh%r(1:2,gs_global%lim_con(i))
 END DO
-r_tmp(:,gs_global%nlim_con+1)=smesh%r(1:2,gs_global%lim_con(1))
+nloops=gs_global%lim_nloops
+loop_ptr=C_LOC(gs_global%lim_ptr)
 END SUBROUTINE tokamaker_get_limiter
 !------------------------------------------------------------------------------
 !> Needs docs

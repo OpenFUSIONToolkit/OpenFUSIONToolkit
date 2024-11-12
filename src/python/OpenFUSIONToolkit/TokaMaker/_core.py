@@ -356,8 +356,19 @@ class TokaMaker():
         # Get limiter contour
         npts = c_int()
         r_loc = c_double_ptr()
-        tokamaker_get_limiter(ctypes.byref(npts),ctypes.byref(r_loc))
-        self.lim_contour = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        nloops = c_int()
+        loop_ptr = c_int_ptr()
+        tokamaker_get_limiter(ctypes.byref(npts),ctypes.byref(r_loc),ctypes.byref(nloops),ctypes.byref(loop_ptr))
+        loop_ptr = numpy.ctypeslib.as_array(loop_ptr,shape=(nloops.value+1,))
+        self.lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        self.lim_contours = []
+        for i in range(nloops.value):
+            lim_contour = numpy.vstack((self.lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],self.lim_pts[loop_ptr[i]-1,:]))
+            self.lim_contours.append(lim_contour)
+        self.lim_contour = numpy.zeros((0,2))
+        for lim_countour in self.lim_contours:
+            if lim_countour.shape[0] > self.lim_contour.shape[0]:
+                self.lim_contour = lim_countour
         # Get plotting mesh
         np_loc = c_int()
         nc_loc = c_int()
