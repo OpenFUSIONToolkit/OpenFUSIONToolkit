@@ -1100,7 +1100,8 @@ class TokaMaker():
             ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask_tmp,:], mask_vals, colors=cond_color, alpha=1)
         # Show limiter
         if limiter_color and (self.lim_contour is not None):
-            ax.plot(self.lim_contour[:,0],self.lim_contour[:,1],color=limiter_color)
+            for lim_contour in self.lim_contours:
+                ax.plot(lim_contour[:,0],lim_contour[:,1],color=limiter_color)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
         return colorbar
