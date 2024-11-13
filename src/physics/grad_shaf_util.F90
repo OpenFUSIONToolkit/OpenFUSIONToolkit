@@ -1048,7 +1048,7 @@ integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
 integer(4), intent(in) :: nz !< Number of vertical points for flux grid
 real(8), intent(in) :: rbounds(2) !< Radial extents for flux grid
 real(8), intent(in) :: zbounds(2) !< Radial extents for flux grid
-CHARACTER(LEN=36), intent(in) :: run_info !< Run information string [36]
+CHARACTER(LEN=40), intent(in) :: run_info !< Run information string [40]
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
@@ -1059,7 +1059,7 @@ real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp) :: psi_int
 real(8), pointer :: ptout(:,:),rout(:),zout(:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: i,j,k,cell,io_unit
+integer(4) :: i,j,k,cell,io_unit,lim_max
 type(gsinv_interp), target :: field
 TYPE(spline_type) :: rz
 !---
@@ -1072,7 +1072,7 @@ REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 !---
 IF(PRESENT(error_str))error_str=""
-WRITE(*,'(2A)')oft_indent,'Saving EQDSK file'
+WRITE(*,'(3A)')oft_indent,'Saving EQDSK file: ',TRIM(filename)
 CALL oft_increase_indent
 !---
 ALLOCATE(fpol(nr),pres(nr),ffprim(nr),pprime(nr),qpsi(nr))
@@ -1247,7 +1247,7 @@ END DO
 !---------------------------------------------------------------------------
 ! Create output file
 !---------------------------------------------------------------------------
-WRITE(eqdsk_case,'(A,X,A)')'TokaMaker: ',run_info
+WRITE(eqdsk_case,'(A,X,A)')'tMaker:',run_info
 rleft = rbounds(1)
 zmid = (zbounds(2)+zbounds(1))/2.d0
 IF(PRESENT(rcentr_in))THEN
@@ -1261,19 +1261,31 @@ itor = itor/mu0
 idum = 0 ! dummy variable
 xdum = 0.d0 ! dummy variable
 ! Read or set limiting contour
-WRITE(*,*)'"',TRIM(limiter_file),'"'
 IF(TRIM(limiter_file)=='none')THEN
-  nlim=gseq%nlim_con+1
+  IF(gseq%lim_nloops>1)THEN
+    IF(nlim/=gseq%nlim_con+1)CALL oft_warn("Multiply-connected plasma region detected: Using largest boundary loop as limiter")
+    nlim=0
+    DO i=1,gseq%lim_nloops
+      IF(gseq%lim_ptr(i+1)-gseq%lim_ptr(i)>nlim)THEN
+        nlim=gseq%lim_ptr(i+1)-gseq%lim_ptr(i)
+        lim_max=i
+      END IF
+    END DO
+  ELSE
+    lim_max=1
+  END IF
+  nlim=gseq%lim_ptr(lim_max+1)-gseq%lim_ptr(lim_max)+1
   ALLOCATE(rlim(nlim),zlim(nlim))
-  DO i=1,nlim-1
-    rlim(i)=smesh%r(1,gseq%lim_con(i))
-    zlim(i)=smesh%r(2,gseq%lim_con(i))
+  DO i=gseq%lim_ptr(lim_max),gseq%lim_ptr(lim_max+1)-1
+    rlim(i-gseq%lim_ptr(lim_max)+1)=smesh%r(1,gseq%lim_con(i))
+    zlim(i-gseq%lim_ptr(lim_max)+1)=smesh%r(2,gseq%lim_con(i))
   END DO
-  rlim(nlim)=smesh%r(1,gseq%lim_con(1))
-  zlim(nlim)=smesh%r(2,gseq%lim_con(1))
+  rlim(nlim)=rlim(1)
+  zlim(nlim)=zlim(1)
   ! rlim=[rbounds(1),rbounds(1),rbounds(2),rbounds(2),rbounds(1)]
   ! zlim=[zbounds(1),zbounds(2),zbounds(2),zbounds(1),zbounds(1)]
 ELSE
+  WRITE(*,*)'  Limiter file: "',TRIM(limiter_file),'"'
   OPEN(NEWUNIT=io_unit,FILE=TRIM(limiter_file))
   READ(io_unit,*)nlim
   ALLOCATE(rlim(nlim),zlim(nlim))

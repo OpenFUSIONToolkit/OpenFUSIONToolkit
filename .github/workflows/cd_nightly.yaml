@@ -26,18 +26,18 @@ jobs:
           }
         - {
             name: "macOS-x86_64",
-            os: macos-12,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", build_libs_flags: ""
+            os: macos-13,
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3.12", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", build_libs_flags: ""
           }
         - {
             name: "macOS-x86_64-Rosetta",
-            os: macos-12,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", build_libs_flags: "--oblas_no_avx"
+            os: macos-13,
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3.12", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", build_libs_flags: "--oblas_no_avx"
           }
         - {
             name: "macOS-arm64",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer", build_libs_flags: ""
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3.12", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer", build_libs_flags: ""
         }
 
     steps:
