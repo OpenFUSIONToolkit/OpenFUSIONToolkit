@@ -163,6 +163,7 @@ TYPE :: gs_eq
   INTEGER(i4) :: saddle_ntargets = 0
   INTEGER(i4) :: flux_ntargets = 0
   INTEGER(i4) :: nlim_con = 0
+  INTEGER(i4) :: lim_nloops = 0
   REAL(r8) :: eps = 1.d-12
   REAL(r8) :: rmax = 0.d0
   REAL(r8) :: urf = .2d0
@@ -202,6 +203,7 @@ TYPE :: gs_eq
   INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL()
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL()
+  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL()
   REAL(r8), POINTER, DIMENSION(:) :: cond_weights => NULL()
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL()
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL()
@@ -1302,7 +1304,8 @@ CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 contains
 subroutine get_limiter()
-integer(4) :: i,ii,j,k,l,orient(2)
+integer(4) :: i,ii,istart,iloop,j,k,l,orient(2),nmax
+integer(4), allocatable :: tmp_ptr(:)
 real(8) :: val
 logical, allocatable :: eflag(:)
 allocate(eflag(smesh%ne))
@@ -1318,26 +1321,43 @@ DO i=1,smesh%nc
   END DO
 END DO
 self%nlim_con=COUNT(eflag)
-ALLOCATE(self%lim_con(self%nlim_con))
+ALLOCATE(self%lim_con(self%nlim_con),tmp_ptr(self%nlim_con))
+tmp_ptr=0
 self%lim_con=0
-DO i=1,smesh%ne
-  IF(eflag(i))EXIT
-END DO
-self%lim_con(1)=smesh%le(1,i)
-!
-DO ii=2,self%nlim_con
-  DO j=smesh%kpe(self%lim_con(ii-1)),smesh%kpe(self%lim_con(ii-1)+1)-1
-    i=smesh%lpe(j)
-    IF(.NOT.eflag(i))CYCLE
-    k=SUM(smesh%le(:,i))-self%lim_con(ii-1)
-    IF(ii>2)THEN
-      IF(k==self%lim_con(ii-2))CYCLE
-    END IF
-    self%lim_con(ii)=k
+istart=1
+self%lim_nloops=0
+nmax=0
+DO WHILE(.TRUE.)
+  DO i=1,smesh%ne
+    IF(eflag(i))EXIT
   END DO
+  IF(i>smesh%ne)EXIT
+  self%lim_nloops=self%lim_nloops+1
+  tmp_ptr(self%lim_nloops)=istart
+  self%lim_con(istart)=smesh%le(1,i)
+  eflag(i)=.FALSE. ! Unmark edge after use
+  !
+  DO ii=istart+1,self%nlim_con
+    DO j=smesh%kpe(self%lim_con(ii-1)),smesh%kpe(self%lim_con(ii-1)+1)-1
+      i=smesh%lpe(j)
+      IF(.NOT.eflag(i))CYCLE
+      k=SUM(smesh%le(:,i))-self%lim_con(ii-1)
+      IF(ii>2)THEN
+        IF(k==self%lim_con(ii-2))CYCLE
+      END IF
+      self%lim_con(ii)=k
+      eflag(i)=.FALSE. ! Unmark edge after use
+      EXIT
+    END DO
+    IF(j>=smesh%kpe(self%lim_con(ii-1)+1))EXIT
+  END DO
+  istart=ii
 END DO
 IF(MINVAL(self%lim_con)==0)CALL oft_abort('Zero value detected in lim_con','gs_init::get_limiter',__FILE__)
-deallocate(eflag)
+ALLOCATE(self%lim_ptr(self%lim_nloops+1))
+self%lim_ptr(self%lim_nloops+1)=self%nlim_con+1
+self%lim_ptr(1:self%lim_nloops)=tmp_ptr(1:self%lim_nloops)
+deallocate(eflag,tmp_ptr)
 ! !---Check orientation
 ! orient=0.d0
 ! DO i=1,smesh%nbp
@@ -5602,6 +5622,8 @@ integer(i4) :: i,j
 IF(ALLOCATED(node_flag))DEALLOCATE(node_flag)
 !
 ! IF(ASSOCIATED(self%cflag))DEALLOCATE(self%cflag)
+IF(ASSOCIATED(self%lim_con))DEALLOCATE(self%lim_con)
+IF(ASSOCIATED(self%lim_ptr))DEALLOCATE(self%lim_ptr)
 IF(ASSOCIATED(self%limiter_nds))DEALLOCATE(self%limiter_nds)
 IF(ASSOCIATED(self%bc_rhs_list))DEALLOCATE(self%bc_rhs_list)
 IF(ASSOCIATED(self%olbp))DEALLOCATE(self%olbp)
