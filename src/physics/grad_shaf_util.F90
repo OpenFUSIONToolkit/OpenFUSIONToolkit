@@ -1041,7 +1041,7 @@ end subroutine gs_save_decon
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !---------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1052,6 +1052,7 @@ CHARACTER(LEN=40), intent(in) :: run_info !< Run information string [40]
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
+LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
 CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
@@ -1067,9 +1068,10 @@ INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
-REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
+REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS,fptmp
 REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
+LOGICAL :: do_truncate
 !---
 IF(PRESENT(error_str))error_str=""
 WRITE(*,'(3A)')oft_indent,'Saving EQDSK file: ',TRIM(filename)
@@ -1084,7 +1086,13 @@ x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
   x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
 END IF
+do_truncate=.TRUE.
+IF(PRESENT(trunc_eq))do_truncate=trunc_eq
 xr = (x2-x1)
+IF(do_truncate)THEN
+  x1 = x1 + xr*psi_pad
+  xr = (x2-x1)
+END IF
 psi_int%u=>gseq%psi
 CALL psi_int%setup()
 !---Find Rmax along Zaxis
@@ -1112,7 +1120,7 @@ END IF
 call set_tracer(1)
 ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
-!$omp parallel private(j,psi_surf,pt,ptout,field) firstprivate(pt_last)
+!$omp parallel private(j,psi_surf,pt,ptout,field,fptmp) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup()
 active_tracer%neq=3
@@ -1131,7 +1139,7 @@ do j=1,nr
   !---------------------------------------------------------------------------
   psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
   psi_trace = psi_surf
-  IF((psi_trace-x1)/xr<psi_pad)psi_trace = x1 + xr*psi_pad
+  IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
   IF(gseq%diverted.AND.(psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near divertor
     active_tracer%tol=1.d-10
   ELSE
@@ -1196,9 +1204,12 @@ do j=1,nr
   !---------------------------------------------------------------------------
   !---Get flux variables
   IF(gseq%mode==0)THEN
+    fptmp=gseq%alam*gseq%I%f(psi_trace)+gseq%I%f_offset
     fpol(j)=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
     ffprim(j)=(gseq%alam**2)*gseq%I%fp(psi_surf)*(gseq%I%f(psi_surf)+gseq%I%f_offset/gseq%alam)
   ELSE
+    fptmp=SQRT(gseq%alam*gseq%I%f(psi_trace) + gseq%I%f_offset**2) &
+      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
     fpol(j)=SQRT(gseq%alam*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
     ffprim(j)=0.5d0*gseq%alam*gseq%I%fp(psi_surf)
@@ -1206,7 +1217,7 @@ do j=1,nr
   pres(j)=gseq%pnorm*gseq%P%f(psi_surf)/mu0
   pprime(j)=gseq%pnorm*gseq%P%fp(psi_surf)/mu0
   !---Safety Factor (q)
-  IF(j>1)qpsi(j)=fpol(j)*active_tracer%v(3)/(2*pi)
+  IF(j>1)qpsi(j)=fptmp*active_tracer%v(3)/(2*pi)
 end do
 CALL active_tracer%delete
 !$omp end parallel
@@ -1219,18 +1230,20 @@ IF(PRESENT(error_str))THEN
 END IF
 !---Extrapolate q on axis
 f(1) = x2
-f(2) = x2 - (x2-x1)*(1.d0/REAL(nr-1,8))
-f(3) = x2 - (x2-x1)*(2.d0/REAL(nr-1,8))
+f(2) = x2 - xr*(1.d0/REAL(nr-1,8))
+f(3) = x2 - xr*(2.d0/REAL(nr-1,8))
 qpsi(1) = (qpsi(3)-qpsi(2))*(f(1)-f(2))/(f(3)-f(2)) + qpsi(2)
 !---Extrapolate to LCFS
-DO i=1,nr
-  pt=[rout(i),zout(i),0.d0]
-  pt_last(1:2)=pt(1:2)-gseq%o_point
-  pt_last=pt_last/SQRT(SUM(pt_last(1:2)**2))
-  CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_last)
-  rout(i)=pt(1)
-  zout(i)=pt(2)
-END DO
+IF(.NOT.do_truncate)THEN
+  DO i=1,nr
+    pt=[rout(i),zout(i),0.d0]
+    pt_last(1:2)=pt(1:2)-gseq%o_point
+    pt_last=pt_last/SQRT(SUM(pt_last(1:2)**2))
+    CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_last)
+    rout(i)=pt(1)
+    zout(i)=pt(2)
+  END DO
+END IF
 !---Sample flux grid
 rdim = rbounds(2)-rbounds(1)
 zdim = zbounds(2)-zbounds(1)
@@ -1261,7 +1274,7 @@ itor = itor/mu0
 idum = 0 ! dummy variable
 xdum = 0.d0 ! dummy variable
 ! Read or set limiting contour
-IF(TRIM(limiter_file)=='none')THEN
+IF(TRIM(limiter_file)=='')THEN
   IF(gseq%lim_nloops>1)THEN
     IF(nlim/=gseq%nlim_con+1)CALL oft_warn("Multiply-connected plasma region detected: Using largest boundary loop as limiter")
     nlim=0
