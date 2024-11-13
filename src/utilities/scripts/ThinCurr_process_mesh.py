@@ -192,6 +192,7 @@ class trimesh:
     
     def get_loop_edge_vec(self,path):
         edges = np.zeros((self.ne,), dtype=np.int32)
+        distance = 0.0
         for i in range(1,len(path)):
             js=min(path[i],path[i-1]) # low points
             je=max(path[i],path[i-1]) # high points
@@ -201,12 +202,13 @@ class trimesh:
             if self.llpe[jp+edge] != je:
                 print(self.llpe[jp:jp+jn],je)
                 raise ValueError('Edge not found!')
+            distance += np.linalg.norm(self.r[path[i],:]-self.r[path[i-1],:])
             edge += jp
             if path[i]-path[i-1] < 0:
                 edges[edge] = -1
             else:
                 edges[edge] = 1
-        return edges
+        return edges, distance
     
     def boundary_cycles(self):
         edge_marker = -np.ones((self.ne,))
@@ -590,57 +592,59 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
         else:
             holes.append(cycle)
 
+    hb_out = hb
     if options.optimize_holes:
-        print("    Optimizing internal cycles")
+        print("  Optimizing internal cycles")
+        indent_level += '  '
+        mesh_covered = trimesh(vertex,face_covered)
+        bmat_dense_base = mesh_covered.get_face_edge_bop().todense()
+
         # Compute several additional basis sets
-        minima_sets = []
-        minima_counts = []
-        for i in range(len(hb)):
-            ind2 = hb[i][int(len(hb[i])/2)]
+        for j in range(len(hb)):
+            minima_sets = [cycle for cycle in hb_out]
+
+            ind2 = hb[j][int(len(hb[j])/2)]
             hb2 = compute_greedy_homotopy_basis(face_covered,vertex,ind2,face_sweight=mesh.nf)
             for i in range(len(hb2)):
                 hb2[i] = fixup_loop(hb2[i],mesh,new_bcycles,options.debug)        
             minima_sets += hb2
-            minima_counts += [len(hb2[i]) for i in range(len(hb2))]
-        inds = np.argsort(minima_counts)
 
-        # Build edge operator for comparison
-        mesh_covered = trimesh(vertex,face_covered)
-        boundary_mat = mesh_covered.get_face_edge_bop()
-        bmat_dense = boundary_mat.todense()
-        he = []
-        he_mark = np.zeros((mesh_covered.ne,))
-        for i in range(len(minima_sets)):
-            evec = mesh_covered.get_loop_edge_vec(minima_sets[inds[i]])
-            he.append(evec)
-            he_mark[abs(evec)>0] = 1
-        
-        # Shrink graph by grouping cells that don't cross cycles
-        cell_flags = mesh_covered.group_cells(he_mark)
-        ncoarse = np.max(cell_flags)+1
-        cell_mat = np.zeros((ncoarse,mesh_covered.nf))
-        for i in range(ncoarse):
-            cell_mat[i,cell_flags==i] = 1
-        bmat_dense = np.dot(cell_mat,bmat_dense)
-        
-        # Build list of cycles from smallest to largest
-        intial_rank = np.linalg.matrix_rank(bmat_dense)
-        hb_out = []
-        for i in range(len(minima_sets)):
-            aug_rank = np.linalg.matrix_rank(np.vstack((bmat_dense,he[i])))
-            if aug_rank != intial_rank:
-                if options.debug:
-                    print("Adding cycle {0}".format(i))
-                bmat_dense = np.vstack((bmat_dense,he[i]))
-                hb_out.append(minima_sets[inds[i]])
-                intial_rank = aug_rank
-                if len(hb_out) == len(hb):
-                    break
-            else:
-                if options.debug:
-                    print("Skipping cycle {0}".format(i))
-    else:
-        hb_out = hb
+            # Build edge operator for comparison
+            minima_counts = []
+            he = []
+            he_mark = np.zeros((mesh_covered.ne,))
+            for i in range(len(minima_sets)):
+                evec, distance = mesh_covered.get_loop_edge_vec(minima_sets[i])
+                he.append(evec)
+                minima_counts.append(distance)
+                he_mark[abs(evec)>0] = 1
+            
+            # Shrink graph by grouping cells that don't cross cycles
+            cell_flags = mesh_covered.group_cells(he_mark)
+            ncoarse = np.max(cell_flags)+1
+            print(indent_level + "[{1}/{2}] Reducing mesh to {0} macro cells".format(ncoarse,j+1,len(hb)))
+            cell_mat = np.zeros((ncoarse,mesh_covered.nf))
+            for i in range(ncoarse):
+                cell_mat[i,cell_flags==i] = 1
+            bmat_dense = np.dot(cell_mat,bmat_dense_base)
+            
+            # Build list of cycles from smallest to largest
+            intial_rank = np.linalg.matrix_rank(bmat_dense)
+            hb_out = []
+            for i in np.argsort(minima_counts):
+                aug_rank = np.linalg.matrix_rank(np.vstack((bmat_dense,he[i])))
+                if aug_rank != intial_rank:
+                    if options.debug:
+                        print("Adding cycle {0}".format(i))
+                    bmat_dense = np.vstack((bmat_dense,he[i]))
+                    hb_out.append(minima_sets[i])
+                    intial_rank = aug_rank
+                    if len(hb_out) == len(hb):
+                        break
+                else:
+                    if options.debug:
+                        print("Skipping cycle {0}".format(i))
+        indent_level = indent_level[:-2]
     
     # Save computed internal cycles to hole list
     for basis_cycle in hb_out:
