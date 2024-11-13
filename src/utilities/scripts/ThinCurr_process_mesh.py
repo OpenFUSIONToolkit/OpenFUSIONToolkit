@@ -183,6 +183,31 @@ class trimesh:
                 self.lbp[j]=i
                 j+=1
     
+    def get_face_edge_bop(self):
+        I = np.zeros((self.nf*3,),dtype=np.int32); I[::3] = np.arange(self.nf); I[1::3] = np.arange(self.nf); I[2::3] = np.arange(self.nf)
+        J = self.lfe.reshape((self.nf*3,))
+        V = np.sign(J, dtype=np.int32)
+        J = abs(J)-1
+        return scipy.sparse.csc_matrix((V, (I, J)), dtype=np.int32)
+    
+    def get_loop_edge_vec(self,path):
+        edges = np.zeros((self.ne,), dtype=np.int32)
+        for i in range(1,len(path)):
+            js=min(path[i],path[i-1]) # low points
+            je=max(path[i],path[i-1]) # high points
+            jp=self.klpe[js]          # pointer into low point list
+            jn=self.klpe[js+1]-jp     # number of shared edges
+            edge = np.searchsorted(self.llpe[jp:jp+jn],je)
+            if self.llpe[jp+edge] != je:
+                print(self.llpe[jp:jp+jn],je)
+                raise ValueError('Edge not found!')
+            edge += jp
+            if path[i]-path[i-1] < 0:
+                edges[edge] = -1
+            else:
+                edges[edge] = 1
+        return edges
+    
     def boundary_cycles(self):
         edge_marker = -np.ones((self.ne,))
         # Find cycles
@@ -270,11 +295,39 @@ class trimesh:
         surf_id=-1
         for i in range(self.nf):
             if oriented[i]<0:
-                surf_id+=1
+                surf_id += 1
                 oriented[i] = surf_id
                 orient_neighbors(i,oriented)
         sys.setrecursionlimit(recur_lim)
         return np.array(oriented)
+    
+    def group_cells(self,eflag):
+        def flag_cells(face,cell_group):
+            next_faces = []
+            for j in range(3):
+                if eflag[abs(self.lfe[face,j])-1] > 0:
+                    continue
+                face2 = self.lff[face,j]
+                if face2 < 0:
+                    continue
+                if cell_group[face2] >= 0:
+                    continue
+                cell_group[face2] = group_id
+                next_faces.append(face2)
+            for face2 in next_faces:
+                flag_cells(face2,cell_group)
+        #
+        cell_group = [-1 for _ in range(self.nf)]
+        recur_lim = sys.getrecursionlimit()
+        sys.setrecursionlimit(self.nf)
+        group_id=-1
+        for i in range(self.nf):
+            if cell_group[i]<0:
+                group_id += 1
+                cell_group[i] = group_id
+                flag_cells(i,cell_group)
+        sys.setrecursionlimit(recur_lim)
+        return np.array(cell_group)
 
 def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     '''Compute the single-point Homotopy basis using the greedy method
@@ -448,6 +501,7 @@ parser.add_argument("--plot_steps", action="store_true", default=False, help="Sh
 parser.add_argument("--show_omitted", action="store_true", default=False, help="Show boundary cycles that are omitted?")
 parser.add_argument("--debug", action="store_true", default=False, help="Print additional debug information?")
 parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
+parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
 options = parser.parse_args()
 
 out_file = options.out_file
@@ -535,7 +589,61 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
             skipped_holes.append(cycle)
         else:
             holes.append(cycle)
-    for basis_cycle in hb:
+
+    if options.optimize_holes:
+        print("    Optimizing internal cycles")
+        # Compute several additional basis sets
+        minima_sets = []
+        minima_counts = []
+        for i in range(len(hb)):
+            ind2 = hb[i][int(len(hb[i])/2)]
+            hb2 = compute_greedy_homotopy_basis(face_covered,vertex,ind2,face_sweight=mesh.nf)
+            for i in range(len(hb2)):
+                hb2[i] = fixup_loop(hb2[i],mesh,new_bcycles,options.debug)        
+            minima_sets += hb2
+            minima_counts += [len(hb2[i]) for i in range(len(hb2))]
+        inds = np.argsort(minima_counts)
+
+        # Build edge operator for comparison
+        mesh_covered = trimesh(vertex,face_covered)
+        boundary_mat = mesh_covered.get_face_edge_bop()
+        bmat_dense = boundary_mat.todense()
+        he = []
+        he_mark = np.zeros((mesh_covered.ne,))
+        for i in range(len(minima_sets)):
+            evec = mesh_covered.get_loop_edge_vec(minima_sets[inds[i]])
+            he.append(evec)
+            he_mark[abs(evec)>0] = 1
+        
+        # Shrink graph by grouping cells that don't cross cycles
+        cell_flags = mesh_covered.group_cells(he_mark)
+        ncoarse = np.max(cell_flags)+1
+        cell_mat = np.zeros((ncoarse,mesh_covered.nf))
+        for i in range(ncoarse):
+            cell_mat[i,cell_flags==i] = 1
+        bmat_dense = np.dot(cell_mat,bmat_dense)
+        
+        # Build list of cycles from smallest to largest
+        intial_rank = np.linalg.matrix_rank(bmat_dense)
+        hb_out = []
+        for i in range(len(minima_sets)):
+            aug_rank = np.linalg.matrix_rank(np.vstack((bmat_dense,he[i])))
+            if aug_rank != intial_rank:
+                if options.debug:
+                    print("Adding cycle {0}".format(i))
+                bmat_dense = np.vstack((bmat_dense,he[i]))
+                hb_out.append(minima_sets[inds[i]])
+                intial_rank = aug_rank
+                if len(hb_out) == len(hb):
+                    break
+            else:
+                if options.debug:
+                    print("Skipping cycle {0}".format(i))
+    else:
+        hb_out = hb
+    
+    # Save computed internal cycles to hole list
+    for basis_cycle in hb_out:
         internal_holes.append(reindex_inv[basis_cycle])
 
     # Plot intermediate cycles
@@ -549,7 +657,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
                     ax.plot(vertex[cycle,0], vertex[cycle,1], vertex[cycle,2], color='k')
             else:
                 ax.plot(vertex[cycle,0], vertex[cycle,1], vertex[cycle,2], color='tab:blue')
-        for basis_cycle in hb:
+        for basis_cycle in hb_out:
             ax.plot(vertex[basis_cycle,0], vertex[basis_cycle,1], vertex[basis_cycle,2], color='tab:orange')
         ax.plot(vertex[ind,0], vertex[ind,1], vertex[ind,2], 'o', color='tab:orange')
         ax.set_aspect('equal','box')
