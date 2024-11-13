@@ -185,7 +185,7 @@ class trimesh:
     
     def boundary_cycles(self):
         edge_marker = -np.ones((self.ne,))
-        #
+        # Find cycles
         cycle_ind = -1
         cycle_lists = [[] for _ in range(np.max(self.surf_tag)+1)]
         for ie in range(self.nbe):
@@ -290,18 +290,18 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     amd = scipy.sparse.csc_matrix((V+1, (I, J)),dtype=np.int32)
     am = amd.copy()
     am.data.fill(1)
-    am = am+am.transpose()
+    am += am.transpose()
 
     # Compute edge matrices
     I,J,_ = scipy.sparse.find(am)
     ind = I<J
-    edge = (np.vstack((I[ind],J[ind]))).transpose()
+    edge = np.vstack((I[ind],J[ind]))
     amd_bool = amd.astype('bool')
     am_bool = am.astype('bool')
     tmp_mat = amd-((amd_bool>am_bool)+(amd_bool<am_bool))
     _, _, V = scipy.sparse.find(tmp_mat)
     _, _, V2 = scipy.sparse.find(tmp_mat.transpose())
-    eif = (np.vstack((V2[ind],V[ind]))).transpose() - 1
+    eif = np.vstack((V2[ind],V[ind])) - 1
     
     # Compute edge length-weighted graph
     I, J, _ = scipy.sparse.find(am)
@@ -312,7 +312,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
         J = face[face_sweight:,2].flatten()
         el2 = 1.E2*np.ones((I.shape[0],))
         G += scipy.sparse.csr_matrix((el2, (I, J)),shape=(nv,nv))
-    G = G + G.transpose()
+    G += G.transpose()
     
     # Compute tree (T) of shortest paths in G using the Dijkstra's algorithm
     distance,pred = scipy.sparse.csgraph.dijkstra(G,indices=bi,return_predecessors=True)
@@ -326,10 +326,10 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
         path.append(np.flip(path_tmp))
     
     # Compute dual graph
-    ind = np.logical_and(eif[:,0]>=0,eif[:,1]>=0)
-    eif2 = eif[ind,:]
-    amf = scipy.sparse.csc_matrix((np.ones((eif2.shape[0],)),(eif2[:,0],eif2[:,1])),shape=(nf,nf))
-    amf = amf + amf.transpose()
+    ind = np.logical_and(eif[0,:]>=0,eif[1,:]>=0)
+    eif2 = eif[:,ind]
+    amf = scipy.sparse.csc_matrix((np.ones((eif2.shape[1],)),(eif2[0,:],eif2[1,:])),shape=(nf,nf))
+    amf += amf.transpose()
 
     # Form graph (G\T)* as edges of G* that are not in T
     I = np.arange(nv)
@@ -346,16 +346,16 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     
     # Build spanning tree (T*) of (G\T)*
     I,J,_ = scipy.sparse.find(amf)
-    ind = np.logical_not(np.logical_or(eif[:,0]==-2,eif[:,1]==-2))
-    eif = eif[ind,:]
-    edge = edge[ind,:]
-    ind1 = np.hstack((eif[:,0],eif[:,1]))
-    ind2 = np.hstack((eif[:,1],eif[:,0]))
-    vals = np.hstack((edge[:,0],edge[:,1]))
+    ind = np.logical_not(np.logical_or(eif[0,:]==-2,eif[1,:]==-2))
+    eif = eif[:,ind]
+    edge = edge[:,ind]
+    ind1 = np.hstack((eif[0,:],eif[1,:]))
+    ind2 = np.hstack((eif[1,:],eif[0,:]))
+    vals = np.hstack((edge[0,:],edge[1,:]))
     F2E = scipy.sparse.csc_matrix((vals+1,(ind1,ind2)),shape=(nf,nf))
-    ei = (np.vstack((F2E[I,J]-1,F2E[J,I]-1))).transpose()
-    dvi = vertex[ei[:,0],:]-vertex[ei[:,1],:]
-    V = -((distance[ei[:,0]]+distance[ei[:,1]]).flatten()+np.linalg.norm(dvi[:,0,:],axis=1))
+    ei = np.vstack((F2E[I,J]-1,F2E[J,I]-1))
+    dvi = vertex[ei[0,:],:]-vertex[ei[1,:],:]
+    V = -((distance[ei[0,:]]+distance[ei[1,:]]).flatten()+np.linalg.norm(dvi[:,0,:],axis=1))
     amf_w = scipy.sparse.csc_matrix((V, (I, J)),shape=(nf,nf))
     tree = scipy.sparse.csgraph.minimum_spanning_tree(amf_w).transpose()
     
@@ -370,9 +370,9 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     
     # Remove edges crossed by edges in T*
     I,J,_ = scipy.sparse.find(tree)
-    ei = (np.vstack((F2E[I,J]-1,F2E[J,I]-1))).transpose()
-    G2[ei[:,0],ei[:,1]] = 0
-    G2[ei[:,1],ei[:,0]] = 0
+    ei = np.vstack((F2E[I,J]-1,F2E[J,I]-1))
+    G2[ei[0,:],ei[1,:]] = 0
+    G2[ei[1,:],ei[0,:]] = 0
     
     # The greedy homotopy basis consists of all loops (e), where e is an edge of G2.
     G2 = scipy.sparse.tril(G2)
@@ -385,33 +385,32 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     return basis_cycles
 
 def fixup_loop(cycle,mesh,boundary_cycles,debug):
-    # # Shrink corners
-    # while True:
-    #     # print(len(cycle))
-    #     if cycle[-2] == cycle[1]:
-    #         cycle = np.delete(cycle,[0,-1])
-    #         continue
-    #     for k in range(mesh.kpf[cycle[0]],mesh.kpf[cycle[0]+1]):
-    #         face = mesh.lpf[k]
-    #         if np.sum(mesh.lf[face,:]) == (cycle[-2]+cycle[0]+cycle[1]):
-    #             if cycle[-2] in mesh.lf[face,:]:
-    #                 cycle = np.delete(cycle,[0,-1])
-    #                 cycle = np.append(cycle,cycle[0])
-    #                 continue
-    #     #
-    #     for i in range(1,cycle.shape[0]-1):
-    #         if cycle[i-1] == cycle[i+1]:
-    #             break
-    #         for k in range(mesh.kpf[cycle[i]],mesh.kpf[cycle[i]+1]):
-    #             face = mesh.lpf[k]
-    #             if (cycle[i-1] in mesh.lf[face,:]) and (cycle[i] in mesh.lf[face,:]) and (cycle[i+1] in mesh.lf[face,:]):
-    #                 break
-    #         else:
-    #             continue
-    #         break
-    #     else:
-    #         break
-    #     cycle = np.delete(cycle,i)
+    # Shrink corners
+    while True:
+        if cycle[-2] == cycle[1]:
+            cycle = np.delete(cycle,[0,-1])
+            continue
+        for k in range(mesh.kpf[cycle[0]],mesh.kpf[cycle[0]+1]):
+            face = mesh.lpf[k]
+            if (cycle[1] in mesh.lf[face,:]) and (cycle[-2] in mesh.lf[face,:]):
+                if cycle[-2] in mesh.lf[face,:]:
+                    cycle = np.delete(cycle,[0,-1])
+                    cycle = np.append(cycle,cycle[0])
+                    continue
+        #
+        for i in range(1,cycle.shape[0]-1):
+            if cycle[i-1] == cycle[i+1]:
+                break
+            for k in range(mesh.kpf[cycle[i]],mesh.kpf[cycle[i]+1]):
+                face = mesh.lpf[k]
+                if (cycle[i-1] in mesh.lf[face,:]) and (cycle[i+1] in mesh.lf[face,:]):
+                    break
+            else:
+                continue
+            break
+        else:
+            break
+        cycle = np.delete(cycle,i)
     # Stitch boundary cycle crossings
     cycle_starts = [boundary_cycle[0] for boundary_cycle in boundary_cycles]
     while True:
@@ -543,7 +542,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
     if options.plot_steps:
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1, projection='3d')
-        ax.plot_trisurf(vertex[:,0], vertex[:,1], vertex[:,2], triangles=face, edgecolor=[0.0, 0.0, 0.0, 0.1] , color='none')
+        ax.plot_trisurf(vertex[:,0], vertex[:,1], vertex[:,2], triangles=face, color=[0.0, 0.0, 0.0, 0.1])
         for k, cycle in enumerate(new_bcycles):
             if k == cycle_max[1]:
                 if options.show_omitted:
