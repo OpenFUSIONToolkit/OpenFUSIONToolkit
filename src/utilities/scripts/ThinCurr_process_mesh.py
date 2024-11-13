@@ -573,13 +573,11 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
         ind = np.argmax(face_mask)
         print("  No boundary cycles, adding closure element at face {0}".format(ind))
         closures.append(ind)
-    
+
+    # Compute Homotopy basis from basepoint
     print("  Computing Homology Basis")
     print('    Euler Characteristic (covered) = {0} ({1})'.format(mesh.np-mesh.ne+mesh.nf,mesh.np-(mesh.ne+new_ne)+(mesh.nf+new_nf)))
     print("    # of boundary cycles = {0}".format(len(boundary_cycles[surf_id])))
-
-
-    # Compute Homotopy basis
     ind = np.linalg.norm(vertex-ref_point[np.newaxis,:],axis=1).argmin()
     hb = compute_greedy_homotopy_basis(face_covered,vertex,ind,face_sweight=mesh.nf)
     print("    # of internal cycles = {0}".format(len(hb)))
@@ -593,6 +591,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
             holes.append(cycle)
 
     hb_out = hb
+    # Optimize over cycles from basepoint homotopy to produce better looking basis
     if options.optimize_holes:
         print("  Optimizing internal cycles")
         indent_level += '  '
