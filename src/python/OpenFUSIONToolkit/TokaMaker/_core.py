@@ -356,8 +356,19 @@ class TokaMaker():
         # Get limiter contour
         npts = c_int()
         r_loc = c_double_ptr()
-        tokamaker_get_limiter(ctypes.byref(npts),ctypes.byref(r_loc))
-        self.lim_contour = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        nloops = c_int()
+        loop_ptr = c_int_ptr()
+        tokamaker_get_limiter(ctypes.byref(npts),ctypes.byref(r_loc),ctypes.byref(nloops),ctypes.byref(loop_ptr))
+        loop_ptr = numpy.ctypeslib.as_array(loop_ptr,shape=(nloops.value+1,))
+        self.lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        self.lim_contours = []
+        for i in range(nloops.value):
+            lim_contour = numpy.vstack((self.lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],self.lim_pts[loop_ptr[i]-1,:]))
+            self.lim_contours.append(lim_contour)
+        self.lim_contour = numpy.zeros((0,2))
+        for lim_countour in self.lim_contours:
+            if lim_countour.shape[0] > self.lim_contour.shape[0]:
+                self.lim_contour = lim_countour
         # Get plotting mesh
         np_loc = c_int()
         nc_loc = c_int()
@@ -1089,7 +1100,8 @@ class TokaMaker():
             ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask_tmp,:], mask_vals, colors=cond_color, alpha=1)
         # Show limiter
         if limiter_color and (self.lim_contour is not None):
-            ax.plot(self.lim_contour[:,0],self.lim_contour[:,1],color=limiter_color)
+            for lim_contour in self.lim_contours:
+                ax.plot(lim_contour[:,0],lim_contour[:,1],color=limiter_color)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
         return colorbar
