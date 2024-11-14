@@ -11,8 +11,14 @@ tri_ed = np.asarray([[2,1], [0,2], [1,0]]) # Triangle edge list
 indent_level = ''
 
 class trimesh:
+    '''Triangular mesh class for topology analysis
+    '''
+    def __init__(self, r, lf, info=True):
+        '''Construct mesh and orient
 
-    def __init__(self, r, lf):
+        @param r Vertex list [nv,3]
+        @param lf Face list [nf,3]
+        '''
         if lf.shape[1] != 3:
             raise ValueError("Face list must have shape [nf, 3]")
         self.r=r
@@ -21,18 +27,21 @@ class trimesh:
         self.nf=lf.shape[0]
         self.ne = 0
         # Setup mesh
-        self.setup_edges()
-        self.setup_neighbors()
-        self.setup_boundary()
-        self.surf_tag = self.sync_normals()
+        self._setup_edges()
+        self._setup_neighbors()
+        self._setup_boundary()
+        self.surf_tag = self._orient_surface()
         self.nsurfs = np.max(self.surf_tag)+1
-        print(indent_level+"Mesh constructed:")
-        print(indent_level+"  Found {0} distinct surface(s)".format(self.nsurfs))
-        print(indent_level+"  # of vertices = {0} ({1})".format(self.np, self.nbp))
-        print(indent_level+"  # of edges    = {0} ({1})".format(self.ne, self.nbe))
-        print(indent_level+"  # of faces    = {0} ({1})".format(self.nf, self.nbf))
+        if info:
+            print(indent_level+"Mesh constructed:")
+            print(indent_level+"  Found {0} distinct surface(s)".format(self.nsurfs))
+            print(indent_level+"  # of vertices = {0} ({1})".format(self.np, self.nbp))
+            print(indent_level+"  # of edges    = {0} ({1})".format(self.ne, self.nbe))
+            print(indent_level+"  # of faces    = {0} ({1})".format(self.nf, self.nbf))
     
-    def setup_edges(self):
+    def _setup_edges(self):
+        '''Construct edges from mesh, building `klpe`, `llpe`, `le`, and `lfe`
+        '''
         nr=np.zeros((self.np+1,), dtype=np.int32) # initialize raw edge counter
         ir=np.zeros((self.np+1,), dtype=np.int32)
         jr=np.zeros((self.nf*3,), dtype=np.int32)
@@ -106,7 +115,9 @@ class trimesh:
                 if k[tri_ed[j,1]]-k[tri_ed[j,0]]<0:
                     self.lfe[i,j] *= -1 # apply orientation
     
-    def setup_neighbors(self):
+    def _setup_neighbors(self):
+        '''Build topology neighbor lists `kpf`, `lpf`, `lef`, and `lff`
+        '''
         self.kpf=np.zeros((self.np+1,), dtype=np.int32)
         nr=np.zeros((self.np+1,), dtype=np.int32)
         for i in range(self.nf): # loop over cells
@@ -140,7 +151,9 @@ class trimesh:
                 k=abs(self.lfe[i,j])-1 # edge numbers
                 self.lff[i,j]=np.sum(self.lef[k,:])-i
     
-    def setup_boundary(self):
+    def _setup_boundary(self):
+        '''Locate and mark boundary elements
+        '''
         self.bp=np.zeros((self.np,), dtype=np.bool_)
         self.be=np.zeros((self.ne,), dtype=np.bool_)
         self.bf=np.zeros((self.nf,), dtype=np.bool_)
@@ -172,7 +185,49 @@ class trimesh:
                 self.lbp[j]=i
                 j+=1
     
+    def _orient_surface(self):
+        '''Orient surface(s) in mesh to ensure consistency
+        '''
+        def orient_neighbors(face,oriented):
+            next_faces = []
+            for j in range(3):
+                face2 = self.lff[face,j]
+                if face2 < 0:
+                    continue
+                if oriented[face2] >= 0:
+                    continue
+                ed = self.lf[face,tri_ed[j,:]]
+                # Ensure same sense as neighbor (opposite direction of shared edge)
+                for k in range(3):
+                    if(self.lff[face2,k]==face):
+                        break
+                else:
+                    raise ValueError("Could not find face!!")
+                ed2 = self.lf[face2,tri_ed[k,:]]
+                if (ed[0]==ed2[0]) and (ed[1]==ed2[1]):
+                    self.lf[face2,[1,2]] = self.lf[face2,[2,1]]
+                    self.lfe[face2,:] = -self.lfe[face2,[0,2,1]]
+                    self.lff[face2,:] = self.lff[face2,[0,2,1]]
+                oriented[face2] = surf_id
+                next_faces.append(face2)
+            for face2 in next_faces:
+                orient_neighbors(face2,oriented)
+        #
+        oriented = [-1 for _ in range(self.nf)]
+        recur_lim = sys.getrecursionlimit()
+        sys.setrecursionlimit(self.nf)
+        surf_id=-1
+        for i in range(self.nf):
+            if oriented[i]<0:
+                surf_id += 1
+                oriented[i] = surf_id
+                orient_neighbors(i,oriented)
+        sys.setrecursionlimit(recur_lim)
+        return np.array(oriented)
+    
     def get_face_edge_bop(self):
+        ''' Compute face to edge boundary operator \partial_2
+        '''
         I = np.zeros((self.nf*3,),dtype=np.int32); I[::3] = np.arange(self.nf); I[1::3] = np.arange(self.nf); I[2::3] = np.arange(self.nf)
         J = self.lfe.reshape((self.nf*3,))
         V = np.sign(J, dtype=np.int32)
@@ -180,6 +235,8 @@ class trimesh:
         return scipy.sparse.csc_matrix((V, (I, J)), dtype=np.int32)
     
     def get_loop_edge_vec(self,path):
+        ''' Convert vertex chains to edges and compute path length
+        '''
         edges = np.zeros((self.ne,), dtype=np.int32)
         distance = 0.0
         for i in range(1,len(path)):
@@ -200,6 +257,8 @@ class trimesh:
         return edges, distance
     
     def boundary_cycles(self):
+        '''Identify all distinct boundary vertex chains
+        '''
         edge_marker = -np.ones((self.ne,))
         # Find cycles
         cycle_ind = -1
@@ -254,45 +313,9 @@ class trimesh:
         print(indent_level+'  Found {0} boundary cycles'.format(k))
         return cycle_lists
     
-    def sync_normals(self):
-        def orient_neighbors(face,oriented):
-            next_faces = []
-            for j in range(3):
-                face2 = self.lff[face,j]
-                if face2 < 0:
-                    continue
-                if oriented[face2] >= 0:
-                    continue
-                ed = self.lf[face,tri_ed[j,:]]
-                # Ensure same sense as neighbor (opposite direction of shared edge)
-                for k in range(3):
-                    if(self.lff[face2,k]==face):
-                        break
-                else:
-                    raise ValueError("Could not find face!!")
-                ed2 = self.lf[face2,tri_ed[k,:]]
-                if (ed[0]==ed2[0]) and (ed[1]==ed2[1]):
-                    self.lf[face2,[1,2]] = self.lf[face2,[2,1]]
-                    self.lfe[face2,:] = -self.lfe[face2,[0,2,1]]
-                    self.lff[face2,:] = self.lff[face2,[0,2,1]]
-                oriented[face2] = surf_id
-                next_faces.append(face2)
-            for face2 in next_faces:
-                orient_neighbors(face2,oriented)
-        #
-        oriented = [-1 for _ in range(self.nf)]
-        recur_lim = sys.getrecursionlimit()
-        sys.setrecursionlimit(self.nf)
-        surf_id=-1
-        for i in range(self.nf):
-            if oriented[i]<0:
-                surf_id += 1
-                oriented[i] = surf_id
-                orient_neighbors(i,oriented)
-        sys.setrecursionlimit(recur_lim)
-        return np.array(oriented)
-    
-    def group_cells(self,eflag):
+    def merge_cells(self,eflag):
+        ''' Merge all possible cells while retaining marked edge features
+        '''
         def flag_cells(face,cell_group):
             next_faces = []
             for j in range(3):
@@ -425,6 +448,8 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     return basis_cycles
 
 def fixup_loop(cycle,mesh,boundary_cycles,debug):
+    ''' Fix up vertex chain by replacing paths that cross the boundary and performing some simplification
+    '''
     # Shrink corners
     while True:
         if cycle[-2] == cycle[1]:
@@ -480,9 +505,9 @@ def fixup_loop(cycle,mesh,boundary_cycles,debug):
 
 
 parser = argparse.ArgumentParser()
-parser.description = "Compute holes for ThinCurr meshes using a Greedy Homotopy approach"
+parser.description = "Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach"
 parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
-parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
+parser.add_argument("--out_file", type=str, default=None, help='Ouput mesh file (default: Input file name with "-homology" appended)')
 parser.add_argument("--keep_nodeset_start", type=int, default=None, help="Starting index of nodesets to keep from input file")
 parser.add_argument("--plot_final", action="store_true", default=False, help="Show final homology basis?")
 parser.add_argument("--plot_steps", action="store_true", default=False, help="Show intermediate bases for each distinct surface?")
@@ -524,6 +549,7 @@ with h5py.File(options.in_file) as fid:
                 except:
                     parser.exit(-1, 'Failed to read nodeset {0}'.format(j+1))
 
+# Setup full mesh
 full_mesh = trimesh(vertex_full,face_full)
 boundary_cycles = full_mesh.boundary_cycles()
 indent_level = '  '
@@ -533,23 +559,25 @@ holes = []
 skipped_holes = []
 closures = []
 for surf_id in range(np.max(full_mesh.surf_tag)+1):
-    #
     print()
     print("Analyzing surface {0} of {1}".format(surf_id+1,np.max(full_mesh.surf_tag)+1))
-    #
+
+    # Isolate surface from full mesh
     face_mask = (full_mesh.surf_tag==surf_id)
     reindex_flag = np.zeros((vertex_full.shape[0]+1,), dtype=np.int32)
     reindex_flag[face_full[face_mask,:].flatten()+1] = 1
     vertex = vertex_full[reindex_flag[1:] == 1,:]
     rindexed_pts = np.cumsum(reindex_flag)
     face = rindexed_pts[face_full[face_mask,:]+1]-1
-    #
-    mesh = trimesh(vertex,face)
+
+    mesh = trimesh(vertex,face,info=options.debug)
     reindex_inv = [0 for _ in range(mesh.np)]
     for i in range(full_mesh.np):
         if reindex_flag[i+1] == 1:
             reindex_inv[rindexed_pts[i+1]-1] = i
     reindex_inv = np.array(reindex_inv,dtype=np.int32)
+
+    # Identify boundary cycles and stitch over each to seal mesh
     new_ne = 0
     new_nf = 0
     if len(boundary_cycles[surf_id]) > 0:
@@ -593,10 +621,10 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
 
     hb_out = hb
     # Optimize over cycles from basepoint homotopy to produce better looking basis
-    if options.optimize_holes:
+    if options.optimize_holes and (len(hb) > 0):
         print("  Optimizing internal cycles")
         indent_level += '  '
-        mesh_covered = trimesh(vertex,face_covered)
+        mesh_covered = trimesh(vertex,face_covered,info=options.debug)
         bmat_dense_base = mesh_covered.get_face_edge_bop().todense()
 
         # Compute several additional basis sets
@@ -620,7 +648,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
                 he_mark[abs(evec)>0] = 1
             
             # Shrink graph by grouping cells that don't cross cycles
-            cell_flags, keep_edges = mesh_covered.group_cells(he_mark)
+            cell_flags, keep_edges = mesh_covered.merge_cells(he_mark)
             ncoarse = np.max(cell_flags)+1
             print(indent_level + "[{2}/{3}] Reducing mesh to {0} macro cells with {1} edges".format(ncoarse,keep_edges.shape[0],j+1,len(hb)))
             bmat_tmp = bmat_dense_base[:,keep_edges]
