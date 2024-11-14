@@ -1120,7 +1120,7 @@ END IF
 call set_tracer(1)
 ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
-!$omp parallel private(j,psi_surf,pt,ptout,field,fptmp) firstprivate(pt_last)
+!$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup()
 active_tracer%neq=3
