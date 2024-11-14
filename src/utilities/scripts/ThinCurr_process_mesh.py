@@ -54,14 +54,10 @@ class trimesh:
                 je=max(k[tri_ed[j,0]],k[tri_ed[j,1]]) # high points
                 jr[ir[js]+nr[js]]=je                  # high point list
                 nr[js]+=1                             # edge counter
-        # !$omp parallel do
         for i in range(self.np): # sort raw high point list
             if(nr[i]>1):
                 jr[ir[i]:ir[i]+nr[i]].sort()
-                # jr[ir[i]:ir[i]+nr[i]]=np.sort(jr[ir[i]:ir[i]+nr[i]])
-        # deallocate(nr)
         self.klpe=np.zeros((self.np+1,), dtype=np.int32)
-        # !$omp parallel do private(j,js,je)
         for i in range(self.np): # loop over raw edges & count unique edges
             js=ir[i]
             je=ir[i+1]
@@ -78,7 +74,6 @@ class trimesh:
         if self.klpe[0]!=0:
             raise ValueError('Bad unique edge count')
         self.llpe=(self.np+1)*np.ones((self.ne,), dtype=np.int32)
-        # !$omp parallel do private(j,js,je,jn)
         for i in range(self.np): # loop over raw edges & index unique edges
             js=ir[i]
             je=ir[i+1]
@@ -90,16 +85,12 @@ class trimesh:
                     if jr[j]>jr[j-1]:
                         jn=jn+1
                         self.llpe[jn]=jr[j]
-        # deallocate(ir,jr)
         self.le=np.zeros((self.ne,2), dtype=np.int32)
-        # !$omp parallel do
         for i in range(self.np): # construct global edge list
             self.le[self.klpe[i]:self.klpe[i+1],0]=i
-        # !$omp parallel do
         for i in range(self.ne):
             self.le[i,1]=self.llpe[i]
         self.lfe=np.zeros((self.nf,3), dtype=np.int32)
-        # !$omp parallel do private(k,j,js,je,jp,jn)
         for i in range(self.nf): # loop over cells & index cells to edges
             k=self.lf[i,:] # cell corners
             for j in range(3): # loop over edges
@@ -135,7 +126,6 @@ class trimesh:
                 k=self.lf[i,j]                # corner number
                 self.lpf[self.kpf[k]+nr[k]]=i # index cell to corner
                 nr[k]+=1                      # count cell to corner
-        # deallocate(nr)
         self.lef=-np.ones((self.ne,2), dtype=np.int32)
         self.lff=np.zeros((self.nf,3), dtype=np.int32)
         for i in range(self.nf):      # loop over cells & index to edges
@@ -145,7 +135,6 @@ class trimesh:
                     self.lef[k,0]=i   # record first cell
                 else:
                     self.lef[k,1]=i   # record second cell
-        #!$omp parallel do private(j,k)
         for i in range(self.nf):     # loop over cells & locate neighbors
             for j in range(3):       # loop over edges
                 k=abs(self.lfe[i,j])-1 # edge numbers
@@ -329,7 +318,8 @@ class trimesh:
                 cell_group[i] = group_id
                 flag_cells(i,cell_group)
         sys.setrecursionlimit(recur_lim)
-        return np.array(cell_group)
+        cell_group = np.array(cell_group)
+        return cell_group, np.where(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])[0]
 
 def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     '''Compute the single-point Homotopy basis using the greedy method
@@ -342,7 +332,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     I = face.reshape((nf*3,))
     J = face[:,[1,2,0]].reshape((nf*3,))
     V = np.zeros((nf*3,),dtype=np.int32); V[::3] = np.arange(nf); V[1::3] = np.arange(nf); V[2::3] = np.arange(nf)
-    amd = scipy.sparse.csc_matrix((V+1, (I, J)),dtype=np.int32)
+    amd = scipy.sparse.csc_matrix((V+1, (I, J)),shape=(3*nf,3*nf),dtype=np.int32)
     am = amd.copy()
     am.data.fill(1)
     am += am.transpose()
@@ -369,7 +359,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
         G += scipy.sparse.csr_matrix((el2, (I, J)),shape=(nv,nv))
     G += G.transpose()
     
-    # Compute tree (T) of shortest paths in G using the Dijkstra's algorithm
+    # Compute tree (T) of shortest paths in G using Dijkstra's algorithm
     distance,pred = scipy.sparse.csgraph.dijkstra(G,indices=bi,return_predecessors=True)
     path = []
     for i in range(nv):
@@ -380,11 +370,11 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
             path_tmp.append(v)
         path.append(np.flip(path_tmp))
     
-    # Compute dual graph
+    # Compute dual graph G*
     ind = np.logical_and(eif[0,:]>=0,eif[1,:]>=0)
     eif2 = eif[:,ind]
-    amf = scipy.sparse.csc_matrix((np.ones((eif2.shape[1],)),(eif2[0,:],eif2[1,:])),shape=(nf,nf))
-    amf += amf.transpose()
+    Gs = scipy.sparse.csc_matrix((np.ones((eif2.shape[1],)),(eif2[0,:],eif2[1,:])),shape=(nf,nf))
+    Gs += Gs.transpose()
 
     # Form graph (G\T)* as edges of G* that are not in T
     I = np.arange(nv)
@@ -396,42 +386,37 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     ind = np.logical_not(np.logical_or(I2==0,J2==0))
     I2 = I2[ind]-1
     J2 = J2[ind]-1
-    amf[I2,J2] = 0
-    amf[J2,I2] = 0
+    Gs[I2,J2] = 0
+    Gs[J2,I2] = 0
     
     # Build spanning tree (T*) of (G\T)*
-    I,J,_ = scipy.sparse.find(amf)
-    ind = np.logical_not(np.logical_or(eif[0,:]==-2,eif[1,:]==-2))
-    eif = eif[:,ind]
-    edge = edge[:,ind]
+    I,J,_ = scipy.sparse.find(Gs)
     ind1 = np.hstack((eif[0,:],eif[1,:]))
     ind2 = np.hstack((eif[1,:],eif[0,:]))
     vals = np.hstack((edge[0,:],edge[1,:]))
     F2E = scipy.sparse.csc_matrix((vals+1,(ind1,ind2)),shape=(nf,nf))
     ei = np.vstack((F2E[I,J]-1,F2E[J,I]-1))
     dvi = vertex[ei[0,:],:]-vertex[ei[1,:],:]
-    V = -((distance[ei[0,:]]+distance[ei[1,:]]).flatten()+np.linalg.norm(dvi[:,0,:],axis=1))
-    amf_w = scipy.sparse.csc_matrix((V, (I, J)),shape=(nf,nf))
-    tree = scipy.sparse.csgraph.minimum_spanning_tree(amf_w).transpose()
+    V = -((distance[ei[0,:]]+distance[ei[1,:]]).flatten()+np.linalg.norm(dvi[0,:,:],axis=1))
+    GTs = scipy.sparse.csc_matrix((V, (I, J)),shape=(nf,nf))
+    tree = scipy.sparse.csgraph.minimum_spanning_tree(GTs)
     
-    # G2 is the graph, with edges neither in T nor are crossed by edges in T*
-    G2 = G.copy()
+    # Modify graph G, to contain only edges neither in T nor crossed by edges in T*
     # Remove edges in T
     I = np.arange(nv)
     I = np.delete(I, bi)
     J = pred[I]
-    G2[I,J] = 0
-    G2[J,I] = 0
-    
+    G[I,J] = 0
+    G[J,I] = 0
     # Remove edges crossed by edges in T*
     I,J,_ = scipy.sparse.find(tree)
     ei = np.vstack((F2E[I,J]-1,F2E[J,I]-1))
-    G2[ei[0,:],ei[1,:]] = 0
-    G2[ei[1,:],ei[0,:]] = 0
+    G[ei[0,:],ei[1,:]] = 0
+    G[ei[1,:],ei[0,:]] = 0
     
-    # The greedy homotopy basis consists of all loops (e), where e is an edge of G2.
-    G2 = scipy.sparse.tril(G2)
-    I,J,_ = scipy.sparse.find(G2)
+    # The homotopy basis consists of all loops (e), where e is an edge of G
+    G = scipy.sparse.tril(G)
+    I,J,_ = scipy.sparse.find(G)
     basis_cycles = []
     for i in range(len(I)):
         pi = path[I[i]]
@@ -635,23 +620,24 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
                 he_mark[abs(evec)>0] = 1
             
             # Shrink graph by grouping cells that don't cross cycles
-            cell_flags = mesh_covered.group_cells(he_mark)
+            cell_flags, keep_edges = mesh_covered.group_cells(he_mark)
             ncoarse = np.max(cell_flags)+1
-            print(indent_level + "[{1}/{2}] Reducing mesh to {0} macro cells".format(ncoarse,j+1,len(hb)))
-            cell_mat = np.zeros((ncoarse,mesh_covered.nf))
+            print(indent_level + "[{2}/{3}] Reducing mesh to {0} macro cells with {1} edges".format(ncoarse,keep_edges.shape[0],j+1,len(hb)))
+            bmat_tmp = bmat_dense_base[:,keep_edges]
+            bmat_dense = np.zeros((ncoarse,keep_edges.shape[0]))
             for i in range(ncoarse):
-                cell_mat[i,cell_flags==i] = 1
-            bmat_dense = np.dot(cell_mat,bmat_dense_base)
+                bmat_dense[i,:] = np.sum(bmat_tmp[cell_flags==i,:],axis=0)
             
             # Build list of cycles from smallest to largest
             intial_rank = np.linalg.matrix_rank(bmat_dense)
             hb_out = []
             for i in np.argsort(minima_counts):
-                aug_rank = np.linalg.matrix_rank(np.vstack((bmat_dense,he[i])))
+                bmat_tmp = np.vstack((bmat_dense,he[i][keep_edges]))
+                aug_rank = np.linalg.matrix_rank(bmat_tmp)
                 if aug_rank != intial_rank:
                     if options.debug:
                         print("Adding cycle {0}".format(i))
-                    bmat_dense = np.vstack((bmat_dense,he[i]))
+                    bmat_dense = bmat_tmp
                     hb_out.append(minima_sets[i])
                     intial_rank = aug_rank
                     if len(hb_out) == len(hb):
