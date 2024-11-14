@@ -498,6 +498,7 @@ parser = argparse.ArgumentParser()
 parser.description = "Compute holes for ThinCurr meshes using a Greedy Homotopy approach"
 parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
 parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
+parser.add_argument("--keep_nodeset_start", type=int, default=None, help="Starting index of nodesets to keep from input file")
 parser.add_argument("--plot_final", action="store_true", default=False, help="Show final homology basis?")
 parser.add_argument("--plot_steps", action="store_true", default=False, help="Show intermediate bases for each distinct surface?")
 parser.add_argument("--show_omitted", action="store_true", default=False, help="Show boundary cycles that are omitted?")
@@ -522,6 +523,21 @@ with h5py.File(options.in_file) as fid:
     vertex_full = np.asarray(fid['mesh/R'])
     face_full = np.asarray(fid['mesh/LC'])-1
     reg_full = np.asarray(fid['mesh/REG'])
+    keep_nodesets = []
+    if options.keep_nodeset_start is not None:
+        if options.keep_nodeset_start < 0:
+            parser.exit(-1, '"--keep_nodeset_start" must be a >= 0')
+        if 'mesh/NUM_NODESETS' not in fid:
+            parser.exit(-1, '"--keep_nodeset_start" specified but no nodesets available')
+        num_nodesets = fid['mesh/NUM_NODESETS'][0]
+        if options.keep_nodeset_start > num_nodesets:
+            parser.exit(-1, '"--keep_nodeset_start" exceeds the number of available nodesets')
+        for j in range(num_nodesets):
+            if j+1 >= options.keep_nodeset_start:
+                try:
+                    keep_nodesets.append(np.asarray(fid['mesh/NODESET{0:04d}'.format(j+1)])-1)
+                except:
+                    parser.exit(-1, 'Failed to read nodeset {0}'.format(j+1))
 
 full_mesh = trimesh(vertex_full,face_full)
 boundary_cycles = full_mesh.boundary_cycles()
@@ -672,6 +688,7 @@ print()
 print("Final model:")
 print("    # of holes = {0}".format(len(all_cycles)))
 print("    # of closures = {0}".format(len(closures)))
+print("    # of additional nodesets = {0}".format(len(keep_nodesets)))
 
 # Copy mesh to new file and replace holes/closures
 shutil.copyfile(options.in_file,out_file)
@@ -681,12 +698,17 @@ with h5py.File(out_file,'r+') as h5_file:
         for j in range(h5_file['mesh/NUM_NODESETS'][0]):
             del h5_file['mesh/NODESET{0:04d}'.format(j+1)]
         del h5_file['mesh/NUM_NODESETS']
+    nodesets = []
     if len(all_cycles) > 0:
-        h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(all_cycles),], dtype='i4')
-        j=0
         for k, cycle in enumerate(all_cycles):
+            nodesets.append(cycle[:-1])
+    nodesets = nodesets + keep_nodesets
+    if len(nodesets) > 0:
+        h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(nodesets),], dtype='i4')
+        j=0
+        for k, nodeset in enumerate(nodesets):
             j+=1
-            h5_file.create_dataset('mesh/NODESET{0:04d}'.format(j), data=cycle[:-1]+1, dtype='i4')
+            h5_file.create_dataset('mesh/NODESET{0:04d}'.format(j), data=nodeset+1, dtype='i4')
     # Replace sidesets
     if 'mesh/NUM_SIDESETS' in h5_file:
         for j in range(h5_file['mesh/NUM_SIDESETS'][0]):
@@ -708,6 +730,8 @@ if options.plot_final:
             ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='k')
     for k, cycle in enumerate(internal_holes):
         ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:orange')
+    for k, cycle in enumerate(keep_nodesets):
+        ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:green')
     for closure_cell in closures:
         closure = full_mesh.lf[closure_cell,0]
         ax.plot(vertex_full[closure,0], vertex_full[closure,1], vertex_full[closure,2], 'o', color='k')
