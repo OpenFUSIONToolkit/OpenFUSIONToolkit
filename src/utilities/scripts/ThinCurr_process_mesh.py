@@ -53,7 +53,7 @@ class trimesh:
         ir[self.np]=3*self.nf
         for i in range(self.np-1,-1,-1): # cumulative raw edge count
             ir[i]=ir[i+1]-nr[i]
-        if ir[0]!=0 :
+        if ir[0] != 0:
             raise ValueError('Bad raw edge count')
         nr=np.zeros((self.np+1,), dtype=np.int32) # reset raw edge counter
         for i in range(self.nf): # loop over cells & index raw edges
@@ -346,7 +346,7 @@ class trimesh:
 
 def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     '''Compute the single-point Homotopy basis using the greedy method
-    of Erickson and Whittlesey ()
+    of Erickson and Whittlesey
     '''
     nf = face.shape[0]
     nv = vertex.shape[0]
