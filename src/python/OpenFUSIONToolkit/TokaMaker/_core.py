@@ -1301,8 +1301,8 @@ class TokaMaker():
         return numpy.ctypeslib.as_array(pts_loc,shape=(npts.value, 2)), \
             numpy.ctypeslib.as_array(flux_loc,shape=(npts.value,))
 
-    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None):
-        '''! Save current equilibrium to gEQDSK format
+    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None,truncate_eq=True,limiter_file=''):
+        r'''! Save current equilibrium to gEQDSK format
 
         @param filename Filename to save equilibrium to
         @param nr Number of radial sampling points
@@ -1312,8 +1312,11 @@ class TokaMaker():
         @param run_info Run information for gEQDSK file (maximum of 40 characters)
         @param lcfs_pad Padding in normalized flux at LCFS
         @param rcentr `RCENTR` value for gEQDSK file (if `None`, geometric axis is used)
+        @param truncate_eq Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
+        @param limiter_file File containing limiter contour to use instead of TokaMaker limiter
         '''
         cfilename = c_char_p(filename.encode())
+        lim_filename = c_char_p(limiter_file.encode())
         if len(run_info) > 40:
             raise ValueError('"run_info" cannot be longer than 40 characters')
         crun_info = c_char_p(run_info.encode())
@@ -1328,12 +1331,12 @@ class TokaMaker():
         if rcentr is None:
             rcentr = -1.0
         cstring = c_char_p(b""*200)
-        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),cstring)
+        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
 
     def eig_wall(self,neigs=4,pm=False):
-        '''! Compute eigenvalues (1 / Tau_L/R) for conducting structures
+        r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
 
         @param neigs Number of eigenvalues to compute
         @param pm Print solver statistics and raw eigenvalues?
