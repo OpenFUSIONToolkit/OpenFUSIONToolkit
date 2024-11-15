@@ -433,18 +433,21 @@ END SUBROUTINE tokamaker_get_mesh
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_limiter(np,r_loc) BIND(C,NAME="tokamaker_get_limiter")
+SUBROUTINE tokamaker_get_limiter(np,r_loc,nloops,loop_ptr) BIND(C,NAME="tokamaker_get_limiter")
 TYPE(c_ptr), INTENT(out) :: r_loc !< Needs docs
+TYPE(c_ptr), INTENT(out) :: loop_ptr !< Needs docs
 INTEGER(c_int), INTENT(out) :: np !< Needs docs
+INTEGER(c_int), INTENT(out) :: nloops !< Needs docs
 INTEGER(4) :: i
 REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
-np=gs_global%nlim_con+1
-ALLOCATE(r_tmp(2,gs_global%nlim_con+1))
+np=gs_global%nlim_con
+ALLOCATE(r_tmp(2,gs_global%nlim_con))
 r_loc=C_LOC(r_tmp)
 DO i=1,gs_global%nlim_con
   r_tmp(:,i)=smesh%r(1:2,gs_global%lim_con(i))
 END DO
-r_tmp(:,gs_global%nlim_con+1)=smesh%r(1:2,gs_global%lim_con(1))
+nloops=gs_global%lim_nloops
+loop_ptr=C_LOC(gs_global%lim_ptr)
 END SUBROUTINE tokamaker_get_limiter
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -920,25 +923,29 @@ END SUBROUTINE tokamaker_set_coil_vsc
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
+SUBROUTINE tokamaker_save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
 CHARACTER(KIND=c_char), INTENT(in) :: filename(80) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: run_info(36) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nr !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nz !< Needs docs
 REAL(c_double), INTENT(in) :: rbounds(2) !< Needs docs
 REAL(c_double), INTENT(in) :: zbounds(2) !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 CHARACTER(LEN=36) :: run_info_f
 CHARACTER(LEN=80) :: filename_tmp,lim_file,error_flag
 CALL copy_string_rev(run_info,run_info_f)
 CALL copy_string_rev(filename,filename_tmp)
-lim_file='none'
+CALL copy_string_rev(lim_filename,lim_file)
 IF(rcentr>0.d0)THEN
-  CALL gs_save_eqdsk(gs_global,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad,rcentr_in=rcentr,error_str=error_flag)
+  CALL gs_save_eqdsk(gs_global,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
+    rcentr_in=rcentr,trunc_eq=LOGICAL(trunc_eq),error_str=error_flag)
 ELSE
-  CALL gs_save_eqdsk(gs_global,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad,error_str=error_flag)
+  CALL gs_save_eqdsk(gs_global,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
+    trunc_eq=LOGICAL(trunc_eq),error_str=error_flag)
 END IF
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_eqdsk
