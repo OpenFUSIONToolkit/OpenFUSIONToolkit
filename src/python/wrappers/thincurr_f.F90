@@ -40,7 +40,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
+SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
 CHARACTER(KIND=c_char), INTENT(in) :: mesh_file(80) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs
@@ -48,6 +48,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: reg_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: pmap_loc !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: np !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nc !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: jumper_start !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sizes !< Needs docs
 TYPE(c_ptr), INTENT(out) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
@@ -63,6 +64,7 @@ TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
+! TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
 #ifdef HAVE_XML
 TYPE(fox_node), POINTER :: xml_node
 #endif
@@ -126,7 +128,14 @@ ELSE
       tw_obj%closures=mesh_ssets(1)%v
     END IF
   END IF
-  hole_nsets=>mesh_nsets
+  ! hole_nsets=>mesh_nsets
+  IF(jumper_start>0)THEN
+    ! n=SIZE(mesh_nsets)
+    hole_nsets=>mesh_nsets(1:jumper_start-1)
+    ! jumper_nsets=>mesh_nsets(jumper_start:n)
+  ELSE
+    hole_nsets=>mesh_nsets
+  END IF
 END IF
 IF(c_associated(xml_ptr))THEN
 #ifdef HAVE_XML
@@ -475,12 +484,14 @@ END SUBROUTINE thincurr_Mcoil
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,sensor_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
+SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,jumper_start,Ms_ptr,Msc_ptr,nsensors,njumpers,sensor_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: sensor_file(80) !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: jumper_start !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Ms_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Msc_ptr !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: nsensors
+INTEGER(KIND=c_int), INTENT(out) :: njumpers
 TYPE(c_ptr), INTENT(inout) :: sensor_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
@@ -490,6 +501,7 @@ CHARACTER(LEN=OFT_PATH_SLEN) :: sensor_filename = ''
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(tw_sensors), POINTER :: sensors
+TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
@@ -508,7 +520,11 @@ END IF
 ALLOCATE(sensors)
 !
 CALL copy_string_rev(sensor_file,sensor_filename)
-NULLIFY(jumper_nsets)
+NULLIFY(mesh_nsets,jumper_nsets)
+IF(jumper_start>0)THEN
+  CALL native_read_nodesets(mesh_nsets,native_filename='SPARC_Feb2024_REMC_noPP-homology.h5')
+  jumper_nsets=>mesh_nsets(jumper_start:SIZE(mesh_nsets))
+END IF
 CALL tw_load_sensors(TRIM(sensor_filename),tw_obj,sensors,jumper_nsets)
 !
 CALL copy_string_rev(cache_file,filename)
@@ -521,6 +537,7 @@ Ms_ptr=C_LOC(tw_obj%Ael2sen)
 Msc_ptr=C_LOC(tw_obj%Adr2sen)
 sensor_ptr=C_LOC(sensors)
 nsensors=sensors%nfloops
+njumpers=sensors%njumpers
 END SUBROUTINE thincurr_Msensor
 !------------------------------------------------------------------------------
 !> Needs docs

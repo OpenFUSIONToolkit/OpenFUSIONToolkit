@@ -80,13 +80,15 @@ class ThinCurr():
         self._xml_ptr = c_void_p()
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
+        ##
+        self._jumper_start = -1
 
     def _update_psin(self):
         '''! Update input file (`oftpyin`) with current settings'''
         with open('oftpyin','w+') as fid:
             fid.write(oft_in_template.format(**self._psin_dict))
 
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=-1):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
@@ -114,7 +116,7 @@ class ThinCurr():
             sizes = numpy.zeros((8,),dtype=numpy.int32)
             filename = c_char_p(mesh_file.encode())
             cstring = c_char_p(b""*200)
-            thincurr_setup(filename,idummy,rfake,idummy,lcfake,regfake,pmap,ctypes.byref(self.tw_obj),sizes,cstring,self._xml_ptr)
+            thincurr_setup(filename,idummy,rfake,idummy,lcfake,regfake,pmap,c_int(jumper_start),ctypes.byref(self.tw_obj),sizes,cstring,self._xml_ptr)
             if cstring.value != b'':
                 raise Exception(cstring.value.decode())
             self.np = sizes[0]
@@ -125,6 +127,7 @@ class ThinCurr():
             self.n_vcoils = sizes[5]
             self.nelems = sizes[6]
             self.n_icoils = sizes[7]
+            self._jumper_start = jumper_start
         elif r is not None:
             raise ValueError('Specifying mesh values not yet supported')
             # r = numpy.ascontiguousarray(r, dtype=numpy.float64)
@@ -336,9 +339,11 @@ class ThinCurr():
         Ms_loc = c_void_p()
         Msc_loc = c_void_p()
         nsensors = c_int()
+        njumpers = c_int()
         sensor_loc = c_void_p()
         error_string = c_char_p(b""*200)
-        thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc),ctypes.byref(nsensors),ctypes.byref(sensor_loc),cache_string,error_string)
+        thincurr_Msensor(self.tw_obj,sensor_string,c_int(self._jumper_start),ctypes.byref(Ms_loc),ctypes.byref(Msc_loc), 
+                         ctypes.byref(nsensors),ctypes.byref(njumpers),ctypes.byref(sensor_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return numpy.ctypeslib.as_array(ctypes.cast(Ms_loc, c_double_ptr),shape=(self.nelems,nsensors.value)), \

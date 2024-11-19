@@ -2462,6 +2462,7 @@ IF(ASSOCIATED(jumper_nsets))THEN
   ALLOCATE(sensors%jumpers(sensors%njumpers))
   ALLOCATE(hole_facs(self%nholes))
   DO i=1,sensors%njumpers
+    WRITE(sensors%jumpers(i)%name,'(A,I4.4)')'JUMPER_',i
     sensors%jumpers(i)%np=jumper_nsets(i)%n
     ALLOCATE(sensors%jumpers(i)%points(sensors%jumpers(i)%np))
     CALL order_jumper_list(jumper_nsets(i)%v,sensors%jumpers(i)%points,jumper_nsets(i)%n)
