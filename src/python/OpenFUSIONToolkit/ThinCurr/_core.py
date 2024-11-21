@@ -80,8 +80,6 @@ class ThinCurr():
         self._xml_ptr = c_void_p()
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
-        ##
-        self._jumper_start = -1
 
     def _update_psin(self):
         '''! Update input file (`oftpyin`) with current settings'''
@@ -127,7 +125,6 @@ class ThinCurr():
             self.n_vcoils = sizes[5]
             self.nelems = sizes[6]
             self.n_icoils = sizes[7]
-            self._jumper_start = jumper_start
         elif r is not None:
             raise ValueError('Specifying mesh values not yet supported')
             # r = numpy.ascontiguousarray(r, dtype=numpy.float64)
@@ -342,7 +339,7 @@ class ThinCurr():
         njumpers = c_int()
         sensor_loc = c_void_p()
         error_string = c_char_p(b""*200)
-        thincurr_Msensor(self.tw_obj,sensor_string,c_int(self._jumper_start),ctypes.byref(Ms_loc),ctypes.byref(Msc_loc), 
+        thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc), 
                          ctypes.byref(nsensors),ctypes.byref(njumpers),ctypes.byref(sensor_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())

@@ -127,7 +127,7 @@ CALL hdf5_write(utmp,'tCurr_mode_model.h5','thincurr/driver')
 ! END DO
 ! CLOSE(io_unit)
 !---Save probe signals
-CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
+CALL tw_load_sensors('floops.loc',tw_sim,sensors)
 IF(sensors%nfloops>0)THEN
   tw_sim%n_icoils=0
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)

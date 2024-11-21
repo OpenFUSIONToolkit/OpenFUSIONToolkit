@@ -105,7 +105,12 @@ tw_sim%mesh=>smesh
 IF(jumper_start>0)THEN
   n=SIZE(mesh_nsets)
   hole_nsets=>mesh_nsets(1:jumper_start-1)
-  jumper_nsets=>mesh_nsets(jumper_start:n)
+  ALLOCATE(tw_sim%jumper_nsets(n-jumper_start+1))
+  DO i=jumper_start,n
+    tw_sim%jumper_nsets(i-jumper_start+1)%n=mesh_nsets(i)%n
+    ALLOCATE(tw_sim%jumper_nsets(i-jumper_start+1)%v(tw_sim%jumper_nsets(i-jumper_start+1)%n))
+    tw_sim%jumper_nsets(i-jumper_start+1)%v=mesh_nsets(i)%v
+  END DO
 ELSE
   hole_nsets=>mesh_nsets
 END IF
@@ -117,7 +122,7 @@ IF(oft_debug_print(1))CALL tw_sim%save_debug()
 ! Frequency-response run
 !---------------------------------------------------------------------------
 !---Load sensors
-CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
+CALL tw_load_sensors('floops.loc',tw_sim,sensors)
 !---Setup voltage source
 ALLOCATE(fr_driver(tw_sim%nelems,2),fr_sensor(sensors%nfloops,2))
 fr_driver=0.d0
