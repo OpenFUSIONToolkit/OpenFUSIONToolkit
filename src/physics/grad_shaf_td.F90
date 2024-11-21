@@ -456,6 +456,145 @@ CALL b%restore_local(rhs_vals,add=.TRUE.)
 DEALLOCATE(pol_vals,rhs_vals,reg_source)
 DEBUG_STACK_POP
 end subroutine apply_rhs
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine f_evolution_rhs(self,delta_t,a_psi0,a_psi1,a_ff,b_ff,g_loc,mop_ff)
+    class(oft_tmaker_td), intent(inout) :: self !< NL operator object
+    real(r8), intent(inout) :: delta_t !
+    class(oft_vector), target, intent(inout) :: a_psi0 !< basis for psi at step n
+    class(oft_vector), target, intent(inout) :: a_psi1 !< basis for psi at step n+1
+    
+    real(r8), intent(inout) :: a_ff(:) !< basis for f
+    real(r8), intent(inout) :: b_ff(:) !< 
+    real(r8), allocatable, intent(out) :: g_loc(:) !< 
+    real(r8), intent(out) :: mop_ff(:,:) !< 
+    
+    integer(i4) :: i,m,jr,jc,f_nnodes
+    integer(i4), allocatable :: j(:)
+    real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3)
+    real(r8) :: psi_tmp_0,psi_tmp_1,psiN_tmp_0,grad_psi_tmp_1
+    real(r8) :: max_tmp,lim_tmp,f_tmp,f_tmp_prime,eta,pprime
+    real(r8), allocatable :: rop(:),rop_f(:),rop_fprime(:), gop(:,:),lop(:,:),vals_loc(:),f_nodes(:)
+    !real(r8), pointer, dimension(:) :: eta_vals,rhs_vals
+    real(r8), pointer, dimension(:) :: pol_vals_0,pol_vals_1
+    
+    !---Update plasma boundary
+    !self%gs_eq%psi=>a
+    CALL gs_update_bounds(self%mfop%gs_eq)
+    
+    ! type(oft_timer) :: mytimer
+    DEBUG_STACK_PUSH
+    ! IF(oft_debug_print(1))THEN
+    !   WRITE(*,'(2X,A)')'Constructing Poloidal flux time-advance operator'
+    !   CALL mytimer%tick()
+    ! END IF
+    !---------------------------------------------------------------------------
+    ! Get local vector values
+    !---------------------------------------------------------------------------
+    
+    NULLIFY(pol_vals_0,pol_vals_1) ! Nullify?
+    
+    CALL a_psi0%get_local(pol_vals_0)
+    CALL a_psi1%get_local(pol_vals_1)
+    
+    ! CALL self%eta%get_local(eta_vals)
+    
+    b_ff = 0.d0
+    mop_ff = 0.d0
+    
+    ! f_nodes = 0, 1/2, 1 , or 0, 1/3, 2/3, 1 . Interpolation space for f
+    f_nodes = (/0.0,1.0/3.0,2.0/3.0,1.0 /)
+    f_nnodes = SIZE(f_nodes)
+    
+    psi_norm=self%gs_eq%plasma_bounds(2)-self%gs_eq%plasma_bounds(1)
+    
+    !---------------------------------------------------------------------------
+    ! Operator integration
+    !---------------------------------------------------------------------------
+    !$omp parallel private(j,vals_loc,rop,gop,det,goptmp,m,vol,jr,jc,pt,f_tmp,f_tmp_prime,psi_tmp_1,grad_psi_tmp_1)
+    allocate(j(oft_blagrange%nce),vals_loc(oft_blagrange%nce)) ! Local DOF and matrix indices
+    allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
+    allocate(rop_f(f_nnodes),g_loc(f_nnodes))
+    !$omp do schedule(static,1)
+    do i=1,oft_blagrange%mesh%nc
+        IF(smesh%reg(i)==1)CYCLE
+        !---Get local to global DOF mapping
+        call oft_blagrange%ncdofs(i,j)
+        !---Get local reconstructed operators
+        vals_loc=0.d0
+        do m=1,oft_blagrange%quad%np ! Loop over quadrature points
+            call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
+            det=vol*oft_blagrange%quad%wts(m) ! THIS IS DRDZ
+            pt=oft_blagrange%mesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+            psi_tmp_0=0.d0; psi_tmp_1=0.d0; psiN_tmp_0=0.d0, grad_psi_tmp_1=0.d0
+            f_tmp=0.d0; f_tmp_prime=0.d0
+    
+            ! Reconstructing psi at both time steps
+            do jr=1,oft_blagrange%nce ! Loop over degrees of freedom
+                call oft_blag_eval(oft_blagrange,i,jr,oft_blagrange%quad%pts(:,m),rop(jr))
+                psi_tmp_0 = psi_tmp_0 + pol_vals_0(j(jr))*rop(jr) ! RECONSTRUCTING PSI AS POL_VALS = ALPHA, ROP = V_J
+                psi_tmp_1 = psi_tmp_1 + pol_vals_1(j(jr))*rop(jr) ! RECONSTRUCTING PSI AS POL_VALS = ALPHA, ROP = V_J
+    
+                call oft_blag_geval(oft_blagrange,i,jr,oft_blagrange%quad%pts(:,m),gop(:,jr),goptmp)
+    
+                ! For below line, "Error: Incompatible ranks 0 and 1 in assignment at (1)"
+                ! gop(:,jr) is not a scalar?
+                grad_psi_tmp_1 = grad_psi_tmp_1 + pol_vals_1(j(jr))*gop(:,jr) ! RECONSTRUCTING PSI AS POL_VALS = ALPHA, ROP = V_J
+    
+            end do
+    
+            ! Gather pprime(psi) and eta(psi)
+            pprime = self%P%fp(psi_tmp_0) ! TIME STEP IS 1 ! Error: 'p' at (1) is not a member of the 'oft_tmaker_td' structure
+            eta = self%eta%fp(psi_tmp_0) ! TIME STEP IS UNSPECIFIED ! Error: 'eta' at (1) is not a member of the 'oft_tmaker_td' structure
+            
+            ! Compute normalized psi _0
+            psiN_tmp_0 = (psi_tmp_0-self%gs_eq%plasma_bounds(1))/psi_norm ! Error: 'gs_eq' at (1) is not a member of the 'oft_tmaker_td' structure
+    
+            ! Compute temporary F, F' contributions
+            do jr=1,f_nnodes ! Loop over nodes, nnodes = DOF
+                rop_f(jr) = lag_1d(jr,psiN_tmp_0,f_nodes,f_nnodes) ! Error: Function 'lag_1d' at (1) has no IMPLICIT type
+                f_tmp = f_tmp + a_ff(jr)*rop_f(jr)
+                
+                rop_fprime(jr) = dlag_1d(jr,psiN_tmp_0,f_nodes,f_nnodes) ! Error: Function 'dlag_1d' at (1) has no IMPLICIT type
+                f_tmp_prime = f_tmp_prime + a_ff(jr)*rop_fprime(jr)
+            end do
+    
+            ! Compute g integral
+            do jr=1,f_nnodes ! pt(1) is r
+                g_loc(jr) = g_loc(jr) - psi_tmp_0 * f_tmp * rop_fprime(jr) * det ! where rop_fprime(jr) is g_prime
+                g_loc(jr) = g_loc(jr) + f_tmp * rop_f(jr) * det
+                g_loc(jr) = g_loc(jr) + psi_tmp_1 * f_tmp * rop_fprime(jr) * det
+                g_loc(jr) = g_loc(jr) - delta_t * eta * rop_fprime(jr) * ( pt(1)**2 * pprime * f_tmp + &
+                            f_tmp_prime*( f_tmp*f_tmp + grad_psi_tmp_1**2)/mu0 ) * det ! grad_psi_temp_1 is just a scalar??
+                do jc=1,f_nnodes
+                    !$omp atomic
+                    mop_ff(jc,jr) = mop_ff(jc,jr) + rop_f(jc) * rop_f(jr) * det
+                end do
+            end do
+                
+            ! F = mop_ff^-1 * b_ff
+            
+        end do
+    
+        do jr=1,f_nnodes
+        !$omp atomic
+        b_ff(jr) = b_ff(jr) + g_loc(jr)
+        end do
+    
+    end do
+    
+    deallocate(j,vals_loc,rop,gop)
+    !$omp end parallel
+    
+    DEALLOCATE(pol_vals_0,pol_vals_1)
+    !---Report time
+    ! IF(oft_debug_print(1))THEN
+    !   elapsed_time=mytimer%tock()
+    !   WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+    ! END IF
+    DEBUG_STACK_POP
+    end subroutine f_evolution_rhs
 ! !---------------------------------------------------------------------------
 ! !> Needs docs
 ! !---------------------------------------------------------------------------
