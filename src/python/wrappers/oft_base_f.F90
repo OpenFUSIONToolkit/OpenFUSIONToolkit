@@ -59,7 +59,7 @@ END SUBROUTINE oftpy_init
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE oftpy_load_xml(xml_file,oft_node_ptr) BIND(C,NAME="oftpy_load_xml")
-CHARACTER(KIND=c_char), INTENT(in) :: xml_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: xml_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), INTENT(out) :: oft_node_ptr !< Needs docs
 #ifdef HAVE_XML
 INTEGER(i4) :: ierr

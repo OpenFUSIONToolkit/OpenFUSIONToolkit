@@ -363,8 +363,8 @@ end subroutine hdf5_create_timestep
 !---------------------------------------------------------------------------
 function hdf5_proc_str(proc_ind) result(proc_str)
 integer(i4), optional, intent(in) :: proc_ind
-character(LEN=HDF5_TLEN) :: proc_str
-100 FORMAT (I HDF5_TLEN.HDF5_TLEN)
+character(LEN=OFT_HDF5_ILEN) :: proc_str
+100 FORMAT (I OFT_HDF5_ILEN.OFT_HDF5_ILEN)
 IF(PRESENT(proc_ind))THEN
   write(proc_str,100)proc_ind+1
 ELSE
@@ -375,8 +375,8 @@ end function hdf5_proc_str
 !> Get timestep index as string for HDF5 I/O
 !---------------------------------------------------------------------------
 function hdf5_ts_str() result(ts_str)
-character(LEN=HDF5_TLEN) :: ts_str
-100 FORMAT (I HDF5_TLEN.HDF5_TLEN)
+character(LEN=OFT_HDF5_ILEN) :: ts_str
+100 FORMAT (I OFT_HDF5_ILEN.OFT_HDF5_ILEN)
 write(ts_str,100)hdf5_ts
 end function hdf5_ts_str
 !---------------------------------------------------------------------------

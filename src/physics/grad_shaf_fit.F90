@@ -464,7 +464,7 @@ CONTAINS
 !---------------------------------------------------------------------------
 function minpack_exit_reason(info) result(exit_reason)
 integer(4), intent(in) :: info
-CHARACTER(LEN=80) :: exit_reason
+CHARACTER(LEN=OFT_ERROR_SLEN) :: exit_reason
 ! info = 0  improper input parameters.
 !
 ! info = 1  both actual and predicted relative reductions
