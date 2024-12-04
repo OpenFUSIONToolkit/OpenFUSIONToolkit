@@ -50,6 +50,7 @@ add_custom_command(
     POST_BUILD
     COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} --junitxml=OFT.junit.xml -m \"not slow\" grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
+    POST_BUILD
 )
 # Add "full" testing command to Makefile
 add_custom_target(test_full)
@@ -58,6 +59,7 @@ add_custom_command(
     POST_BUILD
     COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} --junitxml=OFT.junit.xml grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
+    POST_BUILD
 )
 # Add "full" testing command to Makefile
 if( OFT_COVERAGE )
@@ -68,5 +70,6 @@ if( OFT_COVERAGE )
       POST_BUILD
       COMMAND PATH=${OFT_TEST_PATH} COVERAGE_PROCESS_START=.coveragerc OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=1 coverage run -m pytest -m \"coverage\" grid lin_alg fem physics
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
+      POST_BUILD
   )
 endif()

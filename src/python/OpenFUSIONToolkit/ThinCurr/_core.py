@@ -428,16 +428,28 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return eig_vals, eig_vecs
 
-    def compute_freq_response(self,driver,freq=0.0,fr_limit=0,direct=False):
+    def compute_freq_response(self,fdriver=None,vdriver=None,freq=0.0,fr_limit=0,direct=False):
         '''! Compute frequence response of the current model to given driver voltages
 
-        @param driver Real/Imaginary driver voltage pair
+        @param fdriver Real/Imaginary driver flux pair (M*I)
+        @param vdriver Real/Imaginary driver voltage pair
         @param freq Frequency for response calculation [Hz] (unused if `fr_limit!=0`)
         @param fr_limit Frequency limit for calculation (0: none, 1: inductive, 2: resistive)
         @param direct Use direct solver?
         @result Real/Imaginary eddy current response
         '''
-        result = numpy.ascontiguousarray(driver.copy(), dtype=numpy.float64)
+        if fdriver is not None:
+            if vdriver is not None:
+                raise ValueError('"fdriver" and "vdriver" cannot be specified simultaneously')
+            # Assume fixed current V = -i*omega*M*I
+            if fr_limit == 0:
+                omega = 2.0*numpy.pi*freq
+            else:
+                omega = 1.0
+            vdriver = fdriver.copy()
+            vdriver[0,:] = omega*fdriver[1,:]
+            vdriver[1,:] = -omega*fdriver[0,:]
+        result = numpy.ascontiguousarray(vdriver.copy(), dtype=numpy.float64)
         error_string = c_char_p(b""*200)
         if self.Lmat_hodlr:
             thincurr_freq_response(self.tw_obj,c_bool(direct),c_int(fr_limit),c_double(freq),result,self.Lmat_hodlr,error_string)

@@ -177,11 +177,12 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
         Mcoil = tw_model.compute_Mcoil()
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
         tw_model.compute_Rmat()
+        driver_current = 1.0/mu0 # Current is 1.0/mu0 [A]
         driver = np.zeros((2,tw_model.nelems))
-        driver[0,:] = Mcoil[0,:]
+        driver[0,:] = -Mcoil[0,:]*driver_current
         result = tw_model.compute_freq_response(driver,fr_limit=fr_limit,freq=freq,direct=(direct_flag == 'T'))
         probe_signals = np.dot(result,Msensor)
-        probe_signals[0,:] += np.dot(np.r_[1.0],Msc)
+        probe_signals[0,:] += np.dot(np.r_[driver_current],Msc)
         fr_file = '\n'.join(['{0} {1}'.format(*probe_signals[:,i]) for i in range(probe_signals.shape[1])])
         with open('thincurr_fr.dat','w+') as fid:
             fid.write(fr_file)

@@ -840,7 +840,7 @@ IF(ASSOCIATED(tw_obj%Ael2dr))THEN
     END DO
     !$omp end parallel
   END IF
-  tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
+  tw_obj%Ael2dr = tw_obj%Ael2dr*mu0/(4.d0*pi)
 END IF
 DEALLOCATE(Acoil2coil_tmp)
 !
@@ -1594,7 +1594,7 @@ ALLOCATE(tw_obj%Adr2sen(nsensors,tw_obj%n_icoils))
 DO i=1,tw_obj%n_icoils
   tw_obj%Adr2sen(:,i)=Acoil2sen_tmp(:,i+tw_obj%n_vcoils)
 END DO
-tw_obj%Adr2sen=tw_obj%Adr2sen/(4.d0*pi)
+tw_obj%Adr2sen=tw_obj%Adr2sen*mu0/(4.d0*pi)
 !---Copy coupling between passive coils and sensors
 IF(nsensors>0)THEN
   !$omp parallel private(j,ii,jj,ik,jk)

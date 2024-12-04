@@ -42,8 +42,7 @@ TYPE(tw_type), TARGET :: tw_sim,mode_source
 TYPE(tw_sensors) :: sensors
 !
 INTEGER(4) :: i,n,ierr,io_unit
-REAL(8), POINTER, contiguous, DIMENSION(:,:) :: mode_driver,fr_driver,fr_sensor
-REAL(8), ALLOCATABLE :: eig_rval(:),eig_ival(:),eig_vec(:,:)
+REAL(8), POINTER, contiguous, DIMENSION(:,:) :: mode_driver,fr_driver,fr_sensor,driver_tmp
 CHARACTER(LEN=2) :: eig_tag
 TYPE(oft_timer) :: mytimer
 CLASS(oft_vector), POINTER :: uio
@@ -163,11 +162,11 @@ ELSE ! Driver coil as source
     CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
   END IF
   !---FR with coil 1
-  fr_driver(:,1)=tw_sim%Ael2dr(:,1)
-  fr_sensor(:,1)=tw_sim%Adr2sen(:,1)
+  fr_driver(:,1)=tw_sim%Ael2dr(:,1)/mu0
+  fr_sensor(:,1)=tw_sim%Adr2sen(:,1)/mu0
   IF(tw_sim%n_icoils>1)THEN ! Second coil if present
-    fr_driver(:,2)=tw_sim%Ael2dr(:,2)
-    fr_sensor(:,2)=tw_sim%Adr2sen(:,2)
+    fr_driver(:,2)=tw_sim%Ael2dr(:,2)/mu0
+    fr_sensor(:,2)=tw_sim%Adr2sen(:,2)/mu0
   END IF
 END IF
 !---------------------------------------------------------------------------
@@ -193,6 +192,13 @@ IF(fr_limit/=2)THEN
 END IF
 !---Setup resistivity matrix
 CALL tw_compute_Rmat(tw_sim,.TRUE.)
+!---Assume fixed current V = -i*omega*M*I
+ALLOCATE(driver_tmp(tw_sim%nelems,1))
+driver_tmp(:,1)=-fr_driver(:,1)
+fr_driver(:,1)=fr_driver(:,2)
+fr_driver(:,2)=driver_tmp(:,1)
+IF(fr_limit==0)fr_driver=fr_driver*freq*2.d0*pi ! Scale driver by frequency
+DEALLOCATE(driver_tmp)
 !---Compute Frequency-response
 IF(tw_hodlr%L_svd_tol>0.d0)THEN
   CALL frequency_response(tw_sim,direct,fr_limit,freq,fr_driver,hodlr_op=tw_hodlr)
