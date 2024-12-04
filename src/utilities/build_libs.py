@@ -1536,7 +1536,9 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
             "-DBLAS_ROOT:PATH={BLAS_ROOT}",
             "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
         ]
-        UMFPACK_CMAKE_options = config_CMAKE_options.copy()
+        UMFPACK_CMAKE_options = config_CMAKE_options.copy() + [
+            "-DNCHOLMOD=TRUE"
+        ]
         if (config_dict['CC_VENDOR'] == 'gnu') and (self.config_dict['OS_TYPE'] == 'Darwin'):
             UMFPACK_CMAKE_options.append("-DCMAKE_SHARED_LINKER_FLAGS:STRING=-lgfortran")
         #
@@ -1548,11 +1550,9 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
         if 'CMAKE_BIN' in self.config_dict:
             build_lines += ["export PATH={0}:$PATH".format(self.config_dict['CMAKE_BIN'])]
         build_lines += [
-            "export FFLAGS=-fPIC",
             "export JOBS={MAKE_THREADS}",
             "export OPTIMIZATION=-O2",
             "export AUTOCC=no",
-            "export UMFPACK_CONFIG=-DNCHOLMOD",
             "make distclean",
             "cd SuiteSparse_config",
             'make library CMAKE_OPTIONS="{0}"'.format(' '.join(config_CMAKE_options)),

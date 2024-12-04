@@ -356,8 +356,19 @@ class TokaMaker():
         # Get limiter contour
         npts = c_int()
         r_loc = c_double_ptr()
-        tokamaker_get_limiter(ctypes.byref(npts),ctypes.byref(r_loc))
-        self.lim_contour = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        nloops = c_int()
+        loop_ptr = c_int_ptr()
+        tokamaker_get_limiter(ctypes.byref(npts),ctypes.byref(r_loc),ctypes.byref(nloops),ctypes.byref(loop_ptr))
+        loop_ptr = numpy.ctypeslib.as_array(loop_ptr,shape=(nloops.value+1,))
+        self.lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        self.lim_contours = []
+        for i in range(nloops.value):
+            lim_contour = numpy.vstack((self.lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],self.lim_pts[loop_ptr[i]-1,:]))
+            self.lim_contours.append(lim_contour)
+        self.lim_contour = numpy.zeros((0,2))
+        for lim_countour in self.lim_contours:
+            if lim_countour.shape[0] > self.lim_contour.shape[0]:
+                self.lim_contour = lim_countour
         # Get plotting mesh
         np_loc = c_int()
         nc_loc = c_int()
@@ -729,9 +740,7 @@ class TokaMaker():
     def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,retain_previous=False):
         r'''! Set global target values
 
-        Once set, values are retained until they are explicitly set to their respective disabled
-        values (see below). By default, all targets are disabled so this function should be called
-        at least once to set "sane" values for `alam` and `pnorm`.
+        @note Values that are not specified are reset to their defaults on each call unless `retain_previous=True`.
 
         @param alam Scale factor for \f$F*F'\f$ term (disabled if `Ip` is set)
         @param pnorm Scale factor for \f$P'\f$ term (disabled if `pax`, `estore`, or `R0` are set)
@@ -765,6 +774,27 @@ class TokaMaker():
         if V0 is not None:
             self._V0_target.value=V0
         tokamaker_set_targets(self._Ip_target,self._Ip_ratio_target,self._pax_target,self._estore_target,self._R0_target,self._V0_target)
+    
+    def get_targets(self):
+        r'''! Get global target values
+
+        @result Dictionary of global target values
+        '''
+        # Get targets
+        target_dict = {}
+        if self._Ip_target.value > 0.0:
+            target_dict['Ip'] = self._Ip_target.value
+        if self._estore_target.value > 0.0:
+            target_dict['estore'] = self._estore_target.value
+        if self._pax_target.value > 0.0:
+            target_dict['pax'] = self._pax_target.value
+        if self._Ip_ratio_target.value > -1.E98:
+            target_dict['Ip_ratio'] = self._Ip_ratio_target.value
+        if self._R0_target.value > 0.0:
+            target_dict['R0'] = self._R0_target.value
+        if self._V0_target.value > -1.E98:
+            target_dict['V0'] = self._V0_target.value
+        return target_dict
 
     def get_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
@@ -1070,7 +1100,8 @@ class TokaMaker():
             ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask_tmp,:], mask_vals, colors=cond_color, alpha=1)
         # Show limiter
         if limiter_color and (self.lim_contour is not None):
-            ax.plot(self.lim_contour[:,0],self.lim_contour[:,1],color=limiter_color)
+            for lim_contour in self.lim_contours:
+                ax.plot(lim_contour[:,0],lim_contour[:,1],color=limiter_color)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
         return colorbar
@@ -1270,21 +1301,24 @@ class TokaMaker():
         return numpy.ctypeslib.as_array(pts_loc,shape=(npts.value, 2)), \
             numpy.ctypeslib.as_array(flux_loc,shape=(npts.value,))
 
-    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None):
-        '''! Save current equilibrium to gEQDSK format
+    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None,truncate_eq=True,limiter_file=''):
+        r'''! Save current equilibrium to gEQDSK format
 
         @param filename Filename to save equilibrium to
         @param nr Number of radial sampling points
         @param nz Number of vertical sampling points
         @param rbounds Extents of grid in R
         @param zbounds Extents of grid in Z
-        @param run_info Run information for gEQDSK file (maximum of 36 characters)
+        @param run_info Run information for gEQDSK file (maximum of 40 characters)
         @param lcfs_pad Padding in normalized flux at LCFS
-        @param rcentr `RCENTR` value for gEQDSK file (if `None`, magnetic axis is used)
+        @param rcentr `RCENTR` value for gEQDSK file (if `None`, geometric axis is used)
+        @param truncate_eq Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
+        @param limiter_file File containing limiter contour to use instead of TokaMaker limiter
         '''
         cfilename = c_char_p(filename.encode())
-        if len(run_info) > 36:
-            raise ValueError('"run_info" cannot be longer than 36 characters')
+        lim_filename = c_char_p(limiter_file.encode())
+        if len(run_info) > 40:
+            raise ValueError('"run_info" cannot be longer than 40 characters')
         crun_info = c_char_p(run_info.encode())
         if rbounds is None:
             rbounds = numpy.r_[self.lim_contour[:,0].min(), self.lim_contour[:,0].max()]
@@ -1297,12 +1331,12 @@ class TokaMaker():
         if rcentr is None:
             rcentr = -1.0
         cstring = c_char_p(b""*200)
-        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),cstring)
+        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
 
     def eig_wall(self,neigs=4,pm=False):
-        '''! Compute eigenvalues (1 / Tau_L/R) for conducting structures
+        r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
 
         @param neigs Number of eigenvalues to compute
         @param pm Print solver statistics and raw eigenvalues?
