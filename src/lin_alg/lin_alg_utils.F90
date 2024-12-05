@@ -1242,4 +1242,118 @@ outgraph%kr=[(i,i=1,outgraph%nr+1)]
 outgraph%lc=[(i,i=1,outgraph%nr)]
 DEBUG_STACK_POP
 END SUBROUTINE create_identity_graph
+!------------------------------------------------------------------------------
+!> Create a tri-diagonal graph for a given vector
+!!
+!! @param[in,out] outgraph Resulting graph
+!! @param[in] vec Vector representing matrix rows/columns
+!! @param[in] periodic Apply periodic BCs?
+!------------------------------------------------------------------------------
+SUBROUTINE create_tridiag_graph(outgraph,vec,periodic)
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph
+CLASS(oft_vector), POINTER, INTENT(in) :: vec
+LOGICAL, INTENT(in) :: periodic
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+!---Setup graph
+ALLOCATE(outgraph)
+IF(periodic)THEN
+  outgraph%nnz=3*vec%n
+ELSE
+  outgraph%nnz=3*vec%n-2
+END IF
+outgraph%nr=vec%n
+outgraph%nrg=vec%ng
+outgraph%nc=vec%n
+outgraph%ncg=vec%ng
+!---Create indexing
+ALLOCATE(outgraph%kr(outgraph%nr+1))
+ALLOCATE(outgraph%lc(outgraph%nnz))
+outgraph%kr(1)=1
+IF(periodic)THEN
+  outgraph%lc(1:3)=[1,2,vec%n]
+  outgraph%kr(2)=4
+ELSE
+  outgraph%lc(1:2)=[1,2]
+  outgraph%kr(2)=3
+END IF
+DO i=2,vec%n-1
+  outgraph%lc(outgraph%kr(i):outgraph%kr(i)+2)=[i-1,i,i+1]
+  outgraph%kr(i+1)=outgraph%kr(i)+3
+END DO
+IF(periodic)THEN
+  outgraph%lc(outgraph%nnz-2:outgraph%nnz)=[1,vec%n-1,vec%n]
+ELSE
+  outgraph%lc(outgraph%nnz-1:outgraph%nnz)=[vec%n-1,vec%n]
+END IF
+outgraph%kr(vec%n+1)=outgraph%nnz+1
+DEBUG_STACK_POP
+END SUBROUTINE create_tridiag_graph
+!------------------------------------------------------------------------------
+!> Create a dense graph for a given vector
+!!
+!! @param[in,out] outgraph Resulting graph
+!! @param[in] rvec Vector representing matrix rows
+!! @param[in] cvec Vector representing matrix columns (optional)
+!------------------------------------------------------------------------------
+SUBROUTINE create_dense_graph(outgraph,rvec,cvec)
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph
+CLASS(oft_vector), POINTER, INTENT(in) :: rvec
+CLASS(oft_vector), POINTER, OPTIONAL, INTENT(in) :: cvec
+INTEGER(i4) :: i
+CLASS(oft_vector), POINTER :: vec2
+DEBUG_STACK_PUSH
+IF(PRESENT(cvec))THEN
+  vec2=>cvec
+ELSE
+  vec2=>rvec
+END IF
+!---Setup graph
+ALLOCATE(outgraph)
+outgraph%nnz=rvec%n*vec2%n
+outgraph%nr=rvec%n
+outgraph%nrg=rvec%ng
+outgraph%nc=vec2%n
+outgraph%ncg=vec2%ng
+!---Create indexing
+ALLOCATE(outgraph%kr(outgraph%nr+1))
+ALLOCATE(outgraph%lc(outgraph%nnz))
+outgraph%kr(1)=1
+DO i=1,rvec%n
+  outgraph%kr(i+1)=outgraph%kr(i)+vec2%n
+  outgraph%lc(outgraph%kr(i):outgraph%kr(i+1)-1)=[(i,i=1,vec2%n)]
+END DO
+DEBUG_STACK_POP
+END SUBROUTINE create_dense_graph
+!------------------------------------------------------------------------------
+!> Create stitch structure for local vector
+!!
+!! @param[out] stitch Stitching object
+!! @param[in] n Size of local vector
+!------------------------------------------------------------------------------
+SUBROUTINE create_local_stitch(stitch,map,n)
+TYPE(oft_seam), INTENT(out) :: stitch
+TYPE(oft_map), INTENT(inout) :: map
+INTEGER(i4), INTENT(in) :: n
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+!---Setup stitching object
+ALLOCATE(stitch%be(n),stitch%kle(0:oft_env%nproc_con+1))
+stitch%full=.TRUE.
+stitch%nbe=0
+stitch%be=.FALSE.
+stitch%kle=0
+!---Setup map
+map%per=.FALSE.
+map%offset=0
+map%n=n
+map%ng=n
+map%nslice=n
+ALLOCATE(map%slice(map%nslice))
+map%slice=[(i,i=1,n)]
+ALLOCATE(map%lge(map%n))
+map%lge=[(i,i=1,n)]
+map%gbe=>stitch%be
+DEBUG_STACK_POP
+END SUBROUTINE create_local_stitch
 END MODULE oft_la_utils

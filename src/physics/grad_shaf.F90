@@ -19,9 +19,12 @@ USE oft_gauss_quadrature, ONLY: set_quad_1d
 USE oft_tet_quadrature, ONLY: set_quad_2d
 USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
+USE oft_stitching, ONLY: oft_seam, seam_list
 !---
-USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr
-USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr, &
+  oft_map, map_list
+USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks, create_dense_graph, create_vector, &
+  create_local_stitch
 USE oft_solver_base, ONLY: oft_solver, oft_eigsolver
 USE oft_solver_utils, ONLY: create_diag_pre, create_cg_solver
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
@@ -250,9 +253,13 @@ TYPE :: gs_eq
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL()
   TYPE(cond_region), POINTER, DIMENSION(:) :: cond_regions => NULL()
   TYPE(gs_region_info) :: region_info
+  TYPE(oft_seam), POINTER :: coil_stitch => NULL() !< Needs docs
+  TYPE(oft_map), POINTER :: coil_map => NULL() !< Needs docs
   CLASS(oft_vector), POINTER :: psi => NULL() !<
   CLASS(oft_vector), POINTER :: chi => NULL() !<
   CLASS(oft_vector), POINTER :: u_hom => NULL() !<
+  CLASS(oft_vector), POINTER :: coil_vec => NULL() !< Needs docs
+  CLASS(oft_vector), POINTER :: aug_vec => NULL() !< Needs docs
   CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_coil => NULL()
   ! CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_cond => NULL()
   CLASS(oft_vector), POINTER :: psi_dt => NULL() !<
@@ -1136,6 +1143,8 @@ real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:)
 character(LEN=3) :: coil_tag
 character(LEN=2) :: cond_tag,eig_tag
+type(seam_list), pointer, dimension(:) :: stitch_tmp
+type(map_list), pointer, dimension(:) :: map_tmp
 ! logical :: do_compute
 ! do_compute=.TRUE.
 ! IF(PRESENT(compute))do_compute=compute
@@ -1302,6 +1311,22 @@ DEALLOCATE(tmp_vec2)
 ! IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,'Psi_init')
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
+!---Create coil vector
+ALLOCATE(self%coil_stitch,self%coil_map)
+CALL create_local_stitch(self%coil_stitch,self%coil_map,self%ncoils)
+ALLOCATE(stitch_tmp(1),map_tmp(1))
+stitch_tmp(1)%s=>self%coil_stitch
+map_tmp(1)%m=>self%coil_map
+CALL create_vector(self%coil_vec,stitch_tmp,map_tmp)
+DEALLOCATE(stitch_tmp,map_tmp)
+!---Create augmented vector
+ALLOCATE(stitch_tmp(2),map_tmp(2))
+stitch_tmp(1)%s=>self%psi%stitch_info
+map_tmp(1)%m=>self%psi%map(1)
+stitch_tmp(2)%s=>self%coil_stitch
+map_tmp(2)%m=>self%coil_map
+CALL create_vector(self%aug_vec,stitch_tmp,map_tmp)
+DEALLOCATE(stitch_tmp,map_tmp)
 contains
 subroutine get_limiter()
 integer(4) :: i,ii,istart,iloop,j,k,l,orient(2),nmax
@@ -2282,7 +2307,7 @@ subroutine gs_solve(self,ierr)
 class(gs_eq), intent(inout) :: self
 integer(4), optional, intent(out) :: ierr
 class(oft_vector), pointer :: rhs,rhs_bc,psip,psiin,psi_bc,psi_eddy,psi_dt
-class(oft_vector), pointer :: tmp_vec,psi_alam,psi_press,psi_vac,psi_vcont
+class(oft_vector), pointer :: tmp_vec,psi_alam,psi_press,psi_vac,psi_vcont,psi_aug,tmp_aug
 real(r8), pointer, DIMENSION(:) :: vals_tmp
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm,curr
@@ -2320,7 +2345,6 @@ CALL self%psi%new(psi_bc)
 CALL self%psi%new(psi_vac)
 CALL self%psi%new(psi_vcont)
 CALL self%psi%new(psi_eddy)
-CALL self%psi%new(psi_dt)
 CALL self%psi%new(psi_alam)
 CALL self%psi%new(psi_press)
 t0=omp_get_wtime()
@@ -2343,6 +2367,9 @@ CALL self%p%update(self)
 !---Get J_phi source term
 CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
 IF(self%dt>0.d0)THEN
+  CALL self%psi%new(psi_dt)
+  CALL self%aug_vec%new(psi_aug)
+  CALL self%aug_vec%new(tmp_aug)
   IF(self%dt/=self%dt_last)THEN
     CALL build_dels(self%dels_dt,self,"free",self%dt)
     self%dt_last=self%dt
@@ -2354,16 +2381,12 @@ END IF
 CALL psi_vac%set(0.d0)
 CALL psi_vac%add(1.d0,1.d0,psi_bc)
 DO j=1,self%ncoils
-  ! curr = self%coil_regions(j)%curr
   CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
 END DO
 !
 CALL psi_eddy%set(0.d0)
 DO j=1,self%ncond_regs
   DO k=1,self%cond_regions(j)%neigs
-    ! ii=self%cond_regions(j)%eig_map(k)
-    ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-    !   self%cond_regions(j)%psi_eig(k)%f)
     CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
       self%cond_regions(j)%psi_eig(k)%f)
   END DO
@@ -2372,7 +2395,6 @@ CALL psi_vac%add(1.d0,1.d0,psi_eddy)
 !
 CALL psi_vcont%set(0.d0)
 DO j=1,self%ncoils
-  ! curr = self%coil_regions(j)%vcont_gain
   CALL psi_vcont%add(1.d0,self%coil_vcont(j),self%psi_coil(j)%f)
 END DO
 !---Save input solution
@@ -2457,8 +2479,6 @@ DO i=1,self%maxits
   param_mat=0.d0
   param_rhs=0.d0
   IF(self%Itor_target>0.d0)THEN
-    ! itor_alam=self%itor(psi_alam)
-    ! itor_press=self%itor(psi_press)
     param_mat(1,:)=[itor_alam,itor_press,0.d0]
     param_rhs(1)=self%Itor_target
   ELSE
@@ -2559,55 +2579,20 @@ DO i=1,self%maxits
     END IF
     CALL self%psi%add(1.d0,-1.d0,psi_eddy)
     CALL self%psi%add(1.d0,-1.d0,psi_bc)
-    !---Update vacuum field part
-    CALL psi_vac%set(0.d0)
-    CALL psi_vac%add(1.d0,1.d0,psi_bc)
-    DO j=1,self%ncoils
-      ! curr = self%coil_regions(j)%curr
-      CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
-    END DO
-    ! CALL psi_eddy%set(0.d0)
-    ! DO j=1,self%ncond_regs
-    !   DO k=1,self%cond_regions(j)%neigs
-    !     ! ii=self%cond_regions(j)%eig_map(k)
-    !     CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-    !       self%cond_regions(j)%psi_eig(k)%f)
-    !     CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-    !       self%cond_regions(j)%psi_eig(k)%f)
-    !   END DO
-    ! END DO
   END IF
+  !---Update vacuum field part
+  CALL psi_vac%set(0.d0)
+  CALL psi_vac%add(1.d0,1.d0,psi_bc)
+  DO j=1,self%ncoils
+    CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+  END DO
 
-  ! Fit wall eigenmodes if fluxes are available
-  ! IF(self%flux_ntargets>0)THEN
-  !   CALL self%psi%add(1.d0,1.d0,psi_vac)
-  !   CALL gs_fit_walleigs(self,ierr_loc)
-  !   IF(ierr_loc/=0)THEN
-  !     error_flag=-8
-  !     EXIT
-  !   END IF
-  !   CALL self%psi%add(1.d0,-1.d0,psi_vac)
-  !   !---Update vacuum field part
-  !   CALL psi_eddy%set(0.d0)
-  !   DO j=1,self%ncond_regs
-  !     DO k=1,self%cond_regions(j)%neigs
-  !       ! ii=self%cond_regions(j)%eig_map(k)
-  !       ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-  !       !   self%cond_regions(j)%psi_eig(k)%f)
-  !       CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-  !         self%cond_regions(j)%psi_eig(k)%f)
-  !     END DO
-  !   END DO
-  !   CALL psi_vac%add(1.d0,1.d0,psi_eddy)
-  ! ELSE IF(self%isoflux_ntargets>0)THEN
+  ! Add fixed wall eddy contributions
   IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
     !---Update vacuum field part
     CALL psi_eddy%set(0.d0)
     DO j=1,self%ncond_regs
       DO k=1,self%cond_regions(j)%neigs
-        ! ii=self%cond_regions(j)%eig_map(k)
-        ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-        !   self%cond_regions(j)%psi_eig(k)%f)
         CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
           self%cond_regions(j)%psi_eig(k)%f)
       END DO
@@ -2625,9 +2610,15 @@ DO i=1,self%maxits
     CALL psi_dt%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
     CALL gs_wall_source(self,psi_dt,tmp_vec)
     CALL blag_zerob(tmp_vec)
+    !---Solve in augmented space (flux + coils)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
-    CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
+    CALL tmp_vec%get_local(vals_tmp)
+    CALL tmp_aug%restore_local(vals_tmp,1)
+    CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
+    CALL psi_aug%get_local(vals_tmp,1)
+    CALL psi_dt%restore_local(vals_tmp)
     oft_env%pm=pm_save
+    !---Add flux to solution
     CALL psi_eddy%add(1.d0,1.d0,psi_dt)
     CALL psi_vac%add(1.d0,1.d0,psi_dt)
     CALL self%psi%add(1.d0,1.d0,psi_dt)
@@ -2647,17 +2638,9 @@ DO i=1,self%maxits
     EXIT
   END IF
   !---Under-relax solution
-  ! IF(MOD(i,self%ninner)/=0.OR.(.NOT.self%free))
   CALL self%psi%add(1.d0-self%urf,self%urf,psip)
   !---Update flux scale for free and fixed boundary
-  ! CALL self%psi%add(1.d0,-1.d0,psi_vac)
-  ! CALL self%psi%add(1.d0,-self%vcontrol_val,psi_vcont)
-  ! CALL blag_zerob(self%psi)
-  IF(self%free)THEN
-    ! CALL self%psi%add(1.d0,1.d0,psi_bc)
-    ! CALL self%psi%add(1.d0,1.d0,psi_vac)
-    ! CALL self%psi%add(1.d0,self%vcontrol_val,psi_vcont)
-  ELSE
+  IF(.NOT.self%free)THEN
     CALL self%psi%add(1.d0,-1.d0,psi_vac)
     CALL self%psi%add(1.d0,-self%vcontrol_val,psi_vcont)
     CALL blag_zerob(self%psi)
@@ -2703,11 +2686,6 @@ DO i=1,self%maxits
     vals_tmp=vals_tmp*self%vcontrol_val
     CALL smesh%save_vertex_scalar(vals_tmp,'Psi_vcont')
   END IF
-  ! !---Under-relax pressure in R0 control mode
-  ! IF(self%R0_target>0.d0.AND.MOD(i,self%ninner)==0)THEN
-  !   self%pnorm=(self%pnorm+pnormp)/2.d0
-  !   pnormp=self%pnorm
-  ! END IF
   !---Update vacuum field part
   CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
   !---Compute error in NL function
@@ -2723,7 +2701,7 @@ DO i=1,self%maxits
     SQRT(nl_res),self%o_point(1),self%o_point(2),self%vcontrol_val/mu0
   !---Check if converged
   IF((self%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
-  IF(SQRT(nl_res)<self%nl_tol)EXIT !.AND.i>3*self%ninner)EXIT
+  IF(SQRT(nl_res)<self%nl_tol)EXIT
 end do
 IF(oft_env%pm)CALL oft_decrease_indent
 IF(i>self%maxits)error_flag=-1
@@ -2767,6 +2745,12 @@ CALL psi_press%delete
 DEALLOCATE(rhs,psip,psiin)
 DEALLOCATE(rhs_bc,psi_bc,psi_alam,psi_press,psi_vac,psi_vcont)
 DEALLOCATE(vals_tmp,psi_eddy)
+IF(self%dt>0.d0)THEN
+  CALL psi_dt%delete
+  CALL psi_aug%delete
+  CALL tmp_aug%delete
+  DEALLOCATE(psi_dt,psi_aug,tmp_aug)
+END IF
 !---
 IF(self%compute_chi)CALL self%get_chi
 self%ierr=error_flag
@@ -3075,9 +3059,10 @@ subroutine gs_vac_solve(self,psi_sol,ierr)
 class(gs_eq), intent(inout) :: self !< G-S object
 class(oft_vector), intent(inout) :: psi_sol !< Input: BCs for \f$ \psi \f$, Output: solution
 integer(4), optional, intent(out) :: ierr !< Error flag
-class(oft_vector), pointer :: rhs_bc,psi_bc,psi_eddy,psi_dt,tmp_vec,psi_vac,psi_vcont
+class(oft_vector), pointer :: rhs_bc,psi_bc,psi_eddy,psi_dt,tmp_vec,psi_vac,psi_vcont,psi_aug,tmp_aug
 integer(4) :: j,k,error_flag
 REAL(8) :: psimax
+real(r8), pointer, DIMENSION(:) :: vals_tmp
 logical :: pm_save
 !---
 ierr=0
@@ -3103,6 +3088,9 @@ IF(self%dt>0.d0)THEN
   self%lu_solver_dt%A=>self%dels_dt
   CALL self%psi%new(psi_dt)
   CALL self%psi%new(tmp_vec)
+  CALL self%aug_vec%new(psi_aug)
+  CALL self%aug_vec%new(tmp_aug)
+  ALLOCATE(vals_tmp(self%psi%n))
 END IF
 !---Update vacuum field part
 CALL psi_vac%set(0.d0)
@@ -3159,7 +3147,11 @@ IF(self%dt>0.d0)THEN
   CALL gs_wall_source(self,tmp_vec,psi_dt)
   CALL blag_zerob(psi_dt)
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  CALL self%lu_solver_dt%apply(tmp_vec,psi_dt)
+  CALL psi_dt%get_local(vals_tmp)
+  CALL tmp_aug%restore_local(vals_tmp,1)
+  CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
+  CALL psi_aug%get_local(vals_tmp,1)
+  CALL tmp_vec%restore_local(vals_tmp)
   oft_env%pm=pm_save
   CALL psi_sol%add(1.d0,1.d0,tmp_vec)
 END IF
@@ -3174,7 +3166,9 @@ CALL psi_eddy%delete
 IF(self%dt>0.d0)THEN
   CALL psi_dt%delete
   CALL tmp_vec%delete
-  DEALLOCATE(psi_dt,tmp_vec)
+  CALL psi_aug%delete
+  CALL tmp_aug%delete
+  DEALLOCATE(psi_dt,tmp_vec,psi_aug,tmp_aug,vals_tmp)
 END IF
 DEALLOCATE(psi_vac,psi_vcont,psi_eddy)
 end subroutine gs_vac_solve
@@ -5393,7 +5387,7 @@ real(r8), pointer, dimension(:) :: nonaxi_tmp
 real(r8), pointer, dimension(:,:) :: nonaxi_vals
 type(oft_1d_int), pointer, dimension(:) :: bc_nodes
 CLASS(oft_vector), POINTER :: oft_lag_vec
-TYPE(oft_graph_ptr) :: graphs(1,1)
+TYPE(oft_graph_ptr), pointer, dimension(:,:) :: graphs
 TYPE(oft_graph), TARGET :: graph1,graph2
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
@@ -5413,6 +5407,7 @@ IF(dt_in>0.d0)nnonaxi=self%region_info%nnonaxi
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   !---
+  CALL oft_blagrange%vec_create(oft_lag_vec)
   graph1%nr=oft_blagrange%ne
   graph1%nrg=oft_blagrange%global%ne
   graph1%nc=oft_blagrange%ne
@@ -5452,13 +5447,27 @@ IF(.NOT.ASSOCIATED(mat))THEN
     graph1%lc=>graph2%lc
     DEALLOCATE(dense_flag)
   END IF
-  !---Create matrix
+  !---Add coil blocks
+  IF(dt_in>0.d0)THEN
+    ALLOCATE(graphs(2,2))
+    ALLOCATE(graphs(2,1)%g,graphs(1,2)%g,graphs(2,2)%g)
+    CALL create_dense_graph(graphs(2,1)%g,self%coil_vec,oft_lag_vec)
+    CALL create_dense_graph(graphs(1,2)%g,oft_lag_vec,self%coil_vec)
+    CALL create_dense_graph(graphs(2,2)%g,self%coil_vec,self%coil_vec)
+  ELSE
+    ALLOCATE(graphs(1,1))
+  END IF
   graphs(1,1)%g=>graph1
-  CALL oft_blagrange%vec_create(oft_lag_vec)
-  CALL create_matrix(mat,graphs,oft_lag_vec,oft_lag_vec)
+  !---Create matrix
+  IF(dt_in>0.d0)THEN
+    CALL create_matrix(mat,graphs,self%aug_vec,self%aug_vec)
+  ELSE
+    CALL create_matrix(mat,graphs,oft_lag_vec,oft_lag_vec)
+  END IF
   CALL oft_lag_vec%delete
   DEALLOCATE(oft_lag_vec)
   NULLIFY(graphs(1,1)%g)
+  DEALLOCATE(graphs)
 ELSE
   CALL mat%zero
 END IF
@@ -5600,6 +5609,13 @@ SELECT CASE(TRIM(bc))
   CASE("free")
     CALL set_bcmat(self,mat)
 END SELECT
+IF(dt_in>0.d0)THEN
+  lop(1,1)=1.d0
+  DO i=1,self%ncoils
+    j=oft_blagrange%ne+i
+    call mat%add_values(j,j,lop,1,1)
+  END DO
+END IF
 DEALLOCATE(j,lop)
 CALL oft_blagrange%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
