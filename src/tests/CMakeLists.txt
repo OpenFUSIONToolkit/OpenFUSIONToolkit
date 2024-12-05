@@ -47,6 +47,7 @@ endif()
 add_custom_target(test)
 add_custom_command(
     TARGET  test
+    POST_BUILD
     COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} --junitxml=OFT.junit.xml -m \"not slow\" grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
 )
@@ -54,6 +55,7 @@ add_custom_command(
 add_custom_target(test_full)
 add_custom_command(
     TARGET  test_full
+    POST_BUILD
     COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} --junitxml=OFT.junit.xml grid lin_alg fem physics
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
 )
@@ -63,6 +65,7 @@ if( OFT_COVERAGE )
   add_custom_target(test_cov)
   add_custom_command(
       TARGET  test_cov
+      POST_BUILD
       COMMAND PATH=${OFT_TEST_PATH} COVERAGE_PROCESS_START=.coveragerc OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=1 coverage run -m pytest -m \"coverage\" grid lin_alg fem physics
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
   )

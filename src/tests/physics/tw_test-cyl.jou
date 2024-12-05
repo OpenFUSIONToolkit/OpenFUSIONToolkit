@@ -18,6 +18,7 @@ mesh surface all
 set duplicate block elements off
 block 1 add surface 1 
 nodeset 1 add vertex 2
+nodeset 2 add curve 3  
 
 # Export grid
 set large exodus file on

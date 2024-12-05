@@ -8,10 +8,10 @@ from ..util import *
 
 
 ## @cond
-# ThinCurr setup function (load mesh and setup model) (mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,tw_ptr,size,error_str)
+# ThinCurr setup function (load mesh and setup model) (mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start,tw_ptr,size,error_str)
 thincurr_setup = ctypes_subroutine(oftpy_lib.thincurr_setup,
     [c_char_p, c_int, ctypes_numpy_array(float64,2), c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), 
-     ctypes_numpy_array(int32,1), c_void_p, ctypes_numpy_array(int32,1), c_char_p])
+     ctypes_numpy_array(int32,1), c_int, c_void_p, ctypes_numpy_array(int32,1), c_char_p])
 
 # ThinCurr setup plotting (tw_ptr,basepath,save_debug,error_str
 thincurr_setup_io = ctypes_subroutine(oftpy_lib.thincurr_setup_io,
@@ -57,9 +57,9 @@ thincurr_Bmat = ctypes_subroutine(oftpy_lib.thincurr_Bmat,
 thincurr_Mcoil = ctypes_subroutine(oftpy_lib.thincurr_Mcoil,
     [c_void_p, c_void_ptr_ptr, c_char_p, c_char_p])
 
-# thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,cache_file,error_str)
+# thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,njumpers,sensor_ptr,cache_file,error_str)
 thincurr_Msensor = ctypes_subroutine(oftpy_lib.thincurr_Msensor,
-    [c_void_p, c_char_p, c_void_ptr_ptr, c_void_ptr_ptr, c_int_ptr, c_void_p, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_void_ptr_ptr, c_void_ptr_ptr, c_int_ptr, c_int_ptr, c_void_p, c_char_p, c_char_p])
 
 # Compute model resistivity matrix thincurr_curr_Rmat(tw_ptr,copy_out,Rmat,error_str)
 thincurr_curr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
