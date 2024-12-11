@@ -402,8 +402,8 @@ END TYPE mat_parts
 DOUBLE COMPLEX, allocatable, dimension(:) :: r,w
 DOUBLE COMPLEX, allocatable, dimension(:,:) :: v,z
 DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:)
-DOUBLE COMPLEX :: delta,hkmi,ggin
-REAL(r8) :: uu,uuold,gg,ggold,elapsed_time
+DOUBLE COMPLEX :: delta,hkmi
+REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time
 integer(i4) :: i,j,jr,k,kk,nits,info
 integer(i4), allocatable, dimension(:) :: part
 LOGICAL, allocatable, dimension(:) :: eflag
