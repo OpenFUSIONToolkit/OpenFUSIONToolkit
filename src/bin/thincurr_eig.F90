@@ -102,7 +102,12 @@ tw_sim%mesh=>smesh
 IF(jumper_start>0)THEN
   n=SIZE(mesh_nsets)
   hole_nsets=>mesh_nsets(1:jumper_start-1)
-  jumper_nsets=>mesh_nsets(jumper_start:n)
+  ALLOCATE(tw_sim%jumper_nsets(n-jumper_start+1))
+  DO i=jumper_start,n
+    tw_sim%jumper_nsets(i-jumper_start+1)%n=mesh_nsets(i)%n
+    ALLOCATE(tw_sim%jumper_nsets(i-jumper_start+1)%v(tw_sim%jumper_nsets(i-jumper_start+1)%n))
+    tw_sim%jumper_nsets(i-jumper_start+1)%v=mesh_nsets(i)%v
+  END DO
 ELSE
   hole_nsets=>mesh_nsets
 END IF
@@ -117,13 +122,13 @@ IF(oft_debug_print(1))CALL tw_sim%save_debug()
 WRITE(*,*)
 IF(plot_run)THEN
   !---Load sensors
-  CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
+  CALL tw_load_sensors('floops.loc',tw_sim,sensors)
   tw_sim%n_icoils=0
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
   CALL plot_eig(tw_sim,sensors%nfloops,sensors%floops)
 ELSE
   IF(reduce_model)THEN
-    CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
+    CALL tw_load_sensors('floops.loc',tw_sim,sensors)
   ELSE
     tw_sim%n_icoils=0
     sensors%nfloops=0
