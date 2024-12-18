@@ -43,7 +43,7 @@ USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob, &
   h1_setup_interp, oft_h1_rinterp
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
-  taylor_rst
+  taylor_rst, taylor_hlam
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -57,24 +57,29 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_setup(order,nmodes,minlev,save_rst,error_str) BIND(C,NAME="marklin_setup")
+SUBROUTINE marklin_compute(order,nmodes,minlev,save_rst,eig_vals,error_str) BIND(C,NAME="marklin_compute")
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nmodes !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: minlev !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_rst !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eig_vals !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()
 CLASS(oft_solver), POINTER :: lminv => NULL()
 !---Local variables
 INTEGER(i4) :: i,io_unit,ierr
-REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
+REAL(r8), POINTER, DIMENSION(:) :: vals_tmp => NULL()
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 CHARACTER(LEN=3) :: pltnum
 !---Clear error flag
 CALL copy_string('',error_str)
+IF(taylor_nm>0)THEN
+  CALL copy_string('Eigenstates already computed',error_str)
+  RETURN
+END IF
 !---Lagrange
 CALL oft_lag_setup(order,minlev)
 CALL lag_setup_interp
@@ -93,7 +98,9 @@ END IF
 oft_env%pm=.TRUE.
 taylor_rst=save_rst
 CALL taylor_hmodes(nmodes)
-END SUBROUTINE marklin_setup
+CALL c_f_pointer(eig_vals, vals_tmp, [nmodes])
+vals_tmp=taylor_hlam(:,oft_hcurl_level)
+END SUBROUTINE marklin_compute
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

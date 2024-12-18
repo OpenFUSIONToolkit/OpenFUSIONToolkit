@@ -14,6 +14,7 @@ oft_in_template = """&runtime_options
 
 &mesh_options
  meshname='none'
+ grid_order={GRID_ORDER}
  {MESH_TYPE}
 /
 
@@ -53,13 +54,13 @@ class Marklin_field_interpolator():
 
 class Marklin():
     '''! Marklin force-free equilibrium solver class'''
-    def __init__(self,debug_level=0,nthreads=2):
+    def __init__(self,debug_level=0,nthreads=2,grid_order=1):
         '''! Initialize Marklin object
 
         @param debug_level Level of debug printing (0-3)
         '''
         ## Input file settings
-        self._psin_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'MESH_DEF': ''}
+        self._psin_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'GRID_ORDER': grid_order, 'MESH_DEF': ''}
         self._update_psin()
         oft_init(c_int(nthreads))
         ## Number of regions in mesh
@@ -76,6 +77,8 @@ class Marklin():
         self.reg = None
         ## Number of modes
         self._nm = -1
+        ## Eigenvalues
+        self.eig_vals = None
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
 
@@ -161,11 +164,13 @@ class Marklin():
         if self._nm != -1:
             raise ValueError('Eigenstates already computed')
         #
+        eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
         cstring = c_char_p(b""*200)
-        marklin_compute(order,nmodes,minlev,save_rst,cstring)
+        marklin_compute(order,nmodes,minlev,save_rst,eig_vals,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
         self._nm = nmodes
+        self.eig_vals = eig_vals
 
     def save_field(self,field,tag):
         '''! Save field to XDMF files for VisIt/Paraview
