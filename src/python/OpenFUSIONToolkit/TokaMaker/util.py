@@ -71,7 +71,7 @@ def create_spline_flux_fun(npts,x,y,axis_bc=[1,0.0],edge_bc=[1,0.0],normalize=Tr
 
 
 def create_power_flux_fun(npts,alpha,gamma):
-    r'''! Build power law flux function of the form \f$ ((1-\hat{\psi})^{\alpha})^{\gamma} \f$
+    r'''! Build power law flux function of the form \f$ (1-\hat{\psi}^{\alpha})^{\gamma} \f$
 
     @param npts Number of points for definition
     @param alpha Inner exponent
