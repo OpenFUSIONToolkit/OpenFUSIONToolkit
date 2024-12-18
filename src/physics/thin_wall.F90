@@ -806,7 +806,7 @@ IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
               cpt = (coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
               tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/SQRT(SUM((pt_i-cpt)**2) + coil_thickness)
             END DO
-            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
+            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
           END DO
         END DO
       END DO

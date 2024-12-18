@@ -18,23 +18,24 @@ ThinCurr is used through four driver programs:
 \section doc_tw_main_ex ThinCurr Examples
 The following examples illustrate usage of ThinCurr to perform calculations using the thin-wall model.
 
-**Command line interface**
- - \subpage doc_thincurr_ex1
- - \subpage doc_thincurr_ex2
- - \subpage doc_thincurr_ex3
- - \subpage doc_thincurr_ex4 
-
-**Python interface**
+**Python interface (recommended)**
  - \subpage doc_tCurr_plate_eig
+ - \subpage doc_tCurr_cyl_td
  - \subpage doc_tCurr_torus_mode
  - \subpage doc_tCurr_torus_fr
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
 
+**Command line interface**
+ - \subpage doc_thincurr_ex1
+ - \subpage doc_thincurr_ex2
+ - \subpage doc_thincurr_ex3
+ - \subpage doc_thincurr_ex4 
+
 \section doc_tw_main_settings ThinCurr settings groups
 
-\subsubsection doc_tw_main_settings_fortran Fortran option groups
+\subsection doc_tw_main_settings_fortran Fortran option groups
 Driver-specific settings groups are defined for each of the programs above (eg. `thincurr_td`), follow links for description
 of available settings.
 
@@ -50,7 +51,7 @@ The following driver-wide settings are also available:
 |  `B_svd_tol=T`          |  SVD tolerance for HODLR compression of B reconstruction operator (negative to disable) | int |
 |  `B_aca_rel_tol=F`      |  ACA tolerance (relative to SVD) for HODLR compression of B reconstruction operator (negative to disable) | int |
 
-\subsubsection doc_tw_main_settings_xml XML input settings
+\subsection doc_tw_main_settings_xml XML input settings
 Settings for ThinCurr runs are contained in the `oft->thincurr` element, with the following elements:
   * `eta`: Comma separated values for surface resistivity (\f$ \eta_s = \eta / t \f$) in each region
   * `sens_mask`: Comma separated integer mask for removing regions from sensor signals (optional; default: 0 for all regions)
@@ -208,18 +209,9 @@ correct this two holes must be added, corresponding to loops in each of these tw
 This use of jumps and a single-valued potential to represent a multivalued potential is common practice in numerical methods.
 
 \subsubsection doc_tw_main_holes_def Defining holes
-Holes are defined using "nodesets" in mesh definition files that mark the nodes corresponding to a given hole. There are two
-cases for these definitions:
-
- 1. If the hole is on a boundary, as in the cylinder case, only a single node is needed and ThinCurr will determine the remaining
- elements in the hole by finding a closed boundary loop.
-
- 2. If the hole is on the interior of the mesh, as in the torus case, all the nodes that form the hole must be provided. ThinCurr
- will then generate an ordered loop from this list.
-
-Nodesets are stored in the `mesh/NODESET****` fields in native mesh files. These can be converted from nodesets defined via the
-Cubit meshing software, through the Exodus II mesh format, and `convert_cubit.py` or other mesh inputs with suitable interfacing
-scripts.
+Holes can be defined using the `ThinCurr_compute_holes.py` script. This script analyzes the toplogy of a given
+mesh and automatically locates and defines needed hole elements. This is now the recommended way of defining holes in
+ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
 
 \subsection doc_tw_main_close "Closure" elements
 As stated above the fact that the solution depends only on the gradient and not on the absolute value of \f$ \phi \f$ itself can
@@ -230,10 +222,8 @@ potential to zero at that point. We call these elements "closure" elements as th
 solveable.
 
 \subsubsection doc_tw_main_close_def Defining closures
-Closures are defined using "sidesets" in mesh definition files that mark the triangles where an element should be removed to
-avoid singularities in the system. Sidesets are stored in the `mesh/SIDESET****` fields in native mesh files. These can be
-converted from nodesets defined via the Cubit meshing software, through the Exodus II mesh format, and `convert_cubit.py` or other
-mesh inputs with suitable interfacing scripts.
+As with holes, closures can also be defined using the `ThinCurr_compute_holes.py` script. This is now the recommended way of defining
+closures in ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
 
 \subsection doc_tw_main_hodlr Hierarchical Off-Diagonal Low-Rank (HODLR) approximation
 In the standard BFEM approach described above every element interacts with every other element, leading to a dense \f$ \textrm{L} \f$ and
