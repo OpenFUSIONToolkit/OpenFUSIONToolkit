@@ -179,7 +179,7 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
         tw_model.compute_Rmat()
         driver_current = 1.0/mu0 # Current is 1.0/mu0 [A]
         driver = np.zeros((2,tw_model.nelems))
-        driver[0,:] = -Mcoil[0,:]*driver_current
+        driver[0,:] = Mcoil[0,:]*driver_current
         result = tw_model.compute_freq_response(driver,fr_limit=fr_limit,freq=freq,direct=(direct_flag == 'T'))
         probe_signals = np.dot(result,Msensor)
         probe_signals[0,:] += np.dot(np.r_[driver_current],Msc)
