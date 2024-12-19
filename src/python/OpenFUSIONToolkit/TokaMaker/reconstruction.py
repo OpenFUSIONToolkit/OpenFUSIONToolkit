@@ -5,7 +5,7 @@
 @ingroup doxy_oft_python
 '''
 import numpy as np
-from ..util import *
+from .._interface import *
 
 class tokamaker_recon_settings_struct(c_struct):
     r'''! TokaMaker reconstruction settings structure

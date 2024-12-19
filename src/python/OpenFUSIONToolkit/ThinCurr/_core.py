@@ -9,41 +9,28 @@
 # Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
 import numpy
-from ..util import *
 from ._interface import *
 
-oft_in_template = """&runtime_options
- debug={DEBUG_LEVEL}
-/
-
-&mesh_options
- meshname='none'
- {MESH_TYPE}
-/
-
-{MESH_DEF}
-
-&thincurr_hodlr_options
- target_size=1200
- aca_min_its=20
- L_svd_tol=1.E-8
- L_aca_rel_tol=0.05
- B_svd_tol=1.E-3
- B_aca_rel_tol=0.05
-/
-"""
 
 class ThinCurr():
     '''! ThinCurr thin-wall eddy current model class'''
-    def __init__(self,debug_level=0,nthreads=2):
+    def __init__(self,OFT_env):
         '''! Initialize ThinCurr object
 
         @param debug_level Level of debug printing (0-3)
         '''
-        ## Input file settings
-        self._psin_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'MESH_DEF': ''}
-        self._update_psin()
-        oft_init(c_int(nthreads))
+        # Create OFT execution environment
+        self._oft_env = OFT_env
+        self._oft_env.oft_in_groups['mesh_options'] = {'cad_type': "0"}
+        self._oft_env.oft_in_groups['thincurr_hodlr_options'] = {
+            'target_size': '1200',
+            'aca_min_its': '20',
+            'L_svd_tol': '1.E-8',
+            'L_aca_rel_tol': '0.05',
+            'B_svd_tol': '1.E-3',
+            'B_aca_rel_tol': '0.05',
+        }
+        self._oft_env.update_oft_in()
         ## Thin-wall model object
         self.tw_obj = c_void_p()
         ## Number of regions in mesh
@@ -80,11 +67,6 @@ class ThinCurr():
         self._xml_ptr = c_void_p()
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
-
-    def _update_psin(self):
-        '''! Update input file (`oftpyin`) with current settings'''
-        with open('oftpyin','w+') as fid:
-            fid.write(oft_in_template.format(**self._psin_dict))
 
     def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=-1):
         '''! Setup ThinCurr model

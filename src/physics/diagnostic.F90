@@ -210,7 +210,7 @@ CHARACTER(LEN=*), INTENT(in) :: filename !< Filename for history file
 INTEGER(i4) :: i,j,io_unit
 CHARACTER(LEN=4) :: fid
 CHARACTER(LEN=2) :: did
-CHARACTER(LEN=OFT_HIST_SLEN) :: desc_str
+CHARACTER(LEN=OFT_SLEN) :: desc_str
 self%filename=filename
 !---Setup history file
 IF(oft_env%head_proc)THEN

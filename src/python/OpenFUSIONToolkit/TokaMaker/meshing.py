@@ -7,7 +7,7 @@
 import json
 import math
 import numpy
-from ..util import ctypes, c_struct, c_int, c_int_ptr, c_double_ptr, c_char_p, ctypes_subroutine, oft_triangle_lib
+from .._interface import *
 
 ## @cond
 class triangle_struct(c_struct):

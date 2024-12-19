@@ -1066,7 +1066,7 @@ INTEGER(4) :: i,j,k,n,m,npsi,io_unit,ncons,neddy
 REAL(8) :: rtmp(2)
 REAL(8), ALLOCATABLE :: nax_corr(:,:),nax_tmp(:,:)
 CHARACTER(LEN=2) :: num_str
-CHARACTER(LEN=OFT_HIST_SLEN) :: dissfile
+CHARACTER(LEN=OFT_SLEN) :: dissfile
 LOGICAL :: file_exists
 CALL oft_increase_indent()
 !---

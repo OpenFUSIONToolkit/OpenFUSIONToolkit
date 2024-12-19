@@ -6,20 +6,7 @@
 '''
 import numpy
 from ._interface import *
-from ..util import *
 
-oft_in_template = """&runtime_options
- debug={DEBUG_LEVEL}
-/
-
-&mesh_options
- meshname='none'
- grid_order={GRID_ORDER}
- {MESH_TYPE}
-/
-
-{MESH_DEF}
-"""
 
 class Marklin_field_interpolator():
     '''! Interpolation class for force-free eigenstate vector fields'''
@@ -52,17 +39,16 @@ class Marklin_field_interpolator():
         marklin_apply_int(self.int_obj,self.int_type,pt,self.fbary_tol,ctypes.byref(self.cell),self.val)
         return self.val
 
+
 class Marklin():
     '''! Marklin force-free equilibrium solver class'''
-    def __init__(self,debug_level=0,nthreads=2,grid_order=1):
+    def __init__(self,OFT_env):
         '''! Initialize Marklin object
 
         @param debug_level Level of debug printing (0-3)
         '''
-        ## Input file settings
-        self._psin_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'GRID_ORDER': grid_order, 'MESH_DEF': ''}
-        self._update_psin()
-        oft_init(c_int(nthreads))
+        # Create OFT execution environment
+        self._oft_env = OFT_env
         ## Number of regions in mesh
         self.nregs = -1
         ## Number of points in mesh
@@ -82,12 +68,7 @@ class Marklin():
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
 
-    def _update_psin(self):
-        '''! Update input file (`oftpyin`) with current settings'''
-        with open('oftpyin','w+') as fid:
-            fid.write(oft_in_template.format(**self._psin_dict))
-
-    def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
+    def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None,grid_order=1):
         '''! Setup mesh for Marklin force-free equilibrium calculations
 
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
@@ -105,11 +86,12 @@ class Marklin():
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
             regfake = numpy.ones((1,),dtype=numpy.int32)
-            self._psin_dict['MESH_TYPE'] = 'cad_type=0'
-            self._psin_dict['MESH_DEF'] = """&native_mesh_options
- filename='{0}'
-/""".format(mesh_file)
-            self._update_psin()
+            self._oft_env.oft_in_groups['mesh_options'] = {
+                'cad_type': "0",
+                'grid_order': '{0}'.format(grid_order)
+            }
+            self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
+            self._oft_env.update_oft_in()
             oft_setup_vmesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
         elif r is not None:
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)

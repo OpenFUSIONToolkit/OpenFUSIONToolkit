@@ -8,10 +8,7 @@
 #
 # Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
-# import json
-# import math
 import numpy
-from ..util import *
 from ._interface import *
 
 
@@ -80,30 +77,16 @@ def create_prof_file(self, filename, profile_dict, name):
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
-oft_in_template = """&runtime_options
- debug={DEBUG_LEVEL}
-/
-
-&mesh_options
- meshname='none'
- {MESH_TYPE}
-/
-
-{MESH_DEF}
-"""
-
 
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
-    def __init__(self,debug_level=0,nthreads=2):
+    def __init__(self,OFT_env):
         '''! Initialize TokaMaker object
 
         @param debug_level Level of debug printing (0-3)
         '''
-        ## Input file settings
-        self._oft_in_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'MESH_DEF': ''}
-        self._update_oft_in()
-        oft_init(c_int(nthreads))
+        # Create OFT execution environment
+        self._oft_env = OFT_env
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_eq "gs_eq")
         self.gs_obj = c_void_p()
         tokamaker_alloc(ctypes.byref(self.gs_obj))
@@ -163,11 +146,6 @@ class TokaMaker():
         self.nvac = 0
         ## Limiting contour
         self.lim_contour = None
-    
-    def _update_oft_in(self):
-        '''! Update input file (`oftpyin`) with current settings'''
-        with open('oftpyin','w+') as fid:
-            fid.write(oft_in_template.format(**self._oft_in_dict))
 
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
@@ -229,11 +207,9 @@ class TokaMaker():
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
             regfake = numpy.ones((1,),dtype=numpy.int32)
-            self._oft_in_dict['MESH_TYPE'] = 'cad_type=0'
-            self._oft_in_dict['MESH_DEF'] = """&native_mesh_options
- filename='{0}'
-/""".format(mesh_file)
-            self._update_oft_in()
+            self._oft_env.oft_in_groups['mesh_options'] = {'cad_type': "0"}
+            self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
+            self._oft_env.update_oft_in()
             oft_setup_smesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
         elif r is not None:
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)

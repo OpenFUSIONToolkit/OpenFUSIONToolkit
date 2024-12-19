@@ -49,11 +49,15 @@ END SUBROUTINE copy_string_rev
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE oftpy_init(nthreads) BIND(C,NAME="oftpy_init")
+SUBROUTINE oftpy_init(nthreads,slens) BIND(C,NAME="oftpy_init")
 INTEGER(c_int), VALUE, INTENT(in) :: nthreads !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: slens !< String lengths
+INTEGER(4), POINTER, DIMENSION(:) :: slens_tmp
 IF(oft_env%ifile/='none')RETURN
 oft_env%ifile='oftpyin'
 CALL oft_init(nthreads)
+CALL c_f_pointer(slens, slens_tmp, [4])
+slens_tmp=[OFT_MPI_PLEN,OFT_SLEN,OFT_PATH_SLEN,OFT_ERROR_SLEN]
 END SUBROUTINE oftpy_init
 !------------------------------------------------------------------------------
 !> Needs docs

@@ -4,7 +4,7 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
-from ..util import *
+from .._interface import *
 
 
 class tokamaker_settings_struct(c_struct):
