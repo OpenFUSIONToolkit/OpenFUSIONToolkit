@@ -238,12 +238,11 @@ WRITE(*,*)
 WRITE(*,*)'Starting Frequency-response run'
 !---Setup matrix
 ALLOCATE(b(self%nelems))
-b=-(0.d0,1.d0)*driver(:,1) + (1.d0,0.d0)*driver(:,2) ! -i*L_e*I_e
+b=(1.d0,0.d0)*driver(:,1) + (0.d0,1.d0)*driver(:,2)
 IF(PRESENT(hodlr_op))THEN
   SELECT CASE(fr_limit)
   CASE(0)
     WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
-    b=b*freq*2.d0*pi ! Scale RHS by forcing frequency
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)*freq*2.d0*pi
@@ -268,7 +267,6 @@ ELSE
   SELECT CASE(fr_limit)
   CASE(0)
     WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
-    b=b*freq*2.d0*pi ! Scale RHS by forcing frequency
     Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -650,9 +648,9 @@ IF(ASSOCIATED(curr_waveform))THEN
   IF(ncols-1/=self%n_icoils)CALL oft_abort('# of currents in waveform does not match # of icoils', &
     'run_td_sim',__FILE__)
   ntimes_curr=SIZE(curr_waveform,DIM=1)
-  DO j=1,self%n_icoils
-    curr_waveform(:,j+1)=curr_waveform(:,j+1)*mu0 ! Convert to magnetic units
-  END DO
+  ! DO j=1,self%n_icoils
+  !   curr_waveform(:,j+1)=curr_waveform(:,j+1)*mu0 ! Convert to magnetic units
+  ! END DO
   ALLOCATE(icoil_curr(ncols-1),icoil_dcurr(ncols-1))
 ELSE
   ALLOCATE(icoil_curr(self%n_icoils),icoil_dcurr(self%n_icoils))
@@ -858,7 +856,7 @@ DO i=1,nsteps
   uu=g%dot(g)
   CALL g%get_local(vals)
   IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
-  self%nelems,icoil_dcurr,1,1.d0,vals,1)
+    self%nelems,icoil_dcurr,1,1.d0,vals,1)
   DO j=1,self%n_vcoils
     vals(self%np_active+self%nholes+j)=vals(self%np_active+self%nholes+j)+pcoil_volt(j)
   END DO
