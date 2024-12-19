@@ -106,6 +106,10 @@ tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
 tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
     [ctypes_numpy_array(numpy.float64,1)])
 
+# tokamaker_area_int(vec_vals,reg_ind,result)
+tokamaker_area_int = ctypes_subroutine(oftpy_lib.tokamaker_area_int,
+    [ctypes_numpy_array(numpy.float64,1), c_int, c_double_ptr])
+
 #
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
     [ctypes_numpy_array(numpy.float64,1)])
