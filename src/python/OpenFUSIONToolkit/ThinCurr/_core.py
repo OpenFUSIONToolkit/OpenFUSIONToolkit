@@ -9,7 +9,9 @@
 # Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
 import numpy
+import h5py
 from ._interface import *
+from ..util import build_XDMF
 
 
 class ThinCurr():

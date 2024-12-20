@@ -155,8 +155,6 @@ class TokaMaker():
             raise Exception(cstring.value)
         self.nregs = -1
         self.np = -1
-        self._oft_in_dict['MESH_TYPE'] = ''
-        self._oft_in_dict['MESH_DEF'] = ''
         # Reset defaults
         self.settings = tokamaker_default_settings()
         self._cond_dict = {}

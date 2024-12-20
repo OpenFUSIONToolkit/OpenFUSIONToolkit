@@ -6,6 +6,7 @@
 '''
 import numpy
 from ._interface import *
+from ..util import build_XDMF
 
 
 class Marklin_field_interpolator():

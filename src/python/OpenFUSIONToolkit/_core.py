@@ -34,9 +34,9 @@ class OFT_env():
         ## Error string size
         self.oft_error_slen = slens[3]
     
-    def update_oft_in(self):
+    def update_oft_in(self,filename='oftpyin'):
         '''! Update input file (`oftpyin`) with current settings'''
-        with open('oftpyin','w+') as fid:
+        with open(filename, 'w+') as fid:
             for name, options in self.oft_in_groups.items():
                 fid.write("&{0}\n".format(name))
                 for option_name, option_value in options.items():
