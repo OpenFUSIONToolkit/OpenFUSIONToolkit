@@ -76,20 +76,20 @@ jobs:
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
-        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py triangle
+        python -m pip install pytest numpy scipy h5py triangle
     
     - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
-        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py setuptools
+        python -m pip install pytest numpy scipy h5py setuptools
         git clone https://github.com/drufat/triangle.git
         cd triangle
         git submodule init
         git submodule update
-        ${{ matrix.config.python }} setup.py build
-        ${{ matrix.config.python }} setup.py install
+        CC=clang python setup.py build
+        CC=clang python setup.py install
 
     - name: Cache external libraries
       id: cache-ext-libs
