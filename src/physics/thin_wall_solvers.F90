@@ -1159,6 +1159,7 @@ CHARACTER(LEN=4) :: sub_coil_id
 CLASS(oft_vector), POINTER :: atmp,btmp,Bx,By,Bz
 character(LEN=80), dimension(1) :: description
 CALL hdf5_create_file(TRIM(filename))
+CALL hdf5_write(tw_idx_ver,TRIM(filename),tw_idx_path)
 !---Setup temporaries
 NULLIFY(vals)
 CALL self%Uloc%new(atmp)

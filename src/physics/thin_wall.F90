@@ -2124,7 +2124,7 @@ DO i=1,bmesh%np
     END DO
   END DO
 END DO
-self%Bdr=self%Bdr/(4.d0*pi)
+self%Bdr=self%Bdr*mu0/(4.d0*pi)
 !
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems
