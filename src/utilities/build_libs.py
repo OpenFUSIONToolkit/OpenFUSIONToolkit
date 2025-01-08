@@ -877,7 +877,10 @@ class HDF5(package):
                     'export LIBS="{MPI_LIBS}"'
                 ]
         if self.cmake_build and ('MACOS_SDK_PATH' in self.config_dict):
-            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+            if self.cmake_build:
+                cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+            else:
+                configure_options.append('--with-sysroot={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         #
         if self.cmake_build:
             build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
@@ -1755,8 +1758,6 @@ if options.ld_flags is not None:
 if options.cross_compile_host is not None:
     config_dict['CROSS_COMPILE_HOST'] = options.cross_compile_host
 if options.macos_sdk_path is not None:
-    if not options.hdf5_cmake_build:
-        parser.exit(-1, 'Use of "--macos_sdk_path" requires CMake build for HDF5\n')
     if not os.path.isdir(options.macos_sdk_path):
         parser.exit(-1, 'Specified "--macos_sdk_path={0}" directory does not exist\n'.format(options.macos_sdk_path))
     config_dict['MACOS_SDK_PATH'] = options.macos_sdk_path

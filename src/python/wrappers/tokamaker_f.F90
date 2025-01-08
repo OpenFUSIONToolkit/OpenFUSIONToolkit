@@ -963,7 +963,7 @@ REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
-CHARACTER(LEN=36) :: run_info_f
+CHARACTER(LEN=40) :: run_info_f
 CHARACTER(LEN=80) :: filename_tmp,lim_file,error_flag
 CALL copy_string_rev(run_info,run_info_f)
 CALL copy_string_rev(filename,filename_tmp)
