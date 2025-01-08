@@ -990,7 +990,7 @@ real(r8), allocatable, dimension(:) :: t1v,t2v
 DEBUG_STACK_PUSH
 if(self%stitch_info%full)then
   rst_info%offset=0
-  rst_info%count=self%ng
+  rst_info%count=INT(self%ng,4)
   rst_info%dim=self%ng
   rst_info%full=.TRUE.
   allocate(rst_info%data(rst_info%count))

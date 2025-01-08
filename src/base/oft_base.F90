@@ -816,7 +816,7 @@ END FUNCTION oft_mpi_maxia
 FUNCTION oft_mpi_maxi8a(a,n) result(b)
 INTEGER(i8), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
-INTEGER(i4) :: b(n),ierr
+INTEGER(i8) :: b(n),ierr
 INTEGER(i8) :: timein
 #ifdef HAVE_MPI
 DEBUG_STACK_PUSH
