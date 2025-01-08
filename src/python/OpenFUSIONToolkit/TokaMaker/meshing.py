@@ -7,6 +7,72 @@
 import json
 import math
 import numpy
+from ..util import ctypes, c_struct, c_int, c_int_ptr, c_double_ptr, c_char_p, ctypes_subroutine, oft_triangle_lib
+
+## @cond
+class triangle_struct(c_struct):
+    r'''! Triangle library I/O structure
+    '''
+    _fields_ = [
+        ("pointlist", c_double_ptr),
+        ("pointattributelist", c_double_ptr),
+        ("pointmarkerlist", c_int_ptr),
+        ("numberofpoints", c_int),
+        ("numberofpointattributes", c_int),
+        ("trianglelist", c_int_ptr),
+        ("triangleattributelist", c_double_ptr),
+        ("trianglearealist", c_double_ptr),
+        ("neighborlist", c_int_ptr),
+        ("numberoftriangles", c_int),
+        ("numberofcorners", c_int),
+        ("numberoftriangleattributes", c_int),
+        ("segmentlist", c_int_ptr),
+        ("segmentmarkerlist", c_int_ptr),
+        ("numberofsegments", c_int),
+        ("holelist", c_double_ptr),
+        ("numberofholes", c_int),
+        ("regionlist", c_double_ptr),
+        ("numberofregions", c_int),
+        ("edgelist", c_int_ptr),
+        ("edgemarkerlist", c_int_ptr),
+        ("normlist", c_double_ptr),
+        ("numberofedges", c_int)
+    ]
+
+oft_triangulate = ctypes_subroutine(oft_triangle_lib.triangulate,
+    [c_char_p, ctypes.POINTER(triangle_struct), ctypes.POINTER(triangle_struct), ctypes.POINTER(triangle_struct)], c_int)
+## @endcond
+
+def run_triangle(alpha):
+    # # Old version using Python "triangle" package
+    # try:
+    #     import triangle as tr
+    # except ImportError:
+    #     print('Meshing requires "triangle" python library')
+    #     return None
+    # return tr.triangulate(alpha,'pqaA')
+
+    # New version using internal interface
+    in_struct = triangle_struct()
+    point_list = numpy.ascontiguousarray(alpha['vertices'], dtype=numpy.float64)
+    in_struct.pointlist = point_list.ctypes.data_as(c_double_ptr)
+    in_struct.numberofpoints = point_list.shape[0]
+    segments = numpy.ascontiguousarray(alpha['segments'], dtype=numpy.int32)
+    in_struct.segmentlist = segments.ctypes.data_as(c_int_ptr)
+    in_struct.numberofsegments = segments.shape[0]
+    regions = numpy.ascontiguousarray(alpha['regions'], dtype=numpy.float64)
+    in_struct.regionlist = regions.ctypes.data_as(c_double_ptr)
+    in_struct.numberofregions = regions.shape[0]
+    out_struct = triangle_struct()
+    vor_struct = triangle_struct()
+    setting_string = c_char_p(b'pqaAzQ')
+    errval = oft_triangulate(setting_string, ctypes.byref(in_struct), ctypes.byref(out_struct), ctypes.byref(vor_struct))
+    if errval != 0:
+        raise ValueError("Meshing failed!")
+    vertices = numpy.ctypeslib.as_array(out_struct.pointlist,shape=(out_struct.numberofpoints,2))
+    triangles = numpy.ctypeslib.as_array(out_struct.trianglelist,shape=(out_struct.numberoftriangles,3))
+    triangle_attributes = numpy.ctypeslib.as_array(out_struct.triangleattributelist,shape=(out_struct.numberoftriangles,))
+    return {'vertices': vertices, 'triangles': triangles, 'triangle_attributes': triangle_attributes}
 
 
 class gs_Domain:
@@ -800,17 +866,12 @@ class Mesh:
 
         @result pts[np,2], tris[nc,3], regions[nc] 
         '''
+        print('Generating mesh:')
         resampled_flat = []
         for segment in self._resampled_segments:
             resampled_flat += [[segment[i], segment[i+1]] for i in range(len(segment)-1)]
         alpha = dict(vertices=self._resampled_points, segments=resampled_flat, regions=self._reg_defs)
-        try:
-            import triangle as tr
-        except ImportError:
-            print('Meshing requires "triangle" python library')
-            return None
-        print('Generating mesh:')
-        beta = tr.triangulate(alpha,'pqaA')
+        beta = run_triangle(alpha)
         regions = beta['triangle_attributes'].astype('int32').ravel()
         print('  # of points  = {0}'.format(len(beta['vertices'])))
         print('  # of cells   = {0}'.format(len(beta['triangles'])))

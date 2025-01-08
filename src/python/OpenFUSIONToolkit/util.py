@@ -44,14 +44,14 @@ def ctypes_numpy_array(type,ndim):
     '''
     return numpy.ctypeslib.ndpointer(dtype=type,ndim=ndim,flags='C_CONTIGUOUS')
 
-def ctypes_subroutine(function, argtypes=None):
+def ctypes_subroutine(function, argtypes=None, restype=None):
     '''! Create a ctypes object for a FORTRAN subroutine (no return value)
 
     @param function Function object from ctypes library
     @param argtypes List of types for each argument (optional)
     '''
     tmp_fun = function
-    tmp_fun.restype = None
+    tmp_fun.restype = restype
     if argtypes is not None:
         tmp_fun.argtypes = argtypes
     return tmp_fun
@@ -71,6 +71,7 @@ elif platform.system() == 'Darwin':
 else:
     raise SystemError('Unsupported platform type')
 oftpy_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboftpy'+lib_suffix))
+oft_triangle_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboft_triangle'+lib_suffix))
 
 # Global init function
 oft_init = ctypes_subroutine(oftpy_lib.oftpy_init,

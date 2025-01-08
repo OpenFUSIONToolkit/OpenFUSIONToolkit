@@ -548,6 +548,9 @@ class ThinCurr_reduced:
         @param filename File containing reduced model
         '''
         with h5py.File(filename,'r') as file:
+            mu0_scale = mu0 # Prior to addition of version flag magnetic units were saved for coils
+            if 'ThinCurr_Version' in file:
+                mu0_scale = 1.0 
             ## Current potential basis set
             self.Basis = numpy.asarray(file['Basis'])
             ## Self-inductance matrix for reduced model
@@ -567,13 +570,13 @@ class ThinCurr_reduced:
             ## B-field coil reconstruction operator
             self.Bc = None
             if 'Mc' in file:
-                self.Mc = numpy.asarray(file['Mc'])
+                self.Mc = mu0_scale*numpy.asarray(file['Mc'])
                 if 'Bx_c' in file:
-                    self.Bc = [numpy.asarray(file['Bx_c']), numpy.asarray(file['By_c']), numpy.asarray(file['Bz_c'])]
+                    self.Bc = mu0_scale*numpy.asarray([file['Bx_c'], file['By_c'], file['Bz_c']])
             ## Coil-sensor mutual inductance matrix
             self.Msc = None
             if 'Msc' in file:
-                self.Msc = numpy.asarray(file['Msc'])
+                self.Msc = mu0_scale*numpy.asarray(file['Msc'])
     
     def reconstruct_potential(self,weights):
         r'''! Reconstruct full current potential on original grid
@@ -604,7 +607,7 @@ class ThinCurr_reduced:
         for i in range(3):
             Bfield[:,i] = numpy.dot(weights,self.B[i])
             if self.Bc is not None:
-                Bfield[:,i] += numpy.dot(mu0*coil_currs,self.Bc[i])
+                Bfield[:,i] += numpy.dot(coil_currs,self.Bc[i])
         return Bfield
 
     def get_eigs(self):
@@ -653,7 +656,7 @@ class ThinCurr_reduced:
         if self.Ms is not None:
             sen_tmp = numpy.dot(pot_tmp,self.Ms)
             if self.Msc is not None:
-                sen_tmp += numpy.dot(mu0*curr_tmp,self.Msc)
+                sen_tmp += numpy.dot(curr_tmp,self.Msc)
             sen_time.append(t)
             sen_hist.append(sen_tmp)
         #
@@ -666,7 +669,6 @@ class ThinCurr_reduced:
                     dcurr_tmp[j] -= numpy.interp(t-dt/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
                     dcurr_tmp[j] += numpy.interp(t+dt*5.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
                     dcurr_tmp[j] -= numpy.interp(t+dt*3.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
-                dcurr_tmp *= mu0
                 rhs -= numpy.dot(dcurr_tmp,self.Mc)
             pot_tmp = numpy.dot(rhs,Lbackward)
             t += dt
@@ -682,7 +684,7 @@ class ThinCurr_reduced:
             if self.Ms is not None:
                 sen_tmp = numpy.dot(pot_tmp,self.Ms)
                 if self.Msc is not None:
-                    sen_tmp += numpy.dot(mu0*curr_tmp,self.Msc)
+                    sen_tmp += numpy.dot(curr_tmp,self.Msc)
                 sen_time.append(t)
                 sen_hist.append(sen_tmp)
         #

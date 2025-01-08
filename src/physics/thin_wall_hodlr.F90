@@ -570,7 +570,7 @@ IF(self%n_icoils>0)THEN
     END DO
   END DO
 END IF
-Bop_dr=Bop_dr/(4.d0*pi)
+Bop_dr=Bop_dr*mu0/(4.d0*pi)
 END SUBROUTINE tw_compute_Bops_hole
 !------------------------------------------------------------------------------
 !> Needs Docs
