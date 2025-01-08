@@ -1853,7 +1853,7 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         build_tests=(options.oft_build_tests == 1),
         build_examples=(options.oft_build_examples == 1),
         build_docs=(options.oft_build_docs == 1),
-        build_coverage=(options.oft_build_coverage == 1),
+        build_coverage=options.oft_build_coverage,
         package_build=options.oft_package,
         package_release=options.oft_package_release
     )
