@@ -999,7 +999,7 @@ DO i=1,nsteps
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       hist_i4=(/rst_ind+i-1,nksolver%lits,nksolver%nlits/)
-      hist_r4=(/t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time/)
+      hist_r4=REAL([t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,2X,I4,F12.3,ES12.2)
       WRITE(*,103)rst_ind+i,t,nksolver%lits,nksolver%nlits,elapsed_time,dt
       IF(oft_debug_print(1))WRITE(*,*)
@@ -1431,7 +1431,7 @@ DO i=1,nsteps
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       hist_i4=(/rst_ind+i-1,solver%cits,0/)
-      hist_r4=(/t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time/)
+      hist_r4=REAL([t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,F12.3,ES12.2)
       WRITE(*,103)rst_ind+i,t,solver%cits,elapsed_time,dt
       IF(oft_debug_print(1))WRITE(*,*)

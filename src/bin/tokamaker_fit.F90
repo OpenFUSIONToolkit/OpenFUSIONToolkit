@@ -69,7 +69,7 @@ LOGICAL :: limited_only = .FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
-CHARACTER(LEN=36) :: eqdsk_run_info = ''
+CHARACTER(LEN=40) :: eqdsk_run_info = ''
 CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = ''
 !---Fit Input options
 REAL(8) :: psinorm = 1.d0
