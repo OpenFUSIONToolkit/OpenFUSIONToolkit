@@ -82,18 +82,20 @@ IF(taylor_nm>0)THEN
 END IF
 !---Lagrange
 CALL oft_lag_setup(order,minlev)
-CALL lag_setup_interp
-CALL lag_mloptions
 !---H1(Curl) subspace
 CALL oft_hcurl_setup(order,minlev)
-CALL hcurl_setup_interp
-CALL hcurl_mloptions
 !---Compute modes
 IF(minlev<0)THEN
   taylor_minlev=oft_hcurl_level
 ELSE
   taylor_minlev=minlev
   IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,minlev)
+END IF
+IF(taylor_minlev<oft_hcurl_level)THEN
+  CALL lag_setup_interp
+  CALL lag_mloptions
+  CALL hcurl_setup_interp
+  CALL hcurl_mloptions
 END IF
 oft_env%pm=.TRUE.
 taylor_rst=save_rst
