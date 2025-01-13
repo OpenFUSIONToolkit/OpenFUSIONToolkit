@@ -729,7 +729,8 @@ with h5py.File(out_file,'r+') as h5_file:
             del h5_file['mesh/SIDESET{0:04d}'.format(j+1)]
         del h5_file['mesh/NUM_SIDESETS']
     if len(closures) > 0:
-        h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(closures),], dtype='i4')
+        closures = [closure+1 for closure in closures]
+        h5_file.create_dataset('mesh/NUM_SIDESETS', data=[1,], dtype='i4')
         h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(1), data=closures, dtype='i4')
 
 # Plot final cycles
