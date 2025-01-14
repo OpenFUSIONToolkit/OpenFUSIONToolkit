@@ -304,9 +304,25 @@ class trimesh:
                         else:
                             flip = True
                 if flip:
-                    cycle_lists[self.surf_tag[face]].append(np.flip(cycle_pts))
+                    cycle_tmp = np.flip(cycle_pts)
                 else:
-                    cycle_lists[self.surf_tag[face]].append(np.array(cycle_pts))
+                    cycle_tmp = np.array(cycle_pts)
+                # Check to make sure we start at a suitable point by avoiding boundary points that connect via non-boundary edges
+                for i in range(cycle_tmp.shape[0]):
+                    next_pt = cycle_tmp[i]
+                    for k in range(self.kpf[next_pt],self.kpf[next_pt+1]):
+                        face = self.lpf[k]
+                        if self.bp[self.lf[face,0]] and self.bp[self.lf[face,1]] and self.bp[self.lf[face,2]]:
+                            break
+                    else:
+                        break
+                else:
+                    raise ValueError("Could not find suitable starting point for boundary cycle")
+                if i > 0:
+                    print("Shifting boundary cycle to {0}".format(i))
+                    cycle_tmp = np.hstack((cycle_tmp[i:-1], cycle_tmp[:i+1]))
+                #
+                cycle_lists[self.surf_tag[face]].append(cycle_tmp)
         k = 0
         for cycle_list in cycle_lists:
             k += len(cycle_list)
@@ -452,6 +468,8 @@ def fixup_loop(cycle,mesh,boundary_cycles,debug):
     '''
     # Shrink corners
     while True:
+        if len(cycle) < 2:
+            raise ValueError("Cycle has shrunk to zero size")
         if cycle[-2] == cycle[1]:
             cycle = np.delete(cycle,[0,-1])
             continue
@@ -512,6 +530,7 @@ parser.add_argument("--keep_nodeset_start", type=int, default=None, help="Starti
 parser.add_argument("--plot_final", action="store_true", default=False, help="Show final homology basis?")
 parser.add_argument("--plot_steps", action="store_true", default=False, help="Show intermediate bases for each distinct surface?")
 parser.add_argument("--show_omitted", action="store_true", default=False, help="Show boundary cycles that are omitted?")
+parser.add_argument("--show_covering", action="store_true", default=False, help="Show covering triangles for boundary cycles (only used if `--plot_steps`)?")
 parser.add_argument("--debug", action="store_true", default=False, help="Print additional debug information?")
 parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
 parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
@@ -597,6 +616,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
         new_lc = rindexed_pts[np.asarray(new_lc)+1]-1
         face_covered = np.vstack((face,new_lc))
     else:
+        new_lc = []
         new_bcycles = []
         face_covered = face
         ind = np.argmax(face_mask)
@@ -684,6 +704,8 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1, projection='3d')
         ax.plot_trisurf(vertex[:,0], vertex[:,1], vertex[:,2], triangles=face, color=[0.0, 0.0, 0.0, 0.1])
+        if options.show_covering and (len(new_lc) > 0):
+            ax.plot_trisurf(vertex[:,0], vertex[:,1], vertex[:,2], triangles=new_lc, color='g')
         for k, cycle in enumerate(new_bcycles):
             if k == cycle_max[1]:
                 if options.show_omitted:
