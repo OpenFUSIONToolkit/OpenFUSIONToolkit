@@ -613,7 +613,7 @@ function hexmesh_phys2logho(self,i,pt) result(f)
 class(oft_hexmesh), target, intent(in) :: self
 integer(i4), intent(in) :: i
 real(r8), intent(in) :: pt(3)
-real(4) :: f(4)
+real(r8) :: f(4)
 !---
 integer(i4), parameter :: nerr=3
 integer(i4), parameter :: neq=3
@@ -956,7 +956,7 @@ DO k=1,2
     IF(i/=iskip)test(i)=DOT_PRODUCT(sgop(:,k),vgop(:,i))
   END DO
   i = MAXLOC(ABS(test), DIM=1)
-  lmap(k)=SIGN(REAL(i,8), test(i))
+  lmap(k)=INT(SIGN(REAL(i,8), test(i)),4)
 END DO
 end subroutine hexmesh_get_surf_map
 !------------------------------------------------------------------------------

@@ -446,7 +446,7 @@ IF(error==0)THEN
     CALL h5sget_simple_extent_ndims_f(dspace_id, ndims, error)
     ALLOCATE(dim_sizes(ndims),tmp_sizes(ndims),maxdims(ndims))
     CALL h5sget_simple_extent_dims_f(dspace_id, tmp_sizes, maxdims, error)
-    dim_sizes=tmp_sizes
+    dim_sizes=INT(tmp_sizes,4)
     DEALLOCATE(tmp_sizes,maxdims)
     !---Close dataspace/set
     call h5sclose_f(dspace_id, error)

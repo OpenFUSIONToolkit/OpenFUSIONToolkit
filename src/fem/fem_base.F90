@@ -111,7 +111,7 @@ END INTERFACE
 TYPE, PUBLIC, EXTENDS(oft_afem_type) :: oft_bfem_type
   INTEGER(i4) :: gstruct(3) = -1 !< Geometric mapping array
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Structure containing bound mesh
-  TYPE(fem_mpi_global), POINTER :: parent => NULL() !< Global index information
+  TYPE(fem_parent), POINTER :: parent => NULL() !< Global index information
 CONTAINS
   !> Setup FE representation
   PROCEDURE :: setup => bfem_setup
@@ -192,6 +192,13 @@ type :: fem_mpi_global
   integer(8), pointer, dimension(:) :: le => NULL() !< Global index of elements (ne)
   logical, pointer, dimension(:) :: gbe => NULL() !< Global boundary element flag (ne)
 end type fem_mpi_global
+!---------------------------------------------------------------------------
+!> Parent FE information and indicies
+!---------------------------------------------------------------------------
+type :: fem_parent
+  integer(i4) :: ne = 0 !< Parent element count
+  integer(i4), pointer, dimension(:) :: le => NULL() !< Parent index of elements (ne)
+end type fem_parent
 !---
 PUBLIC fem_common_linkage, fem_gen_legacy, fem_delete, bfem_delete
 contains
@@ -751,10 +758,10 @@ jp=row%linkage%kle(0)
 jn=row%linkage%kle(0+1)-jp
 IF(jn>0)THEN
   DO m=1,nbe
-    jp=search_array(leout(m,1),row_lg_sorted,INT(row%ne,8))
+    jp=INT(search_array(leout(m,1),row_lg_sorted,INT(row%ne,8)),4)
     IF(jp>0)THEN
       leout(m,1)=row_lg_ind(jp)
-      jn=search_array(leout(m,2),col_lg_sorted,INT(col%ne,8))
+      jn=INT(search_array(leout(m,2),col_lg_sorted,INT(col%ne,8)),4)
       IF(jn>0)THEN
         leout(m,2)=col_lg_ind(jn)
         nnz_new=nnz_new+1
@@ -794,7 +801,7 @@ DO i=1,row%ne
     DO WHILE(letmp(ncon(m),1)<=i)
       IF(letmp(ncon(m),1)==i)THEN
         new_graph%kr(i)=new_graph%kr(i)+1
-        lrtmp(nnz_new+new_graph%kr(i))=letmp(ncon(m),2)
+        lrtmp(nnz_new+new_graph%kr(i))=INT(letmp(ncon(m),2),4)
       END IF
       ncon(m)=ncon(m)+1
       IF(ncon(m)>nrecv(m))EXIT
@@ -1862,8 +1869,8 @@ CLASS(oft_bfem_type), INTENT(inout) :: self
 DEBUG_STACK_PUSH
 CALL afem_delete(self)
 IF(ASSOCIATED(self%parent))THEN
+  self%parent%ne=0
   IF(ASSOCIATED(self%parent%le))DEALLOCATE(self%parent%le)
-  IF(ASSOCIATED(self%parent%gbe))DEALLOCATE(self%parent%gbe)
 END IF
 NULLIFY(self%mesh)
 DEBUG_STACK_POP
@@ -1888,13 +1895,13 @@ LOGICAL :: has_parent
 integer(i8), pointer, dimension(:) :: letmp,leout
 integer(i8), allocatable, dimension(:) :: lsort
 integer(i4), allocatable :: linktmp(:,:,:),isort(:),ncon(:)
-integer(i4) :: neel
+integer(i4) :: neel,mycounts4(3)
 integer(i4) :: kk,m,mm,l,request
 integer(i4) :: nbetmp,nbemax
 integer(i8) :: netmp,nemax
-integer(i4) :: i,j,k,offset,stack1,stack2
+integer(i4) :: i,j,k,offset,offsetp,stack1,stack2
 integer(i4) :: je,js,jee,jse,ierr
-integer(i8) :: offsetg,offsetp
+integer(i8) :: offsetg
 integer(i8) :: mycounts(3)
 integer(i4), allocatable, dimension(:) :: bpi,bei,bfi
 class(oft_bmesh), pointer :: mesh
@@ -1917,8 +1924,8 @@ IF(mesh%skip)THEN
   !---Determine parent element count
   IF(has_parent)THEN
     allocate(self%parent)
-    mycounts=(/mesh%parent%np,mesh%parent%ne,mesh%parent%nf/)
-    self%parent%ne=sum(self%gstruct*mycounts)
+    mycounts4=(/mesh%parent%np,mesh%parent%ne,mesh%parent%nf/)
+    self%parent%ne=sum(self%gstruct*mycounts4)
   END IF
   IF(mesh%fullmesh)THEN
     self%linkage%full=.TRUE.
@@ -2021,8 +2028,8 @@ self%global%ne=sum(self%gstruct*mycounts)
 allocate(self%global%le(self%ne))
 !---Determine parent element count
 IF(has_parent)THEN
-  mycounts=(/mesh%parent%np,mesh%parent%ne,mesh%parent%nf/)
-  self%parent%ne=sum(self%gstruct*mycounts)
+  mycounts4=(/mesh%parent%np,mesh%parent%ne,mesh%parent%nf/)
+  self%parent%ne=sum(self%gstruct*mycounts4)
   allocate(self%parent%le(self%ne))
 END IF
 !---

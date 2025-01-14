@@ -69,8 +69,8 @@ LOGICAL :: limited_only = .FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
-CHARACTER(LEN=36) :: eqdsk_run_info = ''
-CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = 'none'
+CHARACTER(LEN=40) :: eqdsk_run_info = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = ''
 !---Fit Input options
 REAL(8) :: psinorm = 1.d0
 LOGICAL :: adjust_pnorm = .FALSE.
@@ -122,7 +122,7 @@ IF(TRIM(limiter_file)/='none')THEN
   IF(.NOT.file_exists)CALL oft_abort('Specified "limiter_file" cannot be found', &
     'tokamaker_fit', __FILE__)
 END IF
-IF(TRIM(eqdsk_limiter_file)/='none')THEN
+IF(TRIM(eqdsk_limiter_file)/='')THEN
   INQUIRE(EXIST=file_exists,FILE=TRIM(eqdsk_limiter_file))
   IF(.NOT.file_exists)CALL oft_abort('Specified "eqdsk_limiter_file" cannot be found', &
     'tokamaker_fit', __FILE__)

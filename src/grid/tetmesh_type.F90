@@ -459,7 +459,7 @@ function tetmesh_phys2logho(self,i,pt) result(f)
 class(oft_tetmesh), target, intent(in) :: self
 integer(i4), intent(in) :: i
 real(r8), intent(in) :: pt(3)
-real(4) :: f(4)
+real(r8) :: f(4)
 !---
 integer(i4), parameter :: nerr=3
 integer(i4), parameter :: neq=3

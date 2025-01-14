@@ -375,10 +375,17 @@ OPEN(outunit,FILE='abort_'//proc//'.err')
 #endif
 !---Print error information
 100 FORMAT (A,I5,2A)
+101 FORMAT (2A)
 WRITE(outunit,'(A)')'#----------------------------------------------'
-WRITE(outunit,100)  '[',oft_env%rank,'] ERROR: ',TRIM(error_str)
-WRITE(outunit,100)  '[',oft_env%rank,'] SUBROUTINE: ',TRIM(sname)
-WRITE(outunit,100)  '[',oft_env%rank,'] FILE: ',TRIM(fname)
+IF(oft_env%nprocs>1)THEN
+  WRITE(outunit,100)  '[',oft_env%rank,'] ERROR: ',TRIM(error_str)
+  WRITE(outunit,100)  '[',oft_env%rank,'] SUBROUTINE: ',TRIM(sname)
+  WRITE(outunit,100)  '[',oft_env%rank,'] FILE: ',TRIM(fname)
+ELSE
+  WRITE(outunit,101)  'ERROR: ',TRIM(error_str)
+  WRITE(outunit,101)  'SUBROUTINE: ',TRIM(sname)
+  WRITE(outunit,101)  'FILE: ',TRIM(fname)
+END IF
 #ifdef OFT_ABORT_FILES
 CLOSE(outunit)
 #endif
@@ -399,7 +406,12 @@ SUBROUTINE oft_warn(error_str)
 CHARACTER(LEN=*) :: error_str
 !---Print warning information
 100 FORMAT (A,I5,2A)
-WRITE(error_unit,100)'[',oft_env%rank,'] WARNING: ',TRIM(error_str)
+101 FORMAT (2A)
+IF(oft_env%nprocs>1)THEN
+  WRITE(error_unit,100)'[',oft_env%rank,'] WARNING: ',TRIM(error_str)
+ELSE
+  WRITE(error_unit,101)'WARNING: ',TRIM(error_str)
+END IF
 END SUBROUTINE oft_warn
 !---------------------------------------------------------------------------
 !> Output control for performance messages
@@ -804,7 +816,7 @@ END FUNCTION oft_mpi_maxia
 FUNCTION oft_mpi_maxi8a(a,n) result(b)
 INTEGER(i8), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
-INTEGER(i4) :: b(n),ierr
+INTEGER(i8) :: b(n),ierr
 INTEGER(i8) :: timein
 #ifdef HAVE_MPI
 DEBUG_STACK_PUSH
@@ -1051,8 +1063,13 @@ WRITE(outunit,'(A)')  ''
 WRITE(outunit,'(A)')  'Stacktrace'
 WRITE(outunit,'(A)')  '#----------------------------------------------'
 100 FORMAT (A,I5,A,2X,I2,2X,A60)
+101 FORMAT (2X,I2,2X,A60)
 DO i=nstack,1,-1
-  WRITE(outunit,100)  '[',oft_env%rank,']',i,ADJUSTR(TRIM(stack_mods(stack(1,i)))//"::"//TRIM(stack_funs(stack(2,i))))
+  IF(oft_env%nprocs>0)THEN
+    WRITE(outunit,100)  '[',oft_env%rank,']',i,ADJUSTR(TRIM(stack_mods(stack(1,i)))//"::"//TRIM(stack_funs(stack(2,i))))
+  ELSE
+    WRITE(outunit,101)  i,ADJUSTR(TRIM(stack_mods(stack(1,i)))//"::"//TRIM(stack_funs(stack(2,i))))
+  END IF
 END DO
 WRITE(outunit,'(A)')  ''
 #ifdef OFT_ABORT_FILES

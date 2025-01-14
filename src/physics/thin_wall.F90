@@ -118,14 +118,11 @@ TYPE :: tw_type
   INTEGER(i4), POINTER, DIMENSION(:) :: kfh => NULL() !< Pointer to face-hole interaction list [mesh%nc+1]
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lfh => NULL() !< List of face-hole interactions [nfh]
   REAL(r8), POINTER, DIMENSION(:) :: Eta_reg => NULL() !< Resistivity*thickness values for each region [nreg]
-  ! REAL(r8), POINTER, DIMENSION(:,:) :: sen_locs => NULL() !< 
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2dr => NULL() !< Element to driver (icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2coil => NULL() !< Element to coil (vcoils+icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2sen => NULL() !< Element to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2coil => NULL() !< Coil to coil coupling matrix
-  ! REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2sen => NULL() !< Coil to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Lmat => NULL() !< Full inductance matrix
-  ! REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2coil => NULL() !< Driver (icoils) to coil coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2sen => NULL() !< Driver (icoils) to sensor coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
@@ -135,6 +132,7 @@ TYPE :: tw_type
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL() !< Resistivity matrix for thin-wall model
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Underlying surface mesh
   TYPE(hole_mesh), POINTER, DIMENSION(:) :: hmesh => NULL() !< Hole definitions
+  TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL() !< Jumper definitions
   TYPE(tw_coil_set), POINTER, DIMENSION(:) :: vcoils => NULL() !< List of Vcoils
   TYPE(tw_coil_set), POINTER, DIMENSION(:) :: icoils => NULL() !< List of Icoils
   TYPE(fox_node), POINTER :: xml => NULL()
@@ -808,7 +806,7 @@ IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
               cpt = (coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
               tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/SQRT(SUM((pt_i-cpt)**2) + coil_thickness)
             END DO
-            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
+            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
           END DO
         END DO
       END DO
@@ -842,7 +840,7 @@ IF(ASSOCIATED(tw_obj%Ael2dr))THEN
     END DO
     !$omp end parallel
   END IF
-  tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
+  tw_obj%Ael2dr = tw_obj%Ael2dr*mu0/(4.d0*pi)
 END IF
 DEALLOCATE(Acoil2coil_tmp)
 !
@@ -1596,7 +1594,7 @@ ALLOCATE(tw_obj%Adr2sen(nsensors,tw_obj%n_icoils))
 DO i=1,tw_obj%n_icoils
   tw_obj%Adr2sen(:,i)=Acoil2sen_tmp(:,i+tw_obj%n_vcoils)
 END DO
-tw_obj%Adr2sen=tw_obj%Adr2sen/(4.d0*pi)
+tw_obj%Adr2sen=tw_obj%Adr2sen*mu0/(4.d0*pi)
 !---Copy coupling between passive coils and sensors
 IF(nsensors>0)THEN
   !$omp parallel private(j,ii,jj,ik,jk)
@@ -2126,7 +2124,7 @@ DO i=1,bmesh%np
     END DO
   END DO
 END DO
-self%Bdr=self%Bdr/(4.d0*pi)
+self%Bdr=self%Bdr*mu0/(4.d0*pi)
 !
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems
@@ -2420,11 +2418,10 @@ END SUBROUTINE tw_copy_coil
 !---------------------------------------------------------------------------
 !> Load sensors from "floops.loc" and build jumpers from nodesets
 !---------------------------------------------------------------------------
-subroutine tw_load_sensors(filename,self,sensors,jumper_nsets)
+subroutine tw_load_sensors(filename,self,sensors)
 CHARACTER(LEN=*), INTENT(in) :: filename !< Thin-wall model object
 CLASS(tw_type), INTENT(inout) :: self !< Thin-wall model object
 TYPE(tw_sensors), INTENT(inout) :: sensors !< Sensor container
-TYPE(oft_1d_int), POINTER, INTENT(in) :: jumper_nsets(:) !< Nodesets definition current jumpers
 INTEGER(4) :: i,j,k,io_unit,ierr,id,vert,cell,p1,p2
 INTEGER(4), ALLOCATABLE :: ed_mark(:),list_out(:),hole_tmp(:,:)
 REAL(8) :: location(2),norm(3),ed_norm(3),cell_norm(3),f(3)
@@ -2454,17 +2451,18 @@ IF(exists)THEN
 END IF
 !---Load jumpers
 sensors%njumpers=0
-IF(ASSOCIATED(jumper_nsets))THEN
+IF(ASSOCIATED(self%jumper_nsets))THEN
   WRITE(*,*)
   WRITE(*,*)'Setting jumper information:'
   OPEN(NEWUNIT=io_unit, FILE='jumpers_orient.dat')
-  sensors%njumpers=SIZE(jumper_nsets)
+  sensors%njumpers=SIZE(self%jumper_nsets)
   ALLOCATE(sensors%jumpers(sensors%njumpers))
   ALLOCATE(hole_facs(self%nholes))
   DO i=1,sensors%njumpers
-    sensors%jumpers(i)%np=jumper_nsets(i)%n
+    WRITE(sensors%jumpers(i)%name,'(A,I4.4)')'JUMPER_',i
+    sensors%jumpers(i)%np=self%jumper_nsets(i)%n
     ALLOCATE(sensors%jumpers(i)%points(sensors%jumpers(i)%np))
-    CALL order_jumper_list(jumper_nsets(i)%v,sensors%jumpers(i)%points,jumper_nsets(i)%n)
+    CALL order_jumper_list(self%jumper_nsets(i)%v,sensors%jumpers(i)%points,self%jumper_nsets(i)%n)
     ! Setup hole couplings
     hole_facs=0.d0
     DO j=1,sensors%jumpers(i)%np-1

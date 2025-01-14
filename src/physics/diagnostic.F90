@@ -14,9 +14,9 @@
 MODULE diagnostic
 USE oft_base
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, mesh_findcell2, cell_is_curved
+USE oft_mesh_type, ONLY: mesh, smesh, mesh_findcell2, cell_is_curved
 USE oft_io, ONLY: oft_bin_file
-USE fem_utils, ONLY: fem_interp
+USE fem_utils, ONLY: fem_interp, bfem_interp
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -636,6 +636,38 @@ energy=oft_mpi_sum(energy)
 CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_surf_int
+!---------------------------------------------------------------------------
+!> Evaluate the boundary integral of a boundary scalar field
+!---------------------------------------------------------------------------
+FUNCTION bscal_surf_int(field,quad_order,reg_mask) RESULT(energy)
+CLASS(bfem_interp), INTENT(inout) :: field !< Input field
+INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
+INTEGER(i4), OPTIONAL, INTENT(in) :: reg_mask !< Region to integrate over
+REAL(r8) :: energy !< \f$ \int u dS \f$
+INTEGER(i4) :: i,m,cell
+REAL(r8) :: area,etmp(1),sgop(3,3)
+TYPE(oft_quad_type) :: quad
+DEBUG_STACK_PUSH
+!---Setup
+CALL smesh%quad_rule(quad_order,quad)
+energy=0.d0
+!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+do i=1,smesh%nc
+  IF(PRESENT(reg_mask))THEN
+    IF(smesh%reg(i)/=reg_mask)CYCLE
+  END IF
+  !---Loop over quadrature points
+  do m=1,quad%np
+    call smesh%jacobian(i,quad%pts(:,m),sgop,area)
+    call field%interp(i,quad%pts(:,m),sgop,etmp)
+    energy = energy + etmp(1)*area*quad%wts(m)
+  end do
+end do
+!---Global reduction and cleanup
+energy=oft_mpi_sum(energy)
+CALL quad%delete
+DEBUG_STACK_POP
+END FUNCTION bscal_surf_int
 !---------------------------------------------------------------------------
 ! FUNCTION: vec_surf_int
 !

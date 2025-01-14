@@ -664,7 +664,7 @@ ggin=gg
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
 if(self%its/=0.AND.self%nrits/=0)THEN
 nits=0
-do j=1,u%ng
+do j=1,INT(u%ng,4)
   IF(gg==0.d0)EXIT
   res=0.d0
   res(1)=sqrt(gg)
@@ -931,7 +931,7 @@ ggin=gg
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
 if(self%its/=0.AND.self%nrits/=0)THEN
 nits=0
-do j=1,u%ng
+do j=1,INT(u%ng,4)
   IF(gg==0.d0)EXIT
   res=0.d0
   res(1)=sqrt(gg)
@@ -1239,7 +1239,7 @@ if(gg==0.d0.OR.self%its==0)then
   DEBUG_STACK_POP
   return
 end if
-ninner = u%ng
+ninner = INT(u%ng,4)
 if((self%ninner>0).AND.(self%ninner<u%ng))ninner=self%ninner
 ! iterate to find the solution
 do ir=1,self%nrestarts ! restart loop

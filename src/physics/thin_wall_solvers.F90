@@ -238,12 +238,11 @@ WRITE(*,*)
 WRITE(*,*)'Starting Frequency-response run'
 !---Setup matrix
 ALLOCATE(b(self%nelems))
-b=-(0.d0,1.d0)*driver(:,1) + (1.d0,0.d0)*driver(:,2) ! -i*L_e*I_e
+b=(1.d0,0.d0)*driver(:,1) + (0.d0,1.d0)*driver(:,2)
 IF(PRESENT(hodlr_op))THEN
   SELECT CASE(fr_limit)
   CASE(0)
     WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
-    b=b*freq*2.d0*pi ! Scale RHS by forcing frequency
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)*freq*2.d0*pi
@@ -268,7 +267,6 @@ ELSE
   SELECT CASE(fr_limit)
   CASE(0)
     WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
-    b=b*freq*2.d0*pi ! Scale RHS by forcing frequency
     Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -402,8 +400,8 @@ END TYPE mat_parts
 DOUBLE COMPLEX, allocatable, dimension(:) :: r,w
 DOUBLE COMPLEX, allocatable, dimension(:,:) :: v,z
 DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:)
-DOUBLE COMPLEX :: delta,hkmi,ggin
-REAL(r8) :: uu,uuold,gg,ggold,elapsed_time
+DOUBLE COMPLEX :: delta,hkmi
+REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time
 integer(i4) :: i,j,jr,k,kk,nits,info
 integer(i4), allocatable, dimension(:) :: part
 LOGICAL, allocatable, dimension(:) :: eflag
@@ -650,9 +648,9 @@ IF(ASSOCIATED(curr_waveform))THEN
   IF(ncols-1/=self%n_icoils)CALL oft_abort('# of currents in waveform does not match # of icoils', &
     'run_td_sim',__FILE__)
   ntimes_curr=SIZE(curr_waveform,DIM=1)
-  DO j=1,self%n_icoils
-    curr_waveform(:,j+1)=curr_waveform(:,j+1)*mu0 ! Convert to magnetic units
-  END DO
+  ! DO j=1,self%n_icoils
+  !   curr_waveform(:,j+1)=curr_waveform(:,j+1)*mu0 ! Convert to magnetic units
+  ! END DO
   ALLOCATE(icoil_curr(ncols-1),icoil_dcurr(ncols-1))
 ELSE
   ALLOCATE(icoil_curr(self%n_icoils),icoil_dcurr(self%n_icoils))
@@ -858,7 +856,7 @@ DO i=1,nsteps
   uu=g%dot(g)
   CALL g%get_local(vals)
   IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
-  self%nelems,icoil_dcurr,1,1.d0,vals,1)
+    self%nelems,icoil_dcurr,1,1.d0,vals,1)
   DO j=1,self%n_vcoils
     vals(self%np_active+self%nholes+j)=vals(self%np_active+self%nholes+j)+pcoil_volt(j)
   END DO
@@ -1161,6 +1159,7 @@ CHARACTER(LEN=4) :: sub_coil_id
 CLASS(oft_vector), POINTER :: atmp,btmp,Bx,By,Bz
 character(LEN=80), dimension(1) :: description
 CALL hdf5_create_file(TRIM(filename))
+CALL hdf5_write(tw_idx_ver,TRIM(filename),tw_idx_path)
 !---Setup temporaries
 NULLIFY(vals)
 CALL self%Uloc%new(atmp)

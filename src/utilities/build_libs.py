@@ -222,10 +222,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
     config_dict = {"CC": "gcc", "CXX": "g++", "FC": "gfortran", "LD": None,
                    "AR": "ar rv", "RANLIB": "ranlib", "CMAKE": "cmake", "LD_FLAGS": "",
                    "OMP_FLAGS": "", "DEBUG_FLAGS": "", "CHK_FLAGS": "", "OPT_FLAGS": "",
-                   "LOPT_FLAGS": "", "BASE_FFLAGS": "", "BASE_CFLAGS": "", "OMP_LIB": "",
-                   "MKL_INC_LINES": "", "MAKE_THREADS": 1, "COMP_DEFS": [],
-                   "MAKE_INC_CONTENTS": "", "INC_DEFS": [], "CC_VENDOR": "unknown",
-                   "CC_VERSION": "unknown", "EXT_LIBS": ["$(OMP_LIB) -lm -lstdc++"]
+                   "BASE_FFLAGS": "", "BASE_CFLAGS": "", "MAKE_THREADS": 1,
+                   "CC_VENDOR": "unknown", "CC_VERSION": "unknown"
                   }
     # Check for environment variables
     for key in ('CC', 'CXX', 'FC', 'LD', 'CMAKE'):
@@ -320,15 +318,11 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
         config_dict['DEBUG_FLAGS'] = "-g"
         config_dict['CHK_FLAGS'] = "-O0 -fcheck=all"
         config_dict['OPT_FLAGS'] = "-O2"
-        config_dict["LOPT_FLAGS"] = "-O2 -fPIC"
-        config_dict['OMP_LIB'] = "-lgomp"
     elif cc_vendor == 'intel':
         config_dict['OMP_FLAGS'] = "-qopenmp"
         config_dict['DEBUG_FLAGS'] = "-g"
         config_dict['CHK_FLAGS'] = "-O0 -check bounds,pointers,shape,uninit"
         config_dict['OPT_FLAGS'] = ""
-        config_dict["LOPT_FLAGS"] = "-fPIC"
-        config_dict['OMP_LIB'] = "-liomp5"
     # Determine OS type
     import platform
     config_dict['OS_TYPE'] = platform.uname()[0]
@@ -339,64 +333,6 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
         config_dict['OS_VER'] = platform.uname()[2]
     # Return dictionary
     return config_dict
-
-
-def build_make_include(mydict):
-    # Create make_libs.mk file containing library and build information
-    tmp_dict = mydict.copy()
-    tmp_dict['date'] = time.strftime("%c")
-    tmp_dict['machine'] = os.uname()[1]
-    tmp_dict['script_args'] = ' '.join(sys.argv[1:])
-    tmp_dict['CC'] = mydict['HDF5_CC']
-    tmp_dict['CXX'] = mydict['CXX']
-    tmp_dict['FC'] = mydict['HDF5_FC']
-    tmp_dict['LD'] = mydict['HDF5_FC']
-    tmp_dict['COMP_DEFS_LINE'] = ' '.join(mydict['COMP_DEFS'])
-    tmp_dict['INC_DEFS_LINE'] = ' '.join(reversed(mydict['INC_DEFS']))
-    tmp_dict['EXT_LIBS_LINE'] = ' '.join(reversed(mydict['EXT_LIBS']))
-    # Template string
-    template = """# Auto-Generated on {date}
-# using library build at {base_dir}
-# on machine {machine}
-# settings: {script_args}
-
-# Compilers
-CC = {CC}
-CXX = {CXX}
-FC = {FC}
-LD = {LD}
-AR = {AR}
-RANLIB = {RANLIB}
-
-# Compiler flags
-BASE_FFLAGS = {BASE_FFLAGS}
-BASE_CFLAGS = {BASE_CFLAGS}
-OMP_FLAGS = {OMP_FLAGS}
-DEBUG_FLAGS = {DEBUG_FLAGS}
-CHK_FLAGS = {CHK_FLAGS}
-OPT_FLAGS = {OPT_FLAGS}
-LD_FLAGS = {LD_FLAGS}
-{MKL_INC_LINES}
-
-# Optimization flag for included 3rd party libraries (LSODE, MINPACK)
-LOPT_FLAGS = {LOPT_FLAGS}
-
-# OpenMP library
-OMP_LIB = {OMP_LIB}
-
-# Available libraries
-COMP_DEFS = {COMP_DEFS_LINE}
-
-# ==== External library specification ==== #
-{MAKE_INC_CONTENTS}
-# ==== Final external library/include grouping ==== #
-INC_DEFS = {INC_DEFS_LINE}
-EXT_LIBS = {EXT_LIBS_LINE}
-\n"""
-    string = template.format(**tmp_dict)
-    # Output
-    with open('make_libs.mk', 'w+') as fid:
-        fid.write(string)
 
 
 def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False, 
@@ -412,13 +348,13 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
     tmp_dict['machine'] = os.uname()[1]
     tmp_dict['script_args'] = ' '.join(sys.argv[1:])
     tmp_dict['LD'] = mydict['FC']
-    tmp_dict['cmake_install_dir'] = "install_debug" if build_debug else "install_release"
-    tmp_dict['cmake_build_dir'] = "build_debug" if build_debug else "build_release"
+    tmp_dict['cmake_install_dir'] = os.path.join("$ROOT_PATH","install_debug" if build_debug else "install_release")
+    tmp_dict['cmake_build_dir'] = os.path.join("$ROOT_PATH","build_debug" if build_debug else "build_release")
     env_lines = []
     cmake_lines = [
         "{CMAKE}",
         "-DCMAKE_BUILD_TYPE={0}".format("Debug" if build_debug else "Release"),
-        "-DCMAKE_INSTALL_PREFIX:PATH={0}".format(os.path.join("$ROOT_PATH",tmp_dict['cmake_install_dir'])),
+        "-DCMAKE_INSTALL_PREFIX:PATH=$INSTALL_DIR",
         "-DOFT_BUILD_TESTS:BOOL={0}".format(bool_to_string(build_tests)),
         "-DOFT_BUILD_EXAMPLES:BOOL={0}".format(bool_to_string(build_examples)),
         "-DOFT_BUILD_PYTHON:BOOL={0}".format(bool_to_string(build_python)),
@@ -517,12 +453,14 @@ end program test_program
 # on machine {machine}
 # settings: {script_args}
 
-# Get current directory
+# Setup build and install paths
 ROOT_PATH=$(pwd)
+BUILD_DIR={cmake_build_dir}
+INSTALL_DIR={cmake_install_dir}
 
 # Create fresh build directory
-rm -rf {cmake_build_dir}
-mkdir {cmake_build_dir} && cd {cmake_build_dir}
+rm -rf $BUILD_DIR
+mkdir $BUILD_DIR && cd $BUILD_DIR
 
 """ + env_lines_str + cmake_lines_str + '\n'
     string = template.format(**tmp_dict)
@@ -602,7 +540,7 @@ class package:
         self.build()
         build_duration = time.time() - build_start
         build_minutes = math.floor(build_duration/60)
-        print("    Elapsed Time = {0}:{1}".format(build_minutes,int(build_duration-build_minutes*60)))
+        print("    Elapsed Time = {0}:{1:02d}".format(build_minutes,int(build_duration-build_minutes*60)))
         os.chdir(self.root_path)
         # Check to make sure Installation succeeded
         config_dict = self.post_install(config_dict)
@@ -790,10 +728,6 @@ class METIS(package):
         # Installation check files
         self.install_chk_files = [os.path.join(self.config_dict['METIS_LIB'], 'libmetis.a')]
         #
-        self.config_dict['INC_DEFS'].append('$(METIS_INC)')
-        self.config_dict['EXT_LIBS'].append('$(METIS_LIB)')
-        template = '\n# METIS library\nMETIS_INC = -I{METIS_INCLUDE}\nMETIS_LIB = -L{METIS_LIB} {METIS_LIBS}\n'
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -828,22 +762,11 @@ class MPICH(package):
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
-        self.config_dict['COMP_DEFS'].append("-DHAVE_MPI")
         if "MPI_CC" in config_dict:
             self.skip = True
             print("MPI provided by compiler wrappers: Skipping build")
             return self.config_dict
         if "MPI_LIBS" in config_dict:
-            template = '\n'.join([
-                '',
-                '# MPI library',
-                'MPI_INC = -I{MPI_INCLUDE}',
-                'MPI_LIB = -L{MPI_LIB} {MPI_LIBS}',
-                ''
-            ])
-            self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
-            self.config_dict['INC_DEFS'].append('$(MPI_INC)')
-            self.config_dict['EXT_LIBS'].append('$(MPI_LIB)')
             self.skip = True
             print("MPI libraries specified: Skipping build")
             return self.config_dict
@@ -885,22 +808,11 @@ class OpenMPI(package):
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
-        self.config_dict['COMP_DEFS'].append("-DHAVE_MPI")
         if "MPI_CC" in config_dict:
             self.skip = True
             print("MPI provided by compiler wrappers: Skipping build")
             return self.config_dict
         if "MPI_LIBS" in config_dict:
-            template = '\n'.join([
-                '',
-                '# MPI library',
-                'MPI_INC = -I{MPI_INCLUDE}',
-                'MPI_LIB = -L{MPI_LIB} {MPI_LIBS}',
-                ''
-            ])
-            self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
-            self.config_dict['INC_DEFS'].append('$(MPI_INC)')
-            self.config_dict['EXT_LIBS'].append('$(MPI_LIB)')
             self.skip = True
             print("MPI libraries specified: Skipping build")
             return self.config_dict
@@ -958,8 +870,6 @@ class HDF5(package):
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
         if "HDF5_CC" in config_dict:
-            if self.parallel:
-                self.config_dict['COMP_DEFS'].append("-DHAVE_PHDF5")
             self.skip = True
             print("HDF5 provided by compiler wrappers: Skipping build")
             return self.config_dict
@@ -968,7 +878,6 @@ class HDF5(package):
         if self.parallel:
             self.config_dict['HDF5_CC'] = os.path.join(bin_dir, "h5pcc")
             self.config_dict['HDF5_FC'] = os.path.join(bin_dir, "h5pfc")
-            self.config_dict['COMP_DEFS'].append("-DHAVE_PHDF5")
         else:
             self.config_dict['HDF5_CC'] = os.path.join(bin_dir, "h5cc")
             self.config_dict['HDF5_FC'] = os.path.join(bin_dir, "h5fc")
@@ -1027,7 +936,10 @@ class HDF5(package):
                     'export LIBS="{MPI_LIBS}"'
                 ]
         if self.cmake_build and ('MACOS_SDK_PATH' in self.config_dict):
-            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+            if self.cmake_build:
+                cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+            else:
+                configure_options.append('--with-sysroot={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         #
         if self.cmake_build:
             build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
@@ -1052,18 +964,14 @@ class NETCDF(package):
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
         if self.comp_wrapper:
-            self.config_dict['COMP_DEFS'].append("-DHAVE_NCDF")
             self.skip = True
             print("NETCDF provided by compiler wrappers: Skipping build")
             return self.config_dict
         self.setup_root_struct()
         self.config_dict['NETCDF_C_LIBS'] = "-lnetcdf"
-        self.config_dict['COMP_DEFS'].append("-DHAVE_NCDF")
         # Installation check files
         self.install_chk_files = [os.path.join(self.config_dict['NETCDF_LIB'], 'libnetcdf.a')]
         #
-        self.config_dict['INC_DEFS'].append('$(NETCDF_INC)')
-        self.config_dict['EXT_LIBS'].append('$(NETCDF_LIB)')
         return self.config_dict
 
     def post_child_setup(self, config_dict):
@@ -1073,12 +981,6 @@ class NETCDF(package):
             self.children[0].config_dict['NETCDF_Fortran_LIBS'],
             self.config_dict['NETCDF_C_LIBS']
         ])
-        template = '\n'.join([
-            '\n# NETCDF library',
-            'NETCDF_INC = -I{NETCDF_INCLUDE}',
-            'NETCDF_LIB = -L{NETCDF_LIB} {NETCDF_LIBS}\n'
-        ])
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -1181,17 +1083,12 @@ class OpenBLAS(package):
         self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'libopenblas.a')
         self.config_dict['LAPACK_LIB_PATH'] = self.config_dict['BLAS_LIB_PATH']
         if self.threaded:
-            self.config_dict['COMP_DEFS'].append("-DBLAS_THREADED")
-            self.config_dict['COMP_DEFS'].append("-DLAPACK_THREADED")
             self.config_dict['OpenBLAS_THREADS'] = True
         else:
             self.config_dict['OpenBLAS_THREADS'] = False
         # Installation check files
         self.install_chk_files = [self.config_dict['BLAS_LIB_PATH']]
         #
-        self.config_dict['EXT_LIBS'].append('$(LAPACK_LIB)')
-        template = '\n# LAPACK library\nLAPACK_LIB = -L{LAPACK_LIB} {LAPACK_LIBS}\n'
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -1266,16 +1163,10 @@ class MKL(package):
             for mkl_lib in mkl_libs:
                 flag_string += "$(MKL_ROOT)/lib/{0} ".format(mkl_lib)
             self.config_dict['MKL_FLAGS'] = flag_string[:-1] #"$(MKL_ROOT)/lib/libmkl_intel_lp64.a $(MKL_ROOT)/lib/libmkl_intel_thread.a $(MKL_ROOT)/lib/libmkl_core.a"
-            self.config_dict['OMP_LIB'] = "-L{0} -liomp5 -lpthread -ldl".format(iomp_path)
             self.config_dict['BLAS_ROOT'] = self.mkl_root
             self.config_dict['LAPACK_ROOT'] = self.mkl_root
             print("  MKL libraries    = {0}".format(" ".join(mkl_libs)))
-            print("  Intel OpenMP lib = {0}".format(self.config_dict['OMP_LIB']))
-        self.config_dict['COMP_DEFS'].append("-DHAVE_MKL")
         self.config_dict['MKL_ROOT'] = self.mkl_root
-        self.config_dict['MKL_INC_LINES'] = "MKL_ROOT = {0}\n".format(self.mkl_root)
-        self.config_dict['MKL_INC_LINES'] += "MKL_FLAGS = {0}".format(self.config_dict['MKL_FLAGS'])
-        self.config_dict['INC_DEFS'].append('-I$(MKL_ROOT)/include')
         return self.config_dict
 
 
@@ -1303,9 +1194,6 @@ class BLAS_LAPACK(package):
         if (self.blas_lib_path is not None) and (self.lapack_lib_path is not None):
             self.config_dict['BLAS_LIB_PATH'] = self.blas_lib_path
             self.config_dict['LAPACK_LIB_PATH'] = self.lapack_lib_path
-            self.config_dict['EXT_LIBS'].append('$(LAPACK_LIB)')
-            template = '\n# LAPACK library\nLAPACK_LIB = {LAPACK_LIB_PATH} {BLAS_LIB_PATH}\n'
-            self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
             self.skip = True
             print("Pre-built BLAS/LAPACK provided: Skipping build")
             return self.config_dict
@@ -1320,9 +1208,6 @@ class BLAS_LAPACK(package):
         # Installation check files
         self.install_chk_files = [self.config_dict['BLAS_LIB_PATH'], self.config_dict['LAPACK_LIB_PATH']]
         #
-        self.config_dict['EXT_LIBS'].append('$(LAPACK_LIB)')
-        template = '\n# LAPACK library\nLAPACK_LIB = -L{LAPACK_LIB} {LAPACK_LIBS}\n'
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -1373,13 +1258,9 @@ class ARPACK(package):
             self.config_dict['ARPACK_LIBS'] = "-lparpack -larpack"
         else:
             self.config_dict['ARPACK_LIBS'] = "-larpack"
-        self.config_dict['COMP_DEFS'].append("-DHAVE_ARPACK")
         # Installation check files
         self.install_chk_files = [os.path.join(self.config_dict['ARPACK_LIB'], 'libarpack.a')]
         #
-        self.config_dict['EXT_LIBS'].append('$(ARPACK_LIB)')
-        template = '\n# ARPACK library\nARPACK_LIB = -L{ARPACK_LIB} {ARPACK_LIBS}\n'
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -1462,15 +1343,9 @@ class SUPERLU(package):
         self.config_dict['SUPERLU_LIB'] = self.config_dict[self.name + '_LIB']
         self.config_dict['SUPERLU_LIBS'] = self.libname
         self.config_dict["SUPERLU_VER_MAJOR"] = 5
-        self.config_dict['COMP_DEFS'].append("-DHAVE_SUPERLU")
-        self.config_dict['COMP_DEFS'].append("-DSUPERLU_VER_MAJOR=5")
         # Installation check files
         self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_LIB'], self.libpath)]
         #
-        self.config_dict['INC_DEFS'].append('$(SUPERLU_INC)')
-        self.config_dict['EXT_LIBS'].append('$(SUPERLU_LIB)')
-        template = '\n# SuperLU library\nSUPERLU_INC = -I{SUPERLU_INCLUDE}\nSUPERLU_LIB = -L{SUPERLU_LIB} {SUPERLU_LIBS}\n'
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -1512,16 +1387,7 @@ class SUPERLU_DIST(package):
             return self.config_dict
         self.setup_root_struct()
         self.config_dict['SUPERLU_DIST_LIBS'] = "-lsuperlu_dist"
-        self.config_dict['COMP_DEFS'].append("-DHAVE_SUPERLU_DIST")
-        # Set makefile fields
-        self.config_dict['INC_DEFS'].append('$(SUPERLU_DIST_INC)')
-        self.config_dict['EXT_LIBS'].append('$(SUPERLU_DIST_LIB)')
-        template = """
-# SuperLU-Dist library
-SUPERLU_DIST_INC = -I{SUPERLU_DIST_INCLUDE}
-SUPERLU_DIST_LIB = -L{SUPERLU_DIST_LIB} {SUPERLU_DIST_LIBS}
-"""
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
+        #
         self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_DIST_LIB'], "libsuperlu_dist.a")]
         return self.config_dict
 
@@ -1576,18 +1442,9 @@ class UMFPACK(package):
             return self.config_dict
         self.setup_root_struct()
         self.config_dict['UMFPACK_LIBS'] = "-lumfpack -lamd -lsuitesparseconfig"
-        self.config_dict['COMP_DEFS'].append("-DHAVE_UMFPACK")
         # Installation check files
         self.install_chk_files = [os.path.join(self.config_dict['UMFPACK_LIB'], 'libumfpack.a')]
         #
-        self.config_dict['INC_DEFS'].append('$(UMFPACK_INC)')
-        self.config_dict['EXT_LIBS'].append('$(UMFPACK_LIB)')
-        template = """
-# UMFPACK library
-UMFPACK_INC = -I{UMFPACK_INCLUDE}
-UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
-"""
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -1606,7 +1463,9 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
             "-DBLAS_ROOT:PATH={BLAS_ROOT}",
             "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
         ]
-        UMFPACK_CMAKE_options = config_CMAKE_options.copy()
+        UMFPACK_CMAKE_options = config_CMAKE_options.copy() + [
+            "-DNCHOLMOD=TRUE"
+        ]
         if (config_dict['CC_VENDOR'] == 'gnu') and (self.config_dict['OS_TYPE'] == 'Darwin'):
             UMFPACK_CMAKE_options.append("-DCMAKE_SHARED_LINKER_FLAGS:STRING=-lgfortran")
         #
@@ -1618,11 +1477,9 @@ UMFPACK_LIB = -L{UMFPACK_LIB} {UMFPACK_LIBS}
         if 'CMAKE_BIN' in self.config_dict:
             build_lines += ["export PATH={0}:$PATH".format(self.config_dict['CMAKE_BIN'])]
         build_lines += [
-            "export FFLAGS=-fPIC",
             "export JOBS={MAKE_THREADS}",
             "export OPTIMIZATION=-O2",
             "export AUTOCC=no",
-            "export UMFPACK_CONFIG=-DNCHOLMOD",
             "make distclean",
             "cd SuiteSparse_config",
             'make library CMAKE_OPTIONS="{0}"'.format(' '.join(config_CMAKE_options)),
@@ -1655,17 +1512,12 @@ class FOX(package):
         install_path = os.path.join(self.root_path, self.install_dir)
         self.config_dict["FOX_INCLUDE"] = os.path.join(install_path, "finclude")
         self.config_dict["FOX_LIBS"] = "-lFoX_dom -lFoX_sax -lFoX_fsys -lFoX_utils -lFoX_common"
-        self.config_dict['COMP_DEFS'].append("-DHAVE_XML")
         self.config_dict['CROSS_COMPILE_FLAG'] = ""
         if 'CROSS_COMPILE_HOST' in config_dict:
             self.config_dict['CROSS_COMPILE_FLAG'] = '--host="{0}"'.format(config_dict['CROSS_COMPILE_HOST'])
         # Installation check files
         self.install_chk_files = [os.path.join(self.config_dict['FOX_LIB'], 'libFoX_dom.a')]
         #
-        self.config_dict['INC_DEFS'].append('$(FOX_INC)')
-        self.config_dict['EXT_LIBS'].append('$(FOX_LIB)')
-        template = '\n# FOX library\nFOX_INC = -I{FOX_INCLUDE}\nFOX_LIB = -L{FOX_LIB} {FOX_LIBS}\n'
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -1698,14 +1550,9 @@ class ONURBS(package):
         self.config_dict['ONURBS_LIB'] = os.path.join(install_path, "lib")
         self.config_dict['ONURBS_INCLUDE'] = os.path.join(install_path, "include")
         self.config_dict["ONURBS_LIBS"] = "-lopenNURBS"
-        self.config_dict['COMP_DEFS'].append("-DHAVE_ONURBS")
         # Installation check files
         self.install_chk_files = [os.path.join(self.config_dict['ONURBS_LIB'], 'libopenNURBS.a')]
         #
-        self.config_dict['INC_DEFS'].append('$(ONURBS_INC)')
-        self.config_dict['EXT_LIBS'].append('$(ONURBS_LIB)')
-        template = '\n# OpenNURBS library\nONURBS_INC = -I{ONURBS_INCLUDE}\nONURBS_LIB = -L{ONURBS_LIB} {ONURBS_LIBS}\n'
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
         return self.config_dict
 
     def build(self):
@@ -1776,15 +1623,13 @@ class PETSC(package):
                 print("    PETSc not found!")
                 sys.exit(1)
             self.version = '{0}.{1}'.format(ver_major, ver_minor)
-            self.config_dict['COMP_DEFS'].append('-DHAVE_PETSC -DPETSC_VERSION_MAJOR={0} -DPETSC_VERSION_MINOR={1}'.format(ver_major, ver_minor))
+            # self.config_dict['COMP_DEFS'].append('-DHAVE_PETSC -DPETSC_VERSION_MAJOR={0} -DPETSC_VERSION_MINOR={1}'.format(ver_major, ver_minor))
             try:
                 metis_tmp = METIS()
                 metis_tmp.detect_sizes()
             except:
                 print("    Cannot detect PETSc METIS!")
                 sys.exit(1)
-            self.config_dict['COMP_DEFS'].append("-DHAVE_MUMPS")
-            self.config_dict['COMP_DEFS'].append("-DHAVE_SUPERLU")
             return self.config_dict
         self.setup_root_struct()
         # Setup libraries
@@ -1793,7 +1638,6 @@ class PETSC(package):
         self.config_dict['PETSC_LIBS'] = "-lpetsc"
         if self.with_umfpack:
             self.config_dict['PETSC_LIBS'] += " -lumfpack -lamd"
-            self.config_dict['COMP_DEFS'].append("-DHAVE_UMFPACK")
             self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libumfpack.a'))
         if self.with_superlu:
             if self.version == '3.6':
@@ -1803,31 +1647,21 @@ class PETSC(package):
                 self.config_dict['PETSC_LIBS'] += " -lsuperlu"
                 if ver_lt(self.version,'3.10'):
                     self.config_dict['PETSC_LIBS'] += " -lsuperlu_dist"
-                self.config_dict['COMP_DEFS'].append("-DHAVE_SUPERLU")
-                self.config_dict['COMP_DEFS'].append("-DSUPERLU_VER_MAJOR=5")
                 self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu.a'))
             else:
                 self.config_dict['PETSC_LIBS'] += " -lsuperlu_4.3 -lsuperlu_dist_3.3"
                 self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu_4.3.a'))
         if self.with_mumps:
             self.config_dict['PETSC_LIBS'] += " -ldmumps -lmumps_common -lpord -lscalapack"
-            self.config_dict['COMP_DEFS'].append("-DHAVE_MUMPS")
             self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libdmumps.a'))
         self.config_dict['PETSC_LIBS'] += " -lparmetis -lmetis"
         # Installation check files
         self.install_chk_files = [os.path.join(self.config_dict['PETSC_LIB'], 'libpetsc.a')]
         #
-        self.config_dict['INC_DEFS'].append('$(PETSC_INC)')
-        self.config_dict['EXT_LIBS'].append('$(PETSC_LIB)')
-        self.config_dict['PETSC_COMP_DEFS'] = ''
         ver_string = self.version.split('.')
         ver_major = ver_string[0]
         ver_minor = ver_string[1]
-        self.config_dict['COMP_DEFS'].append('-DHAVE_PETSC -DPETSC_VERSION_MAJOR={0} -DPETSC_VERSION_MINOR={1}'.format(ver_major, ver_minor))
-        template = """\n# PETSc library
-PETSC_INC = -I{PETSC_INCLUDE}
-PETSC_LIB = -L{PETSC_LIB} {PETSC_LIBS}\n"""
-        self.config_dict["MAKE_INC_CONTENTS"] += template.format(**self.config_dict)
+        # self.config_dict['COMP_DEFS'].append('-DHAVE_PETSC -DPETSC_VERSION_MAJOR={0} -DPETSC_VERSION_MINOR={1}'.format(ver_major, ver_minor))
         return self.config_dict
 
     def build(self):
@@ -1984,8 +1818,6 @@ if options.ld_flags is not None:
 if options.cross_compile_host is not None:
     config_dict['CROSS_COMPILE_HOST'] = options.cross_compile_host
 if options.macos_sdk_path is not None:
-    if not options.hdf5_cmake_build:
-        parser.exit(-1, 'Use of "--macos_sdk_path" requires CMake build for HDF5\n')
     if not os.path.isdir(options.macos_sdk_path):
         parser.exit(-1, 'Specified "--macos_sdk_path={0}" directory does not exist\n'.format(options.macos_sdk_path))
     config_dict['MACOS_SDK_PATH'] = options.macos_sdk_path
@@ -2082,7 +1914,6 @@ for package in packages:
 #
 # print(config_dict)
 if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
-    build_make_include(config_dict)
     build_cmake_script(config_dict,
         build_debug=(options.oft_build_debug == 1),
         use_openmp=(options.oft_use_openmp == 1),
@@ -2090,7 +1921,7 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         build_tests=(options.oft_build_tests == 1),
         build_examples=(options.oft_build_examples == 1),
         build_docs=(options.oft_build_docs == 1),
-        build_coverage=(options.oft_build_coverage == 1),
+        build_coverage=options.oft_build_coverage,
         package_build=options.oft_package,
         package_release=options.oft_package_release
     )

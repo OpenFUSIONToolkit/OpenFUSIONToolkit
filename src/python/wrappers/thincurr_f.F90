@@ -40,7 +40,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
+SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
 CHARACTER(KIND=c_char), INTENT(in) :: mesh_file(80) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs
@@ -48,13 +48,14 @@ TYPE(c_ptr), VALUE, INTENT(in) :: reg_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: pmap_loc !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: np !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nc !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: jumper_start !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sizes !< Needs docs
 TYPE(c_ptr), INTENT(out) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: xml_ptr !< Needs docs
 !
 LOGICAL :: success,is_2d
-INTEGER(4) :: ndims,ierr
+INTEGER(4) :: i,ndims,ierr
 integer(i4), allocatable, dimension(:) :: dim_sizes
 INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: rtmp
@@ -69,6 +70,7 @@ TYPE(fox_node), POINTER :: xml_node
 CALL copy_string('',error_str)
 CALL copy_string_rev(mesh_file,filename)
 CALL c_f_pointer(sizes, sizes_tmp, [8])
+NULLIFY(mesh_nsets,mesh_ssets)
 IF(TRIM(filename)=='none')THEN
   CALL copy_string('Array-based loading not yet supported',error_str)
   RETURN
@@ -115,9 +117,21 @@ ELSE
     ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
     CALL hdf5_read(tw_obj%pmap,TRIM(filename),'thincurr/periodicity/pmap',success)
   END IF
-  !
-  NULLIFY(mesh_nsets,mesh_ssets,hole_nsets)
+  !---Read nodesets and define holes and jumpers
   CALL native_read_nodesets(mesh_nsets,native_filename=TRIM(filename))
+  IF(jumper_start>0)THEN
+    ndims=SIZE(mesh_nsets)
+    hole_nsets=>mesh_nsets(1:jumper_start-1)
+    ALLOCATE(tw_obj%jumper_nsets(ndims-jumper_start+1))
+    DO i=jumper_start,ndims
+      tw_obj%jumper_nsets(i-jumper_start+1)%n=mesh_nsets(i)%n
+      ALLOCATE(tw_obj%jumper_nsets(i-jumper_start+1)%v(tw_obj%jumper_nsets(i-jumper_start+1)%n))
+      tw_obj%jumper_nsets(i-jumper_start+1)%v=mesh_nsets(i)%v
+    END DO
+  ELSE
+    hole_nsets=>mesh_nsets
+  END IF
+  !---Read sidesets and copy to closures
   CALL native_read_sidesets(mesh_ssets,native_filename=TRIM(filename))
   IF(ASSOCIATED(mesh_ssets))THEN
     IF(mesh_ssets(1)%n>0)THEN
@@ -125,8 +139,12 @@ ELSE
       ALLOCATE(tw_obj%closures(tw_obj%nclosures))
       tw_obj%closures=mesh_ssets(1)%v
     END IF
+    ndims=SIZE(mesh_ssets)
+    DO i=1,ndims
+      IF(ASSOCIATED(mesh_ssets(i)%v))DEALLOCATE(mesh_ssets(i)%v)
+    END DO
+    DEALLOCATE(mesh_ssets)
   END IF
-  hole_nsets=>mesh_nsets
 END IF
 IF(c_associated(xml_ptr))THEN
 #ifdef HAVE_XML
@@ -142,6 +160,14 @@ IF(c_associated(xml_ptr))THEN
 #endif
 END IF
 CALL tw_obj%setup(hole_nsets)
+!---Deallocate nodesets
+IF(ASSOCIATED(mesh_nsets))THEN
+  ndims=SIZE(mesh_nsets)
+  DO i=1,ndims
+    IF(ASSOCIATED(mesh_nsets(i)%v))DEALLOCATE(mesh_nsets(i)%v)
+  END DO
+  DEALLOCATE(mesh_nsets)
+END IF
 !
 tw_ptr=C_LOC(tw_obj)
 sizes_tmp=[tw_obj%mesh%np,tw_obj%mesh%ne,tw_obj%mesh%nc,tw_obj%np_active, &
@@ -475,12 +501,13 @@ END SUBROUTINE thincurr_Mcoil
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,sensor_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
+SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,njumpers,sensor_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: sensor_file(80) !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Ms_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Msc_ptr !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: nsensors
+INTEGER(KIND=c_int), INTENT(out) :: njumpers
 TYPE(c_ptr), INTENT(inout) :: sensor_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
@@ -490,7 +517,6 @@ CHARACTER(LEN=OFT_PATH_SLEN) :: sensor_filename = ''
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(tw_sensors), POINTER :: sensors
-TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
 !---Deallocate existing object
@@ -508,8 +534,7 @@ END IF
 ALLOCATE(sensors)
 !
 CALL copy_string_rev(sensor_file,sensor_filename)
-NULLIFY(jumper_nsets)
-CALL tw_load_sensors(TRIM(sensor_filename),tw_obj,sensors,jumper_nsets)
+CALL tw_load_sensors(TRIM(sensor_filename),tw_obj,sensors)
 !
 CALL copy_string_rev(cache_file,filename)
 IF(TRIM(filename)=='')THEN
@@ -521,6 +546,7 @@ Ms_ptr=C_LOC(tw_obj%Ael2sen)
 Msc_ptr=C_LOC(tw_obj%Adr2sen)
 sensor_ptr=C_LOC(sensors)
 nsensors=sensors%nfloops
+njumpers=sensors%njumpers
 END SUBROUTINE thincurr_Msensor
 !------------------------------------------------------------------------------
 !> Needs docs

@@ -86,7 +86,7 @@ class ThinCurr():
         with open('oftpyin','w+') as fid:
             fid.write(oft_in_template.format(**self._psin_dict))
 
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=-1):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
@@ -114,7 +114,7 @@ class ThinCurr():
             sizes = numpy.zeros((8,),dtype=numpy.int32)
             filename = c_char_p(mesh_file.encode())
             cstring = c_char_p(b""*200)
-            thincurr_setup(filename,idummy,rfake,idummy,lcfake,regfake,pmap,ctypes.byref(self.tw_obj),sizes,cstring,self._xml_ptr)
+            thincurr_setup(filename,idummy,rfake,idummy,lcfake,regfake,pmap,c_int(jumper_start),ctypes.byref(self.tw_obj),sizes,cstring,self._xml_ptr)
             if cstring.value != b'':
                 raise Exception(cstring.value.decode())
             self.np = sizes[0]
@@ -336,9 +336,11 @@ class ThinCurr():
         Ms_loc = c_void_p()
         Msc_loc = c_void_p()
         nsensors = c_int()
+        njumpers = c_int()
         sensor_loc = c_void_p()
         error_string = c_char_p(b""*200)
-        thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc),ctypes.byref(nsensors),ctypes.byref(sensor_loc),cache_string,error_string)
+        thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc), 
+                         ctypes.byref(nsensors),ctypes.byref(njumpers),ctypes.byref(sensor_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return numpy.ctypeslib.as_array(ctypes.cast(Ms_loc, c_double_ptr),shape=(self.nelems,nsensors.value)), \
@@ -426,16 +428,28 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return eig_vals, eig_vecs
 
-    def compute_freq_response(self,driver,freq=0.0,fr_limit=0,direct=False):
+    def compute_freq_response(self,fdriver=None,vdriver=None,freq=0.0,fr_limit=0,direct=False):
         '''! Compute frequence response of the current model to given driver voltages
 
-        @param driver Real/Imaginary driver voltage pair
+        @param fdriver Real/Imaginary driver flux pair (M*I)
+        @param vdriver Real/Imaginary driver voltage pair
         @param freq Frequency for response calculation [Hz] (unused if `fr_limit!=0`)
         @param fr_limit Frequency limit for calculation (0: none, 1: inductive, 2: resistive)
         @param direct Use direct solver?
         @result Real/Imaginary eddy current response
         '''
-        result = numpy.ascontiguousarray(driver.copy(), dtype=numpy.float64)
+        if fdriver is not None:
+            if vdriver is not None:
+                raise ValueError('"fdriver" and "vdriver" cannot be specified simultaneously')
+            # Assume fixed current V = -i*omega*M*I
+            if fr_limit == 0:
+                omega = 2.0*numpy.pi*freq
+            else:
+                omega = 1.0
+            vdriver = fdriver.copy()
+            vdriver[0,:] = omega*fdriver[1,:]
+            vdriver[1,:] = -omega*fdriver[0,:]
+        result = numpy.ascontiguousarray(vdriver.copy(), dtype=numpy.float64)
         error_string = c_char_p(b""*200)
         if self.Lmat_hodlr:
             thincurr_freq_response(self.tw_obj,c_bool(direct),c_int(fr_limit),c_double(freq),result,self.Lmat_hodlr,error_string)
@@ -534,6 +548,9 @@ class ThinCurr_reduced:
         @param filename File containing reduced model
         '''
         with h5py.File(filename,'r') as file:
+            mu0_scale = mu0 # Prior to addition of version flag magnetic units were saved for coils
+            if 'ThinCurr_Version' in file:
+                mu0_scale = 1.0 
             ## Current potential basis set
             self.Basis = numpy.asarray(file['Basis'])
             ## Self-inductance matrix for reduced model
@@ -553,13 +570,13 @@ class ThinCurr_reduced:
             ## B-field coil reconstruction operator
             self.Bc = None
             if 'Mc' in file:
-                self.Mc = numpy.asarray(file['Mc'])
+                self.Mc = mu0_scale*numpy.asarray(file['Mc'])
                 if 'Bx_c' in file:
-                    self.Bc = [numpy.asarray(file['Bx_c']), numpy.asarray(file['By_c']), numpy.asarray(file['Bz_c'])]
+                    self.Bc = mu0_scale*numpy.asarray([file['Bx_c'], file['By_c'], file['Bz_c']])
             ## Coil-sensor mutual inductance matrix
             self.Msc = None
             if 'Msc' in file:
-                self.Msc = numpy.asarray(file['Msc'])
+                self.Msc = mu0_scale*numpy.asarray(file['Msc'])
     
     def reconstruct_potential(self,weights):
         r'''! Reconstruct full current potential on original grid
@@ -590,7 +607,7 @@ class ThinCurr_reduced:
         for i in range(3):
             Bfield[:,i] = numpy.dot(weights,self.B[i])
             if self.Bc is not None:
-                Bfield[:,i] += numpy.dot(mu0*coil_currs,self.Bc[i])
+                Bfield[:,i] += numpy.dot(coil_currs,self.Bc[i])
         return Bfield
 
     def get_eigs(self):
@@ -639,7 +656,7 @@ class ThinCurr_reduced:
         if self.Ms is not None:
             sen_tmp = numpy.dot(pot_tmp,self.Ms)
             if self.Msc is not None:
-                sen_tmp += numpy.dot(mu0*curr_tmp,self.Msc)
+                sen_tmp += numpy.dot(curr_tmp,self.Msc)
             sen_time.append(t)
             sen_hist.append(sen_tmp)
         #
@@ -652,7 +669,6 @@ class ThinCurr_reduced:
                     dcurr_tmp[j] -= numpy.interp(t-dt/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
                     dcurr_tmp[j] += numpy.interp(t+dt*5.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
                     dcurr_tmp[j] -= numpy.interp(t+dt*3.0/4.0,coil_currs[:,0],coil_currs[:,j+1],left=coil_currs[0,j+1],right=coil_currs[-1,j+1])
-                dcurr_tmp *= mu0
                 rhs -= numpy.dot(dcurr_tmp,self.Mc)
             pot_tmp = numpy.dot(rhs,Lbackward)
             t += dt
@@ -668,7 +684,7 @@ class ThinCurr_reduced:
             if self.Ms is not None:
                 sen_tmp = numpy.dot(pot_tmp,self.Ms)
                 if self.Msc is not None:
-                    sen_tmp += numpy.dot(mu0*curr_tmp,self.Msc)
+                    sen_tmp += numpy.dot(curr_tmp,self.Msc)
                 sen_time.append(t)
                 sen_hist.append(sen_tmp)
         #

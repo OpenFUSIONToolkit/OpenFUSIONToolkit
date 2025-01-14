@@ -12,8 +12,8 @@
 
 &thincurr_td_options
  curr_file='curr.drive'
- dt=2.e-5
- nsteps=200
+ dt=2.e-4
+ nsteps=400
  nplot=10
  direct=T
  save_L=F
