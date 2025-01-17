@@ -672,8 +672,6 @@ LOGICAL, PARAMETER :: PLOT_R4_FLAG=.TRUE.
 #endif
 CONTAINS
 !------------------------------------------------------------------------------
-! FUNCTION: cell_is_curved
-!------------------------------------------------------------------------------
 !> Checks if a global mesh cell is curved or not
 !!
 !! @param[in] self Mesh containing cell
@@ -681,7 +679,7 @@ CONTAINS
 !! @result (T/F) cell is curved?
 !------------------------------------------------------------------------------
 function cell_is_curved(self,cell) result(curved)
-class(oft_mesh), intent(in) :: self
+class(oft_amesh), intent(in) :: self
 integer(i4), intent(in) :: cell
 integer(i4) :: k,i
 logical :: curved
