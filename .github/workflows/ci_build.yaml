@@ -81,7 +81,7 @@ jobs:
     - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
       run: |
-        brew install libevent
+        brew install pmix
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
         python -m pip install pytest numpy scipy h5py
