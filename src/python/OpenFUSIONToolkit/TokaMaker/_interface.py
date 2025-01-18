@@ -58,9 +58,9 @@ tokamaker_reset = ctypes_subroutine(oftpy_lib.tokamaker_reset,
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
     [ctypes.POINTER(tokamaker_settings_struct)])
 
-# G-S init function (r0,z0,a,kappa,delta)
+# tokamaker_init_psi(r0,z0,a,kappa,delta,rhs_source,ierr)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
-    [c_double, c_double, c_double, c_double, c_double, c_int_ptr])
+    [c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_int_ptr])
 
 # G-S load flux functions (f_file,f_offset,p_file)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
@@ -70,10 +70,9 @@ tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
 tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
     [c_int_ptr])
 
-# tokamaker_vac_solve(psi_in,error_flag)
+# tokamaker_vac_solve(psi_in,rhs_source,error_flag)
 tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
-    [ctypes_numpy_array(float64,1),  c_int_ptr])
-
+    [ctypes_numpy_array(float64,1), c_double_ptr,  c_int_ptr])
 
 # G-S info function
 tokamaker_analyze = ctypes_subroutine(oftpy_lib.tokamaker_analyze)

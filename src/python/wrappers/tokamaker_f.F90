@@ -9,7 +9,7 @@
 !---------------------------------------------------------------------------
 MODULE tokamaker_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
-  c_f_pointer, c_bool, c_null_ptr
+  c_f_pointer, c_bool, c_null_ptr, c_associated
 USE oft_base
 USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 ! USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
@@ -273,35 +273,57 @@ END SUBROUTINE tokamaker_load_profiles
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_init_psi(r0,z0,a,kappa,delta,ierr) BIND(C,NAME="tokamaker_init_psi")
+SUBROUTINE tokamaker_init_psi(r0,z0,a,kappa,delta,rhs_source,ierr) BIND(C,NAME="tokamaker_init_psi")
 REAL(c_double), VALUE, INTENT(in) :: r0 !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: z0 !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: a !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: kappa !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: delta !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
 INTEGER(c_int), INTENT(out) :: ierr !< Needs docs
-CALL gs_global%init_psi(ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
+REAL(8), POINTER, DIMENSION(:) :: rhs_tmp
+IF(c_associated(rhs_source))THEN
+  CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
+  CALL gs_global%init_psi(ierr,curr_source=rhs_tmp)
+ELSE
+  CALL gs_global%init_psi(ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
+END IF
 END SUBROUTINE tokamaker_init_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_solve(error_flag) BIND(C,NAME="tokamaker_solve")
-INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
+INTEGER(c_int), INTENT(out) :: error_flag !< Error flag
 CALL gs_global%solve(error_flag)
 END SUBROUTINE tokamaker_solve
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_vac_solve(psi_in,error_flag) BIND(C,NAME="tokamaker_vac_solve")
-TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Needs docs
-REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-CLASS(oft_vector), POINTER :: psi_tmp
+SUBROUTINE tokamaker_vac_solve(psi_in,rhs_source,error_flag) BIND(C,NAME="tokamaker_vac_solve")
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Input: BCs for \f$ \psi \f$, Output: solution
+TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
+INTEGER(c_int), INTENT(out) :: error_flag !< Error flag
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rhs_tmp
+CLASS(oft_vector), POINTER :: psi_tmp,rhs_vec
+TYPE(oft_lag_brinterp) :: source_field
 NULLIFY(psi_tmp)
 CALL gs_global%psi%new(psi_tmp)
 CALL c_f_pointer(psi_in, vals_tmp, [gs_global%psi%n])
 CALL psi_tmp%restore_local(vals_tmp)
-CALL gs_global%vac_solve(psi_tmp,error_flag)
+IF(c_associated(rhs_source))THEN
+  NULLIFY(rhs_tmp)
+  CALL gs_global%psi%new(rhs_vec)
+  CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
+  CALL rhs_vec%restore_local(rhs_tmp)
+  source_field%u=>rhs_vec
+  CALL source_field%setup()
+  CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=error_flag)
+  CALL source_field%delete()
+  CALL rhs_vec%delete()
+  DEALLOCATE(rhs_vec)
+ELSE
+  CALL gs_global%vac_solve(psi_tmp,ierr=error_flag)
+END IF
 CALL psi_tmp%get_local(vals_tmp)
 CALL psi_tmp%delete()
 DEALLOCATE(psi_tmp)
