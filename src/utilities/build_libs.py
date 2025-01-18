@@ -835,18 +835,28 @@ class OpenMPI(package):
         ]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
             build_lines.append('export FFLAGS=-fallow-argument-mismatch')
+        # config_options = [
+        #     "--prefix={MPI_ROOT}",
+        #     "--enable-mpi-fortran=yes",
+        #     "--enable-shared=no",
+        #     "--with-pic",
+        #     "--disable-sphinx",
+        #     "--disable-opencl",
+        #     "--disable-nvml",
+        #     "--disable-cuda"
+        # ]
         config_options = [
             "--prefix={MPI_ROOT}",
             "--enable-mpi-fortran=yes",
             "--enable-shared=no",
             "--with-pic",
             "--disable-sphinx",
-            "--disable-opencl",
-            "--disable-nvml",
-            "--disable-cuda"
+            "--without-rocm",
+            "--without-cuda",
+            "--without-prrte"
         ]
-        if self.config_dict['OS_TYPE'] == 'Darwin':
-            config_options.append('--with-libevent="internal"')
+        # if self.config_dict['OS_TYPE'] == 'Darwin':
+        #     config_options.append('--with-libevent="internal"')
         build_lines += [
             "../configure " + " ".join(config_options),
             "make -j{MAKE_THREADS}",
