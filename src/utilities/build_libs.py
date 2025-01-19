@@ -852,11 +852,34 @@ class OpenMPI(package):
             "--with-pic",
             "--disable-sphinx",
             "--without-rocm",
-            "--without-cuda",
-            "--without-prrte"
+            "--without-cuda"
         ]
-        # if self.config_dict['OS_TYPE'] == 'Darwin':
-        #     config_options.append('--with-libevent="internal"')
+        if self.config_dict['OS_TYPE'] == 'Darwin':
+            print("  macOS detected: Looking for required packages with homebrew")
+            # Search for HWLOC
+            result, errcode = run_command("brew --prefix hwloc")
+            if errcode == 0:
+                hwloc_path = result.strip()
+                print("    Using hwloc from homebrew: {0}".format(hwloc_path))
+                config_options.append('--with-hwloc={0}'.format(hwloc_path))
+            else:
+                print("    Could not find hwloc, build may fail")
+            # Search for PMIx
+            result, errcode = run_command("brew --prefix pmix")
+            if errcode == 0:
+                pmix_path = result.strip()
+                print("    Using pmix from homebrew: {0}".format(pmix_path))
+                config_options.append('--with-pmix={0}'.format(pmix_path))
+            else:
+                print("    Could not find pmix, build may fail")
+            # Search for libevent
+            result, errcode = run_command("brew --prefix libevent")
+            if errcode == 0:
+                libevent_path = result.strip()
+                print("    Using libevent from homebrew: {0}".format(libevent_path))
+                config_options.append('--with-libevent={0}'.format(libevent_path))
+            else:
+                print("    Could not find libevent, build may fail")
         build_lines += [
             "../configure " + " ".join(config_options),
             "make -j{MAKE_THREADS}",

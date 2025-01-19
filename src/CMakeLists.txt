@@ -151,12 +151,10 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 ########################
 # MPI
 if( OFT_USE_MPI )
-  find_package( MPI )
-  if( MPI_FOUND )
-    set( CMAKE_Fortran_COMPILER ${MPI_Fortran_COMPILER} )
-    set( CMAKE_C_COMPILER ${MPI_C_COMPILER} )
-    add_definitions( -DHAVE_MPI )
-  endif()
+  find_package( MPI COMPONENTS C Fortran REQUIRED )
+  set( CMAKE_Fortran_COMPILER ${MPI_Fortran_COMPILER} )
+  set( CMAKE_C_COMPILER ${MPI_C_COMPILER} )
+  add_definitions( -DHAVE_MPI )
 endif()
 # BLAS/LAPACK
 find_package( LAPACK REQUIRED )
