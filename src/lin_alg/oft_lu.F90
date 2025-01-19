@@ -69,7 +69,11 @@ END TYPE native_ilu_struc
 !---------------------------------------------------------------------------
 TYPE :: superlu_struc
   INTEGER(i4) :: col_perm = -1 !< Column permutation to use (-1 for default)
+#ifdef OFT_MPI_F08
+  TYPE(mpi_comm) :: comm = MPI_COMM_NULL !< Private MPI communicator for SuperLU-DIST
+#else
   INTEGER(i4) :: comm = MPI_COMM_NULL !< Private MPI communicator for SuperLU-DIST
+#endif
   TYPE(C_PTR) :: f_factors = C_NULL_PTR !< SuperLU factors pointer
   TYPE(C_PTR) :: grid_handle = C_NULL_PTR !< SuperLU-DIST processor grid pointer
   INTEGER(i4), POINTER, DIMENSION(:) :: kr => NULL() !< Row pointer (0-based indices)

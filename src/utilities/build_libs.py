@@ -390,7 +390,10 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DMPI_CXX_COMPILER:PATH={0}".format(mydict["MPI_CXX"]))
         if "MPI_FC" in mydict:
             cmake_lines.append("-DMPI_Fortran_COMPILER:PATH={0}".format(mydict["MPI_FC"]))
-    if not have_mpi:
+    if have_mpi:
+        if "MPI_USE_HEADERS" in mydict:
+            cmake_lines.append("-DOFT_MPI_HEADER:BOOL=FALSE")
+    else:
         cmake_lines.append("-DOFT_USE_MPI:BOOL=FALSE")
     if "PETSC_ROOT" in mydict:
         cmake_lines.append("-DOFT_PETSc_ROOT:PATH={0}".format(mydict["PETSC_ROOT"]))
@@ -755,13 +758,16 @@ class METIS(package):
 
 
 class MPI(package):
-    def __init__(self):
+    def __init__(self,use_headers):
         self.name = "MPI"
         self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
         self.build_timeout = 20
+        self.use_headers = use_headers
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
+        if self.use_headers:
+            self.config_dict["MPI_USE_HEADERS"] = True
         if "MPI_CC" in config_dict:
             self.skip = True
             print("MPI provided by compiler wrappers: Skipping build")
@@ -1684,6 +1690,7 @@ group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compile
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
 group.add_argument("--mpi_libs", default=None, type=str, help="MPI libraries")
 group.add_argument("--mpi_include_dir", default=None, type=str, help="MPI include directory")
+group.add_argument("--mpi_use_headers", action="store_true", default=False, help="Use header-based MPI interface instead of Fortran 2008 module")
 #
 group = parser.add_argument_group("HDF5", "HDF5 package options")
 group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wrapper")
@@ -1801,7 +1808,7 @@ else:
             packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch,options.oblas_no_avx))
 # MPI
 if use_mpi:
-    packages.append(MPI())
+    packages.append(MPI(options.mpi_use_headers))
 else:
     if options.hdf5_parallel:
         print('Warning: Reverting to serial HDF5 library without MPI')

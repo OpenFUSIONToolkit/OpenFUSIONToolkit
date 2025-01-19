@@ -369,7 +369,11 @@ REAL(r8) :: dtmp,ptmp(3)
 REAL(r8), ALLOCATABLE :: dist(:),distout(:),distin(:),ptstmp(:,:)
 TYPE(oft_quad_type) :: quad
 #ifdef HAVE_MPI
+#ifdef OFT_MPI_F08
+TYPE(mpi_status) :: stat
+#else
 INTEGER(i4) :: stat(MPI_STATUS_SIZE)
+#endif
 #endif
 !---
 quad_order=4
