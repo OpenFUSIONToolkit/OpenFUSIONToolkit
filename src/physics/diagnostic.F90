@@ -464,7 +464,7 @@ IF(raxis==2)ptind(2)=3
 !---Set quadrature order
 CALL mesh%quad_rule(quad_order,quad)
 tflux=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad,raxis,ptind) reduction(+:tflux)
+!$omp parallel do default(firstprivate) shared(field,quad,raxis,ptind) private(curved) reduction(+:tflux)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -497,7 +497,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -528,7 +528,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -559,7 +559,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -591,7 +591,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do  default(firstprivate) shared(field,weight,quad) reduction(+:energy)
+!$omp parallel do  default(firstprivate) shared(field,weight,quad) private(curved) reduction(+:energy)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np

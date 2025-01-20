@@ -760,7 +760,7 @@ class METIS(package):
 class MPI(package):
     def __init__(self,use_headers):
         self.name = "MPI"
-        self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
+        self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz" # 3.4.3, 4.2.3
         self.build_timeout = 20
         self.use_headers = use_headers
 
@@ -779,6 +779,7 @@ class MPI(package):
         self.setup_root_struct()
         bin_dir = self.config_dict['MPI_BIN']
         self.config_dict['MPI_CC'] = os.path.join(bin_dir, "mpicc")
+        self.config_dict['MPI_CXX'] = os.path.join(bin_dir, "mpicxx")
         self.config_dict['MPI_FC'] = os.path.join(bin_dir, "mpif90")
         print('To use MPI please add "{0}" to your path'.format(bin_dir))
         # Installation check files
@@ -794,8 +795,32 @@ class MPI(package):
             "export FC={FC}"]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
             build_lines.append('export FFLAGS=-fallow-argument-mismatch')
+        config_options = [
+            "--prefix={MPI_ROOT}",
+            "--enable-fortran=yes",
+            "--enable-shared=no",
+            "--with-pic",
+            "--without-hip",
+            "--without-cuda",
+            "--disable-cuda",
+            "--disable-opencl"
+        ]
+        # if self.config_dict['OS_TYPE'] == 'Darwin':
+        #     print("  macOS detected: Looking for required packages with homebrew")
+        #     # Search for HWLOC
+        #     result, errcode = run_command("brew --prefix hwloc")
+        #     if errcode == 0:
+        #         hwloc_path = result.strip()
+        #         print("    Using hwloc from homebrew: {0}".format(hwloc_path))
+        #         config_options.append('--with-hwloc={0}'.format(hwloc_path))
+        #     # Search for PMIx
+        #     result, errcode = run_command("brew --prefix pmix")
+        #     if errcode == 0:
+        #         pmix_path = result.strip()
+        #         print("    Using pmix from homebrew: {0}".format(pmix_path))
+        #         config_options.append('--with-pmix={0}'.format(pmix_path))
         build_lines += [
-            "../configure --prefix={MPI_ROOT} --enable-fortran=yes --enable-shared=no --with-pic --disable-opencl --disable-nvml --disable-cuda",
+            "../configure " + " ".join(config_options),
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1321,8 +1346,8 @@ class SUPERLU(package):
 class SUPERLU_DIST(package):
     def __init__(self, build_openmp, comp_wrapper=False):
         self.name = "SUPERLU_DIST"
-        self.url = "https://portal.nersc.gov/project/sparse/superlu/superlu_dist_6.2.0.tar.gz"
-        self.build_dir = "SuperLU_DIST_6.2.0"
+        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v6.3.0.tar.gz"
+        self.build_dir = "superlu_dist-6.3.0"
         self.build_openmp = build_openmp
         self.comp_wrapper = comp_wrapper
 
@@ -1350,6 +1375,7 @@ class SUPERLU_DIST(package):
             "-DBUILD_SHARED_LIBS:BOOL=FALSE",
             "-DMPI_Fortran_COMPILER={MPI_FC}",
             "-DMPI_C_COMPILER={MPI_CC}",
+            "-DMPI_CXX_COMPILER={MPI_CXX}",
             "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-DCMAKE_INSTALL_LIBDIR=lib",
         ]
