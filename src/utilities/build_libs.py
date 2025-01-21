@@ -392,7 +392,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DMPI_Fortran_COMPILER:PATH={0}".format(mydict["MPI_FC"]))
     if have_mpi:
         if "MPI_USE_HEADERS" in mydict:
-            cmake_lines.append("-DOFT_MPI_HEADER:BOOL=FALSE")
+            cmake_lines.append("-DOFT_MPI_HEADER:BOOL=TRUE")
     else:
         cmake_lines.append("-DOFT_USE_MPI:BOOL=FALSE")
     if "PETSC_ROOT" in mydict:
