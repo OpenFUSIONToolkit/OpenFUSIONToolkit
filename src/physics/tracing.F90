@@ -1050,6 +1050,7 @@ IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','tracer_euler_send',__FILE__)
 self%status=TRACER_SEND_ACTIVE
 DEBUG_STACK_POP
 #else
+sid=MPI_REQUEST_NULL
 CALL oft_abort("Send requested without MPI","tracer_euler_send",__FILE__)
 #endif
 end function tracer_euler_send
@@ -1097,6 +1098,7 @@ ELSE
 END IF
 DEBUG_STACK_POP
 #else
+rid=MPI_REQUEST_NULL
 CALL oft_abort("Recieve requested without MPI","tracer_euler_recv",__FILE__)
 #endif
 end function tracer_euler_recv
@@ -1325,6 +1327,7 @@ IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','tracer_lsode_send',__FILE__)
 self%status=TRACER_SEND_ACTIVE
 DEBUG_STACK_POP
 #else
+sid=MPI_REQUEST_NULL
 CALL oft_abort("Send requested without MPI","tracer_lsode_send",__FILE__)
 #endif
 end function tracer_lsode_send
@@ -1378,6 +1381,7 @@ ELSE
 END IF
 DEBUG_STACK_POP
 #else
+rid=MPI_REQUEST_NULL
 CALL oft_abort("Receive requested without MPI","tracer_lsode_recv",__FILE__)
 #endif
 end function tracer_lsode_recv

@@ -342,6 +342,7 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
 LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+error_flag=0
 IF(vacuum)gs_global%has_plasma=.FALSE.
 fitI=settings%fitI
 fitP=settings%fitP

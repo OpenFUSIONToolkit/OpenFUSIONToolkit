@@ -1292,10 +1292,11 @@ class SUPERLU(package):
     def build(self):
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT}",
-            "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
             "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-Denable_blaslib:BOOL=TRUE",
         ]
+        if "BLAS_LIB_PATH" in self.config_dict:
+            cmake_options.append("-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}")
         if 'MACOS_SDK_PATH' in self.config_dict:
             cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         build_lines = [
@@ -1338,8 +1339,6 @@ class SUPERLU_DIST(package):
         cmake_options = [
             "-DTPL_ENABLE_PARMETISLIB:BOOL=FALSE",
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT}",
-            "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
-            "-DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}",
             "-Denable_tests=OFF -Denable_examples=OFF",
             "-DBUILD_SHARED_LIBS:BOOL=FALSE",
             "-DMPI_Fortran_COMPILER={MPI_FC}",
@@ -1347,6 +1346,11 @@ class SUPERLU_DIST(package):
             "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-DCMAKE_INSTALL_LIBDIR=lib",
         ]
+        if "BLAS_LIB_PATH" in self.config_dict:
+            cmake_options += [
+                "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
+                "-DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}"
+            ]
         if self.build_openmp:
             cmake_options.append("-Denable_openmp:BOOL=TRUE")
         else:
