@@ -758,9 +758,15 @@ class METIS(package):
 
 
 class MPI(package):
-    def __init__(self,use_headers):
+    def __init__(self,use_headers,ver_major):
         self.name = "MPI"
-        self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz" # 3.4.3, 4.2.3
+        self.ver_major = ver_major
+        if ver_major == 3:
+            self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
+        elif ver_major == 4:
+            self.url = "https://www.mpich.org/static/downloads/4.2.2/mpich-4.2.2.tar.gz"
+        else:
+            raise ValueError("Unknown MPICH version")
         self.build_timeout = 20
         self.use_headers = use_headers
 
@@ -801,18 +807,16 @@ class MPI(package):
             "--enable-shared=no",
             "--with-pic",
             "--without-hip",
-            "--without-cuda",
-            "--disable-cuda",
-            "--disable-opencl"
+            "--without-cuda"
         ]
-        # if self.config_dict['OS_TYPE'] == 'Darwin':
-        #     print("  macOS detected: Looking for required packages with homebrew")
-        #     # Search for HWLOC
-        #     result, errcode = run_command("brew --prefix hwloc")
-        #     if errcode == 0:
-        #         hwloc_path = result.strip()
-        #         print("    Using hwloc from homebrew: {0}".format(hwloc_path))
-        #         config_options.append('--with-hwloc={0}'.format(hwloc_path))
+        if self.config_dict['OS_TYPE'] == 'Darwin':
+            print("  macOS detected: Looking for required packages with homebrew")
+            # Search for HWLOC
+            result, errcode = run_command("brew --prefix hwloc")
+            if errcode == 0:
+                hwloc_path = result.strip()
+                print("    Using hwloc from homebrew: {0}".format(hwloc_path))
+                config_options.append('--with-hwloc={0}'.format(hwloc_path))
         #     # Search for PMIx
         #     result, errcode = run_command("brew --prefix pmix")
         #     if errcode == 0:
@@ -1710,7 +1714,8 @@ group.add_argument("--oft_package_release", action="store_true", default=False, 
 group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
 #
 group = parser.add_argument_group("MPI", "MPI package options")
-group.add_argument("--build_mpi", default=0, type=int, choices=(0,1), help="Build MPI libraries? (default: 0)")
+group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=(0,1), help="Build MPICH library? (default: 0)")
+group.add_argument("--mpich_version", default=4, type=int, choices=(3,4), help="MPICH major version (default: 4)")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
@@ -1812,7 +1817,7 @@ else:
             config_dict['MPI_INCLUDE'] = options.mpi_include_dir
         else:
             parser.exit(-1, '"MPI_INCLUDE" required when "MPI_LIB" is specified\n')
-    elif options.build_mpi:
+    elif options.build_mpich:
         use_mpi = True
 # Setup library builds (in order of dependency)
 packages = []
@@ -1834,7 +1839,7 @@ else:
             packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch,options.oblas_no_avx))
 # MPI
 if use_mpi:
-    packages.append(MPI(options.mpi_use_headers))
+    packages.append(MPI(options.mpi_use_headers,options.mpich_version))
 else:
     if options.hdf5_parallel:
         print('Warning: Reverting to serial HDF5 library without MPI')
