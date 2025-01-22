@@ -139,6 +139,7 @@ CLASS(oft_vector), POINTER :: u,v
 TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
 TYPE(oft_hcurl_cinterp), POINTER :: binterp_obj
 CHARACTER(LEN=80) :: name_tmp = ''
+CALL copy_string('',error_str)
 CALL copy_string_rev(key,name_tmp)
 !---Construct operator
 NULLIFY(lmop)
@@ -193,6 +194,7 @@ CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
 CLASS(oft_matrix), POINTER :: lop => NULL()
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
+CALL copy_string('',error_str)
 IF(oft_h1_nlevels==0)THEN
   !---H1(Grad) subspace
   CALL oft_h0_setup(oft_hcurl%order+1,oft_hcurl_minlev+1)
@@ -245,6 +247,7 @@ INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Needs docs
 TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 TYPE(oft_hcurl_cinterp), POINTER :: interp_obj
+CALL copy_string('',error_str)
 ALLOCATE(interp_obj)
 interp_obj%u=>taylor_hffa(imode,oft_hcurl_level)%f
 CALL interp_obj%setup()
