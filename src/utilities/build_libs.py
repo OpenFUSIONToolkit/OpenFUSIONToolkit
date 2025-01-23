@@ -767,7 +767,7 @@ class MPI(package):
             self.url = "https://www.mpich.org/static/downloads/4.2.2/mpich-4.2.2.tar.gz"
         else:
             raise ValueError("Unknown MPICH version")
-        self.build_timeout = 20
+        self.build_timeout = 30
         self.use_headers = use_headers
 
     def setup(self, config_dict):
