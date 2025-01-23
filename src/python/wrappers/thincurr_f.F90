@@ -359,7 +359,7 @@ SUBROUTINE thincurr_cross_coupling(tw_ptr1,tw_ptr2,Mmat,cache_file,error_str) BI
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr1 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr2 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: Mmat !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
 REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: Mmat_tmp
@@ -405,7 +405,7 @@ SUBROUTINE thincurr_Lmat(tw_ptr,use_hodlr,Lmat_ptr,cache_file,error_str) BIND(C,
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: use_hodlr
 TYPE(c_ptr), INTENT(out) :: Lmat_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
@@ -447,7 +447,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Bmat_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Bdr_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
@@ -482,7 +482,7 @@ END SUBROUTINE thincurr_Bmat
 SUBROUTINE thincurr_Mcoil(tw_ptr,Mc_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Mcoil")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Mc_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
@@ -503,13 +503,13 @@ END SUBROUTINE thincurr_Mcoil
 !------------------------------------------------------------------------------
 SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,njumpers,sensor_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: sensor_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: sensor_file(80) !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Ms_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Msc_ptr !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: nsensors
 INTEGER(KIND=c_int), INTENT(out) :: njumpers
 TYPE(c_ptr), INTENT(inout) :: sensor_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: cache_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
 INTEGER(4) :: i
