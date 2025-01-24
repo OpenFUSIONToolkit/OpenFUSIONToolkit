@@ -69,7 +69,11 @@ END TYPE native_ilu_struc
 !---------------------------------------------------------------------------
 TYPE :: superlu_struc
   INTEGER(i4) :: col_perm = -1 !< Column permutation to use (-1 for default)
+#ifdef OFT_MPI_F08
+  TYPE(mpi_comm) :: comm = MPI_COMM_NULL !< Private MPI communicator for SuperLU-DIST
+#else
   INTEGER(i4) :: comm = MPI_COMM_NULL !< Private MPI communicator for SuperLU-DIST
+#endif
   TYPE(C_PTR) :: f_factors = C_NULL_PTR !< SuperLU factors pointer
   TYPE(C_PTR) :: grid_handle = C_NULL_PTR !< SuperLU-DIST processor grid pointer
   INTEGER(i4), POINTER, DIMENSION(:) :: kr => NULL() !< Row pointer (0-based indices)
@@ -437,7 +441,7 @@ RECURSIVE SUBROUTINE lusolver_apply(self,u,g)
 CLASS(oft_lusolver), INTENT(inout) :: self
 CLASS(oft_vector), INTENT(inout) :: u,g
 !---
-INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
+INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info,superlu_comm
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
 REAL(r8), POINTER, DIMENSION(:) :: mat_vals,csc_vals,vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
@@ -489,7 +493,12 @@ IF(.NOT.self%initialized)THEN
       mode=1
       nrhs=1
       CALL MPI_Comm_dup(MPI_COMM_SELF,self%superlu_struct%comm,ierr)
-      CALL oft_superlu_dist_slugrid(mode,self%superlu_struct%comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
+#ifdef OFT_MPI_F08
+      superlu_comm=self%superlu_struct%comm%MPI_VAL
+#else
+      superlu_comm=self%superlu_struct%comm
+#endif
+      CALL oft_superlu_dist_slugrid(mode,superlu_comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
 #else
       CALL oft_abort('OFT not compiled with SUPERLU-DIST','lusolver_apply',__FILE__)
 #endif
@@ -516,7 +525,11 @@ IF(.NOT.self%initialized)THEN
     CASE("mumps")
 #ifdef HAVE_MUMPS
       self%mumps_struct%job = -1
+#ifdef OFT_MPI_F08
+      self%mumps_struct%comm = MPI_COMM_SELF%MPI_VAL
+#else
       self%mumps_struct%comm = MPI_COMM_SELF
+#endif
       self%mumps_struct%sym = 0
       self%mumps_struct%par = 1
       CALL dmumps(self%mumps_struct)
@@ -793,7 +806,7 @@ end function lusolver_check_thread
 !---------------------------------------------------------------------------
 subroutine lusolver_delete(self)
 class(oft_lusolver), intent(inout) :: self
-INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
+INTEGER(i4) :: mode,nrhs,ierr,ldb,nr,superlu_comm
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ivals
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rvals
 self%refactor=.TRUE.
@@ -817,7 +830,12 @@ SELECT CASE(TRIM(self%package))
       rvals,ldb,self%superlu_struct%grid_handle,self%superlu_struct%f_factors,nrhs,ierr)
     mode=2
     nrhs=1
-    CALL oft_superlu_dist_slugrid(mode,self%superlu_struct%comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
+#ifdef OFT_MPI_F08
+    superlu_comm=self%superlu_struct%comm%MPI_VAL
+#else
+    superlu_comm=self%superlu_struct%comm
+#endif
+    CALL oft_superlu_dist_slugrid(mode,superlu_comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
     CALL MPI_COMM_FREE(self%superlu_struct%comm, ierr)
     DEALLOCATE(self%superlu_struct%csc_vals,self%superlu_struct%csc_map)
     DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)

@@ -592,7 +592,7 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc)
+!$omp parallel default(firstprivate) shared(field,xloc) private(det)
 allocate(j(oft_blagrange%nce))
 !$omp do schedule(guided)
 do i=1,smesh%nc
@@ -641,7 +641,7 @@ call y%get_local(yloc)
 call z%set(0.d0)
 call z%get_local(zloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc,yloc,zloc)
+!$omp parallel default(firstprivate) shared(field,xloc,yloc,zloc) private(det)
 allocate(j(oft_blagrange%nce))
 !$omp do schedule(guided)
 do i=1,smesh%nc
@@ -690,7 +690,7 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc)
+!$omp parallel default(firstprivate) shared(field,xloc) private(det)
 allocate(j(oft_blagrange%nce))
 !$omp do schedule(guided)
 do i=1,smesh%nc
