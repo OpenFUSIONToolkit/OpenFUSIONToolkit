@@ -721,7 +721,7 @@ IF(.NOT.row%linkage%full)THEN
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    if(all(oft_env%recv==MPI_REQUEST_NULL))exit ! All recieves have been processed
+    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
     CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','fem_fill_lgraph',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array
@@ -729,10 +729,10 @@ IF(.NOT.row%linkage%full)THEN
     ncon(j)=0
     !---Convert to local indexing
     DO m=1,netmp
-      jp=search_array(letmp(m,1),row_lg_sorted,INT(row%ne,8))
+      jp=INT(search_array(letmp(m,1),row_lg_sorted,INT(row%ne,8)),4)
       IF(jp>0)THEN
         letmp(m,1)=row_lg_ind(jp)
-        jn=search_array(letmp(m,2),col_lg_sorted,INT(col%ne,8))
+        jn=INT(search_array(letmp(m,2),col_lg_sorted,INT(col%ne,8)),4)
         IF(jn>0)THEN
           letmp(m,2)=col_lg_ind(jn)
           nnz_new=nnz_new+1
@@ -1201,7 +1201,7 @@ IF(.NOT.mesh%fullmesh)THEN
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    if(all(oft_env%recv==MPI_REQUEST_NULL))exit ! All recieves have been processed
+    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
     CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','fem_global_linkage',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array
@@ -1966,7 +1966,7 @@ IF(mesh%skip)THEN
     end do
     !---Loop over each connected processor
     do while(.TRUE.)
-      if(all(oft_env%recv==MPI_REQUEST_NULL))exit ! All recieves have been processed
+      IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
       CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
       IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','bfem_global_linkage',__FILE__)
     end do
@@ -2138,7 +2138,7 @@ IF(.NOT.mesh%fullmesh)THEN
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    if(all(oft_env%recv==MPI_REQUEST_NULL))exit ! All recieves have been processed
+    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
     CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','bfem_global_linkage',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array

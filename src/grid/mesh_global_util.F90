@@ -336,7 +336,12 @@ class(oft_amesh), intent(inout) :: mesh
 integer(8) :: nloc(6),ntmp(4),nfb,nfl,nfg,nfmax
 integer(i4) :: i,j,k,l
 #ifdef HAVE_MPI
-integer(i4) :: stat(MPI_STATUS_SIZE),ierr
+integer(i4) :: ierr
+#ifdef OFT_MPI_F08
+type(mpi_status) :: stat
+#else
+integer(i4) :: stat(MPI_STATUS_SIZE)
+#endif
 #endif
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting I/O information'
@@ -465,7 +470,11 @@ INTEGER(i4) :: i,j,k,l,ierr
 INTEGER(i8) :: grnd_global
 LOGICAL :: owned
 #ifdef HAVE_MPI
+#ifdef OFT_MPI_F08
+type(mpi_status) :: stat
+#else
 integer(i4) :: stat(MPI_STATUS_SIZE)
+#endif
 #endif
 DEBUG_STACK_PUSH
 !---Locate local surface ground point

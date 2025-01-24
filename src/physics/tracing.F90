@@ -38,7 +38,11 @@ type, abstract :: oft_tracer
   integer(i4) :: estatus = 0 !< Error status of tracer
   integer(i4) :: proc = 0 !< Processor location of last/current trace point
   integer(i4) :: tids(2) = 0 !< Transfer tags for inter-processor communication
+#ifdef OFT_MPI_F08
+  type(mpi_request) :: rids(2) = MPI_REQUEST_NULL !< Active MPI recieve request IDs
+#else
   integer(i4) :: rids(2) = MPI_REQUEST_NULL !< Active MPI recieve request IDs
+#endif
   real(r8) :: tol = 1.d-4 !< Tolerance for ODE solver
   real(r8) :: dt = 0.d0 !< Time step for ODE solver
   real(r8), pointer, dimension(:) :: y !< Possition of current trace point
@@ -176,9 +180,16 @@ abstract interface
 !---------------------------------------------------------------------------
   function tracer_send(self,proc) result(sid)
   import oft_tracer, i4
+#ifdef OFT_MPI_F08
+  import mpi_request
+#endif
   class(oft_tracer), intent(inout) :: self
   integer(i4), intent(in) :: proc
+#ifdef OFT_MPI_F08
+  type(mpi_request) :: sid(2)
+#else
   integer(i4) :: sid(2)
+#endif
   end function tracer_send
 !---------------------------------------------------------------------------
 ! INTERFACE tracer_recv
@@ -190,9 +201,16 @@ abstract interface
 !---------------------------------------------------------------------------
   function tracer_recv(self,proc) result(rid)
   import oft_tracer, i4
+#ifdef OFT_MPI_F08
+  import mpi_request
+#endif
   class(oft_tracer), intent(inout) :: self
   integer(i4), intent(in) :: proc
+#ifdef OFT_MPI_F08
+  type(mpi_request) :: rid(2)
+#else
   integer(i4) :: rid(2)
+#endif
   end function tracer_recv
 !------------------------------------------------------------------------------
 ! INTERFACE tracer_step
@@ -332,8 +350,14 @@ subroutine tracing_line(tracer,pt,filename)
 class(oft_tracer), TARGET, intent(in) :: tracer
 real(r8), intent(in) :: pt(:)
 character(LEN=*), intent(in) :: filename
-integer(i4) :: i,j,ierr,cell,proc,nsteps,io_unit,tid(2)
+integer(i4) :: i,j,ierr,cell,proc,nsteps,io_unit
+#ifdef OFT_MPI_F08
+type(mpi_request) :: tid(2)
+type(mpi_request), allocatable, dimension(:) :: send_reqr,send_reqi
+#else
+integer(i4) :: tid(2)
 integer(i4), allocatable, dimension(:) :: send_reqr,send_reqi
+#endif
 real(r8) :: f(4),fmin,fmax,ptmp(3)
 real(r8), ALLOCATABLE, DIMENSION(:,:) :: pt_list,tmp_list
 DEBUG_STACK_PUSH
@@ -410,7 +434,7 @@ do while(active_tracer%ntrans<active_tracer%maxtrans)
     else
       DO
         tid=active_tracer%recv(active_tracer%proc)
-        IF(ALL(tid==MPI_REQUEST_NULL))EXIT
+        IF(oft_mpi_check_reqs(2,tid))EXIT
       END DO
       active_tracer%ntrans=active_tracer%ntrans+1
     end if
@@ -610,9 +634,16 @@ end subroutine tracing_poincare
 subroutine tracing_poincare_master(tracers,n)
 type(oft_tracer_ptr), target, intent(inout) :: tracers(n)
 integer(i4), intent(in) :: n
-integer(i4) :: i,j,ierr,cell,tid(2)
+integer(i4) :: i,j,ierr,cell
+#ifdef OFT_MPI_F08
+type(mpi_request) :: tid(2)
+type(mpi_request), allocatable, dimension(:) :: recv_reqr,recv_reqi
+type(mpi_request), allocatable, dimension(:,:) :: send_reqr,send_reqi
+#else
+integer(i4) :: tid(2)
 integer(i4), allocatable, dimension(:) :: recv_reqr,recv_reqi
 integer(i4), allocatable, dimension(:,:) :: send_reqr,send_reqi
+#endif
 logical :: testr,testi,testc
 real(r8) :: f(4),fmin,fmax,tol_ratio
 class(oft_tracer), pointer :: loc_tracer
@@ -747,7 +778,7 @@ DO
       END IF
       !---Test for completion of recv
       tid=loc_tracer%recv(loc_tracer%proc)
-      IF(ALL(tid==MPI_REQUEST_NULL))THEN
+      IF(oft_mpi_check_reqs(2,tid))THEN
         !---Recv is complete
         loc_tracer%ntrans=loc_tracer%ntrans+1
         !---Disable point if over maxtrans
@@ -1031,7 +1062,12 @@ end subroutine tracer_euler_save
 function tracer_euler_send(self,proc) result(sid)
 class(oft_tracer_euler), intent(inout) :: self
 integer(i4), intent(in) :: proc
-integer(i4) :: sid(2),ierr
+integer(i4) :: ierr
+#ifdef OFT_MPI_F08
+type(mpi_request) :: sid(2)
+#else
+integer(i4) :: sid(2)
+#endif
 #ifdef HAVE_MPI
 DEBUG_STACK_PUSH
 !---Pack info
@@ -1050,6 +1086,7 @@ IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','tracer_euler_send',__FILE__)
 self%status=TRACER_SEND_ACTIVE
 DEBUG_STACK_POP
 #else
+sid=MPI_REQUEST_NULL
 CALL oft_abort("Send requested without MPI","tracer_euler_send",__FILE__)
 #endif
 end function tracer_euler_send
@@ -1067,11 +1104,16 @@ end function tracer_euler_send
 function tracer_euler_recv(self,proc) result(rid)
 class(oft_tracer_euler), intent(inout) :: self
 integer(i4), intent(in) :: proc
-integer(i4) :: rid(2),ierr
+integer(i4) :: ierr
+#ifdef OFT_MPI_F08
+type(mpi_request) :: rid(2)
+#else
+integer(i4) :: rid(2)
+#endif
 #ifdef HAVE_MPI
 logical :: testr,testi
 DEBUG_STACK_PUSH
-IF(ALL(self%rids==MPI_REQUEST_NULL))THEN
+IF(oft_mpi_check_reqs(2,self%rids))THEN
   !---Setup recv
   CALL MPI_IRECV(self%rsend,self%neq+1,OFT_MPI_R8,proc,self%tids(1),oft_env%COMM,self%rids(1),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','tracer_euler_recv',__FILE__)
@@ -1097,6 +1139,7 @@ ELSE
 END IF
 DEBUG_STACK_POP
 #else
+rid=MPI_REQUEST_NULL
 CALL oft_abort("Recieve requested without MPI","tracer_euler_recv",__FILE__)
 #endif
 end function tracer_euler_recv
@@ -1301,7 +1344,12 @@ end subroutine tracer_lsode_save
 function tracer_lsode_send(self,proc) result(sid)
 class(oft_tracer_lsode), intent(inout) :: self
 integer(i4), intent(in) :: proc
-integer(i4) :: sid(2),ierr
+integer(i4) :: ierr
+#ifdef OFT_MPI_F08
+type(mpi_request) :: sid(2)
+#else
+integer(i4) :: sid(2)
+#endif
 #ifdef HAVE_MPI
 DEBUG_STACK_PUSH
 !---Pack info
@@ -1325,6 +1373,7 @@ IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','tracer_lsode_send',__FILE__)
 self%status=TRACER_SEND_ACTIVE
 DEBUG_STACK_POP
 #else
+sid=MPI_REQUEST_NULL
 CALL oft_abort("Send requested without MPI","tracer_lsode_send",__FILE__)
 #endif
 end function tracer_lsode_send
@@ -1342,11 +1391,16 @@ end function tracer_lsode_send
 function tracer_lsode_recv(self,proc) result(rid)
 class(oft_tracer_lsode), intent(inout) :: self
 integer(i4), intent(in) :: proc
-integer(i4) :: rid(2),ierr
+integer(i4) :: ierr
+#ifdef OFT_MPI_F08
+type(mpi_request) :: rid(2)
+#else
+integer(i4) :: rid(2)
+#endif
 #ifdef HAVE_MPI
 logical :: testr,testi
 DEBUG_STACK_PUSH
-IF(ALL(self%rids==MPI_REQUEST_NULL))THEN
+IF(oft_mpi_check_reqs(2,self%rids))THEN
   !---Setup recv
   CALL MPI_IRECV(self%rsend,self%nrsend,OFT_MPI_R8,proc,self%tids(1),oft_env%COMM,self%rids(1),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','tracer_lsode_recv',__FILE__)
@@ -1378,6 +1432,7 @@ ELSE
 END IF
 DEBUG_STACK_POP
 #else
+rid=MPI_REQUEST_NULL
 CALL oft_abort("Receive requested without MPI","tracer_lsode_recv",__FILE__)
 #endif
 end function tracer_lsode_recv

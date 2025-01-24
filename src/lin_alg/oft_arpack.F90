@@ -302,7 +302,7 @@ SUBROUTINE iram_eig_apply(self,u,alam)
 CLASS(oft_iram_eigsolver), intent(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
-INTEGER(i4) :: i,j,ind,nslice,neigs
+INTEGER(i4) :: i,j,ind,nslice,neigs,comm
 INTEGER(i4) :: ido,ldv,lworkl,info
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(14)
 INTEGER(i4), POINTER, DIMENSION(:) :: emap
@@ -381,6 +381,11 @@ DEALLOCATE(vslice)
 !---------------------------------------------------------------------------
 ! Begin Reverse Communication
 !---------------------------------------------------------------------------
+#ifdef OFT_MPI_F08
+comm = oft_env%comm%MPI_VAL
+#else
+comm = oft_env%comm
+#endif
 i=0
 self%info=0
 DO
@@ -390,7 +395,7 @@ DO
                 resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
   ELSE
 #ifdef HAVE_MPI
-    CALL pdnaupd(oft_env%comm,ido,bmat,nslice,self%which,self%nev,self%tol, &
+    CALL pdnaupd(comm,ido,bmat,nslice,self%which,self%nev,self%tol, &
                  resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
   END IF
@@ -462,7 +467,7 @@ DO
                   workl,lworkl,info)
     ELSE
 #ifdef HAVE_MPI
-      CALL pdneupd(oft_env%comm,rvec,'A',select,dr,di,v,ldv, &
+      CALL pdneupd(comm,rvec,'A',select,dr,di,v,ldv, &
                    sigmar,sigmai,workev,bmat,nslice,self%which,self%nev,self%tol, &
                    resid,self%ncv,v,ldv,iparam,ipntr,workd, &
                    workl,lworkl,info)
@@ -518,7 +523,7 @@ SUBROUTINE iram_eig_max(self,u,alam)
 CLASS(oft_iram_eigsolver), INTENT(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
-INTEGER(i4) :: i,j
+INTEGER(i4) :: i,j,comm
 INTEGER(i4) :: ido,nslice,nev,ncv,ldv,lworkl,info
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(14)
 REAL(r8) :: sigmar,sigmai
@@ -582,6 +587,11 @@ DEALLOCATE(vslice)
 !---------------------------------------------------------------------------
 ! Begin Reverse Communication
 !---------------------------------------------------------------------------
+#ifdef OFT_MPI_F08
+comm = oft_env%comm%MPI_VAL
+#else
+comm = oft_env%comm
+#endif
 self%info=0
 DO i=1,4000
   !---Call APRACK driver
@@ -590,7 +600,7 @@ DO i=1,4000
       ldv,iparam,ipntr,workd,workl,lworkl,info)
   ELSE
 #ifdef HAVE_MPI
-    CALL pdnaupd(oft_env%comm,ido,bmat,nslice,which,nev,self%tol,resid,ncv,v, &
+    CALL pdnaupd(comm,ido,bmat,nslice,which,nev,self%tol,resid,ncv,v, &
       ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
   END IF
@@ -650,7 +660,7 @@ DO i=1,4000
       resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
     ELSE
 #ifdef HAVE_MPI
-      CALL pdneupd(oft_env%comm,rvec,'A',select,dr,di,v,ldv, &
+      CALL pdneupd(comm,rvec,'A',select,dr,di,v,ldv, &
         sigmar,sigmai,workev,bmat,nslice,which,nev,self%tol, &
         resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
@@ -690,7 +700,7 @@ SUBROUTINE irlm_eig_apply(self,u,alam)
 CLASS(oft_irlm_eigsolver), intent(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
-INTEGER(i4) :: i,j
+INTEGER(i4) :: i,j,comm
 INTEGER(i4) :: ido,nslice,ldv,lworkl,info
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(11)
 REAL(r8) :: sigma
@@ -767,6 +777,11 @@ DEALLOCATE(vslice)
 !---------------------------------------------------------------------------
 ! Begin Reverse Communication
 !---------------------------------------------------------------------------
+#ifdef OFT_MPI_F08
+comm = oft_env%comm%MPI_VAL
+#else
+comm = oft_env%comm
+#endif
 i=0
 self%info=0
 DO
@@ -776,7 +791,7 @@ DO
       self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
   ELSE
 #ifdef HAVE_MPI
-    CALL pdsaupd(oft_env%comm,ido,bmat,nslice,self%which,self%nev,self%tol,resid, &
+    CALL pdsaupd(comm,ido,bmat,nslice,self%which,self%nev,self%tol,resid, &
       self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
   END IF
@@ -846,7 +861,7 @@ DO
         resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
     ELSE
 #ifdef HAVE_MPI
-      CALL pdseupd(oft_env%comm,rvec,'A',select,d,v,ldv, &
+      CALL pdseupd(comm,rvec,'A',select,d,v,ldv, &
         sigma,bmat,nslice,self%which,self%nev,self%tol, &
         resid,self%ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
@@ -897,7 +912,7 @@ SUBROUTINE irlm_eig_max(self,u,alam)
 CLASS(oft_irlm_eigsolver), INTENT(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
-INTEGER(i4) :: i,j
+INTEGER(i4) :: i,j,comm
 INTEGER(i4) :: ido,nslice,nev,ncv,ldv,lworkl,info
 INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(11)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: emap
@@ -962,6 +977,11 @@ DEALLOCATE(vslice)
 !---------------------------------------------------------------------------
 ! Begin Reverse Communication
 !---------------------------------------------------------------------------
+#ifdef OFT_MPI_F08
+comm = oft_env%comm%MPI_VAL
+#else
+comm = oft_env%comm
+#endif
 self%info=0
 DO
   !---Call APRACK driver
@@ -970,7 +990,7 @@ DO
       v,ldv,iparam,ipntr,workd,workl,lworkl,info)
   ELSE
 #ifdef HAVE_MPI
-    CALL pdsaupd(oft_env%comm,ido,bmat,nslice,which,nev,self%tol,resid,ncv, &
+    CALL pdsaupd(comm,ido,bmat,nslice,which,nev,self%tol,resid,ncv, &
       v,ldv,iparam,ipntr,workd,workl,lworkl,info)
 #endif
   END IF
@@ -1042,7 +1062,7 @@ DO
         iparam,ipntr,workd,workl,lworkl,info)
     ELSE
 #ifdef HAVE_MPI
-      CALL pdseupd(oft_env%comm,rvec,'A',select,d,v(:,1:nev),ldv, &
+      CALL pdseupd(comm,rvec,'A',select,d,v(:,1:nev),ldv, &
         sigma,bmat,nslice,which,nev,self%tol,resid,ncv,v,ldv, &
         iparam,ipntr,workd,workl,lworkl,info)
 #endif

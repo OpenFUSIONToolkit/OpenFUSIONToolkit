@@ -390,7 +390,10 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DMPI_CXX_COMPILER:PATH={0}".format(mydict["MPI_CXX"]))
         if "MPI_FC" in mydict:
             cmake_lines.append("-DMPI_Fortran_COMPILER:PATH={0}".format(mydict["MPI_FC"]))
-    if not have_mpi:
+    if have_mpi:
+        if "MPI_USE_HEADERS" in mydict:
+            cmake_lines.append("-DOFT_MPI_HEADER:BOOL=TRUE")
+    else:
         cmake_lines.append("-DOFT_USE_MPI:BOOL=FALSE")
     if "PETSC_ROOT" in mydict:
         cmake_lines.append("-DOFT_PETSc_ROOT:PATH={0}".format(mydict["PETSC_ROOT"]))
@@ -755,13 +758,22 @@ class METIS(package):
 
 
 class MPICH(package):
-    def __init__(self):
+    def __init__(self,use_headers,ver_major):
         self.name = "MPI"
-        self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
-        self.build_timeout = 20
+        self.ver_major = ver_major
+        if ver_major == 3:
+            self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
+        elif ver_major == 4:
+            self.url = "https://www.mpich.org/static/downloads/4.2.2/mpich-4.2.2.tar.gz"
+        else:
+            raise ValueError("Unknown MPICH version")
+        self.build_timeout = 30
+        self.use_headers = use_headers
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
+        if self.use_headers:
+            self.config_dict["MPI_USE_HEADERS"] = True
         if "MPI_CC" in config_dict:
             self.skip = True
             print("MPI provided by compiler wrappers: Skipping build")
@@ -773,6 +785,7 @@ class MPICH(package):
         self.setup_root_struct()
         bin_dir = self.config_dict['MPI_BIN']
         self.config_dict['MPI_CC'] = os.path.join(bin_dir, "mpicc")
+        self.config_dict['MPI_CXX'] = os.path.join(bin_dir, "mpicxx")
         self.config_dict['MPI_FC'] = os.path.join(bin_dir, "mpif90")
         print('To use MPI please add "{0}" to your path'.format(bin_dir))
         # Installation check files
@@ -788,8 +801,30 @@ class MPICH(package):
             "export FC={FC}"]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
             build_lines.append('export FFLAGS=-fallow-argument-mismatch')
+        config_options = [
+            "--prefix={MPI_ROOT}",
+            "--enable-fortran=yes",
+            "--enable-shared=no",
+            "--with-pic",
+            "--without-hip",
+            "--without-cuda"
+        ]
+        if self.config_dict['OS_TYPE'] == 'Darwin':
+            print("  macOS detected: Looking for required packages with homebrew")
+            # Search for HWLOC
+            result, errcode = run_command("brew --prefix hwloc")
+            if errcode == 0:
+                hwloc_path = result.strip()
+                print("    Using hwloc from homebrew: {0}".format(hwloc_path))
+                config_options.append('--with-hwloc={0}'.format(hwloc_path))
+        #     # Search for PMIx
+        #     result, errcode = run_command("brew --prefix pmix")
+        #     if errcode == 0:
+        #         pmix_path = result.strip()
+        #         print("    Using pmix from homebrew: {0}".format(pmix_path))
+        #         config_options.append('--with-pmix={0}'.format(pmix_path))
         build_lines += [
-            "../configure --prefix={MPI_ROOT} --enable-fortran=yes --enable-shared=no --with-pic --disable-opencl --disable-nvml --disable-cuda",
+            "../configure " + " ".join(config_options),
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1384,10 +1419,11 @@ class SUPERLU(package):
     def build(self):
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT}",
-            "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
             "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-Denable_blaslib:BOOL=TRUE",
         ]
+        if "BLAS_LIB_PATH" in self.config_dict:
+            cmake_options.append("-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}")
         if 'MACOS_SDK_PATH' in self.config_dict:
             cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         build_lines = [
@@ -1407,8 +1443,8 @@ class SUPERLU(package):
 class SUPERLU_DIST(package):
     def __init__(self, build_openmp, comp_wrapper=False):
         self.name = "SUPERLU_DIST"
-        self.url = "https://portal.nersc.gov/project/sparse/superlu/superlu_dist_6.2.0.tar.gz"
-        self.build_dir = "SuperLU_DIST_6.2.0"
+        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v6.3.0.tar.gz"
+        self.build_dir = "superlu_dist-6.3.0"
         self.build_openmp = build_openmp
         self.comp_wrapper = comp_wrapper
 
@@ -1430,15 +1466,19 @@ class SUPERLU_DIST(package):
         cmake_options = [
             "-DTPL_ENABLE_PARMETISLIB:BOOL=FALSE",
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT}",
-            "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
-            "-DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}",
             "-Denable_tests=OFF -Denable_examples=OFF",
             "-DBUILD_SHARED_LIBS:BOOL=FALSE",
             "-DMPI_Fortran_COMPILER={MPI_FC}",
             "-DMPI_C_COMPILER={MPI_CC}",
+            "-DMPI_CXX_COMPILER={MPI_CXX}",
             "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-DCMAKE_INSTALL_LIBDIR=lib",
         ]
+        if "BLAS_LIB_PATH" in self.config_dict:
+            cmake_options += [
+                "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
+                "-DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}"
+            ]
         if self.build_openmp:
             cmake_options.append("-Denable_openmp:BOOL=TRUE")
         else:
@@ -1771,12 +1811,14 @@ group.add_argument("--oft_build_coverage", action="store_true", default=False, h
 #
 group = parser.add_argument_group("MPI", "MPI package options")
 group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=(0,1), help="Build MPICH libraries?")
+group.add_argument("--mpich_version", default=4, type=int, choices=(3,4), help="MPICH major version (default: 4)")
 group.add_argument("--build_openmpi", default=0, type=int, choices=(0,1), help="Build OpenMPI libraries?")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
 group.add_argument("--mpi_libs", default=None, type=str, help="MPI libraries")
 group.add_argument("--mpi_include_dir", default=None, type=str, help="MPI include directory")
+group.add_argument("--mpi_use_headers", action="store_true", default=False, help="Use header-based MPI interface instead of Fortran 2008 module")
 #
 group = parser.add_argument_group("HDF5", "HDF5 package options")
 group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wrapper")
@@ -1899,7 +1941,7 @@ if use_mpi:
     if options.build_openmpi:
         packages.append(OpenMPI())
     elif options.build_mpich:
-        packages.append(MPICH())
+        packages.append(MPICH(options.mpi_use_headers,options.mpich_version))
     else:
         parser.exit(-1, 'Invalid MPI package')
 else:
