@@ -1211,7 +1211,11 @@ CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
 CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
 integer(i4) :: i,ntrans(4),ierr,io_unit
 #ifdef HAVE_MPI
+#ifdef OFT_MPI_F08
+type(mpi_status) :: mpi_stat
+#else
 integer(i4) :: mpi_stat(MPI_STATUS_SIZE)
+#endif
 #endif
 DEBUG_STACK_PUSH
 pathprefix=''
