@@ -171,7 +171,7 @@ class TokaMaker():
 
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         tokamaker_reset(cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
@@ -314,7 +314,7 @@ class TokaMaker():
         self.update_settings()
         #
         ncoils = c_int()
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         # filename = c_char_p(input_filename.encode())
         tokamaker_setup(order,full_domain,ctypes.byref(ncoils),cstring)
         if cstring.value != b'':
@@ -871,7 +871,7 @@ class TokaMaker():
             raise ValueError('Invalid field type ("B", "psi", "F", "P")')
         #
         int_obj = c_void_p()
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         tokamaker_get_field_eval(imode,ctypes.byref(int_obj),cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
@@ -1357,7 +1357,7 @@ class TokaMaker():
             zbounds += numpy.r_[-1.0,1.0]*dr*0.05
         if rcentr is None:
             rcentr = -1.0
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)

@@ -12,7 +12,7 @@ import sys
 import os
 import platform
 import ctypes
-from ctypes import c_bool, c_int, c_double, c_char_p, c_void_p
+from ctypes import c_bool, c_int, c_double, c_char_p, c_void_p, create_string_buffer
 import subprocess
 import numpy
 from numpy import float64, int32
