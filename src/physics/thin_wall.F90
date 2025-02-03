@@ -806,7 +806,7 @@ IF(tw_obj%n_vcoils>0.AND.ncoils_tot>0)THEN
               cpt = (coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
               tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/SQRT(SUM((pt_i-cpt)**2) + coil_thickness)
             END DO
-            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
+            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
           END DO
         END DO
       END DO
@@ -840,7 +840,7 @@ IF(ASSOCIATED(tw_obj%Ael2dr))THEN
     END DO
     !$omp end parallel
   END IF
-  tw_obj%Ael2dr = tw_obj%Ael2dr/(4.d0*pi)
+  tw_obj%Ael2dr = tw_obj%Ael2dr*mu0/(4.d0*pi)
 END IF
 DEALLOCATE(Acoil2coil_tmp)
 !
@@ -1594,7 +1594,7 @@ ALLOCATE(tw_obj%Adr2sen(nsensors,tw_obj%n_icoils))
 DO i=1,tw_obj%n_icoils
   tw_obj%Adr2sen(:,i)=Acoil2sen_tmp(:,i+tw_obj%n_vcoils)
 END DO
-tw_obj%Adr2sen=tw_obj%Adr2sen/(4.d0*pi)
+tw_obj%Adr2sen=tw_obj%Adr2sen*mu0/(4.d0*pi)
 !---Copy coupling between passive coils and sensors
 IF(nsensors>0)THEN
   !$omp parallel private(j,ii,jj,ik,jk)
@@ -2124,7 +2124,7 @@ DO i=1,bmesh%np
     END DO
   END DO
 END DO
-self%Bdr=self%Bdr/(4.d0*pi)
+self%Bdr=self%Bdr*mu0/(4.d0*pi)
 !
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems

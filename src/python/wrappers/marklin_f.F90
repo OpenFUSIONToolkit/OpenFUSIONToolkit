@@ -35,7 +35,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
     hcurl_mloptions
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, h0_zerogrnd
+USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, h0_zerogrnd, h0_zerob
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_nlevels
 USE oft_h1_fields, ONLY: oft_h1_create
@@ -43,7 +43,7 @@ USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob, &
   h1_setup_interp, oft_h1_rinterp
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
-  taylor_rst
+  taylor_rst, taylor_hlam
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -57,35 +57,33 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_setup(order,nmodes,minlev,save_rst,error_str) BIND(C,NAME="marklin_setup")
+SUBROUTINE marklin_compute(order,nmodes,minlev,save_rst,eig_vals,error_str) BIND(C,NAME="marklin_compute")
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nmodes !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: minlev !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_rst !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eig_vals !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()
 CLASS(oft_solver), POINTER :: lminv => NULL()
 !---Local variables
 INTEGER(i4) :: i,io_unit,ierr
-REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
+REAL(r8), POINTER, DIMENSION(:) :: vals_tmp => NULL()
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 CHARACTER(LEN=3) :: pltnum
 !---Clear error flag
 CALL copy_string('',error_str)
-!---Setup grid
-! CALL mesh%setup_io(order)
-! smesh%tess_order=order
+IF(taylor_nm>0)THEN
+  CALL copy_string('Eigenstates already computed',error_str)
+  RETURN
+END IF
 !---Lagrange
 CALL oft_lag_setup(order,minlev)
-CALL lag_setup_interp
-CALL lag_mloptions
 !---H1(Curl) subspace
 CALL oft_hcurl_setup(order,minlev)
-CALL hcurl_setup_interp
-CALL hcurl_mloptions
 !---Compute modes
 IF(minlev<0)THEN
   taylor_minlev=oft_hcurl_level
@@ -93,26 +91,56 @@ ELSE
   taylor_minlev=minlev
   IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,minlev)
 END IF
+IF(taylor_minlev<oft_hcurl_level)THEN
+  CALL lag_setup_interp
+  CALL lag_mloptions
+  CALL hcurl_setup_interp
+  CALL hcurl_mloptions
+END IF
 oft_env%pm=.TRUE.
 taylor_rst=save_rst
 CALL taylor_hmodes(nmodes)
-END SUBROUTINE marklin_setup
+CALL c_f_pointer(eig_vals, vals_tmp, [nmodes])
+vals_tmp=taylor_hlam(:,oft_hcurl_level)
+END SUBROUTINE marklin_compute
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_save_visit(error_str) BIND(C,NAME="marklin_save_visit")
+SUBROUTINE marklin_setup_io(basepath,error_str) BIND(C,NAME="marklin_setup_io")
+CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+!
+CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix = ''
+CALL copy_string('',error_str)
+CALL copy_string_rev(basepath,pathprefix)
+!---Setup I/0
+IF(TRIM(pathprefix)/='')THEN
+  CALL mesh%setup_io(oft_hcurl%order,basepath=pathprefix)
+ELSE
+  CALL mesh%setup_io(oft_hcurl%order)
+END IF
+END SUBROUTINE marklin_setup_io
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE marklin_save_visit(int_obj,int_type,key,error_str) BIND(C,NAME="marklin_save_visit")
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: key(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()
 CLASS(oft_solver), POINTER :: lminv => NULL()
 !---Local variables
-INTEGER(i4) :: i,io_unit,ierr
+INTEGER(i4) :: i
 REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
-CLASS(oft_vector), POINTER :: u,v,check
-TYPE(oft_hcurl_cinterp) :: Bfield
-CHARACTER(LEN=3) :: pltnum
-CALL mesh%setup_io(oft_hcurl%order)
+CLASS(oft_vector), POINTER :: u,v
+TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
+TYPE(oft_hcurl_cinterp), POINTER :: binterp_obj
+CHARACTER(LEN=80) :: name_tmp = ''
+CALL copy_string('',error_str)
+CALL copy_string_rev(key,name_tmp)
 !---Construct operator
 NULLIFY(lmop)
 CALL oft_lag_vgetmop(lmop,'none')
@@ -125,40 +153,48 @@ lminv%its=-2
 CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)
 ALLOCATE(bvout(3,u%n/3))
-!---Save modes
-DO i=1,taylor_nm
-  WRITE(pltnum,'(I3.3)')i
-  ! CALL oft_hcurl%vec_save(taylor_hffa(i,oft_hcurl_level)%f, &
-  !                         'taylor.rst','A_'//pltnum, append=(i/=1))
-  !---Setup field interpolation
-  Bfield%u=>taylor_hffa(i,oft_hcurl_level)%f
-  CALL Bfield%setup
-  !---Project field
-  CALL oft_lag_vproject(Bfield,v)
-  CALL u%set(0.d0)
-  CALL lminv%apply(u,v)
-  !---Retrieve local values and save
-  vals=>bvout(1,:)
-  CALL u%get_local(vals,1)
-  vals=>bvout(2,:)
-  CALL u%get_local(vals,2)
-  vals=>bvout(3,:)
-  CALL u%get_local(vals,3)
-  call mesh%save_vertex_vector(bvout,'B_'//pltnum)
-END DO
+!---Project field onto plotting mesh
+SELECT CASE(int_type)
+CASE(1)
+  CALL c_f_pointer(int_obj, ainterp_obj)
+  CALL oft_lag_vproject(ainterp_obj,v)
+CASE(2)
+  CALL c_f_pointer(int_obj, binterp_obj)
+  CALL oft_lag_vproject(binterp_obj,v)
+END SELECT
+CALL u%set(0.d0)
+CALL lminv%apply(u,v)
+!---Retrieve local values and save
+vals=>bvout(1,:)
+CALL u%get_local(vals,1)
+vals=>bvout(2,:)
+CALL u%get_local(vals,2)
+vals=>bvout(3,:)
+CALL u%get_local(vals,3)
+call mesh%save_vertex_vector(bvout,TRIM(name_tmp))
+!---Cleanup
+CALL lminv%pre%delete
+DEALLOCATE(lminv%pre)
+CALL u%delete()
+CALL v%delete()
+CALL lmop%delete()
+CALL lminv%delete()
+DEALLOCATE(u,v,lmop,lminv)
 END SUBROUTINE marklin_save_visit
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_get_aint(imode,int_obj,error_str) BIND(C,NAME="marklin_get_aint")
+SUBROUTINE marklin_get_aint(imode,int_obj,zero_norm,error_str) BIND(C,NAME="marklin_get_aint")
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Needs docs
 TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: zero_norm !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 TYPE(oft_h1_rinterp), POINTER :: interp_obj
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
 CLASS(oft_matrix), POINTER :: lop => NULL()
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
+CALL copy_string('',error_str)
 IF(oft_h1_nlevels==0)THEN
   !---H1(Grad) subspace
   CALL oft_h0_setup(oft_hcurl%order+1,oft_hcurl_minlev+1)
@@ -171,14 +207,22 @@ END IF
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
 NULLIFY(lop,tmp)
-CALL oft_h0_getlop(lop,"grnd")
+IF(zero_norm)THEN
+  CALL oft_h0_getlop(lop,"grnd")
+ELSE
+  CALL oft_h0_getlop(lop,"zerob")
+END IF
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
 CALL create_diag_pre(linv%pre) ! Setup Preconditioner
 divout%solver=>linv
-divout%bc=>h0_zerogrnd
-divout%keep_boundary=.TRUE.
+IF(zero_norm)THEN
+  divout%bc=>h0_zerogrnd
+  divout%keep_boundary=.TRUE.
+ELSE
+  divout%bc=>h0_zerob
+END IF
 !---------------------------------------------------------------------------
 ! Setup initial conditions
 !---------------------------------------------------------------------------
@@ -186,13 +230,14 @@ ALLOCATE(interp_obj)
 CALL oft_h1_create(interp_obj%u)
 CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
 CALL interp_obj%u%restore_local(tmp,1)
-WRITE(*,*)'Setting gauge'
+IF(zero_norm)WRITE(*,*)'Setting gauge'
 divout%pm=.TRUE.
 CALL divout%apply(interp_obj%u)
 CALL interp_obj%setup()
 int_obj=C_LOC(interp_obj)
 !---Cleanup
 CALL divout%delete()
+DEALLOCATE(tmp)
 END SUBROUTINE marklin_get_aint
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -202,6 +247,7 @@ INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Needs docs
 TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 TYPE(oft_hcurl_cinterp), POINTER :: interp_obj
+CALL copy_string('',error_str)
 ALLOCATE(interp_obj)
 interp_obj%u=>taylor_hffa(imode,oft_hcurl_level)%f
 CALL interp_obj%setup()

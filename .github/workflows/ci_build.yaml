@@ -26,27 +26,27 @@ jobs:
         - {
             name: "Ubuntu 20.04 GCC 10",
             os: ubuntu-20.04,
-            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python"
+            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python", extra_build_flags: "--mpi_use_headers --mpich_version=3"
           }
         - {
             name: "Ubuntu 22.04 GCC 12",
             os: ubuntu-22.04,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3", extra_build_flags: ""
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
             os: ubuntu-24.04,
-            cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14", python: "python3"
+            cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14", python: "python3", extra_build_flags: ""
           }
         - {
             name: "macOS Ventura GCC 12",
             os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3.12", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3.12", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", extra_build_flags: ""
           }
         - {
             name: "macOS Sonoma GCC 13",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3.12", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3.12", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer", extra_build_flags: ""
           }
 
     steps:
@@ -76,20 +76,15 @@ jobs:
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
-        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py triangle
+        python -m pip install pytest numpy scipy h5py triangle
     
     - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
       run: |
+        brew install hwloc
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
-        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py setuptools
-        git clone https://github.com/drufat/triangle.git
-        cd triangle
-        git submodule init
-        git submodule update
-        ${{ matrix.config.python }} setup.py build
-        ${{ matrix.config.python }} setup.py install
+        python -m pip install pytest numpy scipy h5py
 
     - name: Cache external libraries
       id: cache-ext-libs
@@ -119,7 +114,7 @@ jobs:
       run: >
         ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
         --build_mpi=1 --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1
-        --build_arpack=1 --oft_build_tests=1
+        --build_arpack=1 --oft_build_tests=1 ${{ matrix.config.extra_build_flags }}
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4

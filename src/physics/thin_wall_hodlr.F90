@@ -570,7 +570,7 @@ IF(self%n_icoils>0)THEN
     END DO
   END DO
 END IF
-Bop_dr=Bop_dr/(4.d0*pi)
+Bop_dr=Bop_dr*mu0/(4.d0*pi)
 END SUBROUTINE tw_compute_Bops_hole
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -1080,7 +1080,6 @@ IF(TRIM(save_file)/='none')THEN
         hash_tmp(5) = oft_simple_hash(C_LOC(self%levels(level)%blocks(k)%ielem),INT(4*self%levels(level)%blocks(k)%nelems,8))
         WRITE(matrix_id,'(I5)')i
         CALL hdf5_read(file_counts,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)),success=exists)
-        READ(io_unit, IOSTAT=ierr)file_counts
         IF(exists.AND.ALL(file_counts(1:5)==hash_tmp(1:5)))THEN
           IF(file_counts(6)<0)THEN
             ALLOCATE(self%aca_dense(i)%M(self%levels(level)%blocks(k)%nelems,self%levels(level)%blocks(j)%nelems))

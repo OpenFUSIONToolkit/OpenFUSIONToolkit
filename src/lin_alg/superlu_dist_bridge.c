@@ -53,12 +53,17 @@ oft_superlu_dist_slugrid_c(int *iopt, MPI_Comm *slu_comm, int *nprow, int *npcol
 }
 
 typedef struct {
+#if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
+	dScalePermstruct_t *ScalePermstruct;
+	dLUstruct_t *LUstruct;
+#else
 	ScalePermstruct_t *ScalePermstruct;
 	LUstruct_t *LUstruct;
+#endif
 	SuperMatrix A;
 } factors_dist_t;
 
-int
+void
 oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 				double *values, int_t *colind, int_t *rowptr,
 				double *b, int *ldb, gridinfo_t **grid_handle,
@@ -112,8 +117,13 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 	superlu_dist_options_t options;
 	SuperLUStat_t stat;
 	SuperMatrix A;
+#if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
+	dScalePermstruct_t *ScalePermstruct;
+	dLUstruct_t *LUstruct;
+#else
 	ScalePermstruct_t *ScalePermstruct;
 	LUstruct_t *LUstruct;
+#endif
 	gridinfo_t *grid;
 	factors_dist_t *LUfactors;
 	double *berr;
@@ -131,10 +141,17 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
             */
             // if ( *perm_spec >= 0 ) options.ColPerm = *perm_spec;
             /* */
+#if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
+			ScalePermstruct = (dScalePermstruct_t *) SUPERLU_MALLOC(sizeof(dScalePermstruct_t));
+			dScalePermstructInit(*n, *n, ScalePermstruct);
+			LUstruct = (dLUstruct_t *) SUPERLU_MALLOC(sizeof(dLUstruct_t));
+			dLUstructInit(*n, LUstruct);
+#else
 			ScalePermstruct = (ScalePermstruct_t *) SUPERLU_MALLOC(sizeof(ScalePermstruct_t));
 			ScalePermstructInit(*n, *n, ScalePermstruct);
 			LUstruct = (LUstruct_t *) SUPERLU_MALLOC(sizeof(LUstruct_t));
 			LUstructInit(*n, LUstruct);
+#endif	
 			dCreate_CompCol_Matrix_dist(&A, *n, *n, *nnz, values, colind, rowptr,
 						SLU_NC, SLU_D, SLU_GE);
 			// Setup saved info
@@ -149,17 +166,32 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 			dCreate_CompCol_Matrix_dist(&A, *n, *n, *nnz, values, colind, rowptr,
 						SLU_NC, SLU_D, SLU_GE);
 			// Destroy and recreate
+#if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
+			dDestroy_LU(*n, grid, LUfactors->LUstruct);
+			dLUstructFree(LUfactors->LUstruct);
+			SUPERLU_FREE(LUfactors->LUstruct);
+			LUstruct = (dLUstruct_t *) SUPERLU_MALLOC(sizeof(dLUstruct_t));
+			dLUstructInit(*n, LUstruct);
+#else
 			Destroy_LU(*n, grid, LUfactors->LUstruct);
 			LUstructFree(LUfactors->LUstruct);
 			SUPERLU_FREE(LUfactors->LUstruct);
 			LUstruct = (LUstruct_t *) SUPERLU_MALLOC(sizeof(LUstruct_t));
 			LUstructInit(*n, LUstruct);
+#endif
 			if ( *iopt == 1 ) {
 				// Destroy and recreate
+#if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
+				dScalePermstructFree(LUfactors->ScalePermstruct);
+				SUPERLU_FREE(LUfactors->ScalePermstruct);
+				ScalePermstruct = (dScalePermstruct_t *) SUPERLU_MALLOC(sizeof(dScalePermstruct_t));
+				dScalePermstructInit(*n, *n, ScalePermstruct);
+#else
 				ScalePermstructFree(LUfactors->ScalePermstruct);
 				SUPERLU_FREE(LUfactors->ScalePermstruct);
 				ScalePermstruct = (ScalePermstruct_t *) SUPERLU_MALLOC(sizeof(ScalePermstruct_t));
 				ScalePermstructInit(*n, *n, ScalePermstruct);
+#endif			
 			} else {
 				ScalePermstruct = LUfactors->ScalePermstruct;
 			}
@@ -242,9 +274,15 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 		LUfactors = *f_factors;
 		A = LUfactors->A;
 		Destroy_SuperMatrix_Store_dist(&A);
+#if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
+		dDestroy_LU(*n, grid, LUfactors->LUstruct);
+		dLUstructFree(LUfactors->LUstruct);
+		dScalePermstructFree(LUfactors->ScalePermstruct);
+#else
 		Destroy_LU(*n, grid, LUfactors->LUstruct);
 		LUstructFree(LUfactors->LUstruct);
 		ScalePermstructFree(LUfactors->ScalePermstruct);
+#endif
 		SUPERLU_FREE(LUfactors->ScalePermstruct);
 		SUPERLU_FREE(LUfactors->LUstruct);
 		SUPERLU_FREE(LUfactors);

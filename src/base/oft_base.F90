@@ -25,15 +25,29 @@ USE oft_local
 USE oft_sort, ONLY: sort_array
 #ifdef HAVE_PETSC
 USE petscsys
+#else
+#ifdef OFT_MPI_F08
+USE mpi_f08
+#endif
 #endif
 IMPLICIT NONE
-#if defined(HAVE_MPI) && !defined(HAVE_PETSC)
+#if defined(HAVE_MPI) && !defined(OFT_MPI_F08) && !defined(HAVE_PETSC)
 #include "mpif.h"
 #endif
 #include "local.h"
 #include "git_info.h"
 !---MPI Type Aliases
 #ifdef HAVE_MPI
+#ifdef OFT_MPI_F08
+TYPE(mpi_datatype) :: OFT_MPI_I8=MPI_INTEGER8 !< MPI_INT8 alias
+TYPE(mpi_datatype) :: OFT_MPI_I4=MPI_INTEGER4 !< MPI_INT4 alias
+TYPE(mpi_datatype) :: OFT_MPI_R4=MPI_REAL8 !< MPI_REAL4 alias
+TYPE(mpi_datatype) :: OFT_MPI_R8=MPI_REAL8 !< MPI_REAL8 alias
+TYPE(mpi_datatype) :: OFT_MPI_C4=MPI_COMPLEX8 !< MPI_COMPLEX8 alias
+TYPE(mpi_datatype) :: OFT_MPI_C8=MPI_COMPLEX16 !< MPI_COMPLEX16 alias
+TYPE(mpi_datatype) :: OFT_MPI_LOGICAL=MPI_LOGICAL !< MPI_LOGICAL alias
+TYPE(mpi_datatype) :: OFT_MPI_CHAR=MPI_CHARACTER !< MPI_CHAR alias
+#else
 INTEGER(i4) :: OFT_MPI_I8=MPI_INTEGER8 !< MPI_INT8 alias
 INTEGER(i4) :: OFT_MPI_I4=MPI_INTEGER4 !< MPI_INT4 alias
 INTEGER(i4) :: OFT_MPI_R4=MPI_REAL8 !< MPI_REAL4 alias
@@ -42,6 +56,7 @@ INTEGER(i4) :: OFT_MPI_C4=MPI_COMPLEX8 !< MPI_COMPLEX8 alias
 INTEGER(i4) :: OFT_MPI_C8=MPI_COMPLEX16 !< MPI_COMPLEX16 alias
 INTEGER(i4) :: OFT_MPI_LOGICAL=MPI_LOGICAL !< MPI_LOGICAL alias
 INTEGER(i4) :: OFT_MPI_CHAR=MPI_CHARACTER !< MPI_CHAR alias
+#endif
 #else
 INTEGER(i4), PARAMETER :: MPI_COMM_WORLD = -1 ! Dummy comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_COMM_NULL = -2 ! Dummy null comm value for non-MPI runs
@@ -99,7 +114,11 @@ END TYPE
 TYPE :: oft_env_type
   INTEGER(i4) :: nbase = -1 !< Number of OpenMP base meshes
   INTEGER(i4) :: nparts = 1 !< Number of OpenMP paritions
+#ifdef OFT_MPI_F08
+  TYPE(mpi_comm) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+#else
   INTEGER(i4) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+#endif
   INTEGER(i4) :: nnodes = -1 !< Number of MPI tasks
   INTEGER(i4) :: ppn = 1 !< Number of procs per NUMA node
   INTEGER(i4) :: nprocs = -1 !< Number of MPI tasks
@@ -109,8 +128,13 @@ TYPE :: oft_env_type
   INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
   INTEGER(i4) :: debug = 0 !< Debug level (1-3)
   INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
+#ifdef OFT_MPI_F08
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
+#else
   INTEGER(i4), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
   INTEGER(i4), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
+#endif
   LOGICAL :: head_proc = .FALSE. !< Lead processor flag
   LOGICAL :: pm = .TRUE. !< Performance monitor (default T=on, F=off)
   LOGICAL :: test_run = .FALSE. !< Test run
@@ -489,7 +513,11 @@ END SUBROUTINE oft_mpi_barrier
 !---------------------------------------------------------------------------
 SUBROUTINE oft_mpi_waitany(n,req,j,ierr)
 INTEGER(i4), INTENT(in) :: n !< Number of requests
+#ifdef OFT_MPI_F08
+TYPE(mpi_request), INTENT(inout) :: req(n) !< Array of requests
+#else
 INTEGER(i4), INTENT(inout) :: req(n) !< Array of requests
+#endif
 INTEGER(i4), INTENT(out) :: j !< Next completed request 
 INTEGER(i4), INTENT(out) :: ierr !< Error flag
 INTEGER(i8) :: timein
@@ -508,7 +536,11 @@ END SUBROUTINE oft_mpi_waitany
 !---------------------------------------------------------------------------
 SUBROUTINE oft_mpi_waitall(n,req,ierr)
 INTEGER(i4), INTENT(in) :: n !< Number of requests
+#ifdef OFT_MPI_F08
+TYPE(mpi_request), INTENT(inout) :: req(n) !< Array of requests
+#else
 INTEGER(i4), INTENT(inout) :: req(n) !< Array of requests
+#endif
 INTEGER(i4), INTENT(out) :: ierr !< Error flag
 INTEGER(i8) :: timein
 #ifdef HAVE_MPI
@@ -520,6 +552,25 @@ comm_times(3)=comm_times(3)+oft_time_diff(timein)
 ierr=0
 #endif
 END SUBROUTINE oft_mpi_waitall
+!---------------------------------------------------------------------------
+!> Helper to check all requests from completion
+!---------------------------------------------------------------------------
+FUNCTION oft_mpi_check_reqs(n,req) result(all_null)
+INTEGER(i4), INTENT(in) :: n !< Number of requests
+#ifdef OFT_MPI_F08
+TYPE(mpi_request), INTENT(inout) :: req(n) !< Array of requests
+#else
+INTEGER(i4), INTENT(inout) :: req(n) !< Array of requests
+#endif
+INTEGER(i4) :: i
+LOGICAL :: all_null
+all_null=.TRUE.
+#ifdef HAVE_MPI
+DO i=1,n
+  all_null=all_null.AND.(oft_env%recv(i)==MPI_REQUEST_NULL)
+END DO
+#endif
+END FUNCTION oft_mpi_check_reqs
 !------------------------------------------------------------------------------
 !> real(r8) scalar implementation of global SUM reduction
 !!
@@ -816,8 +867,8 @@ END FUNCTION oft_mpi_maxia
 FUNCTION oft_mpi_maxi8a(a,n) result(b)
 INTEGER(i8), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
-INTEGER(i4) :: b(n),ierr
-INTEGER(i8) :: timein
+INTEGER(i4) :: ierr
+INTEGER(i8) :: b(n),timein
 #ifdef HAVE_MPI
 DEBUG_STACK_PUSH
 timein=oft_time_i8()

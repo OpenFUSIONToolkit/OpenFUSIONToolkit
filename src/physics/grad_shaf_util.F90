@@ -855,7 +855,7 @@ type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
 real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
 real(8), allocatable :: ptout(:,:)
-real(4), allocatable :: rout(:,:),zout(:,:),cout(:,:)
+real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
 TYPE(spline_type) :: rz
@@ -1013,7 +1013,7 @@ WRITE(io_unit)INT(npsi-1,4),INT(ntheta-1,4)
 ! cout(4,:) -> q(0:mpsi)
 !---------------------------------------------------------------------------
 DO j=1,4
-  WRITE(io_unit)cout(j,:)
+  WRITE(io_unit)REAL(cout(j,:),4)
 END DO
 !---------------------------------------------------------------------------
 ! Write out inverse representation
@@ -1021,8 +1021,8 @@ END DO
 ! rout -> r(0:mpsi,0:mtheta)
 ! zout -> z(0:mpsi,0:mtheta)
 !---------------------------------------------------------------------------
-WRITE(io_unit)rout
-WRITE(io_unit)zout
+WRITE(io_unit)REAL(rout,4)
+WRITE(io_unit)REAL(zout,4)
 !---------------------------------------------------------------------------
 ! Close output file
 !---------------------------------------------------------------------------

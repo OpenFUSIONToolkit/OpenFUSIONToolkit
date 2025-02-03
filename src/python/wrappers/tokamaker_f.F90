@@ -9,7 +9,7 @@
 !---------------------------------------------------------------------------
 MODULE tokamaker_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
-  c_f_pointer, c_bool, c_null_ptr
+  c_f_pointer, c_bool, c_null_ptr, c_associated
 USE oft_base
 USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 ! USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
@@ -23,6 +23,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_base, ONLY: oft_afem_type
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
   oft_lag_setup
+USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
@@ -32,6 +33,7 @@ USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eq
   gs_profile_load, sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
+USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
 #include "local.h"
@@ -271,35 +273,57 @@ END SUBROUTINE tokamaker_load_profiles
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_init_psi(r0,z0,a,kappa,delta,ierr) BIND(C,NAME="tokamaker_init_psi")
+SUBROUTINE tokamaker_init_psi(r0,z0,a,kappa,delta,rhs_source,ierr) BIND(C,NAME="tokamaker_init_psi")
 REAL(c_double), VALUE, INTENT(in) :: r0 !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: z0 !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: a !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: kappa !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: delta !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
 INTEGER(c_int), INTENT(out) :: ierr !< Needs docs
-CALL gs_global%init_psi(ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
+REAL(8), POINTER, DIMENSION(:) :: rhs_tmp
+IF(c_associated(rhs_source))THEN
+  CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
+  CALL gs_global%init_psi(ierr,curr_source=rhs_tmp)
+ELSE
+  CALL gs_global%init_psi(ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
+END IF
 END SUBROUTINE tokamaker_init_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_solve(error_flag) BIND(C,NAME="tokamaker_solve")
-INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
+INTEGER(c_int), INTENT(out) :: error_flag !< Error flag
 CALL gs_global%solve(error_flag)
 END SUBROUTINE tokamaker_solve
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_vac_solve(psi_in,error_flag) BIND(C,NAME="tokamaker_vac_solve")
-TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Needs docs
-REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-CLASS(oft_vector), POINTER :: psi_tmp
+SUBROUTINE tokamaker_vac_solve(psi_in,rhs_source,error_flag) BIND(C,NAME="tokamaker_vac_solve")
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Input: BCs for \f$ \psi \f$, Output: solution
+TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
+INTEGER(c_int), INTENT(out) :: error_flag !< Error flag
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rhs_tmp
+CLASS(oft_vector), POINTER :: psi_tmp,rhs_vec
+TYPE(oft_lag_brinterp) :: source_field
 NULLIFY(psi_tmp)
 CALL gs_global%psi%new(psi_tmp)
 CALL c_f_pointer(psi_in, vals_tmp, [gs_global%psi%n])
 CALL psi_tmp%restore_local(vals_tmp)
-CALL gs_global%vac_solve(psi_tmp,error_flag)
+IF(c_associated(rhs_source))THEN
+  NULLIFY(rhs_tmp)
+  CALL gs_global%psi%new(rhs_vec)
+  CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
+  CALL rhs_vec%restore_local(rhs_tmp)
+  source_field%u=>rhs_vec
+  CALL source_field%setup()
+  CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=error_flag)
+  CALL source_field%delete()
+  CALL rhs_vec%delete()
+  DEALLOCATE(rhs_vec)
+ELSE
+  CALL gs_global%vac_solve(psi_tmp,ierr=error_flag)
+END IF
 CALL psi_tmp%get_local(vals_tmp)
 CALL psi_tmp%delete()
 DEALLOCATE(psi_tmp)
@@ -318,6 +342,7 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
 LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+error_flag=0
 IF(vacuum)gs_global%has_plasma=.FALSE.
 fitI=settings%fitI
 fitP=settings%fitP
@@ -493,6 +518,32 @@ CALL minv%pre%delete()
 CALL minv%delete()
 DEALLOCATE(u,v,minv)
 END SUBROUTINE tokamaker_get_dels_curr
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_area_int(vec_vals,reg_ind,result) BIND(C,NAME="tokamaker_area_int")
+TYPE(c_ptr), VALUE, INTENT(in) :: vec_vals !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: reg_ind !< Needs docs
+REAL(c_double), INTENT(out) :: result !< Needs docs
+INTEGER(4) :: i,m
+real(8) :: goptmp(3,3),v,pt(3),valtmp(1)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: u
+TYPE(oft_lag_brinterp) :: field
+NULLIFY(field%u)
+CALL gs_global%psi%new(field%u)
+CALL c_f_pointer(vec_vals, vals_tmp, [gs_global%psi%n])
+CALL field%u%restore_local(vals_tmp)
+CALL field%setup()
+IF(reg_ind>0)THEN
+  result = bscal_surf_int(field,oft_blagrange%quad%order,reg_ind)
+ELSE
+  result = bscal_surf_int(field,oft_blagrange%quad%order)
+END IF
+CALL field%u%delete
+DEALLOCATE(field%u)
+CALL field%delete
+END SUBROUTINE tokamaker_area_int
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -935,7 +986,7 @@ REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(80) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
-CHARACTER(LEN=36) :: run_info_f
+CHARACTER(LEN=40) :: run_info_f
 CHARACTER(LEN=80) :: filename_tmp,lim_file,error_flag
 CALL copy_string_rev(run_info,run_info_f)
 CALL copy_string_rev(filename,filename_tmp)

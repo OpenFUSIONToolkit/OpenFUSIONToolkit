@@ -617,7 +617,7 @@ READ(rst_char,104,IOSTAT=io_stat)rst_tmp
 IF((io_stat/=0).OR.(rst_tmp/=rst_ind))CALL oft_abort("Step count exceeds format width", "xmhd_run", __FILE__)
 rst=oft_file_exist(TRIM('xMHD_'//rst_char//'.rst'))
 IF(rst.AND.(rst_ind/=0))THEN
-  CALL oft_xmhd_rst_load(u, 'xMHD_'//rst_char//'.rst', 'U', t, dt)
+  CALL oft_xmhd_rst_load(u, 'xMHD_'//rst_char//'.rst', 'U', t, dt, rst_version_out=rst_version)
   IF(PRESENT(driver))CALL driver%rst_load('xMHD_'//rst_char//'.rst')
   IF(rst_version<2)THEN
     dt = dt*2.d0
@@ -925,7 +925,7 @@ DO i=1,nsteps
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       hist_i4=(/rst_ind+i-1,nksolver%lits,nksolver%nlits/)
-      hist_r4=(/t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time/)
+      hist_r4=REAL([t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,2X,I4,F12.3,ES12.2)
       WRITE(*,103)rst_ind+i,t,nksolver%lits,nksolver%nlits,elapsed_time,dt
       IF(oft_debug_print(1))WRITE(*,*)
@@ -1011,7 +1011,7 @@ class(oft_vector), pointer :: du,u0,v,un1,un2
 type(xmhd_sub_fields) :: sub_fields
 type(oft_xmhd_massmatrix) :: mop
 type(oft_timer) :: mytimer
-integer(i4) :: i,j,ierr,io_unit,io_stat,rst_version,rst_tmp
+integer(i4) :: i,j,ierr,io_unit,io_stat,rst_tmp
 integer(i4) :: itcount(XMHD_ITCACHE)
 real(r8) :: dt,dthist(XMHD_ITCACHE)
 real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr,elapsed_time
@@ -1306,7 +1306,7 @@ DO i=1,nsteps
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       hist_i4=(/rst_ind+i-1,solver%cits,0/)
-      hist_r4=(/t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time/)
+      hist_r4=REAL([t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,F12.3,ES12.2)
       WRITE(*,103)rst_ind+i,t,solver%cits,elapsed_time,dt
       IF(oft_debug_print(1))WRITE(*,*)
@@ -4099,12 +4099,13 @@ end subroutine oft_xmhd_rst_save
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
 !---------------------------------------------------------------------------
-subroutine oft_xmhd_rst_load(u,filename,path,t,dt)
+subroutine oft_xmhd_rst_load(u,filename,path,t,dt,rst_version_out)
 class(oft_vector), pointer, intent(inout) :: u !< Solution to load
 character(LEN=*), intent(in) :: filename !< Name of restart file
 character(LEN=*), intent(in) :: path !< Path to store solution vector in file
 real(r8), optional, intent(out) :: t !< Time of loaded solution
 real(r8), optional, intent(out) :: dt !< Timestep at loaded time
+integer(i4), optional, intent(out) :: rst_version_out !< Version number
 integer(i4) :: i,rst_version
 real(r8) :: scale_tmp
 real(r8), pointer, dimension(:) :: stmp
@@ -4113,6 +4114,7 @@ CALL xmhd_rep%vec_load(u,filename,path)
 IF(PRESENT(t))CALL hdf5_read(t,filename,'t')
 IF(PRESENT(dt))CALL hdf5_read(dt,filename,'dt')
 CALL hdf5_read(rst_version,filename,'xMHD_Version')
+IF(PRESENT(rst_version_out))rst_version_out=rst_version
 !---Rescale if necessary scales
 IF(rst_version>2)THEN
   CALL hdf5_read(scale_tmp,filename,'vel_scale')

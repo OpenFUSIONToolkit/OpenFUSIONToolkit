@@ -219,12 +219,12 @@ END TYPE oft_amesh
 !! - Global boundary flags
 !------------------------------------------------------------------------------
 TYPE, PUBLIC :: bmesh_parent
-  INTEGER(i8) :: np = 0 !< Global point count
-  INTEGER(i8) :: ne = 0 !< Global edge count
-  INTEGER(i8) :: nf = 0 !< Global face count
-  INTEGER(i8), POINTER, DIMENSION(:) :: lp => NULL() !< Global index of points (np)
-  INTEGER(i8), POINTER, DIMENSION(:) :: le => NULL() !< Global index of edges (ne) [oriented]
-  INTEGER(i8), POINTER, DIMENSION(:) :: lf => NULL() !< Global index of faces (nf)
+  INTEGER(i4) :: np = 0 !< Global point count
+  INTEGER(i4) :: ne = 0 !< Global edge count
+  INTEGER(i4) :: nf = 0 !< Global face count
+  INTEGER(i4), POINTER, DIMENSION(:) :: lp => NULL() !< Global index of points (np)
+  INTEGER(i4), POINTER, DIMENSION(:) :: le => NULL() !< Global index of edges (ne) [oriented]
+  INTEGER(i4), POINTER, DIMENSION(:) :: lf => NULL() !< Global index of faces (nf)
 END TYPE bmesh_parent
 !------------------------------------------------------------------------------
 !> Surface mesh type
@@ -672,8 +672,6 @@ LOGICAL, PARAMETER :: PLOT_R4_FLAG=.TRUE.
 #endif
 CONTAINS
 !------------------------------------------------------------------------------
-! FUNCTION: cell_is_curved
-!------------------------------------------------------------------------------
 !> Checks if a global mesh cell is curved or not
 !!
 !! @param[in] self Mesh containing cell
@@ -681,7 +679,7 @@ CONTAINS
 !! @result (T/F) cell is curved?
 !------------------------------------------------------------------------------
 function cell_is_curved(self,cell) result(curved)
-class(oft_mesh), intent(in) :: self
+class(oft_amesh), intent(in) :: self
 integer(i4), intent(in) :: cell
 integer(i4) :: k,i
 logical :: curved

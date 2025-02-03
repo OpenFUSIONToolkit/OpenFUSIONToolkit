@@ -471,7 +471,7 @@ class TokaMaker():
         coil_gains = numpy.ascontiguousarray(coil_gains, dtype=numpy.float64)
         tokamaker_set_coil_vsc(coil_gains)
 
-    def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0):
+    def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
         r'''! Initialize \f$\psi\f$ using uniform current distributions
 
         If r0>0 then a uniform current density inside a surface bounded by
@@ -483,9 +483,16 @@ class TokaMaker():
         @param a Minor radius for flux surface-based approach
         @param kappa Elongation for flux surface-based approach
         @param delta Triangularity for flux surface-based approach
+        @param curr_source Current source for arbitrary current distribution
         '''
+        curr_ptr = None
+        if curr_source is not None:
+            if curr_source.shape[0] != self.np:
+                raise IndexError('Incorrect shape of "curr_source", should be [np]')
+            curr_source = numpy.ascontiguousarray(curr_source, dtype=numpy.float64)
+            curr_ptr = curr_source.ctypes.data_as(c_double_ptr)
         error_flag = c_int()
-        tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),ctypes.byref(error_flag))
+        tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,ctypes.byref(error_flag))
         return error_flag.value
 
     def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in', eta_file='eta_prof.in', f_NI_file='f_NI_prof.in'):
@@ -554,10 +561,12 @@ class TokaMaker():
         tokamaker_solve(ctypes.byref(error_flag))
         return error_flag.value
     
-    def vac_solve(self,psi=None):
+    def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
+        and optional other currents
         
         @param psi Boundary values for vacuum solve
+        @param rhs_source Current source (optional)
         '''
         if psi is None:
             psi = numpy.zeros((self.np,),dtype=numpy.float64)
@@ -565,8 +574,14 @@ class TokaMaker():
             if psi.shape[0] != self.np:
                 raise IndexError('Incorrect shape of "psi", should be [np]')
             psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
+        rhs_ptr = None
+        if rhs_source is not None:
+            if rhs_source.shape[0] != self.np:
+                raise IndexError('Incorrect shape of "rhs_source", should be [np]')
+            rhs_source = numpy.ascontiguousarray(rhs_source, dtype=numpy.float64)
+            rhs_ptr = rhs_source.ctypes.data_as(c_double_ptr)
         error_flag = c_int()
-        tokamaker_vac_solve(psi,ctypes.byref(error_flag))
+        tokamaker_vac_solve(psi,rhs_ptr,ctypes.byref(error_flag))
         return psi, error_flag.value
 
     def get_stats(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):
@@ -1048,6 +1063,18 @@ class TokaMaker():
         '''! Update settings after changes to values in python'''
         tokamaker_set_settings(ctypes.byref(self.settings))
     
+    def area_integral(self,field,reg_mask=-1):
+        r'''! Compute area integral of field over a specified region
+
+        @param field Field to integrate [np,]
+        @param reg_mask ID of region for integration (negative for whole mesh)
+        @result \f$ \int f dA \f$
+        '''
+        result = c_double(0.0)
+        field = numpy.ascontiguousarray(field, dtype=numpy.float64)
+        tokamaker_area_int(field,c_int(reg_mask),ctypes.byref(result))
+        return result.value
+
     def plot_machine(self,fig,ax,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
                      coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',colorbar=None):
         '''! Plot machine geometry

@@ -3,6 +3,8 @@ if( OFT_BUILD_TESTS )
   # Marklin tests
   oft_add_test( test_taylor.F90 )
   configure_file( test_taylor.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( test_Marklin.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( cyl_Marklin.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   oft_add_test( test_taylor_inj.F90 )
   configure_file( test_taylor_inj.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( torus_test.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
