@@ -211,6 +211,9 @@ TYPE :: gs_eq
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL()
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL()
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL()
+  REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL()
+  REAL(r8), POINTER, DIMENSION(:) :: coils_dt => NULL()
+  REAL(r8), POINTER, DIMENSION(:) :: coils_volt => NULL()
   REAL(r8), POINTER, DIMENSION(:,:) :: rlimiter_nds => NULL()
   REAL(r8), POINTER, DIMENSION(:,:) :: limiter_pts => NULL()
   REAL(r8), POINTER, DIMENSION(:,:) :: bc_mat => NULL()
@@ -1256,6 +1259,10 @@ ELSE
   END DO
 END IF
 ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils+1,self%ncoils+1))
+ALLOCATE(self%Rcoils(self%ncoils+1),self%coils_dt(self%ncoils+1),self%coils_volt(self%ncoils+1))
+self%Rcoils=-1.d0
+self%coils_dt=0.d0
+self%coils_volt=0.d0
 self%Lcoils=0.d0
 DO i=1,self%ncoils
   CALL self%psi%new(self%psi_coil(i)%f)
@@ -1270,7 +1277,11 @@ DO i=1,self%ncoils
   DO j=i,self%ncoils
     CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
     self%Lcoils(i,j)=self%Lcoils(i,j)
-    IF(j>i)self%Lcoils(j,i)=self%Lcoils(i,j)
+    IF(j>i)THEN ! Integral can be slightly different so compute both ways and average
+      CALL gs_coil_mutual(self,j,self%psi_coil(i)%f,self%Lcoils(j,i))
+      self%Lcoils(j,i)=(self%Lcoils(j,i)+self%Lcoils(i,j))/2.d0
+      self%Lcoils(i,j)=self%Lcoils(j,i)
+    END IF
   END DO
 END DO
 ! ALLOCATE(self%psi_cond(self%ncond_eigs))
@@ -1313,7 +1324,7 @@ CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 !---Create coil vector
 ALLOCATE(self%coil_stitch,self%coil_map)
-CALL create_local_stitch(self%coil_stitch,self%coil_map,self%ncoils)
+CALL create_local_stitch(self%coil_stitch,self%coil_map,self%ncoils+1)
 ALLOCATE(stitch_tmp(1),map_tmp(1))
 stitch_tmp(1)%s=>self%coil_stitch
 map_tmp(1)%m=>self%coil_map
@@ -1764,9 +1775,8 @@ DO j=1,smesh%nc
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -1785,7 +1795,6 @@ DO j=1,smesh%nc
 end do
 deallocate(rhs_loc,j_lag,rop)
 !$omp end parallel
-! DEALLOCATE(cond_fac)
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
@@ -1860,20 +1869,28 @@ end subroutine gs_cond_source
 !---------------------------------------------------------------------------
 subroutine gs_wall_source(self,dpsi_dt,b)
 class(gs_eq), intent(inout) :: self !< G-S object
-CLASS(oft_vector), intent(inout) :: dpsi_dt,b
-real(r8), pointer, dimension(:) :: btmp
+CLASS(oft_vector), intent(inout) :: dpsi_dt !< Needs docs
+CLASS(oft_vector), intent(inout) :: b !< Needs docs
+real(r8), pointer, dimension(:) :: btmp,btmp_coils
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:),eta_reg(:),reg_source(:)
-real(8), pointer :: psi_vals(:)
+real(8), pointer :: psi_vals(:),coil_vals(:)
 integer(4) :: j,m,l,k,kk,iCond
 integer(4), allocatable :: j_lag(:)
 logical :: curved
 ! t1=omp_get_wtime()
 !---
-NULLIFY(btmp,psi_vals)
+NULLIFY(btmp,btmp_coils,psi_vals,coil_vals)
 call b%set(0.d0)
-CALL b%get_local(btmp)
-CALL dpsi_dt%get_local(psi_vals)
+CALL b%get_local(btmp,1)
+CALL b%get_local(btmp_coils,2)
+CALL dpsi_dt%get_local(psi_vals,1)
+CALL dpsi_dt%get_local(coil_vals,2)
+DO l=1,self%ncoils
+  IF(self%Rcoils(l)<=0.d0)CYCLE
+  btmp_coils(l)=DOT_PRODUCT(coil_vals(1:self%ncoils),self%Lcoils(1:self%ncoils,l))
+END DO
+DEALLOCATE(coil_vals)
 !
 ALLOCATE(eta_reg(smesh%nreg),reg_source(smesh%nreg))
 reg_source=0.d0
@@ -1898,9 +1915,8 @@ DO j=1,smesh%nc
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     pt=oft_blagrange%mesh%log2phys(j,oft_blagrange%quad%pts(:,m))
     psitmp=0.d0
@@ -1923,8 +1939,9 @@ DO j=1,smesh%nc
 END DO
 deallocate(rhs_loc,j_lag,rop)
 !$omp end parallel
-CALL b%restore_local(btmp,add=.TRUE.)
-DEALLOCATE(btmp,psi_vals,eta_reg,reg_source)
+CALL b%restore_local(btmp,1,add=.TRUE.,wait=.TRUE.)
+CALL b%restore_local(btmp_coils,2,add=.TRUE.)
+DEALLOCATE(btmp,btmp_coils,psi_vals,eta_reg,reg_source)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_wall_source
 !---------------------------------------------------------------------------
@@ -1947,7 +1964,7 @@ NULLIFY(btmp)
 CALL b%get_local(btmp)
 !---
 mutual=0.d0
-!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns) reduction(+:mutual)
+!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns,psi_tmp) reduction(+:mutual)
 allocate(rop(oft_blagrange%nce))
 allocate(j_lag(oft_blagrange%nce))
 !$omp do schedule(static,1)
@@ -1956,9 +1973,8 @@ DO j=1,smesh%nc
   IF(ABS(nturns)<1.d-10)CYCLE
   call oft_blagrange%ncdofs(j,j_lag)
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     psi_tmp=0.d0
     DO l=1,oft_blagrange%nce
@@ -2564,7 +2580,7 @@ DO i=1,self%maxits
   CALL psi_vac%set(0.d0)
   CALL psi_vac%add(1.d0,1.d0,psi_bc)
   DO j=1,self%ncoils
-    CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+    IF(self%Rcoils(j)<=0.d0)CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
   END DO
 
   ! Add fixed wall eddy contributions
@@ -2588,15 +2604,42 @@ DO i=1,self%maxits
   IF(self%dt>0.d0)THEN
     CALL psi_dt%set(0.d0)
     CALL psi_dt%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
-    CALL gs_wall_source(self,psi_dt,tmp_vec)
-    CALL blag_zerob(tmp_vec)
+    CALL psi_dt%get_local(vals_tmp)
+    CALL psi_aug%restore_local(vals_tmp,1)
+    !---Set Vcoil currents at previous step and remove associated flux
+    DO j=1,self%ncoils+1
+      IF(self%Rcoils(j)>0.d0)THEN
+        CALL psi_aug%add(1.d0,-self%coils_dt(j)/self%dt,self%psi_coil(j)%f)
+        vals_tmp(j)=self%coils_dt(j)/self%dt
+      ELSE
+        vals_tmp(j)=0.d0
+      END IF
+    END DO
+    CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+    CALL gs_wall_source(self,psi_aug,tmp_aug)
+    !---Add voltages for Vcoils
+    CALL tmp_aug%get_local(vals_tmp,2)
+    DO j=1,self%ncoils+1
+      IF(self%Rcoils(j)>0.d0)THEN
+        vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+      END IF
+    END DO
+    CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+    CALL blag_zerob(tmp_aug)
     !---Solve in augmented space (flux + coils)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
-    CALL tmp_vec%get_local(vals_tmp)
-    CALL tmp_aug%restore_local(vals_tmp,1)
+    CALL psi_aug%set(0.d0)
     CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
     CALL psi_aug%get_local(vals_tmp,1)
     CALL psi_dt%restore_local(vals_tmp)
+    CALL psi_aug%get_local(vals_tmp,2)
+    !---Update coil currents in solution for Vcoils
+    DO j=1,self%ncoils+1
+      IF(self%Rcoils(j)>0.d0)THEN
+        self%coil_currs(j)=vals_tmp(j)
+        CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+      END IF
+    END DO
     oft_env%pm=pm_save
     !---Add flux to solution
     CALL psi_eddy%add(1.d0,1.d0,psi_dt)
@@ -3082,7 +3125,7 @@ END IF
 CALL psi_vac%set(0.d0)
 DO j=1,self%ncoils
   ! curr = self%coil_regions(j)%curr
-  CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+  IF(self%Rcoils(j)<=0.d0)CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
 END DO
 CALL psi_eddy%set(0.d0)
 DO j=1,self%ncond_regs
@@ -3130,18 +3173,42 @@ CALL psi_sol%add(1.d0,self%vcontrol_val,psi_vcont)
 IF(self%dt>0.d0)THEN
   CALL tmp_vec%set(0.d0)
   CALL tmp_vec%add(0.d0,-1.d0/self%dt,psi_sol,1.d0/self%dt,self%psi_dt)
-  CALL gs_wall_source(self,tmp_vec,psi_dt)
+  CALL tmp_vec%get_local(vals_tmp)
+  CALL psi_aug%restore_local(vals_tmp,1)
+  DO j=1,self%ncoils+1
+    IF(self%Rcoils(j)>0.d0)THEN
+      CALL tmp_vec%add(1.d0,-self%coils_dt(j)/self%dt,self%psi_coil(j)%f)
+      vals_tmp(j)=self%coils_dt(j)/self%dt
+    ELSE
+      vals_tmp(j)=0.d0
+    END IF
+  END DO
+  CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+  CALL gs_wall_source(self,psi_aug,tmp_aug)
+  CALL tmp_aug%get_local(vals_tmp,2)
+  DO j=1,self%ncoils+1
+    IF(self%Rcoils(j)>0.d0)THEN
+      vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+    END IF
+  END DO
+  CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
   IF(PRESENT(rhs_source))THEN
     CALL gs_gen_source(self,rhs_source,tmp_vec)
-    CALL psi_dt%add(1.d0,1.d0,tmp_vec)
+    CALL tmp_aug%add(1.d0,1.d0,psi_aug)
   END IF
-  CALL blag_zerob(psi_dt)
+  CALL blag_zerob(tmp_aug)
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  CALL psi_dt%get_local(vals_tmp)
-  CALL tmp_aug%restore_local(vals_tmp,1)
+  CALL psi_aug%set(0.d0)
   CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
   CALL psi_aug%get_local(vals_tmp,1)
   CALL tmp_vec%restore_local(vals_tmp)
+  CALL psi_aug%get_local(vals_tmp,2)
+  DO j=1,self%ncoils+1
+    IF(self%Rcoils(j)>0.d0)THEN
+      self%coil_currs(j)=vals_tmp(j)
+      CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+    END IF
+  END DO
   oft_env%pm=pm_save
   CALL psi_sol%add(1.d0,1.d0,tmp_vec)
 ELSE
@@ -5383,7 +5450,7 @@ character(LEN=*), intent(in) :: bc
 real(8), optional, intent(in) :: dt
 real(8), optional, intent(in) :: scale
 integer(i4) :: i,m,jr,jc
-integer(i4), allocatable :: j(:)
+integer(i4), allocatable :: j(:),j2(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time,pt(3),dt_in,main_scale
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),eta_reg(:)
 logical :: curved
@@ -5603,27 +5670,50 @@ IF(nnonaxi>0)THEN
   END DO
   DEALLOCATE(nonaxi_vals)
 END IF
-!---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
-    lop(1,1)=1.d0
-    DO i=1,oft_blagrange%nbe
-      IF(.NOT.oft_blagrange%linkage%leo(i))CYCLE
-      j=oft_blagrange%lbe(i)
-      call mat%add_values(j,j,lop,1,1)
-    END DO
-  CASE("free")
-    CALL set_bcmat(self,mat)
-END SELECT
+!---Add inductance and resistance terms for Vcoils
 IF(dt_in>0.d0)THEN
-  lop(1,1)=1.d0
-  DO i=1,self%ncoils
+  ALLOCATE(j2(1))
+  DO i=1,self%ncoils+1
     j=oft_blagrange%ne+i
-    call mat%add_values(j,j,lop,1,1)
+    IF(self%Rcoils(i)<=0.d0)THEN
+      lop(1,1)=1.d0
+      CALL mat%add_values(j,j,lop,1,1)
+    ELSE
+      DO jc=1,self%ncoils+1
+        IF(self%Rcoils(jc)<=0.d0)CYCLE
+        j2=oft_blagrange%ne+jc
+        lop(1,1)=self%Lcoils(i,jc)/dt_in
+        IF(i==jc)lop(1,1)=lop(1,1)+self%Rcoils(i)
+        CALL mat%add_values(j,j2,lop,1,1)
+      END DO
+    END IF
+  END DO
+  DEALLOCATE(j2)
+  !$omp parallel do
+  DO i=1,self%ncoils
+    IF(self%Rcoils(i)<=0.d0)CYCLE
+    CALL dels_coil_part(self,mat,i,dt_in,bc)
   END DO
 END IF
 DEALLOCATE(j,lop)
-CALL oft_blagrange%vec_create(oft_lag_vec)
+!---Set diagonal entries for dirichlet rows
+SELECT CASE(TRIM(bc))
+CASE("zerob")
+  lop(1,1)=1.d0
+  DO i=1,oft_blagrange%nbe
+    IF(.NOT.oft_blagrange%linkage%leo(i))CYCLE
+    j=oft_blagrange%lbe(i)
+    call mat%add_values(j,j,lop,1,1)
+  END DO
+CASE("free")
+  CALL set_bcmat(self,mat)
+END SELECT
+!---Assemble final matrix
+IF(dt_in>0.d0)THEN
+  CALL self%aug_vec%new(oft_lag_vec)
+ELSE
+  CALL oft_blagrange%vec_create(oft_lag_vec)
+END IF
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec,eta_reg)
@@ -5633,6 +5723,84 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine build_dels
+!---------------------------------------------------------------------------
+!> Compute inductance between coil and given poloidal flux
+!---------------------------------------------------------------------------
+subroutine dels_coil_part(self,mat,iCoil,dt_in,bc)
+class(gs_eq), intent(inout) :: self !< G-S solver object
+class(oft_matrix), pointer, intent(inout) :: mat
+integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
+real(8), intent(in) :: dt_in
+character(LEN=*), intent(in) :: bc
+real(r8), pointer, dimension(:) :: btmp
+real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns,eta_wt,pt(3)
+real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),row_tmp(:,:),col_tmp(:,:),eta_reg(:)
+integer(4) :: j,m,l,k,j2(1)
+integer(4), allocatable :: j_lag(:)
+logical :: curved
+! t1=omp_get_wtime()
+!---
+NULLIFY(btmp)
+CALL self%psi_coil(iCoil)%f%get_local(btmp)
+j2=oft_blagrange%ne+iCoil
+!
+ALLOCATE(eta_reg(smesh%nreg))
+eta_reg=-1.d0
+IF(dt_in>0.d0)THEN
+  DO l=1,self%ncond_regs
+    j=self%cond_regions(l)%id
+    eta_reg(j)=self%cond_regions(l)%eta
+  END DO
+END IF
+!---
+!!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns) reduction(+:mutual)
+allocate(rop(oft_blagrange%nce),row_tmp(oft_blagrange%nce,1))
+allocate(j_lag(oft_blagrange%nce),col_tmp(1,oft_blagrange%nce))
+!!$omp do schedule(static,1)
+DO j=1,smesh%nc
+  nturns=self%coil_nturns(smesh%reg(j),iCoil)
+  eta_wt=0.d0
+  IF(eta_reg(smesh%reg(j))>0.d0)eta_wt=1.d0/(dt_in*eta_reg(smesh%reg(j)))
+  IF(ABS(nturns)<1.d-10.AND.(eta_reg(smesh%reg(j))<=0.d0))CYCLE
+  call oft_blagrange%ncdofs(j,j_lag)
+  curved=cell_is_curved(smesh,j)
+  row_tmp=0.d0
+  col_tmp=0.d0
+  do m=1,oft_blagrange%quad%np
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    det=v*oft_blagrange%quad%wts(m)
+    pt=smesh%log2phys(j,oft_blagrange%quad%pts(:,m))
+    psi_tmp=0.d0
+    DO l=1,oft_blagrange%nce
+      CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
+      psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
+    END DO
+    !
+    DO l=1,oft_blagrange%nce
+      col_tmp(1,l)=col_tmp(1,l)+mu0*2.d0*pi*rop(l)*nturns*det/dt_in
+      row_tmp(l,1)=row_tmp(l,1)+eta_wt*rop(l)*psi_tmp*det/(pt(1)+gs_epsilon)
+    END DO
+  end do
+  !---Apply bc to local matrix
+  SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    DO l=1,oft_blagrange%nce
+      IF(oft_blagrange%be(j_lag(l)))row_tmp(l,1)=0.d0
+    END DO
+  CASE("free")
+    DO l=1,oft_blagrange%nce
+      IF(oft_blagrange%be(j_lag(l)))row_tmp(l,1)=0.d0
+    END DO
+  END SELECT
+  !!$omp critical
+  call mat%add_values(j2,j_lag,col_tmp,1,oft_blagrange%nce)
+  call mat%add_values(j_lag,j2,row_tmp,oft_blagrange%nce,1)
+  !!$omp end critical
+end do
+deallocate(j_lag,rop,row_tmp,col_tmp)
+!!$omp end parallel
+DEALLOCATE(btmp,eta_reg)
+end subroutine dels_coil_part
 !---------------------------------------------------------------------------
 !> Initialize Grad-Shafranov solution with the Taylor state
 !!

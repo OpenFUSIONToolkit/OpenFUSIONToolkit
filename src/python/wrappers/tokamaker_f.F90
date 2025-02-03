@@ -804,19 +804,31 @@ END SUBROUTINE tokamaker_set_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi_dt(psi_vals,dt) BIND(C,NAME="tokamaker_set_psi_dt")
+SUBROUTINE tokamaker_set_psi_dt(psi_vals,rcoils,icoils,vcoils,dt) BIND(C,NAME="tokamaker_set_psi_dt")
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: rcoils !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: icoils !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vcoils !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: dt !< Needs docs
-REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rtmp,ictmp,vtmp
 gs_global%dt=dt
 IF(dt>0.d0)THEN
   IF(.NOT.ASSOCIATED(gs_global%psi_dt))CALL gs_global%psi%new(gs_global%psi_dt)
   CALL c_f_pointer(psi_vals, vals_tmp, [gs_global%psi%n])
   CALL gs_global%psi_dt%restore_local(vals_tmp)
+  CALL c_f_pointer(rcoils, rtmp, [gs_global%ncoils+1])
+  CALL c_f_pointer(icoils, ictmp, [gs_global%ncoils+1])
+  CALL c_f_pointer(vcoils, vtmp, [gs_global%ncoils+1])
+  gs_global%Rcoils=rtmp
+  gs_global%coils_dt=ictmp*mu0
+  gs_global%coils_volt=vtmp*mu0
 ELSE
   IF(ASSOCIATED(gs_global%psi_dt))THEN
     CALL gs_global%psi_dt%delete()
     DEALLOCATE(gs_global%psi_dt)
+    gs_global%Rcoils=-1.d0
+    gs_global%coils_dt=0.d0
+    gs_global%coils_volt=0.d0
   END IF
 END IF
 END SUBROUTINE tokamaker_set_psi_dt

@@ -113,9 +113,10 @@ tokamaker_area_int = ctypes_subroutine(oftpy_lib.tokamaker_area_int,
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
     [ctypes_numpy_array(numpy.float64,1)])
 
-#
+# tokamaker_set_psi_dt(psi_vals,rcoils,icoils,vcoils,dt)
 tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
-    [ctypes_numpy_array(numpy.float64,1), c_double])
+    [ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
+     ctypes_numpy_array(numpy.float64,1), c_double])
 
 #
 tokamaker_get_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_get_field_eval,

@@ -847,7 +847,7 @@ class TokaMaker():
         psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         tokamaker_set_psi(psi)
     
-    def set_psi_dt(self,psi0,dt):
+    def set_psi_dt(self,psi0,dt,rcoils=None,icoils=None,vcoils=None):
         '''! Set reference poloidal flux and time step for eddy currents in .solve()
 
         @param psi0 Reference poloidal flux at t-dt (unnormalized)
@@ -856,7 +856,17 @@ class TokaMaker():
         if psi0.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi0", should be [np]')
         psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
-        tokamaker_set_psi_dt(psi0,c_double(dt))
+        if rcoils is None:
+            rcoils = -numpy.ones((self.ncoils+1,))
+            icoils = numpy.zeros((self.ncoils+1,))
+        else:
+            rcoils = numpy.ascontiguousarray(rcoils, dtype=numpy.float64)
+            icoils = numpy.ascontiguousarray(icoils, dtype=numpy.float64)
+            if vcoils is None:
+                vcoils = numpy.zeros((self.ncoils+1,))
+            else:
+                vcoils = numpy.ascontiguousarray(vcoils, dtype=numpy.float64)
+        tokamaker_set_psi_dt(psi0,rcoils,icoils,vcoils,c_double(dt))
     
     def get_field_eval(self,field_type):
         r'''! Create field interpolator for vector potential
@@ -1295,6 +1305,9 @@ class TokaMaker():
             mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
         elif dpsi_dt is not None:
             mask, plot_field = self.get_conductor_source(dpsi_dt)
+        if mask.sum() == 0:
+            print("Warning: No conducting regions to plot")
+            return None
         if plot_field.shape[0] == self.nc:
             if symmap:
                 max_curr = abs(plot_field).max()
