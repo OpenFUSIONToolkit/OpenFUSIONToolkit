@@ -72,7 +72,7 @@ oft_triangle_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboft_tr
 
 # Global init function
 oft_init = ctypes_subroutine(oftpy_lib.oftpy_init,
-    [c_int])
+    [c_int, c_char_p, ctypes_numpy_array(int32,1)])
 
 # oftpy_load_xml(xml_file,oft_node_ptr)
 oftpy_load_xml = ctypes_subroutine(oftpy_lib.oftpy_load_xml,

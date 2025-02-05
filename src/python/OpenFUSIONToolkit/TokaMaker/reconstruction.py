@@ -31,7 +31,9 @@ class tokamaker_recon_settings_struct(c_struct):
                 ("fitCoils", c_bool),
                 ("fitF0", c_bool),
                 ("fixedCentering", c_bool),
-                ("pm", c_bool)]
+                ("pm", c_bool),
+                ("infile", ctypes.c_char_p),
+                ("outfile", ctypes.c_char_p)]
 
 
 def tokamaker_recon_default_settings():
@@ -50,6 +52,8 @@ def tokamaker_recon_default_settings():
     settings.fitF0 = False
     settings.fixedCentering = False
     settings.pm = False
+    settings.infile = b'none'
+    settings.outfile = b'none'
     return settings
 
 ## @cond
@@ -236,9 +240,13 @@ class reconstruction():
         self._saddles = []
         ##
         self._pressure_cons = []
-        #
-        if filename is not None:
-            self.read_fit_in(filename)
+        if filename is None:
+            ##
+            self.fit_file = self._gs_obj._oft_env.unique_filename('fit.in')
+        else:
+            self.fit_file = filename
+        self.settings.infile = self.fit_file.encode()
+        self.settings.outfile = self._gs_obj._oft_env.unique_filename('fit.out').encode()
     
     def __del__(self):
         self._gs_obj = None
@@ -276,21 +284,21 @@ class reconstruction():
         self._saddles = []
         self._pressure_cons = []
     
-    def write_fit_in(self,filename='fit.in'):
+    def write_fit_in(self):
         constraints = self._flux_loops + self._mirnovs + self._pressure_cons
         if self._Ip_con is not None:
             constraints.append(self._Ip_con)
         if self._Dflux_con is not None:
             constraints.append(self._Dflux_con)
         ncons = len(constraints)
-        with open(filename, 'w+') as fid:
+        with open(self.fit_file, 'w+') as fid:
             fid.write('{0:d}\n\n'.format(ncons))
             for con in constraints:
                 con.write(fid)
     
-    def read_fit_in(self,filename='fit.in'):
+    def read_fit_in(self):
         self.reset_constraints()
-        with open(filename, 'r') as fid:
+        with open(self.fit_file, 'r') as fid:
             ncons = int(fid.readline())
             for _ in range(ncons):
                 fid.readline()

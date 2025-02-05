@@ -216,8 +216,10 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE fit_gs(gs,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
+SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
 TYPE(gs_eq), TARGET, INTENT(inout) :: gs
+CHARACTER(LEN=*), INTENT(in) :: inpath
+CHARACTER(LEN=*), INTENT(in) :: outpath
 LOGICAL, OPTIONAL, INTENT(in) :: fitI
 LOGICAL, OPTIONAL, INTENT(in) :: fitP
 LOGICAL, OPTIONAL, INTENT(in) :: fitPnorm
@@ -252,7 +254,7 @@ IF(fitPnorm)gs%R0_target=-1.d0
 gs_active=>gs
 WRITE(*,*)
 WRITE(*,'(A)')'*** Loading fit constraints ***'
-CALL fit_load('fit.in',conlist)
+CALL fit_load(inpath,conlist)
 !---Count coefficients
 ncofs=0
 IF(gs%free)THEN
@@ -397,9 +399,9 @@ ALLOCATE(cofs_best(ncofs))
 cofs_best=cofs
 CALL gs_active%psi%new(psi_best)
 !---Load coefficient values
-INQUIRE(EXIST=file_exists,FILE='fit_cofs.in')
+INQUIRE(EXIST=file_exists,FILE=TRIM(inpath)//'_cofs')
 IF(file_exists)THEN
-  OPEN(NEWUNIT=io_unit,FILE='fit_cofs.in')
+  OPEN(NEWUNIT=io_unit,FILE=TRIM(inpath)//'_cofs')
   READ(io_unit,*)i
   IF(i==ncofs)THEN
     READ(io_unit,*)cofs
@@ -440,13 +442,13 @@ ELSE
   CALL fit_error(ncons,ncofs,cofs,error,i)
 END IF
 !---
-OPEN(NEWUNIT=io_unit,FILE='fit.err')
+OPEN(NEWUNIT=io_unit,FILE=TRIM(outpath))
 DO i=1,ncons
   WRITE(io_unit,'(I8,4ES20.12)')i,error(i),conlist(i)%con%eval(gs_active),conlist(i)%con%val, &
   conlist(i)%con%get_nax(gs_active)
 END DO
 CLOSE(io_unit)
-OPEN(NEWUNIT=io_unit,FILE='fit_cofs.out')
+OPEN(NEWUNIT=io_unit,FILE=TRIM(outpath)//'_cofs')
 WRITE(io_unit,*)ncofs
 WRITE(io_unit,*)cofs
 WRITE(io_unit,*)gs_active%pnorm,gs_active%vcontrol_val

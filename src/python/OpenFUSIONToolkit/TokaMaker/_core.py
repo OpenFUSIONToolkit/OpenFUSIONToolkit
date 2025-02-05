@@ -482,7 +482,7 @@ class TokaMaker():
             self._F0 = foffset
         tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()),c_char_p(eta_file.encode()),c_char_p(f_NI_file.encode()))
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations 
@@ -492,23 +492,34 @@ class TokaMaker():
         in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
         in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
         '''
+        delete_files = []
         ffp_file = 'none'
         if ffp_prof is not None:
-            ffp_file = 'tokamaker_f.prof'
+            ffp_file = self._oft_env.unique_filename('tokamaker_f.prof')
             create_prof_file(self, ffp_file, ffp_prof, "F*F'")
+            delete_files.append(ffp_file)
         pp_file = 'none'
         if pp_prof is not None:
-            pp_file = 'tokamaker_p.prof'
+            pp_file = self._oft_env.unique_filename('tokamaker_p.prof')
             create_prof_file(self, pp_file, pp_prof, "P'")
+            delete_files.append(pp_file)
         eta_file = 'none'
         ffp_NI_file = 'none'
         if ffp_NI_prof is not None:
-            ffp_NI_file = 'tokamaker_ffp_NI.prof'
+            ffp_NI_file = self._oft_env.unique_filename('tokamaker_ffp_NI.prof')
             create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
+            delete_files.append(ffp_NI_file)
         if foffset is not None:
             self._F0 = foffset
         self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
+        if not keep_files:
+            for file in delete_files:
+                try:
+                    os.remove(file)
+                except:
+                    print('Warning: unable to delete temporary file "{0}"'.format(file))
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition

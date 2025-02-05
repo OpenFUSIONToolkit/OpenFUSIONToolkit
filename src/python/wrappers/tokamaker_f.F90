@@ -67,6 +67,8 @@ TYPE, BIND(C) :: tokamaker_recon_settings_type
   LOGICAL(KIND=c_bool) :: fitF0 = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fixedCentering = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Needs docs
+  TYPE(c_ptr) :: infile !< Needs docs
+  TYPE(c_ptr) :: outfile !< Needs docs
 END TYPE tokamaker_recon_settings_type
 !
 TYPE(gs_eq), POINTER :: gs_global => NULL() !< Global G-S object
@@ -342,6 +344,8 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
 LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
+CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 error_flag=0
 IF(vacuum)gs_global%has_plasma=.FALSE.
 fitI=settings%fitI
@@ -354,7 +358,11 @@ fitCoils=settings%fitCoils
 fitF0=settings%fitF0
 fixedCentering=settings%fixedCentering
 fit_pm=settings%pm
-CALL fit_gs(gs_global,fitI,fitP,fitPnorm,&
+CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
+CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
+CALL copy_string_rev(infile_c,infile)
+CALL copy_string_rev(outfile_c,outfile)
+CALL fit_gs(gs_global,infile,outfile,fitI,fitP,fitPnorm,&
             fitAlam,fitR0,fitV0,fitCoils,fitF0, &
             fixedCentering)
 gs_global%has_plasma=.TRUE.
