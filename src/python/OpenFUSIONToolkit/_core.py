@@ -41,7 +41,20 @@ class OFT_env():
     
     def unique_filename(self,filename):
         return '{0}-{1}'.format(filename,self.pid)
-    
+
+    def path2c(self,path):
+        if len(path) > self.oft_path_slen:
+            raise ValueError("Path length exceeds OFT library allowable lenght of {0}".format(self.oft_path_slen))
+        return c_char_p(path.encode())
+
+    def string2c(self,string):
+        if len(string) > self.oft_slen:
+            raise ValueError("String length exceeds OFT library allowable lenght of {0}".format(self.oft_slen))
+        return c_char_p(string.encode())
+
+    def get_c_errorbuff(self):
+        return create_string_buffer(b"",self.oft_error_slen)
+
     def update_oft_in(self):
         '''! Update input file (`oftpyin`) with current settings'''
         with open(self.oft_ifile, 'w+') as fid:

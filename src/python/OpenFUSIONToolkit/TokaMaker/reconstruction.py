@@ -36,7 +36,7 @@ class tokamaker_recon_settings_struct(c_struct):
                 ("outfile", ctypes.c_char_p)]
 
 
-def tokamaker_recon_default_settings():
+def tokamaker_recon_default_settings(oft_env):
     '''! Initialize reconstruction settings object with default values
 
     @result tokamaker_recon_settings_struct object
@@ -52,8 +52,8 @@ def tokamaker_recon_default_settings():
     settings.fitF0 = False
     settings.fixedCentering = False
     settings.pm = False
-    settings.infile = b'none'
-    settings.outfile = b'none'
+    settings.infile = oft_env.path2c('none')
+    settings.outfile = oft_env.path2c('none')
     return settings
 
 ## @cond
@@ -227,7 +227,7 @@ class reconstruction():
         ## Grad-Shafranov object for reconstruction
         self._gs_obj = gs_obj
         ## Reconstruction specific settings object
-        self.settings = tokamaker_recon_default_settings()
+        self.settings = tokamaker_recon_default_settings(self._gs_obj._oft_env)
         ##
         self._Ip_con = None
         ##
@@ -245,8 +245,8 @@ class reconstruction():
             self.fit_file = self._gs_obj._oft_env.unique_filename('fit.in')
         else:
             self.fit_file = filename
-        self.settings.infile = self.fit_file.encode()
-        self.settings.outfile = self._gs_obj._oft_env.unique_filename('fit.out').encode()
+        self.settings.infile = self._gs_obj._oft_env.path2c(self.fit_file)
+        self.settings.outfile = self._gs_obj._oft_env.path2c(self._gs_obj._oft_env.unique_filename('fit.out'))
     
     def __del__(self):
         self._gs_obj = None

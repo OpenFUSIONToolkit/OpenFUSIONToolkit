@@ -30,7 +30,7 @@ TYPE :: oft_bin_file
   INTEGER(i4) :: nbytes = 0 !< Number of bytes per line
   INTEGER(i4), POINTER, DIMENSION(:) :: field_size => NULL() !< Dimension of each field
   CHARACTER(LEN=OFT_PATH_SLEN) :: filename = '' !< Output filename
-  CHARACTER(LEN=80) :: filedesc = '' !< Description string
+  CHARACTER(LEN=OFT_SLEN) :: filedesc = '' !< Description string
   CHARACTER(LEN=2), POINTER, DIMENSION(:) :: field_type => NULL() !< Field types
   CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: field_names => NULL() !< Field names
   CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: field_desc => NULL() !< Field descriptions

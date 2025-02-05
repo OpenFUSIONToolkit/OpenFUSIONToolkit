@@ -10,6 +10,7 @@ from scipy.special import jv, jn_zeros
 from scipy.integrate import dblquad
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
+from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
@@ -83,7 +84,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(R,0.0,0.12,0.15,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order,F0=1.0,full_domain=True)

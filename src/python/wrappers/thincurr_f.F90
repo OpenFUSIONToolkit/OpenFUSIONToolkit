@@ -201,9 +201,9 @@ END SUBROUTINE thincurr_setup_io
 SUBROUTINE thincurr_save_field(tw_ptr,vals,fieldname) BIND(C,NAME="thincurr_save_field")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: fieldname(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: fieldname(OFT_SLEN) !< Needs docs
 !
-CHARACTER(LEN=OFT_PATH_SLEN) :: name_tmp = ''
+CHARACTER(LEN=OFT_SLEN) :: name_tmp = ''
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 TYPE(tw_type), POINTER :: tw_obj
 CALL c_f_pointer(tw_ptr, tw_obj)
@@ -324,9 +324,9 @@ END SUBROUTINE thincurr_recon_field
 SUBROUTINE thincurr_save_scalar(tw_ptr,vals,fieldname) BIND(C,NAME="thincurr_save_scalar")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: fieldname(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: fieldname(OFT_SLEN) !< Needs docs
 !
-CHARACTER(LEN=OFT_PATH_SLEN) :: name_tmp = ''
+CHARACTER(LEN=OFT_SLEN) :: name_tmp = ''
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 TYPE(tw_type), POINTER :: tw_obj
 CALL c_f_pointer(tw_ptr, tw_obj)

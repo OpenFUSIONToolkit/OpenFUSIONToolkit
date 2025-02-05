@@ -116,17 +116,17 @@ class Marklin():
         @param basepath Path to root directory to use for I/O
         '''
         if basepath is None:
-            basepath_c = c_char_p(b'')
+            basepath_c = self._oft_env.path2c('')
             self._io_basepath = "."
         else:
             if basepath[-1] != '/':
                 basepath += '/'
             self._io_basepath = basepath[:-1]
-            basepath_c = c_char_p(basepath.encode())
-        cstring = c_char_p(b""*200)
-        marklin_setup_io(basepath_c,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value.decode())
+            basepath_c = self._oft_env.path2c(basepath)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_setup_io(basepath_c,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
     
     def build_XDMF(self,repeat_static=False,pretty=False):
         '''! Build XDMF plot metadata files for model
@@ -148,10 +148,10 @@ class Marklin():
             raise ValueError('Eigenstates already computed')
         #
         eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
-        cstring = c_char_p(b""*200)
-        marklin_compute(order,nmodes,minlev,save_rst,eig_vals,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_compute(order,nmodes,minlev,save_rst,eig_vals,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         self._nm = nmodes
         self.eig_vals = eig_vals
 
@@ -162,10 +162,11 @@ class Marklin():
         @param tag Name for field in XDMF files
         '''
         #
-        cstring = c_char_p(b""*200)
-        marklin_save_visit(field.int_obj,field.int_type,c_char_p(tag.encode()),cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        ctag = self._oft_env.path2c(tag)
+        marklin_save_visit(field.int_obj,field.int_type,ctag,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def get_ainterp(self,imode,bn_gauge=False):
         r'''! Create field interpolator for vector potential
@@ -177,10 +178,10 @@ class Marklin():
         if imode > self._nm:
             raise ValueError("Requested mode number exceeds number of available modes")
         int_obj = c_void_p()
-        cstring = c_char_p(b""*200)
-        marklin_get_aint(imode,ctypes.byref(int_obj),bn_gauge,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_get_aint(imode,ctypes.byref(int_obj),bn_gauge,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         return Marklin_field_interpolator(int_obj,1,3)
 
     def get_binterp(self,imode):
@@ -192,8 +193,8 @@ class Marklin():
         if imode > self._nm:
             raise ValueError("Requested mode number exceeds number of available modes")
         int_obj = c_void_p()
-        cstring = c_char_p(b""*200)
-        marklin_get_bint(imode,ctypes.byref(int_obj),cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_get_bint(imode,ctypes.byref(int_obj),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         return Marklin_field_interpolator(int_obj,2,3)

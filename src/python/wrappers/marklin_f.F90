@@ -108,7 +108,7 @@ END SUBROUTINE marklin_compute
 !------------------------------------------------------------------------------
 SUBROUTINE marklin_setup_io(basepath,error_str) BIND(C,NAME="marklin_setup_io")
 CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix = ''
 CALL copy_string('',error_str)
@@ -126,7 +126,7 @@ END SUBROUTINE marklin_setup_io
 SUBROUTINE marklin_save_visit(int_obj,int_type,key,error_str) BIND(C,NAME="marklin_save_visit")
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: key(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: key(OFT_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()

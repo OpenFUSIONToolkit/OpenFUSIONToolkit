@@ -12,7 +12,7 @@ import numpy
 from ._interface import *
 
 
-def tokamaker_default_settings():
+def tokamaker_default_settings(oft_env):
     '''! Initialize settings object with default values
 
     @result tokamaker_settings_struct object
@@ -28,7 +28,7 @@ def tokamaker_default_settings():
     settings.nl_tol = 1.E-6
     settings.rmin = 0.0
     settings.lim_zmax = 1.E99
-    settings.limiter_file = 'none'.encode()
+    settings.limiter_file = oft_env.path2c('none')
     return settings
 
 
@@ -91,7 +91,7 @@ class TokaMaker():
         self.gs_obj = c_void_p()
         tokamaker_alloc(ctypes.byref(self.gs_obj))
         ## General settings object
-        self.settings = tokamaker_default_settings()
+        self.settings = tokamaker_default_settings(self._oft_env)
         ## Conductor definition dictionary
         self._cond_dict = {}
         ## Vacuum definition dictionary
@@ -149,14 +149,14 @@ class TokaMaker():
 
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
-        cstring = c_char_p(b""*200)
-        tokamaker_reset(cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_reset(error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         self.nregs = -1
         self.np = -1
         # Reset defaults
-        self.settings = tokamaker_default_settings()
+        self.settings = tokamaker_default_settings(self._oft_env)
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
@@ -274,7 +274,7 @@ class TokaMaker():
         for key in self.coil_sets:
             for sub_coil in self.coil_sets[key]['sub_coils']:
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
-        cstring = c_char_p('none'.encode())
+        cstring = self._oft_env.path2c('none')
         tokamaker_setup_regions(cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils)
     
     def setup(self,order=2,F0=0.0,full_domain=False):
@@ -288,11 +288,10 @@ class TokaMaker():
         self.update_settings()
         #
         ncoils = c_int()
-        cstring = c_char_p(b""*200)
-        # filename = c_char_p(input_filename.encode())
-        tokamaker_setup(order,full_domain,ctypes.byref(ncoils),cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_setup(order,full_domain,ctypes.byref(ncoils),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         ## Number of coils in mesh
         self.ncoils = ncoils.value
         ## Isoflux constraint points (use @ref TokaMaker.TokaMaker.set_isoflux "set_isoflux")
@@ -469,7 +468,7 @@ class TokaMaker():
         tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,ctypes.byref(error_flag))
         return error_flag.value
 
-    def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in', eta_file='eta_prof.in', f_NI_file='f_NI_prof.in'):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -480,7 +479,11 @@ class TokaMaker():
         '''
         if foffset is not None:
             self._F0 = foffset
-        tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()),c_char_p(eta_file.encode()),c_char_p(f_NI_file.encode()))
+        f_file_c = self._oft_env.path2c(f_file)
+        p_file_c = self._oft_env.path2c(p_file)
+        eta_file_c = self._oft_env.path2c(eta_file)
+        f_NI_file_c = self._oft_env.path2c(f_NI_file)
+        tokamaker_load_profiles(f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c)
 
     def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
@@ -856,10 +859,10 @@ class TokaMaker():
             raise ValueError('Invalid field type ("B", "psi", "F", "P")')
         #
         int_obj = c_void_p()
-        cstring = c_char_p(b""*200)
-        tokamaker_get_field_eval(imode,ctypes.byref(int_obj),cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_field_eval(imode,ctypes.byref(int_obj),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         field_dim = 1
         if imode == 1:
             field_dim = 3
@@ -1327,11 +1330,11 @@ class TokaMaker():
         @param truncate_eq Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
         @param limiter_file File containing limiter contour to use instead of TokaMaker limiter
         '''
-        cfilename = c_char_p(filename.encode())
-        lim_filename = c_char_p(limiter_file.encode())
+        cfilename = self._oft_env.path2c(filename)
+        lim_filename = self._oft_env.path2c(limiter_file)
         if len(run_info) > 40:
             raise ValueError('"run_info" cannot be longer than 40 characters')
-        crun_info = c_char_p(run_info.encode())
+        crun_info = self._oft_env.path2c(run_info)
         if rbounds is None:
             rbounds = numpy.r_[self.lim_contour[:,0].min(), self.lim_contour[:,0].max()]
             dr = rbounds[1]-rbounds[0]
@@ -1342,10 +1345,10 @@ class TokaMaker():
             zbounds += numpy.r_[-1.0,1.0]*dr*0.05
         if rcentr is None:
             rcentr = -1.0
-        cstring = c_char_p(b""*200)
-        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures

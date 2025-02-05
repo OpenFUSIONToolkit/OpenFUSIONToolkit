@@ -51,7 +51,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
   REAL(KIND=c_double) :: nl_tol = 1.d-6 !< Needs docs
   REAL(KIND=c_double) :: rmin = 0.d0 !< Needs docs
   REAL(KIND=c_double) :: lim_zmax = 1.d99 !< Needs docs
-  CHARACTER(KIND=c_char) :: limiter_file(OFT_PATH_SLEN) = 'none' !< Needs docs
+  TYPE(c_ptr) :: limiter_file !< Needs docs
 END TYPE tokamaker_settings_type
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -833,6 +833,7 @@ END SUBROUTINE tokamaker_set_psi_dt
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_settings(settings) BIND(C,NAME="tokamaker_set_settings")
 TYPE(tokamaker_settings_type), INTENT(in) :: settings !< Needs docs
+CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 oft_env%pm=settings%pm
 gs_global%free=settings%free_boundary
 gs_global%lim_zmax=settings%lim_zmax
@@ -842,7 +843,8 @@ gs_global%urf=settings%urf
 gs_global%maxits=settings%maxits
 gs_global%nl_tol=settings%nl_tol
 gs_global%limited_only=settings%limited_only
-CALL copy_string_rev(settings%limiter_file,gs_global%limiter_file)
+CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
+CALL copy_string_rev(limfile_c,gs_global%limiter_file)
 END SUBROUTINE tokamaker_set_settings
 !------------------------------------------------------------------------------
 !> Needs docs

@@ -13,6 +13,7 @@ import os
 import subprocess
 import numpy
 import h5py
+from ._interface import oftpy_dump_cov
 
 # Common parameters
 ## Vacuum magnetic permeability
