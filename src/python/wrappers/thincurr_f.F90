@@ -800,6 +800,8 @@ IF(c_associated(sensor_vals_ptr))THEN
     RETURN
   END IF
   CALL c_f_pointer(sensor_vals_ptr, sensor_waveform, [nvolt,sensors%nfloops+1])
+ELSE
+  NULLIFY(sensor_waveform)
 END IF
 CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
 !---Run eigenvalue analysis
