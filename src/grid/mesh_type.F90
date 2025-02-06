@@ -27,7 +27,8 @@ MODULE oft_mesh_type
 USE oft_base
 USE oft_stitching, ONLY: oft_seam, destory_seam
 USE oft_io, ONLY: hdf5_create_files, oft_hdf5_write_dump, oft_hdf5_add_dump, &
-  hdf5_proc_str, hdf5_ts_str, hdf5_write
+  hdf5_proc_str, hdf5_ts_str, hdf5_write, oft_hdf5_add_mesh, hdf5_field_exist, &
+  hdf5_create_group
 USE oft_quadrature
 IMPLICIT NONE
 #include "local.h"
@@ -722,8 +723,6 @@ CALL quad%delete()
 DEBUG_STACK_POP
 end function mesh_volume
 !---------------------------------------------------------------------------
-! SUBROUTINE: mesh_setup_io
-!---------------------------------------------------------------------------
 !> Estimate mesh volume
 !---------------------------------------------------------------------------
 SUBROUTINE mesh_setup_io(self,tess_order,basepath)
@@ -748,6 +747,7 @@ END IF
 self%tess_order=tess_order
 !---Get grid tessellation
 CALL self%tessellate(rtmp, lctmp, self%tess_order)
+CALL oft_hdf5_add_mesh(30+self%type,rtmp,lctmp,'vmesh',self%io_path)
 !---Write out point list
 CALL hdf5_write(rtmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5','R_vol',single_prec=PLOT_R4_FLAG)
 deallocate(rtmp)
@@ -1181,6 +1181,7 @@ IF(self%nc==0)THEN
 END IF
 !---Get grid tessellation
 CALL self%tessellate(rtmp, lftmp, self%tess_order)
+CALL oft_hdf5_add_mesh(20+self%type,rtmp,lftmp,'smesh',self%io_path)
 !---Write out point list
 CALL hdf5_write(rtmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5', "R_surf",single_prec=PLOT_R4_FLAG)
 deallocate(rtmp)

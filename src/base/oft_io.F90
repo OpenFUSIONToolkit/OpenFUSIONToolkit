@@ -326,9 +326,71 @@ CALL oft_increase_indent
 CALL hdf5_create_file(TRIM(pathprefix)//"scalar_dump."//hdf5_proc_str()//".h5")
 CALL hdf5_create_file(TRIM(pathprefix)//"vector_dump."//hdf5_proc_str()//".h5")
 CALL hdf5_create_file(TRIM(pathprefix)//"mesh."//hdf5_proc_str()//".h5")
+CALL hdf5_create_file(TRIM(pathprefix)//"oft_plot."//hdf5_proc_str()//".h5")
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine hdf5_create_files
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine oft_hdf5_add_mesh(mesh_type,pt_list,cell_list,field_path,basepath)
+integer(i4), intent(in) :: mesh_type !< Mesh type flag (Tet/Tri or Hex/Quad)
+real(r8), intent(in) :: pt_list(:,:) !< Point list [3,np]
+integer(i4), intent(in) :: cell_list(:,:) !< Cell list [:,nc]
+CHARACTER(LEN=*), intent(in) :: field_path !< Path to mesh in HDF5 file
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix,filename
+integer(i4) :: i,ntrans(4),ierr,io_unit
+#ifdef HAVE_MPI
+#ifdef OFT_MPI_F08
+type(mpi_status) :: mpi_stat
+#else
+integer(i4) :: mpi_stat(MPI_STATUS_SIZE)
+#endif
+#endif
+DEBUG_STACK_PUSH
+pathprefix=''
+IF(PRESENT(basepath))THEN
+  IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
+    "oft_hdf5_write_dump", __FILE__)
+  pathprefix=basepath
+END IF
+filename = TRIM(pathprefix)//"oft_plot."//hdf5_proc_str()//".h5"
+CALL hdf5_create_group(filename,TRIM(field_path))
+CALL hdf5_write(mesh_type,filename,TRIM(field_path)//"/TYPE")
+CALL hdf5_write(pt_list,filename,TRIM(field_path)//"/R",single_prec=.TRUE.)
+CALL hdf5_write(cell_list,filename,TRIM(field_path)//"/LC")
+DEBUG_STACK_POP
+end subroutine oft_hdf5_add_mesh
+! !---------------------------------------------------------------------------
+! !> Adds a timestep to the dump metadata file.
+! !!
+! !! Subsequent output will be added to this timestep until another call
+! !! to this subroutine
+! !---------------------------------------------------------------------------
+! subroutine hdf5_set_timestep(t,basepath)
+! real(r8), intent(in) :: t !< Time value
+! CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+! CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
+! integer(i4) :: io_unit
+! DEBUG_STACK_PUSH
+! if(oft_debug_print(1))write(*,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
+! hdf5_ts=hdf5_ts+1
+! if(oft_env%rank==0)then
+!   pathprefix=''
+!   IF(PRESENT(basepath))THEN
+!     IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
+!       "hdf5_create_timestep", __FILE__)
+!     pathprefix=basepath
+!   END IF
+!   OPEN(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
+!   WRITE(io_unit,*)
+!   WRITE(io_unit,*)'Time Step',REAL(t,4)
+!   WRITE(io_unit,*)'Field Data'
+!   CLOSE(io_unit)
+! end if
+! DEBUG_STACK_POP
+! end subroutine hdf5_set_timestep
 !---------------------------------------------------------------------------
 !> Adds a timestep to the dump metadata file.
 !!
