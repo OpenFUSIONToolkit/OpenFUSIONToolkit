@@ -1,10 +1,11 @@
+import tempfile
 import numpy
 from ._interface import *
 
 
 class OFT_env():
     '''! TokaMaker G-S solver class'''
-    def __init__(self,debug_level=0,nthreads=2):
+    def __init__(self,debug_level=0,nthreads=2,use_tmpdir=True):
         '''! Initialize TokaMaker object
 
         @param debug_level Level of debug printing (0-3)
@@ -12,6 +13,16 @@ class OFT_env():
         '''
         ## ID of Python interpreter process
         self.pid = os.getpid()
+        if use_tmpdir:
+            ## Directory for temporary files
+            self.tempdir = os.path.join(tempfile.gettempdir(),'oft_{0}'.format(self.pid))
+            try:
+                os.mkdir(self.tempdir)
+            except:
+                print("Could not make temporary directory")
+                raise
+        else:
+            self.tempdir = None
         ## Number of threads for execution
         self.nthreads = nthreads
         ## Debug level
@@ -26,7 +37,7 @@ class OFT_env():
             }
         }
         ## Input filename for execution environment
-        self.oft_ifile = self.unique_filename('oftpyin')
+        self.oft_ifile = self.unique_tmpfile('oftpyin')
         self.update_oft_in()
         # Initialize OFT
         slens = numpy.zeros((4,), dtype=numpy.int32)
@@ -39,8 +50,11 @@ class OFT_env():
         ## Error string size
         self.oft_error_slen = slens[3]
     
-    def unique_filename(self,filename):
-        return '{0}-{1}'.format(filename,self.pid)
+    def unique_tmpfile(self,filename):
+        if self.tempdir is not None:
+            return os.path.join(self.tempdir,filename)
+        else:
+            return '{0}-{1}'.format(filename,self.pid)
 
     def path2c(self,path):
         if len(path) > self.oft_path_slen:
@@ -63,3 +77,9 @@ class OFT_env():
                 for option_name, option_value in options.items():
                     fid.write("  {0}={1}\n".format(option_name,option_value))
                 fid.write("/\n\n")
+    
+    def __del__(self):
+        try:
+            os.remove(self.oft_ifile)
+        except:
+            print('Warning: unable to delete temporary file "{0}"'.format(self.oft_ifile))

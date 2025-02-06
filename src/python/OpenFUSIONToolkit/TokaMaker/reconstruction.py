@@ -52,8 +52,8 @@ def tokamaker_recon_default_settings(oft_env):
     settings.fitF0 = False
     settings.fixedCentering = False
     settings.pm = False
-    settings.infile = oft_env.path2c('none')
-    settings.outfile = oft_env.path2c('none')
+    settings.infile = oft_env.path2c('fit.in')
+    settings.outfile = oft_env.path2c('fit.out')
     return settings
 
 ## @cond
@@ -223,7 +223,7 @@ con_map = {
 
 
 class reconstruction():
-    def __init__(self,gs_obj,filename=None):
+    def __init__(self,gs_obj,in_filename=None,out_filename=None):
         ## Grad-Shafranov object for reconstruction
         self._gs_obj = gs_obj
         ## Reconstruction specific settings object
@@ -240,13 +240,18 @@ class reconstruction():
         self._saddles = []
         ##
         self._pressure_cons = []
-        if filename is None:
+        if in_filename is None:
             ##
-            self.fit_file = self._gs_obj._oft_env.unique_filename('fit.in')
+            self.con_file = 'fit.in'
         else:
-            self.fit_file = filename
-        self.settings.infile = self._gs_obj._oft_env.path2c(self.fit_file)
-        self.settings.outfile = self._gs_obj._oft_env.path2c(self._gs_obj._oft_env.unique_filename('fit.out'))
+            self.con_file = in_filename
+        if out_filename is None:
+            ##
+            self.out_file = 'fit.out'
+        else:
+            self.out_file = out_filename
+        self.settings.infile = self._gs_obj._oft_env.path2c(self.con_file)
+        self.settings.outfile = self._gs_obj._oft_env.path2c(self.out_file)
     
     def __del__(self):
         self._gs_obj = None
@@ -291,14 +296,14 @@ class reconstruction():
         if self._Dflux_con is not None:
             constraints.append(self._Dflux_con)
         ncons = len(constraints)
-        with open(self.fit_file, 'w+') as fid:
+        with open(self.con_file, 'w+') as fid:
             fid.write('{0:d}\n\n'.format(ncons))
             for con in constraints:
                 con.write(fid)
     
     def read_fit_in(self):
         self.reset_constraints()
-        with open(self.fit_file, 'r') as fid:
+        with open(self.con_file, 'r') as fid:
             ncons = int(fid.readline())
             for _ in range(ncons):
                 fid.readline()

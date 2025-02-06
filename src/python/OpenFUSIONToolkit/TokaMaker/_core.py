@@ -500,18 +500,18 @@ class TokaMaker():
         delete_files = []
         ffp_file = 'none'
         if ffp_prof is not None:
-            ffp_file = self._oft_env.unique_filename('tokamaker_f.prof')
+            ffp_file = self._oft_env.unique_tmpfile('tokamaker_f.prof')
             create_prof_file(self, ffp_file, ffp_prof, "F*F'")
             delete_files.append(ffp_file)
         pp_file = 'none'
         if pp_prof is not None:
-            pp_file = self._oft_env.unique_filename('tokamaker_p.prof')
+            pp_file = self._oft_env.unique_tmpfile('tokamaker_p.prof')
             create_prof_file(self, pp_file, pp_prof, "P'")
             delete_files.append(pp_file)
         eta_file = 'none'
         ffp_NI_file = 'none'
         if ffp_NI_prof is not None:
-            ffp_NI_file = self._oft_env.unique_filename('tokamaker_ffp_NI.prof')
+            ffp_NI_file = self._oft_env.unique_tmpfile('tokamaker_ffp_NI.prof')
             create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
             delete_files.append(ffp_NI_file)
         if foffset is not None:
