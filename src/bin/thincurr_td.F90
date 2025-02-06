@@ -55,7 +55,7 @@ TYPE(tw_sensors) :: sensors
 LOGICAL :: exists
 INTEGER(4) :: i,j,k,n,ierr,io_unit,ncols,ntimes
 REAL(8), ALLOCATABLE :: curr_ic(:)
-REAL(8), POINTER, DIMENSION(:,:) :: curr_waveform,volt_waveform
+REAL(8), POINTER, DIMENSION(:,:) :: curr_waveform,volt_waveform,sensor_waveform
 TYPE(oft_timer) :: mytimer
 CLASS(oft_vector), POINTER :: uio
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
@@ -180,10 +180,11 @@ END IF
 ! Run main calculation or plots
 !---------------------------------------------------------------------------
 IF(plot_run)THEN
+  NULLIFY(sensor_waveform)
   IF(tw_hodlr%L_svd_tol>0.d0)THEN
-    CALL plot_td_sim(tw_sim,nsteps,nplot,sensors,compute_B,plot_rebuild_sensors,tw_hodlr)
+    CALL plot_td_sim(tw_sim,nsteps,nplot,sensors,compute_B,plot_rebuild_sensors,sensor_waveform,tw_hodlr)
   ELSE
-    CALL plot_td_sim(tw_sim,nsteps,nplot,sensors,compute_B,plot_rebuild_sensors)
+    CALL plot_td_sim(tw_sim,nsteps,nplot,sensors,compute_B,plot_rebuild_sensors,sensor_waveform)
   END IF
 ELSE
   !---Setup resistivity matrix
@@ -212,16 +213,17 @@ ELSE
   ELSE
     NULLIFY(volt_waveform)
   END IF
+  NULLIFY(sensor_waveform)
   !---Run time-dependent simulation
   ALLOCATE(curr_ic(tw_sim%nelems))
   curr_ic=0.d0
   oft_env%pm=.FALSE.
   IF(tw_hodlr%L_svd_tol>0.d0)THEN
     CALL run_td_sim(tw_sim,dt,nsteps,curr_ic,direct,cg_tol,timestep_cn,nstatus, &
-      nplot,sensors,curr_waveform,volt_waveform,tw_hodlr)
+      nplot,sensors,curr_waveform,volt_waveform,sensor_waveform,tw_hodlr)
   ELSE
     CALL run_td_sim(tw_sim,dt,nsteps,curr_ic,direct,cg_tol,timestep_cn,nstatus, &
-      nplot,sensors,curr_waveform,volt_waveform)
+      nplot,sensors,curr_waveform,volt_waveform,sensor_waveform)
   END IF
 END IF
 !---
