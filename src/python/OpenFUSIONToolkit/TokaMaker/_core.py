@@ -1372,6 +1372,8 @@ class TokaMaker():
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         tokamaker_eig_wall(c_int(neigs),eig_vals,eig_vecs,pm)
+        if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
+            raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False):
@@ -1386,6 +1388,8 @@ class TokaMaker():
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         tokamaker_eig_td(c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),pm)
+        if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
+            raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
     def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
