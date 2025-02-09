@@ -188,38 +188,95 @@ def build_torus_bnorm_grid(filename,nsample,nphi,resample_type='theta',use_splin
     return r, bnorm, nmode
 
 
-def build_periodic_mesh(r_grid,nfp):
-    r'''Build triangular mesh for the full surface from a uniform grid of a single field period (toroidal)
+class ThinCurr_periodic_toroid:
+    def __init__(self,r_grid,nfp):
+        r'''Build triangular mesh for the full surface from a uniform grid of a single field period (toroidal)
 
-    @param r_grid Uniform grid [nphi,ntheta,3] (\f$ \phi \f$ and \f$ \theta \f$ vary along the first and second dimension respectively)
-    @param nfp Number of field periods
-    @result point list [np,3], cell list [nc,3], toroidal nodeset, poloidal nodesets, periodicity map
-    '''
-    if nfp == 1:
-        lc, r, tnodeset, pnodeset = build_triangles_from_grid(r_grid)
-        return r, lc, tnodeset, [pnodeset,], None
-    nphi = r_grid.shape[0]
-    ntheta = r_grid.shape[1]
-    r_base = r_grid.copy().reshape((nphi*ntheta,3))
-    r_full = r_base[:-ntheta,:].copy()
-    r_map = numpy.arange((nphi-1)*ntheta, dtype=numpy.int32)
-    rotation = 2.0*numpy.pi/nfp
-    for i in range(1,nfp):
-        r_rotated = r_base[:-ntheta,:].copy()
-        for j in range(r_rotated.shape[0]):
-            theta = numpy.arctan2(r_rotated[j,1],r_rotated[j,0])
-            if theta < 0.0:
-                theta += 2*numpy.pi
-            r = numpy.sqrt(numpy.power(r_rotated[j,0],2)+numpy.power(r_rotated[j,1],2))
-            r_rotated[j,0] = r*numpy.cos(theta + rotation*i)
-            r_rotated[j,1] = r*numpy.sin(theta + rotation*i)
-        r_full = numpy.vstack((r_full,r_rotated))
-        r_map = numpy.hstack((r_map,numpy.arange((nphi-1)*ntheta, dtype=numpy.int32)))
-    lc, r, tnodeset, pnodeset = build_triangles_from_grid(r_full.reshape((int(r_full.shape[0]/(ntheta)),ntheta,3)))
-    pnodesets = [pnodeset]
-    for i in range(1,nfp):
-        pnodesets.append(pnodeset+i*(nphi-1)*ntheta)
-    return r, lc, tnodeset, pnodesets, r_map
+        @param r_grid Uniform grid [nphi,ntheta,3] (\f$ \phi \f$ and \f$ \theta \f$ vary along the first and second dimension respectively)
+        @param nfp Number of field periods
+        @result point list [np,3], cell list [nc,3], toroidal nodeset, poloidal nodesets, periodicity map
+        '''
+        self.nfp = nfp
+        if nfp == 1:
+            self.r, self.lc, self.tnodeset, pnodeset = build_triangles_from_grid(r_grid)
+            self.pnodesets = [pnodeset,]
+            self.r_map = numpy.s_[:]
+        else:
+            nphi = r_grid.shape[0]
+            ntheta = r_grid.shape[1]
+            r_base = r_grid.copy().reshape((nphi*ntheta,3))
+            r_full = r_base[:-ntheta,:].copy()
+            self.r_map = numpy.arange((nphi-1)*ntheta, dtype=numpy.int32)
+            rotation = 2.0*numpy.pi/nfp
+            for i in range(1,nfp):
+                r_rotated = r_base[:-ntheta,:].copy()
+                for j in range(r_rotated.shape[0]):
+                    theta = numpy.arctan2(r_rotated[j,1],r_rotated[j,0])
+                    if theta < 0.0:
+                        theta += 2*numpy.pi
+                    r = numpy.sqrt(numpy.power(r_rotated[j,0],2)+numpy.power(r_rotated[j,1],2))
+                    r_rotated[j,0] = r*numpy.cos(theta + rotation*i)
+                    r_rotated[j,1] = r*numpy.sin(theta + rotation*i)
+                r_full = numpy.vstack((r_full,r_rotated))
+                self.r_map = numpy.hstack((self.r_map,numpy.arange((nphi-1)*ntheta, dtype=numpy.int32)))
+            self.r, self.lc, self.tnodeset, pnodeset = build_triangles_from_grid(r_full.reshape((int(r_full.shape[0]/(ntheta)),ntheta,3)))
+            self.pnodesets = [pnodeset]
+            for i in range(1,nfp):
+                self.pnodesets.append(pnodeset+i*(nphi-1)*ntheta)
+    
+    def plot_mesh(self,fig):
+        '''Needs Docs'''
+        ax = fig.add_subplot(1,2,1, projection='3d')
+        ax.plot(self.r[self.tnodeset,0], self.r[self.tnodeset,1], self.r[self.tnodeset,2], c='red')
+        for pnodeset in self.pnodesets:
+            ax.plot(self.r[pnodeset,0], self.r[pnodeset,1], self.r[pnodeset,2], c='blue')
+        #
+        ax = fig.add_subplot(1,2,2, projection='3d')
+        _ = ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lc, cmap='viridis')
+    
+    def write_to_file(self,filename,reg=None,include_closures=True):
+        '''Needs Docs'''
+        if include_closures:
+            closures = numpy.arange(self.nfp)*int(self.lc.shape[0]/self.nfp)+1
+        else:
+            closures = []
+        if reg is None:
+            reg = numpy.ones((self.lc.shape[0],))
+        if self.nfp == 1:
+            write_ThinCurr_mesh(filename, self.r, self.lc+1, reg,
+                holes=[self.tnodeset+1, self.pnodesets[0]+1], closures=closures)
+        else:
+            write_ThinCurr_mesh(filename, self.r, self.lc+1, reg,
+                holes=[self.tnodeset+1] + [pnodeset+1 for pnodeset in self.pnodesets], closures=closures, pmap=self.r_map, nfp=self.nfp)
+    
+    def condense_matrix(self,matrix):
+        '''Needs Docs'''
+        # Condense model to single mode period
+        if self.nfp > 1:
+            nelems_new = matrix.shape[0]-self.nfp+1
+            matrix_new = numpy.zeros((nelems_new,nelems_new))
+            matrix_new[:-1,:-1] = matrix[:-self.nfp,:-self.nfp]
+            matrix_new[:-1,-1] = matrix[:-self.nfp,-self.nfp:].sum(axis=1)
+            matrix_new[-1,:-1] = matrix[-self.nfp:,:-self.nfp].sum(axis=0)
+            matrix_new[-1,-1] = matrix[-self.nfp:,-self.nfp:].sum(axis=None)
+            return matrix_new
+        else:
+            return matrix
+    
+    def get_single_period(self,vector,tor_val=0.0,pol_val=0.0):
+        '''Needs Docs'''
+        if self.nfp > 1:
+            vector = vector[:-self.pnodesets[0].shape[0]]
+        return numpy.r_[vector[1:],tor_val,pol_val]
+
+    def expand_poloidal_holes(self,vector):
+        '''Needs Docs'''
+        if self.nfp == 1:
+            return vector
+        output = numpy.zeros((vector.shape[0]+(self.nfp-1)))
+        output[:-self.nfp+1] = vector
+        output[-self.nfp+1:] = output[-self.nfp]
+        return output
 
 
 def build_triangles_from_grid(data_grid,wrap_n=True,wrap_m=True):
