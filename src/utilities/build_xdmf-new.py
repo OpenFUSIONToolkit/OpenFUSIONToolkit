@@ -293,5 +293,3 @@ with h5py.File("{0}.{1}.h5".format(inprefix,str(1).zfill(padSize)),'r') as h5_fi
 
 for xml_doc in xml_docs:
     xml_doc.write_file()
-
-
