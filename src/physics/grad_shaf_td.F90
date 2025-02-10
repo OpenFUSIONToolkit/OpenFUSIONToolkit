@@ -365,7 +365,7 @@ CALL arsolver%apply(eig_vec,lam0)
 IF(arsolver%info>=0)THEN
   !---Sort eigenvalues
   ALLOCATE(sort_tmp(arsolver%nev),eig_tmp(arsolver%nev))
-  eig_tmp=ABS(1.d0/arsolver%eig_val(1,1:arsolver%nev)+omega)
+  eig_tmp=1.d0/arsolver%eig_val(1,1:arsolver%nev)+omega
   sort_tmp=[(i,i=1,arsolver%nev)]
   CALL sort_array(eig_tmp,sort_tmp,arsolver%nev)
   DEALLOCATE(eig_tmp)

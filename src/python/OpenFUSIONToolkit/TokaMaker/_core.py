@@ -491,9 +491,10 @@ class TokaMaker():
                 raise IndexError('Incorrect shape of "curr_source", should be [np]')
             curr_source = numpy.ascontiguousarray(curr_source, dtype=numpy.float64)
             curr_ptr = curr_source.ctypes.data_as(c_double_ptr)
-        error_flag = c_int()
-        tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,ctypes.byref(error_flag))
-        return error_flag.value
+        error_str = create_string_buffer(b"",200)
+        tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,error_str)
+        if error_str.value != b'':
+            raise ValueError("Error in solve: {0}".format(error_str.value.decode()))
 
     def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in', eta_file='eta_prof.in', f_NI_file='f_NI_prof.in'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
@@ -559,8 +560,8 @@ class TokaMaker():
             raise ValueError('"vacuum=True" no longer supported, use "vac_solve()"')
         error_str = create_string_buffer(b"",200)
         tokamaker_solve(error_str)
-        if error_str.value != '':
-            raise ValueError("Error in solve: {0}".format(error_str.value))
+        if error_str.value != b'':
+            raise ValueError("Error in solve: {0}".format(error_str.value.decode()))
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
@@ -583,8 +584,8 @@ class TokaMaker():
             rhs_ptr = rhs_source.ctypes.data_as(c_double_ptr)
         error_str = create_string_buffer(b"",200)
         tokamaker_vac_solve(psi,rhs_ptr,error_str)
-        if error_str.value != '':
-            raise ValueError("Error in solve: {0}".format(error_str.value))
+        if error_str.value != b'':
+            raise ValueError("Error in solve: {0}".format(error_str.value.decode()))
         return psi
 
     def get_stats(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):

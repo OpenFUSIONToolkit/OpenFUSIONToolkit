@@ -60,7 +60,7 @@ tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
 
 # tokamaker_init_psi(r0,z0,a,kappa,delta,rhs_source,ierr)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
-    [c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_int_ptr])
+    [c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_char_p])
 
 # G-S load flux functions (f_file,f_offset,p_file)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
