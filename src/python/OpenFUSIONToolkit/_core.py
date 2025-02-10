@@ -1,19 +1,24 @@
+import shutil
 import tempfile
 import numpy
 from ._interface import *
 
 
 class OFT_env():
-    '''! TokaMaker G-S solver class'''
-    def __init__(self,debug_level=0,nthreads=2,use_tmpdir=True):
-        '''! Initialize TokaMaker object
+    '''! OpenFUSIONToolkit runtime environment class'''
+    def __init__(self,debug_level=0,nthreads=2,unique_tempfiles='global'):
+        '''! Initialize OFT runtime object
 
         @param debug_level Level of debug printing (0-3)
         @param nthreads Number of threads for execution
+        @param unique_tempfiles Method for temporary file creation ('global': Create unique folder
+        in global temporary space, 'local_dir': Create unique folder in current working directory,
+        'local_file': Use current working directory and append unique identifier to filenames,
+        'none': Use non-unique names in local directory; can lead to conflict with multiple instances)
         '''
         ## ID of Python interpreter process
         self.pid = os.getpid()
-        if use_tmpdir:
+        if unique_tempfiles == 'global':
             ## Directory for temporary files
             self.tempdir = os.path.join(tempfile.gettempdir(),'oft_{0}'.format(self.pid))
             try:
@@ -21,8 +26,21 @@ class OFT_env():
             except:
                 print("Could not make temporary directory")
                 raise
-        else:
+        elif unique_tempfiles == 'local_dir':
+            self.tempdir = os.path.join(os.getcwd(),'oft_tmp-{0}'.format(self.pid))
+            try:
+                os.mkdir(self.tempdir)
+            except:
+                print("Could not make temporary directory")
+                raise
+        elif unique_tempfiles == 'local_file':
             self.tempdir = None
+        elif unique_tempfiles == 'none':
+            self.tempdir = None
+            self.pid = None
+            print("Warning: Using non-unique names/locations for temporary files can lead to conflicts if multiple python instances are used in the same directory")
+        else:
+            raise ValueError('Unknown value "{0}" for "unique_tempfiles"'.format(unique_tempfiles))
         ## Number of threads for execution
         self.nthreads = nthreads
         ## Debug level
@@ -51,26 +69,45 @@ class OFT_env():
         self.oft_error_slen = slens[3]
     
     def unique_tmpfile(self,filename):
-        if self.tempdir is not None:
-            return os.path.join(self.tempdir,filename)
+        '''! Get unique temporary filename
+        
+        @param filename Base non-unique filename
+        @result Unique filepath in suitable temporary location
+        '''
+        if self.tempdir is None:
+            if self.pid is None:
+                return '{0}'.format(filename)
+            else:
+                return '{0}-{1}'.format(filename,self.pid)
         else:
-            return '{0}-{1}'.format(filename,self.pid)
+            return os.path.join(self.tempdir,filename)
 
     def path2c(self,path):
+        '''! Convert general strings to C-compatible objects calls to OFT compiled API
+        
+        @param path Python path string
+        @result `c_char_p` object containing path string value
+        '''
         if len(path) > self.oft_path_slen:
             raise ValueError("Path length exceeds OFT library allowable lenght of {0}".format(self.oft_path_slen))
         return c_char_p(path.encode())
 
     def string2c(self,string):
+        '''! Convert general strings to C-compatible objects calls to OFT compiled API
+        
+        @param string Python string
+        @result `c_char_p` object containing string value
+        '''
         if len(string) > self.oft_slen:
             raise ValueError("String length exceeds OFT library allowable lenght of {0}".format(self.oft_slen))
         return c_char_p(string.encode())
 
     def get_c_errorbuff(self):
+        '''! Get properly-sized error string buffer for calls to OFT compiled API'''
         return create_string_buffer(b"",self.oft_error_slen)
 
     def update_oft_in(self):
-        '''! Update input file (`oftpyin`) with current settings'''
+        '''! Update input file with current settings'''
         with open(self.oft_ifile, 'w+') as fid:
             for name, options in self.oft_in_groups.items():
                 fid.write("&{0}\n".format(name))
@@ -79,7 +116,14 @@ class OFT_env():
                 fid.write("/\n\n")
     
     def __del__(self):
-        try:
-            os.remove(self.oft_ifile)
-        except:
-            print('Warning: unable to delete temporary file "{0}"'.format(self.oft_ifile))
+        '''! Destroy environment and cleanup known temporary files'''
+        if self.tempdir is not None:
+            try:
+                shutil.rmtree(self.tempdir)
+            except:
+                print('Warning: unable to delete temporary directory "{0}"'.format(self.tempdir))
+        else:
+            try:
+                os.remove(self.oft_ifile)
+            except:
+                print('Warning: unable to delete temporary file "{0}"'.format(self.oft_ifile))
