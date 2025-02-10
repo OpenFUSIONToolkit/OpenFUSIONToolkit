@@ -464,9 +464,10 @@ class TokaMaker():
                 raise IndexError('Incorrect shape of "curr_source", should be [np]')
             curr_source = numpy.ascontiguousarray(curr_source, dtype=numpy.float64)
             curr_ptr = curr_source.ctypes.data_as(c_double_ptr)
-        error_flag = c_int()
-        tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,ctypes.byref(error_flag))
-        return error_flag.value
+        error_str = create_string_buffer(b"",200)
+        tokamaker_init_psi(c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,error_str)
+        if error_str.value != b'':
+            raise ValueError("Error in solve: {0}".format(error_str.value.decode()))
 
     def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
@@ -545,9 +546,10 @@ class TokaMaker():
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
         if vacuum:
             raise ValueError('"vacuum=True" no longer supported, use "vac_solve()"')
-        error_flag = c_int()
-        tokamaker_solve(ctypes.byref(error_flag))
-        return error_flag.value
+        error_str = create_string_buffer(b"",200)
+        tokamaker_solve(error_str)
+        if error_str.value != b'':
+            raise ValueError("Error in solve: {0}".format(error_str.value.decode()))
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
@@ -568,9 +570,11 @@ class TokaMaker():
                 raise IndexError('Incorrect shape of "rhs_source", should be [np]')
             rhs_source = numpy.ascontiguousarray(rhs_source, dtype=numpy.float64)
             rhs_ptr = rhs_source.ctypes.data_as(c_double_ptr)
-        error_flag = c_int()
-        tokamaker_vac_solve(psi,rhs_ptr,ctypes.byref(error_flag))
-        return psi, error_flag.value
+        error_str = create_string_buffer(b"",200)
+        tokamaker_vac_solve(psi,rhs_ptr,error_str)
+        if error_str.value != b'':
+            raise ValueError("Error in solve: {0}".format(error_str.value.decode()))
+        return psi
 
     def get_stats(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
@@ -1360,6 +1364,8 @@ class TokaMaker():
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         tokamaker_eig_wall(c_int(neigs),eig_vals,eig_vecs,pm)
+        if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
+            raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False):
@@ -1374,6 +1380,8 @@ class TokaMaker():
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         tokamaker_eig_td(c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),pm)
+        if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
+            raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
     def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
