@@ -83,6 +83,7 @@ CONTAINS
   PROCEDURE :: setup => xmdf_setup
   PROCEDURE :: add_mesh => xdmf_add_mesh
   PROCEDURE :: add_timestep => xdmf_add_timestep
+  PROCEDURE :: clear_timesteps => xdmf_clear_timesteps
   PROCEDURE :: write_scalar => xdmf_write_scalar
   PROCEDURE :: write_vector => xdmf_write_vector
   GENERIC :: write => write_scalar, write_vector
@@ -325,7 +326,7 @@ subroutine xmdf_setup(self,group_name,basepath)
 class(xdmf_plot_file), intent(inout) :: self
 CHARACTER(LEN=*), intent(in) :: group_name !< Path to mesh in HDF5 file
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-integer(i4) :: error
+integer :: error
 IF(PRESENT(basepath))THEN
   call execute_command_line('mkdir -p '//TRIM(basepath), exitstat=error)
   IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(basepath), &
@@ -335,7 +336,7 @@ ELSE
   self%file_path="oft_xdmf."//hdf5_proc_str()//".h5"
 END IF
 self%group_name=group_name
-CALL hdf5_create_file(TRIM(self%file_path))
+CALL hdf5_create_file(TRIM(self%file_path),.TRUE.)
 CALL hdf5_create_group(TRIM(self%file_path),TRIM(group_name))
 end subroutine xmdf_setup
 !---------------------------------------------------------------------------
@@ -397,7 +398,38 @@ DO i=1,self%n_grids
 END DO
 DEBUG_STACK_POP
 end subroutine xdmf_add_timestep
-!
+!---------------------------------------------------------------------------
+!> Clear existing timesteps and reset to static fields
+!---------------------------------------------------------------------------
+subroutine xdmf_clear_timesteps(self,clear_static)
+class(xdmf_plot_file), intent(inout) :: self
+logical, optional, intent(in) :: clear_static !< Clear static fields as well?
+integer(i4) :: j,i,istart
+CHARACTER(LEN=200) :: hdf5_path
+DEBUG_STACK_PUSH
+istart=1
+IF(PRESENT(clear_static))THEN
+  IF(clear_static)istart=0
+END IF
+if(oft_debug_print(1))write(*,'(2A,I6,A)')oft_indent,'Clearing ',self%n_ts+(1-istart),' existing timesteps'
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_clear_timesteps",__FILE__)
+DO i=istart,self%n_ts
+  DO j=1,self%n_grids
+    hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(j))//"/"//TRIM(hdf5_ts_str(i))
+    CALL hdf5_delete_obj(TRIM(self%file_path),TRIM(hdf5_path))
+  END DO
+END DO
+self%n_ts=0
+IF(istart==0)THEN
+  hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(j))
+  CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path)//"/"//hdf5_ts_str(0))
+END IF
+DEBUG_STACK_POP
+end subroutine xdmf_clear_timesteps
+!---------------------------------------------------------------------------
+!> Write scalar field to plot file
+!---------------------------------------------------------------------------
 subroutine xdmf_write_scalar(self,data,grid_name,path,centering,single_prec)
 class(xdmf_plot_file), intent(in) :: self
 real(r8), intent(in) :: data(:) !< Scalar data
@@ -427,7 +459,9 @@ SELECT CASE(centering)
     CALL oft_abort('Unknown field centering','xdmf_write_scalar',__FILE__)
 END SELECT
 end subroutine xdmf_write_scalar
-!
+!---------------------------------------------------------------------------
+!> Write vector field to plot file
+!---------------------------------------------------------------------------
 subroutine xdmf_write_vector(self,data,grid_name,path,centering,single_prec)
 class(xdmf_plot_file), intent(in) :: self
 real(r8), intent(in) :: data(:,:) !< Vector data
@@ -457,35 +491,6 @@ SELECT CASE(centering)
     CALL oft_abort('Unknown field centering','xdmf_write_vector',__FILE__)
 END SELECT
 end subroutine xdmf_write_vector
-!---------------------------------------------------------------------------
-!> Adds a timestep to the dump metadata file.
-!!
-!! Subsequent output will be added to this timestep until another call
-!! to this subroutine
-!---------------------------------------------------------------------------
-subroutine hdf5_create_timestep(t,basepath)
-real(r8), intent(in) :: t !< Time value
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
-integer(i4) :: io_unit
-DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
-hdf5_ts=hdf5_ts+1
-if(oft_env%rank==0)then
-  pathprefix=''
-  IF(PRESENT(basepath))THEN
-    IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
-      "hdf5_create_timestep", __FILE__)
-    pathprefix=basepath
-  END IF
-  OPEN(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
-  WRITE(io_unit,*)
-  WRITE(io_unit,*)'Time Step',REAL(t,4)
-  WRITE(io_unit,*)'Field Data'
-  CLOSE(io_unit)
-end if
-DEBUG_STACK_POP
-end subroutine hdf5_create_timestep
 !---------------------------------------------------------------------------
 !> Get processor rank as string for HDF5 I/O
 !---------------------------------------------------------------------------
@@ -594,17 +599,29 @@ end subroutine hdf5_field_get_sizes
 !---------------------------------------------------------------------------
 !> Create an empty HDF5 output file
 !---------------------------------------------------------------------------
-subroutine hdf5_create_file(filename)
+subroutine hdf5_create_file(filename,persistent_space_tracking)
 character(LEN=*), intent(in) :: filename !< Name of file to be created
-integer(4) :: error
-integer(HID_T) :: file_id
+logical, optional, intent(in) :: persistent_space_tracking
+integer :: error
+integer(HID_T) :: file_id,plist_id
+integer(HSIZE_T) :: zero = 0
+logical :: track_free
 DEBUG_STACK_PUSH
 !---Get processor rank for file creation
 IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Creating HDF5 output file: ',TRIM(filename)
 !---Initialize HDF5 system
 call h5open_f(error)
 !---Create HDF5 file
-call h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
+track_free=.FALSE.
+IF(PRESENT(persistent_space_tracking))track_free=persistent_space_tracking
+IF(track_free)THEN
+  CALL H5Pcreate_f(H5P_FILE_CREATE_F,plist_id,error)
+  CALL H5Pset_file_space_strategy_f(plist_id,H5F_FSPACE_STRATEGY_FSM_AGGR_F,.TRUE.,zero,error)
+  CALL h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error, creation_prp=plist_id)
+  CALL h5pclose_f(plist_id, error)
+ELSE
+  call h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
+END IF
 call h5fclose_f(file_id, error)
 !---Finalize HDF5 system
 call h5close_f(error)
@@ -630,6 +647,26 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_create_group
+!---------------------------------------------------------------------------
+!> Create HDF5 group in existing file
+!---------------------------------------------------------------------------
+subroutine hdf5_delete_obj(filename,obj_path)
+character(LEN=*), intent(in) :: filename !< Name of HDF5 file
+character(LEN=*), intent(in) :: obj_path !< Group path
+integer :: error
+integer(HID_T) :: file_id,grp_id
+DEBUG_STACK_PUSH
+!---Initialize HDF5 and open vector dump file
+call h5open_f(error)
+CALL h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
+IF(error/=0)CALL oft_abort('Error opening file','hdf5_delete_obj',__FILE__)
+CALL h5ldelete_f(file_id, "/"//TRIM(obj_path), error)
+IF(error/=0)CALL oft_abort('Error deleting object','hdf5_delete_obj',__FILE__)
+!---Close vector dump file and finalize HDF5
+call h5fclose_f(file_id, error)
+call h5close_f(error)
+DEBUG_STACK_POP
+end subroutine hdf5_delete_obj
 !---------------------------------------------------------------------------
 !> Add string attribute to existing object (group or dataset)
 !---------------------------------------------------------------------------

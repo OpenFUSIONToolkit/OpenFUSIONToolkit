@@ -29,7 +29,7 @@
 !---------------------------------------------------------------------------
 PROGRAM thincurr_td
 USE oft_base
-USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file
+USE oft_io, ONLY: oft_bin_file
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF

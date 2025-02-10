@@ -13,7 +13,7 @@
 MODULE thin_wall_solvers
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute, hdf5_create_timestep
+USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
@@ -1056,6 +1056,7 @@ IF(compute_B)THEN
   END IF
 END IF
 !
+CALL self%xdmf%clear_timesteps()
 DO i=0,nsteps
   IF(MOD(i,nplot)/=0)CYCLE
   !

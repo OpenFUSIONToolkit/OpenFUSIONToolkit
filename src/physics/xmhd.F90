@@ -75,8 +75,7 @@ MODULE xmhd
 #endif
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
-  hdf5_create_timestep, hdf5_field_exist, oft_bin_file, &
-  xdmf_plot_file
+  hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: mesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh, multigrid_level, multigrid_base_pushcc

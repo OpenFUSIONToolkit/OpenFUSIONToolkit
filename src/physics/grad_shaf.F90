@@ -12,7 +12,7 @@
 MODULE oft_gs
 USE oft_base
 USE oft_sort, ONLY: sort_matrix, sort_array
-USE oft_io, ONLY: hdf5_create_timestep, hdf5_field_exist, hdf5_read, hdf5_write, &
+USE oft_io, ONLY: hdf5_field_exist, hdf5_read, hdf5_write, &
   xdmf_plot_file
   ! hdf5_rst_field_exist
 USE oft_quadrature, ONLY: oft_quad_type

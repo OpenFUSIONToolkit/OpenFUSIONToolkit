@@ -1,6 +1,7 @@
 from __future__ import print_function
 import os
 import sys
+import h5py
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
