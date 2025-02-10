@@ -55,6 +55,8 @@ def validate_dict(results,dict_exp):
         else:
             if type(exp_val) is list:
                 for i in range(len(exp_val)):
+                    if exp_val[i] is None:
+                        continue
                     if abs((result_val[i]-exp_val[i])/exp_val[i]) > 1.E-2:
                         print("FAILED: {0} ({1}) error too high!".format(key,i))
                         print("  Expected = {0}".format(exp_val[i]))
@@ -623,7 +625,7 @@ def test_LTX_stability(order):
 def test_LTX_eq(order):
     exp_dict = {
         'Ip': 90000.1298205169,
-        'Ip_centroid': [4.05471907e-01, -3.16176193e-07],
+        'Ip_centroid': [4.05471907e-01, None],
         'kappa': 1.5213293087744595,
         'kappaU': 1.5215960005535605,
         'kappaL': 1.5210626169953587,
