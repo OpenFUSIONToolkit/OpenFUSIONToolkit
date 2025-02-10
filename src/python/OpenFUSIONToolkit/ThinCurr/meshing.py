@@ -248,28 +248,37 @@ class ThinCurr_periodic_toroid:
         else:
             write_ThinCurr_mesh(filename, self.r, self.lc+1, reg,
                 holes=[self.tnodeset+1] + [pnodeset+1 for pnodeset in self.pnodesets], closures=closures, pmap=self.r_map, nfp=self.nfp)
-    
-    def condense_matrix(self,matrix):
+
+    def condense_matrix(self,matrix,axis=None):
         '''Needs Docs'''
         # Condense model to single mode period
         if self.nfp > 1:
             nelems_new = matrix.shape[0]-self.nfp+1
-            matrix_new = numpy.zeros((nelems_new,nelems_new))
-            matrix_new[:-1,:-1] = matrix[:-self.nfp,:-self.nfp]
-            matrix_new[:-1,-1] = matrix[:-self.nfp,-self.nfp:].sum(axis=1)
-            matrix_new[-1,:-1] = matrix[-self.nfp:,:-self.nfp].sum(axis=0)
-            matrix_new[-1,-1] = matrix[-self.nfp:,-self.nfp:].sum(axis=None)
+            if axis is None:
+                matrix_new = numpy.zeros((nelems_new,nelems_new))
+                matrix_new[:-1,:-1] = matrix[:-self.nfp,:-self.nfp]
+                matrix_new[:-1,-1] = matrix[:-self.nfp,-self.nfp:].sum(axis=1)
+                matrix_new[-1,:-1] = matrix[-self.nfp:,:-self.nfp].sum(axis=0)
+                matrix_new[-1,-1] = matrix[-self.nfp:,-self.nfp:].sum(axis=None)
+            elif axis == 0:
+                matrix_new = numpy.zeros((nelems_new,matrix.shape[1]))
+                matrix_new[:-1,:] = matrix[:-self.nfp,:]
+                matrix_new[-1,:] = matrix[-self.nfp:,:].sum(axis=0)
+            elif axis == 1:
+                matrix_new = numpy.zeros((matrix.shape[0],nelems_new))
+                matrix_new[:,:-1] = matrix[:,:-self.nfp]
+                matrix_new[:,-1] = matrix[:,-self.nfp:].sum(axis=1)
             return matrix_new
         else:
             return matrix
     
-    def get_single_period(self,vector,tor_val=0.0,pol_val=0.0):
+    def full_period_to_dof(self,vector,tor_val=0.0,pol_val=0.0):
         '''Needs Docs'''
         if self.nfp > 1:
             vector = vector[:-self.pnodesets[0].shape[0]]
         return numpy.r_[vector[1:],tor_val,pol_val]
 
-    def expand_poloidal_holes(self,vector):
+    def copy_poloidal_holes(self,vector):
         '''Needs Docs'''
         if self.nfp == 1:
             return vector
@@ -277,6 +286,15 @@ class ThinCurr_periodic_toroid:
         output[:-self.nfp+1] = vector
         output[-self.nfp+1:] = output[-self.nfp]
         return output
+
+    def full_period_to_2D(self,data,nphi,ntheta):
+        data_out = numpy.zeros((nphi,ntheta))
+        if self.nfp > 1:
+            data_out[:-1,:] = numpy.r_[0.0,data[:-2]].reshape((nphi-1,ntheta))
+            data_out[-1,:] = data_out[0,:] + data[-1]
+        else:
+            data_out = numpy.r_[0.0,data[:-2]].reshape((nphi,ntheta))
+        return data_out.transpose()
 
 
 def build_triangles_from_grid(data_grid,wrap_n=True,wrap_m=True):
