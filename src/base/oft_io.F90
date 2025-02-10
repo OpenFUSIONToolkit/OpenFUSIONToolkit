@@ -331,7 +331,7 @@ IF(PRESENT(basepath))THEN
   call execute_command_line('mkdir -p '//TRIM(basepath), exitstat=error)
   IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(basepath), &
     "xmdf_setup", __FILE__)
-  self%file_path=TRIM(basepath)//"_xdmf."//hdf5_proc_str()//".h5"
+  self%file_path=TRIM(basepath)//"oft_xdmf."//hdf5_proc_str()//".h5"
 ELSE
   self%file_path="oft_xdmf."//hdf5_proc_str()//".h5"
 END IF
@@ -406,6 +406,7 @@ class(xdmf_plot_file), intent(inout) :: self
 logical, optional, intent(in) :: clear_static !< Clear static fields as well?
 integer(i4) :: j,i,istart
 CHARACTER(LEN=200) :: hdf5_path
+integer(HSSIZE_T) :: file_sizes(2)
 DEBUG_STACK_PUSH
 istart=1
 IF(PRESENT(clear_static))THEN
@@ -425,6 +426,10 @@ IF(istart==0)THEN
   hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(j))
   CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path)//"/"//hdf5_ts_str(0))
 END IF
+if(oft_debug_print(2))THEN
+  file_sizes = hdf5_file_size(TRIM(self%file_path))
+  write(*,'(2A,ES14.6,A,ES14.6,A)')oft_indent,'Freed ',REAL(file_sizes(2),8)/1.d6,' of ',REAL(file_sizes(1),8)/1.d6,' [MB]'
+end if
 DEBUG_STACK_POP
 end subroutine xdmf_clear_timesteps
 !---------------------------------------------------------------------------
@@ -527,6 +532,35 @@ character(LEN=*), intent(in) :: filepath !< Path to file
 logical :: exists
 INQUIRE(FILE=TRIM(filepath),EXIST=exists)
 end function oft_file_exist
+!---------------------------------------------------------------------------
+!> Test for exitence of a field in a HDF5 file
+!!
+!! @result Logical flag indicating existence of field and file
+!---------------------------------------------------------------------------
+function hdf5_file_size(filepath) result(sizes)
+character(LEN=*), intent(in) :: filepath !< Path to file
+integer :: error
+logical :: exists
+integer(HID_T) :: file_id
+integer(HSSIZE_T) :: sizes(2)
+exists=oft_file_exist(filepath)
+sizes=-1
+IF(.NOT.exists)RETURN
+DEBUG_STACK_PUSH
+!---Try to open file as HDF5 file
+call h5open_f(error)
+call h5fopen_f(TRIM(filepath), H5F_ACC_RDONLY_F, file_id, error)
+IF(error/=0)THEN
+  call h5close_f(error)
+  RETURN
+END IF
+CALL H5Fget_filesize_f(file_id,sizes(1),error)
+CALL H5Fget_freespace_f(file_id,sizes(2),error)
+!---Close file and finalize HDF5
+call h5fclose_f(file_id, error)
+call h5close_f(error)
+DEBUG_STACK_POP
+end function hdf5_file_size
 !---------------------------------------------------------------------------
 !> Test for exitence of a field in a HDF5 file
 !!

@@ -9,9 +9,13 @@
 #
 # General I/O functionality for Open FUSION Toolkit (OFT) Python interfaces
 from __future__ import print_function
+import os
+import sys
 import struct
 import re
+import subprocess
 import numpy
+import h5py
 eol_byte = '\n'.encode()
 
 
@@ -264,3 +268,134 @@ class histfile:
             if field is not None:
                 result += '    {0}: {3} ({1}{2})\n'.format(field, self.field_types[ind], self.field_repeats[ind], self.field_descriptions[field])
         return result
+
+
+class XDMF_plot_mesh:
+    def __init__(self,mesh_obj):
+        self.type = mesh_obj['TYPE'][()]
+        self.r = numpy.asarray(mesh_obj['R'])
+        self.lc = numpy.asarray(mesh_obj['LC'])
+        self.np = self.r.shape[0]
+        self.nc = self.lc.shape[0]
+        #
+        self.static_fields = {}
+        for field_name, field_obj in mesh_obj.get('0000',{}).items():
+            self.static_fields[field_name] = numpy.asarray(field_obj)
+        #
+        self.times = []
+        self.time_field_names = []
+        self.time_fields = []
+        for i in range(1,9998):
+            timestep = mesh_obj.get('{0:04d}'.format(i+1),None)
+            if timestep is None:
+                break
+            self.times.append(timestep['TIME'][0])
+            step_dict = {}
+            for field_name, field_obj in timestep.items():
+                if field_name == 'TIME':
+                    continue
+                if field_name not in self.time_field_names:
+                    self.time_field_names.append(field_name)
+                step_dict[field_name] = numpy.asarray(field_obj)
+            self.time_fields.append(step_dict)
+        self.times = numpy.array(self.times)
+        
+    def get_field(self,name,time=None):
+        if time is None:
+            if name not in self.static_fields:
+                raise KeyError('"{0}" is not one of the static fields'.format(name))
+            return self.static_fields[name]
+        else:
+            if name not in self.time_field_names:
+                raise KeyError('"{0}" is not one of the fields in the timesteps'.format(name))
+            for i in range(self.times.shape[0]-1):
+                if (self.times[i] <= time) and (self.times[i+1] >= time):
+                    if (name not in self.time_fields[i]):
+                        raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i))
+                    if (name not in self.time_fields[i+1]):
+                        raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i+1))
+                    return (self.time_fields[i][name]-self.time_fields[i+1][name])*(time-self.times[i])/(self.times[i+1]-self.times[i]) + self.time_fields[i][name]
+            raise ValueError("Requested time outside available range [{0:.6E},{1:.6E}]".format(self.times[0],self.times[-1]))
+    
+    def get_pyvista_grid(self):
+        import pyvista
+        if self.type == 31:
+            celltype = pyvista.CellType.TETRA
+            ncv = 4
+        elif self.type == 32:
+            celltype = pyvista.CellType.QUADRATIC_TETRA
+            ncv = 10
+        elif self.type == 33:
+            celltype = pyvista.CellType.HEXAHEDRON
+            ncv = 8
+        elif self.type == 21:
+            celltype = pyvista.CellType.TRIANGLE
+            ncv = 3
+        elif self.type == 22:
+            celltype = pyvista.CellType.QUADRATIC_TRIANGLE
+            ncv = 6
+        elif self.type == 23:
+            celltype = pyvista.CellType.QUAD
+            ncv = 4
+        elif self.type == 10:
+            celltype = pyvista.CellType.LINE
+            ncv = 2
+        celltypes = numpy.array([celltype for _ in range(self.lc.shape[0])], dtype=numpy.int8)
+        cells = numpy.insert(self.lc, [0,], ncv, axis=1)
+        return pyvista.UnstructuredGrid(cells, celltypes, self.r)
+
+
+class XDMF_plot_file:
+    def __init__(self,filename):
+        self.filename = filename
+        self._groups = {}
+        with h5py.File(self.filename,'r') as h5_file:
+            for group_key, group_obj in h5_file.items():
+                self._groups[group_key] = {}
+                for mesh_key, mesh_obj in group_obj.items():
+                    self._groups[group_key][mesh_key] = XDMF_plot_mesh(mesh_obj)
+    
+    def get(self, keyname, value=None):
+        return self._groups.get(keyname,value)
+
+    def keys(self):
+        return self._groups.keys()
+
+    def items(self):
+        return self._groups.items()
+
+    def __getitem__(self, key):
+        return self._groups[key]
+    
+    def __iter__(self):
+        return iter(self._groups)
+
+
+
+def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
+    '''! Build XDMF plot metadata files 
+
+    @param path Folder to build XDMF files in (must include "dump.dat" file)
+    @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
+    @param pretty Use pretty printing (indentation) in XDMF files?
+    @param legacy Use legacy XDMF script for processing `dump.dat` files?
+    '''
+    if legacy:
+        cmd = [
+            "{0}".format(sys.executable),
+            "{0}".format(os.path.join(os.path.dirname(__file__),'..','build_xdmf-legacy.py'))
+        ]
+    else:
+        cmd = [
+            "{0}".format(sys.executable),
+            "{0}".format(os.path.join(os.path.dirname(__file__),'..','build_xdmf.py'))
+        ]
+    if repeat_static:
+        cmd.append("--repeat_static")
+    if pretty:
+        cmd.append("--pretty")
+    subprocess.run(cmd,cwd=path)
+    if legacy:
+        return None
+    else:
+        return XDMF_plot_file(os.path.join(path,'oft_xdmf.0001.h5'))

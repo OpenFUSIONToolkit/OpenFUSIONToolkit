@@ -9,7 +9,7 @@
 # Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
 import numpy
-from ..util import *
+from ..io import *
 from ._interface import *
 
 oft_in_template = """&runtime_options
@@ -242,7 +242,7 @@ class ThinCurr():
         @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
         @param pretty Use pretty printing (indentation) in XDMF files?
         '''
-        build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
+        return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
     
     def scale_va(self,data,div_flag=False):
         '''! Scale a vertex array by vertex areas (eg. B_n -> flux)
