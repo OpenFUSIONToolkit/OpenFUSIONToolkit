@@ -835,11 +835,29 @@ class MPI(package):
         os.environ["PATH"] = "{0}:".format(self.config_dict['MPI_BIN']) + os.environ.get("PATH", "")
         return config_dict
 
+class zlib_ng(package):
+    def __init__(self, cmake_build=False):
+        self.name = "zlib-ng"
+        self.url = "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.2.3.tar.gz"
+        self.cmake_build = cmake_build
 
+    def setup(self,config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        self.config_dict['ZLIB_CC']
+        self.config_dict['ZLIB_FC']
+        
+        
+        
+class libaec(package):
+    def __init__(self, cmake_build=True):
+        
+
+        
 class HDF5(package):
     def __init__(self, parallel=False, cmake_build=False):
         self.name = "HDF5"
-        self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.5/hdf5-1.14.5.tar.gz"
+        self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.6/hdf5-1.14.6.tar.gz"
         self.parallel = parallel
         self.cmake_build = cmake_build
 
@@ -1727,9 +1745,22 @@ group.add_argument("--mpi_libs", default=None, type=str, help="MPI libraries")
 group.add_argument("--mpi_include_dir", default=None, type=str, help="MPI include directory")
 group.add_argument("--mpi_use_headers", action="store_true", default=False, help="Use header-based MPI interface instead of Fortran 2008 module")
 #
+group = parser.add_argument_group("LIBAEC", "libaec (SZIP) package options"))
+group.add_argument("--libaec_cc", default=None,type=str,help="libaec C compiler wrapper")
+group.add_argument("--libaec_lib_dir", default=None, type=str, help="libaec library directory")
+group.add_argument("--libaec_inc_dir", default=None, type=str, help="libaec include directory")
+group.add_argument("--libaec_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
+#
+group = parser.add_argument_group("ZLIB", "zlib-ng package options")
+group.add_argument("--zlib_cc", default=None, type=str, help="zlib-ng C compiler wrapper")
+group.add_argument("--zlib_lib_dir", default=None, type=str, help="zlib-ng library directory")
+group.add_argument("--zlib_inc_dir", default=None, stype=str, help="zlib-ng include directory")
+group.add_argument("--zlib_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
+#
 group = parser.add_argument_group("HDF5", "HDF5 package options")
 group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wrapper")
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
+group.add_argument("--hdf5_build_deps", action="store_true", default=True, help="Build zlib and szip dependencies?")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
 group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
 #
