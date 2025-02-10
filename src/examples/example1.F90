@@ -23,6 +23,7 @@
 PROGRAM example1
 !---Runtime
 USE oft_base
+USE oft_io, ONLY: xdmf_plot_file
 !---Grid
 USE oft_mesh_type, ONLY: mesh
 USE multigrid_build, ONLY: multigrid_construct
@@ -57,6 +58,7 @@ TYPE(oft_native_cg_eigsolver) :: solver
 INTEGER(i4), PARAMETER :: order = 3
 REAL(r8) :: lambda
 REAL(r8), POINTER, DIMENSION(:) :: vtmp => NULL()
+TYPE(xdmf_plot_file) :: plot_file
 !!\subsection doc_ex1_code_init Initialize Enviroment
 !!
 !!This call setups of the basics OFT run environment, including initializing MPI and PETSc if
@@ -73,7 +75,8 @@ CALL multigrid_construct
 !!later in the program. The plotting grid handles high order fields by tesselating the mesh to
 !!produce additional tets using the new node points. The level of tesselation is set by
 !!the first argument to \ref oft_mesh_type::oft_mesh::setup_io "mesh%setup_io".
-CALL mesh%setup_io(order)
+CALL plot_file%setup("Example1")
+CALL mesh%setup_io(plot_file,order)
 !!\subsection doc_ex1_code_fem Setup Lagrange FE
 !!
 !!\ref oft_lag_basis::oft_lag_setup "oft_lag_setup" builds the Lagrange finte elements on each grid
@@ -126,7 +129,7 @@ CALL solver%apply(u,lambda)
 !!completing the run, the \c build_xdmf script may be used to construct VisIt files and view the solution
 !!field, saved as tag \c T.
 CALL u%get_local(vtmp)
-CALL mesh%save_vertex_scalar(vtmp,'T')
+CALL mesh%save_vertex_scalar(vtmp,plot_file,'T')
 DEALLOCATE(vtmp)
 !---Program Stop
 CALL oft_finalize

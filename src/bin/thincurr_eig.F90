@@ -113,7 +113,8 @@ ELSE
 END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL smesh%setup_io(1)
+CALL tw_sim%xdmf%setup("ThinCurr")
+CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
 ! Eigenvalue run
@@ -277,7 +278,7 @@ DO i=1,neigs
         END DO
       END DO
     END IF
-    CALL self%mesh%save_vertex_vector(cc_vals,'B_v_'//eig_tag)
+    CALL self%mesh%save_vertex_vector(cc_vals,tw_sim%xdmf,'B_v_'//eig_tag)
   END IF
   !---Save sensor signals
   IF(nsensors>0)THEN

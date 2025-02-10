@@ -70,6 +70,24 @@ type :: hdf5_rst
   real(r8), pointer, dimension(:) :: data => NULL() !< Array holding local data
 end type hdf5_rst
 !---------------------------------------------------------------------------
+!> Information for XDMF plotting groups in HDF5 plot file
+!---------------------------------------------------------------------------
+type :: xdmf_plot_file
+  integer(i4) :: n_ts = 0
+  integer(i4) :: curr_ts = 0
+  integer(i4) :: n_grids = 0
+  character(LEN=80) :: file_path = ''
+  character(LEN=80) :: group_name = ''
+  character(LEN=80) :: grid_names(10) = ''
+CONTAINS
+  PROCEDURE :: setup => xmdf_setup
+  PROCEDURE :: add_mesh => xdmf_add_mesh
+  PROCEDURE :: add_timestep => xdmf_add_timestep
+  PROCEDURE :: write_scalar => xdmf_write_scalar
+  PROCEDURE :: write_vector => xdmf_write_vector
+  GENERIC :: write => write_scalar, write_vector
+end type xdmf_plot_file
+!---------------------------------------------------------------------------
 !> Write data to an HDF5 file
 !---------------------------------------------------------------------------
 INTERFACE hdf5_write
@@ -300,46 +318,67 @@ SUBROUTINE bin_file_flush(self)
 CLASS(oft_bin_file), INTENT(inout) :: self
 FLUSH(self%io_unit)
 END SUBROUTINE bin_file_flush
-!---------------------------------------------------------------------------
-!> Creates HDF5 output files for the current mesh
-!!
-!! The following files are created
-!! - mesh.[PROC_RANK].h5
-!! - scalar_dump.[PROC_RANK].h5
-!! - vector_dump.[PROC_RANK].h5
-!!
-!! @note One output file is created per MPI task
-!---------------------------------------------------------------------------
-subroutine hdf5_create_files(basepath)
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
-INTEGER(4) :: ierr
-DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Creating HDF5 plot files'
-pathprefix=''
-IF(PRESENT(basepath))THEN
-  IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
-    "hdf5_create_files", __FILE__)
-  pathprefix=basepath
-END IF
-CALL oft_increase_indent
-CALL hdf5_create_file(TRIM(pathprefix)//"scalar_dump."//hdf5_proc_str()//".h5")
-CALL hdf5_create_file(TRIM(pathprefix)//"vector_dump."//hdf5_proc_str()//".h5")
-CALL hdf5_create_file(TRIM(pathprefix)//"mesh."//hdf5_proc_str()//".h5")
-CALL hdf5_create_file(TRIM(pathprefix)//"oft_plot."//hdf5_proc_str()//".h5")
-CALL oft_decrease_indent
-DEBUG_STACK_POP
-end subroutine hdf5_create_files
+! !---------------------------------------------------------------------------
+! !> Creates HDF5 output files for the current mesh
+! !!
+! !! The following files are created
+! !! - mesh.[PROC_RANK].h5
+! !! - scalar_dump.[PROC_RANK].h5
+! !! - vector_dump.[PROC_RANK].h5
+! !!
+! !! @note One output file is created per MPI task
+! !---------------------------------------------------------------------------
+! SUBROUTINE hdf5_create_files(basepath)
+! CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+! CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
+! INTEGER(4) :: ierr
+! DEBUG_STACK_PUSH
+! if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Creating HDF5 plot files'
+! pathprefix=''
+! IF(PRESENT(basepath))THEN
+!   IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
+!     "hdf5_create_files", __FILE__)
+!   pathprefix=basepath
+! END IF
+! CALL oft_increase_indent
+! ! CALL hdf5_create_file(TRIM(pathprefix)//"scalar_dump."//hdf5_proc_str()//".h5")
+! ! CALL hdf5_create_file(TRIM(pathprefix)//"vector_dump."//hdf5_proc_str()//".h5")
+! ! CALL hdf5_create_file(TRIM(pathprefix)//"mesh."//hdf5_proc_str()//".h5")
+! CALL hdf5_create_file(TRIM(pathprefix)//"oft_plot."//hdf5_proc_str()//".h5")
+! CALL oft_decrease_indent
+! DEBUG_STACK_POP
+! END SUBROUTINE hdf5_create_files
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine oft_hdf5_add_mesh(mesh_type,pt_list,cell_list,field_path,basepath)
+subroutine xmdf_setup(self,group_name,basepath)
+class(xdmf_plot_file), intent(inout) :: self
+CHARACTER(LEN=*), intent(in) :: group_name !< Path to mesh in HDF5 file
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+integer(i4) :: error
+IF(PRESENT(basepath))THEN
+  call execute_command_line('mkdir -p '//TRIM(basepath), exitstat=error)
+  IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(basepath), &
+    "xmdf_setup", __FILE__)
+  self%file_path=TRIM(basepath)//"_xdmf."//hdf5_proc_str()//".h5"
+ELSE
+  self%file_path="oft_xdmf."//hdf5_proc_str()//".h5"
+END IF
+self%group_name=group_name
+CALL hdf5_create_file(TRIM(self%file_path))
+CALL hdf5_create_group(TRIM(self%file_path),TRIM(group_name))
+end subroutine xmdf_setup
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine xdmf_add_mesh(self,mesh_type,pt_list,cell_list,grid_name)
+class(xdmf_plot_file), intent(inout) :: self
 integer(i4), intent(in) :: mesh_type !< Mesh type flag (Tet/Tri or Hex/Quad)
 real(r8), intent(in) :: pt_list(:,:) !< Point list [3,np]
 integer(i4), intent(in) :: cell_list(:,:) !< Cell list [:,nc]
-CHARACTER(LEN=*), intent(in) :: field_path !< Path to mesh in HDF5 file
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+CHARACTER(LEN=*), intent(in) :: grid_name !< Path to mesh in HDF5 file
 CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix,filename
+CHARACTER(LEN=200) :: hdf5_path
 integer(i4) :: i,ntrans(4),ierr,io_unit
 #ifdef HAVE_MPI
 #ifdef OFT_MPI_F08
@@ -349,48 +388,105 @@ integer(i4) :: mpi_stat(MPI_STATUS_SIZE)
 #endif
 #endif
 DEBUG_STACK_PUSH
-pathprefix=''
-IF(PRESENT(basepath))THEN
-  IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
-    "oft_hdf5_write_dump", __FILE__)
-  pathprefix=basepath
-END IF
-filename = TRIM(pathprefix)//"oft_plot."//hdf5_proc_str()//".h5"
-CALL hdf5_create_group(filename,TRIM(field_path))
-CALL hdf5_write(mesh_type,filename,TRIM(field_path)//"/TYPE")
-CALL hdf5_write(pt_list,filename,TRIM(field_path)//"/R",single_prec=.TRUE.)
-CALL hdf5_write(cell_list,filename,TRIM(field_path)//"/LC")
+self%n_grids=self%n_grids+1
+self%grid_names(self%n_grids)=TRIM(grid_name)
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_add_mesh",__FILE__)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_name)
+CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path))
+CALL hdf5_write(mesh_type,TRIM(self%file_path),TRIM(hdf5_path)//"/TYPE")
+CALL hdf5_write(pt_list,TRIM(self%file_path),TRIM(hdf5_path)//"/R",single_prec=.TRUE.)
+CALL hdf5_write(cell_list,TRIM(self%file_path),TRIM(hdf5_path)//"/LC")
+#ifdef HAVE_MPI
+CALL hdf5_write(oft_env%nprocs,TRIM(self%file_path),TRIM(hdf5_path)//"/NBLOCKS")
+#endif
+!---Create static storage
+CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path)//"/"//hdf5_ts_str(0))
 DEBUG_STACK_POP
-end subroutine oft_hdf5_add_mesh
-! !---------------------------------------------------------------------------
-! !> Adds a timestep to the dump metadata file.
-! !!
-! !! Subsequent output will be added to this timestep until another call
-! !! to this subroutine
-! !---------------------------------------------------------------------------
-! subroutine hdf5_set_timestep(t,basepath)
-! real(r8), intent(in) :: t !< Time value
-! CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-! CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
-! integer(i4) :: io_unit
-! DEBUG_STACK_PUSH
-! if(oft_debug_print(1))write(*,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
-! hdf5_ts=hdf5_ts+1
-! if(oft_env%rank==0)then
-!   pathprefix=''
-!   IF(PRESENT(basepath))THEN
-!     IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
-!       "hdf5_create_timestep", __FILE__)
-!     pathprefix=basepath
-!   END IF
-!   OPEN(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
-!   WRITE(io_unit,*)
-!   WRITE(io_unit,*)'Time Step',REAL(t,4)
-!   WRITE(io_unit,*)'Field Data'
-!   CLOSE(io_unit)
-! end if
-! DEBUG_STACK_POP
-! end subroutine hdf5_set_timestep
+end subroutine xdmf_add_mesh
+!---------------------------------------------------------------------------
+!> Adds a timestep to the dump metadata file.
+!!
+!! Subsequent output will be added to this timestep until another call
+!! to this subroutine
+!---------------------------------------------------------------------------
+subroutine xdmf_add_timestep(self,t)
+class(xdmf_plot_file), intent(inout) :: self
+real(r8), intent(in) :: t !< Time value
+integer(i4) :: i
+CHARACTER(LEN=200) :: hdf5_path
+DEBUG_STACK_PUSH
+if(oft_debug_print(1))write(*,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_add_timestep",__FILE__)
+self%n_ts=self%n_ts+1
+DO i=1,self%n_grids
+  hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(i))//"/"//TRIM(hdf5_ts_str(self%n_ts))
+  CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path))
+  CALL hdf5_write(t,TRIM(self%file_path),TRIM(hdf5_path)//"/TIME")
+END DO
+DEBUG_STACK_POP
+end subroutine xdmf_add_timestep
+!
+subroutine xdmf_write_scalar(self,data,grid_name,path,centering,single_prec)
+class(xdmf_plot_file), intent(in) :: self
+real(r8), intent(in) :: data(:) !< Scalar data
+CHARACTER(LEN=*), intent(in) :: grid_name !< Grid name
+character(LEN=*), intent(in) :: path !< Name of the output field
+integer(i4), intent(in) :: centering !< Centering of data (1-> vertex; 2-> cell)
+logical, optional, intent(in) :: single_prec !< Save as single precision?
+CHARACTER(LEN=200) :: hdf5_path
+CHARACTER(LEN=80) :: attr_data
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_write_scalar",__FILE__)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_name)//"/"//TRIM(hdf5_ts_str(self%n_ts))
+IF(.NOT.hdf5_field_exist(TRIM(self%file_path),TRIM(hdf5_path)))CALL oft_abort("Timestep does not exist", &
+  "xdmf_write_scalar",__FILE__)
+hdf5_path=TRIM(hdf5_path)//"/"//TRIM(path)
+CALL hdf5_write(data,TRIM(self%file_path),TRIM(hdf5_path),single_prec)
+attr_data='Scalar'
+CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'TYPE',[attr_data])
+SELECT CASE(centering)
+  CASE(1)
+    attr_data='Node'
+    CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'CENTERING',[attr_data])
+  CASE(2)
+    attr_data='Cell'
+    CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'CENTERING',[attr_data])
+  CASE DEFAULT
+    CALL oft_abort('Unknown field centering','xdmf_write_scalar',__FILE__)
+END SELECT
+end subroutine xdmf_write_scalar
+!
+subroutine xdmf_write_vector(self,data,grid_name,path,centering,single_prec)
+class(xdmf_plot_file), intent(in) :: self
+real(r8), intent(in) :: data(:,:) !< Vector data
+CHARACTER(LEN=*), intent(in) :: grid_name !< Grid name
+character(LEN=*), intent(in) :: path !< Name of the output field
+integer(i4), intent(in) :: centering !< Centering of data (1-> vertex; 2-> cell)
+logical, optional, intent(in) :: single_prec !< Save as single precision?
+CHARACTER(LEN=200) :: hdf5_path
+CHARACTER(LEN=80) :: attr_data
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_write_vector",__FILE__)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_name)//"/"//TRIM(hdf5_ts_str(self%n_ts))
+IF(.NOT.hdf5_field_exist(TRIM(self%file_path),TRIM(hdf5_path)))CALL oft_abort("Timestep does not exist", &
+  "xdmf_write_vector",__FILE__)
+hdf5_path=TRIM(hdf5_path)//"/"//TRIM(path)
+CALL hdf5_write(data,TRIM(self%file_path),TRIM(hdf5_path),single_prec)
+attr_data='Vector'
+CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'TYPE',[attr_data])
+SELECT CASE(centering)
+  CASE(1)
+    attr_data='Node'
+    CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'CENTERING',[attr_data])
+  CASE(2)
+    attr_data='Cell'
+    CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'CENTERING',[attr_data])
+  CASE DEFAULT
+    CALL oft_abort('Unknown field centering','xdmf_write_vector',__FILE__)
+END SELECT
+end subroutine xdmf_write_vector
 !---------------------------------------------------------------------------
 !> Adds a timestep to the dump metadata file.
 !!
@@ -436,10 +532,15 @@ end function hdf5_proc_str
 !---------------------------------------------------------------------------
 !> Get timestep index as string for HDF5 I/O
 !---------------------------------------------------------------------------
-function hdf5_ts_str() result(ts_str)
+function hdf5_ts_str(ts_in) result(ts_str)
+integer(i4), optional, intent(in) :: ts_in
 character(LEN=HDF5_TLEN) :: ts_str
 100 FORMAT (I HDF5_TLEN.HDF5_TLEN)
-write(ts_str,100)hdf5_ts
+IF(PRESENT(ts_in))THEN
+  write(ts_str,100)ts_in
+ELSE
+  write(ts_str,100)hdf5_ts
+END IF
 end function hdf5_ts_str
 !---------------------------------------------------------------------------
 !> Test for exitence of a file

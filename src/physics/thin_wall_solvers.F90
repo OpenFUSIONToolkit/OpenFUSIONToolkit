@@ -1064,7 +1064,7 @@ DO i=0,nsteps
   CALL hdf5_read(t,'pThinCurr_'//pltnum//'.rst','time')
   IF(self%n_icoils>0)CALL hdf5_read(coil_vec,'pThinCurr_'//pltnum//'.rst','coil_currents')
   !
-  CALL hdf5_create_timestep(t)
+  CALL self%xdmf%add_timestep(t)
   CALL u%get_local(vals)
   CALL tw_save_pfield(self,vals,'J')
   !
@@ -1116,7 +1116,7 @@ DO i=0,nsteps
       END DO
     ! END IF
     END IF
-    CALL self%mesh%save_vertex_vector(cc_vals,'B_v')
+    CALL self%mesh%save_vertex_vector(cc_vals,self%xdmf,'B_v')
   END IF
   IF(rebuild_sensors)THEN
     !

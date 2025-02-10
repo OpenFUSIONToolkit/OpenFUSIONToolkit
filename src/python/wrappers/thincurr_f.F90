@@ -14,7 +14,7 @@ USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
 USE oft_base
 USE spline_mod
 USE oft_io, ONLY: hdf5_create_file, hdf5_field_get_sizes, hdf5_read, hdf5_field_exist, &
-  oft_hdf5_add_mesh
+  xdmf_plot_file
 !--Grid
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem, native_read_nodesets, native_read_sidesets
@@ -193,9 +193,11 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  CALL tw_obj%mesh%setup_io(1,basepath=pathprefix)
+  CALL tw_obj%xdmf%setup('ThinCurr',pathprefix)
+  CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 ELSE
-  CALL tw_obj%mesh%setup_io(1)
+  CALL tw_obj%xdmf%setup('ThinCurr')
+  CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 END IF
 IF(tw_obj%n_vcoils>0)THEN
   npts=0
@@ -221,7 +223,7 @@ IF(tw_obj%n_vcoils>0)THEN
       END DO
     END DO
   END DO
-  CALL oft_hdf5_add_mesh(10,rtmp,lctmp,'vcoils',pathprefix)
+  CALL tw_obj%xdmf%add_mesh(10,rtmp,lctmp,'vcoils')
   DEALLOCATE(rtmp,lctmp)
 END IF
 IF(tw_obj%n_icoils>0)THEN
@@ -248,7 +250,7 @@ IF(tw_obj%n_icoils>0)THEN
       END DO
     END DO
   END DO
-  CALL oft_hdf5_add_mesh(10,rtmp,lctmp,'icoils',pathprefix)
+  CALL tw_obj%xdmf%add_mesh(10,rtmp,lctmp,'icoils')
   DEALLOCATE(rtmp,lctmp)
 END IF
 IF(save_debug)CALL tw_obj%save_debug()
@@ -391,7 +393,7 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(fieldname,name_tmp)
 CALL c_f_pointer(vals, vals_tmp, [tw_obj%mesh%np])
 !---Save plot fields
-CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,TRIM(name_tmp))
+CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,tw_obj%xdmf,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_scalar
 !------------------------------------------------------------------------------
 !> Needs docs

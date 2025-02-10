@@ -134,7 +134,8 @@ CALL tw_sim%setup(hole_nsets)
 IF((TRIM(curr_file)=="none").AND.(tw_sim%n_icoils>0))CALL oft_abort("No waveform filename specified", &
   "thincurr_td",__FILE__)
 !---Setup I/0
-CALL smesh%setup_io(1)
+CALL tw_sim%xdmf%setup("ThinCurr")
+CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
 ! Time-dependent run

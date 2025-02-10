@@ -26,9 +26,9 @@
 MODULE oft_mesh_type
 USE oft_base
 USE oft_stitching, ONLY: oft_seam, destory_seam
-USE oft_io, ONLY: hdf5_create_files, oft_hdf5_write_dump, oft_hdf5_add_dump, &
-  hdf5_proc_str, hdf5_ts_str, hdf5_write, oft_hdf5_add_mesh, hdf5_field_exist, &
-  hdf5_create_group
+USE oft_io, ONLY: oft_hdf5_write_dump, oft_hdf5_add_dump, &
+  hdf5_proc_str, hdf5_ts_str, hdf5_write, hdf5_field_exist, &
+  hdf5_create_group, xdmf_plot_file
 USE oft_quadrature
 IMPLICIT NONE
 #include "local.h"
@@ -725,42 +725,45 @@ end function mesh_volume
 !---------------------------------------------------------------------------
 !> Estimate mesh volume
 !---------------------------------------------------------------------------
-SUBROUTINE mesh_setup_io(self,tess_order,basepath)
+SUBROUTINE mesh_setup_io(self,xdmf_obj,tess_order)!,basepath
 class(oft_mesh), INTENT(inout) :: self
+class(xdmf_plot_file), intent(inout) :: xdmf_obj
 integer(i4), intent(in) :: tess_order
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+! CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
 integer(i4) :: i,j,k,id,error,two=2,io_sizes(2),dims(2)
 integer(i4), POINTER :: lctmp(:,:),fmap(:)
 real(r8), POINTER :: rtmp(:,:),reg_tmp(:)
 DEBUG_STACK_PUSH
-CALL hdf5_create_files(basepath=self%io_path)
+! CALL hdf5_create_files(basepath=self%io_path)
 !---Initialize HDF5 and open mesh file
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Writing mesh to plot files'
 CALL oft_increase_indent
-self%io_path=''
-IF(PRESENT(basepath))THEN
-  self%io_path=basepath
-  call execute_command_line('mkdir -p '//TRIM(self%io_path), exitstat=error)
-  IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(self%io_path), &
-    "mesh_setup_io", __FILE__)
-END IF
+! self%io_path=''
+! IF(PRESENT(basepath))THEN
+!   self%io_path=basepath
+!   call execute_command_line('mkdir -p '//TRIM(self%io_path), exitstat=error)
+!   IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(self%io_path), &
+!     "mesh_setup_io", __FILE__)
+! END IF
 self%tess_order=tess_order
 !---Get grid tessellation
 CALL self%tessellate(rtmp, lctmp, self%tess_order)
-CALL oft_hdf5_add_mesh(30+self%type,rtmp,lctmp,'vmesh',self%io_path)
+! CALL oft_hdf5_add_mesh(30+self%type,rtmp,lctmp,'vmesh',self%io_path)
+IF(TRIM(self%meshname)=='none')self%meshname='vmesh'
+CALL xdmf_obj%add_mesh(30+self%type,rtmp,lctmp,self%meshname)
 !---Write out point list
-CALL hdf5_write(rtmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5','R_vol',single_prec=PLOT_R4_FLAG)
+! CALL hdf5_write(rtmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5','R_vol',single_prec=PLOT_R4_FLAG)
 deallocate(rtmp)
 !---Write out cell point list
-CALL hdf5_write(lctmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5','LC_vol')
+! CALL hdf5_write(lctmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5','LC_vol')
 dims=SHAPE(lctmp)
 k=dims(2)/self%nc
 deallocate(lctmp)
 !---Create "dump.dat" file
-CALL oft_hdf5_write_dump(self%type,self%get_io_sizes(),self%bmesh%get_io_sizes(),basepath=self%io_path)
+! CALL oft_hdf5_write_dump(self%type,self%get_io_sizes(),self%bmesh%get_io_sizes(),basepath=self%io_path)
 !---Setup I/O for boundary mesh
-self%bmesh%io_path=self%io_path
-CALL self%bmesh%setup_io(self%tess_order,append_files=.TRUE.)
+! self%bmesh%io_path=self%io_path
+CALL self%bmesh%setup_io(xdmf_obj,self%tess_order)
 !---Write regions
 ALLOCATE(reg_tmp(dims(2)))
 !$omp parallel do private(j,id)
@@ -770,7 +773,7 @@ DO i=1,self%nc
   reg_tmp((i-1)*k+j)=REAL(id,8)
   END DO
 END DO
-CALL self%save_cell_scalar(reg_tmp,'REG_vol')
+CALL self%save_cell_scalar(reg_tmp,xdmf_obj,'REG_vol')
 DEALLOCATE(reg_tmp)
 !---Write surface IDs
 IF(self%bmesh%nc>0)THEN
@@ -790,96 +793,84 @@ IF(self%bmesh%nc>0)THEN
       reg_tmp((i-1)*k+j)=REAL(id,8)
     END DO
   END DO
-  CALL self%bmesh%save_cell_scalar(reg_tmp,'SID')
+  CALL self%bmesh%save_cell_scalar(reg_tmp,xdmf_obj,'SID')
   DEALLOCATE(reg_tmp,fmap)
 END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE mesh_setup_io
 !---------------------------------------------------------------------------
-! SUBROUTINE: mesh_save_vertex_scalar
-!---------------------------------------------------------------------------
 !> Write scalar vertex data out to file
-!!
-!! @param[in] p Vertex data
-!! @param[in] tag Name of the output field
 !---------------------------------------------------------------------------
-subroutine mesh_save_vertex_scalar(self,p,path)
+subroutine mesh_save_vertex_scalar(self,p,xdmf_obj,path)
 class(oft_mesh), INTENT(IN) :: self
-real(r8), intent(in) :: p(:)
-character(LEN=*), intent(in) :: path
+real(r8), intent(in) :: p(:) !< Vertex data [np]
+class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
+character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
 sizes=self%get_io_sizes()
 IF(SIZE(p,DIM=1)/=sizes(1))CALL oft_abort("Incorrect array size","mesh_save_vertex_scalar",__FILE__)
-CALL hdf5_write(p,TRIM(self%io_path)//"scalar_dump."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
-CALL oft_hdf5_add_dump(path,11,basepath=self%io_path)
+CALL xdmf_obj%write(p,self%meshname,path,1,PLOT_R4_FLAG)
+! CALL hdf5_write(p,TRIM(self%io_path)//"oft_plot."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
+! CALL oft_hdf5_add_dump(path,11,basepath=self%io_path)
 DEBUG_STACK_POP
 end subroutine mesh_save_vertex_scalar
 !---------------------------------------------------------------------------
-! SUBROUTINE: mesh_save_cell_scalar
-!---------------------------------------------------------------------------
 !> Write scalar cell data out to file
-!!
-!! @param[in] p Cell data
-!! @param[in] tag Name of the output field
 !---------------------------------------------------------------------------
-subroutine mesh_save_cell_scalar(self,p,path)
+subroutine mesh_save_cell_scalar(self,p,xdmf_obj,path)
 class(oft_mesh), INTENT(IN) :: self
-real(r8), intent(in) :: p(:)
-character(LEN=*), intent(in) :: path
+real(r8), intent(in) :: p(:) !< Cell data [nc]
+class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
+character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
 sizes=self%get_io_sizes()
 IF(SIZE(p,DIM=1)/=sizes(2))CALL oft_abort("Incorrect array size","mesh_save_cell_scalar",__FILE__)
-CALL hdf5_write(p,TRIM(self%io_path)//"scalar_dump."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
-CALL oft_hdf5_add_dump(path,12,basepath=self%io_path)
+CALL xdmf_obj%write(p,self%meshname,path,2,PLOT_R4_FLAG)
+! CALL hdf5_write(p,TRIM(self%io_path)//"oft_plot."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
+! CALL oft_hdf5_add_dump(path,12,basepath=self%io_path)
 DEBUG_STACK_POP
 end subroutine mesh_save_cell_scalar
 !---------------------------------------------------------------------------
-! SUBROUTINE: mesh_save_vertex_vector
-!---------------------------------------------------------------------------
 !> Write vector vertex data out to file
-!!
-!! @param[in] bv Vertex data
-!! @param[in] tag Name of the output field
 !---------------------------------------------------------------------------
-subroutine mesh_save_vertex_vector(self,bv,path)
+subroutine mesh_save_vertex_vector(self,bv,xdmf_obj,path)
 class(oft_mesh), INTENT(IN) :: self
-real(r8), intent(in) :: bv(:,:)
-character(LEN=*), intent(in) :: path
+real(r8), intent(in) :: bv(:,:) !< Vertex data [3,np]
+class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
+character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
 IF(SIZE(bv,DIM=1)/=3)CALL oft_abort("Output array is not 3 vector","mesh_save_vertex_vector",__FILE__)
 sizes=self%get_io_sizes()
 IF(SIZE(bv,DIM=2)/=sizes(1))CALL oft_abort("Incorrect array size","mesh_save_vertex_vector",__FILE__)
-CALL hdf5_write(bv,TRIM(self%io_path)//"vector_dump."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
-CALL oft_hdf5_add_dump(path,21,basepath=self%io_path)
+CALL xdmf_obj%write(bv,self%meshname,path,1,PLOT_R4_FLAG)
+! CALL hdf5_write(bv,TRIM(self%io_path)//"oft_plot."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
+! CALL oft_hdf5_add_dump(path,21,basepath=self%io_path)
 DEBUG_STACK_POP
 end subroutine mesh_save_vertex_vector
 !---------------------------------------------------------------------------
-! SUBROUTINE: mesh_save_cell_vector
-!---------------------------------------------------------------------------
 !> Write vector cell data out to file
-!!
-!! @param[in] bcc Cell data
-!! @param[in] tag Name of the output field
 !---------------------------------------------------------------------------
-subroutine mesh_save_cell_vector(self,bcc,path)
+subroutine mesh_save_cell_vector(self,bcc,xdmf_obj,path)
 class(oft_mesh), INTENT(IN) :: self
-real(r8), intent(in) :: bcc(:,:)
-character(LEN=*), intent(in) :: path
+real(r8), intent(in) :: bcc(:,:) !< Cell data [3,np]
+class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
+character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
 IF(SIZE(bcc,DIM=1)/=3)CALL oft_abort("Output array is not 3 vector","mesh_save_cell_vector",__FILE__)
 sizes=self%get_io_sizes()
 IF(SIZE(bcc,DIM=2)/=sizes(2))CALL oft_abort("Incorrect array size","mesh_save_cell_vector",__FILE__)
-CALL hdf5_write(bcc,TRIM(self%io_path)//"vector_dump."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
-CALL oft_hdf5_add_dump(path,22,basepath=self%io_path)
+CALL xdmf_obj%write(bcc,self%meshname,path,2,PLOT_R4_FLAG)
+! CALL hdf5_write(bcc,TRIM(self%io_path)//"oft_plot."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
+! CALL oft_hdf5_add_dump(path,22,basepath=self%io_path)
 DEBUG_STACK_POP
 end subroutine mesh_save_cell_vector
 !---------------------------------------------------------------------------
@@ -1147,11 +1138,12 @@ end subroutine bmesh_findcell
 !!
 !! @note Should only be used via class \ref tri_mesh or children
 !---------------------------------------------------------------------------
-SUBROUTINE bmesh_setup_io(self,tess_order,append_files,basepath)
+SUBROUTINE bmesh_setup_io(self,xdmf_obj,tess_order)!,append_files,basepath)
 CLASS(oft_bmesh), INTENT(inout) :: self
+class(xdmf_plot_file), intent(inout) :: xdmf_obj
 integer(i4), intent(in) :: tess_order
-logical, optional, intent(in) :: append_files
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+! logical, optional, intent(in) :: append_files
+! CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
 logical :: create_files
 integer(i4) :: i,k,j,id,error,dims(2)
 integer(i4), POINTER :: lftmp(:,:),fmap(:)
@@ -1160,20 +1152,20 @@ DEBUG_STACK_PUSH
 !---Setup I/O
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Writing boundary mesh to plot files'
 CALL oft_increase_indent
-self%io_path=''
-IF(PRESENT(basepath))THEN
-  self%io_path=basepath
-  call execute_command_line('mkdir -p '//TRIM(self%io_path), exitstat=error)
-  IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(self%io_path), &
-    "bmesh_setup_io", __FILE__)
-END IF
+! self%io_path=''
+! IF(PRESENT(basepath))THEN
+!   self%io_path=basepath
+!   call execute_command_line('mkdir -p '//TRIM(self%io_path), exitstat=error)
+!   IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(self%io_path), &
+!     "bmesh_setup_io", __FILE__)
+! END IF
 self%tess_order=tess_order
-create_files=.TRUE.
-IF(PRESENT(append_files))create_files=(.NOT.append_files)
-IF(create_files)THEN
-  CALL hdf5_create_files(basepath=self%io_path)
-  CALL oft_hdf5_write_dump(self%type,[0,0],self%get_io_sizes(),basepath=self%io_path)
-END IF
+! create_files=.TRUE.
+! IF(PRESENT(append_files))create_files=(.NOT.append_files)
+! IF(create_files)THEN
+!   CALL hdf5_create_files(basepath=self%io_path)
+!   CALL oft_hdf5_write_dump(self%type,[0,0],self%get_io_sizes(),basepath=self%io_path)
+! END IF
 IF(self%nc==0)THEN
   CALL oft_decrease_indent
   DEBUG_STACK_POP
@@ -1181,12 +1173,13 @@ IF(self%nc==0)THEN
 END IF
 !---Get grid tessellation
 CALL self%tessellate(rtmp, lftmp, self%tess_order)
-CALL oft_hdf5_add_mesh(20+self%type,rtmp,lftmp,'smesh',self%io_path)
+IF(TRIM(self%meshname)=='none')self%meshname='smesh'
+CALL xdmf_obj%add_mesh(20+self%type,rtmp,lftmp,self%meshname)
 !---Write out point list
-CALL hdf5_write(rtmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5', "R_surf",single_prec=PLOT_R4_FLAG)
+! CALL hdf5_write(rtmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5', "R_surf",single_prec=PLOT_R4_FLAG)
 deallocate(rtmp)
 !---Write out cell point list
-CALL hdf5_write(lftmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5', "LC_surf")
+! CALL hdf5_write(lftmp,TRIM(self%io_path)//'mesh.'//hdf5_proc_str()//'.h5', "LC_surf")
 dims=SHAPE(lftmp)
 k=INT(dims(2),4)/self%nc
 deallocate(lftmp)
@@ -1203,7 +1196,7 @@ IF(ASSOCIATED(self%reg))THEN
 ELSE
   reg_tmp=0.d0
 END IF
-CALL self%save_cell_scalar(reg_tmp,'REG_surf')
+CALL self%save_cell_scalar(reg_tmp,xdmf_obj,'REG_surf')
 DEALLOCATE(reg_tmp)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
@@ -1214,17 +1207,19 @@ END SUBROUTINE bmesh_setup_io
 !! @param[in] p Vertex data
 !! @param[in] tag Name of the output field
 !---------------------------------------------------------------------------
-subroutine bmesh_save_vertex_scalar(self,p,path)
+subroutine bmesh_save_vertex_scalar(self,p,xdmf_obj,path)
 class(oft_bmesh), INTENT(IN) :: self
 real(r8), intent(in) :: p(:)
+class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
 sizes=self%get_io_sizes()
 IF(SIZE(p,DIM=1)/=sizes(1))CALL oft_abort("Incorrect array size","bmesh_save_vertex_scalar",__FILE__)
-CALL hdf5_write(p,TRIM(self%io_path)//"scalar_dump."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
-CALL oft_hdf5_add_dump(path,31,basepath=self%io_path)
+CALL xdmf_obj%write(p,self%meshname,path,1,PLOT_R4_FLAG)
+! CALL hdf5_write(p,TRIM(self%io_path)//"oft_plot."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
+! CALL oft_hdf5_add_dump(path,31,basepath=self%io_path)
 DEBUG_STACK_POP
 end subroutine bmesh_save_vertex_scalar
 !---------------------------------------------------------------------------
@@ -1233,17 +1228,19 @@ end subroutine bmesh_save_vertex_scalar
 !! @param[in] p Cell data
 !! @param[in] tag Name of the output field
 !---------------------------------------------------------------------------
-subroutine bmesh_save_cell_scalar(self,p,path)
+subroutine bmesh_save_cell_scalar(self,p,xdmf_obj,path)
 class(oft_bmesh), INTENT(IN) :: self
 real(r8), intent(in) :: p(:)
+class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
 sizes=self%get_io_sizes()
 IF(SIZE(p,DIM=1)/=sizes(2))CALL oft_abort("Incorrect array size","bmesh_save_cell_scalar",__FILE__)
-CALL hdf5_write(p,TRIM(self%io_path)//"scalar_dump."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
-CALL oft_hdf5_add_dump(path,32,basepath=self%io_path)
+CALL xdmf_obj%write(p,self%meshname,path,2,PLOT_R4_FLAG)
+! CALL hdf5_write(p,TRIM(self%io_path)//"oft_plot."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
+! CALL oft_hdf5_add_dump(path,32,basepath=self%io_path)
 DEBUG_STACK_POP
 end subroutine bmesh_save_cell_scalar
 !---------------------------------------------------------------------------
@@ -1252,9 +1249,10 @@ end subroutine bmesh_save_cell_scalar
 !! @param[in] bv Vertex data
 !! @param[in] tag Name of the output field
 !---------------------------------------------------------------------------
-subroutine bmesh_save_vertex_vector(self,bv,path)
+subroutine bmesh_save_vertex_vector(self,bv,xdmf_obj,path)
 class(oft_bmesh), INTENT(IN) :: self
 real(r8), intent(in) :: bv(:,:)
+class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
@@ -1262,8 +1260,9 @@ IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving vector plot field: ',TRI
 IF(SIZE(bv,DIM=1)/=3)CALL oft_abort("Output array is not 3 vector","bmesh_save_vertex_vector",__FILE__)
 sizes=self%get_io_sizes()
 IF(SIZE(bv,DIM=2)/=sizes(1))CALL oft_abort("Incorrect array size","bmesh_save_vertex_vector",__FILE__)
-CALL hdf5_write(bv,TRIM(self%io_path)//"vector_dump."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
-CALL oft_hdf5_add_dump(path,41,basepath=self%io_path)
+CALL xdmf_obj%write(bv,self%meshname,path,1,PLOT_R4_FLAG)
+! CALL hdf5_write(bv,TRIM(self%io_path)//"oft_plot."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
+! CALL oft_hdf5_add_dump(path,41,basepath=self%io_path)
 DEBUG_STACK_POP
 end subroutine bmesh_save_vertex_vector
 !---------------------------------------------------------------------------
@@ -1272,9 +1271,10 @@ end subroutine bmesh_save_vertex_vector
 !! @param[in] bcc Cell data
 !! @param[in] tag Name of the output field
 !---------------------------------------------------------------------------
-subroutine bmesh_save_cell_vector(self,bcc,path)
+subroutine bmesh_save_cell_vector(self,bcc,xdmf_obj,path)
 class(oft_bmesh), INTENT(IN) :: self
 real(r8), intent(in) :: bcc(:,:)
+class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
@@ -1282,8 +1282,9 @@ IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving vector plot field: ',TRI
 IF(SIZE(bcc,DIM=1)/=3)CALL oft_abort("Output array is not 3 vector","bmesh_save_cell_vector",__FILE__)
 sizes=self%get_io_sizes()
 IF(SIZE(bcc,DIM=2)/=sizes(2))CALL oft_abort("Incorrect array size","bmesh_save_cell_vector",__FILE__)
-CALL hdf5_write(bcc,TRIM(self%io_path)//"vector_dump."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
-CALL oft_hdf5_add_dump(path,42,basepath=self%io_path)
+CALL xdmf_obj%write(bcc,self%meshname,path,2,PLOT_R4_FLAG)
+! CALL hdf5_write(bcc,TRIM(self%io_path)//"oft_plot."//hdf5_proc_str()//".h5",path//hdf5_ts_str(),PLOT_R4_FLAG)
+! CALL oft_hdf5_add_dump(path,42,basepath=self%io_path)
 DEBUG_STACK_POP
 end subroutine bmesh_save_cell_vector
 !---------------------------------------------------------------------------
