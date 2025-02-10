@@ -557,9 +557,10 @@ class TokaMaker():
         '''! Solve G-S equation with specified constraints, profiles, etc.'''
         if vacuum:
             raise ValueError('"vacuum=True" no longer supported, use "vac_solve()"')
-        error_flag = c_int()
-        tokamaker_solve(ctypes.byref(error_flag))
-        return error_flag.value
+        error_str = create_string_buffer(b"",200)
+        tokamaker_solve(error_str)
+        if error_str.value != '':
+            raise ValueError("Error in solve: {0}".format(error_str.value))
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
@@ -580,9 +581,11 @@ class TokaMaker():
                 raise IndexError('Incorrect shape of "rhs_source", should be [np]')
             rhs_source = numpy.ascontiguousarray(rhs_source, dtype=numpy.float64)
             rhs_ptr = rhs_source.ctypes.data_as(c_double_ptr)
-        error_flag = c_int()
-        tokamaker_vac_solve(psi,rhs_ptr,ctypes.byref(error_flag))
-        return psi, error_flag.value
+        error_str = create_string_buffer(b"",200)
+        tokamaker_vac_solve(psi,rhs_ptr,error_str)
+        if error_str.value != '':
+            raise ValueError("Error in solve: {0}".format(error_str.value))
+        return psi
 
     def get_stats(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium

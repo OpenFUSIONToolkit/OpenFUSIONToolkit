@@ -292,20 +292,25 @@ END SUBROUTINE tokamaker_init_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(error_flag) BIND(C,NAME="tokamaker_solve")
-INTEGER(c_int), INTENT(out) :: error_flag !< Error flag
-CALL gs_global%solve(error_flag)
+SUBROUTINE tokamaker_solve(error_str) BIND(C,NAME="tokamaker_solve")
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
+INTEGER(i4) :: ierr
+CALL copy_string('',error_str)
+CALL gs_global%solve(ierr)
+IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_solve
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_vac_solve(psi_in,rhs_source,error_flag) BIND(C,NAME="tokamaker_vac_solve")
+SUBROUTINE tokamaker_vac_solve(psi_in,rhs_source,error_str) BIND(C,NAME="tokamaker_vac_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Input: BCs for \f$ \psi \f$, Output: solution
 TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
-INTEGER(c_int), INTENT(out) :: error_flag !< Error flag
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
+INTEGER(i4) :: ierr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rhs_tmp
 CLASS(oft_vector), POINTER :: psi_tmp,rhs_vec
 TYPE(oft_lag_brinterp) :: source_field
+CALL copy_string('',error_str)
 NULLIFY(psi_tmp)
 CALL gs_global%psi%new(psi_tmp)
 CALL c_f_pointer(psi_in, vals_tmp, [gs_global%psi%n])
@@ -317,12 +322,12 @@ IF(c_associated(rhs_source))THEN
   CALL rhs_vec%restore_local(rhs_tmp)
   source_field%u=>rhs_vec
   CALL source_field%setup()
-  CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=error_flag)
+  CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=ierr)
   CALL source_field%delete()
   CALL rhs_vec%delete()
   DEALLOCATE(rhs_vec)
 ELSE
-  CALL gs_global%vac_solve(psi_tmp,ierr=error_flag)
+  CALL gs_global%vac_solve(psi_tmp,ierr=ierr)
 END IF
 CALL psi_tmp%get_local(vals_tmp)
 CALL psi_tmp%delete()
