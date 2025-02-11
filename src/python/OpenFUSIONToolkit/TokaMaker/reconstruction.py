@@ -398,7 +398,7 @@ class reconstruction():
         @param val Value of flux loop constraint
         @param err Error in constraint
         '''
-        self._flux_loops.append(fluxLoop_con(pt=loc, val=val, err=err))
+        self._flux_loops.append(fluxLoop_con(loc=loc, val=val, err=err))
 
     def add_Mirnov(self,loc,norm,val,err):
         '''! Add Mirnov sensor constraint
@@ -408,7 +408,7 @@ class reconstruction():
         @param val Value of Mirnov constraint
         @param err Error in constraint
         '''
-        self._mirnovs.append(Mirnov_con(pt=loc, norm=norm, val=val, err=err))
+        self._mirnovs.append(Mirnov_con(loc=loc, norm=norm, val=val, err=err))
     
     def add_saddle(self,p1,p2,width,val,err):
         '''! Add saddle loop constraint
@@ -428,7 +428,7 @@ class reconstruction():
         @param val Value of pressure constraint
         @param err Error in constraint
         '''
-        self._pressure_cons.append(Press_con(pt=loc,val=val,err=err))
+        self._pressure_cons.append(Press_con(loc=loc,val=val,err=err))
     
     def reset_constraints(self):
         '''! Remove all current constraints'''
