@@ -45,6 +45,7 @@ DO i=1,LEN(f_string)
     IF(c_string(i)==c_null_char)EXIT
     f_string(i:i)=c_string(i)
 END DO
+IF(i>LEN(f_string))CALL oft_warn("No termination character found when copying C string")
 END SUBROUTINE copy_string_rev
 !------------------------------------------------------------------------------
 !> Needs docs
