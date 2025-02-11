@@ -551,6 +551,19 @@ END SUBROUTINE thincurr_Msensor
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
+SUBROUTINE thincurr_get_sensor_name(sensor_ptr,sensor_ind,sensor_name,error_str) BIND(C,NAME="thincurr_get_sensor_name")
+TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: sensor_ind !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: sensor_name(40) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+TYPE(tw_sensors), POINTER :: sensors
+CALL copy_string('',error_str)
+CALL c_f_pointer(sensor_ptr, sensors)
+CALL copy_string(sensors%floops(sensor_ind)%name,sensor_name)
+END SUBROUTINE thincurr_get_sensor_name
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE thincurr_Rmat(tw_ptr,copy_out,Rmat,error_str) BIND(C,NAME="thincurr_Rmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE,  INTENT(in) :: copy_out !< Needs docs
@@ -715,7 +728,7 @@ END SUBROUTINE thincurr_freq_response
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot, &
-  vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
+  vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
 REAL(KIND=c_double), VALUE, INTENT(in) :: dt !< Needs docs
@@ -730,11 +743,13 @@ INTEGER(KIND=c_int), VALUE, INTENT(in) :: ncurr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: curr_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nvolt !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: volt_ptr !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: volts_full !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
 LOGICAL :: pm_save
-REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),curr_waveform(:,:),volt_waveform(:,:)
+REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),curr_waveform(:,:),volt_waveform(:,:),sensor_waveform(:,:)
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(tw_sensors), POINTER :: sensors
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
@@ -767,9 +782,26 @@ ELSE
   NULLIFY(curr_waveform)
 END IF
 IF(nvolt>0)THEN
-  CALL c_f_pointer(volt_ptr, volt_waveform, [nvolt,tw_obj%n_vcoils+1])
+  IF(volts_full)THEN
+    CALL c_f_pointer(volt_ptr, volt_waveform, [nvolt,tw_obj%nelems+1])
+  ELSE
+    CALL c_f_pointer(volt_ptr, volt_waveform, [nvolt,tw_obj%n_vcoils+1])
+  END IF
 ELSE
   NULLIFY(volt_waveform)
+END IF
+IF(c_associated(sensor_vals_ptr))THEN
+  IF(.NOT.c_associated(sensor_ptr))THEN
+    CALL copy_string('Sensor object required with sensor waveform',error_str)
+    RETURN
+  END IF
+  IF(.NOT.ASSOCIATED(volt_waveform))THEN
+    CALL copy_string('Voltage waveform required with sensor waveform',error_str)
+    RETURN
+  END IF
+  CALL c_f_pointer(sensor_vals_ptr, sensor_waveform, [nvolt,sensors%nfloops+1])
+ELSE
+  NULLIFY(sensor_waveform)
 END IF
 CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
 !---Run eigenvalue analysis
@@ -777,10 +809,10 @@ pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
   CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),cg_tol,LOGICAL(timestep_cn), &
-    nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op=hodlr_op)
+    nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_waveform,hodlr_op=hodlr_op)
 ELSE
   CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),cg_tol,LOGICAL(timestep_cn), &
-    nstatus,nplot,sensors,curr_waveform,volt_waveform)
+    nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_waveform)
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain
@@ -788,18 +820,20 @@ END SUBROUTINE thincurr_time_domain
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot, &
-  sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
+  sensor_ptr,sensor_vals_ptr,nsensor,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_B !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: rebuild_sensors !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsensor !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
 !
 LOGICAL :: pm_save
-REAL(8), CONTIGUOUS, POINTER :: curr_waveform(:,:)
+REAL(8), CONTIGUOUS, POINTER :: sensor_waveform(:,:)
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(tw_sensors), POINTER :: sensors
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
@@ -814,13 +848,22 @@ IF(c_associated(sensor_ptr))THEN
 ELSE
   ALLOCATE(sensors)
 END IF
+IF(nsensor>0)THEN
+  IF(.NOT.c_associated(sensor_ptr))THEN
+    CALL copy_string('Sensor object required with sensor waveform',error_str)
+    RETURN
+  END IF
+  CALL c_f_pointer(sensor_vals_ptr, sensor_waveform, [nsensor,sensors%nfloops+1])
+ELSE
+  NULLIFY(sensor_waveform)
+END IF
 !---Run eigenvalue analysis
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),hodlr_op=hodlr_op)
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform,hodlr_op=hodlr_op)
 ELSE
-  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors))
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform)
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain_plot

@@ -140,7 +140,7 @@ class Marklin():
                 basepath += '/'
             self._io_basepath = basepath[:-1]
             basepath_c = c_char_p(basepath.encode())
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         marklin_setup_io(basepath_c,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value.decode())
@@ -165,7 +165,7 @@ class Marklin():
             raise ValueError('Eigenstates already computed')
         #
         eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         marklin_compute(order,nmodes,minlev,save_rst,eig_vals,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
@@ -179,7 +179,7 @@ class Marklin():
         @param tag Name for field in XDMF files
         '''
         #
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         marklin_save_visit(field.int_obj,field.int_type,c_char_p(tag.encode()),cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
@@ -194,7 +194,7 @@ class Marklin():
         if imode > self._nm:
             raise ValueError("Requested mode number exceeds number of available modes")
         int_obj = c_void_p()
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         marklin_get_aint(imode,ctypes.byref(int_obj),bn_gauge,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
@@ -209,7 +209,7 @@ class Marklin():
         if imode > self._nm:
             raise ValueError("Requested mode number exceeds number of available modes")
         int_obj = c_void_p()
-        cstring = c_char_p(b""*200)
+        cstring = create_string_buffer(b"",200)
         marklin_get_bint(imode,ctypes.byref(int_obj),cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
