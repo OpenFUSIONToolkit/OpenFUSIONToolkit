@@ -813,7 +813,8 @@ IF(ierr>0)CALL oft_abort('Error parsing "tokamaker_wall_options" in input file.'
 ! Setup Mesh
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf
-CALL smesh%setup_io(order)
+CALL mygs%xdmf%setup("TokaMaker")
+CALL smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
@@ -987,9 +988,9 @@ DO i=1,self%ncond_regs
           rz_correction=rz_correction/self%cond_regions(i)%coverage
           ALLOCATE(outtmp(3,SIZE(rz_grid,DIM=2)))
           outtmp=SQRT(SUM(rz_correction**2,DIM=2)/REAL(SIZE(rz_grid,DIM=2),8))
-          CALL smesh%save_vertex_scalar(outtmp(1,:), 'Br_corr')
-          CALL smesh%save_vertex_scalar(outtmp(2,:), 'Bt_corr')
-          CALL smesh%save_vertex_scalar(outtmp(3,:), 'Bz_corr')
+          CALL smesh%save_vertex_scalar(outtmp(1,:),self%xdmf, 'Br_corr')
+          CALL smesh%save_vertex_scalar(outtmp(2,:),self%xdmf, 'Bt_corr')
+          CALL smesh%save_vertex_scalar(outtmp(3,:),self%xdmf, 'Bz_corr')
           DEALLOCATE(outtmp)
           CALL hdf5_write(rz_correction(1,:,:), 'wall_eig.rst', 'rz_corr_r'//num_str//'_'//num_str2)
           CALL hdf5_write(rz_correction(2,:,:), 'wall_eig.rst', 'rz_corr_t'//num_str//'_'//num_str2)
@@ -1011,7 +1012,7 @@ DO i=1,self%ncond_regs
         CALL self%psi%get_local(psi_vals)
         WRITE(cond_tag,'(I2.2)')i
         WRITE(eig_tag,'(I2.2)')j
-        CALL smesh%save_vertex_scalar(psi_vals,'Eig_'//cond_tag//'_'//eig_tag)
+        CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Eig_'//cond_tag//'_'//eig_tag)
         DEALLOCATE(psi_vals)
         ! CALL self%solve
         DO k=1,ncons

@@ -19,7 +19,7 @@
 PROGRAM marklin_eigs
 !---Base
 USE oft_base
-USE oft_io, ONLY: hdf5_create_file
+USE oft_io, ONLY: hdf5_create_file, xdmf_plot_file
 !--Grid
 USE oft_mesh_type, ONLY: mesh
 USE multigrid_build, ONLY: multigrid_construct
@@ -50,6 +50,7 @@ REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 CHARACTER(LEN=3) :: pltnum
+TYPE(xdmf_plot_file) :: plot_file
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: nmodes = 1
 INTEGER(i4) :: minlev = 1
@@ -66,7 +67,8 @@ IF(ierr<0)CALL oft_abort('No "marklin_eigs_options" found in input file.', &
 IF(ierr>0)CALL oft_abort('Error parsing "marklin_eigs_options" in input file.', &
   'marklin_eigs',__FILE__)
 !---Setup grid
-CALL mesh%setup_io(order)
+CALL plot_file%setup("marklin_eigs")
+CALL mesh%setup_io(plot_file,order)
 !
 IF(minlev<0)THEN
   taylor_minlev=oft_hcurl_level
@@ -115,7 +117,7 @@ DO i=1,nmodes
   CALL u%get_local(vals,2)
   vals=>bvout(3,:)
   CALL u%get_local(vals,3)
-  call mesh%save_vertex_vector(bvout,'B_'//pltnum)
+  call mesh%save_vertex_vector(bvout,plot_file,'B_'//pltnum)
 END DO
 !---Finalize enviroment
 CALL oft_finalize

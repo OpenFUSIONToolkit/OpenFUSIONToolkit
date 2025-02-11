@@ -168,6 +168,7 @@
 PROGRAM example3
 !---Runtime
 USE oft_base
+USE oft_io, ONLY: xdmf_plot_file
 !---Grid
 USE oft_mesh_type, ONLY: mesh
 USE multigrid_build, ONLY: multigrid_construct
@@ -206,6 +207,7 @@ REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
+TYPE(xdmf_plot_file) :: plot_file
 !!\subsection doc_ex3_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting files must be setup
@@ -214,7 +216,8 @@ TYPE(oft_hcurl_cinterp) :: Bfield
 CALL oft_init
 !---Setup grid
 CALL multigrid_construct
-CALL mesh%setup_io(order)
+CALL plot_file%setup("Example3")
+CALL mesh%setup_io(plot_file,order)
 !!\subsection doc_ex3_code_fem Setup FE Types
 !!
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
@@ -282,7 +285,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-call mesh%save_vertex_vector(bvout,'B')
+call mesh%save_vertex_vector(bvout,plot_file,'B')
 !---Finalize enviroment
 CALL oft_finalize
 END PROGRAM example3

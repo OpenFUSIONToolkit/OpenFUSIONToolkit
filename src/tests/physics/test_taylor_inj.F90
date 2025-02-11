@@ -13,6 +13,7 @@
 !---------------------------------------------------------------------------
 PROGRAM test_taylor_inj
 USE oft_base
+USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_type, ONLY: mesh
 USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
@@ -38,6 +39,7 @@ CLASS(oft_vector), POINTER :: gffa
 INTEGER(i4), PARAMETER :: nh = 1
 REAL(r8) :: fluxes(nh),hcpc(3,nh),hcpv(3,nh),energy(nh)
 CHARACTER(LEN=taylor_tag_size) :: htags(nh)
+TYPE(xdmf_plot_file) :: plot_file
 INTEGER(i4) :: order=1
 LOGICAL :: mg_test=.FALSE.
 NAMELIST/test_taylor_options/order,mg_test
@@ -49,7 +51,8 @@ READ(io_unit,test_taylor_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct
-CALL mesh%setup_io(order)
+CALL plot_file%setup("Test")
+CALL mesh%setup_io(plot_file,order)
 IF(mg_test)THEN
   taylor_minlev=2
 ELSE
@@ -128,7 +131,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-CALL mesh%save_vertex_vector(bvout,'B')
+CALL mesh%save_vertex_vector(bvout,plot_file,'B')
 END BLOCK
 !---Finalize enviroment
 CALL oft_finalize

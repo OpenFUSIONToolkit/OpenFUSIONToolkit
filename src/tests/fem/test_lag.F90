@@ -16,6 +16,7 @@
 !---------------------------------------------------------------------------
 PROGRAM test_lag
 USE oft_base
+USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: mg_mesh
@@ -29,8 +30,9 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 IMPLICIT NONE
-INTEGER(i4) :: minlev
-INTEGER(i4) :: order,ierr,io_unit
+INTEGER(i4) :: minlev,ierr,io_unit
+TYPE(xdmf_plot_file) :: plot_file
+INTEGER(i4) :: order
 LOGICAL :: mg_test
 NAMELIST/test_lag_options/order,mg_test
 !---Initialize enviroment
@@ -55,7 +57,8 @@ oft_env%pm=.FALSE.
 IF(mg_test)THEN
   CALL test_lapmg
 ELSE
-  CALL mesh%setup_io(order)
+  CALL plot_file%setup("Test")
+  CALL mesh%setup_io(plot_file,order)
   CALL test_lap
 END IF
 !---Finalize enviroment
@@ -96,7 +99,7 @@ CALL lag_zerob(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vals)
-CALL mesh%save_vertex_scalar(vals,'T')
+CALL mesh%save_vertex_scalar(vals,plot_file,'T')
 uu=u%dot(u)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='lagrange.results')

@@ -836,7 +836,7 @@ IF(self%L_aca_tol<=0.d0)THEN
 END IF
 WRITE(*,*)'  # of SVD =       ',sparse_count(2)
 WRITE(*,*)'  # of ACA =       ',sparse_count(1)
-CALL self%tw_obj%mesh%save_vertex_scalar(point_block, 'ACA_Block')
+CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
 DO j=1,self%nlevels
   DO i=1,self%levels(j)%nblocks

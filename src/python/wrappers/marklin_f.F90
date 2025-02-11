@@ -12,7 +12,7 @@ USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr
 !---Base
 USE oft_base
-USE oft_io, ONLY: hdf5_create_file
+USE oft_io, ONLY: hdf5_create_file, xdmf_plot_file
 !--Grid
 USE oft_mesh_type, ONLY: mesh, mesh_findcell
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
@@ -50,6 +50,7 @@ USE oft_base_f, ONLY: copy_string, copy_string_rev
 IMPLICIT NONE
 #include "local.h"
 !
+type(xdmf_plot_file) :: xdmf_plot
 integer(i4), POINTER :: lc_plot(:,:) !< Needs docs
 integer(i4), POINTER :: reg_plot(:) !< Needs docs
 real(r8), POINTER :: r_plot(:,:) !< Needs docs
@@ -115,9 +116,11 @@ CALL copy_string('',error_str)
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  CALL mesh%setup_io(oft_hcurl%order,basepath=pathprefix)
+  CALL xdmf_plot%setup('Marklin',pathprefix)
+  CALL mesh%setup_io(xdmf_plot,oft_hcurl%order)
 ELSE
-  CALL mesh%setup_io(oft_hcurl%order)
+  CALL xdmf_plot%setup('Marklin')
+  CALL mesh%setup_io(xdmf_plot,oft_hcurl%order)
 END IF
 END SUBROUTINE marklin_setup_io
 !------------------------------------------------------------------------------
@@ -171,7 +174,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-call mesh%save_vertex_vector(bvout,TRIM(name_tmp))
+call mesh%save_vertex_vector(bvout,xdmf_plot,TRIM(name_tmp))
 !---Cleanup
 CALL lminv%pre%delete
 DEALLOCATE(lminv%pre)

@@ -105,8 +105,6 @@ CALL oft_h1_setup(order, -1)
 !! probe signals at evenly spaced points in time as specified in the input file, see
 !! \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_sph_ex2_post.
 IF(plot_run)THEN
-  !---Setup I/0
-  CALL mesh%setup_io(order)
   !---Run post-processing routine
   CALL xmhd_plot
   !---Finalize enviroment and exit

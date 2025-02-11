@@ -67,7 +67,8 @@ ALLOCATE(tw_sim%closures(tw_sim%nclosures))
 tw_sim%closures(1)=1 !INT(tw_sim%mesh%nc/2.d0,4)
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL tw_sim%mesh%setup_io(1)
+CALL tw_sim%xdmf%setup("ThinCurr")
+CALL tw_sim%mesh%setup_io(tw_sim%xdmf,1)
 !---Compute face mutuals
 CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat)
 !---Compute and correct perturbation
@@ -82,8 +83,8 @@ DO i=1,tw_sim%np_active
 END DO
 !---Save B-normal field
 WRITE(*,*)'Flux chk',SUM(vtmp(:,1)),SUM(vtmp(:,2))
-CALL tw_sim%mesh%save_vertex_scalar(bnorm(:,1),'BSin')
-CALL tw_sim%mesh%save_vertex_scalar(bnorm(:,2),'BCos')
+CALL tw_sim%mesh%save_vertex_scalar(bnorm(:,1),tw_sim%xdmf,'BSin')
+CALL tw_sim%mesh%save_vertex_scalar(bnorm(:,2),tw_sim%xdmf,'BCos')
 DEALLOCATE(bnorm)
 WRITE(*,*)'Flux chk',SUM(vtmp(:,1)),SUM(vtmp(:,2))
 !---Compute current potential

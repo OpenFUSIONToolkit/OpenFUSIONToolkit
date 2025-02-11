@@ -59,22 +59,22 @@ for (i, file) in enumerate(files):
     # Read fields from MUG history file
     print('Reading file: "{0}"'.format(file))
     dump = histfile(file)
-    ts = numpy.r_[dump.data['ts']]
-    time = numpy.r_[dump.data['time']]*1.E3
+    ts = numpy.r_[dump['ts']]
+    time = numpy.r_[dump['time']]*1.E3
     dt = time[1:-1] - time[0:-2]
-    lits = numpy.r_[dump.data['lits']]
-    nlits = numpy.r_[dump.data['nlits']]
-    stime = numpy.r_[dump.data['stime']]
-    mag_energy = numpy.r_[dump.data['men']]/mu0
-    kin_energy = numpy.r_[dump.data['ven']]
+    lits = numpy.r_[dump['lits']]
+    nlits = numpy.r_[dump['nlits']]
+    stime = numpy.r_[dump['stime']]
+    mag_energy = numpy.r_[dump['men']]/mu0
+    kin_energy = numpy.r_[dump['ven']]
     total_energy = mag_energy + kin_energy
-    tflux = numpy.r_[dump.data['tflux']]
-    tcurr = numpy.r_[dump.data['tcurr']]/mu0
-    div_err = numpy.r_[dump.data['derr']]/(2.*mag_energy*mu0)
+    tflux = numpy.r_[dump['tflux']]
+    tcurr = numpy.r_[dump['tcurr']]/mu0
+    div_err = numpy.r_[dump['derr']]/(2.*mag_energy*mu0)
     gr_data = get_gr(time/1.E3, total_energy, dump)
     print()
     # Detect legacy field names
-    if 'npart' in dump.data:
+    if 'npart' in dump:
         ti_name = 'temp'
         ne_name = 'npart'
         te_name = 'tempe'
@@ -121,20 +121,20 @@ for (i, file) in enumerate(files):
         # Plot toroidal current
         Tcurr_plot.add_plot(time, tcurr/1.E3, ylabel='Toroidal Current [kA]', subplot=1)
         Tcurr_plot.add_plot(time, abs(tcurr)/1.E3, xlabel='Time [ms]', ylabel='Toroidal Current [kA]', subplot=2, type='semiy')
-    if ti_name in dump.data:
+    if ti_name in dump:
         if Ti_plot is None:
             plot_id += 1
             Ti_plot = oft_mpl.plot(plot_id)
             plot_id += 1
             Ne_plot = oft_mpl.plot(plot_id)
         # Plot ion temperature
-        Ti = numpy.r_[dump.data[ti_name]]
+        Ti = numpy.r_[dump[ti_name]]
         Ti_plot.add_plot(time, Ti, xlabel='Time [ms]', ylabel='Average ion temperature [eV]', include_yzero=True)
         # Plot ion density
-        Ne = numpy.r_[dump.data[ne_name]]
+        Ne = numpy.r_[dump[ne_name]]
         Ne_plot.add_plot(time, Ne, xlabel='Time [ms]', ylabel='Average density [m^-3]', include_yzero=True)
-    if te_name in dump.data:
-        Te = numpy.r_[dump.data[te_name]]
+    if te_name in dump:
+        Te = numpy.r_[dump[te_name]]
         if Te.max() > 0.:
             if Te_plot is None:
                 plot_id += 1
