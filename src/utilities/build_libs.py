@@ -854,6 +854,7 @@ class OpenMPI(package):
         self.setup_root_struct()
         bin_dir = self.config_dict['MPI_BIN']
         self.config_dict['MPI_CC'] = os.path.join(bin_dir, "mpicc")
+        self.config_dict['MPI_CXX'] = os.path.join(bin_dir, "mpicxx")
         self.config_dict['MPI_FC'] = os.path.join(bin_dir, "mpif90")
         print('To use MPI please add "{0}" to your path'.format(bin_dir))
         # Installation check files

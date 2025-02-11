@@ -10,7 +10,7 @@
 #include "superlu_ddefs.h"
 
 void
-oft_superlu_dist_slugrid_c(int *iopt, MPI_Comm *slu_comm, int *nprow, int *npcol,
+oft_superlu_dist_slugrid_c(int iopt, MPI_Comm *slu_comm, int nprow, int npcol,
 				   gridinfo_t **grid_handle, int *info)
 /*
  * This routine provides a fortran call for initializing and
@@ -29,25 +29,25 @@ oft_superlu_dist_slugrid_c(int *iopt, MPI_Comm *slu_comm, int *nprow, int *npcol
 {
 	gridinfo_t *grid;
 
-	if ( *iopt == 1 ) {
+	if ( iopt == 1 ) {
 		/* Allocate the grid structure. */
 		grid = (gridinfo_t *) SUPERLU_MALLOC(sizeof(gridinfo_t));
 
 		/* Initialize the process grid. */
-		superlu_gridinit(*slu_comm, *nprow, *npcol, grid);
+		superlu_gridinit(MPI_COMM_SELF, nprow, npcol, grid);
 
 		/* Set the handle passed from fortran, so that the
 		* process grid can be reused. */
 		*grid_handle = grid;
 		*info = 0;
-	} else if ( *iopt == 2 ) {
+	} else if ( iopt == 2 ) {
 		/* Locate and free the process grid. */
 		grid = *grid_handle;
 		superlu_gridexit(grid);
 		SUPERLU_FREE(grid);
 		*info = 0;
 	} else {
-		fprintf(stderr, "Invalid iopt=%d passed to oft_superlu_dist_slugrid_c()\n", *iopt);
+		printf("Invalid iopt=%d passed to oft_superlu_dist_slugrid_c()\n", iopt);
 		*info = -1;
 	}
 }
