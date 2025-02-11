@@ -474,6 +474,7 @@ mkdir $BUILD_DIR && cd $BUILD_DIR
 
 class package:
     name = "Unitialized"
+    display_name = None
     url = None
     version = None
     file = None
@@ -526,7 +527,7 @@ class package:
         if self.skip:
             return handle_children(config_dict)
         print("=========================================================")
-        print("Building library: {0}".format(self.name))
+        print("Building library: {0}".format(self.name if self.display_name is None else self.display_name))
         #
         os.chdir(self.root_build_path)
         self.fetch(force)
@@ -760,6 +761,7 @@ class METIS(package):
 class MPICH(package):
     def __init__(self,use_headers,ver_major):
         self.name = "MPI"
+        self.display_name = "MPICH"
         self.ver_major = ver_major
         if ver_major == 3:
             self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
@@ -839,6 +841,7 @@ class MPICH(package):
 class OpenMPI(package):
     def __init__(self):
         self.name = "MPI"
+        self.display_name = "OpenMPI"
         self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.5.tar.gz"
 
     def setup(self, config_dict):
@@ -884,7 +887,8 @@ class OpenMPI(package):
         config_options = [
             "--prefix={MPI_ROOT}",
             "--enable-mpi-fortran=yes",
-            "--enable-shared=no",
+            "--enable-shared=yes",
+            "--enable-static=no",
             "--with-pic",
             "--disable-sphinx",
             "--without-rocm",

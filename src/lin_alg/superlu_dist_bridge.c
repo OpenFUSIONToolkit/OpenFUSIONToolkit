@@ -10,7 +10,7 @@
 #include "superlu_ddefs.h"
 
 void
-oft_superlu_dist_slugrid_c(int iopt, MPI_Comm *slu_comm, int nprow, int npcol,
+oft_superlu_dist_slugrid_c(int iopt, int *slu_comm, int nprow, int npcol,
 				   gridinfo_t **grid_handle, int *info)
 /*
  * This routine provides a fortran call for initializing and
@@ -34,7 +34,8 @@ oft_superlu_dist_slugrid_c(int iopt, MPI_Comm *slu_comm, int nprow, int npcol,
 		grid = (gridinfo_t *) SUPERLU_MALLOC(sizeof(gridinfo_t));
 
 		/* Initialize the process grid. */
-		superlu_gridinit(MPI_COMM_SELF, nprow, npcol, grid);
+		MPI_Comm cComm = MPI_Comm_f2c(*slu_comm);
+		superlu_gridinit(cComm, nprow, npcol, grid);
 
 		/* Set the handle passed from fortran, so that the
 		* process grid can be reused. */
