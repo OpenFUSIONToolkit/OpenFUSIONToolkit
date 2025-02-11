@@ -62,7 +62,7 @@ IF(test_surf)THEN
   END IF
 #endif
   CALL plot_file%setup("Test")
-  CALL mesh%setup_io(plot_file,1)
+  CALL smesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)THEN
     OPEN(NEWUNIT=io_unit,FILE='cubit.results')
     WRITE(io_unit,*)0.0_r8

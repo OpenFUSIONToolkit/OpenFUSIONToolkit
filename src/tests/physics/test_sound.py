@@ -139,8 +139,8 @@ def validate_result(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_tem
         if 'MUG' in h5_file:
             for _, mesh_obj in h5_file['MUG'].items():
                 if mesh_obj['TYPE'][()] > 30:
-                    for i in range(9998):
-                        timestep = mesh_obj.get('{0:04d}'.format(i+1),None)
+                    for i in range(9999):
+                        timestep = mesh_obj.get('{0:04d}'.format(i),None)
                         if timestep is None:
                             break
                         step_count += 1

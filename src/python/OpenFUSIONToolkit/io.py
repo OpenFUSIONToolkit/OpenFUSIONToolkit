@@ -375,7 +375,7 @@ class XDMF_plot_file:
 def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
     '''! Build XDMF plot metadata files 
 
-    @param path Folder to build XDMF files in (must include "dump.dat" file)
+    @param path Folder to build XDMF files in (must include `oft_xdmf.XXXX.h5` or `dump.dat` files)
     @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
     @param pretty Use pretty printing (indentation) in XDMF files?
     @param legacy Use legacy XDMF script for processing `dump.dat` files?

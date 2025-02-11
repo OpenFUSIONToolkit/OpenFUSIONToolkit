@@ -4508,7 +4508,7 @@ if(ierr<0)call oft_abort('No MHD plot options found in input file.','xmhd_plot',
 if(ierr>0)call oft_abort('Error parsing MHD plot options in input file.','xmhd_plot',__FILE__)
 !---
 CALL xdmf%setup("MUG")
-CALL mesh%setup_io(xdmf,oft_hcurl%order)
+CALL mesh%setup_io(xdmf,oft_lagrange%order)
 !---------------------------------------------------------------------------
 ! Check run type and optional fields
 !---------------------------------------------------------------------------
