@@ -278,7 +278,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
-    mygs.set_coil_currents(np.array([1.E-2]))
+    mygs.set_coil_currents({'COIL': 1.E-2})
     try:
         psi0 = mygs.vac_solve()
     except ValueError:
@@ -381,12 +381,9 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
         mp_q.put([{'Tau_w': eig_vals[:5,0]}])
         return
     #
-    vsc_signs = np.zeros((mygs.ncoils,), dtype=np.float64)
-    vsc_signs[mygs.coil_sets['VS']['id']] = 1.0
-    mygs.set_coil_vsc(vsc_signs)
+    mygs.set_coil_vsc({'VS': 1.0})
     #
-    coil_bounds = np.zeros((mygs.ncoils+1,2), dtype=np.float64)
-    coil_bounds[:,0] = -50.E6; coil_bounds[:,1] = 50.E6
+    coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}
     mygs.set_coil_bounds(coil_bounds)
     #
     Ip_target=15.6E6
@@ -407,22 +404,23 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
     x_point = np.array([[5.125, -3.4],])
     mygs.set_isoflux(np.vstack((isoflux_pts,x_point)))
     mygs.set_saddles(x_point)
-    #
-    coil_reg_mat = np.eye(mygs.ncoils+1, dtype=np.float64)
-    coil_reg_weights = np.ones((mygs.ncoils+1,))
-    coil_reg_targets = np.zeros((mygs.ncoils+1,))
-    for key, coil in mygs.coil_sets.items():
+    # Set regularization weights
+    coil_reg_rows = []
+    coil_reg_weights = []
+    for key in mygs.coil_sets:
+        coil_reg_rows.append({key: 1.0})
         if key.startswith('CS'):
             if key.startswith('CS1'):
-                coil_reg_weights[coil['id']] = 2.E-2
+                coil_reg_weights.append(2.E-2)
             else:
-                coil_reg_weights[coil['id']] = 1.E-2
+                coil_reg_weights.append(1.E-2)
         elif key.startswith('PF'):
-            coil_reg_weights[coil['id']] = 1.E-2
+            coil_reg_weights.append(1.E-2)
         elif key.startswith('VS'):
-            coil_reg_weights[coil['id']] = 1.E2
-    coil_reg_weights[-1] = 1.E-2
-    mygs.set_coil_reg(coil_reg_mat, reg_weights=coil_reg_weights, reg_targets=coil_reg_targets)
+            coil_reg_weights.append(1.E-2)
+    coil_reg_rows.append({'#VSC': 1.0})
+    coil_reg_weights.append(1.E2)
+    mygs.set_coil_reg(reg_rows=coil_reg_rows, reg_weights=np.array(coil_reg_weights))
     #
     ffp_prof = create_power_flux_fun(40,1.5,2.0)
     pp_prof = create_power_flux_fun(40,4.0,1.0)
@@ -555,29 +553,32 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
         mp_q.put([{'Tau_w': eig_vals[:5,0]}])
         return
     #
-    vsc_signs = np.zeros((mygs.ncoils,), dtype=np.float64)
-    vsc_signs[[mygs.coil_sets['INTERNALU']['id'], mygs.coil_sets['INTERNALL']['id']]] = [1.0,-1.0]
-    mygs.set_coil_vsc(vsc_signs)
+    mygs.set_coil_vsc({'INTERNALU': 1.0, 'INTERNALL': -1.0})
     #
     Ip_target = 8.0E4
     mygs.set_targets(Ip=Ip_target,Ip_ratio=2.0)
     isoflux_pts = create_isoflux(20,0.40,0.0,0.22,1.5,0.1)
     mygs.set_isoflux(isoflux_pts)
-    #
-    coil_regmat = np.eye(mygs.ncoils+1, dtype=np.float64)
-    coil_reg_weights = np.zeros((mygs.ncoils+1,), dtype=np.float64)
+    # Set regularization weights
     disable_list = ('YELLOW',)
-    for name, coil in mygs.coil_sets.items():
+    coil_reg_rows = []
+    coil_reg_weights = []
+    for name in mygs.coil_sets:
+        if name[:-1] in disable_list:
+            coil_reg_rows.append({name: 1.0})
+            coil_reg_weights.append(1.E4)
+            continue
+        if name[-1] == 'L':
+            continue
+        coil_reg_rows.append({name: 1.0})
+        coil_reg_weights.append(1.E-1)
+        #
         if name[-1] == 'U':
-            coil_regmat[coil['id'],mygs.coil_sets[name[:-1]+'L']['id']] = -1.0
-            coil_reg_weights[coil['id']] = 1.E2
-        else:
-            if name[:-1] in disable_list:
-                coil_reg_weights[coil['id']] = 1.E4
-            else:
-                coil_reg_weights[coil['id']] = 1.E-1
-    coil_reg_weights[-1] = 1.E-4
-    mygs.set_coil_reg(coil_regmat,reg_weights=coil_reg_weights)
+            coil_reg_rows.append({name: 1.0, name[:-1]+'L': -1.0})
+            coil_reg_weights.append(1.E2)
+    coil_reg_rows.append({'#VSC': 1.0})
+    coil_reg_weights.append(1.E-4)
+    mygs.set_coil_reg(reg_rows=coil_reg_rows, reg_weights=np.array(coil_reg_weights))
     #
     ffp_prof = create_power_flux_fun(50,1.5,2.0)
     pp_prof = create_power_flux_fun(50,4.0,1.0)

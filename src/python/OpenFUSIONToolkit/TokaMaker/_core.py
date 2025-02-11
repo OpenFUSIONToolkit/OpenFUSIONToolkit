@@ -117,6 +117,8 @@ class TokaMaker():
         self._coil_dict = {}
         ## Coil set definitions, including sub-coils
         self.coil_sets = {}
+        ## Coil set names in order of id number
+        self.coil_set_names = []
         ## Vacuum F value
         self._F0 = 0.0
         ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
@@ -296,8 +298,10 @@ class TokaMaker():
             if eta_vals[i] < -1.5:
                 eta_vals[i] = 1.E10
                 self.nvac += 1 
+        self.coil_set_names = ['' for _ in range(nCoils)]
         coil_nturns = numpy.zeros((nCoils, self.nregs))
         for key in self.coil_sets:
+            self.coil_set_names[self.coil_sets[key]['id']] = key
             for sub_coil in self.coil_sets[key]['sub_coils']:
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
         cstring = c_char_p('none'.encode())
@@ -422,7 +426,7 @@ class TokaMaker():
         else:
             return None
     
-    def set_coil_reg(self,reg_mat,reg_targets=None,reg_weights=None):
+    def set_coil_reg(self,reg_mat=None,reg_targets=None,reg_weights=None,reg_rows=None):
         '''! Set regularization matrix for coils when isoflux and/or saddle constraints are used
 
         Can be used to enforce "soft" constraints on coil currents. For hard constraints see
@@ -431,10 +435,27 @@ class TokaMaker():
         @param reg_mat Regularization matrix [nregularize,ncoils+1]
         @param reg_targets Regularization targets [nregularize] (default: 0)
         @param reg_weights Weights for regularization terms [nregularize] (default: 1)
+        @param reg_rows Array of dictionaries, defining each row in the regularization matrix
         '''
-        if reg_mat.shape[1] != self.ncoils+1:
-            raise IndexError('Incorrect shape of "reg_mat", should be [nregularize,ncoils+1]')
-        nregularize = reg_mat.shape[0]
+        if reg_rows is not None:
+            if reg_mat is not None:
+                raise ValueError('"reg_rows" and "reg_dict" cannot be specified simultaneously')
+            nregularize = len(reg_rows)
+            reg_mat = numpy.zeros((self.ncoils+1,nregularize), dtype=numpy.float64)
+            for i, reg_row in enumerate(reg_rows):
+                for key, value in reg_row.items():
+                    if key == '#VSC':
+                        reg_mat[-1,i] = value
+                    else:
+                        reg_mat[self.coil_sets[key]['id'],i] = value
+        elif reg_mat is not None:
+            if reg_mat.shape[1] != self.ncoils+1:
+                raise IndexError('Incorrect shape of "reg_mat", should be [nregularize,ncoils+1]')
+            nregularize = reg_mat.shape[0]
+            reg_mat = numpy.ascontiguousarray(reg_mat.transpose(), dtype=numpy.float64)
+        else:
+            raise ValueError('Either "reg_rows" or "reg_dict" is required')
+        #
         if reg_targets is None:
             reg_targets = numpy.zeros((nregularize,), dtype=numpy.float64)
         if reg_weights is None:
@@ -443,12 +464,11 @@ class TokaMaker():
             raise IndexError('Incorrect shape of "reg_targets", should be [nregularize]')
         if reg_weights.shape[0] != nregularize:
             raise IndexError('Incorrect shape of "reg_weights", should be [nregularize]')
-        reg_mat = numpy.ascontiguousarray(reg_mat.transpose(), dtype=numpy.float64)
         reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
         reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
         tokamaker_set_coil_regmat(nregularize,reg_mat, reg_targets, reg_weights)
 
-    def set_coil_bounds(self,coil_bounds):
+    def set_coil_bounds(self,coil_bounds=None):
         '''! Set hard constraints on coil currents
 
         Can be used with or without regularization terms (see
@@ -456,20 +476,25 @@ class TokaMaker():
 
         @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
         '''
-        if (coil_bounds.shape[0] != self.ncoils+1) or (coil_bounds.shape[1] != 2):
-            raise IndexError('Incorrect shape of "coil_bounds", should be [ncoils+1,2]')
-        coil_bounds = numpy.ascontiguousarray(coil_bounds, dtype=numpy.float64)
-        tokamaker_set_coil_bounds(coil_bounds)
+        bounds_array = numpy.zeros((self.ncoils+1,2), dtype=numpy.float64)
+        bounds_array[:,0] = -1.E98; bounds_array[:,1] = 1.E98
+        if coil_bounds is not None:
+            for coil_key, coil_bound in coil_bounds.items():
+                if coil_key == '#VSC':
+                    bounds_array[-1,:] = coil_bound
+                else:
+                    bounds_array[self.coil_sets[coil_key]['id'],:] = coil_bound
+        tokamaker_set_coil_bounds(bounds_array)
 
     def set_coil_vsc(self,coil_gains):
         '''! Define a vertical stability coil set from one or more coils
 
         @param coil_gains Gains for each coil (absolute scale is arbitrary)
         '''
-        if coil_gains.shape[0] != self.ncoils:
-            raise IndexError('Incorrect shape of "coil_gains", should be [ncoils]')
-        coil_gains = numpy.ascontiguousarray(coil_gains, dtype=numpy.float64)
-        tokamaker_set_coil_vsc(coil_gains)
+        gains_array = numpy.zeros((self.ncoils,), dtype=numpy.float64)
+        for coil_key, coil_gain in coil_gains.items():
+            gains_array[self.coil_sets[coil_key]['id']] = coil_gain
+        tokamaker_set_coil_vsc(gains_array)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
         r'''! Initialize \f$\psi\f$ using uniform current distributions
@@ -892,7 +917,10 @@ class TokaMaker():
         currents = numpy.zeros((self.ncoils,),dtype=numpy.float64)
         currents_reg = numpy.zeros((self.nregs,),dtype=numpy.float64)
         tokamaker_get_coil_currents(currents, currents_reg)
-        return currents, currents_reg
+        current_dict = {}
+        for coil_key, coil_set in self.coil_sets.items():
+            current_dict[coil_key] = currents[coil_set['id']]
+        return current_dict, currents_reg
 
     def get_coil_Lmat(self):
         r'''! Get mutual inductance matrix between coils
@@ -1053,15 +1081,16 @@ class TokaMaker():
                     break
             return self.x_points[:i,:], self.diverted
     
-    def set_coil_currents(self, currents):
+    def set_coil_currents(self, currents=None):
         '''! Set coil currents
 
         @param currents Current in each coil [A]
         '''
-        if currents.shape[0] != self.ncoils:
-            raise IndexError('Incorrect shape of "currents", should be [ncoils]')
-        currents = numpy.ascontiguousarray(currents, dtype=numpy.float64)
-        tokamaker_set_coil_currents(currents)
+        current_array = numpy.zeros((self.ncoils,), dtype=numpy.float64)
+        if currents is not None:
+            for coil_key, coil_current in currents.items():
+                current_array[self.coil_sets[coil_key]['id']] = coil_current
+        tokamaker_set_coil_currents(current_array)
 
     def update_settings(self):
         '''! Update settings after changes to values in python'''
@@ -1106,7 +1135,7 @@ class TokaMaker():
         if coil_colormap is not None:
             _, region_currents = self.get_coil_currents()
             mesh_currents = numpy.zeros((self.lc.shape[0],))
-            for i in range(self.ncoils):
+            for _ in range(self.ncoils):
                 mesh_currents = region_currents[self.reg-1]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:
