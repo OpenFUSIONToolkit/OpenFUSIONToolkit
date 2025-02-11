@@ -68,6 +68,22 @@ class OFT_env():
         ## Error string size
         self.oft_error_slen = slens[3]
     
+    def set_debug_level(self,debug_level):
+        '''! Set debug verbosity level
+        
+        @param debug_level New value for debug level (must be in range [0,3])
+        '''
+        if (debug_level < 0) or (debug_level > 3):
+            raise ValueError('Invalid value of "debug_level", must be in range [0,3]')
+        oftpy_set_debug(c_int(debug_level))
+
+    def set_num_threads(self,nthreads):
+        '''! Set the number of OpenMP threads to use
+        
+        @param nthreads Number of threads to use for subsequent OpenMP parallel regions
+        '''
+        oftpy_set_nthreads(c_int(nthreads))
+    
     def unique_tmpfile(self,filename):
         '''! Get unique temporary filename
         

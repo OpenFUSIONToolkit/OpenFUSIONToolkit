@@ -86,6 +86,26 @@ oft_node_ptr=C_NULL_PTR
 #endif
 END SUBROUTINE oftpy_load_xml
 !------------------------------------------------------------------------------
+!> Set debug verbosity level
+!------------------------------------------------------------------------------
+SUBROUTINE oftpy_set_debug(debug_level) BIND(C,NAME="oftpy_set_debug")
+INTEGER(c_int), VALUE, INTENT(in) :: debug_level !< New value for debug level (must be in range [0,3])
+oft_env%debug=debug_level
+END SUBROUTINE oftpy_set_debug
+!------------------------------------------------------------------------------
+!> Set the number of OpenMP threads to use
+!------------------------------------------------------------------------------
+SUBROUTINE oftpy_set_nthreads(nthreads) BIND(C,NAME="oftpy_set_nthreads")
+INTEGER(c_int), VALUE, INTENT(in) :: nthreads !< Number of threads to use for subsequent OpenMP parallel regions
+CHARACTER(LEN=4) :: thrd_str,proc_str
+IF(nthreads>omp_get_num_procs())THEN
+    WRITE(thrd_str,'(I4.4)')nthreads
+    WRITE(proc_str,'(I4.4)')omp_get_num_procs()
+    CALL oft_warn("Number of requested threads ("//thrd_str//") exceeds number of available processors ("//proc_str//")")
+END IF
+CALL omp_set_num_threads(nthreads)
+END SUBROUTINE oftpy_set_nthreads
+!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE oft_setup_smesh(ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nregs) BIND(C,NAME="oft_setup_smesh")
