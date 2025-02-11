@@ -839,13 +839,17 @@ class MPICH(package):
 
 
 class OpenMPI(package):
-    def __init__(self):
+    def __init__(self,use_headers):
         self.name = "MPI"
         self.display_name = "OpenMPI"
         self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.5.tar.gz"
+        self.use_headers = use_headers
+        self.build_timeout = 30
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
+        if self.use_headers:
+            self.config_dict["MPI_USE_HEADERS"] = True
         if "MPI_CC" in config_dict:
             self.skip = True
             print("MPI provided by compiler wrappers: Skipping build")
@@ -874,16 +878,6 @@ class OpenMPI(package):
         ]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
             build_lines.append('export FFLAGS=-fallow-argument-mismatch')
-        # config_options = [
-        #     "--prefix={MPI_ROOT}",
-        #     "--enable-mpi-fortran=yes",
-        #     "--enable-shared=no",
-        #     "--with-pic",
-        #     "--disable-sphinx",
-        #     "--disable-opencl",
-        #     "--disable-nvml",
-        #     "--disable-cuda"
-        # ]
         config_options = [
             "--prefix={MPI_ROOT}",
             "--enable-mpi-fortran=yes",
@@ -1944,7 +1938,7 @@ else:
 # MPI
 if use_mpi:
     if options.build_openmpi:
-        packages.append(OpenMPI())
+        packages.append(OpenMPI(options.mpi_use_headers))
     elif options.build_mpich:
         packages.append(MPICH(options.mpi_use_headers,options.mpich_version))
     else:
