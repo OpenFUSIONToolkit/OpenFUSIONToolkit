@@ -1911,7 +1911,7 @@ integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns
+real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
 integer(4) :: j,m,l,k
 integer(4), allocatable :: j_lag(:)
@@ -1922,7 +1922,7 @@ NULLIFY(btmp)
 CALL b%get_local(btmp)
 !---
 mutual=0.d0
-!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns) reduction(+:mutual)
+!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psi_tmp,l,rop,nturns) reduction(+:mutual)
 allocate(rop(oft_blagrange%nce))
 allocate(j_lag(oft_blagrange%nce))
 !$omp do schedule(static,1)
@@ -4078,12 +4078,13 @@ end subroutine psi2pt_error
 !! @param[in,out] r
 !! @param[in] z
 !---------------------------------------------------------------------------
-subroutine gs_psi2pt(self,psi_target,pt,pt_con,vec)
+subroutine gs_psi2pt(self,psi_target,pt,pt_con,vec,psi_int)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_target
 real(8), intent(inout) :: pt(2)
 real(8), intent(in) :: pt_con(2)
 real(8), intent(in) :: vec(2)
+type(oft_lag_brinterp), target, optional, intent(inout) :: psi_int
 type(oft_lag_brinterp), target :: psi_eval
 !---MINPACK variables
 real(8) :: ftol,xtol,gtol,epsfcn,factor,cofs(1),error(1)
@@ -4092,9 +4093,13 @@ real(8), allocatable, dimension(:,:) :: fjac
 integer(4) :: maxfev,mode,nprint,info,nfev,ldfjac,ncons,ncofs
 integer(4), allocatable, dimension(:) :: ipvt
 !---
-psi_eval%u=>self%psi
-CALL psi_eval%setup()
-psi_eval_active=>psi_eval
+IF(PRESENT(psi_int))THEN
+  psi_eval_active=>psi_int
+ELSE
+  psi_eval%u=>self%psi
+  CALL psi_eval%setup()
+  psi_eval_active=>psi_eval
+END IF
 psi_target_active=psi_target
 cell_active=0
 ! z_con_active=z
@@ -4123,7 +4128,7 @@ call lmdif(psi2pt_error,ncons,ncofs,cofs,error, &
               nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 deallocate(diag,fjac,qtf,wa1,wa2)
 deallocate(wa3,wa4,ipvt)
-CALL psi_eval%delete()
+IF(.NOT.PRESENT(psi_int))CALL psi_eval%delete()
 !---Save back result
 pt=pt_con_active+cofs(1)*vec_con_active
 end subroutine gs_psi2pt
@@ -4137,13 +4142,14 @@ end subroutine gs_psi2pt
 !! @param[in,out] r
 !! @param[in] z
 !---------------------------------------------------------------------------
-subroutine gs_psi2r(self,psi_target,pt)
+subroutine gs_psi2r(self,psi_target,pt,psi_int)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_target
 real(8), intent(inout) :: pt(2)
+type(oft_lag_brinterp), target, optional, intent(inout) :: psi_int
 real(8) :: vec(2)
 vec=[1.d0,0.d0]
-CALL gs_psi2pt(self,psi_target,pt,[self%o_point(1),pt(2)],vec)
+CALL gs_psi2pt(self,psi_target,pt,[self%o_point(1),pt(2)],vec,psi_int)
 end subroutine gs_psi2r
 !---------------------------------------------------------------------------
 ! FUNCTION gs_beta
@@ -4698,7 +4704,7 @@ real(8), intent(out) :: prof(nr),dl,rbounds(2,2),zbounds(2,2)
 real(8), optional, intent(out) :: ravgs(nr,2)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
-type(oft_lag_brinterp) :: psi_int
+type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
@@ -4739,7 +4745,7 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-!$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
+!$omp parallel private(psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup()
 IF(PRESENT(ravgs))THEN
@@ -4770,7 +4776,7 @@ do j=1,nr
   !
   pt=pt_last
   !$omp critical
-  CALL gs_psi2r(gseq,psi_surf,pt)
+  CALL gs_psi2r(gseq,psi_surf,pt,psi_int)
   !$omp end critical
   CALL tracinginv_fs(pt(1:2),ptout)
   pt_last=pt

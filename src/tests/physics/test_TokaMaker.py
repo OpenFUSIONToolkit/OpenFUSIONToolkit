@@ -52,6 +52,7 @@ def validate_dict(results,dict_exp):
         result_val = results[0].get(key,None)
         if result_val is None:
             print('FAILED: key "{0}" not present!'.format(key))
+            result_val = False
         else:
             if type(exp_val) is list:
                 for i in range(len(exp_val)):
@@ -494,7 +495,7 @@ def test_ITER_eq(order):
         'l_i': 0.9048845463517069,
         'beta_tor': 1.7816206668692283,
         'beta_n': 1.1868590722509704,
-        'MCS1': 2.5608173430680583e-06,
+        'LCS1': 2.485860941880887e-06,
         'MCS1_plasma': 8.930926092661585e-07,
         'Lplasma': 1.1899835061690724e-05
     }

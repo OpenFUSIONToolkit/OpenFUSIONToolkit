@@ -586,6 +586,11 @@ CASE("superd")
       self%update_graph=.FALSE.
     END IF
     mode=33
+    IF(self%iter_refine)THEN
+      self%pardiso_struct%iparm(8)=0
+    ELSE
+      self%pardiso_struct%iparm(8)=1
+    END IF
     CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
       mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
       nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
