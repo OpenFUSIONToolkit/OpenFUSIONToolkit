@@ -50,7 +50,7 @@ if ( iopt == 1 ) { /* iLU0 decomposition */
 	dpar[30] = 1.E-20;
 	dpar[31] = 1.E-16;
 	// Factor matrix
-	dcsrilu0(n, values, rowptr, colind, LUfactors->ilu_vals, ipar, dpar, info);
+	dcsrilu0(&n, values, rowptr, colind, LUfactors->ilu_vals, ipar, dpar, info);
 	// Destroy old matrix if necessary
 	if (LUfactors->A_iLU)
 		mkl_sparse_destroy(LUfactors->A_iLU);
