@@ -92,12 +92,6 @@ jobs:
         sudo xcode-select -s ${{ matrix.config.xcode_path }}
         xcode-select -p
 
-    - name: Check compilers
-      run: |
-        $CC --version
-        $CXX --version
-        $FC --version
-
     - name: Install prerequisites (Linux)
       if: startsWith(matrix.config.os, 'ubuntu')
       run: |
@@ -124,6 +118,13 @@ jobs:
         sudo apt-get update -o Dir::Etc::sourcelist="sources.list.d/oneAPI.list" -o APT::Get::List-Cleanup="0"
         sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp intel-oneapi-compiler-fortran intel-oneapi-mkl-devel
         echo "source /opt/intel/oneapi/setvars.sh" >> ${{ github.workspace }}/setup_env.sh
+    
+    - name: Check compilers
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        $CC --version
+        $CXX --version
+        $FC --version
 
     - name: Cache external libraries
       id: cache-ext-libs
