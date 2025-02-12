@@ -174,6 +174,15 @@ set( EXT_LIBS ${LAPACK_LIBRARIES} ${EXT_LIBS} )
 if( BLA_VENDOR MATCHES "^Intel" )
   add_definitions( -DHAVE_MKL )
 endif()
+# ZLIB
+find_package( ZLIB REQUIRED )
+include_directories( ${ZLIB_INCLUDE_DIRS} )
+set( OFT_ZLIB_LIBS ${ZLIB_LIBRARIES} )
+# LIBAEC
+find_package( libaec REQUIRED )
+include_directories( ${LIBAEC_INCLUDE_DIRS} )
+set( OFT_LIBAEC_LIBS ${LIBAEC_LIBRARIES} )
+
 # HDF5
 find_package( HDF5 COMPONENTS C Fortran REQUIRED )
 include_directories( ${HDF5_INCLUDE_DIRS} )
