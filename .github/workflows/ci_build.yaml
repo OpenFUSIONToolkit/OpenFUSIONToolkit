@@ -10,36 +10,36 @@ on:
   
 jobs:
   build:
-    name: ${{ format('{0} ({1})', matrix.os, matrix.parallel) }}
-    runs-on: ${{ matrix.os }}
+    name: ${{ format('{0} ({1})', matrix.config.os, matrix.parallel) }}
+    runs-on: ${{ matrix.config.os }}
     env:
-      CC: ${{ matrix.os.cc }}
-      CXX: ${{ matrix.os.cxx }}
-      FC: ${{ matrix.os.fc }}
+      CC: ${{ matrix.config.cc }}
+      CXX: ${{ matrix.config.cxx }}
+      FC: ${{ matrix.config.fc }}
       OMP_NUM_THREADS: 2
     
     strategy:
       fail-fast: false
       matrix:
         parallel: ["openmp", "mpich", "openmpi"]
-        os:
-          - ubuntu-22.04
+        config:
+          - os: ubuntu-22.04
             cc: "gcc-12",
             cxx: "g++-12",
             fc: "gfortran-12",
             python: "python3"
-          - ubuntu-24.04
+          - os: ubuntu-24.04
             cc: "gcc-14",
             cxx: "g++-14",
             fc: "gfortran-14",
             python: "python3"
-          - macos-13
+          - os: macos-13
             cc: "gcc-12",
             cxx: "g++-12",
             fc: "gfortran-12",
             python: "python3.12",
             xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
-          - macos-14
+          - os: macos-14
             cc: "gcc-13",
             cxx: "g++-13",
             fc: "gfortran-13",
@@ -47,22 +47,22 @@ jobs:
             xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
         exclude:
           - parallel: "openmpi"
-            os: macos-14
+            config.os: macos-14
 
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
 
     - name: Get OS version (Linux)
-      if: startsWith(matrix.os, 'ubuntu')
+      if: startsWith(matrix.config.os, 'ubuntu')
       run: lsb_release -d
 
     - name: Get OS version (macOS)
-      if: startsWith(matrix.os, 'macos')
+      if: startsWith(matrix.config.os, 'macos')
       run: |
         sw_vers -productVersion
         pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
-        sudo xcode-select -s ${{ matrix.os.xcode_path }}
+        sudo xcode-select -s ${{ matrix.config.xcode_path }}
         xcode-select -p
 
     - name: Check compilers
@@ -72,17 +72,17 @@ jobs:
         $FC --version
 
     - name: Install prerequisites (Linux)
-      if: startsWith(matrix.os, 'ubuntu')
+      if: startsWith(matrix.config.os, 'ubuntu')
       run: |
-        ${{ matrix.os.python }} -m venv ${{ github.workspace }}/oft_venv
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
         python -m pip install pytest numpy scipy h5py triangle
     
     - name: Install prerequisites (macOS)
-      if: startsWith(matrix.os, 'macos')
+      if: startsWith(matrix.config.os, 'macos')
       run: |
         brew install pmix
-        ${{ matrix.os.python }} -m venv ${{ github.workspace }}/oft_venv
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
         python -m pip install pytest numpy scipy h5py
 
@@ -91,7 +91,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.os }}-build-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ matrix.config.os }}-build-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
@@ -103,7 +103,7 @@ jobs:
       timeout-minutes: 30
       working-directory: libs
       run: >
-        ${{ matrix.os.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
         --build_umfpack=1 --build_superlu=1 --build_arpack=1 --oft_build_tests=1
     
     - name: Build external (MPICH+OpenMP)
@@ -112,7 +112,7 @@ jobs:
       timeout-minutes: 60
       working-directory: libs
       run: >
-        ${{ matrix.os.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
         --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1 --build_arpack=1 --oft_build_tests=1
         --build_mpich=1
 
@@ -122,7 +122,7 @@ jobs:
       timeout-minutes: 60
       working-directory: libs
       run: >
-        ${{ matrix.os.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
+        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
         --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1 --build_arpack=1 --oft_build_tests=1
         --build_openmpi=1
 
@@ -130,7 +130,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: failure()
       with:
-        name: Library_failure_log-${{ matrix.os }}_${{ matrix.parallel }}
+        name: Library_failure_log-${{ matrix.config.os }}_${{ matrix.parallel }}
         path: libs/build/build_error.log
     
     - name: Remove external build directory
@@ -165,7 +165,7 @@ jobs:
         mv tests/OFT.junit.xml OFT.junit.xml
     
     - name: Upload test results to Codecov
-      if: ${{ !cancelled() && startsWith(matrix.os, 'ubuntu') }}
+      if: ${{ !cancelled() && startsWith(matrix.config.os, 'ubuntu') }}
       uses: codecov/test-results-action@v1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
