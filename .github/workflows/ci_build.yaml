@@ -30,7 +30,8 @@ jobs:
             cxx: "g++-12",
             fc: "gfortran-12",
             python: "python3",
-            blas_flags: "--ref_blas"
+            build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
@@ -39,7 +40,8 @@ jobs:
             cxx: "g++-14",
             fc: "gfortran-14",
             python: "python3",
-            blas_flags: "--ref_blas"
+            build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 Intel",
@@ -48,7 +50,8 @@ jobs:
             cxx: "icx",
             fc: "ifx",
             python: "python3",
-            blas_flags: "--use_mkl --mkl_root=$MKLROOT"
+            build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT"
           }
         - {
             name: "macOS Ventura GCC 12",
@@ -57,7 +60,8 @@ jobs:
             cxx: "g++-12",
             fc: "gfortran-12",
             python: "python3.12",
-            blas_flags: "--ref_blas",
+            build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
           }
         - {
@@ -67,7 +71,8 @@ jobs:
             cxx: "g++-13",
             fc: "gfortran-13",
             python: "python3.12",
-            blas_flags: "--ref_blas",
+            build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
         exclude:
@@ -144,7 +149,7 @@ jobs:
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 ${{ matrix.config.blas_flags }} --build_umfpack=1 --build_superlu=1 --build_arpack=1 --oft_build_tests=1
+        python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1
     
     - name: Build external (MPICH+OpenMP)
       if: ${{ matrix.parallel == 'mpich' }}
@@ -153,7 +158,7 @@ jobs:
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 ${{ matrix.config.blas_flags }} --build_umfpack=1 --build_superlu=1 --build_arpack=1 --oft_build_tests=1 --build_mpich=1 --build_superlu_dist=1 
+        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 
     - name: Build external (OpenMPI+OpenMP)
       if: ${{ matrix.parallel == 'openmpi' }}
@@ -162,7 +167,7 @@ jobs:
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 ${{ matrix.config.blas_flags }} --build_umfpack=1 --build_superlu=1 --build_arpack=1 --oft_build_tests=1 --build_openmpi=1 --build_superlu_dist=1
+        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
