@@ -17,7 +17,7 @@
 !! @ingroup doxy_oft_lin_alg
 !---------------------------------------------------------------------------
 MODULE oft_lu
-USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_double, c_ptr, c_null_ptr
+USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr
 USE oft_local
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_graph
