@@ -10,7 +10,7 @@ on:
   
 jobs:
   build:
-    name: ${{ format('{0} ({1})', matrix.config.os, matrix.parallel) }}
+    name: ${{ format('{0} ({1})', matrix.config.name, matrix.parallel) }}
     runs-on: ${{ matrix.config.os }}
     env:
       CC: ${{ matrix.config.cc }}
