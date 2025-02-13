@@ -474,6 +474,7 @@ mkdir $BUILD_DIR && cd $BUILD_DIR
 
 class package:
     name = "Unitialized"
+    display_name = None
     url = None
     version = None
     file = None
@@ -526,7 +527,7 @@ class package:
         if self.skip:
             return handle_children(config_dict)
         print("=========================================================")
-        print("Building library: {0}".format(self.name))
+        print("Building library: {0}".format(self.name if self.display_name is None else self.display_name))
         #
         os.chdir(self.root_build_path)
         self.fetch(force)
@@ -757,9 +758,10 @@ class METIS(package):
         self.run_build(build_lines, self.config_dict)
 
 
-class MPI(package):
+class MPICH(package):
     def __init__(self,use_headers,ver_major):
         self.name = "MPI"
+        self.display_name = "MPICH"
         self.ver_major = ver_major
         if ver_major == 3:
             self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
@@ -823,6 +825,95 @@ class MPI(package):
         #         pmix_path = result.strip()
         #         print("    Using pmix from homebrew: {0}".format(pmix_path))
         #         config_options.append('--with-pmix={0}'.format(pmix_path))
+        build_lines += [
+            "../configure " + " ".join(config_options),
+            "make -j{MAKE_THREADS}",
+            "make install"
+        ]
+        self.run_build(build_lines, self.config_dict)
+
+    def post_install(self, config_dict):
+        # Add MPI bin directory to path for following builds
+        os.environ["PATH"] = "{0}:".format(self.config_dict['MPI_BIN']) + os.environ.get("PATH", "")
+        return config_dict
+
+
+class OpenMPI(package):
+    def __init__(self,use_headers):
+        self.name = "MPI"
+        self.display_name = "OpenMPI"
+        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.5.tar.gz"
+        self.use_headers = use_headers
+        self.build_timeout = 30
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        if self.use_headers:
+            self.config_dict["MPI_USE_HEADERS"] = True
+        if "MPI_CC" in config_dict:
+            self.skip = True
+            print("MPI provided by compiler wrappers: Skipping build")
+            return self.config_dict
+        if "MPI_LIBS" in config_dict:
+            self.skip = True
+            print("MPI libraries specified: Skipping build")
+            return self.config_dict
+        self.setup_root_struct()
+        bin_dir = self.config_dict['MPI_BIN']
+        self.config_dict['MPI_CC'] = os.path.join(bin_dir, "mpicc")
+        self.config_dict['MPI_CXX'] = os.path.join(bin_dir, "mpicxx")
+        self.config_dict['MPI_FC'] = os.path.join(bin_dir, "mpif90")
+        print('To use MPI please add "{0}" to your path'.format(bin_dir))
+        # Installation check files
+        self.install_chk_files = [self.config_dict['MPI_CC'], self.config_dict['MPI_FC']]
+        return self.config_dict
+
+    def build(self):
+        build_lines = [
+            "rm -rf build",
+            "mkdir build",
+            "cd build",
+            "export CC={CC}",
+            "export FC={FC}"
+        ]
+        if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
+            build_lines.append('export FFLAGS=-fallow-argument-mismatch')
+        config_options = [
+            "--prefix={MPI_ROOT}",
+            "--enable-mpi-fortran=yes",
+            "--enable-shared=yes",
+            "--enable-static=no",
+            "--with-pic",
+            "--disable-sphinx",
+            "--without-rocm",
+            "--without-cuda"
+        ]
+        if self.config_dict['OS_TYPE'] == 'Darwin':
+            print("  macOS detected: Looking for required packages with homebrew")
+            # Search for HWLOC
+            result, errcode = run_command("brew --prefix hwloc")
+            if errcode == 0:
+                hwloc_path = result.strip()
+                print("    Using hwloc from homebrew: {0}".format(hwloc_path))
+                config_options.append('--with-hwloc={0}'.format(hwloc_path))
+            else:
+                print("    Could not find hwloc, build may fail")
+            # Search for PMIx
+            result, errcode = run_command("brew --prefix pmix")
+            if errcode == 0:
+                pmix_path = result.strip()
+                print("    Using pmix from homebrew: {0}".format(pmix_path))
+                config_options.append('--with-pmix={0}'.format(pmix_path))
+            else:
+                print("    Could not find pmix, build may fail")
+            # Search for libevent
+            result, errcode = run_command("brew --prefix libevent")
+            if errcode == 0:
+                libevent_path = result.strip()
+                print("    Using libevent from homebrew: {0}".format(libevent_path))
+                config_options.append('--with-libevent={0}'.format(libevent_path))
+            else:
+                print("    Could not find libevent, build may fail")
         build_lines += [
             "../configure " + " ".join(config_options),
             "make -j{MAKE_THREADS}",
@@ -1718,8 +1809,9 @@ group.add_argument("--oft_package_release", action="store_true", default=False, 
 group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
 #
 group = parser.add_argument_group("MPI", "MPI package options")
-group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=(0,1), help="Build MPICH library? (default: 0)")
+group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=(0,1), help="Build MPICH libraries?")
 group.add_argument("--mpich_version", default=4, type=int, choices=(3,4), help="MPICH major version (default: 4)")
+group.add_argument("--build_openmpi", default=0, type=int, choices=(0,1), help="Build OpenMPI libraries?")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
@@ -1821,7 +1913,9 @@ else:
             config_dict['MPI_INCLUDE'] = options.mpi_include_dir
         else:
             parser.exit(-1, '"MPI_INCLUDE" required when "MPI_LIB" is specified\n')
-    elif options.build_mpich:
+    elif options.build_mpich or options.build_openmpi:
+        if options.build_mpich and options.build_openmpi:
+            parser.exit(-1, '"--build_mpich" and "--build_openmpi" cannot be specified together')
         use_mpi = True
 # Setup library builds (in order of dependency)
 packages = []
@@ -1843,7 +1937,12 @@ else:
             packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch,options.oblas_no_avx))
 # MPI
 if use_mpi:
-    packages.append(MPI(options.mpi_use_headers,options.mpich_version))
+    if options.build_openmpi:
+        packages.append(OpenMPI(options.mpi_use_headers))
+    elif options.build_mpich:
+        packages.append(MPICH(options.mpi_use_headers,options.mpich_version))
+    else:
+        parser.exit(-1, 'Invalid MPI package')
 else:
     if options.hdf5_parallel:
         print('Warning: Reverting to serial HDF5 library without MPI')
