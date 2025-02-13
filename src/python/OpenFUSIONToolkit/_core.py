@@ -154,7 +154,7 @@ class OFT_env():
         return create_string_buffer(b"",self.oft_error_slen)
 
     def update_oft_in(self):
-        '''! Update input file with current settings'''
+        '''! Update input file with current settings (see @ref oft_in_groups)'''
         with open(self.oft_ifile, 'w+') as fid:
             for name, options in self.oft_in_groups.items():
                 fid.write("&{0}\n".format(name))

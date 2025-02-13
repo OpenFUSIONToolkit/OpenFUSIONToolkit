@@ -46,7 +46,7 @@ class Marklin():
     def __init__(self,OFT_env):
         '''! Initialize Marklin object
 
-        @param debug_level Level of debug printing (0-3)
+        @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         '''
         # Create OFT execution environment
         self._oft_env = OFT_env

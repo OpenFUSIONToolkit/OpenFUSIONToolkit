@@ -23,6 +23,13 @@ eC = 1.60217663e-19
 
 
 def run_shell_command(command, timeout=10, env_vars={}):
+    '''! Run a shell command
+
+    @param command Command and arguments to run
+    @param timeout Timeout for command to complete [seconds]
+    @param env_vars Modifications to runtime environment
+    @returns `result` STDOUT, `errcode` Error code from command
+    '''
     # Run shell command
     my_env = os.environ.copy()
     for key, val in env_vars.items():

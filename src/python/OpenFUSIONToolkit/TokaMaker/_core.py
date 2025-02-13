@@ -15,6 +15,7 @@ from ._interface import *
 def tokamaker_default_settings(oft_env):
     '''! Initialize settings object with default values
 
+    @param oft_env Current runtime environment
     @result tokamaker_settings_struct object
     '''
     settings = tokamaker_settings_struct()
@@ -83,7 +84,7 @@ class TokaMaker():
     def __init__(self,OFT_env):
         '''! Initialize TokaMaker object
 
-        @param debug_level Level of debug printing (0-3)
+        @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         '''
         # Create OFT execution environment
         self._oft_env = OFT_env
