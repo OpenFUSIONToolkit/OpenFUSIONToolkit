@@ -4,7 +4,7 @@ from ..util import write_native_mesh
 
 
 def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], pmap=None, nfp=None):
-    r'''Create a native HDF5 mesh file for ThinCurr from the given mesh information
+    r'''! Create a native HDF5 mesh file for ThinCurr from the given mesh information
 
     @param filename Filename for mesh file
     @param r Points list [np,3]
@@ -23,21 +23,8 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], pmap=None, 
             h5_file.create_dataset('thincurr/periodicity/nfp', data=[nfp,], dtype='i4')
 
 
-def write_periodic_mesh(filename, r, lc, reg, tnodeset, pnodesets, pmap=None, nfp=1, include_closures=True):
-    if include_closures:
-        closures = numpy.arange(nfp)*int(lc.shape[0]/nfp)+1
-    else:
-        closures = []
-    if nfp == 1:
-        write_ThinCurr_mesh(filename, r, lc, reg,
-           holes=[tnodeset+1, pnodesets[0]+1], closures=closures)
-    else:
-        write_ThinCurr_mesh(filename, r, lc, reg,
-           holes=[tnodeset+1] + [pnodeset+1 for pnodeset in pnodesets], closures=closures, pmap=pmap, nfp=nfp)
-
-
 def build_regcoil_grid(filename, field_suffix, ntheta, nphi, full_torus=False):
-    r'''Build a uniform grid from a REGCOIL definition
+    r'''! Build a uniform grid from a REGCOIL definition
 
     @param field_suffix Suffix for netCDF fields (eg. "plasma" or "coil")
     @param ntheta Number of points in the \f$ \theta \f$ (poloidal) direction
@@ -72,7 +59,7 @@ def build_regcoil_grid(filename, field_suffix, ntheta, nphi, full_torus=False):
 
 
 def build_torus_bnorm_grid(filename,nsample,nphi,resample_type='theta',use_spline=False):
-    r'''Build a uniform grid from a toroidal surface B-norm definition file
+    r'''! Build a uniform grid from a toroidal surface B-norm definition file
 
     @param filename Filename of B-norm poloidal mode definition
     @param nsample Number of points in the \f$ \theta \f$ (poloidal) direction
@@ -193,8 +180,9 @@ def build_torus_bnorm_grid(filename,nsample,nphi,resample_type='theta',use_splin
 
 
 class ThinCurr_periodic_toroid:
+    '''! Helper class for working with periodic toroid models'''
     def __init__(self,r_grid,nfp,nphi,ntheta):
-        r'''Build triangular mesh for the full surface from a uniform grid of a single field period (toroidal)
+        r'''! Build triangular mesh for the full surface from a uniform grid of a single field period (toroidal)
 
         @param r_grid Uniform grid [nphi,ntheta,3] (\f$ \phi \f$ and \f$ \theta \f$ vary along the first and second dimension respectively)
         @param nfp Number of field periods
@@ -232,7 +220,7 @@ class ThinCurr_periodic_toroid:
                 self.pnodesets.append(pnodeset+i*(nphi-1)*ntheta)
     
     def plot_mesh(self,fig):
-        '''Plot mesh and holes
+        '''! Plot mesh and holes
 
         @param fig Figure to use for plots (must be empty)
         '''
@@ -246,7 +234,7 @@ class ThinCurr_periodic_toroid:
         _ = ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lc, cmap='viridis', antialiased=False)
     
     def write_to_file(self,filename,reg=None,include_closures=True):
-        '''Save mesh to file in ThinCurr format
+        '''! Save mesh to file in ThinCurr format
 
         @param filename Filename for mesh file
         @param reg Region list [nc,]
@@ -266,7 +254,7 @@ class ThinCurr_periodic_toroid:
                 holes=[self.tnodeset+1] + [pnodeset+1 for pnodeset in self.pnodesets], closures=closures, pmap=self.r_map, nfp=self.nfp)
 
     def condense_matrix(self,matrix,axis=None):
-        '''Condense matrix to unique DOF only by combining poloidal nodesets
+        '''! Condense matrix to unique DOF only by combining poloidal nodesets
 
         @param matrix Initial matrix in full ThinCurr representation (includes copies of poloidal nodesets)
         @param axis Axis to act on (both if `None`)
@@ -296,7 +284,7 @@ class ThinCurr_periodic_toroid:
             return matrix
     
     def nodes_to_unique(self,vector,tor_val=0.0,pol_val=0.0,remove_closure=True):
-        '''Maps a vector of values on all nodes within a single field period
+        '''! Maps a vector of values on all nodes within a single field period
         to unique DOFs
 
         @param vector Vector of values on nodes
@@ -312,7 +300,7 @@ class ThinCurr_periodic_toroid:
             return numpy.r_[vector,tor_val,pol_val]
 
     def expand_vector(self,vector):
-        '''Expand vector from unique DOF by duplicating poloidal nodesets
+        '''! Expand vector from unique DOF by duplicating poloidal nodesets
 
         @param vector Vector of values for unique DOF
         @returns Expanded vector
@@ -325,7 +313,7 @@ class ThinCurr_periodic_toroid:
         return output
 
     def unique_to_nodes_2D(self,data):
-        '''Maps a vector of values for unique DOFs to all nodes within a single field period
+        '''! Maps a vector of values for unique DOFs to all nodes within a single field period
         and reshape to a structured 2D grid
 
         @param vector Vector of values on nodes
@@ -343,7 +331,7 @@ class ThinCurr_periodic_toroid:
 
 
 def build_triangles_from_grid(data_grid,wrap_n=True,wrap_m=True):
-    r'''Build triangles from a uniform grid of points
+    r'''! Build triangles from a uniform grid of points
 
     @param data_grid Uniform point grid [n,m,3]
     @param wrap_n Wrap grid in n-direction?
