@@ -22,6 +22,24 @@ mu0 = numpy.pi*4.E-7
 eC = 1.60217663e-19
 
 
+def run_shell_command(command, timeout=10, env_vars={}):
+    # Run shell command
+    my_env = os.environ.copy()
+    for key, val in env_vars.items():
+        my_env[key] = val
+    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=my_env)
+    # Wait for process to complete or timeout
+    try:
+        outs, _ = pid.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pid.kill()
+        outs, _ = pid.communicate()
+        print("WARNING: Command timeout")
+    errcode = pid.poll()
+    result = outs.decode("utf-8")
+    return result, errcode
+
+
 def build_XDMF(path='.',repeat_static=False,pretty=False):
     '''! Build XDMF plot metadata files 
 

@@ -1,7 +1,9 @@
+import platform
 import shutil
 import tempfile
 import numpy
 from ._interface import *
+from .util import run_shell_command
 
 
 class OFT_env():
@@ -16,6 +18,35 @@ class OFT_env():
         'local_file': Use current working directory and append unique identifier to filenames,
         'none': Use non-unique names in local directory; can lead to conflict with multiple instances)
         '''
+        ## OS type
+        self.os = platform.uname()[0]
+        ## Number of physical CPUs (if multiple types are present only "performance" are counted)
+        self.ncpus = None
+        if self.os == 'Darwin':
+            try:
+                result, errcode = run_shell_command('sysctl -n hw.perflevel0.physicalcpu')
+                if errcode == 0:
+                    self.ncpus = int(result)
+            except:
+                pass
+        elif self.os == 'Linux':
+            try:
+                result, errcode = run_shell_command('lscpu -p=CORE')
+                if errcode == 0:
+                    max_cpu = 0
+                    for line in result.splitlines():
+                        if line.startswith('#'):
+                            continue
+                        max_cpu = max(max_cpu,int(line))
+                    self.ncpus = max_cpu+1
+            except:
+                pass
+        if self.ncpus is None:
+            print("WARNING: Could not detect number of physical cores.")
+        else:
+            if nthreads > self.ncpus:
+                print('Warning: Request of {0} threads exceeds {1} physical cores detected by OFT (excluding "efficiency" cores)'.format(nthreads, self.ncpus))
+                print("         If correct, this will significantly degrade performance.")
         ## ID of Python interpreter process
         self.pid = os.getpid()
         if unique_tempfiles == 'global':
