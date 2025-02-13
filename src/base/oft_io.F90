@@ -30,11 +30,11 @@ TYPE :: oft_bin_file
   INTEGER(i4) :: nbytes = 0 !< Number of bytes per line
   INTEGER(i4), POINTER, DIMENSION(:) :: field_size => NULL() !< Dimension of each field
   CHARACTER(LEN=OFT_PATH_SLEN) :: filename = '' !< Output filename
-  CHARACTER(LEN=80) :: filedesc = '' !< Description string
+  CHARACTER(LEN=OFT_SLEN) :: filedesc = '' !< Description string
   CHARACTER(LEN=2), POINTER, DIMENSION(:) :: field_type => NULL() !< Field types
-  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: field_names => NULL() !< Field names
-  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: field_desc => NULL() !< Field descriptions
-  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: comm_lines => NULL() !< Comment lines
+  CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: field_names => NULL() !< Field names
+  CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: field_desc => NULL() !< Field descriptions
+  CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: comm_lines => NULL() !< Comment lines
 CONTAINS
   !> Create object and allocate storage
   PROCEDURE :: setup => bin_file_setup
@@ -152,8 +152,8 @@ CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: desc !< Description of field
 INTEGER(i4), OPTIONAL, INTENT(in) :: fsize !< Size of field
 INTEGER(i4) :: fsize_tmp
 INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp
-CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: names_tmp
-CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: desc_tmp
+CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: names_tmp
+CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: desc_tmp
 CHARACTER(LEN=2), POINTER, DIMENSION(:) :: types_tmp
 IF((type_str(1:1)/='i').AND.(type_str(1:1)/='r'))THEN
   CALL oft_abort("Invalid field type", "bin_file_add", __FILE__)
@@ -168,10 +168,10 @@ ELSE IF(type_str(2:2)=='8')THEN
 ELSE
   CALL oft_abort("Invalid field size", "bin_file_add", __FILE__)
 END IF
-IF(LEN(fieldname)>OFT_HIST_SLEN)CALL oft_abort('Name too long', &
+IF(LEN(fieldname)>OFT_SLEN)CALL oft_abort('Name too long', &
   "bin_file_add",__FILE__)
 IF(PRESENT(desc))THEN
-  IF(LEN(desc)>OFT_HIST_SLEN)CALL oft_abort('Description too long', &
+  IF(LEN(desc)>OFT_SLEN)CALL oft_abort('Description too long', &
     "bin_file_add",__FILE__)
 END IF
 !
@@ -211,8 +211,8 @@ END SUBROUTINE bin_file_add
 SUBROUTINE bin_file_add_comm(self,comment)
 CLASS(oft_bin_file), INTENT(inout) :: self !< File object
 CHARACTER(LEN=*), INTENT(in) :: comment !< Comment to add
-CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: comm_tmp
-IF(LEN(comment)>OFT_HIST_SLEN)CALL oft_abort('Comment too long', &
+CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: comm_tmp
+IF(LEN(comment)>OFT_SLEN)CALL oft_abort('Comment too long', &
   "bin_file_add_comm",__FILE__)
 IF(self%ncomm>0)THEN
   comm_tmp=>self%comm_lines
@@ -363,8 +363,8 @@ end subroutine hdf5_create_timestep
 !---------------------------------------------------------------------------
 function hdf5_proc_str(proc_ind) result(proc_str)
 integer(i4), optional, intent(in) :: proc_ind
-character(LEN=HDF5_TLEN) :: proc_str
-100 FORMAT (I HDF5_TLEN.HDF5_TLEN)
+character(LEN=OFT_MPI_PLEN) :: proc_str
+100 FORMAT (I OFT_MPI_PLEN.OFT_MPI_PLEN)
 IF(PRESENT(proc_ind))THEN
   write(proc_str,100)proc_ind+1
 ELSE
@@ -375,8 +375,8 @@ end function hdf5_proc_str
 !> Get timestep index as string for HDF5 I/O
 !---------------------------------------------------------------------------
 function hdf5_ts_str() result(ts_str)
-character(LEN=HDF5_TLEN) :: ts_str
-100 FORMAT (I HDF5_TLEN.HDF5_TLEN)
+character(LEN=OFT_MPI_PLEN) :: ts_str
+100 FORMAT (I OFT_MPI_PLEN.OFT_MPI_PLEN)
 write(ts_str,100)hdf5_ts
 end function hdf5_ts_str
 !---------------------------------------------------------------------------

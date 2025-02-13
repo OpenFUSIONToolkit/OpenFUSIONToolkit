@@ -19,6 +19,10 @@ option(OFT_DOCS_ONLY "Build documentation only?" OFF)
 option(OFT_PACKAGE_BUILD "Perform a destributable package?" OFF)
 option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" ON)
 option(OFT_COVERAGE "Build with code coverage information?" OFF)
+set(OFT_MPI_PLEN "4" CACHE STRING "Size of strings for MPI processor index")
+set(OFT_PATH_SLEN "200" CACHE STRING "Size of path strings")
+set(OFT_ERROR_SLEN "200" CACHE STRING "Size of error strings")
+set(OFT_SLEN "80" CACHE STRING "General string length")
 
 # Internal variables
 set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")

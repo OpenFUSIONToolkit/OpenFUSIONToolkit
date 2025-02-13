@@ -849,7 +849,7 @@ subroutine gs_save_decon(gseq,npsi,ntheta,error_str)
 class(gs_eq), intent(inout) :: gseq
 integer(4), intent(in) :: npsi
 integer(4), intent(in) :: ntheta
-CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
+CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 type(gsinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
@@ -1053,7 +1053,7 @@ CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
-CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
+CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)

@@ -4,7 +4,7 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
-from ..util import *
+from .._interface import *
 
 
 class tokamaker_settings_struct(c_struct):
@@ -32,7 +32,7 @@ class tokamaker_settings_struct(c_struct):
                 ("nl_tol", c_double),
                 ("rmin", c_double),
                 ("lim_zmax", c_double),
-                ("limiter_file", ctypes.c_char*80)]
+                ("limiter_file", ctypes.c_char_p)]
 
 
 ## @cond

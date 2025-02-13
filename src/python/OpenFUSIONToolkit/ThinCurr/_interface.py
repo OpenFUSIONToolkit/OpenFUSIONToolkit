@@ -4,7 +4,7 @@
 @date March 2024
 @ingroup doxy_oft_python
 '''
-from ..util import *
+from .._interface import *
 
 
 ## @cond

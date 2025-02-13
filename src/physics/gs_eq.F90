@@ -35,8 +35,8 @@ TYPE, PUBLIC, EXTENDS(fem_interp) :: oft_gs_eq
   REAL(r8) :: pmax = 0.d0 !< Maximum pressure
   REAL(r8), POINTER, DIMENSION(:) :: Pvals => NULL() !< Nodal pressure values
   REAL(r8), POINTER, DIMENSION(:,:) :: Bvals => NULL() !< Nodal B-Field values
-  CHARACTER(LEN=OFT_HIST_SLEN) :: grid_file = 'none' !< File containing 2D grid
-  CHARACTER(LEN=OFT_HIST_SLEN) :: field_file = 'none' !< File containing field data
+  CHARACTER(LEN=OFT_PATH_SLEN) :: grid_file = 'none' !< File containing 2D grid
+  CHARACTER(LEN=OFT_PATH_SLEN) :: field_file = 'none' !< File containing field data
   TYPE(oft_trimesh) :: mesh !< 2D triangular grid
   CLASS(oft_afem_type), POINTER :: lagrange => NULL() !< FE representation on 2D grid
   TYPE(oft_lag_brinterp) :: P_interp !< Pressure field interpolation object
