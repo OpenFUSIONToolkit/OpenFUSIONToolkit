@@ -166,7 +166,11 @@ def build_torus_bnorm_grid(filename,nsample,nphi,resample_type='theta',use_splin
         for j in range(3):
             mode_resample[:,j]=numpy.interp(resample_grid,mode_in[:npts+2,3],mode_in[:npts+2,j])
             mode_resample[:,3+j]=numpy.interp(resample_grid,mode_in[:npts+2,3],mode_in[:npts+2,4+j])
-    print('  Mode pair sums {0:.4E} {1:.4E}'.format(mode_resample[:,2].sum(),mode_resample[:,5].sum()))
+    sin_sum = mode_resample[:,2].sum(); sin_sum_abs = abs(mode_resample[:,2]).sum()
+    cos_sum = mode_resample[:,5].sum(); cos_sum_abs = abs(mode_resample[:,5]).sum()
+    print('  Mode pair sums {0:.4E} {1:.4E}'.format(sin_sum,cos_sum))
+    if (abs(sin_sum/sin_sum_abs) > 1.E-4) or (abs(cos_sum/cos_sum_abs) > 1.E-4):
+        print('Warning: Large net flux present in one or more modes! This may indicate an error.')
     #
     phi_grid = numpy.linspace(0.0,2.0*numpy.pi/nmode,nphi,endpoint=(nmode>1))
     r = numpy.zeros((nphi,nsample,3))
