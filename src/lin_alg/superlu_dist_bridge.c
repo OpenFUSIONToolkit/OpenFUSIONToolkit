@@ -7,10 +7,11 @@
  *
  * Modified for use with Open FUSION Toolkit by Chris Hansen (December 2014)
  */
+#include <stdbool.h>
 #include "superlu_ddefs.h"
 
 void
-oft_superlu_dist_slugrid_c(int *iopt, MPI_Comm *slu_comm, int *nprow, int *npcol,
+oft_superlu_dist_slugrid_c(int iopt, int *slu_comm, int nprow, int npcol,
 				   gridinfo_t **grid_handle, int *info)
 /*
  * This routine provides a fortran call for initializing and
@@ -29,25 +30,26 @@ oft_superlu_dist_slugrid_c(int *iopt, MPI_Comm *slu_comm, int *nprow, int *npcol
 {
 	gridinfo_t *grid;
 
-	if ( *iopt == 1 ) {
+	if ( iopt == 1 ) {
 		/* Allocate the grid structure. */
 		grid = (gridinfo_t *) SUPERLU_MALLOC(sizeof(gridinfo_t));
 
 		/* Initialize the process grid. */
-		superlu_gridinit(*slu_comm, *nprow, *npcol, grid);
+		MPI_Comm cComm = MPI_Comm_f2c(*slu_comm);
+		superlu_gridinit(cComm, nprow, npcol, grid);
 
 		/* Set the handle passed from fortran, so that the
 		* process grid can be reused. */
 		*grid_handle = grid;
 		*info = 0;
-	} else if ( *iopt == 2 ) {
+	} else if ( iopt == 2 ) {
 		/* Locate and free the process grid. */
 		grid = *grid_handle;
 		superlu_gridexit(grid);
 		SUPERLU_FREE(grid);
 		*info = 0;
 	} else {
-		fprintf(stderr, "Invalid iopt=%d passed to oft_superlu_dist_slugrid_c()\n", *iopt);
+		printf("Invalid iopt=%d passed to oft_superlu_dist_slugrid_c()\n", iopt);
 		*info = -1;
 	}
 }
@@ -64,10 +66,10 @@ typedef struct {
 } factors_dist_t;
 
 void
-oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
+oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 				double *values, int_t *colind, int_t *rowptr,
-				double *b, int *ldb, gridinfo_t **grid_handle,
-				factors_dist_t **f_factors, int *perm_spec, int *info)
+				double *b, int ldb, gridinfo_t **grid_handle,
+				factors_dist_t **f_factors, int perm_spec, bool iter_refine, int *info)
 
 {
 /*
@@ -130,7 +132,7 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 
 	/* Locate the process grid. */
 	grid = *grid_handle;
-	if ( *iopt == 1 || *iopt == 3 ) { /* LU decomposition */
+	if ( iopt == 1 || iopt == 3 ) { /* LU decomposition */
 		if ( !*f_factors ) {
             /*
             * Get column permutation vector perm_c[], according to permc_spec:
@@ -143,16 +145,16 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
             /* */
 #if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
 			ScalePermstruct = (dScalePermstruct_t *) SUPERLU_MALLOC(sizeof(dScalePermstruct_t));
-			dScalePermstructInit(*n, *n, ScalePermstruct);
+			dScalePermstructInit(n, n, ScalePermstruct);
 			LUstruct = (dLUstruct_t *) SUPERLU_MALLOC(sizeof(dLUstruct_t));
-			dLUstructInit(*n, LUstruct);
+			dLUstructInit(n, LUstruct);
 #else
 			ScalePermstruct = (ScalePermstruct_t *) SUPERLU_MALLOC(sizeof(ScalePermstruct_t));
-			ScalePermstructInit(*n, *n, ScalePermstruct);
+			ScalePermstructInit(n, n, ScalePermstruct);
 			LUstruct = (LUstruct_t *) SUPERLU_MALLOC(sizeof(LUstruct_t));
-			LUstructInit(*n, LUstruct);
+			LUstructInit(n, LUstruct);
 #endif	
-			dCreate_CompCol_Matrix_dist(&A, *n, *n, *nnz, values, colind, rowptr,
+			dCreate_CompCol_Matrix_dist(&A, n, n, nnz, values, colind, rowptr,
 						SLU_NC, SLU_D, SLU_GE);
 			// Setup saved info
 			LUfactors = (factors_dist_t*) SUPERLU_MALLOC(sizeof(factors_dist_t));
@@ -163,34 +165,34 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 			// Update matrix
 			A = LUfactors->A;
 			Destroy_SuperMatrix_Store_dist(&A);
-			dCreate_CompCol_Matrix_dist(&A, *n, *n, *nnz, values, colind, rowptr,
+			dCreate_CompCol_Matrix_dist(&A, n, n, nnz, values, colind, rowptr,
 						SLU_NC, SLU_D, SLU_GE);
 			// Destroy and recreate
 #if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
-			dDestroy_LU(*n, grid, LUfactors->LUstruct);
+			dDestroy_LU(n, grid, LUfactors->LUstruct);
 			dLUstructFree(LUfactors->LUstruct);
 			SUPERLU_FREE(LUfactors->LUstruct);
 			LUstruct = (dLUstruct_t *) SUPERLU_MALLOC(sizeof(dLUstruct_t));
-			dLUstructInit(*n, LUstruct);
+			dLUstructInit(n, LUstruct);
 #else
-			Destroy_LU(*n, grid, LUfactors->LUstruct);
+			Destroy_LU(n, grid, LUfactors->LUstruct);
 			LUstructFree(LUfactors->LUstruct);
 			SUPERLU_FREE(LUfactors->LUstruct);
 			LUstruct = (LUstruct_t *) SUPERLU_MALLOC(sizeof(LUstruct_t));
-			LUstructInit(*n, LUstruct);
+			LUstructInit(n, LUstruct);
 #endif
-			if ( *iopt == 1 ) {
+			if ( iopt == 1 ) {
 				// Destroy and recreate
 #if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
 				dScalePermstructFree(LUfactors->ScalePermstruct);
 				SUPERLU_FREE(LUfactors->ScalePermstruct);
 				ScalePermstruct = (dScalePermstruct_t *) SUPERLU_MALLOC(sizeof(dScalePermstruct_t));
-				dScalePermstructInit(*n, *n, ScalePermstruct);
+				dScalePermstructInit(n, n, ScalePermstruct);
 #else
 				ScalePermstructFree(LUfactors->ScalePermstruct);
 				SUPERLU_FREE(LUfactors->ScalePermstruct);
 				ScalePermstruct = (ScalePermstruct_t *) SUPERLU_MALLOC(sizeof(ScalePermstruct_t));
-				ScalePermstructInit(*n, *n, ScalePermstruct);
+				ScalePermstructInit(n, n, ScalePermstruct);
 #endif			
 			} else {
 				ScalePermstruct = LUfactors->ScalePermstruct;
@@ -201,26 +203,26 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 		set_default_options_dist(&options);
 		options.Equil = NO;
 #if (SUPERLU_DIST_MAJOR_VERSION > 5) || ((SUPERLU_DIST_MAJOR_VERSION == 5) && (SUPERLU_DIST_MINOR_VERSION > 3))
-                options.RowPerm = LargeDiag_MC64;
+		options.RowPerm = LargeDiag_MC64;
 #else
-                options.RowPerm = LargeDiag;
+		options.RowPerm = LargeDiag;
 #endif
 		options.ColPerm = MMD_AT_PLUS_A;
 		options.ReplaceTinyPivot = NO;
-		options.IterRefine = NO;
+		if (!iter_refine) options.IterRefine = NO;
 		options.Trans = NOTRANS;
 		options.SolveInitialized = NO;
 		options.RefineInitialized = NO;
 		options.PrintStat = NO;
 		//
 		options.Fact = DOFACT;
-		if ( *iopt == 3 ) options.Fact = SamePattern;
+		if ( iopt == 3 ) options.Fact = SamePattern;
 
 		/* Initialize the statistics variables. */
 		PStatInit(&stat);
 
 		/* Call global routine with nrhs=0 to perform the factorization. */
-		pdgssvx_ABglobal(&options, &A, ScalePermstruct, NULL, *ldb, 0,
+		pdgssvx_ABglobal(&options, &A, ScalePermstruct, NULL, ldb, 0,
 						grid, LUstruct, berr, &stat, info);
 
 		LUfactors->ScalePermstruct = ScalePermstruct;
@@ -230,7 +232,7 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 		/* Free un-wanted storage */
 		PStatFree(&stat);
 
-	} else if ( *iopt == 2 ) { /* Triangular solve */
+	} else if ( iopt == 2 ) { /* Triangular solve */
 
 		/* Extract the LU factors in the factors handle */
 		LUfactors = *f_factors;
@@ -250,7 +252,7 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 #endif
 		options.ColPerm = MMD_AT_PLUS_A;
 		options.ReplaceTinyPivot = NO;
-		options.IterRefine = NO;
+		if (!iter_refine) options.IterRefine = NO;
 		options.Trans = NOTRANS;
 		options.SolveInitialized = NO;
 		options.RefineInitialized = NO;
@@ -258,28 +260,28 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 		//
 		options.Fact = FACTORED;
 
-		berr = (double *) malloc(*n * sizeof(double));
+		berr = (double *) malloc(nrhs * sizeof(double));
 
 		/* Solve the system A*X=B, overwriting B with X. */
-		pdgssvx_ABglobal(&options, &A, ScalePermstruct, b, *ldb, *nrhs,
+		pdgssvx_ABglobal(&options, &A, ScalePermstruct, b, ldb, nrhs,
 						grid, LUstruct, berr, &stat, info);
 
 		/* Free un-wanted storage */
 		PStatFree(&stat);
 		SUPERLU_FREE(berr);
 
-	} else if ( *iopt == 4 ) { /* Free storage */
+	} else if ( iopt == 4 ) { /* Free storage */
 
 		/* Free the LU factors in the factors handle */
 		LUfactors = *f_factors;
 		A = LUfactors->A;
 		Destroy_SuperMatrix_Store_dist(&A);
 #if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
-		dDestroy_LU(*n, grid, LUfactors->LUstruct);
+		dDestroy_LU(n, grid, LUfactors->LUstruct);
 		dLUstructFree(LUfactors->LUstruct);
 		dScalePermstructFree(LUfactors->ScalePermstruct);
 #else
-		Destroy_LU(*n, grid, LUfactors->LUstruct);
+		Destroy_LU(n, grid, LUfactors->LUstruct);
 		LUstructFree(LUfactors->LUstruct);
 		ScalePermstructFree(LUfactors->ScalePermstruct);
 #endif
@@ -288,7 +290,7 @@ oft_superlu_dist_dgssv_c(int *iopt, int_t *n, int_t *nnz, int *nrhs,
 		SUPERLU_FREE(LUfactors);
 
 	} else {
-		fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dist_dgsisx_c()\n",*iopt);
+		fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dist_dgsisx_c()\n",iopt);
 		*info = -1;
 	}
 }
