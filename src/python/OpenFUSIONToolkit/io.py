@@ -20,15 +20,15 @@ eol_byte = '\n'.encode()
 
 
 class histfile:
-    r'''Class for loading and analyzing a structured OFT binary file'''
+    r'''! Class for loading and analyzing a structured OFT binary file'''
     def __init__(self,filename):
-        r'''Load and parse binary file into Python representation'''
+        r'''! Load and parse binary file into Python representation'''
         def decode_list(list):
-            r'''Decode list for Python 3 compatibility'''
+            '''! Decode list for Python 3 compatibility'''
             return [val.decode("utf-8") for val in list]
         
         def setup_sizes(data_reg):
-            r'''Reader header information and setup binary reads'''
+            r'''! Reader header information and setup binary reads'''
             base_dict = {}
             self.dim = None
             for line in self.content[:data_reg].split(eol_byte):
@@ -93,7 +93,7 @@ class histfile:
                     self.line_fmt += self.field_types[ind]*self.field_repeats[ind]
 
         def setup_sizes_legacy():
-            r'''Reader header information and setup binary reads using legacy format'''
+            r'''! Reader header information and setup binary reads using legacy format'''
             self.offset = 4
             tmp = struct.unpack_from("i",self.content,offset=self.offset)
             self.offset += 12
@@ -216,7 +216,7 @@ class histfile:
             self._data[key] = numpy.asarray(data)
 
     def save_to_matlab(self,filename):
-        r'''Convert data to MATLAB format'''
+        r'''! Convert data to MATLAB format'''
         try:
             import scipy.io as sio
         except:
@@ -227,7 +227,7 @@ class histfile:
             sio.savemat(filename, self._data, oned_as='row')
 
     def save_to_hdf5(self,filename):
-        r'''Convert data to HDF5 format'''
+        r'''! Convert data to HDF5 format'''
         try:
             import h5py
         except:
@@ -256,7 +256,7 @@ class histfile:
         return iter(self._data)
 
     def __repr__(self):
-        r'''Print information about the file'''
+        r'''! Print information about the file'''
         result = "\nOFT History file: {0}\n".format(self._filename)
         result += "  Number of fields = {0}\n".format(self.nfields)
         result += "  Number of entries = {0}\n".format(self.nlines)
@@ -271,7 +271,12 @@ class histfile:
 
 
 class XDMF_plot_mesh:
+    '''! Class containing data for a single mesh from OFT plot files'''
     def __init__(self,mesh_obj):
+        '''! Read in data and setup object
+
+        @param mesh_obj HDF5 group corresponding to mesh (file needs to be open)
+        '''
         self.type = mesh_obj['TYPE'][()]
         self.r = numpy.asarray(mesh_obj['R'])
         self.lc = numpy.asarray(mesh_obj['LC'])
@@ -301,6 +306,11 @@ class XDMF_plot_mesh:
         self.times = numpy.array(self.times)
         
     def get_field(self,name,time=None):
+        '''! Get raw data associated with field at a given time
+
+        @param name Name of field
+        @param time Time to sample at
+        '''
         if time is None:
             if name not in self.static_fields:
                 raise KeyError('"{0}" is not one of the static fields'.format(name))
@@ -318,6 +328,10 @@ class XDMF_plot_mesh:
             raise ValueError("Requested time outside available range [{0:.6E},{1:.6E}]".format(self.times[0],self.times[-1]))
     
     def get_pyvista_grid(self):
+        '''! Get pyvista representation of grid
+
+        @returns `pyvista.UnstructuredGrid` object for grid
+        '''
         import pyvista
         if self.type == 31:
             celltype = pyvista.CellType.TETRA
@@ -346,22 +360,34 @@ class XDMF_plot_mesh:
 
 
 class XDMF_plot_file:
-    def __init__(self,filename):
-        self.filename = filename
+    '''! Helper class for interacting with OFT plotting output files'''
+    def __init__(self,filepath):
+        '''! Load data from file and setup object
+
+        @param filename Path to HDF5 plotting file
+        '''
+        self.filepath = filepath
         self._groups = {}
-        with h5py.File(self.filename,'r') as h5_file:
+        with h5py.File(self.filepath,'r') as h5_file:
             for group_key, group_obj in h5_file.items():
                 self._groups[group_key] = {}
                 for mesh_key, mesh_obj in group_obj.items():
                     self._groups[group_key][mesh_key] = XDMF_plot_mesh(mesh_obj)
     
     def get(self, keyname, value=None):
+        '''! Get plotting group (list of @ref XDMF_plot_mesh "meshes")
+
+        @param keyname Name of group
+        @param value Return value if not found
+        '''
         return self._groups.get(keyname,value)
 
     def keys(self):
+        '''! Get plotting groups in file'''
         return self._groups.keys()
 
     def items(self):
+        '''! Return iterator over plotting group (name, value) pairs'''
         return self._groups.items()
 
     def __getitem__(self, key):
@@ -369,7 +395,6 @@ class XDMF_plot_file:
     
     def __iter__(self):
         return iter(self._groups)
-
 
 
 def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
