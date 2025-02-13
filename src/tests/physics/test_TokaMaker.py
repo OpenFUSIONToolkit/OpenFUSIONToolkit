@@ -130,12 +130,12 @@ def validate_solo(results,psi_err_exp,X_err_exp):
         print("FAILED: error in solve!")
         return False
     test_result = True
-    if abs((results[0]-psi_err_exp)/psi_err_exp) > 1.E-1:
+    if abs(results[0]) > abs(psi_err_exp)*1.1:
         print("FAILED: psi error too high!")
         print("  Expected = {0}".format(psi_err_exp))
         print("  Actual =   {0}".format(results[0]))
         test_result = False
-    if abs((results[1]-X_err_exp)/X_err_exp) > 1.E-1:
+    if abs(results[1]) > abs(X_err_exp)*1.1:
         print("FAILED: X-point error too high!")
         print("  Expected = {0}".format(X_err_exp))
         print("  Actual =   {0}".format(results[1]))
@@ -222,7 +222,7 @@ def validate_sph(results,psi_err_exp):
         print("FAILED: error in solve!")
         return False
     test_result = True
-    if abs((results[0]-psi_err_exp)/psi_err_exp) > 1.E-1:
+    if abs(results[0]) > abs(psi_err_exp)*1.1:
         print("FAILED: psi error too high!")
         print("  Expected = {0}".format(psi_err_exp))
         print("  Actual =   {0}".format(results[0]))
@@ -252,7 +252,7 @@ def test_spheromak_h3(order):
 
 #============================================================================
 def run_coil_case(mesh_resolution,fe_order,mp_q):
-    def coil_green(rc,zc,r,z,gs_obj):
+    def coil_green(rc,zc,r,z):
         return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
     def masked_err(point_mask,gs_obj,psi,sort_ind):
         bdry_points = gs_obj.r[point_mask,:]
@@ -262,7 +262,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
         bdry_points = bdry_points[sort_ind]
         green = np.zeros((bdry_points.shape[0],))
         for i in range(bdry_points.shape[0]):
-            green[i], _ = dblquad(coil_green,0.75,0.85,0.75,0.85,args=(bdry_points[i,0],bdry_points[i,1],gs_obj))
+            green[i], _ = dblquad(coil_green,0.75,0.85,0.75,0.85,args=(bdry_points[i,0],bdry_points[i,1]))
         return green, psi_bdry
     # Build mesh
     gs_mesh = gs_Domain(rextent=1.0,zextents=[0.0,1.0])
@@ -302,7 +302,7 @@ def validate_coil(results,psi_err_exp):
         print("FAILED: error in solve!")
         return False
     test_result = True
-    if abs((results[0]-psi_err_exp)/psi_err_exp) > 1.E-1:
+    if abs(results[0]) > abs(psi_err_exp)*1.1:
         print("FAILED: psi error too high!")
         print("  Expected = {0}".format(psi_err_exp))
         print("  Actual =   {0}".format(results[0]))

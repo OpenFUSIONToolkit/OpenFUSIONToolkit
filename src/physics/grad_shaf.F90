@@ -1728,7 +1728,7 @@ NULLIFY(btmp)
 call b%set(0.d0)
 CALL b%get_local(btmp)
 !---
-!$omp parallel private(j,rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
+!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
 allocate(rhs_loc(oft_blagrange%nce))
 allocate(rop(oft_blagrange%nce))
 allocate(j_lag(oft_blagrange%nce))
@@ -1739,9 +1739,8 @@ DO j=1,smesh%nc
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -5864,6 +5863,7 @@ DO i=1,self%bc_nrhs
       jc_int=jc
       CALL dqagse(integrand1,0.d0,1.d0,qp_int_tol,1.d2*qp_int_tol,qp_div_lim,val,abserr,neval,ierr, &
         work(1),work(qp_div_lim+1),work(2*qp_div_lim+1),work(3*qp_div_lim+1),iwork,last)
+      ! ierr=-1
       IF(ierr/=0)THEN
         nfail=nfail+1
         val = 0.d0
