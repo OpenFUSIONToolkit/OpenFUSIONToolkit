@@ -128,8 +128,8 @@ c           epmach is the largest relative spacing.
 c           uflow is the smallest positive magnitude.
 c
 c***first executable statement  dqk21
-      epmach = epsilon(1.d0) !d1mach(4)
-      uflow = tiny(1.d0) !d1mach(1)
+      epmach = epsilon(epmach) !d1mach(4)
+      uflow = tiny(uflow) !d1mach(1)
 c
       centr = 0.5d+00*(a+b)
       hlgth = 0.5d+00*(b-a)

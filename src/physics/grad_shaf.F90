@@ -1675,9 +1675,8 @@ DO j=1,smesh%nc
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -1728,7 +1727,7 @@ NULLIFY(btmp)
 call b%set(0.d0)
 CALL b%get_local(btmp)
 !---
-!$omp parallel private(j,rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
+!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
 allocate(rhs_loc(oft_blagrange%nce))
 allocate(rop(oft_blagrange%nce))
 allocate(j_lag(oft_blagrange%nce))
@@ -1739,9 +1738,8 @@ DO j=1,smesh%nc
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -1803,9 +1801,8 @@ DO kk=1,4
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -1873,9 +1870,8 @@ DO j=1,smesh%nc
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     pt=oft_blagrange%mesh%log2phys(j,oft_blagrange%quad%pts(:,m))
     psitmp=0.d0
@@ -1911,7 +1907,7 @@ integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns
+real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
 integer(4) :: j,m,l,k
 integer(4), allocatable :: j_lag(:)
@@ -1922,7 +1918,7 @@ NULLIFY(btmp)
 CALL b%get_local(btmp)
 !---
 mutual=0.d0
-!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns) reduction(+:mutual)
+!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psi_tmp,l,rop,nturns) reduction(+:mutual)
 allocate(rop(oft_blagrange%nce))
 allocate(j_lag(oft_blagrange%nce))
 !$omp do schedule(static,1)
@@ -1931,9 +1927,8 @@ DO j=1,smesh%nc
   IF(ABS(nturns)<1.d-10)CYCLE
   call oft_blagrange%ncdofs(j,j_lag)
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     psi_tmp=0.d0
     DO l=1,oft_blagrange%nce
@@ -1982,9 +1977,8 @@ DO j=1,smesh%nc
   IF(smesh%reg(j)/=1)CYCLE
   call oft_blagrange%ncdofs(j,j_lag)
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     call psi_eval%interp(j,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
     pt=smesh%log2phys(j,oft_blagrange%quad%pts(:,m))
     !---Compute Magnetic Field
@@ -3346,9 +3340,8 @@ do j=1,smesh%nc
     vcache(l) = atmp(j_lag(l))
   END DO
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -3450,9 +3443,8 @@ allocate(j_lag(oft_blagrange%nce))
 do j=1,smesh%nc
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     pt=smesh%log2phys(j,oft_blagrange%quad%pts(:,m))
     call psi_interp%interp(j,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
@@ -4078,12 +4070,13 @@ end subroutine psi2pt_error
 !! @param[in,out] r
 !! @param[in] z
 !---------------------------------------------------------------------------
-subroutine gs_psi2pt(self,psi_target,pt,pt_con,vec)
+subroutine gs_psi2pt(self,psi_target,pt,pt_con,vec,psi_int)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_target
 real(8), intent(inout) :: pt(2)
 real(8), intent(in) :: pt_con(2)
 real(8), intent(in) :: vec(2)
+type(oft_lag_brinterp), target, optional, intent(inout) :: psi_int
 type(oft_lag_brinterp), target :: psi_eval
 !---MINPACK variables
 real(8) :: ftol,xtol,gtol,epsfcn,factor,cofs(1),error(1)
@@ -4092,9 +4085,13 @@ real(8), allocatable, dimension(:,:) :: fjac
 integer(4) :: maxfev,mode,nprint,info,nfev,ldfjac,ncons,ncofs
 integer(4), allocatable, dimension(:) :: ipvt
 !---
-psi_eval%u=>self%psi
-CALL psi_eval%setup()
-psi_eval_active=>psi_eval
+IF(PRESENT(psi_int))THEN
+  psi_eval_active=>psi_int
+ELSE
+  psi_eval%u=>self%psi
+  CALL psi_eval%setup()
+  psi_eval_active=>psi_eval
+END IF
 psi_target_active=psi_target
 cell_active=0
 ! z_con_active=z
@@ -4123,7 +4120,7 @@ call lmdif(psi2pt_error,ncons,ncofs,cofs,error, &
               nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 deallocate(diag,fjac,qtf,wa1,wa2)
 deallocate(wa3,wa4,ipvt)
-CALL psi_eval%delete()
+IF(.NOT.PRESENT(psi_int))CALL psi_eval%delete()
 !---Save back result
 pt=pt_con_active+cofs(1)*vec_con_active
 end subroutine gs_psi2pt
@@ -4137,13 +4134,14 @@ end subroutine gs_psi2pt
 !! @param[in,out] r
 !! @param[in] z
 !---------------------------------------------------------------------------
-subroutine gs_psi2r(self,psi_target,pt)
+subroutine gs_psi2r(self,psi_target,pt,psi_int)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_target
 real(8), intent(inout) :: pt(2)
+type(oft_lag_brinterp), target, optional, intent(inout) :: psi_int
 real(8) :: vec(2)
 vec=[1.d0,0.d0]
-CALL gs_psi2pt(self,psi_target,pt,[self%o_point(1),pt(2)],vec)
+CALL gs_psi2pt(self,psi_target,pt,[self%o_point(1),pt(2)],vec,psi_int)
 end subroutine gs_psi2r
 !---------------------------------------------------------------------------
 ! FUNCTION gs_beta
@@ -4241,11 +4239,10 @@ wstored=0.d0
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
   ! Fetch whether curved or not
-  IF(.NOT.curved)call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
   do m=1,oft_blagrange%quad%np
     pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
     IF(gs_test_bounds(self,pt))THEN
-      IF(curved)call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
+      if(curved.OR.(m==1))call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
       call psi_eval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
       IF(psitmp(1)>self%plasma_bounds(1))THEN
         !---Update integrand
@@ -4698,7 +4695,7 @@ real(8), intent(out) :: prof(nr),dl,rbounds(2,2),zbounds(2,2)
 real(8), optional, intent(out) :: ravgs(nr,2)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
-type(oft_lag_brinterp) :: psi_int
+type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
@@ -4739,7 +4736,7 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-!$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
+!$omp parallel private(psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup()
 IF(PRESENT(ravgs))THEN
@@ -4770,7 +4767,7 @@ do j=1,nr
   !
   pt=pt_last
   !$omp critical
-  CALL gs_psi2r(gseq,psi_surf,pt)
+  CALL gs_psi2r(gseq,psi_surf,pt,psi_int)
   !$omp end critical
   CALL tracinginv_fs(pt(1:2),ptout)
   pt_last=pt
@@ -4817,6 +4814,7 @@ end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 !$omp end parallel
+CALL psi_int%delete()
 end subroutine gs_get_qprof
 !---------------------------------------------------------------------------
 !>
@@ -5858,6 +5856,7 @@ DO i=1,self%bc_nrhs
       jc_int=jc
       CALL dqagse(integrand1,0.d0,1.d0,qp_int_tol,1.d2*qp_int_tol,qp_div_lim,val,abserr,neval,ierr, &
         work(1),work(qp_div_lim+1),work(2*qp_div_lim+1),work(3*qp_div_lim+1),iwork,last)
+      ! ierr=-1
       IF(ierr/=0)THEN
         nfail=nfail+1
         val = 0.d0

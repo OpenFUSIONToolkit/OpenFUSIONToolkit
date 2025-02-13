@@ -43,6 +43,8 @@ REAL(r8) :: e3,sqrtx,sqrty,sqrtz,xt,yt,zt
 REAL(r8), PARAMETER :: ERRTOL=0.08d0
 REAL(r8), PARAMETER :: loc_tiny=1.d-38
 REAL(r8), PARAMETER :: loc_big=3.d37
+! REAL(r8), PARAMETER :: loc_tiny=TINY(0.d0)*6.d0
+! REAL(r8), PARAMETER :: loc_big=HUGE(0.d0)/6.d0
 REAL(r8), PARAMETER :: loc_third=1.d0/3.d0
 REAL(r8), PARAMETER :: C1=1.d0/24.d0
 REAL(r8), PARAMETER :: C2=.1d0
@@ -90,6 +92,8 @@ REAL(r8) :: ec,ed,ee,fac,sqrtx,sqrty,sqrtz,loc_sum,xt,yt,zt
 REAL(r8), PARAMETER :: ERRTOL=0.05d0
 REAL(r8), PARAMETER :: loc_tiny=1.d-25
 REAL(r8), PARAMETER :: loc_big=4.5d21
+! REAL(r8), PARAMETER :: loc_tiny=3.d0*(HUGE(0.d0)**-2.d0/3.d0)
+! REAL(r8), PARAMETER :: loc_big=ERRTOL*(TINY(0.d0)**-2.d0/3.d0)/1.5d0
 REAL(r8), PARAMETER :: C1=3.d0/14.d0
 REAL(r8), PARAMETER :: C2=1.d0/6.d0
 REAL(r8), PARAMETER :: C3=9.d0/22.d0

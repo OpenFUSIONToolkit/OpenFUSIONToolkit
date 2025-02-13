@@ -11,11 +11,11 @@ typedef struct {
 } factors_t;
 
 void
-oft_umfpack_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
+oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
                     double *values, int *colind, int *rowptr,
-                    double *b, int *ldb,
+                    double *b, int ldb,
                     factors_t **f_factors,
-                    int *col_perm, int *info)
+                    int col_perm, bool iter_refine, int *info)
 
 {
 /*
@@ -40,14 +40,14 @@ oft_umfpack_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
   factors_t *LUfactors;
   bool refactor;
 
-    if ( *iopt == 1 || *iopt == 3 ) { /* Perform full factorization */
+    if ( iopt == 1 || iopt == 3 ) { /* Perform full factorization */
 
       // Create or unpack storage structure
       if ( !*f_factors ) {
         LUfactors = (factors_t*) malloc(sizeof(factors_t));
         /* Set the default input options. */
         umfpack_di_defaults( LUfactors->Control);
-        LUfactors->Control[UMFPACK_IRSTEP] = 0;
+        if (!iter_refine) LUfactors->Control[UMFPACK_IRSTEP] = 0;
         *f_factors = LUfactors;
         refactor = false;
       } else {
@@ -56,11 +56,11 @@ oft_umfpack_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
       }
 
       // Perform factorization
-      if ( *iopt == 1 ) {
+      if ( iopt == 1 ) {
         if (refactor) {
           umfpack_di_free_symbolic( &LUfactors->Symbolic);
         }
-        status = umfpack_di_symbolic( *n, *n, rowptr, colind, values, &LUfactors->Symbolic, LUfactors->Control, Info);
+        status = umfpack_di_symbolic( n, n, rowptr, colind, values, &LUfactors->Symbolic, LUfactors->Control, Info);
         if ( status != 0 ){
           *info = status;
           return;
@@ -72,21 +72,21 @@ oft_umfpack_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
       status = umfpack_di_numeric( rowptr, colind, values, LUfactors->Symbolic, &LUfactors->Numeric, LUfactors->Control, Info);
       *info = status;
 
-    } else if ( *iopt == 2 ) { /* Perform solve */
+    } else if ( iopt == 2 ) { /* Perform solve */
 
       LUfactors = *f_factors;
       double *x;
-      x  = (double *) malloc(*n * sizeof(double));
-      for (j = 0; j < *nrhs; j++)  {
-        for (i = 0; i < *n; i++) x[i] = b[i + j*(*n)];
+      x  = (double *) malloc(n * sizeof(double));
+      for (j = 0; j < nrhs; j++)  {
+        for (i = 0; i < n; i++) x[i] = b[i + j*n];
         // Reversed order of x -> b
-        status = umfpack_di_solve( UMFPACK_At, rowptr, colind, values, b+j*(*n), x, LUfactors->Numeric, LUfactors->Control, Info);
+        status = umfpack_di_solve( UMFPACK_At, rowptr, colind, values, b+j*n, x, LUfactors->Numeric, LUfactors->Control, Info);
         if ( status != 0 ) break;
       }
       free(x);
       *info = status;
 
-    } else if ( *iopt == 4 ) { /* free storage */
+    } else if ( iopt == 4 ) { /* free storage */
 
       LUfactors = *f_factors;
       umfpack_di_free_symbolic( &LUfactors->Symbolic);

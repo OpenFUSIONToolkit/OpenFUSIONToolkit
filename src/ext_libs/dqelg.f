@@ -79,8 +79,8 @@ c           table can contain. if this number is reached, the upper
 c           diagonal of the epsilon table is deleted.
 c
 c***first executable statement  dqelg
-      epmach = epsilon(1.d0) !d1mach(4)
-      oflow = huge(1.d0) !d1mach(2)
+      epmach = epsilon(epmach) !d1mach(4)
+      oflow = huge(oflow) !d1mach(2)
       nres = nres+1
       abserr = oflow
       result = epstab(n)
