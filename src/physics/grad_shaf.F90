@@ -1675,9 +1675,8 @@ DO j=1,smesh%nc
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -1802,9 +1801,8 @@ DO kk=1,4
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -1872,9 +1870,8 @@ DO j=1,smesh%nc
   call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     pt=oft_blagrange%mesh%log2phys(j,oft_blagrange%quad%pts(:,m))
     psitmp=0.d0
@@ -1930,9 +1927,8 @@ DO j=1,smesh%nc
   IF(ABS(nturns)<1.d-10)CYCLE
   call oft_blagrange%ncdofs(j,j_lag)
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     psi_tmp=0.d0
     DO l=1,oft_blagrange%nce
@@ -1981,9 +1977,8 @@ DO j=1,smesh%nc
   IF(smesh%reg(j)/=1)CYCLE
   call oft_blagrange%ncdofs(j,j_lag)
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     call psi_eval%interp(j,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
     pt=smesh%log2phys(j,oft_blagrange%quad%pts(:,m))
     !---Compute Magnetic Field
@@ -3345,9 +3340,8 @@ do j=1,smesh%nc
     vcache(l) = atmp(j_lag(l))
   END DO
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
@@ -3449,9 +3443,8 @@ allocate(j_lag(oft_blagrange%nce))
 do j=1,smesh%nc
   rhs_loc=0.d0
   curved=cell_is_curved(smesh,j)
-  if(.NOT.curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,1),goptmp,v)
   do m=1,oft_blagrange%quad%np
-    if(curved)call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    if(curved.OR.(m==1))call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
     det=v*oft_blagrange%quad%wts(m)
     pt=smesh%log2phys(j,oft_blagrange%quad%pts(:,m))
     call psi_interp%interp(j,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
@@ -4246,11 +4239,10 @@ wstored=0.d0
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
   ! Fetch whether curved or not
-  IF(.NOT.curved)call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
   do m=1,oft_blagrange%quad%np
     pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
     IF(gs_test_bounds(self,pt))THEN
-      IF(curved)call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
+      if(curved.OR.(m==1))call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
       call psi_eval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
       IF(psitmp(1)>self%plasma_bounds(1))THEN
         !---Update integrand
@@ -4822,6 +4814,7 @@ end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 !$omp end parallel
+CALL psi_int%delete()
 end subroutine gs_get_qprof
 !---------------------------------------------------------------------------
 !>

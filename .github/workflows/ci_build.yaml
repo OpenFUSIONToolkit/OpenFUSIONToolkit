@@ -123,6 +123,7 @@ jobs:
         sudo apt-get update -o Dir::Etc::sourcelist="sources.list.d/oneAPI.list" -o APT::Get::List-Cleanup="0"
         sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp intel-oneapi-compiler-fortran intel-oneapi-mkl-devel
         echo "source /opt/intel/oneapi/setvars.sh" >> ${{ github.workspace }}/setup_env.sh
+        echo "ulimit -s unlimited" >> ${{ github.workspace }}/setup_env.sh
     
     - name: Check compilers
       run: |
