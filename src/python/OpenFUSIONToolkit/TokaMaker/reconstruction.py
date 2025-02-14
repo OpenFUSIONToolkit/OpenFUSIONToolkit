@@ -82,7 +82,7 @@ class Mirnov_con:
         @param val Value of constraint
         @param err Error in constraint
         '''
-        self.locpt = loc
+        self.loc = loc
         self.phi = phi
         self.norm = norm
         self.val = val

@@ -7,6 +7,7 @@
 
 #
 # Python interface for TokaMaker Grad-Shafranov functionality
+import collections
 import ctypes
 import numpy
 from ._interface import *
@@ -101,6 +102,8 @@ class TokaMaker():
         self._coil_dict = {}
         ## Coil set definitions, including sub-coils
         self.coil_sets = {}
+        ## Virtual coils, if present (currently only `'#VSC'`)
+        self._virtual_coils = {'#VSC': -1}
         ## Coil set names in order of id number
         self.coil_set_names = []
         ## Vacuum F value
@@ -163,6 +166,8 @@ class TokaMaker():
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
+        self.coil_sets = {}
+        self._virtual_coils = {}
         self._F0 = 0.0
         self._Ip_target=c_double(-1.0)
         self._Ip_ratio_target=c_double(-1.E99)
@@ -399,9 +404,23 @@ class TokaMaker():
             return self._diverted[0]
         else:
             return None
+        
+    def coil_reg_term(self,coffs,target=0.0,weight=1.0):
+        r'''! Define coil current regularization term for the form \f$ target = \Sigma_i \alpha_i I_i \f$
+        to be used in @ref set_coil_reg.
+
+        @param coffs Dictionary of coefficients \f$ \alpha \f$ (zero for unspecified coils)
+        @param target Regularization target (default: 0.0)
+        @param weight Weight for regularization term (default: 1.0)
+        '''
+        coil_reg_term = collections.namedtuple('coil_reg_term', ['coffs', 'target', 'weight'])
+        for key in coffs:
+            if (key not in self.coil_sets) and (key not in self._virtual_coils):
+                raise KeyError('Unknown coil "{0}"'.format(key))
+        return coil_reg_term(coffs,target,weight)
     
-    def set_coil_reg(self,reg_mat=None,reg_targets=None,reg_weights=None,reg_rows=None):
-        '''! Set regularization matrix for coils when isoflux and/or saddle constraints are used
+    def set_coil_reg(self,reg_mat=None,reg_targets=None,reg_weights=None,reg_terms=None):
+        '''! Set regularization matrix for coil currents when isoflux and/or saddle constraints are used
 
         Can be used to enforce "soft" constraints on coil currents. For hard constraints see
         @ref TokaMaker.TokaMaker.set_coil_bounds "set_coil_bounds".
@@ -409,35 +428,44 @@ class TokaMaker():
         @param reg_mat Regularization matrix [nregularize,ncoils+1]
         @param reg_targets Regularization targets [nregularize] (default: 0)
         @param reg_weights Weights for regularization terms [nregularize] (default: 1)
-        @param reg_rows Array of dictionaries, defining each row in the regularization matrix
+        @param reg_terms List of regularization terms created with @ref coil_reg_term
         '''
-        if reg_rows is not None:
+        if reg_terms is not None:
             if reg_mat is not None:
-                raise ValueError('"reg_rows" and "reg_dict" cannot be specified simultaneously')
-            nregularize = len(reg_rows)
+                raise ValueError('"reg_terms" and "reg_mat" cannot be specified simultaneously')
+            if reg_targets is not None:
+                raise ValueError('"reg_terms" and "reg_targets" cannot be specified simultaneously')
+            if reg_weights is not None:
+                raise ValueError('"reg_terms" and "reg_weights" cannot be specified simultaneously')
+            nregularize = len(reg_terms)
             reg_mat = numpy.zeros((self.ncoils+1,nregularize), dtype=numpy.float64)
-            for i, reg_row in enumerate(reg_rows):
-                for key, value in reg_row.items():
-                    if key == '#VSC':
-                        reg_mat[-1,i] = value
-                    else:
+            reg_targets = numpy.zeros((nregularize,), dtype=numpy.float64)
+            reg_weights = numpy.ones((nregularize,), dtype=numpy.float64)
+            for i, reg_term in enumerate(reg_terms):
+                reg_targets[i] = reg_term.target
+                reg_weights[i] = reg_term.weight
+                for key, value in reg_term.coffs.items():
+                    if key in self.coil_sets:
                         reg_mat[self.coil_sets[key]['id'],i] = value
+                    elif key in self._virtual_coils:
+                        reg_mat[self._virtual_coils[key],i] = value
+                    else:
+                        raise KeyError('Unknown coil "{0}"'.format(key))
         elif reg_mat is not None:
             if reg_mat.shape[1] != self.ncoils+1:
                 raise IndexError('Incorrect shape of "reg_mat", should be [nregularize,ncoils+1]')
             nregularize = reg_mat.shape[0]
             reg_mat = numpy.ascontiguousarray(reg_mat.transpose(), dtype=numpy.float64)
+            if reg_targets is None:
+                reg_targets = numpy.zeros((nregularize,), dtype=numpy.float64)
+            if reg_weights is None:
+                reg_weights = numpy.ones((nregularize,), dtype=numpy.float64)
+            if reg_targets.shape[0] != nregularize:
+                raise IndexError('Incorrect shape of "reg_targets", should be [nregularize]')
+            if reg_weights.shape[0] != nregularize:
+                raise IndexError('Incorrect shape of "reg_weights", should be [nregularize]')
         else:
-            raise ValueError('Either "reg_rows" or "reg_dict" is required')
-        #
-        if reg_targets is None:
-            reg_targets = numpy.zeros((nregularize,), dtype=numpy.float64)
-        if reg_weights is None:
-            reg_weights = numpy.ones((nregularize,), dtype=numpy.float64)
-        if reg_targets.shape[0] != nregularize:
-            raise IndexError('Incorrect shape of "reg_targets", should be [nregularize]')
-        if reg_weights.shape[0] != nregularize:
-            raise IndexError('Incorrect shape of "reg_weights", should be [nregularize]')
+            raise ValueError('Either "reg_terms" or "reg_mat" is required')
         reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
         reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
         tokamaker_set_coil_regmat(nregularize,reg_mat, reg_targets, reg_weights)
@@ -454,10 +482,12 @@ class TokaMaker():
         bounds_array[:,0] = -1.E98; bounds_array[:,1] = 1.E98
         if coil_bounds is not None:
             for coil_key, coil_bound in coil_bounds.items():
-                if coil_key == '#VSC':
-                    bounds_array[-1,:] = coil_bound
-                else:
+                if coil_key in self.coil_sets:
                     bounds_array[self.coil_sets[coil_key]['id'],:] = coil_bound
+                elif coil_key in self._virtual_coils:
+                    bounds_array[self._virtual_coils[coil_key],:] = coil_bound
+                else:
+                    raise KeyError('Unknown coil "{0}"'.format(key))
         tokamaker_set_coil_bounds(bounds_array)
 
     def set_coil_vsc(self,coil_gains):

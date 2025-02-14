@@ -411,22 +411,19 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
     mygs.set_isoflux(np.vstack((isoflux_pts,x_point)))
     mygs.set_saddles(x_point)
     # Set regularization weights
-    coil_reg_rows = []
-    coil_reg_weights = []
-    for key in mygs.coil_sets:
-        coil_reg_rows.append({key: 1.0})
-        if key.startswith('CS'):
-            if key.startswith('CS1'):
-                coil_reg_weights.append(2.E-2)
+    regularization_terms = []
+    for name in mygs.coil_sets:
+        if name.startswith('CS'):
+            if name.startswith('CS1'):
+                regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=2.E-2))
             else:
-                coil_reg_weights.append(1.E-2)
-        elif key.startswith('PF'):
-            coil_reg_weights.append(1.E-2)
-        elif key.startswith('VS'):
-            coil_reg_weights.append(1.E-2)
-    coil_reg_rows.append({'#VSC': 1.0})
-    coil_reg_weights.append(1.E2)
-    mygs.set_coil_reg(reg_rows=coil_reg_rows, reg_weights=np.array(coil_reg_weights))
+                regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-2))
+        elif name.startswith('PF'):
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-2))
+        elif name.startswith('VS'):
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-2))
+    regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E2))
+    mygs.set_coil_reg(reg_terms=regularization_terms)
     #
     ffp_prof = create_power_flux_fun(40,1.5,2.0)
     pp_prof = create_power_flux_fun(40,4.0,1.0)
@@ -568,24 +565,20 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     mygs.set_isoflux(isoflux_pts)
     # Set regularization weights
     disable_list = ('YELLOW',)
-    coil_reg_rows = []
-    coil_reg_weights = []
+    regularization_terms = []
     for name in mygs.coil_sets:
         if name[:-1] in disable_list:
-            coil_reg_rows.append({name: 1.0})
-            coil_reg_weights.append(1.E4)
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E4))
             continue
-        if name[-1] == 'L':
+        if name == 'OH': # OH coil has no mirror
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-1))
             continue
-        coil_reg_rows.append({name: 1.0})
-        coil_reg_weights.append(1.E-1)
-        #
-        if name[-1] == 'U':
-            coil_reg_rows.append({name: 1.0, name[:-1]+'L': -1.0})
-            coil_reg_weights.append(1.E2)
-    coil_reg_rows.append({'#VSC': 1.0})
-    coil_reg_weights.append(1.E-4)
-    mygs.set_coil_reg(reg_rows=coil_reg_rows, reg_weights=np.array(coil_reg_weights))
+        elif name[-1] == 'L':
+            continue
+        regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-1))
+        regularization_terms.append(mygs.coil_reg_term({name: 1.0, name[:-1]+'L': -1.0},target=0.0,weight=1.E2))
+    regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E-4))
+    mygs.set_coil_reg(reg_terms=regularization_terms)
     #
     ffp_prof = create_power_flux_fun(50,1.5,2.0)
     pp_prof = create_power_flux_fun(50,4.0,1.0)
