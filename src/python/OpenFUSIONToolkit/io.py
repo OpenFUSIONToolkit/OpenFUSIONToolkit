@@ -305,19 +305,28 @@ class XDMF_plot_mesh:
             self.time_fields.append(step_dict)
         self.times = numpy.array(self.times)
         
-    def get_field(self,name,time=None):
-        '''! Get raw data associated with field at a given time
+    def get_field(self,name,time=None,timestep=None):
+        '''! Get raw data associated with field at a given time or timestep
 
         @param name Name of field
-        @param time Time to sample at
+        @param time Time value to evaluate field (linear interpolation)
+        @param timestep Timestep index to retrieve
         '''
-        if time is None:
-            if name not in self.static_fields:
-                raise KeyError('"{0}" is not one of the static fields'.format(name))
-            return self.static_fields[name]
-        else:
+        if timestep is not None:
             if name not in self.time_field_names:
-                raise KeyError('"{0}" is not one of the fields in the timesteps'.format(name))
+                raise KeyError('"{0}" is not one of the timestep fields'.format(name))
+            if time is not None:
+                raise ValueError('"time" and "timestep" cannot be specified simultaneously')
+            if (timestep < 0) and (timestep > self.times.shape[0]-1):
+                raise ValueError("Requested timestep outside available range [0,{0}]".format(self.times.shape[0]-1))
+            if (name not in self.time_fields[timestep]):
+                raise KeyError('"{0}" is not available at requested timestep {1}'.format(name,timestep))
+            return self.time_fields[timestep][name]
+        elif time is not None:
+            if name not in self.time_field_names:
+                raise KeyError('"{0}" is not one of the timestep fields'.format(name))
+            if timestep is not None:
+                raise ValueError('"time" and "timestep" cannot be specified simultaneously')
             for i in range(self.times.shape[0]-1):
                 if (self.times[i] <= time) and (self.times[i+1] >= time):
                     if (name not in self.time_fields[i]):
@@ -326,6 +335,10 @@ class XDMF_plot_mesh:
                         raise KeyError('"{0}" is not available at required timestep {1}'.format(name,i+1))
                     return (self.time_fields[i][name]-self.time_fields[i+1][name])*(time-self.times[i])/(self.times[i+1]-self.times[i]) + self.time_fields[i][name]
             raise ValueError("Requested time outside available range [{0:.6E},{1:.6E}]".format(self.times[0],self.times[-1]))
+        else:
+            if name not in self.static_fields:
+                raise KeyError('"{0}" is not one of the static fields'.format(name))
+            return self.static_fields[name]
     
     def get_pyvista_grid(self):
         '''! Get pyvista representation of grid
