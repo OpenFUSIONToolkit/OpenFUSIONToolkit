@@ -5,7 +5,7 @@
 @ingroup doxy_oft_python
 '''
 import numpy
-from ..util import *
+from .._interface import *
 
 ## @cond
 # Marklin setup function (mesh and such) order,nmodes,minlev,error_str
