@@ -98,6 +98,7 @@ a {
   text-decoration: none;
   color: #0F79D0;
   text-shadow: none;
+  font-weight: bold;
 
   transition: color 0.5s ease;
   transition: text-shadow 0.5s ease;
@@ -118,6 +119,7 @@ a:hover, a:focus {
 footer a {
   color: #111; /*#F2F2F2;*/
   text-decoration: underline;
+  font-weight: normal;
 }
 
 em, cite {
