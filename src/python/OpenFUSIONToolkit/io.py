@@ -345,7 +345,11 @@ class XDMF_plot_mesh:
 
         @returns `pyvista.UnstructuredGrid` object for grid
         '''
-        import pyvista
+        try:
+            import pyvista
+        except ImportError:
+            print('Failed to load "pyvista" package')
+            raise
         if self.type == 31:
             celltype = pyvista.CellType.TETRA
             ncv = 4
