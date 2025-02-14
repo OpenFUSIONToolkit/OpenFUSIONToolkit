@@ -25,14 +25,16 @@ jobs:
             os: ubuntu-22.04,
             cc: "gcc-12",cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
-            build_libs_flags: "--build_umfpack=1 --oblas_dynamic_arch"
+            build_libs_flags: "--build_umfpack=1 --oblas_dynamic_arch",
+            cache_key: "openmp"
           }
         - {
             name: "Linux-x86_64-Intel",
             os: ubuntu-22.04,
             cc: "icx",cxx: "icx", fc: "ifx",
             python: "python3",
-            build_libs_flags: "--use_mkl --mkl_root=$MKLROOT"
+            build_libs_flags: "--use_mkl --mkl_root=$MKLROOT",
+            cache_key: "openmp"
           }
         - {
             name: "macOS-x86_64",
@@ -40,7 +42,8 @@ jobs:
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3.12",
             xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer",
-            build_libs_flags: "--build_umfpack=1"
+            build_libs_flags: "--build_umfpack=1",
+            cache_key: "openmp"
           }
         - {
             name: "macOS-x86_64-Rosetta",
@@ -48,7 +51,8 @@ jobs:
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3.12",
             xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer",
-            build_libs_flags: "--build_umfpack=1 --oblas_no_avx"
+            build_libs_flags: "--build_umfpack=1 --oblas_no_avx",
+            cache_key: "openmp_noavx"
           }
         - {
             name: "macOS-arm64",
@@ -56,7 +60,8 @@ jobs:
             cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
             python: "python3.12",
             xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer",
-            build_libs_flags: "--build_umfpack=1"
+            build_libs_flags: "--build_umfpack=1",
+            cache_key: "openmp"
         }
 
     steps:
@@ -68,7 +73,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.config.os }}-nightly-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cache_key }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Get OS version (Linux)
       if: startsWith(matrix.config.os, 'ubuntu')
