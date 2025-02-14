@@ -58,8 +58,9 @@ TYPE(c_ptr), VALUE, INTENT(in) :: xml_ptr !< Needs docs
 LOGICAL :: success,is_2d
 INTEGER(4) :: i,ndims,ierr
 integer(i4), allocatable, dimension(:) :: dim_sizes
-INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: rtmp
+INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp,reg_tmp
+INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none'
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
@@ -70,17 +71,29 @@ TYPE(fox_node), POINTER :: xml_node
 #endif
 CALL copy_string('',error_str)
 CALL copy_string_rev(mesh_file,filename)
-CALL c_f_pointer(sizes, sizes_tmp, [8])
-NULLIFY(mesh_nsets,mesh_ssets)
-IF(TRIM(filename)=='none')THEN
-  CALL copy_string('Array-based loading not yet supported',error_str)
-  RETURN
-  ! CALL c_f_pointer(pmap_loc, pmap_tmp, [1])
-  ! IF(pmap_tmp(1)/=-1)THEN
-  !   CALL c_f_pointer(pmap_loc, pmap_tmp, [tw_obj%mesh%np])
-  !   ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
-  !   tw_obj%pmap=pmap_tmp
-  ! END IF
+NULLIFY(mesh_nsets,hole_nsets,mesh_ssets)
+IF(np>0)THEN
+  ALLOCATE(tw_obj)
+  ALLOCATE(oft_trimesh::tw_obj%mesh)
+  CALL tw_obj%mesh%setup(-1,.FALSE.)
+  !
+  tw_obj%mesh%np=np
+  ALLOCATE(tw_obj%mesh%r(3,tw_obj%mesh%np))
+  CALL c_f_pointer(r_loc, r_tmp, [3,tw_obj%mesh%np])
+  tw_obj%mesh%r=r_tmp
+  !
+  tw_obj%mesh%nc=nc
+  ALLOCATE(tw_obj%mesh%lc(3,tw_obj%mesh%nc))
+  CALL c_f_pointer(lc_loc, lc_tmp, [3,tw_obj%mesh%nc])
+  tw_obj%mesh%lc=lc_tmp
+  !
+  ALLOCATE(tw_obj%mesh%reg(tw_obj%mesh%nc))
+  IF(c_associated(reg_loc))THEN
+    CALL c_f_pointer(reg_loc, reg_tmp, [tw_obj%mesh%nc])
+    tw_obj%mesh%reg=reg_tmp
+  ELSE
+    tw_obj%mesh%reg=1
+  END IF
 ELSE
   !---------------------------------------------------------------------------
   ! Load model from file
@@ -98,10 +111,10 @@ ELSE
   ALLOCATE(tw_obj%mesh%r(3,tw_obj%mesh%np))
   IF(is_2d)THEN
     tw_obj%mesh%r=0.d0
-    ALLOCATE(rtmp(2,tw_obj%mesh%np))
-    CALL hdf5_read(rtmp,TRIM(filename),"mesh/R",success)
-    tw_obj%mesh%r(1:2,:)=rtmp
-    DEALLOCATE(rtmp)
+    ALLOCATE(r_tmp(2,tw_obj%mesh%np))
+    CALL hdf5_read(r_tmp,TRIM(filename),"mesh/R",success)
+    tw_obj%mesh%r(1:2,:)=r_tmp
+    DEALLOCATE(r_tmp)
   ELSE
     CALL hdf5_read(tw_obj%mesh%r,TRIM(filename),"mesh/R",success)
   END IF
@@ -111,7 +124,7 @@ ELSE
   IF(hdf5_field_exist(TRIM(filename),'mesh/REG'))THEN
     CALL hdf5_read(tw_obj%mesh%reg,TRIM(filename),"mesh/REG",success)
   ELSE
-    tw_obj%mesh%reg=1.d0
+    tw_obj%mesh%reg=1
   END IF
   !
   IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
@@ -171,7 +184,8 @@ IF(ASSOCIATED(mesh_nsets))THEN
 END IF
 !
 tw_ptr=C_LOC(tw_obj)
-sizes_tmp=[tw_obj%mesh%np,tw_obj%mesh%ne,tw_obj%mesh%nc,tw_obj%np_active, &
+CALL c_f_pointer(sizes, sizes_tmp, [9])
+sizes_tmp=[tw_obj%mesh%np,tw_obj%mesh%ne,tw_obj%mesh%nc,tw_obj%mesh%nreg,tw_obj%np_active, &
   tw_obj%nholes,tw_obj%n_vcoils,tw_obj%nelems,tw_obj%n_icoils]
 END SUBROUTINE thincurr_setup
 !------------------------------------------------------------------------------
@@ -624,17 +638,25 @@ END SUBROUTINE thincurr_get_sensor_name
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_Rmat(tw_ptr,copy_out,Rmat,error_str) BIND(C,NAME="thincurr_Rmat")
+SUBROUTINE thincurr_Rmat(tw_ptr,res_ptr,copy_out,Rmat,error_str) BIND(C,NAME="thincurr_Rmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: res_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE,  INTENT(in) :: copy_out !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: Rmat !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
-INTEGER(4) :: i,j
+INTEGER(4) :: i,j,nreg_mesh
+REAL(8), POINTER :: res_tmp(:)
 REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: Rmat_tmp
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
+!
+IF(c_associated(res_ptr))THEN
+  nreg_mesh=MAXVAL(self%mesh%reg)
+  CALL c_f_pointer(res_ptr, res_tmp, [nreg_mesh])
+  tw_obj%Eta_reg=res_tmp/mu0
+END IF
 !
 CALL tw_compute_Rmat(tw_obj,.TRUE.)
 !

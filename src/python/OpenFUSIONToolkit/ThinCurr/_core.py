@@ -85,8 +85,9 @@ class ThinCurr():
         if xml_filename is not None:
             cfilename = self._oft_env.path2c(xml_filename)
             oftpy_load_xml(cfilename,ctypes.byref(self._xml_ptr))
-        nregs = c_int()
         if mesh_file is not None:
+            if (r is not None) or (lc is not None) or (reg is not None):
+                raise ValueError('Specification of "mesh_file" is incompatible with specification of "r", "lc", and "reg"')
             idummy = c_int(-1)
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
@@ -95,51 +96,47 @@ class ThinCurr():
                 pmap = -numpy.ones((1,),dtype=numpy.int32)
             else:
                 pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
-            sizes = numpy.zeros((8,),dtype=numpy.int32)
+            sizes = numpy.zeros((9,),dtype=numpy.int32)
             cfilename = self._oft_env.path2c(mesh_file)
             error_string = self._oft_env.get_c_errorbuff()
             thincurr_setup(cfilename,idummy,rfake,idummy,lcfake,regfake,pmap,c_int(jumper_start),ctypes.byref(self.tw_obj),sizes,error_string,self._xml_ptr)
             if error_string.value != b'':
                 raise Exception(error_string.value.decode())
-            self.np = sizes[0]
-            self.ne = sizes[1]
-            self.nc = sizes[2]
-            self.np_active = sizes[3]
-            self.nholes = sizes[4]
-            self.n_vcoils = sizes[5]
-            self.nelems = sizes[6]
-            self.n_icoils = sizes[7]
         elif r is not None:
-            raise ValueError('Specifying mesh values not yet supported')
-            # r = numpy.ascontiguousarray(r, dtype=numpy.float64)
-            # lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
-            # np = c_int(r.shape[0])
-            # nc = c_int(lc.shape[0])
-            # if reg is None:
-            #     reg = numpy.ones((nc.value,),dtype=numpy.int32)
-            # else:
-            #     reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
-            # if pmap is None:
-            #     pmap = -numpy.ones((1,),dtype=numpy.int32)
-            # else:
-            #     pmap = numpy.ascontiguousarray(pmap, dtype=numpy.float64)
-            # sizes = numpy.zeros((8,),dtype=numpy.int32)
-            # filename = c_char_p(b"")
-            # cstring = create_string_buffer(b"",200)
-            # thincurr_setup(filename,np,r,nc,lc,reg,ctypes.byref(self.tw_obj),sizes,cstring)
-            # if cstring.value != b'':
-            #     raise Exception(cstring.value)
-            # self.np = sizes[0]
-            # self.ne = sizes[1]
-            # self.nc = sizes[2]
-            # self.np_active = sizes[3]
-            # self.nholes = sizes[4]
-            # self.n_vcoils = sizes[5]
-            # self.nelems = sizes[6]
-            # self.n_icoils = sizes[7]
+            if lc is None:
+                raise ValueError('"r" and "lc" must be both be specified')
+            if jumper_start >= 0:
+                raise ValueError('"jumper_start" not supported with manual mesh specification')
+            np = c_int(r.shape[0])
+            nc = c_int(lc.shape[0])
+            r = numpy.ascontiguousarray(r, dtype=numpy.float64)
+            lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
+            if reg is None:
+                reg = numpy.ones((nc.value,),dtype=numpy.int32)
+            else:
+                reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
+            if pmap is None:
+                pmap = -numpy.ones((1,),dtype=numpy.int32)
+            else:
+                # pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
+                raise ValueError('"pmap" not supported with manual mesh specification')
+            sizes = numpy.zeros((9,),dtype=numpy.int32)
+            cfilename = self._oft_env.path2c('')
+            error_string = self._oft_env.get_c_errorbuff()
+            thincurr_setup(cfilename,np,r,nc,lc+1,reg,pmap,c_int(jumper_start),ctypes.byref(self.tw_obj),sizes,error_string,self._xml_ptr)
+            if error_string.value != b'':
+                raise Exception(error_string.value.decode())
         else:
-            raise ValueError('Mesh filename (native format) or mesh values required')
-        self.nregs = nregs.value
+            raise ValueError('Mesh filename (native format) or mesh values (r, lc) required')
+        self.np = sizes[0]
+        self.ne = sizes[1]
+        self.nc = sizes[2]
+        self.nregs = sizes[3]
+        self.np_active = sizes[4]
+        self.nholes = sizes[5]
+        self.n_vcoils = sizes[6]
+        self.nelems = sizes[7]
+        self.n_icoils = sizes[8]
     
     def setup_io(self,basepath=None,save_debug=False):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
@@ -339,18 +336,25 @@ class ThinCurr():
                numpy.ctypeslib.as_array(ctypes.cast(Msc_loc, c_double_ptr),shape=(self.n_icoils,nsensors.value)), \
                {'names': sensor_names, 'ptr': sensor_loc}
     
-    def compute_Rmat(self,copy_out=False):
+    def compute_Rmat(self,copy_out=False,eta_values=None):
         '''! Compute the resistance matrix for this model
 
         @param copy_out Copy matrix to python and store in `self.Rmat`?
+        @param eta_values Resistivity values for model (overrides those in XML if specified)
         '''
         if copy_out:
             self.Rmat = numpy.zeros((self.nelems,self.nelems), dtype=numpy.float64)
             Rmat_tmp = self.Rmat
         else:
             Rmat_tmp = numpy.zeros((1,1), dtype=numpy.float64)
+        eta_ptr = None
+        if eta_values is not None:
+            if eta_values.shape[0] != self.nregs:
+                raise IndexError('Incorrect shape of "eta_values", should be [nregs]')
+            eta_values = numpy.ascontiguousarray(eta_values, dtype=numpy.float64)
+            eta_ptr = eta_values.ctypes.data_as(c_double_ptr)
         error_string = self._oft_env.get_c_errorbuff()
-        thincurr_curr_Rmat(self.tw_obj,c_bool(copy_out),Rmat_tmp,error_string)
+        thincurr_curr_Rmat(self.tw_obj,eta_ptr,c_bool(copy_out),Rmat_tmp,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
     

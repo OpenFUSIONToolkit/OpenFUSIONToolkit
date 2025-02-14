@@ -23,6 +23,31 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], pmap=None, 
             h5_file.create_dataset('thincurr/periodicity/nfp', data=[nfp,], dtype='i4')
 
 
+def build_ThinCurr_dummy(center,size=1.0):
+    '''! Build simple square dummy mesh for ThinCurr (1 active node)
+    
+    @param center Center of mesh [3]
+    @param size Size of dummy mesh
+    @returns `r` Point list [5,3], lc Cell list [4,3]
+    '''
+    r = numpy.array([
+        [-size/2.0,-size/2.0,0.0],
+        [size/2.0,-size/2.0,0.0],
+        [size/2.0,size/2.0,0.0],
+        [-size/2.0,size/2.0,0.0],
+        [0.0,0.0,0.0]
+    ])
+    lc = numpy.array([
+        [0,1,4],
+        [1,2,4],
+        [2,3,4],
+        [3,0,4]
+    ])
+    for i in range(3):
+        r[:,i] += center[i]
+    return r, lc
+
+
 def build_regcoil_grid(filename, field_suffix, ntheta, nphi, full_torus=False):
     r'''! Build a uniform grid from a REGCOIL definition
 
