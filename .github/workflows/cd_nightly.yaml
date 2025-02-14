@@ -68,7 +68,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.config.os }}-nightly-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-nightly-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Get OS version (Linux)
       if: startsWith(matrix.config.os, 'ubuntu')
