@@ -114,6 +114,7 @@ jobs:
 
     - name: Check compilers
       run: |
+        source ${{ github.workspace }}/setup_env.sh
         $CC --version
         $CXX --version
         $FC --version
@@ -127,7 +128,7 @@ jobs:
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
@@ -144,22 +145,30 @@ jobs:
     - name: Configure OFT
       shell: bash
       working-directory: libs
-      run: bash config_cmake.sh
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
       working-directory: libs/build_release
-      run: make
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make
     
     - name: Install OFT
       shell: bash
       working-directory: libs/build_release
-      run: make install
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make install
 
     - name: Package OFT
       shell: bash
       working-directory: libs/build_release
-      run: make package
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make package
     
     - name: Upload package artifact
       uses: actions/upload-artifact@v4
