@@ -301,6 +301,7 @@ SUBROUTINE tokamaker_solve(error_str) BIND(C,NAME="tokamaker_solve")
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
 CALL copy_string('',error_str)
+gs_global%timing=0.d0
 CALL gs_global%solve(ierr)
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_solve
@@ -370,6 +371,7 @@ CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
 CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(infile_c,infile)
 CALL copy_string_rev(outfile_c,outfile)
+gs_global%timing=0.d0
 CALL fit_gs(gs_global,infile,outfile,fitI,fitP,fitPnorm,&
             fitAlam,fitR0,fitV0,fitCoils,fitF0, &
             fixedCentering)
