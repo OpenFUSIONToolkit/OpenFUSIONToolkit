@@ -28,13 +28,581 @@ PRIVATE
 
 TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: dt = -1.d0 !< Time step
-  REAL(r8) :: kappa_e !< Needs docs
-  REAL(r8) :: kappa_i !< Needs docs
-  REAL(r8) :: tau_eq !< Needs docs
+  REAL(r8) :: chi !< Needs docs
+  REAL(r8) :: eta !< Needs docs
+  REAL(r8) :: nu !< Needs docs
+  REAL(r8) :: mu_0
+  REAL(r8) :: gamma
+  REAL(r8) :: D
+  REAL(r8) :: k_boltz
   REAL(r8) :: diag_vals(2) = 0.d0 !< Needs docs
-  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: Ti_bc => NULL() !< Ti BC flag
-  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: Te_bc => NULL() !< Te BC flag
-CONTAINS
+  !TODO: COMPLETE EDIT FOR NEW FIELDS
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:,:) :: vel_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: by_bc => NULL() !< by BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: psi_bc => NULL() !< psi BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
+  CONTAINS
   !> Apply the matrix
   PROCEDURE :: apply_real => nlfun_apply
-END TYPE xmhd_2d_nlfun
+  END TYPE xmhd_2d_nlfun
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+TYPE, public :: oft_xmhd_2d_sim
+  LOGICAL :: mfnk = .FALSE. !< Use matrix free method?
+  INTEGER(i4) :: nsteps = -1 !< Needs docs
+  INTEGER(i4) :: rst_base = 0 !< Needs docs
+  INTEGER(i4) :: rst_freq = 10 !< Needs docs
+  REAL(r8) :: dt = -1.d0 !< Needs docs
+  REAL(r8) :: t = 0.d0 !< Needs docs
+  ! Edited to reflect new fields
+  REAL(r8) :: chi = -1.d0 !< Needs docs
+  REAL(r8) :: eta = -1.d0 !< Needs docs
+  REAL(r8) :: nu = 0.d0 !< Needs docs
+  REAL(r8) :: mu_0 !< Needs docs
+  REAL(r8) :: gamma !< Needs docs
+  REAL(r8) :: D !< Needs docs
+  REAL(r8) :: k_boltz !< Needs docs
+  REAL(r8) :: lin_tol = 1.d-8 !< Needs docs
+  REAL(r8) :: nl_tol = 1.d-5 !< Needs docs
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:,:) :: vel_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: psi_bc => NULL() !< psi BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: by_bc => NULL() !< by BC flag
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: jacobian_block_mask => NULL() !< Matrix block mask
+  TYPE(oft_fem_comp_type), POINTER :: fe_rep => NULL() !< Finite element representation for solution field
+  CLASS(oft_vector), POINTER :: u => NULL() !< Needs docs
+  CLASS(oft_matrix), POINTER :: jacobian => NULL() !< Needs docs
+  TYPE(oft_mf_matrix), POINTER :: mf_mat => NULL() !< Matrix free operator
+  TYPE(xmhd_2d_nlfun), POINTER :: nlfun => NULL() !< Needs docs
+  TYPE(fox_node), POINTER :: xml_root => NULL() !< XML root element
+  TYPE(fox_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
+contains
+  !> Setup
+  PROCEDURE :: setup => setup
+  !> Run simulation
+  PROCEDURE :: run_simulation => run_simulation
+  !> Save restart file
+  PROCEDURE :: rst_save => rst_save
+  !> Load restart file
+  PROCEDURE :: rst_load => rst_load
+END TYPE oft_xmhd_2d_sim
+TYPE(oft_xmhd_2d_sim), POINTER :: current_sim => NULL()
+CONTAINS
+!---------------------------------------------------------------------------
+!> TODO: COMPLETE EDIT FOR NEW FIELDS
+!---------------------------------------------------------------------------
+subroutine run_simulation(self)
+class(oft_xmhd_2d_sim), target, intent(inout) :: self
+type(oft_nksolver) :: nksolver
+!---Solver objects
+class(oft_vector), pointer :: u,v,up
+type(oft_native_gmres_solver), target :: solver
+type(oft_timer) :: mytimer
+!---History file fields
+TYPE(oft_bin_file) :: hist_file
+integer(i4) :: hist_i4(3)
+real(4) :: hist_r4(4)
+!---Extrapolation fields
+integer(i4), parameter :: maxextrap=2
+integer(i4) :: nextrap
+real(r8), allocatable, dimension(:) :: extrapt
+type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
+!---
+character(LEN=XMHD_2D_RST_LEN) :: rst_char
+integer(i4) :: i,j,io_stat,rst_tmp
+real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time 
+real(r8), pointer :: plot_vals(:)
+current_sim=>self
+!---------------------------------------------------------------------------
+! Create solver fields
+!---------------------------------------------------------------------------
+call self%fe_rep%vec_create(u)
+call self%fe_rep%vec_create(up)
+call self%fe_rep%vec_create(v)
+
+ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
+DO i=1,maxextrap
+  CALL self%fe_rep%vec_create(extrap_fields(i)%f)
+  extrapt(i)=0.d0
+END DO
+nextrap=0
+
+self%t=0.d0
+CALL u%add(0.d0,1.d0,self%u)
+!---Create initial conditions restart file
+!TODO: Edit for new fields
+104 FORMAT (I XMHD_2D_RST_LEN.XMHD_2D_RST_LEN)
+WRITE(rst_char,104)0
+CALL self%rst_save(u, self%t, self%dt, 'xmhd_2d_'//rst_char//'.rst', 'U')
+NULLIFY(plot_vals)
+CALL hdf5_create_timestep(self%t)
+CALL self%u%get_local(plot_vals,1)
+CALL smesh%save_vertex_scalar(plot_vals,'Ti')
+CALL self%u%get_local(plot_vals,2)
+CALL smesh%save_vertex_scalar(plot_vals,'Te')
+
+!---
+ALLOCATE(self%nlfun)
+self%nlfun%chi=self%chi
+self%nlfun%eta=self%eta
+self%nlfun%nu=self%nu
+self%nlfun%D=self%D
+self%nlfun%mu_0=self%mu_0
+self%nlfun%gamma=self%gamma
+self%nlfun%k_boltz=self%k_boltz
+self%nlfun%n_bc=>self%n_bc
+self%nlfun%vel_bc=>self%vel_bc
+self%nlfun%T_bc=>self%T_bc
+self%nlfun%psi_bc=>self%psi_bc
+self%nlfun%by_bc=>self%by_bc
+!---
+CALL build_approx_jacobian(self,u) ! What is this u vector for?
+!---------------------------------------------------------------------------
+! Setup linear solver
+!---------------------------------------------------------------------------
+IF(self%mfnk)THEN
+  ALLOCATE(self%mf_mat)
+  CALL up%set(1.d0)
+  CALL self%mf_mat%setup(u,self%nlfun,up)
+  self%mf_mat%b0=1.d-5
+  solver%A=>self%mf_mat
+ELSE
+  solver%A=>self%jacobian
+END IF
+solver%its=200
+solver%atol=self%lin_tol
+solver%itplot=1
+solver%nrits=20
+solver%pm=oft_env%pm
+NULLIFY(solver%pre)
+IF(ASSOCIATED(self%xml_pre_def))THEN
+  CALL create_solver_xml(solver%pre,self%xml_pre_def)
+ELSE
+  CALL create_diag_pre(solver%pre)
+END IF
+solver%pre%A=>self%jacobian
+
+!---------------------------------------------------------------------------
+! Setup nonlinear solver
+!---------------------------------------------------------------------------
+nksolver%A=>self%nlfun
+nksolver%J_inv=>solver
+nksolver%its=30
+nksolver%atol=self%nl_tol
+nksolver%rtol=1.d-20 ! Disable relative tolerance
+IF(self%mfnk)THEN
+  nksolver%J_update=>mfnk_update
+  nksolver%up_freq=1
+ELSE
+  nksolver%J_update=>update_jacobian
+  nksolver%up_freq=4
+END IF
+
+!---------------------------------------------------------------------------
+! Setup history file
+!---------------------------------------------------------------------------
+IF(oft_env%head_proc)THEN
+  CALL hist_file%setup('oft_xmhd_2d.hist', desc="History file for non-linear thermal diffusion run")
+  CALL hist_file%add_field('ts',   'i4', desc="Time step index")
+  CALL hist_file%add_field('lits', 'i4', desc="Linear iteration count")
+  CALL hist_file%add_field('nlits','i4', desc="Non-linear iteration count")
+  CALL hist_file%add_field('time', 'r4', desc="Simulation time [s]")
+  CALL hist_file%add_field('ti',   'r4', desc="Average ion temperature [eV]")
+  CALL hist_file%add_field('te',   'r4', desc="Average electron temperature [eV]")
+  CALL hist_file%add_field('stime','r4', desc="Walltime [s]")
+  CALL hist_file%write_header
+  CALL hist_file%open ! Open history file
+END IF
+
+!---------------------------------------------------------------------------
+! Begin time stepping
+!---------------------------------------------------------------------------
+DO i=1,self%nsteps
+  IF(oft_env%head_proc)CALL mytimer%tick()
+  self%nlfun%dt=0.d0
+  CALL self%nlfun%apply(u,v)
+  !TODO: Replace with new fields
+  Ti_avg=self%nlfun%diag_vals(1)
+  Te_avg=self%nlfun%diag_vals(2)
+  self%nlfun%dt=self%dt
+  IF((.NOT.self%mfnk).OR.MOD(i,2)==0)THEN
+    CALL update_jacobian(u)
+    CALL solver%pre%update(.TRUE.)
+  END IF
+  !
+  DO j=maxextrap,2,-1
+    CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
+    extrapt(j)=extrapt(j-1)
+  END DO
+  IF(nextrap<maxextrap)nextrap=nextrap+1
+  CALL extrap_fields(1)%f%add(0.d0,1.d0,u)
+  extrapt(1)=self%t
+  IF(i>maxextrap)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,self%t+self%dt,u)
+  CALL nksolver%apply(u,v)
+  !---------------------------------------------------------------------------
+  ! Write out initial solution progress
+  !---------------------------------------------------------------------------
+  IF(oft_env%head_proc)THEN
+    elapsed_time=mytimer%tock()
+    hist_i4=[self%rst_base+i-1,nksolver%lits,nksolver%nlits]
+    hist_r4=REAL([self%t,n_avg,u_avg,T_avg,psi_avg,by_avg,elapsed_time],7)
+103 FORMAT(' Timestep',I8,ES14.6,2X,I4,2X,I4,F12.3,ES12.2)
+    WRITE(*,103)self%rst_base+i,self%t,nksolver%lits,nksolver%nlits,elapsed_time,self%dt
+    IF(oft_debug_print(1))WRITE(*,*)
+    CALL hist_file%write(data_i4=hist_i4, data_r4=hist_r4)
+  END IF
+  !---------------------------------------------------------------------------
+  ! Update timestep and save solution
+  !---------------------------------------------------------------------------
+  self%t=self%t+self%dt
+  CALL self%u%add(0.d0,1.d0,u)
+  IF(MOD(i,self%rst_freq)==0)THEN
+    IF(oft_env%head_proc)CALL mytimer%tick
+    !---Create restart file
+    WRITE(rst_char,104)self%rst_base+i
+    READ(rst_char,104,IOSTAT=io_stat)rst_tmp
+    IF((io_stat/=0).OR.(rst_tmp/=self%rst_base+i))CALL oft_abort("Step count exceeds format width", "run_simulation", __FILE__)
+    CALL self%rst_save(u, self%t, self%dt, 'xmhd_2d_'//rst_char//'.rst', 'U')
+    IF(oft_env%head_proc)THEN
+      elapsed_time=mytimer%tock()
+      WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
+      CALL hist_file%flush
+    END IF
+    !---
+    CALL hdf5_create_timestep(self%t)
+    CALL self%u%get_local(plot_vals,1)
+    CALL smesh%save_vertex_scalar(plot_vals,'Ti')
+    CALL self%u%get_local(plot_vals,2)
+    CALL smesh%save_vertex_scalar(plot_vals,'Te')
+  END IF
+END DO
+CALL hist_file%close()
+CALL nksolver%delete()
+CALL solver%delete()
+CALL u%delete()
+CALL up%delete()
+CALL v%delete()
+DEALLOCATE(u,up,v,plot_vals)
+end subroutine run_simulation
+!---------------------------------------------------------------------------
+!> Compute the NL error function, where we are solving F(x) = 0
+!!
+!! b = F(a)
+!---------------------------------------------------------------------------
+subroutine nlfun_apply(self,a,b)
+  class(tdiff_nlfun), intent(inout) :: self !< NL function object
+  class(oft_vector), target, intent(inout) :: a !< Source field
+  class(oft_vector), intent(inout) :: b !< Result of metric function
+  type(oft_quad_type), pointer :: quad
+  LOGICAL :: curved
+  INTEGER(i4) :: i,m,jr
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+  REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz, diag_vals(7)
+  REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
+          dvel(3,3),div_vel,jac_mat(3,4), jac_det
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
+                      psi_weights_loc, by_weights_loc
+  REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads,res_loc
+  REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
+                                n_res, psi_res, by_res, vtmp
+  REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights, vel_res
+  quad=>oft_blagrange%quad
+  NULLIFY(n_weights, vel_weights, T_weights, psi_weights, by_weights, &
+  n_res, vel_res, T_res, psi_res, by_res)
+  !---Get weights from solution vector
+  CALL a%get_local(n_weights,1)
+  vtmp => vel_weights(1, :)
+  CALL a%get_local(vtmp ,2)
+  vtmp => vel_weights(2, :)
+  CALL a%get_local(vtmp ,3)
+  vtmp => vel_weights(3, :)
+  CALL a%get_local(vtmp, 4)
+  CALL a%get_local(psi_weights,5)
+  CALL a%get_local(T_weights,6)
+  CALL a%get_local(by_weights,7)
+  !---
+  chi = self%chi !< Needs docs
+  eta = self%eta !< Needs docs
+  nu = self%nu !< Needs docs
+  mu_0 = self%mu_0 !< Needs docs
+  gamma = self%gamma !< Needs docs
+  D = self%D !< Needs docs
+  k_boltz = self%k_boltz !< Needs docs
+  ! might need a version of this logic for eta or suchlike
+  ! IF(self%tau_eq>0.d0)THEN
+  !   tau_eq_inv=1.d0/self%tau_eq
+  ! ELSE
+  !   tau_eq_inv=1.d0
+  ! END IF
+  !---Zero result and get storage array
+  CALL b%set(0.d0)
+  CALL b%get_local(n_res, 1)
+  vtmp => vel_res(1, :)
+  CALL b%get_local(vtmp, 2)
+  vtmp => vel_res(2, :)
+  CALL b%get_local(vtmp, 3)
+  vtmp => vel_res(3, :)
+  CALL b%get_local(vtmp, 4)
+  CALL b%get_local(T_res, 5)
+  CALL b%get_local(psi_res, 6)
+  CALL b%get_local(by_res, 7)
+  diag_vals=0.d0
+
+  !$omp parallel private(m,jr,curved,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
+  !$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
+  !$omp jac_det,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel) reduction(+:diag_vals)
+  !Edit for new fields
+  ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
+  ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
+            psi_weights_loc(oft_blagrange%nce), by_weights_loc(oft_blagrange%nce),&
+            vel_weights_loc(3, oft_blagrange%nce))
+  ALLOCATE(cell_dofs(oft_blagrange%nce),res_loc(oft_blagrange%nce,5))
+  !$omp do schedule(static)
+  DO i=1,smesh%nc
+    curved=cell_is_curved(smesh,i) ! Straight cell test
+    call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+    res_loc = 0.d0 ! Zero local (cell) contribution to function
+    n_weights_loc = n_weights(cell_dofs)
+    vel_weights_loc = vel_weights(:, cell_dofs)
+    T_weights_loc = T_weights(cell_dofs)
+    psi_weights_loc = psi_weights(cell_dofs)
+    by_weights = by_weights(cell_dofs)
+  !---------------------------------------------------------------------------
+  ! Quadrature Loop
+  !---------------------------------------------------------------------------
+    DO m=1,quad%np
+      if(curved.OR.(m==1))call smesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+      !---Evaluate value and gradients of basis functions at current point
+      DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
+        CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
+        CALL oft_blag_geval(oft_blagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
+      END DO
+      !---Reconstruct values of solution fields
+      n = 0.d0; dn = 0.d0; vel = 0.d0; dvel = 0.d0
+      T = 0.d0; dT = 0.d0; psi = 0.d0; dpsi=0.d0
+      by = 0.d0; dby = 0.d0
+      DO jr=1,oft_blagrange%nce
+        n = n + n_weights_loc(jr)*basis_vals(jr)
+        vel = vel + vel_weights_loc(:, jr)*basis_vals(jr)
+        T = T + T_weights_loc(jr)*basis_vals(jr)
+        psi = psi + psi_weights_loc(jr)*basis_vals(jr)
+        by = by + by_weights_loc(jr)*basis_vals(jr)
+        dn = dn + n_weights_loc(jr)*basis_vals(jr)
+        dvel(1, :) = dvel(1, :) + vel_weights_loc(1, jr)*basis_grads(:, jr)
+        dvel(2, :) = dvel(2, :) + vel_weights_loc(2, jr)*basis_grads(:, jr)
+        dvel(3, :) = dvel(3, :) + vel_weights_loc(3, jr)*basis_grads(:, jr)
+        dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
+        dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
+        dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
+      END DO
+      div_vel = dvel(1,1) + dvel(2,2) + dvel(3,3)
+      diag_vals = diag_vals + [T_i,T_e]*jac_det*quad%wts(m) !TODO: update this line for new fields
+      !---Compute local function contributions
+      DO jr=1,oft_blagrange%nce
+        res_loc(jr, 4) = res_loc(jr, 4) &
+          + basis_vals(jr)*psi*jac_det*quad%wts(m) &
+          + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dpsi)*jac_det*quad%wts(m) &
+          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dpsi)*jac_det*quad%wts(m)/mu_0
+        res_loc(jr, 5) = res_loc(jr, 5) &
+          + basis_vals(jr)*by*jac_det*quad%wts(m) &
+          - basis_vals(jr)*self%dt*cross_product(dpsi,dvel(2, :))*jac_det*quad%wts(m) &
+          + basis_vals(jr)*self%dt*(DOT_PRODUCT(dby,vel) + by*div_vel)*jac_det*quad%wts(m) &
+          + basis_vals(jr)*self%dt*nu*DOT_PRODUCT(basis_grads(:,jr), dby)*jac_det*quad%wts(m)/mu_0
+      END DO
+    END DO
+    !---Add local values to full vector
+    DO jr=1,oft_blagrange%nce
+      !$omp atomic
+      Ti_res(cell_dofs(jr)) = Ti_res(cell_dofs(jr)) + res_loc(jr,1)
+      !$omp atomic
+      Te_res(cell_dofs(jr)) = Te_res(cell_dofs(jr)) + res_loc(jr,2)
+    END DO
+  END DO
+  !---Cleanup thread-local storage
+  DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
+              vel_weights_loc, psi_weights_loc, by_weights_loc,cell_dofs,res_loc)
+  !$omp end parallel
+  IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
+  CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%n_bc)
+  !TODO: check validity of this usage
+  CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),vel_res(1, :),self%vel_bc(1,:))
+  CALL fem_dirichlet_vec(oft_blagrange,vel_weights(2, :),vel_res(2, :),self%vel_bc(2,:))
+  CALL fem_dirichlet_vec(oft_blagrange,vel_weights(3, :),vel_res(3, :),self%vel_bc(3,:))
+  CALL fem_dirichlet_vec(oft_blagrange,T_weights,T_res,self%T_bc)
+  CALL fem_dirichlet_vec(oft_blagrange,psi_weights,psi_res,self%psi_bc)
+  CALL fem_dirichlet_vec(oft_blagrange,by_weights,by_res,self%by_bc)
+  !---Put results into full vector
+  CALL b%restore_local(n_res,1,add=.TRUE.,wait=.TRUE.)
+  CALL b%restore_local(T_res,2,add=.TRUE.)
+  CALL b%restore_local(vel_res(1,:),2,add=.TRUE.)
+  CALL b%restore_local(vel_res(2,:),2,add=.TRUE.)
+  CALL b%restore_local(vel_res(3,:),2,add=.TRUE.)
+  CALL b%restore_local(psi_res,2,add=.TRUE.)
+  CALL b%restore_local(by_res,2,add=.TRUE.)
+  !TODO: adjust diagonal vals
+  self%diag_vals=oft_mpi_sum(diag_vals,2)
+  !---Cleanup remaining storage
+  DEALLOCATE(n_res,vel_res, T_res, psi_res, by_res &
+          n_weights,vel_weights, T_weights, psi_weights, by_weights)
+  end subroutine nlfun_apply
+  !---------------------------------------------------------------------------
+  !> Needs docs
+  !---------------------------------------------------------------------------
+  subroutine build_approx_jacobian(self,a)
+  class(oft_tdiff_sim), intent(inout) :: self
+  class(oft_vector), intent(inout) :: a !< Solution for computing jacobian
+  LOGICAL :: curved
+  INTEGER(i4) :: i,m,jr,jc
+  INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
+  REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz
+  REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
+  dvel(3,3),div_vel,jac_mat(3,4), jac_det
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
+                                      psi_weights_loc, by_weights_loc, res_loc
+  REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
+  REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights, psi_weights, by_weights
+  REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
+  type(oft_1d_int), allocatable, dimension(:) :: iloc
+  class(oft_vector), pointer :: tmp
+  type(oft_local_mat), allocatable, dimension(:,:) :: jac_loc
+  integer(KIND=omp_lock_kind), allocatable, dimension(:) :: tlocks
+  type(oft_quad_type), pointer :: quad
+  quad=>oft_blagrange%quad
+  CALL self%jacobian%zero
+  NULLIFY(n_weights,vel_weights, T_weights, &
+          psi_weights, by_weights)
+  !---Get weights from solution vector
+  CALL a%get_local(n_weights,1)
+  vtmp => vel_weights(1, :)
+  CALL a%get_local(vtmp ,2)
+  vtmp => vel_weights(2, :)
+  CALL a%get_local(vtmp ,3)
+  vtmp => vel_weights(3, :)
+  CALL a%get_local(vtmp, 4)
+  CALL a%get_local(psi_weights,5)
+  CALL a%get_local(T_weights,6)
+  CALL a%get_local(by_weights,7)
+  !---
+  chi = self%chi !< Needs docs
+  eta = self%eta !< Needs docs
+  nu = self%nu !< Needs docs
+  mu_0 = self%mu_0 !< Needs docs
+  gamma = self%gamma !< Needs docs
+  D = self%D !< Needs docs
+  k_boltz = self%k_boltz !< Needs docs
+  ! IF(self%tau_eq>0.d0)THEN
+  !   tau_eq_inv=1.d0/self%tau_eq
+  ! ELSE
+  !   tau_eq_inv=1.d0
+  ! END IF
+  !--Setup thread locks
+  ALLOCATE(tlocks(self%fe_rep%nfields))
+  DO i=1,self%fe_rep%nfields
+    call omp_init_lock(tlocks(i))
+  END DO
+  !$omp parallel private(m,jr,jc,curved,cell_dofs,basis_vals,basis_grads,n_weights_loc&
+  !$omp vel_weights_loc, T_weights_loc, psi_weights_loc, by_weights_loc, &
+  !$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,dn, dT, dvel, dpsi, dby,iloc)
+  ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
+  ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),&
+           T_weights_loc(oft_blagrange%nce), psi_weights_loc(oft_blagrange%nce),&
+           by_weights_loc(oft_blagrange%nce))
+  ALLOCATE(cell_dofs(oft_blagrange%nce))
+  ALLOCATE(jac_loc(self%fe_rep%nfields,self%fe_rep%nfields))
+  ALLOCATE(iloc(self%fe_rep%nfields))
+  iloc(1)%v=>cell_dofs
+  iloc(2)%v=>cell_dofs
+  CALL self%fe_rep%mat_setup_local(jac_loc, self%jacobian_block_mask)
+  !$omp do schedule(static)
+  DO i=1,smesh%nc
+    curved=cell_is_curved(smesh,i) ! Straight cell test
+    call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+    CALL self%fe_rep%mat_zero_local(jac_loc) ! Zero local (cell) contribution to matrix
+    n_weights_loc = n_weights(cell_dofs)
+    vel_weights_loc = vel_weights(:, cell_dofs)
+    T_weights_loc = T_weights(cell_dofs)
+    psi_weights_loc = psi_weights(cell_dofs)
+    by_weights_loc = by_weights(cell_dofs)
+  !---------------------------------------------------------------------------
+  ! Quadrature Loop
+  !---------------------------------------------------------------------------
+    DO m=1,quad%np
+      if(curved.OR.(m==1))call smesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+      !---Evaluate value and gradients of basis functions at current point
+      DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
+        CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
+        CALL oft_blag_geval(oft_blagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
+      END DO
+      !---Reconstruct values of solution fields
+      n = 0.d0; dn = 0.d0; vel = 0.d0; dvel = 0.d0
+      T = 0.d0; dT = 0.d0; psi = 0.d0; dpsi=0.d0
+      by = 0.d0; dby = 0.d0
+      DO jr=1,oft_blagrange%nce
+        n = n + n_weights_loc(jr)*basis_vals(jr)
+        vel = vel + vel_weights_loc(:, jr)*basis_vals(jr)
+        T = T + T_weights_loc(jr)*basis_vals(jr)
+        psi = psi + psi_weights_loc(jr)*basis_vals(jr)
+        by = by + by_weights_loc(jr)*basis_vals(jr)
+        dn = dn + n_weights_loc(jr)*basis_vals(jr)
+        dvel(1, :) = dvel(1, :) + vel_weights_loc(1, jr)*basis_grads(:, jr)
+        dvel(2, :) = dvel(2, :) + vel_weights_loc(2, jr)*basis_grads(:, jr)
+        dvel(3, :) = dvel(3, :) + vel_weights_loc(3, jr)*basis_grads(:, jr)
+        dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
+        dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
+        dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
+      END DO
+      div_vel = dvel(1,1) + dvel(2,2) + dvel(3,3)
+      !---Compute local matrix contributions
+      DO jr=1,oft_blagrange%nce
+        DO jc=1,oft_blagrange%nce
+          !---Ion rows
+          jac_loc(1,1)%m(jr,jc) = jac_loc(1,1)%m(jr,jc) &
+            + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
+            + self%dt*kappa_i*(T_i**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m) &
+            + self%dt*kappa_i*(T_i**1.5d0)*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr),dT_i)*jac_det*quad%wts(m) &
+            - self%dt*tau_eq_inv*basis_vals(jr)*(-basis_vals(jc))*jac_det*quad%wts(m)
+          jac_loc(1,2)%m(jr,jc) = jac_loc(1,2)%m(jr,jc) &
+            - self%dt*tau_eq_inv*basis_vals(jr)*(basis_vals(jc))*jac_det*quad%wts(m)
+          !---Electron rows
+          jac_loc(2,2)%m(jr,jc) = jac_loc(2,2)%m(jr,jc) &
+            + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
+            + self%dt*kappa_e*(T_e**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m) &
+            + self%dt*kappa_e*(T_e**1.5d0)*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr),dT_e)*jac_det*quad%wts(m) &
+            - self%dt*tau_eq_inv*basis_vals(jr)*(-basis_vals(jc))*jac_det*quad%wts(m)
+          jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
+            - self%dt*tau_eq_inv*basis_vals(jr)*(basis_vals(jc))*jac_det*quad%wts(m)
+        END DO
+      END DO
+    END DO
+    CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%Ti_bc(cell_dofs),1)
+    CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%Te_bc(cell_dofs),2)
+    CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
+  END DO
+  !---Cleanup thread-local storage
+  CALL self%fe_rep%mat_destroy_local(jac_loc)
+  DEALLOCATE(basis_vals,basis_grads,T_weights_loc,vel_weights_loc&
+            psi_weights_loc, by_weights_loc, cell_dofs,jac_loc,iloc)
+  !$omp end parallel
+  !--Destroy thread locks
+  DO i=1,self%fe_rep%nfields
+    CALL omp_destroy_lock(tlocks(i))
+  END DO
+  DEALLOCATE(tlocks)
+  IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%n_bc,1)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(1,:),2)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(2,:),3)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(3,:),4)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%T_bc,5)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%psi_bc,6)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%by_bc,7)
+  !
+  call self%fe_rep%vec_create(tmp)
+  call self%jacobian%assemble(tmp)
+  call tmp%delete
+  DEALLOCATE(tmp,n_weights,vel_weights, T_weights, &
+            by_weights, psi_weights)
+  end subroutine build_approx_jacobian
