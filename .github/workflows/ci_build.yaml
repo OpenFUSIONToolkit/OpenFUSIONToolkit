@@ -26,29 +26,23 @@ jobs:
         - {
             name: "Ubuntu 22.04 GCC 12",
             os: ubuntu-22.04,
-            cc: "gcc-12",
-            cxx: "g++-12",
-            fc: "gfortran-12",
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
-            build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
+            build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
             os: ubuntu-24.04,
-            cc: "gcc-14",
-            cxx: "g++-14",
-            fc: "gfortran-14",
+            cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3",
-            build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
+            build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 Intel",
             os: ubuntu-24.04,
-            cc: "icx",
-            cxx: "icx",
-            fc: "ifx",
+            cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
             build_flags: "--use_mkl --mkl_root=$MKLROOT",
             mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT"
@@ -56,23 +50,19 @@ jobs:
         - {
             name: "macOS Ventura GCC 12",
             os: macos-13,
-            cc: "gcc-12",
-            cxx: "g++-12",
-            fc: "gfortran-12",
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3.12",
-            build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
+            build_flags: "--build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
           }
         - {
             name: "macOS Sonoma GCC 13",
             os: macos-14,
-            cc: "gcc-13",
-            cxx: "g++-13",
-            fc: "gfortran-13",
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
             python: "python3.12",
-            build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--ref_blas --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
+            build_flags: "--build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
         exclude:
@@ -138,7 +128,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.config.os }}-build-${{ matrix.parallel }}-${{ matrix.config.cc }}-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
