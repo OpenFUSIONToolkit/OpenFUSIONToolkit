@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - cov_debug
   pull_request:
     types: [opened, reopened, synchronize]
   
