@@ -44,7 +44,7 @@ TYPE :: Exodus_curve
   INTEGER(i4) :: top_cid = -1 !< Curve ID from geometry file
   INTEGER(i4) :: ne = 0 !< Number of geometry model edges
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lgme => NULL() !< List of geometry model edges
-  CHARACTER(LEN=OFT_PATH_SLEN) :: name = ''
+  CHARACTER(LEN=OFT_SLEN) :: name = ''
 END TYPE Exodus_curve
 !------------------------------------------------------------------------------
 ! TYPE Exodus_surf
@@ -58,7 +58,7 @@ TYPE :: Exodus_surf
   INTEGER(i4) :: top_sid = -1 !< Surface ID in OFT ordering
   INTEGER(i4) :: nf = 0 !< Number of geometry model faces
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lgmf => NULL() !< List of geometry model faces
-  CHARACTER(LEN=OFT_PATH_SLEN) :: name = ''
+  CHARACTER(LEN=OFT_SLEN) :: name = ''
 END TYPE Exodus_surf
 !------------------------------------------------------------------------------
 ! TYPE Exodus_cadlink

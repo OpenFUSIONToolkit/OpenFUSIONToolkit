@@ -1104,7 +1104,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror,de_scale
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol
 real(r8), pointer, dimension(:) :: vals => NULL()
 character(LEN=XMHD_RST_LEN) :: rst_char
-character(LEN=OFT_HIST_SLEN) :: comm_line
+character(LEN=OFT_SLEN) :: comm_line
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt

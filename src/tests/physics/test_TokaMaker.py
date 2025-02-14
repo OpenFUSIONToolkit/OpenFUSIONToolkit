@@ -10,6 +10,7 @@ from scipy.special import jv, jn_zeros
 from scipy.integrate import dblquad
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
+from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
@@ -93,7 +94,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(R,0.0,0.12,0.15,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order,F0=1.0,full_domain=True)
@@ -187,7 +189,8 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(0.5,0.5,1.0,1.0,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order)
@@ -275,7 +278,8 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
@@ -371,7 +375,8 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
@@ -545,7 +550,8 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)

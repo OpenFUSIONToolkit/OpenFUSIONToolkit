@@ -41,9 +41,11 @@ def mp_run(target,args,timeout=180):
 
 def run_marklin(meshfile,nmodes,order,grid_order,mp_q):
     try:
+        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.Marklin import Marklin
-        taylor_solver = Marklin(grid_order=grid_order)
-        taylor_solver.setup_mesh(mesh_file=meshfile)
+        myOFT = OFT_env(nthreads=-1)
+        taylor_solver = Marklin(myOFT)
+        taylor_solver.setup_mesh(mesh_file=meshfile,grid_order=grid_order)
         taylor_solver.compute(nmodes,order,minlev=1)
         result = True
     except BaseException as e:

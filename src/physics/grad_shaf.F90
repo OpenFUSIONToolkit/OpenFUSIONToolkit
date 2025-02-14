@@ -4700,7 +4700,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
 type(gsinv_interp), target :: field
-CHARACTER(LEN=80) :: error_str
+CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)

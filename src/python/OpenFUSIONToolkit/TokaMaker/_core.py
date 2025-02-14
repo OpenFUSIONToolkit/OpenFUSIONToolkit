@@ -8,16 +8,14 @@
 #
 # Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
-# import json
-# import math
 import numpy
-from ..util import *
 from ._interface import *
 
 
-def tokamaker_default_settings():
+def tokamaker_default_settings(oft_env):
     '''! Initialize settings object with default values
 
+    @param oft_env Current runtime environment
     @result tokamaker_settings_struct object
     '''
     settings = tokamaker_settings_struct()
@@ -31,7 +29,7 @@ def tokamaker_default_settings():
     settings.nl_tol = 1.E-6
     settings.rmin = 0.0
     settings.lim_zmax = 1.E99
-    settings.limiter_file = 'none'.encode()
+    settings.limiter_file = oft_env.path2c('none')
     return settings
 
 
@@ -80,35 +78,21 @@ def create_prof_file(self, filename, profile_dict, name):
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
-oft_in_template = """&runtime_options
- debug={DEBUG_LEVEL}
-/
-
-&mesh_options
- meshname='none'
- {MESH_TYPE}
-/
-
-{MESH_DEF}
-"""
-
 
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
-    def __init__(self,debug_level=0,nthreads=2):
+    def __init__(self,OFT_env):
         '''! Initialize TokaMaker object
 
-        @param debug_level Level of debug printing (0-3)
+        @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         '''
-        ## Input file settings
-        self._oft_in_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'MESH_DEF': ''}
-        self._update_oft_in()
-        oft_init(c_int(nthreads))
+        # Create OFT execution environment
+        self._oft_env = OFT_env
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_eq "gs_eq")
         self.gs_obj = c_void_p()
         tokamaker_alloc(ctypes.byref(self.gs_obj))
         ## General settings object
-        self.settings = tokamaker_default_settings()
+        self.settings = tokamaker_default_settings(self._oft_env)
         ## Conductor definition dictionary
         self._cond_dict = {}
         ## Vacuum definition dictionary
@@ -163,24 +147,17 @@ class TokaMaker():
         self.nvac = 0
         ## Limiting contour
         self.lim_contour = None
-    
-    def _update_oft_in(self):
-        '''! Update input file (`oftpyin`) with current settings'''
-        with open('oftpyin','w+') as fid:
-            fid.write(oft_in_template.format(**self._oft_in_dict))
 
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
-        cstring = create_string_buffer(b"",200)
-        tokamaker_reset(cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_reset(error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         self.nregs = -1
         self.np = -1
-        self._oft_in_dict['MESH_TYPE'] = ''
-        self._oft_in_dict['MESH_DEF'] = ''
         # Reset defaults
-        self.settings = tokamaker_default_settings()
+        self.settings = tokamaker_default_settings(self._oft_env)
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
@@ -229,11 +206,9 @@ class TokaMaker():
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
             regfake = numpy.ones((1,),dtype=numpy.int32)
-            self._oft_in_dict['MESH_TYPE'] = 'cad_type=0'
-            self._oft_in_dict['MESH_DEF'] = """&native_mesh_options
- filename='{0}'
-/""".format(mesh_file)
-            self._update_oft_in()
+            self._oft_env.oft_in_groups['mesh_options'] = {'cad_type': "0"}
+            self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
+            self._oft_env.update_oft_in()
             oft_setup_smesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
         elif r is not None:
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)
@@ -300,7 +275,7 @@ class TokaMaker():
         for key in self.coil_sets:
             for sub_coil in self.coil_sets[key]['sub_coils']:
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
-        cstring = c_char_p('none'.encode())
+        cstring = self._oft_env.path2c('none')
         tokamaker_setup_regions(cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils)
     
     def setup(self,order=2,F0=0.0,full_domain=False):
@@ -314,11 +289,10 @@ class TokaMaker():
         self.update_settings()
         #
         ncoils = c_int()
-        cstring = create_string_buffer(b"",200)
-        # filename = c_char_p(input_filename.encode())
-        tokamaker_setup(order,full_domain,ctypes.byref(ncoils),cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_setup(order,full_domain,ctypes.byref(ncoils),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         ## Number of coils in mesh
         self.ncoils = ncoils.value
         ## Isoflux constraint points (use @ref TokaMaker.TokaMaker.set_isoflux "set_isoflux")
@@ -496,7 +470,7 @@ class TokaMaker():
         if error_str.value != b'':
             raise ValueError("Error in solve: {0}".format(error_str.value.decode()))
 
-    def load_profiles(self, f_file='f_prof.in', foffset=None, p_file='p_prof.in', eta_file='eta_prof.in', f_NI_file='f_NI_prof.in'):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -507,9 +481,13 @@ class TokaMaker():
         '''
         if foffset is not None:
             self._F0 = foffset
-        tokamaker_load_profiles(c_char_p(f_file.encode()),c_double(self._F0),c_char_p(p_file.encode()),c_char_p(eta_file.encode()),c_char_p(f_NI_file.encode()))
+        f_file_c = self._oft_env.path2c(f_file)
+        p_file_c = self._oft_env.path2c(p_file)
+        eta_file_c = self._oft_env.path2c(eta_file)
+        f_NI_file_c = self._oft_env.path2c(f_NI_file)
+        tokamaker_load_profiles(f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c)
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations 
@@ -519,23 +497,34 @@ class TokaMaker():
         in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
         in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
         '''
+        delete_files = []
         ffp_file = 'none'
         if ffp_prof is not None:
-            ffp_file = 'tokamaker_f.prof'
+            ffp_file = self._oft_env.unique_tmpfile('tokamaker_f.prof')
             create_prof_file(self, ffp_file, ffp_prof, "F*F'")
+            delete_files.append(ffp_file)
         pp_file = 'none'
         if pp_prof is not None:
-            pp_file = 'tokamaker_p.prof'
+            pp_file = self._oft_env.unique_tmpfile('tokamaker_p.prof')
             create_prof_file(self, pp_file, pp_prof, "P'")
+            delete_files.append(pp_file)
         eta_file = 'none'
         ffp_NI_file = 'none'
         if ffp_NI_prof is not None:
-            ffp_NI_file = 'tokamaker_ffp_NI.prof'
+            ffp_NI_file = self._oft_env.unique_tmpfile('tokamaker_ffp_NI.prof')
             create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
+            delete_files.append(ffp_NI_file)
         if foffset is not None:
             self._F0 = foffset
         self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
+        if not keep_files:
+            for file in delete_files:
+                try:
+                    os.remove(file)
+                except:
+                    print('Warning: unable to delete temporary file "{0}"'.format(file))
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
@@ -875,10 +864,10 @@ class TokaMaker():
             raise ValueError('Invalid field type ("B", "psi", "F", "P")')
         #
         int_obj = c_void_p()
-        cstring = create_string_buffer(b"",200)
-        tokamaker_get_field_eval(imode,ctypes.byref(int_obj),cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_field_eval(imode,ctypes.byref(int_obj),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         field_dim = 1
         if imode == 1:
             field_dim = 3
@@ -1346,11 +1335,11 @@ class TokaMaker():
         @param truncate_eq Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
         @param limiter_file File containing limiter contour to use instead of TokaMaker limiter
         '''
-        cfilename = c_char_p(filename.encode())
-        lim_filename = c_char_p(limiter_file.encode())
+        cfilename = self._oft_env.path2c(filename)
+        lim_filename = self._oft_env.path2c(limiter_file)
         if len(run_info) > 40:
             raise ValueError('"run_info" cannot be longer than 40 characters')
-        crun_info = c_char_p(run_info.encode())
+        crun_info = self._oft_env.path2c(run_info)
         if rbounds is None:
             rbounds = numpy.r_[self.lim_contour[:,0].min(), self.lim_contour[:,0].max()]
             dr = rbounds[1]-rbounds[0]
@@ -1361,10 +1350,10 @@ class TokaMaker():
             zbounds += numpy.r_[-1.0,1.0]*dr*0.05
         if rcentr is None:
             rcentr = -1.0
-        cstring = create_string_buffer(b"",200)
-        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
