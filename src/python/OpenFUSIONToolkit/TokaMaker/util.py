@@ -5,7 +5,7 @@
 @ingroup doxy_oft_python
 '''
 import numpy
-from ..util import *
+from .._interface import *
 
 ## @cond
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,

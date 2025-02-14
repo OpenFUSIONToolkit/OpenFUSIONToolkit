@@ -112,8 +112,10 @@ def mp_run(target,args,timeout=180):
 
 def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,mp_q):
     try:
+        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr(nthreads=-1)
+        myOFT = OFT_env(nthreads=-1)
+        tw_model = ThinCurr(myOFT)
         tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
         if floops is not None:
@@ -142,8 +144,10 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
 
 def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
     try:
+        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr(nthreads=-1)
+        myOFT = OFT_env(nthreads=-1)
+        tw_model = ThinCurr(myOFT)
         tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
         tw_model.compute_Mcoil()
@@ -163,8 +167,10 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
 
 def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
     try:
+        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr(nthreads=-1)
+        myOFT = OFT_env(nthreads=-1)
+        tw_model = ThinCurr(myOFT)
         tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
         if floops is not None:

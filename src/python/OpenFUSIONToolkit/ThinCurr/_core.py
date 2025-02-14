@@ -9,41 +9,30 @@
 # Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
 import numpy
-from ..util import *
+import h5py
 from ._interface import *
+from ..util import build_XDMF
 
-oft_in_template = """&runtime_options
- debug={DEBUG_LEVEL}
-/
-
-&mesh_options
- meshname='none'
- {MESH_TYPE}
-/
-
-{MESH_DEF}
-
-&thincurr_hodlr_options
- target_size=1200
- aca_min_its=20
- L_svd_tol=1.E-8
- L_aca_rel_tol=0.05
- B_svd_tol=1.E-3
- B_aca_rel_tol=0.05
-/
-"""
 
 class ThinCurr():
     '''! ThinCurr thin-wall eddy current model class'''
-    def __init__(self,debug_level=0,nthreads=2):
+    def __init__(self,OFT_env):
         '''! Initialize ThinCurr object
 
-        @param debug_level Level of debug printing (0-3)
+        @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         '''
-        ## Input file settings
-        self._psin_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'MESH_DEF': ''}
-        self._update_psin()
-        oft_init(c_int(nthreads))
+        # Create OFT execution environment
+        self._oft_env = OFT_env
+        self._oft_env.oft_in_groups['mesh_options'] = {'cad_type': "0"}
+        self._oft_env.oft_in_groups['thincurr_hodlr_options'] = {
+            'target_size': '1200',
+            'aca_min_its': '20',
+            'L_svd_tol': '1.E-8',
+            'L_aca_rel_tol': '0.05',
+            'B_svd_tol': '1.E-3',
+            'B_aca_rel_tol': '0.05',
+        }
+        self._oft_env.update_oft_in()
         ## Thin-wall model object
         self.tw_obj = c_void_p()
         ## Number of regions in mesh
@@ -81,11 +70,6 @@ class ThinCurr():
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
 
-    def _update_psin(self):
-        '''! Update input file (`oftpyin`) with current settings'''
-        with open('oftpyin','w+') as fid:
-            fid.write(oft_in_template.format(**self._psin_dict))
-
     def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=-1):
         '''! Setup ThinCurr model
 
@@ -99,8 +83,8 @@ class ThinCurr():
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')
         if xml_filename is not None:
-            filename = c_char_p(xml_filename.encode())
-            oftpy_load_xml(filename,ctypes.byref(self._xml_ptr))
+            cfilename = self._oft_env.path2c(xml_filename)
+            oftpy_load_xml(cfilename,ctypes.byref(self._xml_ptr))
         nregs = c_int()
         if mesh_file is not None:
             idummy = c_int(-1)
@@ -112,9 +96,9 @@ class ThinCurr():
             else:
                 pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
             sizes = numpy.zeros((8,),dtype=numpy.int32)
-            filename = c_char_p(mesh_file.encode())
-            error_string = create_string_buffer(b"",200)
-            thincurr_setup(filename,idummy,rfake,idummy,lcfake,regfake,pmap,c_int(jumper_start),ctypes.byref(self.tw_obj),sizes,error_string,self._xml_ptr)
+            cfilename = self._oft_env.path2c(mesh_file)
+            error_string = self._oft_env.get_c_errorbuff()
+            thincurr_setup(cfilename,idummy,rfake,idummy,lcfake,regfake,pmap,c_int(jumper_start),ctypes.byref(self.tw_obj),sizes,error_string,self._xml_ptr)
             if error_string.value != b'':
                 raise Exception(error_string.value.decode())
             self.np = sizes[0]
@@ -165,14 +149,14 @@ class ThinCurr():
         '''
         # tw_ptr,basepath,save_debug,error_str
         if basepath is None:
-            basepath_c = c_char_p(b'')
+            basepath_c = self._oft_env.path2c('')
             self._io_basepath = "."
         else:
             if basepath[-1] != '/':
                 basepath += '/'
             self._io_basepath = basepath[:-1]
-            basepath_c = c_char_p(basepath.encode())
-        error_string = create_string_buffer(b"",200)
+            basepath_c = self._oft_env.path2c(basepath)
+        error_string = self._oft_env.get_c_errorbuff()
         thincurr_setup_io(self.tw_obj,basepath_c,c_bool(save_debug),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
@@ -221,8 +205,8 @@ class ThinCurr():
         if potential.shape[0] != self.nelems:
             raise IndexError('Incorrect shape of "potential", should be [nelems]')
         potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
-        cstring = c_char_p(tag.encode())
-        thincurr_save_field(self.tw_obj,potential,cstring)
+        ctag = self._oft_env.path2c(tag)
+        thincurr_save_field(self.tw_obj,potential,ctag)
     
     def save_scalar(self,field,tag):
         '''! Save scalar field to plot files
@@ -233,7 +217,7 @@ class ThinCurr():
         if field.shape[0] != self.np:
             raise IndexError('Incorrect shape of "field", should be [np]')
         field = numpy.ascontiguousarray(field, dtype=numpy.float64)
-        ctag = c_char_p(tag.encode())
+        ctag = self._oft_env.path2c(tag)
         thincurr_save_scalar(self.tw_obj,field,ctag)
     
     def build_XDMF(self,repeat_static=False,pretty=False):
@@ -263,11 +247,11 @@ class ThinCurr():
         @result Self-inductance matrix (`(:,:)` if `use_hodlr=False` else reference to HODLR object)
         '''
         if cache_file is None:
-            cache_string = c_char_p(b"")
+            cache_string = self._oft_env.path2c("")
         else:
-            cache_string = c_char_p(cache_file.encode())
+            cache_string = self._oft_env.path2c(cache_file)
         Lmat_loc = c_void_p()
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         thincurr_Lmat(self.tw_obj,use_hodlr,ctypes.byref(Lmat_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
@@ -284,12 +268,12 @@ class ThinCurr():
         @result Icoil B-field reconstruction matrix `(:,:)`
         '''
         if cache_file is None:
-            cache_string = c_char_p(b"")
+            cache_string = self._oft_env.path2c("")
         else:
-            cache_string = c_char_p(cache_file.encode())
+            cache_string = self._oft_env.path2c(cache_file)
         Bmat_loc = c_void_p()
         Bdr_ptr = c_void_p()
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
             thincurr_Bmat(self.tw_obj,self.Lmat_hodlr,ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
         else:
@@ -309,11 +293,11 @@ class ThinCurr():
         @result Mutual inductance matrix `(:,:)`
         '''
         if cache_file is None:
-            cache_string = c_char_p(b"")
+            cache_string = self._oft_env.path2c("")
         else:
-            cache_string = c_char_p(cache_file.encode())
+            cache_string = self._oft_env.path2c(cache_file)
         Mc_loc = c_void_p()
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         thincurr_Mcoil(self.tw_obj,ctypes.byref(Mc_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
@@ -329,16 +313,16 @@ class ThinCurr():
         @result Internal ThinCurr sensor object
         '''
         if cache_file is None:
-            cache_string = c_char_p(b"")
+            cache_string = self._oft_env.path2c("")
         else:
-            cache_string = c_char_p(cache_file.encode())
-        sensor_string = c_char_p(sensor_file.encode())
+            cache_string = self._oft_env.path2c(cache_file)
+        sensor_string = self._oft_env.path2c(sensor_file)
         Ms_loc = c_void_p()
         Msc_loc = c_void_p()
         nsensors = c_int()
         njumpers = c_int()
         sensor_loc = c_void_p()
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc), 
                          ctypes.byref(nsensors),ctypes.byref(njumpers),ctypes.byref(sensor_loc),cache_string,error_string)
         if error_string.value != b'':
@@ -365,7 +349,7 @@ class ThinCurr():
             Rmat_tmp = self.Rmat
         else:
             Rmat_tmp = numpy.zeros((1,1), dtype=numpy.float64)
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         thincurr_curr_Rmat(self.tw_obj,c_bool(copy_out),Rmat_tmp,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
@@ -379,10 +363,10 @@ class ThinCurr():
         '''
         Mmat = numpy.zeros((self.nelems,model2.nelems), dtype=numpy.float64)
         if cache_file is None:
-            cache_string = c_char_p(b"")
+            cache_string = self._oft_env.path2c("")
         else:
-            cache_string = c_char_p(cache_file.encode())
-        error_string = create_string_buffer(b"",200)
+            cache_string = self._oft_env.path2c(cache_file)
+        error_string = self._oft_env.get_c_errorbuff()
         thincurr_cross_coupling(self.tw_obj,model2.tw_obj,Mmat,cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
@@ -400,7 +384,7 @@ class ThinCurr():
             raise IndexError('Incorrect shape of "field", should be [nelems]')
         vec_out = numpy.zeros((nrhs,model2.nelems), dtype=numpy.float64)
         vec_in = numpy.ascontiguousarray(field.copy(), dtype=numpy.float64)
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         thincurr_cross_eval(self.tw_obj,model2.tw_obj,c_int(nrhs),vec_in,vec_out,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
@@ -412,7 +396,7 @@ class ThinCurr():
         @result Regularization matrix `(:,:)`
         '''
         Rmat = numpy.zeros((self.nelems,3*self.nc), dtype=numpy.float64)
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         thincurr_curr_regmat(self.tw_obj,Rmat,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
@@ -428,7 +412,7 @@ class ThinCurr():
         '''
         eig_vals = numpy.zeros((neigs,), dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.nelems), dtype=numpy.float64)
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
             thincurr_eigenvalues(self.tw_obj,c_bool(direct),c_int(neigs),eig_vals,eig_vecs,self.Lmat_hodlr,error_string)
         else:
@@ -459,7 +443,7 @@ class ThinCurr():
             vdriver[0,:] = omega*fdriver[1,:]
             vdriver[1,:] = -omega*fdriver[0,:]
         result = numpy.ascontiguousarray(vdriver.copy(), dtype=numpy.float64)
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
             thincurr_freq_response(self.tw_obj,c_bool(direct),c_int(fr_limit),c_double(freq),result,self.Lmat_hodlr,error_string)
         else:
@@ -522,7 +506,7 @@ class ThinCurr():
                 raise ValueError("# of voltages in waveform does not match # of vcoils")
             nvolt = c_int(coil_volts.shape[0])
             coil_volts = numpy.ascontiguousarray(coil_volts.transpose(), dtype=numpy.float64)
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
             thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_bool(timestep_cn),
                                  c_int(status_freq),c_int(plot_freq),vec_ic,sensor_ptr,ncurr,coil_currs,nvolt,coil_volts,volts_full,
@@ -554,7 +538,7 @@ class ThinCurr():
         if sensor_values is None:
             nsensor = c_int(0)
             sensor_values = numpy.zeros((1,1), dtype=numpy.float64)
-        error_string = create_string_buffer(b"",200)
+        error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
             thincurr_time_domain_plot(self.tw_obj,c_bool(compute_B),c_bool(rebuild_sensors),c_int(nsteps),c_int(plot_freq),sensor_ptr,
                                       sensor_values,nsensor,self.Lmat_hodlr,error_string)
@@ -578,11 +562,12 @@ class ThinCurr():
         sensor_ptr = c_void_p()
         if sensor_obj is not None:
             sensor_ptr = sensor_obj['ptr']
-        error_string = create_string_buffer(b"",200)
+        cfilename = self._oft_env.path2c(filename)
+        error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
-            thincurr_reduce_model(self.tw_obj,c_char_p(filename.encode()),nbasis,basis_set,c_bool(compute_B),sensor_ptr,self.Lmat_hodlr,error_string)
+            thincurr_reduce_model(self.tw_obj,cfilename,nbasis,basis_set,c_bool(compute_B),sensor_ptr,self.Lmat_hodlr,error_string)
         else:
-            thincurr_reduce_model(self.tw_obj,c_char_p(filename.encode()),nbasis,basis_set,c_bool(compute_B),sensor_ptr,c_void_p(),error_string)
+            thincurr_reduce_model(self.tw_obj,cfilename,nbasis,basis_set,c_bool(compute_B),sensor_ptr,c_void_p(),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return ThinCurr_reduced(filename)

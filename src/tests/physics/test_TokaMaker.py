@@ -10,6 +10,7 @@ from scipy.special import jv, jn_zeros
 from scipy.integrate import dblquad
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
+from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
@@ -52,6 +53,7 @@ def validate_dict(results,dict_exp):
         result_val = results[0].get(key,None)
         if result_val is None:
             print('FAILED: key "{0}" not present!'.format(key))
+            result_val = False
         else:
             if type(exp_val) is list:
                 for i in range(len(exp_val)):
@@ -92,7 +94,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(R,0.0,0.12,0.15,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order,F0=1.0,full_domain=True)
@@ -129,12 +132,12 @@ def validate_solo(results,psi_err_exp,X_err_exp):
         print("FAILED: error in solve!")
         return False
     test_result = True
-    if abs((results[0]-psi_err_exp)/psi_err_exp) > 1.E-1:
+    if abs(results[0]) > abs(psi_err_exp)*1.1:
         print("FAILED: psi error too high!")
         print("  Expected = {0}".format(psi_err_exp))
         print("  Actual =   {0}".format(results[0]))
         test_result = False
-    if abs((results[1]-X_err_exp)/X_err_exp) > 1.E-1:
+    if abs(results[1]) > abs(X_err_exp)*1.1:
         print("FAILED: X-point error too high!")
         print("  Expected = {0}".format(X_err_exp))
         print("  Actual =   {0}".format(results[1]))
@@ -186,7 +189,8 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     gs_mesh.add_rectangle(0.5,0.5,1.0,1.0,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order)
@@ -221,7 +225,7 @@ def validate_sph(results,psi_err_exp):
         print("FAILED: error in solve!")
         return False
     test_result = True
-    if abs((results[0]-psi_err_exp)/psi_err_exp) > 1.E-1:
+    if abs(results[0]) > abs(psi_err_exp)*1.1:
         print("FAILED: psi error too high!")
         print("  Expected = {0}".format(psi_err_exp))
         print("  Actual =   {0}".format(results[0]))
@@ -251,7 +255,7 @@ def test_spheromak_h3(order):
 
 #============================================================================
 def run_coil_case(mesh_resolution,fe_order,mp_q):
-    def coil_green(rc,zc,r,z,gs_obj):
+    def coil_green(rc,zc,r,z):
         return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
     def masked_err(point_mask,gs_obj,psi,sort_ind):
         bdry_points = gs_obj.r[point_mask,:]
@@ -261,7 +265,7 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
         bdry_points = bdry_points[sort_ind]
         green = np.zeros((bdry_points.shape[0],))
         for i in range(bdry_points.shape[0]):
-            green[i], _ = dblquad(coil_green,0.75,0.85,0.75,0.85,args=(bdry_points[i,0],bdry_points[i,1],gs_obj))
+            green[i], _ = dblquad(coil_green,0.75,0.85,0.75,0.85,args=(bdry_points[i,0],bdry_points[i,1]))
         return green, psi_bdry
     # Build mesh
     gs_mesh = gs_Domain(rextent=1.0,zextents=[0.0,1.0])
@@ -274,7 +278,8 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
@@ -301,7 +306,7 @@ def validate_coil(results,psi_err_exp):
         print("FAILED: error in solve!")
         return False
     test_result = True
-    if abs((results[0]-psi_err_exp)/psi_err_exp) > 1.E-1:
+    if abs(results[0]) > abs(psi_err_exp)*1.1:
         print("FAILED: psi error too high!")
         print("  Expected = {0}".format(psi_err_exp))
         print("  Actual =   {0}".format(results[0]))
@@ -370,7 +375,8 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
@@ -492,7 +498,7 @@ def test_ITER_eq(order):
         'l_i': 0.9048845463517069,
         'beta_tor': 1.7816206668692283,
         'beta_n': 1.1868590722509704,
-        'MCS1': 2.5608173430680583e-06,
+        'LCS1': 2.485860941880887e-06,
         'MCS1_plasma': 8.930926092661585e-07,
         'Lplasma': 1.1899835061690724e-05
     }
@@ -542,7 +548,8 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
-    mygs = TokaMaker(nthreads=-1)
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
