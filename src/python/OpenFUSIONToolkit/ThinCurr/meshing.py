@@ -28,7 +28,7 @@ def build_regcoil_grid(filename, field_suffix, ntheta, nphi, full_torus=False):
 
     @param field_suffix Suffix for netCDF fields (eg. "plasma" or "coil")
     @param ntheta Number of points in the \f$ \theta \f$ (poloidal) direction
-    @param nphi Number of points in the \f$ \phi \f$ (toroidal) direction
+    @param nphi Number of points (per field period) in the \f$ \phi \f$ (toroidal) direction
     @param full_torus Construct grid for the full torus (default: one field period)
     @result `rgrid` Structed phi-theta grid of points [nphi,ntheta,3], `nfp` Number of field periods
     '''
@@ -42,10 +42,10 @@ def build_regcoil_grid(filename, field_suffix, ntheta, nphi, full_torus=False):
         zmns = file['zmns_{0}'.format(field_suffix)][:],
         xm = file['xm_{0}'.format(field_suffix)][:]
         xn = file['xn_{0}'.format(field_suffix)][:]
+        nfp = file['nfp'][0]
         if full_torus:
+            nphi *= nfp
             nfp = 1
-        else:
-            nfp = file['nfp'][0]
     #
     theta_span = numpy.linspace(0.0,2.0*numpy.pi,ntheta,endpoint=False)
     zeta_span = numpy.linspace(0.0,2.0*numpy.pi/nfp,nphi,endpoint=(nfp>1))
@@ -181,13 +181,13 @@ def build_torus_bnorm_grid(filename,nsample,nphi,resample_type='theta',use_splin
 
 class ThinCurr_periodic_toroid:
     '''! Helper class for working with periodic toroid models'''
-    def __init__(self,r_grid,nfp,nphi,ntheta):
+    def __init__(self,r_grid,nfp,ntheta,nphi):
         r'''! Build triangular mesh for the full surface from a uniform grid of a single field period (toroidal)
 
         @param r_grid Uniform grid [nphi,ntheta,3] (\f$ \phi \f$ and \f$ \theta \f$ vary along the first and second dimension respectively)
         @param nfp Number of field periods
-        @param nphi Number of node points within one field period in the toroidal direction
         @param ntheta Number of node points in the poloidal direction
+        @param nphi Number of node points (per field period) in the toroidal direction
         '''
         self.nfp = nfp
         self.nphi = nphi
@@ -219,19 +219,27 @@ class ThinCurr_periodic_toroid:
             for i in range(1,nfp):
                 self.pnodesets.append(pnodeset+i*(nphi-1)*ntheta)
     
-    def plot_mesh(self,fig):
+    def plot_mesh(self,fig,equal_aspect=True,surf_alpha=0.1,surf_cmap='viridis'):
         '''! Plot mesh and holes
 
         @param fig Figure to use for plots (must be empty)
+        @param equal_aspect Set plot aspect ratio to be more physically realistic
+        @param surf_alpha Transparency of surface in hole plot (left plot)
+        @param surf_cmap Colormap for mesh plot (right plot)
         '''
         ax = fig.add_subplot(1,2,1, projection='3d')
         ax.plot(self.r[self.tnodeset,0], self.r[self.tnodeset,1], self.r[self.tnodeset,2], c='tab:red')
         for pnodeset in self.pnodesets:
             pnodeset_tmp = numpy.append(pnodeset, (pnodeset[0],))
             ax.plot(self.r[pnodeset_tmp,0], self.r[pnodeset_tmp,1], self.r[pnodeset_tmp,2], c='tab:blue')
-        _ = ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lc, color=[0.0,0.0,0.0,0.1])
+        ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lc, color=[0.0,0.0,0.0,surf_alpha])
+        if equal_aspect:
+            mesh_range = numpy.ptp(self.r,axis=0)
+            ax.set_box_aspect(mesh_range)
         ax = fig.add_subplot(1,2,2, projection='3d')
-        _ = ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lc, cmap='viridis', antialiased=False)
+        ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lc, cmap=surf_cmap, antialiased=False)
+        if equal_aspect:
+            ax.set_box_aspect(mesh_range)
     
     def write_to_file(self,filename,reg=None,include_closures=True):
         '''! Save mesh to file in ThinCurr format

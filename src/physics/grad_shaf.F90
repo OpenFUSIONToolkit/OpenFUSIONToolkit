@@ -12,7 +12,8 @@
 MODULE oft_gs
 USE oft_base
 USE oft_sort, ONLY: sort_matrix, sort_array
-USE oft_io, ONLY: hdf5_create_timestep, hdf5_field_exist, hdf5_read, hdf5_write
+USE oft_io, ONLY: hdf5_field_exist, hdf5_read, hdf5_write, &
+  xdmf_plot_file
   ! hdf5_rst_field_exist
 USE oft_quadrature, ONLY: oft_quad_type
 USE oft_gauss_quadrature, ONLY: set_quad_1d
@@ -242,6 +243,7 @@ TYPE :: gs_eq
   LOGICAL :: isoflux_grad_weight = .TRUE.
   CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
   CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
+  TYPE(xdmf_plot_file) :: xdmf
   TYPE(oft_lusolver) :: lu_solver
   TYPE(oft_lusolver) :: lu_solver_dt
   ! CLASS(oft_solver), POINTER :: solver => NULL()
@@ -992,7 +994,7 @@ IF(do_plot)THEN
   ! DO j=1,smesh%nc
   !   eigs(j)=REAL(smesh%reg(j),8)
   ! END DO
-  ! CALL smesh%save_cell_scalar(eigs,'Regions')
+  ! CALL smesh%save_cell_scalar(eigs,self%xdmf,'Regions')
   !---
   eigs=0.d0
   DO j=1,self%ncond_regs
@@ -1006,7 +1008,7 @@ IF(do_plot)THEN
       END DO
     END IF
   END DO
-  ! CALL smesh%save_cell_scalar(eigs,'Eig')
+  ! CALL smesh%save_cell_scalar(eigs,self%xdmf,'Eig')
   !---
   eigs=0.d0
   DO j=1,self%ncond_regs
@@ -1019,7 +1021,7 @@ IF(do_plot)THEN
       END DO
     END IF
   END DO
-  ! CALL smesh%save_cell_scalar(eigs,'Curr')
+  ! CALL smesh%save_cell_scalar(eigs,self%xdmf,'Curr')
   DEALLOCATE(eigs)
 END IF
 IF(oft_debug_print(2))CALL oft_decrease_indent
@@ -1255,7 +1257,7 @@ DO i=1,self%ncoils
   CALL gs_vacuum_solve(self,self%psi_coil(i)%f,tmp_vec)
   CALL self%psi_coil(i)%f%get_local(psi_vals)
   WRITE(coil_tag,'(I3.3)')i
-  IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,'Psi_coil'//coil_tag)
+  IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_coil'//coil_tag)
 END DO
 DO i=1,self%ncoils
   DO j=i,self%ncoils
@@ -1276,7 +1278,7 @@ DO i=1,self%ncond_regs
     CALL self%cond_regions(i)%psi_eig(j)%f%get_local(psi_vals)
     WRITE(cond_tag,'(I2.2)')i
     WRITE(eig_tag,'(I2.2)')j
-    IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,'Psi_cond'//cond_tag//"_"//eig_tag)
+    IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_cond'//cond_tag//"_"//eig_tag)
   END DO
 END DO
 CALL tmp_vec2%delete()
@@ -1299,7 +1301,7 @@ DEALLOCATE(tmp_vec2)
 ! END IF
 ! !
 ! CALL self%psi%get_local(psi_vals)
-! IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,'Psi_init')
+! IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_init')
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 contains
@@ -1500,7 +1502,7 @@ CALL self%p%update(self)
 !
 IF(self%save_visit)THEN
   CALL self%psi%get_local(psi_vals)
-  CALL smesh%save_vertex_scalar(psi_vals,'Psi_init')
+  CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_init')
   DEALLOCATE(psi_vals)
 END IF
 ! CALL tmp_vec%delete()
@@ -2351,20 +2353,20 @@ DO j=1,self%ncoils
 END DO
 !---Save input solution
 IF(self%save_visit.AND.self%plot_final.AND.(eq_count==0))THEN
-  CALL hdf5_create_timestep(REAL(eq_count,8))
+  CALL self%xdmf%add_timestep(REAL(eq_count,8))
   CALL self%psi%get_local(vals_tmp)
   IF(self%plasma_bounds(1)<-1.d98)THEN
-    CALL smesh%save_vertex_scalar(vals_tmp,'Psi')
+    CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi')
   ELSE
-    CALL smesh%save_vertex_scalar(vals_tmp-self%plasma_bounds(1),'Psi')
+    CALL smesh%save_vertex_scalar(vals_tmp-self%plasma_bounds(1),self%xdmf,'Psi')
   END IF
   CALL psi_vac%get_local(vals_tmp)
-  CALL smesh%save_vertex_scalar(vals_tmp,'Psi_vac')
+  CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vac')
   CALL psi_eddy%get_local(vals_tmp)
-  CALL smesh%save_vertex_scalar(vals_tmp,'Psi_eddy')
+  CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_eddy')
   CALL psi_vcont%get_local(vals_tmp)
   vals_tmp=vals_tmp*self%vcontrol_val
-  CALL smesh%save_vertex_scalar(vals_tmp,'Psi_vcont')
+  CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vcont')
 END IF
 !---
 nl_res=1.d99
@@ -2662,20 +2664,20 @@ DO i=1,self%maxits
   !---Output
   IF(self%save_visit.AND.self%plot_step)THEN
     eq_count=eq_count+1
-    CALL hdf5_create_timestep(REAL(eq_count,8))
+    CALL self%xdmf%add_timestep(REAL(eq_count,8))
     CALL self%psi%get_local(vals_tmp)
     IF(self%plasma_bounds(1)<-1.d98)THEN
-      CALL smesh%save_vertex_scalar(vals_tmp,'Psi')
+      CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi')
     ELSE
-      CALL smesh%save_vertex_scalar(vals_tmp-self%plasma_bounds(1),'Psi')
+      CALL smesh%save_vertex_scalar(vals_tmp-self%plasma_bounds(1),self%xdmf,'Psi')
     END IF
     CALL psi_vac%get_local(vals_tmp)
-    CALL smesh%save_vertex_scalar(vals_tmp,'Psi_vac')
+    CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vac')
     CALL psi_eddy%get_local(vals_tmp)
-    CALL smesh%save_vertex_scalar(vals_tmp,'Psi_eddy')
+    CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_eddy')
     CALL psi_vcont%get_local(vals_tmp)
     vals_tmp=vals_tmp*self%vcontrol_val
-    CALL smesh%save_vertex_scalar(vals_tmp,'Psi_vcont')
+    CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vcont')
   END IF
   ! !---Under-relax pressure in R0 control mode
   ! IF(self%R0_target>0.d0.AND.MOD(i,self%ninner)==0)THEN
@@ -2704,20 +2706,20 @@ IF(i>self%maxits)error_flag=-1
 !---Output
 IF(self%save_visit.AND.self%plot_final)THEN
   eq_count=eq_count+1
-  CALL hdf5_create_timestep(REAL(eq_count,8))
+  CALL self%xdmf%add_timestep(REAL(eq_count,8))
   CALL self%psi%get_local(vals_tmp)
   IF(self%plasma_bounds(1)<-1.d98)THEN
-    CALL smesh%save_vertex_scalar(vals_tmp,'Psi')
+    CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi')
   ELSE
-    CALL smesh%save_vertex_scalar(vals_tmp-self%plasma_bounds(1),'Psi')
+    CALL smesh%save_vertex_scalar(vals_tmp-self%plasma_bounds(1),self%xdmf,'Psi')
   END IF
   CALL psi_vac%get_local(vals_tmp)
-  CALL smesh%save_vertex_scalar(vals_tmp,'Psi_vac')
+  CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vac')
   CALL psi_eddy%get_local(vals_tmp)
-  CALL smesh%save_vertex_scalar(vals_tmp,'Psi_eddy')
+  CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_eddy')
   CALL psi_vcont%get_local(vals_tmp)
   vals_tmp=vals_tmp*self%vcontrol_val
-  CALL smesh%save_vertex_scalar(vals_tmp,'Psi_vcont')
+  CALL smesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vcont')
 END IF
 self%timing(1)=self%timing(1)+(omp_get_wtime()-t0)
 IF(oft_env%pm)THEN
@@ -5225,10 +5227,10 @@ IF(PRESENT(filename))THEN
   CLOSE(io_unit)
 END IF
 !---Save fields to plot
-CALL smesh%save_vertex_scalar(Fout(1,:),'Br')
-CALL smesh%save_vertex_scalar(Fout(2,:),'Bt')
-CALL smesh%save_vertex_scalar(Fout(3,:),'Bz')
-CALL smesh%save_vertex_scalar(Fout(4,:),'P')
+CALL smesh%save_vertex_scalar(Fout(1,:),self%xdmf,'Br')
+CALL smesh%save_vertex_scalar(Fout(2,:),self%xdmf,'Bt')
+CALL smesh%save_vertex_scalar(Fout(3,:),self%xdmf,'Bz')
+CALL smesh%save_vertex_scalar(Fout(4,:),self%xdmf,'P')
 !---Clean up
 oft_env%pm=pm_save
 CALL a%delete

@@ -11,7 +11,7 @@ import ctypes
 import numpy
 import h5py
 from ._interface import *
-from ..util import build_XDMF
+from ..io import build_XDMF
 
 
 class ThinCurr():
@@ -226,7 +226,7 @@ class ThinCurr():
         @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
         @param pretty Use pretty printing (indentation) in XDMF files?
         '''
-        build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
+        return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
     
     def scale_va(self,data,div_flag=False):
         '''! Scale a vertex array by vertex areas (eg. B_n -> flux)

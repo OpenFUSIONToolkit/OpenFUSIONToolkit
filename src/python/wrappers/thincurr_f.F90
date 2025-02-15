@@ -13,7 +13,8 @@ USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
 !---Base
 USE oft_base
 USE spline_mod
-USE oft_io, ONLY: hdf5_create_file, hdf5_field_get_sizes, hdf5_read, hdf5_field_exist
+USE oft_io, ONLY: hdf5_create_file, hdf5_field_get_sizes, hdf5_read, hdf5_field_exist, &
+  xdmf_plot_file
 !--Grid
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem, native_read_nodesets, native_read_sidesets
@@ -182,6 +183,9 @@ CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_debug !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
+INTEGER(4) :: i,j,k,npts,nedges
+INTEGER(4), ALLOCATABLE :: lctmp(:,:)
+REAL(r8), ALLOCATABLE :: rtmp(:,:)
 CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix = ''
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
@@ -189,9 +193,65 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  CALL tw_obj%mesh%setup_io(1,basepath=pathprefix)
+  CALL tw_obj%xdmf%setup('ThinCurr',pathprefix)
+  CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 ELSE
-  CALL tw_obj%mesh%setup_io(1)
+  CALL tw_obj%xdmf%setup('ThinCurr')
+  CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
+END IF
+IF(tw_obj%n_vcoils>0)THEN
+  npts=0
+  nedges=0
+  DO i=1,tw_obj%n_vcoils
+    DO j=1,tw_obj%vcoils(i)%ncoils
+      npts=npts+tw_obj%vcoils(i)%coils(j)%npts
+      nedges=nedges+tw_obj%vcoils(i)%coils(j)%npts-1
+    END DO
+  END DO
+  ALLOCATE(rtmp(3,npts),lctmp(2,nedges))
+  npts=0
+  nedges=0
+  DO i=1,tw_obj%n_vcoils
+    DO j=1,tw_obj%vcoils(i)%ncoils
+      DO k=1,tw_obj%vcoils(i)%coils(j)%npts
+        npts=npts+1
+        rtmp(:,npts)=tw_obj%vcoils(i)%coils(j)%pts(:,k)
+        IF(k>1)THEN
+          nedges=nedges+1
+          lctmp(:,nedges)=[npts-1,npts]-1
+        END IF
+      END DO
+    END DO
+  END DO
+  CALL tw_obj%xdmf%add_mesh(10,rtmp,lctmp,'vcoils')
+  DEALLOCATE(rtmp,lctmp)
+END IF
+IF(tw_obj%n_icoils>0)THEN
+  npts=0
+  nedges=0
+  DO i=1,tw_obj%n_icoils
+    DO j=1,tw_obj%icoils(i)%ncoils
+      npts=npts+tw_obj%icoils(i)%coils(j)%npts
+      nedges=nedges+tw_obj%icoils(i)%coils(j)%npts-1
+    END DO
+  END DO
+  ALLOCATE(rtmp(3,npts),lctmp(2,nedges))
+  npts=0
+  nedges=0
+  DO i=1,tw_obj%n_icoils
+    DO j=1,tw_obj%icoils(i)%ncoils
+      DO k=1,tw_obj%icoils(i)%coils(j)%npts
+        npts=npts+1
+        rtmp(:,npts)=tw_obj%icoils(i)%coils(j)%pts(:,k)
+        IF(k>1)THEN
+          nedges=nedges+1
+          lctmp(:,nedges)=[npts-1,npts]-1
+        END IF
+      END DO
+    END DO
+  END DO
+  CALL tw_obj%xdmf%add_mesh(10,rtmp,lctmp,'icoils')
+  DEALLOCATE(rtmp,lctmp)
 END IF
 IF(save_debug)CALL tw_obj%save_debug()
 END SUBROUTINE thincurr_setup_io
@@ -333,7 +393,7 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(fieldname,name_tmp)
 CALL c_f_pointer(vals, vals_tmp, [tw_obj%mesh%np])
 !---Save plot fields
-CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,TRIM(name_tmp))
+CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,tw_obj%xdmf,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_scalar
 !------------------------------------------------------------------------------
 !> Needs docs

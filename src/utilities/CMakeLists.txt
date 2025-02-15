@@ -10,6 +10,8 @@ endforeach()
 # Scripts
 install(PROGRAMS build_xdmf.py DESTINATION python COMPONENT app)
 set( OFT_PYTHON_BINS build_xdmf.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
+install(PROGRAMS build_xdmf-legacy.py DESTINATION python COMPONENT app)
+set( OFT_PYTHON_BINS build_xdmf-legacy.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
 install(PROGRAMS convert_hist.py DESTINATION python COMPONENT app)
 set( OFT_PYTHON_BINS convert_hist.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
 install(PROGRAMS convert_cubit.py DESTINATION python COMPONENT app)

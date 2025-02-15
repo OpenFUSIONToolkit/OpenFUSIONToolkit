@@ -14,6 +14,7 @@ MODULE thin_wall
 USE, INTRINSIC :: iso_c_binding, only: c_loc
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array
+USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_bmesh
 USE oft_mesh_local, ONLY: bmesh_local_init
@@ -127,6 +128,7 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: qbasis => NULL() !< Basis function pre-evaluated at cell centers
+  TYPE(xdmf_plot_file) :: xdmf
   CLASS(oft_vector), POINTER :: Uloc => NULL() !< FE vector for thin-wall model
   CLASS(oft_vector), POINTER :: Uloc_pts => NULL() !< Needs docs
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL() !< Resistivity matrix for thin-wall model
@@ -541,7 +543,7 @@ ALLOCATE(normals(3,self%mesh%nc))
 DO i=1,self%mesh%nc
   CALL self%mesh%norm(i,ftmp,normals(:,i))
 END DO
-CALL self%mesh%save_cell_vector(normals, 'Nhat')
+CALL self%mesh%save_cell_vector(normals,self%xdmf,'Nhat')
 !---Save hole info
 DO i=1,self%nholes
   normals=0.d0
@@ -551,7 +553,7 @@ DO i=1,self%nholes
     END DO
   END DO
   WRITE(plt_tag,'(I4.4)')i
-  CALL self%mesh%save_cell_scalar(normals(1,:), 'Ho_'//plt_tag)
+  CALL self%mesh%save_cell_scalar(normals(1,:),self%xdmf,'Ho_'//plt_tag)
 END DO
 CALL tw_save_hole_debug(self)
 DEALLOCATE(normals)
@@ -2876,7 +2878,7 @@ DEBUG_STACK_PUSH
 !---Avg to cells
 ALLOCATE(cellvec(3,self%mesh%nc))
 CALL tw_recon_curr(self,a,cellvec)
-CALL self%mesh%save_cell_vector(cellvec/mu0,TRIM(tag)) ! Convert back to Amps
+CALL self%mesh%save_cell_vector(cellvec/mu0,self%xdmf,TRIM(tag)) ! Convert back to Amps
 !---Avg to points
 ALLOCATE(ptvec(3,self%mesh%np))
 DO i=1,self%mesh%np
@@ -2886,13 +2888,13 @@ DO i=1,self%mesh%np
   END DO
   ptvec(:,i) = ptvec(:,i)/self%mesh%va(i)
 END DO
-CALL self%mesh%save_vertex_vector(ptvec/mu0,TRIM(tag)//'_v') ! Convert back to Amps
+CALL self%mesh%save_vertex_vector(ptvec/mu0,self%xdmf,TRIM(tag)//'_v') ! Convert back to Amps
 !
 ptvec=0.d0
 DO i=1,self%mesh%np
   IF(self%pmap(i)>0)ptvec(1,i)=a(self%pmap(i))
 END DO
-CALL self%mesh%save_vertex_scalar(ptvec(1,:),TRIM(tag)//'_p')
+CALL self%mesh%save_vertex_scalar(ptvec(1,:),self%xdmf,TRIM(tag)//'_p')
 DEALLOCATE(ptvec,cellvec)
 DEBUG_STACK_POP
 END SUBROUTINE tw_save_pfield
@@ -2926,7 +2928,7 @@ END DO
 !WRITE(pltnum,'(I3.3)')ih
 !CALL self%mesh%save_cell_vector(cellvec,"hole_"//pltnum)
 END DO
-CALL self%mesh%save_cell_vector(cellvec,"hole_vec")
+CALL self%mesh%save_cell_vector(cellvec,self%xdmf,"hole_vec")
 DEALLOCATE(cellvec)
 END SUBROUTINE tw_save_hole_debug
 !---------------------------------------------------------------------------

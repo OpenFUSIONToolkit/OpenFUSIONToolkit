@@ -6,7 +6,7 @@
 '''
 import numpy
 from ._interface import *
-from ..util import build_XDMF
+from ..io import build_XDMF
 
 
 class Marklin_field_interpolator():
@@ -134,7 +134,7 @@ class Marklin():
         @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
         @param pretty Use pretty printing (indentation) in XDMF files?
         '''
-        build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
+        return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
 
     def compute(self,nmodes=1,order=2,minlev=-1,save_rst=True):
         r'''! Compute force-free eigenmodes
