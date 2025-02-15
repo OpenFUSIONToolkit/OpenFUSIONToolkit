@@ -120,7 +120,8 @@ END IF
 ! Setup Mesh
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf
-CALL smesh%setup_io(order)
+CALL mygs%xdmf%setup("TokaMaker")
+CALL smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------

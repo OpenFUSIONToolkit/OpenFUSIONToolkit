@@ -8,7 +8,6 @@
 ## @file util.py
 #
 # Helper interfaces for Open FUSION Toolkit (OFT) Python interfaces
-import sys
 import os
 import subprocess
 import numpy
@@ -45,24 +44,6 @@ def run_shell_command(command, timeout=10, env_vars={}):
     errcode = pid.poll()
     result = outs.decode("utf-8")
     return result, errcode
-
-
-def build_XDMF(path='.',repeat_static=False,pretty=False):
-    '''! Build XDMF plot metadata files 
-
-    @param path Folder to build XDMF files in (must include "dump.dat" file)
-    @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
-    @param pretty Use pretty printing (indentation) in XDMF files?
-    '''
-    cmd = [
-        "{0}".format(sys.executable),
-        "{0}".format(os.path.join(os.path.dirname(__file__),'..','build_xdmf.py'))
-    ]
-    if repeat_static:
-        cmd.append("--repeat_static")
-    if pretty:
-        cmd.append("--pretty")
-    subprocess.run(cmd,cwd=path)
 
 
 def write_native_mesh(filename, r, lc, reg, nodesets=[], sidesets=[], ho_info=None, periodic_info=None):

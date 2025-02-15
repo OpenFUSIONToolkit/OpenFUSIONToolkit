@@ -15,6 +15,7 @@
 !---------------------------------------------------------------------------
 PROGRAM test_gmsh
 USE oft_base
+USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: mesh, smesh
 USE oft_mesh_native, ONLY: mesh_native_id
@@ -22,12 +23,14 @@ USE oft_mesh_gmsh, ONLY: mesh_gmsh_id
 USE multigrid_build, ONLY: multigrid_construct
 IMPLICIT NONE
 INTEGER(i4) :: io_unit
+TYPE(xdmf_plot_file) :: plot_file
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
 CALL multigrid_construct
 IF(ALL(mesh%cad_type/=[mesh_gmsh_id,mesh_native_id]))CALL oft_abort('Wrong mesh type.','main',__FILE__)
-CALL mesh%setup_io(1)
+CALL plot_file%setup("Test")
+CALL mesh%setup_io(plot_file,1)
 IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='gmsh.results')
 CALL compute_volume
 CALL compute_area
