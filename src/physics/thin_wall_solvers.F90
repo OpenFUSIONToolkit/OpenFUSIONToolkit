@@ -13,7 +13,7 @@
 MODULE thin_wall_solvers
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute, hdf5_create_timestep
+USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
@@ -610,7 +610,7 @@ END SUBROUTINE frequency_response
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tol,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,hodlr_op)
+SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tol,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self
 REAL(8), INTENT(in) :: dt
 INTEGER(4), INTENT(in) :: nsteps
@@ -623,10 +623,11 @@ INTEGER(4), INTENT(in) :: nplot
 TYPE(tw_sensors), INTENT(in) :: sensors
 REAL(8), POINTER, INTENT(in) :: curr_waveform(:,:)
 REAL(8), POINTER, INTENT(in) :: volt_waveform(:,:)
+REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
-INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits
-REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op
+INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
+REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op,int_facs(2)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
@@ -637,7 +638,7 @@ TYPE(oft_sum_matrix), TARGET :: fmat,bmat
 CLASS(oft_solver), POINTER :: linv
 TYPE(oft_tw_hodlr_rbjpre), TARGET :: linv_pre
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
-LOGICAL :: exists
+LOGICAL :: exists,volt_full
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
 WRITE(*,*)
@@ -648,9 +649,6 @@ IF(ASSOCIATED(curr_waveform))THEN
   IF(ncols-1/=self%n_icoils)CALL oft_abort('# of currents in waveform does not match # of icoils', &
     'run_td_sim',__FILE__)
   ntimes_curr=SIZE(curr_waveform,DIM=1)
-  ! DO j=1,self%n_icoils
-  !   curr_waveform(:,j+1)=curr_waveform(:,j+1)*mu0 ! Convert to magnetic units
-  ! END DO
   ALLOCATE(icoil_curr(ncols-1),icoil_dcurr(ncols-1))
 ELSE
   ALLOCATE(icoil_curr(self%n_icoils),icoil_dcurr(self%n_icoils))
@@ -661,12 +659,19 @@ ELSE
   ntimes_curr=0
 END IF
 !---Setup voltage waveform
+volt_full=.FALSE.
 IF(ASSOCIATED(volt_waveform))THEN
   ncols=SIZE(volt_waveform,DIM=2)
-  IF(ncols-1/=self%n_vcoils)CALL oft_abort('# of voltages in waveform does not match # of vcoils', &
-    'run_td_sim',__FILE__)
+  IF((ncols-1/=self%n_vcoils).AND.(ncols-1/=self%nelems))THEN
+    CALL oft_abort('# of voltages in waveform does not match # of vcoils or model size','run_td_sim',__FILE__)
+  END IF
+  IF(ncols-1==self%nelems)THEN
+    ALLOCATE(pcoil_volt(self%nelems))
+    volt_full=.TRUE.
+  ELSE
+    ALLOCATE(pcoil_volt(self%n_vcoils))
+  END IF
   ntimes_volt=SIZE(volt_waveform,DIM=1)
-  ALLOCATE(pcoil_volt(ncols-1))
 ELSE
   ALLOCATE(pcoil_volt(self%n_vcoils))
   DO j=1,self%n_vcoils
@@ -753,7 +758,7 @@ END IF
 WRITE(pltnum,'(I4.4)')0
 CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
 CALL hdf5_write(t,'pThinCurr_'//pltnum//'.rst','time')
-IF(ntimes_curr>0)CALL hdf5_write(icoil_curr,'pThinCurr_'//pltnum//'.rst','coil_currents')
+CALL hdf5_write(icoil_curr,'pThinCurr_'//pltnum//'.rst','coil_currents')
 !---Save sensor data for t=0
 CALL u%get_local(vals)
 IF(sensors%nfloops>0)THEN
@@ -763,6 +768,13 @@ IF(sensors%nfloops>0)THEN
   senout=0.d0
   IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
     sensors%nfloops,icoil_curr,1,0.d0,senout(2),1)
+  IF((ntimes_volt>0).AND.ASSOCIATED(sensor_vals))THEN
+    CALL linterp_facs(sensor_vals(:,1),ntimes_volt,t,int_inds,int_facs,1)
+    DO i=1,sensors%nfloops
+      senout(i+1) = senout(i+1) + sensor_vals(int_inds(1),i+1)*int_facs(1) &
+        + sensor_vals(int_inds(2),i+1)*int_facs(2)
+    END DO
+  END IF
   !---Setup history file
   IF(oft_env%head_proc)THEN
     floop_hist%filedesc = 'ThinCurr flux loop history file'
@@ -830,11 +842,20 @@ DO i=1,nsteps
       END DO
     END IF
     IF(ntimes_volt>0)THEN
-      DO j=1,self%n_vcoils
-        ! Start of step
-        pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t,1)/2.d0
-        pcoil_volt(j)=pcoil_volt(j)+linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)/2.d0
-      END DO
+      IF(volt_full)THEN
+        CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t,int_inds,int_facs,1)
+        pcoil_volt = (volt_waveform(int_inds(1),2:)*int_facs(1) &
+          + volt_waveform(int_inds(2),2:)*int_facs(2))/2.d0
+        CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t+dt,int_inds,int_facs,1)
+        pcoil_volt = pcoil_volt + (volt_waveform(int_inds(1),2:)*int_facs(1) &
+          + volt_waveform(int_inds(2),2:)*int_facs(2))/2.d0
+      ELSE
+        DO j=1,self%n_vcoils
+          ! Start of step
+          pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t,1)/2.d0
+          pcoil_volt(j)=pcoil_volt(j)+linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)/2.d0
+        END DO
+      END IF
       pcoil_volt=pcoil_volt*dt
     END IF
   ELSE
@@ -847,9 +868,15 @@ DO i=1,nsteps
       icoil_dcurr=icoil_dcurr*2.d0
     END IF
     IF(ntimes_volt>0)THEN
-      DO j=1,self%n_vcoils
-        pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)
-      END DO
+      IF(volt_full)THEN
+        CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t+dt,int_inds,int_facs,1)
+        pcoil_volt = volt_waveform(int_inds(1),2:)*int_facs(1) &
+          + volt_waveform(int_inds(2),2:)*int_facs(2)
+      ELSE
+        DO j=1,self%n_vcoils
+          pcoil_volt(j)=linterp(volt_waveform(:,1),volt_waveform(:,j+1),ntimes_volt,t+dt,1)
+        END DO
+      END IF
       pcoil_volt=pcoil_volt*dt
     END IF
   END IF
@@ -857,9 +884,13 @@ DO i=1,nsteps
   CALL g%get_local(vals)
   IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
     self%nelems,icoil_dcurr,1,1.d0,vals,1)
-  DO j=1,self%n_vcoils
-    vals(self%np_active+self%nholes+j)=vals(self%np_active+self%nholes+j)+pcoil_volt(j)
-  END DO
+  IF(volt_full)THEN
+    vals=vals+pcoil_volt
+  ELSE
+    DO j=1,self%n_vcoils
+      vals(self%np_active+self%nholes+j)=vals(self%np_active+self%nholes+j)+pcoil_volt(j)
+    END DO
+  END IF
   CALL g%restore_local(vals)
   IF(direct)THEN
     CALL Minv%apply(g,u)
@@ -878,15 +909,12 @@ DO i=1,nsteps
     WRITE(pltnum,'(I4.4)')i
     CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
     CALL hdf5_write(t,'pThinCurr_'//pltnum//'.rst','time')
+    CALL hdf5_write(icoil_curr,'pThinCurr_'//pltnum//'.rst','coil_currents')
   END IF
   IF(ntimes_curr>0)THEN
     DO j=1,self%n_icoils
       icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
     END DO
-    IF(MOD(i,nplot)==0)THEN
-      WRITE(pltnum,'(I4.4)')i
-      CALL hdf5_write(icoil_curr,'pThinCurr_'//pltnum//'.rst','coil_currents')
-    END IF
   END IF
   CALL u%get_local(vals)
   IF(sensors%nfloops>0)THEN
@@ -894,6 +922,13 @@ DO i=1,nsteps
       vals,1,0.d0,senout(2),1)
     IF(ntimes_curr>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen, &
       sensors%nfloops,icoil_curr,1,1.d0,senout(2),1)
+    IF((ntimes_volt>0).AND.ASSOCIATED(sensor_vals))THEN
+      CALL linterp_facs(sensor_vals(:,1),ntimes_volt,t,int_inds,int_facs,1)
+      DO j=1,sensors%nfloops
+        senout(j+1) = senout(j+1) + sensor_vals(int_inds(1),j+1)*int_facs(1) &
+          + sensor_vals(int_inds(2),j+1)*int_facs(2)
+      END DO
+    END IF
     senout(1)=t
     CALL floop_hist%write(data_r8=senout)
   END IF
@@ -952,17 +987,18 @@ END SUBROUTINE run_td_sim
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE plot_td_sim(self,nsteps,nplot,sensors,compute_B,rebuild_sensors,hodlr_op)
+SUBROUTINE plot_td_sim(self,nsteps,nplot,sensors,compute_B,rebuild_sensors,sensor_vals,hodlr_op)
 TYPE(tw_type), INTENT(inout) :: self !< Needs Docs
 INTEGER(4), INTENT(in) :: nsteps !< Needs Docs
 INTEGER(4), INTENT(in) :: nplot !< Needs Docs
 TYPE(tw_sensors), INTENT(in) :: sensors !< Needs Docs
 LOGICAL, INTENT(in) :: compute_B !< Needs Docs
 LOGICAL, INTENT(in) :: rebuild_sensors !< Needs Docs
+REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
-INTEGER(4) :: i,j,jj,k,ntimes_curr,ncols,itime,io_unit,face,ind1,ind2
-REAL(8) :: uu,t,tmp,area,tmp2,val_prev
+INTEGER(4) :: i,j,jj,k,ntimes_curr,ncols,itime,io_unit,face,ind1,ind2,int_inds(2)
+REAL(8) :: uu,t,tmp,area,tmp2,val_prev,int_facs(2)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_vec,senout,jumpout
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals,vtmp
@@ -1020,6 +1056,7 @@ IF(compute_B)THEN
   END IF
 END IF
 !
+CALL self%xdmf%clear_timesteps()
 DO i=0,nsteps
   IF(MOD(i,nplot)/=0)CYCLE
   !
@@ -1028,7 +1065,7 @@ DO i=0,nsteps
   CALL hdf5_read(t,'pThinCurr_'//pltnum//'.rst','time')
   IF(self%n_icoils>0)CALL hdf5_read(coil_vec,'pThinCurr_'//pltnum//'.rst','coil_currents')
   !
-  CALL hdf5_create_timestep(t)
+  CALL self%xdmf%add_timestep(t)
   CALL u%get_local(vals)
   CALL tw_save_pfield(self,vals,'J')
   !
@@ -1080,15 +1117,22 @@ DO i=0,nsteps
       END DO
     ! END IF
     END IF
-    CALL self%mesh%save_vertex_vector(cc_vals,'B_v')
+    CALL self%mesh%save_vertex_vector(cc_vals,self%xdmf,'B_v')
   END IF
   IF(rebuild_sensors)THEN
     !
     IF(sensors%nfloops>0)THEN
-      IF(self%n_icoils>0)CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen, &
+      CALL dgemv('N',sensors%nfloops,self%nelems,1.d0,self%Ael2sen, &
         sensors%nfloops,vals,1,0.d0,senout(2),1)
-      CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen,sensors%nfloops, &
+      IF(self%n_icoils>0)CALL dgemv('N',sensors%nfloops,self%n_icoils,1.d0,self%Adr2sen,sensors%nfloops, &
         coil_vec,1,1.d0,senout(2),1)
+      IF(ASSOCIATED(sensor_vals))THEN
+        CALL linterp_facs(sensor_vals(:,1),SIZE(sensor_vals,DIM=1),t,int_inds,int_facs,1)
+        DO j=1,sensors%nfloops
+          senout(j+1) = senout(j+1) + sensor_vals(int_inds(1),j+1)*int_facs(1) &
+            + sensor_vals(int_inds(2),j+1)*int_facs(2)
+        END DO
+      END IF
       senout(1)=t
       CALL floop_hist%write(data_r8=senout)
     END IF

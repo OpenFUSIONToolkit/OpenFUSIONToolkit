@@ -20,6 +20,7 @@
 !-----------------------------------------------------------------------------
 PROGRAM oft_mesh_check
 USE oft_base
+USE oft_io, ONLY: xdmf_plot_file
 !--Grid
 USE oft_mesh_type, ONLY: mesh
 USE multigrid_build, ONLY: multigrid_construct
@@ -37,6 +38,7 @@ USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_mop_eigs
 IMPLICIT NONE
 INTEGER(i4) :: ierr,io_unit
+TYPE(xdmf_plot_file) :: plot_file
 INTEGER(i4) :: order=1
 INTEGER(i4) :: minlev=1
 NAMELIST/oft_mesh_check_options/order,minlev
@@ -55,7 +57,8 @@ CALL multigrid_construct
 !---------------------------------------------------------------------------
 ! Output mesh
 !---------------------------------------------------------------------------
-CALL mesh%setup_io(ABS(order))
+CALL plot_file%setup("mesh_check")
+CALL mesh%setup_io(plot_file,ABS(order))
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------

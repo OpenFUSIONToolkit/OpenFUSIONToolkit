@@ -17,6 +17,7 @@
 !---------------------------------------------------------------------------
 PROGRAM test_cubit
 USE oft_base
+USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: mesh, smesh
 #ifdef HAVE_NCDF
@@ -27,6 +28,7 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(i4) :: io_unit
 INTEGER(i4) :: ierr
+TYPE(xdmf_plot_file) :: plot_file
 #if !defined(HAVE_NCDF)
 CHARACTER(LEN=OFT_PATH_SLEN) :: inpname = 'none'
 #endif
@@ -59,7 +61,8 @@ IF(test_surf)THEN
     CALL oft_finalize
   END IF
 #endif
-  CALL smesh%setup_io(1)
+  CALL plot_file%setup("Test")
+  CALL smesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)THEN
     OPEN(NEWUNIT=io_unit,FILE='cubit.results')
     WRITE(io_unit,*)0.0_r8
@@ -76,7 +79,8 @@ ELSE
     CALL oft_finalize
   END IF
 #endif
-  CALL mesh%setup_io(1)
+  CALL plot_file%setup("Test")
+  CALL mesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='cubit.results')
   CALL compute_volume
   CALL compute_area

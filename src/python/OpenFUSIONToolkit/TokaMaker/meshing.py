@@ -7,7 +7,7 @@
 import json
 import math
 import numpy
-from ..util import ctypes, c_struct, c_int, c_int_ptr, c_double_ptr, c_char_p, ctypes_subroutine, oft_triangle_lib
+from .._interface import *
 
 ## @cond
 class triangle_struct(c_struct):
@@ -141,6 +141,8 @@ class gs_Domain:
         if (dx is None) or (dx < 0.0):
             raise ValueError('"dx" must have a non-negative value')
         name = name.upper()
+        if name[0] == '#':
+            raise ValueError('Invalid value for "name", cannot start with "#"')
         if (name in self.region_info):
             raise KeyError('Region already exists!')
         next_id = -1
@@ -187,6 +189,8 @@ class gs_Domain:
             if reg_type != 'coil':
                 raise ValueError('"coil_set" specification only valid for "coil" regions')
             else:
+                if coil_set[0] == '#':
+                    raise ValueError('Invalid value for "coil_set", cannot start with "#"')
                 self.region_info[name]['coil_set'] = coil_set
         
 
