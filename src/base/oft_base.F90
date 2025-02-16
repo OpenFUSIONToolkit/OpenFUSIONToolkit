@@ -317,8 +317,8 @@ IF(oft_env%rank==0)THEN
 #else
   WRITE(*,'(A)')    '  Not compiled with OpenMP'
 #endif
-  WRITE(*,'(2A)')   'Fortran input file    = ',oft_env%ifile
-  WRITE(*,'(2A)')   'XML input file        = ',oft_env%xml_file
+  WRITE(*,'(2A)')   'Fortran input file    = ',TRIM(oft_env%ifile)
+  WRITE(*,'(2A)')   'XML input file        = ',TRIM(oft_env%xml_file)
   WRITE(*,'(A,3I4)')'Integer Precisions    = ',i4,i8
   WRITE(*,'(A,3I4)')'Float Precisions      = ',r4,r8,r10
   WRITE(*,'(A,3I4)')'Complex Precisions    = ',c4,c8

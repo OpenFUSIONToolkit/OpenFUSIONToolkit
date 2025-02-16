@@ -1325,21 +1325,23 @@ DEALLOCATE(tmp_vec2)
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 !---Create coil vector
-ALLOCATE(self%coil_stitch,self%coil_map)
-CALL create_local_stitch(self%coil_stitch,self%coil_map,self%ncoils+1)
-ALLOCATE(stitch_tmp(1),map_tmp(1))
-stitch_tmp(1)%s=>self%coil_stitch
-map_tmp(1)%m=>self%coil_map
-CALL create_vector(self%coil_vec,stitch_tmp,map_tmp)
-DEALLOCATE(stitch_tmp,map_tmp)
-!---Create augmented vector
-ALLOCATE(stitch_tmp(2),map_tmp(2))
-stitch_tmp(1)%s=>self%psi%stitch_info
-map_tmp(1)%m=>self%psi%map(1)
-stitch_tmp(2)%s=>self%coil_stitch
-map_tmp(2)%m=>self%coil_map
-CALL create_vector(self%aug_vec,stitch_tmp,map_tmp)
-DEALLOCATE(stitch_tmp,map_tmp)
+IF(self%ncoils>0)THEN
+  ALLOCATE(self%coil_stitch,self%coil_map)
+  CALL create_local_stitch(self%coil_stitch,self%coil_map,self%ncoils+1)
+  ALLOCATE(stitch_tmp(1),map_tmp(1))
+  stitch_tmp(1)%s=>self%coil_stitch
+  map_tmp(1)%m=>self%coil_map
+  CALL create_vector(self%coil_vec,stitch_tmp,map_tmp)
+  DEALLOCATE(stitch_tmp,map_tmp)
+  !---Create augmented vector
+  ALLOCATE(stitch_tmp(2),map_tmp(2))
+  stitch_tmp(1)%s=>self%psi%stitch_info
+  map_tmp(1)%m=>self%psi%map(1)
+  stitch_tmp(2)%s=>self%coil_stitch
+  map_tmp(2)%m=>self%coil_map
+  CALL create_vector(self%aug_vec,stitch_tmp,map_tmp)
+  DEALLOCATE(stitch_tmp,map_tmp)
+END IF
 contains
 subroutine get_limiter()
 integer(4) :: i,ii,istart,iloop,j,k,l,orient(2),nmax
@@ -2363,8 +2365,10 @@ CALL self%p%update(self)
 CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
 IF(self%dt>0.d0)THEN
   CALL self%psi%new(psi_dt)
-  CALL self%aug_vec%new(psi_aug)
-  CALL self%aug_vec%new(tmp_aug)
+  IF(self%ncoils>0)THEN
+    CALL self%aug_vec%new(psi_aug)
+    CALL self%aug_vec%new(tmp_aug)
+  END IF
   IF(self%dt/=self%dt_last)THEN
     CALL build_dels(self%dels_dt,self,"free",self%dt)
     self%dt_last=self%dt
@@ -2603,43 +2607,53 @@ DO i=1,self%maxits
   IF(self%dt>0.d0)THEN
     CALL psi_dt%set(0.d0)
     CALL psi_dt%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
-    CALL psi_dt%get_local(vals_tmp)
-    CALL psi_aug%restore_local(vals_tmp,1)
-    !---Set Vcoil currents at previous step and remove associated flux
-    DO j=1,self%ncoils+1
-      IF(self%Rcoils(j)>0.d0)THEN
-        CALL psi_aug%add(1.d0,-self%coils_dt(j)/self%dt,self%psi_coil(j)%f)
-        vals_tmp(j)=self%coils_dt(j)/self%dt
-      ELSE
-        vals_tmp(j)=0.d0
-      END IF
-    END DO
-    CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
-    CALL gs_wall_source(self,psi_aug,tmp_aug)
-    !---Add voltages for Vcoils
-    CALL tmp_aug%get_local(vals_tmp,2)
-    DO j=1,self%ncoils+1
-      IF(self%Rcoils(j)>0.d0)THEN
-        vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
-      END IF
-    END DO
-    CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
-    CALL blag_zerob(tmp_aug)
-    !---Solve in augmented space (flux + coils)
-    pm_save=oft_env%pm; oft_env%pm=.FALSE.
-    CALL psi_aug%set(0.d0)
-    CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
-    CALL psi_aug%get_local(vals_tmp,1)
-    CALL psi_dt%restore_local(vals_tmp)
-    CALL psi_aug%get_local(vals_tmp,2)
-    !---Update coil currents in solution for Vcoils
-    DO j=1,self%ncoils+1
-      IF(self%Rcoils(j)>0.d0)THEN
-        self%coil_currs(j)=vals_tmp(j)
-        CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
-      END IF
-    END DO
-    oft_env%pm=pm_save
+    IF(self%ncoils>0)THEN
+      CALL psi_dt%get_local(vals_tmp)
+      CALL psi_aug%restore_local(vals_tmp,1)
+      !---Set Vcoil currents at previous step and remove associated flux
+      DO j=1,self%ncoils+1
+        IF(self%Rcoils(j)>0.d0)THEN
+          CALL psi_aug%add(1.d0,-self%coils_dt(j)/self%dt,self%psi_coil(j)%f)
+          vals_tmp(j)=self%coils_dt(j)/self%dt
+        ELSE
+          vals_tmp(j)=0.d0
+        END IF
+      END DO
+      CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+      CALL gs_wall_source(self,psi_aug,tmp_aug)
+      !---Add voltages for Vcoils
+      CALL tmp_aug%get_local(vals_tmp,2)
+      DO j=1,self%ncoils+1
+        IF(self%Rcoils(j)>0.d0)THEN
+          vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+        END IF
+      END DO
+      CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+      CALL blag_zerob(tmp_aug)
+      !---Solve in augmented space (flux + coils)
+      CALL psi_aug%set(0.d0)
+      pm_save=oft_env%pm; oft_env%pm=.FALSE.
+      CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
+      oft_env%pm=pm_save
+      CALL psi_aug%get_local(vals_tmp,1)
+      CALL psi_dt%restore_local(vals_tmp)
+      CALL psi_aug%get_local(vals_tmp,2)
+      !---Update coil currents in solution for Vcoils
+      DO j=1,self%ncoils+1
+        IF(self%Rcoils(j)>0.d0)THEN
+          self%coil_currs(j)=vals_tmp(j)
+          CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+        END IF
+      END DO
+    ELSE
+      CALL gs_wall_source(self,psi_dt,tmp_vec)
+      CALL blag_zerob(tmp_vec)
+      !---Solve in augmented space (flux + coils)
+      CALL psi_dt%set(0.d0)
+      pm_save=oft_env%pm; oft_env%pm=.FALSE.
+      CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
+      oft_env%pm=pm_save
+    END IF
     !---Add flux to solution
     CALL psi_eddy%add(1.d0,1.d0,psi_dt)
     CALL psi_vac%add(1.d0,1.d0,psi_dt)
@@ -2769,9 +2783,12 @@ DEALLOCATE(rhs_bc,psi_bc,psi_alam,psi_press,psi_vac,psi_vcont)
 DEALLOCATE(vals_tmp,psi_eddy)
 IF(self%dt>0.d0)THEN
   CALL psi_dt%delete
-  CALL psi_aug%delete
-  CALL tmp_aug%delete
-  DEALLOCATE(psi_dt,psi_aug,tmp_aug)
+  IF(self%ncoils>0)THEN
+    CALL psi_aug%delete
+    CALL tmp_aug%delete
+    DEALLOCATE(psi_aug,tmp_aug)
+  END IF
+  DEALLOCATE(psi_dt)
 END IF
 !---
 IF(self%compute_chi)CALL self%get_chi
@@ -3111,8 +3128,10 @@ IF(self%dt>0.d0)THEN
   self%lu_solver_dt%A=>self%dels_dt
   CALL self%psi%new(psi_dt)
   CALL self%psi%new(tmp_vec)
-  CALL self%aug_vec%new(psi_aug)
-  CALL self%aug_vec%new(tmp_aug)
+  IF(self%ncoils>0)THEN
+    CALL self%aug_vec%new(psi_aug)
+    CALL self%aug_vec%new(tmp_aug)
+  END IF
   ALLOCATE(vals_tmp(self%psi%n))
 ELSE
   IF(PRESENT(rhs_source))THEN
@@ -3172,43 +3191,61 @@ CALL psi_sol%add(1.d0,self%vcontrol_val,psi_vcont)
 IF(self%dt>0.d0)THEN
   CALL tmp_vec%set(0.d0)
   CALL tmp_vec%add(0.d0,-1.d0/self%dt,psi_sol,1.d0/self%dt,self%psi_dt)
-  CALL tmp_vec%get_local(vals_tmp)
-  CALL psi_aug%restore_local(vals_tmp,1)
-  DO j=1,self%ncoils+1
-    IF(self%Rcoils(j)>0.d0)THEN
-      CALL tmp_vec%add(1.d0,-self%coils_dt(j)/self%dt,self%psi_coil(j)%f)
-      vals_tmp(j)=self%coils_dt(j)/self%dt
-    ELSE
-      vals_tmp(j)=0.d0
+  IF(self%ncoils>0)THEN
+    CALL tmp_vec%get_local(vals_tmp)
+    CALL psi_aug%restore_local(vals_tmp,1)
+    DO j=1,self%ncoils+1
+      IF(self%Rcoils(j)>0.d0)THEN
+        CALL tmp_vec%add(1.d0,-self%coils_dt(j)/self%dt,self%psi_coil(j)%f)
+        vals_tmp(j)=self%coils_dt(j)/self%dt
+      ELSE
+        vals_tmp(j)=0.d0
+      END IF
+    END DO
+    CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+    CALL gs_wall_source(self,psi_aug,tmp_aug)
+    CALL tmp_aug%get_local(vals_tmp,2)
+    DO j=1,self%ncoils+1
+      IF(self%Rcoils(j)>0.d0)THEN
+        vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+      END IF
+    END DO
+    CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+    IF(PRESENT(rhs_source))THEN
+      CALL gs_gen_source(self,rhs_source,tmp_vec)
+      CALL psi_aug%set(0.d0)
+      CALL tmp_vec%get_local(vals_tmp)
+      CALL psi_aug%restore_local(vals_tmp,1)
+      CALL tmp_aug%add(1.d0,1.d0,psi_aug)
     END IF
-  END DO
-  CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
-  CALL gs_wall_source(self,psi_aug,tmp_aug)
-  CALL tmp_aug%get_local(vals_tmp,2)
-  DO j=1,self%ncoils+1
-    IF(self%Rcoils(j)>0.d0)THEN
-      vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+    CALL blag_zerob(tmp_aug)
+    CALL psi_aug%set(0.d0)
+    pm_save=oft_env%pm; oft_env%pm=.FALSE.
+    CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
+    oft_env%pm=pm_save
+    CALL psi_aug%get_local(vals_tmp,1)
+    CALL tmp_vec%restore_local(vals_tmp)
+    CALL psi_aug%get_local(vals_tmp,2)
+    DO j=1,self%ncoils+1
+      IF(self%Rcoils(j)>0.d0)THEN
+        self%coil_currs(j)=vals_tmp(j)
+        CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+      END IF
+    END DO
+  ELSE
+    CALL psi_dt%add(0.d0,1.d0,tmp_vec)
+    CALL gs_wall_source(self,psi_dt,tmp_vec)
+    IF(PRESENT(rhs_source))THEN
+      CALL gs_gen_source(self,rhs_source,psi_dt)
+      CALL tmp_vec%add(1.d0,1.d0,psi_dt)
     END IF
-  END DO
-  CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
-  IF(PRESENT(rhs_source))THEN
-    CALL gs_gen_source(self,rhs_source,tmp_vec)
-    CALL tmp_aug%add(1.d0,1.d0,psi_aug)
+    CALL blag_zerob(tmp_vec)
+    CALL psi_dt%set(0.d0)
+    pm_save=oft_env%pm; oft_env%pm=.FALSE.
+    CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
+    oft_env%pm=pm_save
+    CALL tmp_vec%add(0.d0,1.d0,psi_dt)
   END IF
-  CALL blag_zerob(tmp_aug)
-  pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  CALL psi_aug%set(0.d0)
-  CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
-  CALL psi_aug%get_local(vals_tmp,1)
-  CALL tmp_vec%restore_local(vals_tmp)
-  CALL psi_aug%get_local(vals_tmp,2)
-  DO j=1,self%ncoils+1
-    IF(self%Rcoils(j)>0.d0)THEN
-      self%coil_currs(j)=vals_tmp(j)
-      CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
-    END IF
-  END DO
-  oft_env%pm=pm_save
   CALL psi_sol%add(1.d0,1.d0,tmp_vec)
 ELSE
   IF(PRESENT(rhs_source))THEN
@@ -3233,14 +3270,17 @@ DEALLOCATE(psi_vac,psi_vcont,psi_eddy)
 IF(self%dt>0.d0)THEN
   CALL psi_dt%delete
   CALL tmp_vec%delete
-  CALL psi_aug%delete
-  CALL tmp_aug%delete
-  DEALLOCATE(psi_dt,tmp_vec,psi_aug,tmp_aug,vals_tmp)
+  IF(self%ncoils>0)THEN
+    CALL psi_aug%delete
+    CALL tmp_aug%delete
+    DEALLOCATE(psi_aug,tmp_aug)
+  END IF
+  DEALLOCATE(psi_dt,tmp_vec,vals_tmp)
 ELSE
   IF(PRESENT(rhs_source))THEN
     CALL psi_dt%delete
-    CALL psi_aug%delete
-    DEALLOCATE(psi_dt,psi_aug)
+    CALL tmp_vec%delete
+    DEALLOCATE(psi_dt,tmp_vec)
   END IF
 END IF
 end subroutine gs_vac_solve
@@ -5524,7 +5564,7 @@ IF(.NOT.ASSOCIATED(mat))THEN
     DEALLOCATE(dense_flag)
   END IF
   !---Add coil blocks
-  IF(dt_in>0.d0)THEN
+  IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
     ALLOCATE(graphs(2,2))
     ALLOCATE(graphs(2,1)%g,graphs(1,2)%g,graphs(2,2)%g)
     CALL create_dense_graph(graphs(2,1)%g,self%coil_vec,oft_lag_vec)
@@ -5535,7 +5575,7 @@ IF(.NOT.ASSOCIATED(mat))THEN
   END IF
   graphs(1,1)%g=>graph1
   !---Create matrix
-  IF(dt_in>0.d0)THEN
+  IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
     CALL create_matrix(mat,graphs,self%aug_vec,self%aug_vec)
   ELSE
     CALL create_matrix(mat,graphs,oft_lag_vec,oft_lag_vec)
@@ -5674,7 +5714,7 @@ IF(nnonaxi>0)THEN
   DEALLOCATE(nonaxi_vals)
 END IF
 !---Add inductance and resistance terms for Vcoils
-IF(dt_in>0.d0)THEN
+IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
   ALLOCATE(j2(1))
   DO i=1,self%ncoils+1
     j=oft_blagrange%ne+i
@@ -5698,7 +5738,6 @@ IF(dt_in>0.d0)THEN
     CALL dels_coil_part(self,mat,i,dt_in,bc)
   END DO
 END IF
-DEALLOCATE(j,lop)
 !---Set diagonal entries for dirichlet rows
 SELECT CASE(TRIM(bc))
 CASE("zerob")
@@ -5711,8 +5750,9 @@ CASE("zerob")
 CASE("free")
   CALL set_bcmat(self,mat)
 END SELECT
+DEALLOCATE(j,lop)
 !---Assemble final matrix
-IF(dt_in>0.d0)THEN
+IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
   CALL self%aug_vec%new(oft_lag_vec)
 ELSE
   CALL oft_blagrange%vec_create(oft_lag_vec)

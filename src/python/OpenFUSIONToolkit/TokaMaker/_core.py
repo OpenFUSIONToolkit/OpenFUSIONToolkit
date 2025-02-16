@@ -404,6 +404,46 @@ class TokaMaker():
             return self._diverted[0]
         else:
             return None
+    
+    def coil_dict2vec(self,coil_dict,always_virtual=False):
+        '''! Create coil vector from dictionary of values
+
+        @param coil_vec Input dictionary
+        @param always_virtual Always include virtual coils even if not present in dictionary
+        @returns `coil_dict` Ouput vector
+        '''
+        vector = numpy.zeros((self.ncoils+len(self._virtual_coils),))
+        keep_virtual = always_virtual
+        for coil_key, value in coil_dict.items():
+            if coil_key in self.coil_sets:
+                vector[self.coil_sets[coil_key]['id']] = value
+            elif coil_key in self._virtual_coils:
+                vector[self._virtual_coils[coil_key]] = value
+                keep_virtual = True
+            else:
+                raise KeyError('Unknown coil "{0}"'.format(coil_key))
+        if keep_virtual:
+            return vector
+        else:
+            return vector[:self.ncoils]
+    
+    def coil_vec2dict(self,coil_vec,always_virtual=False):
+        '''! Create coil value dictionary of from vector values
+
+        @param coil_vec Input vector
+        @param always_virtual Always include virtual coils even if not present in vector
+        @returns `coil_dict` Ouput dictionary
+        '''
+        coil_dict = {}
+        for coil_key in self.coil_sets:
+            coil_dict[coil_key] = coil_vec[self.coil_sets[coil_key]['id']]
+        if coil_vec.shape[0] > self.ncoils:
+            for coil_key in self._virtual_coils:
+                coil_dict[coil_key] = coil_vec[self._virtual_coils[coil_key]]
+        elif always_virtual:
+            for coil_key in self._virtual_coils:
+                coil_dict[coil_key] = 0.0
+        return coil_dict
         
     def coil_reg_term(self,coffs,target=0.0,weight=1.0):
         r'''! Define coil current regularization term for the form \f$ target = \Sigma_i \alpha_i I_i \f$
@@ -476,9 +516,9 @@ class TokaMaker():
         Can be used with or without regularization terms (see
         @ref TokaMaker.TokaMaker.set_coil_reg "set_coil_reg").
 
-        @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
+        @param coil_bounds Minimum and maximum allowable coil currents (dictionary of form `{coil_name: coil_bound[2]}`)
         '''
-        bounds_array = numpy.zeros((self.ncoils+1,2), dtype=numpy.float64)
+        bounds_array = numpy.zeros((self.ncoils+len(self._virtual_coils),2), dtype=numpy.float64)
         bounds_array[:,0] = -1.E98; bounds_array[:,1] = 1.E98
         if coil_bounds is not None:
             for coil_key, coil_bound in coil_bounds.items():
@@ -487,7 +527,7 @@ class TokaMaker():
                 elif coil_key in self._virtual_coils:
                     bounds_array[self._virtual_coils[coil_key],:] = coil_bound
                 else:
-                    raise KeyError('Unknown coil "{0}"'.format(key))
+                    raise KeyError('Unknown coil "{0}"'.format(coil_key))
         tokamaker_set_coil_bounds(bounds_array)
 
     def set_coil_vsc(self,coil_gains):
@@ -495,9 +535,7 @@ class TokaMaker():
 
         @param coil_gains Gains for each coil (absolute scale is arbitrary)
         '''
-        gains_array = numpy.zeros((self.ncoils,), dtype=numpy.float64)
-        for coil_key, coil_gain in coil_gains.items():
-            gains_array[self.coil_sets[coil_key]['id']] = coil_gain
+        gains_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_gains), dtype=numpy.float64)
         tokamaker_set_coil_vsc(gains_array)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
@@ -895,26 +933,30 @@ class TokaMaker():
         psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         tokamaker_set_psi(psi)
     
-    def set_psi_dt(self,psi0,dt,rcoils=None,icoils=None,vcoils=None):
+    def set_psi_dt(self,psi0,dt,coil_resistivities=None,coil_currents=None,coil_voltages=None):
         '''! Set reference poloidal flux and time step for eddy currents in .solve()
 
         @param psi0 Reference poloidal flux at t-dt (unnormalized)
         @param dt Time since reference poloidal flux
+        @param coil_resistivities Resistivities for Vcoils [Ohms] (dictionary of form `{coil_name: coil_res}`)
+        @param coil_currents Currents for Vcoils [A] (dictionary of form `{coil_name: coil_curr}`)
+        @param coil_voltages Voltages for Vcoils [V] (dictionary of form `{coil_name: coil_volt}`)
         '''
         if psi0.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi0", should be [np]')
         psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
-        if rcoils is None:
-            rcoils = -numpy.ones((self.ncoils+1,))
-            icoils = numpy.zeros((self.ncoils+1,))
+        if coil_resistivities is None:
+            res_array = -numpy.ones((self.ncoils+1,), dtype=numpy.float64)
+            curr_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
+            volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
         else:
-            rcoils = numpy.ascontiguousarray(rcoils, dtype=numpy.float64)
-            icoils = numpy.ascontiguousarray(icoils, dtype=numpy.float64)
-            if vcoils is None:
-                vcoils = numpy.zeros((self.ncoils+1,))
+            res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,True), dtype=numpy.float64)
+            curr_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents,True), dtype=numpy.float64)
+            if coil_voltages is not None:
+                volt_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages,True), dtype=numpy.float64)
             else:
-                vcoils = numpy.ascontiguousarray(vcoils, dtype=numpy.float64)
-        tokamaker_set_psi_dt(psi0,rcoils,icoils,vcoils,c_double(dt))
+                volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
+        tokamaker_set_psi_dt(psi0,res_array,curr_array,volt_array,c_double(dt))
     
     def get_field_eval(self,field_type):
         r'''! Create field interpolator for vector potential
@@ -946,10 +988,7 @@ class TokaMaker():
         currents = numpy.zeros((self.ncoils,),dtype=numpy.float64)
         currents_reg = numpy.zeros((self.nregs,),dtype=numpy.float64)
         tokamaker_get_coil_currents(currents, currents_reg)
-        current_dict = {}
-        for coil_key, coil_set in self.coil_sets.items():
-            current_dict[coil_key] = currents[coil_set['id']]
-        return current_dict, currents_reg
+        return self.coil_vec2dict(currents), currents_reg
 
     def get_coil_Lmat(self):
         r'''! Get mutual inductance matrix between coils
@@ -1115,10 +1154,7 @@ class TokaMaker():
 
         @param currents Current in each coil [A]
         '''
-        current_array = numpy.zeros((self.ncoils,), dtype=numpy.float64)
-        if currents is not None:
-            for coil_key, coil_current in currents.items():
-                current_array[self.coil_sets[coil_key]['id']] = coil_current
+        current_array = numpy.ascontiguousarray(self.coil_dict2vec(currents), dtype=numpy.float64)
         tokamaker_set_coil_currents(current_array)
 
     def update_settings(self):
