@@ -372,7 +372,7 @@ subroutine nlfun_apply(self,a,b)
     vel_weights_loc = vel_weights(:, cell_dofs)
     T_weights_loc = T_weights(cell_dofs)
     psi_weights_loc = psi_weights(cell_dofs)
-    by_weights_loc = by_weights(cell_dofs)
+    by_weights = by_weights(cell_dofs)
   !---------------------------------------------------------------------------
   ! Quadrature Loop
   !---------------------------------------------------------------------------
