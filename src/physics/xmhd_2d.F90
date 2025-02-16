@@ -356,7 +356,7 @@ subroutine nlfun_apply(self,a,b)
 
   !$omp parallel private(m,jr,curved,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
   !$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-  !$omp jac_det,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel) reduction(+:diag_vals)
+  !$omp jac_det,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel, btmp) reduction(+:diag_vals)
   !Edit for new fields
   ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
   ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
@@ -397,9 +397,9 @@ subroutine nlfun_apply(self,a,b)
         ! Note this is actually $(\nabla u)^T = jac(\vec(u))$
         ! Choosing this convention to make index contractions
         ! more consistent with Fortran convention
-        dvel(1,:) = dvel(1, :) + vel_weights_loc(1, jr)*basis_grads(:, jr)
-        dvel(2,:) = 0.d0
-        dvel(3,:) = dvel(3, :) + vel_weights_loc(3, jr)*basis_grads(:, jr)
+        dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
+        dvel(:, 2) = 0.d0
+        dvel(:, 3) = dvel(:, 2) + vel_weights_loc(:, jr)*basis_grads(3, jr)
         dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
         dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
         dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
@@ -410,7 +410,7 @@ subroutine nlfun_apply(self,a,b)
       !---Compute local function contributions
       DO jr=1,oft_blagrange%nce
         res_loc(jr, 2:4) = res_loc(jr, 2:4) &
-          + basis_vals(jr)*self%dt*vel*jac_det*quad%wts(m) &
+          + basis_vals(jr)*vel*jac_det*quad%wts(m) &
           + self%dt*DOT_PRODUCT(btmp,basis_grads(:,jr))*btmp*jac_det*quad%wts(m)/(mu_0*m_i*n) &
           - self%dt*DOT_PRODUCT(btmp,btmp)*basis_grads(:,jr)*jac_det*quad%wts(m)/(2*mu_0*m_i*n) &
           - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*jac_det*quad%wts(m)/(mu_0*m_i*n**2) &
@@ -486,7 +486,7 @@ subroutine nlfun_apply(self,a,b)
   INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
   REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz, m_i
   REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-  dvel(3,3),div_vel,jac_mat(3,4), jac_det
+  dvel(3,3),div_vel,jac_mat(3,4), jac_det, vtmp(3), btmp(3)
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
                                       psi_weights_loc, by_weights_loc, res_loc
   REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
@@ -531,7 +531,7 @@ subroutine nlfun_apply(self,a,b)
     call omp_init_lock(tlocks(i))
   END DO
   !$omp parallel private(m,jr,jc,curved,cell_dofs,basis_vals,basis_grads,n_weights_loc&
-  !$omp vel_weights_loc, T_weights_loc, psi_weights_loc, by_weights_loc, &
+  !$omp vel_weights_loc, T_weights_loc, psi_weights_loc, by_weights_loc, btmp, &
   !$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,dn, dT, dvel, dpsi, dby,iloc)
   ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
   ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),&
@@ -574,33 +574,32 @@ subroutine nlfun_apply(self,a,b)
         psi = psi + psi_weights_loc(jr)*basis_vals(jr)
         by = by + by_weights_loc(jr)*basis_vals(jr)
         dn = dn + n_weights_loc(jr)*basis_vals(jr)
-        dvel(1, :) = dvel(1, :) + vel_weights_loc(1, jr)*basis_grads(:, jr)
-        dvel(2, :) = dvel(2, :) + vel_weights_loc(2, jr)*basis_grads(:, jr)
-        dvel(3, :) = dvel(3, :) + vel_weights_loc(3, jr)*basis_grads(:, jr)
+        dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
+        dvel(:, 2) = 0.d0
+        dvel(:, 3) = dvel(:, 2) + vel_weights_loc(:, jr)*basis_grads(3, jr)
         dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
         dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
         dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
       END DO
       div_vel = dvel(1,1) + dvel(2,2) + dvel(3,3)
+      btmp = cross_product(dpsi, (0,1,0)) + by*(0,1,0)
       !---Compute local matrix contributions
       DO jr=1,oft_blagrange%nce
         DO jc=1,oft_blagrange%nce
-          !---Ion rows
-          jac_loc(1,1)%m(jr,jc) = jac_loc(1,1)%m(jr,jc) &
+          ! Psi rows
+          jac_loc(6, 1)%m(jr,jc) = jac_loc(6, 1)%m(jr,jc) &
             + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
-            + self%dt*kappa_i*(T_i**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m) &
-            + self%dt*kappa_i*(T_i**1.5d0)*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr),dT_i)*jac_det*quad%wts(m) &
-            - self%dt*tau_eq_inv*basis_vals(jr)*(-basis_vals(jc))*jac_det*quad%wts(m)
-          jac_loc(1,2)%m(jr,jc) = jac_loc(1,2)%m(jr,jc) &
-            - self%dt*tau_eq_inv*basis_vals(jr)*(basis_vals(jc))*jac_det*quad%wts(m)
-          !---Electron rows
-          jac_loc(2,2)%m(jr,jc) = jac_loc(2,2)%m(jr,jc) &
-            + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
-            + self%dt*kappa_e*(T_e**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m) &
-            + self%dt*kappa_e*(T_e**1.5d0)*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr),dT_e)*jac_det*quad%wts(m) &
-            - self%dt*tau_eq_inv*basis_vals(jr)*(-basis_vals(jc))*jac_det*quad%wts(m)
-          jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
-            - self%dt*tau_eq_inv*basis_vals(jr)*(basis_vals(jc))*jac_det*quad%wts(m)
+            + self%dt*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*jac_det*quad%wts(m) &
+            + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu_0
+          jac_loc(6,2)%m(jr,jc) = jac_loc(6,2)%m(jr,jc) &
+            + basis_vals(jr)*self%dt*basis_vals(jc)*SUM(dpsi)*jac_det*quad%wts(m)
+          ! B_y rows
+          jac_loc(7, 1)%m(jr,jc) = jac_loc(7, 1)%m(jr,jc) &
+            - basis_vals(jr)*self%dt*cross_product(basis_grads(:,jc),dvel(2,:))*jac_det*quad%wts(m)
+          jac_loc(7, 2)%m(jr,jc) = jac_loc(7, 2)%m(jr,jc) &
+            - basis_vals(jr)*self%dt*cross_product(dpsi,basis_grads(:,jc))*jac_det*quad%wts(m) &
+            + basis_vals(jr)*self%dt*basis_vals(jc)*SUM(dby)*jac_det*quad%wts(m) &
+            + basis_vals(jr)*self%dt*by*SUM(basis_grads(:,jc))*jac_det*quad%wts(m)
         END DO
       END DO
     END DO
