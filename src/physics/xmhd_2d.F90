@@ -35,6 +35,7 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: gamma
   REAL(r8) :: D
   REAL(r8) :: k_boltz
+  REAL(r8) :: m_i
   REAL(r8) :: diag_vals(2) = 0.d0 !< Needs docs
   !TODO: COMPLETE EDIT FOR NEW FIELDS
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
@@ -64,6 +65,7 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8) :: gamma !< Needs docs
   REAL(r8) :: D !< Needs docs
   REAL(r8) :: k_boltz !< Needs docs
+  REAL(r8) :: m_i
   REAL(r8) :: lin_tol = 1.d-8 !< Needs docs
   REAL(r8) :: nl_tol = 1.d-5 !< Needs docs
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
@@ -153,6 +155,7 @@ self%nlfun%D=self%D
 self%nlfun%mu_0=self%mu_0
 self%nlfun%gamma=self%gamma
 self%nlfun%k_boltz=self%k_boltz
+self%nlfun%m_i=self%m_i
 self%nlfun%n_bc=>self%n_bc
 self%nlfun%vel_bc=>self%vel_bc
 self%nlfun%T_bc=>self%T_bc
@@ -298,11 +301,11 @@ subroutine nlfun_apply(self,a,b)
   class(oft_vector), intent(inout) :: b !< Result of metric function
   type(oft_quad_type), pointer :: quad
   LOGICAL :: curved
-  INTEGER(i4) :: i,m,jr
+  INTEGER(i4) :: i,m,jr, k,l
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
-  REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz, diag_vals(7)
+  REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz, m_i, diag_vals(7)
   REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-          dvel(3,3),div_vel,jac_mat(3,4), jac_det
+          dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3)
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
                       psi_weights_loc, by_weights_loc
   REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads,res_loc
@@ -359,7 +362,7 @@ subroutine nlfun_apply(self,a,b)
   ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
             psi_weights_loc(oft_blagrange%nce), by_weights_loc(oft_blagrange%nce),&
             vel_weights_loc(3, oft_blagrange%nce))
-  ALLOCATE(cell_dofs(oft_blagrange%nce),res_loc(oft_blagrange%nce,5))
+  ALLOCATE(cell_dofs(oft_blagrange%nce),res_loc(oft_blagrange%nce,7))
   !$omp do schedule(static)
   DO i=1,smesh%nc
     curved=cell_is_curved(smesh,i) ! Straight cell test
@@ -391,22 +394,40 @@ subroutine nlfun_apply(self,a,b)
         psi = psi + psi_weights_loc(jr)*basis_vals(jr)
         by = by + by_weights_loc(jr)*basis_vals(jr)
         dn = dn + n_weights_loc(jr)*basis_vals(jr)
-        dvel(1, :) = dvel(1, :) + vel_weights_loc(1, jr)*basis_grads(:, jr)
-        dvel(2, :) = dvel(2, :) + vel_weights_loc(2, jr)*basis_grads(:, jr)
-        dvel(3, :) = dvel(3, :) + vel_weights_loc(3, jr)*basis_grads(:, jr)
+        ! Note this is actually $(\nabla u)^T = jac(\vec(u))$
+        ! Choosing this convention to make index contractions
+        ! more consistent with Fortran convention
+        dvel(1,:) = dvel(1, :) + vel_weights_loc(1, jr)*basis_grads(:, jr)
+        dvel(2,:) = 0.d0
+        dvel(3,:) = dvel(3, :) + vel_weights_loc(3, jr)*basis_grads(:, jr)
         dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
         dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
         dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
       END DO
       div_vel = dvel(1,1) + dvel(2,2) + dvel(3,3)
       diag_vals = diag_vals + [T_i,T_e]*jac_det*quad%wts(m) !TODO: update this line for new fields
+      btmp = cross_product(dpsi, (0,1,0)) + by*(0,1,0)
       !---Compute local function contributions
       DO jr=1,oft_blagrange%nce
-        res_loc(jr, 4) = res_loc(jr, 4) &
+        res_loc(jr, 2:4) = res_loc(jr, 2:4) &
+          + basis_vals(jr)*self%dt*vel*jac_det*quad%wts(m) &
+          + self%dt*DOT_PRODUCT(btmp,basis_grads(:,jr))*btmp*jac_det*quad%wts(m)/(mu_0*m_i*n) &
+          - self%dt*DOT_PRODUCT(btmp,btmp)*basis_grads(:,jr)*jac_det*quad%wts(m)/(2*mu_0*m_i*n) &
+          - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*jac_det*quad%wts(m)/(mu_0*m_i*n**2) &
+          + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*jac_det*quad%wts(m)/(2*mu_0*m_i*n**2) &
+          + 2*self%dt*k_boltz*n*basis_vals(jr)*dT*jac_det*quad%wts(m)&
+          + 2*self%dt*k_boltz*T*basis_vals(jr)*dn*jac_det*quad%wts(m)
+        DO n=1,3
+          res_loc(jr,2:4) = res_loc(jr, 2:4) &
+          + basis_vals(jr)*self%dt*vel(n)*dvel(:,n)*jac_det*quad%wts(m) &
+          + nu*self%dt*basis_grads(n,jr)*dvel(:,n)*jac_det*quad%wts(m)/(m_i*n) &
+          - basis_vals(jr)*self%dt*dn(n)*dvel(:,n)*jac_det*quad%wts(m)/(m_i*n**2)
+        END DO
+        res_loc(jr, 6) = res_loc(jr, 6) &
           + basis_vals(jr)*psi*jac_det*quad%wts(m) &
           + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dpsi)*jac_det*quad%wts(m) &
           + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dpsi)*jac_det*quad%wts(m)/mu_0
-        res_loc(jr, 5) = res_loc(jr, 5) &
+        res_loc(jr, 6) = res_loc(jr, 7) &
           + basis_vals(jr)*by*jac_det*quad%wts(m) &
           - basis_vals(jr)*self%dt*cross_product(dpsi,dvel(2, :))*jac_det*quad%wts(m) &
           + basis_vals(jr)*self%dt*(DOT_PRODUCT(dby,vel) + by*div_vel)*jac_det*quad%wts(m) &
@@ -416,13 +437,19 @@ subroutine nlfun_apply(self,a,b)
     !---Add local values to full vector
     DO jr=1,oft_blagrange%nce
       !$omp atomic
-      Ti_res(cell_dofs(jr)) = Ti_res(cell_dofs(jr)) + res_loc(jr,1)
+      n_res(cell_dofs(jr)) = n_res(cell_dofs(jr)) + res_loc(jr,1)
       !$omp atomic
-      Te_res(cell_dofs(jr)) = Te_res(cell_dofs(jr)) + res_loc(jr,2)
+      vel_res(cel_dofs(jr)) = vel_res(cell_dofs(jr)) + res_loc(jr,2:4)
+      !$omp atomic
+      T_res(cell_dofs(jr)) = T_res(cell_dofs(jr)) + res_loc(jr,5)
+      !$omp atomic
+      psi_res(cell_dofs(jr)) = psi_res(cell_dofs(jr)) + res_loc(jr,6)
+      !$omp atomic
+      by_res(cell_dofs(jr)) = by_res(cell_dofs(jr)) + res_loc(jr,7)
     END DO
   END DO
   !---Cleanup thread-local storage
-  DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
+  DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,btmp,&
               vel_weights_loc, psi_weights_loc, by_weights_loc,cell_dofs,res_loc)
   !$omp end parallel
   IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
@@ -457,7 +484,7 @@ subroutine nlfun_apply(self,a,b)
   LOGICAL :: curved
   INTEGER(i4) :: i,m,jr,jc
   INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
-  REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz
+  REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz, m_i
   REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
   dvel(3,3),div_vel,jac_mat(3,4), jac_det
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
