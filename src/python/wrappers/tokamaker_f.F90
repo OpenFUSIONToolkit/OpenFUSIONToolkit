@@ -28,7 +28,7 @@ USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
-  gs_plasma_mutual, gs_source
+  gs_plasma_mutual, gs_source, gs_err_reason
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
@@ -51,7 +51,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
   REAL(KIND=c_double) :: nl_tol = 1.d-6 !< Needs docs
   REAL(KIND=c_double) :: rmin = 0.d0 !< Needs docs
   REAL(KIND=c_double) :: lim_zmax = 1.d99 !< Needs docs
-  CHARACTER(KIND=c_char) :: limiter_file(80) = 'none' !< Needs docs
+  TYPE(c_ptr) :: limiter_file !< Needs docs
 END TYPE tokamaker_settings_type
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -67,6 +67,8 @@ TYPE, BIND(C) :: tokamaker_recon_settings_type
   LOGICAL(KIND=c_bool) :: fitF0 = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fixedCentering = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Needs docs
+  TYPE(c_ptr) :: infile !< Needs docs
+  TYPE(c_ptr) :: outfile !< Needs docs
 END TYPE tokamaker_recon_settings_type
 !
 TYPE(gs_eq), POINTER :: gs_global => NULL() !< Global G-S object
@@ -107,7 +109,7 @@ END SUBROUTINE tokamaker_eval_green
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
-CHARACTER(KIND=c_char), INTENT(in) :: coil_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: coil_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Needs docs
@@ -170,12 +172,12 @@ END SUBROUTINE tokamaker_setup_regions
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_reset(error_str) BIND(C,NAME="tokamaker_reset")
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
 LOGICAL :: file_exists
 real(r8), POINTER :: vals_tmp(:)
-CHARACTER(LEN=80) :: tmp_str
+! CHARACTER(LEN=OFT_ERROR_SLEN) :: tmp_str
 !---Clear error flag
 CALL copy_string('',error_str)
 !---
@@ -196,12 +198,12 @@ SUBROUTINE tokamaker_setup(order,full_domain,ncoils,error_str) BIND(C,NAME="toka
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
 LOGICAL :: file_exists
 real(r8), POINTER :: vals_tmp(:)
-CHARACTER(LEN=80) :: tmp_str
+! CHARACTER(LEN=80) :: tmp_str
 !---Clear error flag
 CALL copy_string('',error_str)
 !---------------------------------------------------------------------------
@@ -254,12 +256,12 @@ END SUBROUTINE tokamaker_setup
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_load_profiles(f_file,f_offset,p_file,eta_file,f_NI_file) BIND(C,NAME="tokamaker_load_profiles")
-CHARACTER(KIND=c_char), INTENT(in) :: f_file(80) !< F*F' prof.in file
-CHARACTER(KIND=c_char), INTENT(in) :: p_file(80) !< P' prof.in file
-CHARACTER(KIND=c_char), INTENT(in) :: eta_file(80) !< Resistivity (eta) prof.in file
-CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(80) !< Non-inductive F*F' prof.in file
+CHARACTER(KIND=c_char), INTENT(in) :: f_file(OFT_PATH_SLEN) !< F*F' prof.in file
+CHARACTER(KIND=c_char), INTENT(in) :: p_file(OFT_PATH_SLEN) !< P' prof.in file
+CHARACTER(KIND=c_char), INTENT(in) :: eta_file(OFT_PATH_SLEN) !< Resistivity (eta) prof.in file
+CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive F*F' prof.in file
 REAL(c_double), VALUE, INTENT(in) :: f_offset !< Needs docs
-CHARACTER(LEN=80) :: tmp_str
+CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 CALL copy_string_rev(f_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%I)
 IF(f_offset>-1.d98)gs_global%I%f_offset=f_offset
@@ -273,39 +275,48 @@ END SUBROUTINE tokamaker_load_profiles
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_init_psi(r0,z0,a,kappa,delta,rhs_source,ierr) BIND(C,NAME="tokamaker_init_psi")
+SUBROUTINE tokamaker_init_psi(r0,z0,a,kappa,delta,rhs_source,error_str) BIND(C,NAME="tokamaker_init_psi")
 REAL(c_double), VALUE, INTENT(in) :: r0 !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: z0 !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: a !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: kappa !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: delta !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
-INTEGER(c_int), INTENT(out) :: ierr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
+INTEGER(i4) :: ierr
 REAL(8), POINTER, DIMENSION(:) :: rhs_tmp
+CALL copy_string('',error_str)
 IF(c_associated(rhs_source))THEN
   CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
   CALL gs_global%init_psi(ierr,curr_source=rhs_tmp)
 ELSE
   CALL gs_global%init_psi(ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
 END IF
+IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_init_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(error_flag) BIND(C,NAME="tokamaker_solve")
-INTEGER(c_int), INTENT(out) :: error_flag !< Error flag
-CALL gs_global%solve(error_flag)
+SUBROUTINE tokamaker_solve(error_str) BIND(C,NAME="tokamaker_solve")
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
+INTEGER(i4) :: ierr
+CALL copy_string('',error_str)
+gs_global%timing=0.d0
+CALL gs_global%solve(ierr)
+IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_solve
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_vac_solve(psi_in,rhs_source,error_flag) BIND(C,NAME="tokamaker_vac_solve")
+SUBROUTINE tokamaker_vac_solve(psi_in,rhs_source,error_str) BIND(C,NAME="tokamaker_vac_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Input: BCs for \f$ \psi \f$, Output: solution
 TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
-INTEGER(c_int), INTENT(out) :: error_flag !< Error flag
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
+INTEGER(i4) :: ierr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rhs_tmp
 CLASS(oft_vector), POINTER :: psi_tmp,rhs_vec
 TYPE(oft_lag_brinterp) :: source_field
+CALL copy_string('',error_str)
 NULLIFY(psi_tmp)
 CALL gs_global%psi%new(psi_tmp)
 CALL c_f_pointer(psi_in, vals_tmp, [gs_global%psi%n])
@@ -317,12 +328,12 @@ IF(c_associated(rhs_source))THEN
   CALL rhs_vec%restore_local(rhs_tmp)
   source_field%u=>rhs_vec
   CALL source_field%setup()
-  CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=error_flag)
+  CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=ierr)
   CALL source_field%delete()
   CALL rhs_vec%delete()
   DEALLOCATE(rhs_vec)
 ELSE
-  CALL gs_global%vac_solve(psi_tmp,ierr=error_flag)
+  CALL gs_global%vac_solve(psi_tmp,ierr=ierr)
 END IF
 CALL psi_tmp%get_local(vals_tmp)
 CALL psi_tmp%delete()
@@ -342,6 +353,8 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
 LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
+CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 error_flag=0
 IF(vacuum)gs_global%has_plasma=.FALSE.
 fitI=settings%fitI
@@ -354,7 +367,12 @@ fitCoils=settings%fitCoils
 fitF0=settings%fitF0
 fixedCentering=settings%fixedCentering
 fit_pm=settings%pm
-CALL fit_gs(gs_global,fitI,fitP,fitPnorm,&
+CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
+CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
+CALL copy_string_rev(infile_c,infile)
+CALL copy_string_rev(outfile_c,outfile)
+gs_global%timing=0.d0
+CALL fit_gs(gs_global,infile,outfile,fitI,fitP,fitPnorm,&
             fitAlam,fitR0,fitV0,fitCoils,fitF0, &
             fixedCentering)
 gs_global%has_plasma=.TRUE.
@@ -734,7 +752,7 @@ END SUBROUTINE tokamaker_get_vfixed
 SUBROUTINE tokamaker_get_field_eval(imode,int_obj,error_str) BIND(C,NAME="tokamaker_get_field_eval")
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
 TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (unused)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (unused)
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 CALL copy_string('',error_str)
@@ -825,6 +843,7 @@ END SUBROUTINE tokamaker_set_psi_dt
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_settings(settings) BIND(C,NAME="tokamaker_set_settings")
 TYPE(tokamaker_settings_type), INTENT(in) :: settings !< Needs docs
+CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 oft_env%pm=settings%pm
 gs_global%free=settings%free_boundary
 gs_global%lim_zmax=settings%lim_zmax
@@ -834,7 +853,8 @@ gs_global%urf=settings%urf
 gs_global%maxits=settings%maxits
 gs_global%nl_tol=settings%nl_tol
 gs_global%limited_only=settings%limited_only
-CALL copy_string_rev(settings%limiter_file,gs_global%limiter_file)
+CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
+CALL copy_string_rev(limfile_c,gs_global%limiter_file)
 END SUBROUTINE tokamaker_set_settings
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -975,7 +995,7 @@ END SUBROUTINE tokamaker_set_coil_vsc
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
-CHARACTER(KIND=c_char), INTENT(in) :: filename(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nr !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nz !< Needs docs
@@ -984,10 +1004,11 @@ REAL(c_double), INTENT(in) :: zbounds(2) !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(80) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 CHARACTER(LEN=40) :: run_info_f
-CHARACTER(LEN=80) :: filename_tmp,lim_file,error_flag
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp,lim_file
+CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
 CALL copy_string_rev(run_info,run_info_f)
 CALL copy_string_rev(filename,filename_tmp)
 CALL copy_string_rev(lim_filename,lim_file)
