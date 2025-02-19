@@ -70,7 +70,7 @@ class ThinCurr():
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
 
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=-1):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
@@ -79,6 +79,7 @@ class ThinCurr():
         @param mesh_file File containing model in native mesh format
         @param pmap Point map for periodic grids
         @param xml_filename Path to XML file for model
+        @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')
@@ -300,7 +301,7 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return numpy.ctypeslib.as_array(ctypes.cast(Mc_loc, c_double_ptr),shape=(self.n_icoils,self.nelems))
 
-    def compute_Msensor(self,sensor_file,cache_file=None):
+    def compute_Msensor(self,sensor_file=None,cache_file=None):
         '''! Compute the mutual inductance between model and sensors
 
         @param sensor_file Path to file contatining flux loop definitions
@@ -313,7 +314,10 @@ class ThinCurr():
             cache_string = self._oft_env.path2c("")
         else:
             cache_string = self._oft_env.path2c(cache_file)
-        sensor_string = self._oft_env.path2c(sensor_file)
+        if sensor_file is None:
+            sensor_string = self._oft_env.path2c("none")
+        else:
+            sensor_string = self._oft_env.path2c(sensor_file)
         Ms_loc = c_void_p()
         Msc_loc = c_void_p()
         nsensors = c_int()

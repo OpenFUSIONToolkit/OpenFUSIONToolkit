@@ -41,7 +41,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
+SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start_in,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
 CHARACTER(KIND=c_char), INTENT(in) :: mesh_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs
@@ -49,14 +49,14 @@ TYPE(c_ptr), VALUE, INTENT(in) :: reg_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: pmap_loc !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: np !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nc !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: jumper_start !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: jumper_start_in !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sizes !< Needs docs
 TYPE(c_ptr), INTENT(out) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: xml_ptr !< Needs docs
 !
 LOGICAL :: success,is_2d
-INTEGER(4) :: i,ndims,ierr
+INTEGER(4) :: i,ndims,ierr,jumper_start
 integer(i4), allocatable, dimension(:) :: dim_sizes
 INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp,reg_tmp
 INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_tmp
@@ -102,10 +102,18 @@ ELSE
   ALLOCATE(oft_trimesh::tw_obj%mesh)
   CALL tw_obj%mesh%setup(-1,.FALSE.)
   CALL hdf5_field_get_sizes(TRIM(filename),"mesh/R",ndims,dim_sizes)
+  IF(ndims<0)THEN
+    CALL copy_string('Point list ("mesh/R") not present in mesh file',error_str)
+    RETURN
+  END IF
   tw_obj%mesh%np=dim_sizes(2)
   is_2d=(dim_sizes(1)==2)
   DEALLOCATE(dim_sizes)
   CALL hdf5_field_get_sizes(TRIM(filename),"mesh/LC",ndims,dim_sizes)
+  IF(ndims<0)THEN
+    CALL copy_string('Cell list ("mesh/LC") not present in mesh file',error_str)
+    RETURN
+  END IF
   tw_obj%mesh%nc=dim_sizes(2)
   DEALLOCATE(dim_sizes)
   ALLOCATE(tw_obj%mesh%r(3,tw_obj%mesh%np))
@@ -113,16 +121,32 @@ ELSE
     tw_obj%mesh%r=0.d0
     ALLOCATE(r_tmp(2,tw_obj%mesh%np))
     CALL hdf5_read(r_tmp,TRIM(filename),"mesh/R",success)
+    IF(.NOT.success)THEN
+      CALL copy_string('Error reading point list from mesh file',error_str)
+      RETURN
+    END IF
     tw_obj%mesh%r(1:2,:)=r_tmp
     DEALLOCATE(r_tmp)
   ELSE
     CALL hdf5_read(tw_obj%mesh%r,TRIM(filename),"mesh/R",success)
+    IF(.NOT.success)THEN
+      CALL copy_string('Error reading point list from mesh file',error_str)
+      RETURN
+    END IF
   END IF
   ALLOCATE(tw_obj%mesh%lc(3,tw_obj%mesh%nc))
   CALL hdf5_read(tw_obj%mesh%lc,TRIM(filename),"mesh/LC",success)
+  IF(.NOT.success)THEN
+    CALL copy_string('Error reading cell list from mesh file',error_str)
+    RETURN
+  END IF
   ALLOCATE(tw_obj%mesh%reg(tw_obj%mesh%nc))
   IF(hdf5_field_exist(TRIM(filename),'mesh/REG'))THEN
     CALL hdf5_read(tw_obj%mesh%reg,TRIM(filename),"mesh/REG",success)
+    IF(.NOT.success)THEN
+      CALL copy_string('Error reading region ID from mesh file',error_str)
+      RETURN
+    END IF
   ELSE
     tw_obj%mesh%reg=1
   END IF
@@ -130,11 +154,21 @@ ELSE
   IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
     ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
     CALL hdf5_read(tw_obj%pmap,TRIM(filename),'thincurr/periodicity/pmap',success)
+    IF(.NOT.success)THEN
+      CALL copy_string('Error reading periodicity information from mesh file',error_str)
+      RETURN
+    END IF
   END IF
   !---Read nodesets and define holes and jumpers
   CALL native_read_nodesets(mesh_nsets,native_filename=TRIM(filename))
-  IF(jumper_start>0)THEN
+  jumper_start=jumper_start_in
+  IF(jumper_start/=0)THEN
     ndims=SIZE(mesh_nsets)
+    IF(ABS(jumper_start)>ndims)THEN
+      CALL copy_string('"jumper_start" exceeds number of nodesets in file',error_str)
+      RETURN
+    END IF
+    IF(jumper_start<0)jumper_start=ndims+1+jumper_start
     hole_nsets=>mesh_nsets(1:jumper_start-1)
     ALLOCATE(tw_obj%jumper_nsets(ndims-jumper_start+1))
     DO i=jumper_start,ndims
