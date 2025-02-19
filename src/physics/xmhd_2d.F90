@@ -415,13 +415,13 @@ subroutine nlfun_apply(self,a,b)
           - self%dt*DOT_PRODUCT(btmp,btmp)*basis_grads(:,jr)*jac_det*quad%wts(m)/(2*mu_0*m_i*n) &
           - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*jac_det*quad%wts(m)/(mu_0*m_i*n**2) &
           + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*jac_det*quad%wts(m)/(2*mu_0*m_i*n**2) &
-          + 2*self%dt*k_boltz*n*basis_vals(jr)*dT*jac_det*quad%wts(m)&
-          + 2*self%dt*k_boltz*T*basis_vals(jr)*dn*jac_det*quad%wts(m)
-        DO n=1,3
+          + 2*self%dt*k_boltz*n*basis_vals(jr)*dT*jac_det*quad%wts(m)/(m_i*n) &
+          + 2*self%dt*k_boltz*T*basis_vals(jr)*dn*jac_det*quad%wts(m)/(m_i*n)
+        DO k=1,3
           res_loc(jr,2:4) = res_loc(jr, 2:4) &
-          + basis_vals(jr)*self%dt*vel(n)*dvel(:,n)*jac_det*quad%wts(m) &
-          + nu*self%dt*basis_grads(n,jr)*dvel(:,n)*jac_det*quad%wts(m)/(m_i*n) &
-          - basis_vals(jr)*self%dt*dn(n)*dvel(:,n)*jac_det*quad%wts(m)/(m_i*n**2)
+          + basis_vals(jr)*self%dt*vel(k)*dvel(:,k)*jac_det*quad%wts(m) &
+          + nu*self%dt*basis_grads(k,jr)*dvel(:,k)*jac_det*quad%wts(m)/(m_i*n) &
+          - basis_vals(jr)*self%dt*dn(k)*dvel(:,k)*jac_det*quad%wts(m)/(m_i*n**2)
         END DO
         res_loc(jr, 6) = res_loc(jr, 6) &
           + basis_vals(jr)*psi*jac_det*quad%wts(m) &
