@@ -1,5 +1,7 @@
 import numpy
 import h5py
+
+import numpy.linalg
 from ..util import write_native_mesh
 
 
@@ -23,12 +25,13 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], pmap=None, 
             h5_file.create_dataset('thincurr/periodicity/nfp', data=[nfp,], dtype='i4')
 
 
-def build_ThinCurr_dummy(center,size=1.0):
+def build_ThinCurr_dummy(center,size=1.0,nsplit=0):
     '''! Build simple square dummy mesh for ThinCurr (1 active node)
     
     @param center Center of mesh [3]
-    @param size Size of dummy mesh
-    @returns `r` Point list [5,3], lc Cell list [4,3]
+    @param size Physical size of dummy mesh in X and Y
+    @param nsplit Number of refinement iterations to perform on grid (starting mesh is `np=5`, `nc=4`)
+    @returns `r` Point list [:,3], lc Cell list [:,3]
     '''
     r = numpy.array([
         [-size/2.0,-size/2.0,0.0],
@@ -45,6 +48,31 @@ def build_ThinCurr_dummy(center,size=1.0):
     ])
     for i in range(3):
         r[:,i] += center[i]
+    # Refine grid as desired
+    for i in range(nsplit):
+        lc_new = []
+        r_new = [r_old for r_old in r]
+        for j in range(lc.shape[0]):
+            new_inds = [0,0,0]
+            r_candidates = [
+                (r[lc[j,0],:]+r[lc[j,1],:])/2.0,
+                (r[lc[j,1],:]+r[lc[j,2],:])/2.0,
+                (r[lc[j,0],:]+r[lc[j,2],:])/2.0
+            ]
+            for k in range(3):
+                for k2 in range(r.shape[0],len(r_new)):
+                    if numpy.linalg.norm(r_new[k2]-r_candidates[k]) < 1.E-10:
+                        new_inds[k] = k2
+                        break
+                else:
+                    r_new.append(r_candidates[k])
+                    new_inds[k] = len(r_new)-1
+            lc_new.append([lc[j,0], new_inds[0], new_inds[2]])
+            lc_new.append([new_inds[0], lc[j,1], new_inds[1]])
+            lc_new.append([new_inds[1], lc[j,2], new_inds[2]])
+            lc_new.append([new_inds[0], new_inds[1], new_inds[2]])
+        lc = numpy.array(lc_new)
+        r = numpy.array(r_new)
     return r, lc
 
 

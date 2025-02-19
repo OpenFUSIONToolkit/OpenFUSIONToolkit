@@ -336,25 +336,43 @@ class ThinCurr():
                numpy.ctypeslib.as_array(ctypes.cast(Msc_loc, c_double_ptr),shape=(self.n_icoils,nsensors.value)), \
                {'names': sensor_names, 'ptr': sensor_loc}
     
-    def compute_Rmat(self,copy_out=False,eta_values=None):
+    def get_eta_values(self):
+        '''! Get resistivity values for model
+
+        @returns `eta_values` Resistivity values for model [nregs]
+        '''
+        eta_values = numpy.zeros((self.nregs,), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_get_eta(self.tw_obj,eta_values,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+        return eta_values
+    
+    def set_eta_values(self,eta_values=None):
+        '''! Set resistivity values for model (overrides those in XML if specified)
+
+        @param eta_values New resistivity values for model [nregs]
+        '''
+        if eta_values.shape[0] != self.nregs:
+            raise IndexError('Incorrect shape of "eta_values", should be [nregs]')
+        eta_values = numpy.ascontiguousarray(eta_values, dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_set_eta(self.tw_obj,eta_values,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+
+    def compute_Rmat(self,copy_out=False):
         '''! Compute the resistance matrix for this model
 
         @param copy_out Copy matrix to python and store in `self.Rmat`?
-        @param eta_values Resistivity values for model (overrides those in XML if specified)
         '''
         if copy_out:
             self.Rmat = numpy.zeros((self.nelems,self.nelems), dtype=numpy.float64)
             Rmat_tmp = self.Rmat
         else:
             Rmat_tmp = numpy.zeros((1,1), dtype=numpy.float64)
-        eta_ptr = None
-        if eta_values is not None:
-            if eta_values.shape[0] != self.nregs:
-                raise IndexError('Incorrect shape of "eta_values", should be [nregs]')
-            eta_values = numpy.ascontiguousarray(eta_values, dtype=numpy.float64)
-            eta_ptr = eta_values.ctypes.data_as(c_double_ptr)
         error_string = self._oft_env.get_c_errorbuff()
-        thincurr_curr_Rmat(self.tw_obj,eta_ptr,c_bool(copy_out),Rmat_tmp,error_string)
+        thincurr_curr_Rmat(self.tw_obj,c_bool(copy_out),Rmat_tmp,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
     

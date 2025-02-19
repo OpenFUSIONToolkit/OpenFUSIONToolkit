@@ -638,25 +638,51 @@ END SUBROUTINE thincurr_get_sensor_name
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE thincurr_Rmat(tw_ptr,res_ptr,copy_out,Rmat,error_str) BIND(C,NAME="thincurr_Rmat")
+SUBROUTINE thincurr_get_eta(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_get_eta")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: res_ptr !< Needs docs
-LOGICAL(KIND=c_bool), VALUE,  INTENT(in) :: copy_out !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: Rmat !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
-INTEGER(4) :: i,j,nreg_mesh
+INTEGER(4) :: nreg_mesh
 REAL(8), POINTER :: res_tmp(:)
-REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: Rmat_tmp
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
 !
-IF(c_associated(res_ptr))THEN
-  nreg_mesh=MAXVAL(self%mesh%reg)
-  CALL c_f_pointer(res_ptr, res_tmp, [nreg_mesh])
-  tw_obj%Eta_reg=res_tmp/mu0
-END IF
+CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
+res_tmp=tw_obj%Eta_reg*mu0
+END SUBROUTINE thincurr_get_eta
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_set_eta(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_set_eta")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+!
+INTEGER(4) :: nreg_mesh
+REAL(8), POINTER :: res_tmp(:)
+TYPE(tw_type), POINTER :: tw_obj
+CALL copy_string('',error_str)
+CALL c_f_pointer(tw_ptr, tw_obj)
+!
+CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
+tw_obj%Eta_reg=res_tmp/mu0
+END SUBROUTINE thincurr_set_eta
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE thincurr_Rmat(tw_ptr,copy_out,Rmat,error_str) BIND(C,NAME="thincurr_Rmat")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+LOGICAL(KIND=c_bool), VALUE,  INTENT(in) :: copy_out !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: Rmat !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+!
+INTEGER(4) :: i,j
+REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: Rmat_tmp
+TYPE(tw_type), POINTER :: tw_obj
+CALL copy_string('',error_str)
+CALL c_f_pointer(tw_ptr, tw_obj)
 !
 CALL tw_compute_Rmat(tw_obj,.TRUE.)
 !
