@@ -614,17 +614,17 @@ subroutine nlfun_apply(self,a,b)
           + self%dt*basis_vals(jc)*basis_grads(:,jr)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2*m_i*n**2*mu0) &
           + self%dt*basis_vals(jr)*basis_grads(:,jc)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2*m_i*n**2*mu0) &
           - self%dt*basis_vals(jr)*basis_vals(jc)*dn*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(m_i*n**3*mu0) &
-          DO i=1,3
-            jac_loc(i+1,1)%m(jr,jc) = jac_loc(i+1,1)%m(jr,jc) &
-            - self%dt*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(:,i))*jac_det*quad%wts(m)/(m_i*n**2) & !-- not sure if indexing on dvel is right here
-            - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(:,i))*jac_det*quad%wts(m)/(m_i*n**2) &
-            + self%dt*nu*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dvel(:,i))*jac_det*quad%wts(m)/(m_i*n**3)
+          DO k=1,3
+            jac_loc(k+1,1)%m(jr,jc) = jac_loc(k+1,1)%m(jr,jc) &
+            - self%dt*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(:,k))*jac_det*quad%wts(m)/(m_i*n**2) & !-- not sure if indexing on dvel is right here
+            - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(:,k))*jac_det*quad%wts(m)/(m_i*n**2) &
+            + self%dt*nu*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dvel(:,k))*jac_det*quad%wts(m)/(m_i*n**3)
           END DO
           !--Momentum, velocity
-          DO i=1,3
-            jac_loc(i+1,2:4)%m(jr,jc)= jac_loc(2,2:4)%m(jr,jc) &
+          DO k=1,3
+            jac_loc(k+1,2:4)%m(jr,jc)= jac_loc(2,2:4)%m(jr,jc) &
             + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
-            + self%dt*basis_vals(jr)*basis_vals(jc)*dvel(i,:)*jac_det*quad%wts(m) &
+            + self%dt*basis_vals(jr)*basis_vals(jc)*dvel(k,:)*jac_det*quad%wts(m) &
             + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*jac_det*quad%wts(m) &
             + self%dt*nu*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))/(m_i*n) &
             - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(dn, basis_grads(:,jc))/(m_i*n**2)
