@@ -75,7 +75,7 @@ MODULE xmhd
 #endif
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
-  hdf5_create_timestep, hdf5_field_exist, oft_bin_file
+  hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: mesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh, multigrid_level, multigrid_base_pushcc
@@ -1104,7 +1104,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror,de_scale
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol
 real(r8), pointer, dimension(:) :: vals => NULL()
 character(LEN=XMHD_RST_LEN) :: rst_char
-character(LEN=OFT_HIST_SLEN) :: comm_line
+character(LEN=OFT_SLEN) :: comm_line
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -4561,6 +4561,7 @@ real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr
 real(r8) :: fac,lramp,tflux,tcurr,t,tp,td
 real(r8) :: ndens
 !---
+TYPE(xdmf_plot_file) :: xdmf
 LOGICAL :: rst,first
 character(LEN=XMHD_RST_LEN) :: rst_char
 CHARACTER(LEN=OFT_PATH_SLEN) :: file_tmp,file_prev
@@ -4592,6 +4593,9 @@ read(io_unit,xmhd_plot_options,IOSTAT=ierr)
 close(io_unit)
 if(ierr<0)call oft_abort('No MHD plot options found in input file.','xmhd_plot',__FILE__)
 if(ierr>0)call oft_abort('Error parsing MHD plot options in input file.','xmhd_plot',__FILE__)
+!---
+CALL xdmf%setup("MUG")
+CALL mesh%setup_io(xdmf,oft_hcurl%order)
 !---------------------------------------------------------------------------
 ! Check run type and optional fields
 !---------------------------------------------------------------------------
@@ -4695,17 +4699,17 @@ IF(linear)THEN
 !---------------------------------------------------------------------------
   vals=>bvout(1,:)
   CALL sub_fields%Ne%get_local(vals)
-  CALL mesh%save_vertex_scalar(vals,'N0')
+  CALL mesh%save_vertex_scalar(vals,xdmf,'N0')
 !---------------------------------------------------------------------------
 ! Extract temperatures and plot
 !---------------------------------------------------------------------------
   vals=>bvout(1,:)
   CALL sub_fields%Ti%get_local(vals)
-  CALL mesh%save_vertex_scalar(vals,'T0')
+  CALL mesh%save_vertex_scalar(vals,xdmf,'T0')
   !---Electron temperature
   IF(xmhd_two_temp)THEN
     CALL sub_fields%Te%get_local(vals)
-    CALL mesh%save_vertex_scalar(vals,'Te0')
+    CALL mesh%save_vertex_scalar(vals,xdmf,'Te0')
   END IF
 !---------------------------------------------------------------------------
 ! Extract velocity and plot
@@ -4716,7 +4720,7 @@ IF(linear)THEN
   CALL sub_fields%V%get_local(vals,2)
   vals=>bvout(3,:)
   CALL sub_fields%V%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'V0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'V0')
 !---------------------------------------------------------------------------
 ! Project magnetic field and plot
 !---------------------------------------------------------------------------
@@ -4731,7 +4735,7 @@ IF(linear)THEN
   CALL ap%get_local(vals,2)
   vals=>bvout(3,:)
   CALL ap%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'B0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
   CALL Jfield%setup
@@ -4744,7 +4748,7 @@ IF(linear)THEN
   CALL ap%get_local(vals,2)
   vals=>bvout(3,:)
   CALL ap%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'J0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'J0')
 END IF
 !---------------------------------------------------------------------------
 ! Count restart file list
@@ -4850,7 +4854,7 @@ DO
       ELSE
         CALL uc%add(0.d0,(td-t)/(tp-t),up,(td-tp)/(t-tp),u)
       END IF
-      CALL hdf5_create_timestep(td)
+      CALL xdmf%add_timestep(td)
 !---------------------------------------------------------------------------
 ! Retrieve sub-fields and setup interpolations
 !---------------------------------------------------------------------------
@@ -4874,21 +4878,21 @@ DO
 !---------------------------------------------------------------------------
       vals=>bvout(1,:)
       CALL sub_fields%Ne%get_local(vals)
-      CALL mesh%save_vertex_scalar(vals,'N')
+      CALL mesh%save_vertex_scalar(vals,xdmf,'N')
       !---Hyper-diff aux field
       IF(n2_ind>0)THEN
         CALL sub_fields%N2%get_local(vals)
-        CALL mesh%save_vertex_scalar(vals,'N2')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'N2')
       END IF
 !---------------------------------------------------------------------------
 ! Extract temperatures and plot
 !---------------------------------------------------------------------------
       CALL sub_fields%Ti%get_local(vals)
-      CALL mesh%save_vertex_scalar(vals,'T')
+      CALL mesh%save_vertex_scalar(vals,xdmf,'T')
       !---Electron temperature
       IF(xmhd_two_temp)THEN
         CALL sub_fields%Te%get_local(vals)
-        CALL mesh%save_vertex_scalar(vals,'Te')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'Te')
       END IF
 !---------------------------------------------------------------------------
 ! Extract velocity and plot
@@ -4899,7 +4903,7 @@ DO
       CALL sub_fields%V%get_local(vals,2)
       vals=>bvout(3,:)
       CALL sub_fields%V%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'V')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'V')
 !---------------------------------------------------------------------------
 ! Project magnetic field and plot
 !---------------------------------------------------------------------------
@@ -4914,7 +4918,7 @@ DO
       CALL ap%get_local(vals,2)
       vals=>bvout(3,:)
       CALL ap%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'B')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'B')
       !---Hyper-res aux field
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
@@ -4928,7 +4932,7 @@ DO
         CALL ap%get_local(vals,2)
         vals=>bvout(3,:)
         CALL ap%get_local(vals,3)
-        CALL mesh%save_vertex_vector(bvout,'J2')
+        CALL mesh%save_vertex_vector(bvout,xdmf,'J2')
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
@@ -4942,7 +4946,7 @@ DO
       CALL ap%get_local(vals,2)
       vals=>bvout(3,:)
       CALL ap%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'J')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'J')
       !---Divergence error
       IF(plot_div)THEN
         CALL oft_lag_project_div(Bfield,x)
@@ -4954,7 +4958,7 @@ DO
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
         CALL ap%get_local(vals,1)
-        CALL mesh%save_vertex_scalar(vals,'divB')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'divB')
       END IF
 !---------------------------------------------------------------------------
 ! Update sampling time

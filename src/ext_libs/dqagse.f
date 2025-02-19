@@ -215,7 +215,7 @@ c           uflow is the smallest positive magnitude.
 c           oflow is the largest positive magnitude.
 c
 c***first executable statement  dqagse
-      epmach = epsilon(1.d0) ! d1mach(4)
+      epmach = epsilon(epmach) ! d1mach(4)
 c
 c            test on validity of parameters
 c            ------------------------------
@@ -235,8 +235,8 @@ c
 c           first approximation to the integral
 c           -----------------------------------
 c
-      uflow = tiny(1.d0) ! d1mach(1)
-      oflow = huge(1.d0) ! d1mach(2)
+      uflow = tiny(uflow) ! d1mach(1)
+      oflow = huge(oflow) ! d1mach(2)
       ierro = 0
       call dqk21(f,a,b,result,abserr,defabs,resabs)
 c

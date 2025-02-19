@@ -131,7 +131,8 @@ END IF
 ! Setup Mesh
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf
-CALL smesh%setup_io(order)
+CALL mygs%xdmf%setup("TokaMaker")
+CALL smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
@@ -214,7 +215,7 @@ mygs%plot_final=.TRUE.
 INQUIRE(EXIST=file_exists,FILE='tokamaker_fit_in.rst')
 IF(file_exists)CALL gs_load(mygs,'tokamaker_fit_in.rst')
 !---Solve
-CALL fit_gs(mygs, fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
+CALL fit_gs(mygs, 'fit.in', 'fit.out', fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
             fitR0=adjust_R0, fitV0=adjust_V0, fitCoils=adjust_coils, fitF0=adjust_F0, &
             fixedCentering=fixed_center)
 !---------------------------------------------------------------------------
