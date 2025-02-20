@@ -387,9 +387,9 @@ class XDMF_plot_file:
         self._groups = {}
         with h5py.File(self.filepath,'r') as h5_file:
             for group_key, group_obj in h5_file.items():
-                self._groups[group_key] = {}
+                self._groups[group_key.lower()] = {}
                 for mesh_key, mesh_obj in group_obj.items():
-                    self._groups[group_key][mesh_key.lower()] = XDMF_plot_mesh(mesh_obj)
+                    self._groups[group_key.lower()][mesh_key.lower()] = XDMF_plot_mesh(mesh_obj)
     
     def get(self, keyname, value=None):
         '''! Get plotting group (list of @ref XDMF_plot_mesh "meshes")

@@ -167,6 +167,16 @@ IF(k>=BA.and.k<=BZ)k = k + wp
 t = char(k)
 END FUNCTION char_to_lower
 !------------------------------------------------------------------------------
+!> Converts a string to all lowercase characters
+!------------------------------------------------------------------------------
+SUBROUTINE string_to_lower(c)
+CHARACTER(len=*), INTENT(inout) :: c !< Input/output string
+INTEGER(i4) :: i
+DO i=1,LEN(c)
+  c(i:i)=char_to_lower(c(i:i))
+END DO
+END SUBROUTINE string_to_lower
+!------------------------------------------------------------------------------
 !> Start or reset timer
 !!
 !! @param[in,out] self Calling timer class
