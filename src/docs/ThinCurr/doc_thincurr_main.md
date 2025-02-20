@@ -21,6 +21,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
 **Python interface (recommended)**
  - \subpage doc_tCurr_plate_eig
  - \subpage doc_tCurr_cyl_td
+ - \subpage doc_tCurr_cyl_td-jumpers
  - \subpage doc_tCurr_torus_mode
  - \subpage doc_tCurr_torus_fr
  - \subpage doc_tCurr_regcoil

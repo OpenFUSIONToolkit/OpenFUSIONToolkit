@@ -338,8 +338,10 @@ CLASS(oft_vector), POINTER :: eig_vec
 TYPE(oft_lusolver), TARGET :: adv_pre
 TYPE(oft_iram_eigsolver) :: arsolver
 TYPE(eig_wrapper), TARGET :: wrap_mat
-REAL(8) :: lam0
 INTEGER(4) :: i,j
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: sort_tmp
+REAL(8) :: lam0
+REAL(8), ALLOCATABLE, DIMENSION(:) :: eig_tmp
 type(oft_tmaker_td_mfop) :: eig_mfop !< NL operator object
 !
 CALL eig_mfop%setup(eq_in)
@@ -360,10 +362,24 @@ arsolver%which='LM'
 CALL oft_blagrange%vec_create(eig_vec)
 CALL arsolver%apply(eig_vec,lam0)
 
-DO i=1,neigs
-    eigs(:,i)=1.d0/arsolver%eig_val(:,i)+omega
-    eig_vecs(:,i)=arsolver%eig_vec(:,i)
-END DO
+IF(arsolver%info>=0)THEN
+  !---Sort eigenvalues
+  ALLOCATE(sort_tmp(arsolver%nev),eig_tmp(arsolver%nev))
+  eig_tmp=1.d0/arsolver%eig_val(1,1:arsolver%nev)+omega
+  sort_tmp=[(i,i=1,arsolver%nev)]
+  CALL sort_array(eig_tmp,sort_tmp,arsolver%nev)
+  DEALLOCATE(eig_tmp)
+  !---Copy output
+  DO i=1,neigs
+    j = sort_tmp(i)
+    eigs(:,i)=1.d0/arsolver%eig_val(:,j)+omega
+    eig_vecs(:,i)=arsolver%eig_vec(:,j)
+  END DO
+  DEALLOCATE(sort_tmp)
+ELSE
+    eigs=-1.d99
+    eig_vecs=0.d0
+END IF
 
 !---Cleanup
 CALL adv_pre%delete

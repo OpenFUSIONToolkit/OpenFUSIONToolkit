@@ -17,6 +17,7 @@
 PROGRAM example4
 !---Runtime
 USE oft_base
+USE oft_io, ONLY: xdmf_plot_file
 !---Grid
 USE oft_mesh_type, ONLY: mesh
 USE multigrid_build, ONLY: multigrid_construct
@@ -67,6 +68,7 @@ REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout,pts
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_taylor_rinterp), TARGET :: Bfield
 CLASS(oft_tracer), POINTER :: tracer
+TYPE(xdmf_plot_file) :: plot_file
 !!\subsection doc_ex4_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting
@@ -75,7 +77,8 @@ CLASS(oft_tracer), POINTER :: tracer
 CALL oft_init
 !---Setup grid
 CALL multigrid_construct
-CALL mesh%setup_io(order)
+CALL plot_file%setup("Example4")
+CALL mesh%setup_io(plot_file,order)
 !!\subsection doc_ex4_code_fem Setup FE Types
 !!
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
@@ -175,7 +178,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-call mesh%save_vertex_vector(bvout,'B')
+call mesh%save_vertex_vector(bvout,plot_file,'B')
 !!\subsection doc_ex4_code_poincare Create Poincare section
 !!
 !! Poincare sections can be created using the subroutine \ref tracing::tracing_poincare

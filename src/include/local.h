@@ -18,16 +18,9 @@
 #define OFT_OMP_VTHRESH 2000
 #endif
 
-#if !defined(HDF5_TLEN)
-#define HDF5_TLEN 4
-#endif
-
-#if !defined(OFT_PATH_SLEN)
-#define OFT_PATH_SLEN 80
-#endif
-
-#if !defined(OFT_HIST_SLEN)
-#define OFT_HIST_SLEN 40
-#endif
+#define OFT_MPI_PLEN @OFT_MPI_PLEN@
+#define OFT_SLEN @OFT_SLEN@
+#define OFT_PATH_SLEN @OFT_PATH_SLEN@
+#define OFT_ERROR_SLEN @OFT_ERROR_SLEN@
 
 #endif

@@ -21,7 +21,7 @@
 PROGRAM thincurr_eig
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file, hdf5_create_file, hdf5_write, &
+USE oft_io, ONLY: oft_bin_file, hdf5_create_file, hdf5_write, &
   hdf5_create_group, hdf5_add_string_attribute
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
@@ -53,7 +53,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
 TYPE(oft_tw_hodlr_op), TARGET :: tw_hodlr
 !
 INTEGER(4) :: neigs = 5
-INTEGER(4) :: jumper_start = -1
+INTEGER(4) :: jumper_start = 0
 LOGICAL :: direct = .TRUE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: save_L = .FALSE.
@@ -113,7 +113,8 @@ ELSE
 END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL smesh%setup_io(1)
+CALL tw_sim%xdmf%setup("ThinCurr")
+CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
 ! Eigenvalue run
@@ -277,7 +278,7 @@ DO i=1,neigs
         END DO
       END DO
     END IF
-    CALL self%mesh%save_vertex_vector(cc_vals,'B_v_'//eig_tag)
+    CALL self%mesh%save_vertex_vector(cc_vals,tw_sim%xdmf,'B_v_'//eig_tag)
   END IF
   !---Save sensor signals
   IF(nsensors>0)THEN

@@ -6,20 +6,8 @@
 '''
 import numpy
 from ._interface import *
-from ..util import *
+from ..io import build_XDMF
 
-oft_in_template = """&runtime_options
- debug={DEBUG_LEVEL}
-/
-
-&mesh_options
- meshname='none'
- grid_order={GRID_ORDER}
- {MESH_TYPE}
-/
-
-{MESH_DEF}
-"""
 
 class Marklin_field_interpolator():
     '''! Interpolation class for force-free eigenstate vector fields'''
@@ -52,17 +40,16 @@ class Marklin_field_interpolator():
         marklin_apply_int(self.int_obj,self.int_type,pt,self.fbary_tol,ctypes.byref(self.cell),self.val)
         return self.val
 
+
 class Marklin():
     '''! Marklin force-free equilibrium solver class'''
-    def __init__(self,debug_level=0,nthreads=2,grid_order=1):
+    def __init__(self,OFT_env):
         '''! Initialize Marklin object
 
-        @param debug_level Level of debug printing (0-3)
+        @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         '''
-        ## Input file settings
-        self._psin_dict = {'DEBUG_LEVEL': debug_level, 'MESH_TYPE': '', 'GRID_ORDER': grid_order, 'MESH_DEF': ''}
-        self._update_psin()
-        oft_init(c_int(nthreads))
+        # Create OFT execution environment
+        self._oft_env = OFT_env
         ## Number of regions in mesh
         self.nregs = -1
         ## Number of points in mesh
@@ -82,12 +69,7 @@ class Marklin():
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
 
-    def _update_psin(self):
-        '''! Update input file (`oftpyin`) with current settings'''
-        with open('oftpyin','w+') as fid:
-            fid.write(oft_in_template.format(**self._psin_dict))
-
-    def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
+    def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None,grid_order=1):
         '''! Setup mesh for Marklin force-free equilibrium calculations
 
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
@@ -105,11 +87,12 @@ class Marklin():
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
             regfake = numpy.ones((1,),dtype=numpy.int32)
-            self._psin_dict['MESH_TYPE'] = 'cad_type=0'
-            self._psin_dict['MESH_DEF'] = """&native_mesh_options
- filename='{0}'
-/""".format(mesh_file)
-            self._update_psin()
+            self._oft_env.oft_in_groups['mesh_options'] = {
+                'cad_type': "0",
+                'grid_order': '{0}'.format(grid_order)
+            }
+            self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
+            self._oft_env.update_oft_in()
             oft_setup_vmesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
         elif r is not None:
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)
@@ -133,17 +116,17 @@ class Marklin():
         @param basepath Path to root directory to use for I/O
         '''
         if basepath is None:
-            basepath_c = c_char_p(b'')
+            basepath_c = self._oft_env.path2c('')
             self._io_basepath = "."
         else:
             if basepath[-1] != '/':
                 basepath += '/'
             self._io_basepath = basepath[:-1]
-            basepath_c = c_char_p(basepath.encode())
-        cstring = c_char_p(b""*200)
-        marklin_setup_io(basepath_c,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value.decode())
+            basepath_c = self._oft_env.path2c(basepath)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_setup_io(basepath_c,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
     
     def build_XDMF(self,repeat_static=False,pretty=False):
         '''! Build XDMF plot metadata files for model
@@ -151,7 +134,7 @@ class Marklin():
         @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
         @param pretty Use pretty printing (indentation) in XDMF files?
         '''
-        build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
+        return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
 
     def compute(self,nmodes=1,order=2,minlev=-1,save_rst=True):
         r'''! Compute force-free eigenmodes
@@ -165,10 +148,10 @@ class Marklin():
             raise ValueError('Eigenstates already computed')
         #
         eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
-        cstring = c_char_p(b""*200)
-        marklin_compute(order,nmodes,minlev,save_rst,eig_vals,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_compute(order,nmodes,minlev,save_rst,eig_vals,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         self._nm = nmodes
         self.eig_vals = eig_vals
 
@@ -179,10 +162,11 @@ class Marklin():
         @param tag Name for field in XDMF files
         '''
         #
-        cstring = c_char_p(b""*200)
-        marklin_save_visit(field.int_obj,field.int_type,c_char_p(tag.encode()),cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        ctag = self._oft_env.path2c(tag)
+        marklin_save_visit(field.int_obj,field.int_type,ctag,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def get_ainterp(self,imode,bn_gauge=False):
         r'''! Create field interpolator for vector potential
@@ -194,10 +178,10 @@ class Marklin():
         if imode > self._nm:
             raise ValueError("Requested mode number exceeds number of available modes")
         int_obj = c_void_p()
-        cstring = c_char_p(b""*200)
-        marklin_get_aint(imode,ctypes.byref(int_obj),bn_gauge,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_get_aint(imode,ctypes.byref(int_obj),bn_gauge,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         return Marklin_field_interpolator(int_obj,1,3)
 
     def get_binterp(self,imode):
@@ -209,8 +193,8 @@ class Marklin():
         if imode > self._nm:
             raise ValueError("Requested mode number exceeds number of available modes")
         int_obj = c_void_p()
-        cstring = c_char_p(b""*200)
-        marklin_get_bint(imode,ctypes.byref(int_obj),cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_get_bint(imode,ctypes.byref(int_obj),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         return Marklin_field_interpolator(int_obj,2,3)
