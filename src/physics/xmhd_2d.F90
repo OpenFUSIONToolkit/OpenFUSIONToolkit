@@ -409,6 +409,13 @@ DO i=1,smesh%nc
    btmp = cross_product(dpsi, (0,1,0)) + by*(0,1,0)
    !---Compute local function contributions
    DO jr=1,oft_blagrange%nce
+      !---Diffusion
+      res_loc(jr,1) = res_loc(jr, 1) &
+      + basis_vals(jr)*n*jac_det*quad%wts(m) &
+      +self%dt*basis_vals(jr)*DOT_PRODUCT(dn, vel)*jac_det*quad%wts(m) &
+      +self%dt*basis_vals(jr)*n*div_vel*jac_det*quad%wts(m) &
+      +self%dt*D*DOT_PRODUCT(dn,basis_grads(:,jr))*jac_det*quad%wts(m)
+      !---Momentum
       res_loc(jr, 2:4) = res_loc(jr, 2:4) &
          + basis_vals(jr)*vel*jac_det*quad%wts(m) &
          + self%dt*DOT_PRODUCT(btmp,basis_grads(:,jr))*btmp*jac_det*quad%wts(m)/(mu_0*m_i*n) &
@@ -423,11 +430,19 @@ DO i=1,smesh%nc
          + nu*self%dt*basis_grads(n,jr)*dvel(:,n)*jac_det*quad%wts(m)/(m_i*n) &
          - basis_vals(jr)*self%dt*dn(n)*dvel(:,n)*jac_det*quad%wts(m)/(m_i*n**2)
       END DO
+      !---Temperature
+      res_loc(jr,5) = res_loc(jr, 5) &
+      + basis_vals(jr)*T*jac_det*quad%wts(m)/(gamma+1) &
+      + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, dT)*jac_det*quad%wts(m)/(gamma+1) &
+      - self%dt*k_boltz*basis_vals(jr)*T*div_vel &
+      + self%dt*chi*DOT_PRODUCT(dT, basis_grads(:,jr)) &
+      - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(dn, dT)/n
+      !---Induction
       res_loc(jr, 6) = res_loc(jr, 6) &
          + basis_vals(jr)*psi*jac_det*quad%wts(m) &
          + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dpsi)*jac_det*quad%wts(m) &
          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dpsi)*jac_det*quad%wts(m)/mu_0
-      res_loc(jr, 6) = res_loc(jr, 7) &
+      res_loc(jr, 7) = res_loc(jr, 7) &
          + basis_vals(jr)*by*jac_det*quad%wts(m) &
          - basis_vals(jr)*self%dt*cross_product(dpsi,dvel(2, :))*jac_det*quad%wts(m) &
          + basis_vals(jr)*self%dt*(DOT_PRODUCT(dby,vel) + by*div_vel)*jac_det*quad%wts(m) &
@@ -598,23 +613,70 @@ DO i=1,smesh%nc
       jac_loc(1, 2)%m(jr,jc) = jac_loc(1, 2)%m(jr, jc) &
          + basis_vals(:, jr)*self%dt*n*SUM(basis_grads(: jc))*jac_det*quad%wts(m) & ! n*div(delta_u) = n*SUM(basis_grads)?
          + basis_vals(:, jr)*self%dt*DOT_PRODUCT(basis_vals(:, jc),dn) ! u dot grad(n)
-      ! TODO: ^^delta_n != grad_n
+      !--Momentum rows
+          !--Momentum,density
+         jac_loc(2:4,1)%m(jr,jc) = jac_loc(2:4,1)%m(jr,jc) &
+         + self%dt*basis_vals(jr)*2*k_boltz*basis_vals(jc)*dT*jac_det*quad%wts(m)/(n*m_i) &
+         + self%dt*basis_vals(jr)*2*k_boltz*T*basis_grads(:,jc)*jac_det*quad%wts(m)/(n*m_i) &
+         - self%dt*basis_vals(jr)*2*k_boltz*basis_vals(jc)*n*dT*jac_det*quad%wts(m)/(n**2*m_i) &
+         - self%dt*basis_vals(jr)*2*k_boltz*basis_vals(jc)*dn*T*jac_det*quad%wts(m)/(n**2*m_i) &
+         - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
+         - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
+         + self%dt*basis_vals(jr)*2*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**3*mu0) &
+         + self%dt*basis_vals(jc)*basis_grads(:,jr)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2*m_i*n**2*mu0) &
+         + self%dt*basis_vals(jr)*basis_grads(:,jc)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2*m_i*n**2*mu0) &
+         - self%dt*basis_vals(jr)*basis_vals(jc)*dn*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(m_i*n**3*mu0) &
+         DO k=1,3
+           jac_loc(k+1,1)%m(jr,jc) = jac_loc(k+1,1)%m(jr,jc) &
+           - self%dt*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(:,k))*jac_det*quad%wts(m)/(m_i*n**2) & !-- not sure if indexing on dvel is right here
+           - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(:,k))*jac_det*quad%wts(m)/(m_i*n**2) &
+           + self%dt*nu*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dvel(:,k))*jac_det*quad%wts(m)/(m_i*n**3)
+         END DO
+         !--Momentum, velocity
+         DO k=1,3
+           jac_loc(k+1,2:4)%m(jr,jc)= jac_loc(2,2:4)%m(jr,jc) &
+           + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
+           + self%dt*basis_vals(jr)*basis_vals(jc)*dvel(k,:)*jac_det*quad%wts(m) &
+           + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*jac_det*quad%wts(m) &
+           + self%dt*nu*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))/(m_i*n) &
+           - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(dn, basis_grads(:,jc))/(m_i*n**2)
+         END DO
+         ! --Momentum, temperature
+         jac_loc(2:4,5)%m(jr,jc) = jac_loc(2:4,5)%m(jr,jc) &
+         + self%dt*basis_vals(jr)*2*k_boltz*dn*basis_vals(jc)*jac_det*quad%wts(m)/(m_i*n) &
+         + self%dt*basis_vals(jr)*2*k_boltz*n*basis_grads(:,jc)*jac_det*quad%wts(m)/(m_i*n) &
+         ! --Momentum, psi
+         jac_loc(2:4,6)%m(jr,jc) = jac_loc(2:4,6)%m(jr,jc) &
+         + self%dt*DOT_PRODUCT(basis_grads(:,jr), cross_product(basis_grads(:,jc), (0,1,0)))*btmp*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+         + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*cross_product(basis_grads(:,jc), (0,1,0))*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+         - self%dt*basis_grads(:,jr)*DOT_PRODUCT(cross_product(basis_grads(:,jc), (0,1,0)), btmp)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+         - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, cross_product(basis_grads(:,jc), (0,1,0)))*btmp*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
+         - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*cross_product(basis_grads(:,jc), (0,1,0))*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
+         + self%dt*basis_vals(jc)*dn*DOT_PRODUCT(cross_product(basis_grads(:,jc), (0,1,0)), btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) 
+         ! --Momentum, By
+         jac_loc(2:4,7)%m(jr,jc) = jac_loc(2:4,7)%m(jr,jc) &
+         + self%dt*DOT_PRODUCT(basis_grads(:,jr),(0,basis_vals(jc),0))*btmp*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+         + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*(0,basis_vals(jc),0)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+         - self%dt*basis_grads(:,jr)*DOT_PRODUCT((0,basis_vals(jc),0), btmp)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+         - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, (0,basis_vals(jc),0))*btmp*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
+         - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*(0,basis_vals(jc),0)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
+         + self%dt*basis_vals(jc)*dn*DOT_PRODUCT((0,basis_vals(jc),0), btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) 
       ! Temperature: delta_T=basis_vals(:, jc)
-      jac_loc(3, 1)%m(jr,jc) = jac_loc(3, 1)%m(jr, jc) &  
+         jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
          + basis_vals(:, jr) * basis_vals(:, jc)/(gamma-1)*jac_det*quad%wts(m) &! delta_T
          + basis_vals(:, jr) * self%dt*DOT_PRODUCT(vel, basis_grads(:, jc))/(gamma-1)*jac_det*quad%wts(m) & ! nabla(dT)
          - basis_vals(:, jr) * self%dt*k_boltz*basis_vals(:, jc)*div_vel*jac_det*quad%wts(m) & ! dT != nabla(dT)
          + self%dt * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*jac_det*quad%wts(m) & ! dT_Chi
          - self%dt*basis_vals(:, jr)*DOT_PRODUCT(dn, basis_grads(:, jc))/n*jac_det*quad%wts(m) 
       ! delta_u=basis_vals(:, jc)
-         jac_loc(3, 2)%m(jr,jc) = jac_loc(3, 2)%m(jr, jc) &  
+         jac_loc(5, 2)%m(jr,jc) = jac_loc(5, 2)%m(jr, jc) &  
          + basis_vals(:, jr) * T/(gamma-1)*jac_det*quad%wts(m) &! T
          + basis_vals(:, jr) * self%dt*DOT_PRODUCT(basis_vals(:, jc), dT)/(gamma-1)*jac_det*quad%wts(m) & ! delta_u dot Delta_T
          - basis_vals(:, jr) * self%dt*k_boltz*T*SUM(basis_grads(:, jc))*jac_det*quad%wts(m) & ! div(delta u) = SUM(basis_grads)?
          + self%dt * chi * DOT_PRODUCT(dT,basis_grads(:, jr))*jac_det*quad%wts(m) & ! dT_Chi
          - self%dt*basis_vals(:, jr)*DOT_PRODUCT(dn, dT)/n*jac_det*quad%wts(m) 
       ! delta_u=basis_vals(:, jc)
-         jac_loc(3, 3)%m(jr,jc) = jac_loc(3, 3)%m(jr, jc) &  
+         jac_loc(5, 3)%m(jr,jc) = jac_loc(5, 3)%m(jr, jc) &  
          + basis_vals(:, jr) * T/(gamma-1)*jac_det*quad%wts(m) &! T
          + basis_vals(:, jr) * self%dt*DOT_PRODUCT(vel, dT)/(gamma-1)*jac_det*quad%wts(m) & ! u dot Delta_T
          - basis_vals(:, jr) * self%dt*k_boltz*T*div_vel*jac_det*quad%wts(m) & ! div(u)
@@ -642,34 +704,34 @@ DO i=1,smesh%nc
          + basis_vals(jr)*self%dt*basis_vals(jc)*div_vel*jac_det*quad%wts(m) &
          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu_0
       END DO
-   END DO
+     END DO
    END DO
    CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%Ti_bc(cell_dofs),1)
    CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%Te_bc(cell_dofs),2)
    CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
-END DO
-!---Cleanup thread-local storage
-CALL self%fe_rep%mat_destroy_local(jac_loc)
-DEALLOCATE(basis_vals,basis_grads,T_weights_loc,vel_weights_loc&
-         psi_weights_loc, by_weights_loc, cell_dofs,jac_loc,iloc, btmp)
-!$omp end parallel
-!--Destroy thread locks
-DO i=1,self%fe_rep%nfields
-   CALL omp_destroy_lock(tlocks(i))
-END DO
-DEALLOCATE(tlocks)
-IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%n_bc,1)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(1,:),2)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(2,:),3)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(3,:),4)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%T_bc,5)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%psi_bc,6)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%by_bc,7)
-!
-call self%fe_rep%vec_create(tmp)
-call self%jacobian%assemble(tmp)
-call tmp%delete
-DEALLOCATE(tmp,n_weights,vel_weights, T_weights, &
-         by_weights, psi_weights)
+  END DO
+  !---Cleanup thread-local storage
+  CALL self%fe_rep%mat_destroy_local(jac_loc)
+  DEALLOCATE(basis_vals,basis_grads,T_weights_loc,vel_weights_loc&
+            psi_weights_loc, by_weights_loc, cell_dofs,jac_loc,iloc, btmp)
+  !$omp end parallel
+  !--Destroy thread locks
+  DO i=1,self%fe_rep%nfields
+    CALL omp_destroy_lock(tlocks(i))
+  END DO
+  DEALLOCATE(tlocks)
+  IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%n_bc,1)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(1,:),2)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(2,:),3)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(3,:),4)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%T_bc,5)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%psi_bc,6)
+  CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%by_bc,7)
+  !
+  call self%fe_rep%vec_create(tmp)
+  call self%jacobian%assemble(tmp)
+  call tmp%delete
+  DEALLOCATE(tmp,n_weights,vel_weights, T_weights, &
+            by_weights, psi_weights)
 end subroutine build_approx_jacobian
