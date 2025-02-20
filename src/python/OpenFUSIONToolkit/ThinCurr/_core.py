@@ -70,7 +70,7 @@ class ThinCurr():
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
 
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=-1):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
@@ -79,14 +79,16 @@ class ThinCurr():
         @param mesh_file File containing model in native mesh format
         @param pmap Point map for periodic grids
         @param xml_filename Path to XML file for model
+        @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')
         if xml_filename is not None:
             cfilename = self._oft_env.path2c(xml_filename)
             oftpy_load_xml(cfilename,ctypes.byref(self._xml_ptr))
-        nregs = c_int()
         if mesh_file is not None:
+            if (r is not None) or (lc is not None) or (reg is not None):
+                raise ValueError('Specification of "mesh_file" is incompatible with specification of "r", "lc", and "reg"')
             idummy = c_int(-1)
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
@@ -95,51 +97,47 @@ class ThinCurr():
                 pmap = -numpy.ones((1,),dtype=numpy.int32)
             else:
                 pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
-            sizes = numpy.zeros((8,),dtype=numpy.int32)
+            sizes = numpy.zeros((9,),dtype=numpy.int32)
             cfilename = self._oft_env.path2c(mesh_file)
             error_string = self._oft_env.get_c_errorbuff()
             thincurr_setup(cfilename,idummy,rfake,idummy,lcfake,regfake,pmap,c_int(jumper_start),ctypes.byref(self.tw_obj),sizes,error_string,self._xml_ptr)
             if error_string.value != b'':
                 raise Exception(error_string.value.decode())
-            self.np = sizes[0]
-            self.ne = sizes[1]
-            self.nc = sizes[2]
-            self.np_active = sizes[3]
-            self.nholes = sizes[4]
-            self.n_vcoils = sizes[5]
-            self.nelems = sizes[6]
-            self.n_icoils = sizes[7]
         elif r is not None:
-            raise ValueError('Specifying mesh values not yet supported')
-            # r = numpy.ascontiguousarray(r, dtype=numpy.float64)
-            # lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
-            # np = c_int(r.shape[0])
-            # nc = c_int(lc.shape[0])
-            # if reg is None:
-            #     reg = numpy.ones((nc.value,),dtype=numpy.int32)
-            # else:
-            #     reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
-            # if pmap is None:
-            #     pmap = -numpy.ones((1,),dtype=numpy.int32)
-            # else:
-            #     pmap = numpy.ascontiguousarray(pmap, dtype=numpy.float64)
-            # sizes = numpy.zeros((8,),dtype=numpy.int32)
-            # filename = c_char_p(b"")
-            # cstring = create_string_buffer(b"",200)
-            # thincurr_setup(filename,np,r,nc,lc,reg,ctypes.byref(self.tw_obj),sizes,cstring)
-            # if cstring.value != b'':
-            #     raise Exception(cstring.value)
-            # self.np = sizes[0]
-            # self.ne = sizes[1]
-            # self.nc = sizes[2]
-            # self.np_active = sizes[3]
-            # self.nholes = sizes[4]
-            # self.n_vcoils = sizes[5]
-            # self.nelems = sizes[6]
-            # self.n_icoils = sizes[7]
+            if lc is None:
+                raise ValueError('"r" and "lc" must be both be specified')
+            if jumper_start != 0:
+                raise ValueError('"jumper_start" not supported with manual mesh specification')
+            np = c_int(r.shape[0])
+            nc = c_int(lc.shape[0])
+            r = numpy.ascontiguousarray(r, dtype=numpy.float64)
+            lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
+            if reg is None:
+                reg = numpy.ones((nc.value,),dtype=numpy.int32)
+            else:
+                reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
+            if pmap is None:
+                pmap = -numpy.ones((1,),dtype=numpy.int32)
+            else:
+                # pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
+                raise ValueError('"pmap" not supported with manual mesh specification')
+            sizes = numpy.zeros((9,),dtype=numpy.int32)
+            cfilename = self._oft_env.path2c('')
+            error_string = self._oft_env.get_c_errorbuff()
+            thincurr_setup(cfilename,np,r,nc,lc+1,reg,pmap,c_int(jumper_start),ctypes.byref(self.tw_obj),sizes,error_string,self._xml_ptr)
+            if error_string.value != b'':
+                raise Exception(error_string.value.decode())
         else:
-            raise ValueError('Mesh filename (native format) or mesh values required')
-        self.nregs = nregs.value
+            raise ValueError('Mesh filename (native format) or mesh values (r, lc) required')
+        self.np = sizes[0]
+        self.ne = sizes[1]
+        self.nc = sizes[2]
+        self.nregs = sizes[3]
+        self.np_active = sizes[4]
+        self.nholes = sizes[5]
+        self.n_vcoils = sizes[6]
+        self.nelems = sizes[7]
+        self.n_icoils = sizes[8]
     
     def setup_io(self,basepath=None,save_debug=False):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
@@ -303,7 +301,7 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return numpy.ctypeslib.as_array(ctypes.cast(Mc_loc, c_double_ptr),shape=(self.n_icoils,self.nelems))
 
-    def compute_Msensor(self,sensor_file,cache_file=None):
+    def compute_Msensor(self,sensor_file=None,cache_file=None):
         '''! Compute the mutual inductance between model and sensors
 
         @param sensor_file Path to file contatining flux loop definitions
@@ -316,7 +314,10 @@ class ThinCurr():
             cache_string = self._oft_env.path2c("")
         else:
             cache_string = self._oft_env.path2c(cache_file)
-        sensor_string = self._oft_env.path2c(sensor_file)
+        if sensor_file is None:
+            sensor_string = self._oft_env.path2c("none")
+        else:
+            sensor_string = self._oft_env.path2c(sensor_file)
         Ms_loc = c_void_p()
         Msc_loc = c_void_p()
         nsensors = c_int()
@@ -339,6 +340,31 @@ class ThinCurr():
                numpy.ctypeslib.as_array(ctypes.cast(Msc_loc, c_double_ptr),shape=(self.n_icoils,nsensors.value)), \
                {'names': sensor_names, 'ptr': sensor_loc}
     
+    def get_eta_values(self):
+        '''! Get resistivity values for model
+
+        @returns `eta_values` Resistivity values for model [nregs]
+        '''
+        eta_values = numpy.zeros((self.nregs,), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_get_eta(self.tw_obj,eta_values,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+        return eta_values
+    
+    def set_eta_values(self,eta_values=None):
+        '''! Set resistivity values for model (overrides those in XML if specified)
+
+        @param eta_values New resistivity values for model [nregs]
+        '''
+        if eta_values.shape[0] != self.nregs:
+            raise IndexError('Incorrect shape of "eta_values", should be [nregs]')
+        eta_values = numpy.ascontiguousarray(eta_values, dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_set_eta(self.tw_obj,eta_values,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+
     def compute_Rmat(self,copy_out=False):
         '''! Compute the resistance matrix for this model
 

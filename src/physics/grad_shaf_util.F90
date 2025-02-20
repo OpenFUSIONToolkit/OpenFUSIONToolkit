@@ -695,6 +695,7 @@ real(8) :: psitmp(1) !< magnetic flux coordinate
 real(8) :: gpsitmp(3) !< needs docs
 integer(4) :: i,m
 !---
+CALL self%eta%update(self) ! Make sure eta is up to date with current equilibrium
 psi_eval%u=>self%psi
 CALL psi_eval%setup
 CALL psi_geval%shared_setup(psi_eval)
