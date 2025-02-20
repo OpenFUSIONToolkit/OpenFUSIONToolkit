@@ -69,6 +69,14 @@ thincurr_get_sensor_name = ctypes_subroutine(oftpy_lib.thincurr_get_sensor_name,
 thincurr_curr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
     [c_void_p, c_bool, ctypes_numpy_array(float64,2), c_char_p])
 
+# thincurr_get_eta(tw_ptr,eta_ptr,error_string)
+thincurr_get_eta = ctypes_subroutine(oftpy_lib.thincurr_get_eta,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
+
+# thincurr_set_eta(tw_ptr,eta_ptr,error_string)
+thincurr_set_eta = ctypes_subroutine(oftpy_lib.thincurr_set_eta,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
+
 # Compute current regularization matrix thincurr_curr_regmat(tw_ptr,Rmat,error_str)
 thincurr_curr_regmat = ctypes_subroutine(oftpy_lib.thincurr_curr_regmat,
     [c_void_p, ctypes_numpy_array(float64,2), c_char_p])
