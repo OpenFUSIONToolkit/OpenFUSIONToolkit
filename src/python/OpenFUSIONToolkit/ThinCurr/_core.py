@@ -106,7 +106,7 @@ class ThinCurr():
         elif r is not None:
             if lc is None:
                 raise ValueError('"r" and "lc" must be both be specified')
-            if jumper_start >= 0:
+            if jumper_start != 0:
                 raise ValueError('"jumper_start" not supported with manual mesh specification')
             np = c_int(r.shape[0])
             nc = c_int(lc.shape[0])

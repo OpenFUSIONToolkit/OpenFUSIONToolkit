@@ -220,7 +220,7 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
 
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
-                    python=False,lin_tol=1.E-9,jumper_start=-1):
+                    python=False,lin_tol=1.E-9,jumper_start=0):
     """
     Common setup and run operations for thin-wall physics module test cases
     """
