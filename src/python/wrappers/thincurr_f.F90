@@ -193,10 +193,10 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  CALL tw_obj%xdmf%setup('ThinCurr',pathprefix)
+  CALL tw_obj%xdmf%setup('thincurr',pathprefix)
   CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 ELSE
-  CALL tw_obj%xdmf%setup('ThinCurr')
+  CALL tw_obj%xdmf%setup('thincurr')
   CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 END IF
 IF(tw_obj%n_vcoils>0)THEN

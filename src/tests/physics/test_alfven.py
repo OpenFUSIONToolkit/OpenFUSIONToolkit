@@ -125,8 +125,8 @@ def validate_result(berr_exp,verr_exp,steps_exp=11,linear=False):
     step_count=0
     B0_found = False
     with h5py.File("{0}.{1}.h5".format('oft_xdmf',str(1).zfill(4)),'r') as h5_file:
-        if 'MUG' in h5_file:
-            for _, mesh_obj in h5_file['MUG'].items():
+        if 'mug' in h5_file:
+            for _, mesh_obj in h5_file['mug'].items():
                 if mesh_obj['TYPE'][()] > 30:
                     for i in range(9999):
                         timestep = mesh_obj.get('{0:04d}'.format(i),None)
@@ -136,7 +136,7 @@ def validate_result(berr_exp,verr_exp,steps_exp=11,linear=False):
                         if 'B0' in timestep:
                             B0_found = True
         else:
-            print("FAILED: MUG plot group not found in output file")
+            print('FAILED: "mug" plot group not found in output file')
             retval = False
     if step_count != steps_exp:
         print("FAILED: Incorrect number of time steps!")
