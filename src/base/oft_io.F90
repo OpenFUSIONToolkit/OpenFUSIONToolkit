@@ -606,6 +606,7 @@ integer(hsize_t), allocatable, dimension(:) :: tmp_sizes,maxdims
 integer(HID_T) :: file_id,dset_id,dspace_id
 DEBUG_STACK_PUSH
 ndims=-1
+IF(.NOT.hdf5_field_exist(filepath,path))RETURN
 !---Try to open file as HDF5 file
 access_flag=H5F_ACC_RDONLY_F
 call h5open_f(error)
