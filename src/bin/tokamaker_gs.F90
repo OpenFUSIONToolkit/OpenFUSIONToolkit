@@ -75,8 +75,8 @@ LOGICAL :: limited_only = .FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
-CHARACTER(LEN=36) :: eqdsk_run_info = ''
-CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = 'none'
+CHARACTER(LEN=40) :: eqdsk_run_info = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = ''
 NAMELIST/tokamaker_options/order,pm,mode,maxits,ninner,urf,nl_tol,itor_target,pnorm, &
 alam,beta_mr,free_boundary,coil_file,limiter_file,f_offset,dcon_npsi,dcon_ntheta, &
 has_plasma,rmin,R0_target,V0_target,save_mug,fast_boundary, &
@@ -111,7 +111,7 @@ IF(TRIM(limiter_file)/='none')THEN
   IF(.NOT.file_exists)CALL oft_abort('Specified "limiter_file" cannot be found', &
     'tokamaker_gs', __FILE__)
 END IF
-IF(TRIM(eqdsk_limiter_file)/='none')THEN
+IF(TRIM(eqdsk_limiter_file)/='')THEN
   INQUIRE(EXIST=file_exists,FILE=TRIM(eqdsk_limiter_file))
   IF(.NOT.file_exists)CALL oft_abort('Specified "eqdsk_limiter_file" cannot be found', &
     'tokamaker_gs', __FILE__)
@@ -120,7 +120,8 @@ END IF
 ! Setup Mesh
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf
-CALL smesh%setup_io(order)
+CALL mygs%xdmf%setup("TokaMaker")
+CALL smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------

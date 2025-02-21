@@ -884,7 +884,7 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Integerate over the volume
-!$omp parallel default(firstprivate) shared(xloc)
+!$omp parallel default(firstprivate) shared(xloc) private(curved,det)
 allocate(j(oft_hcurl%nce),rop(3,oft_hcurl%nce))
 !$omp do schedule(guided)
 do i=1,mesh%nc ! Loop over cells
@@ -928,7 +928,8 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc)
+det=0.d0
+!$omp parallel default(firstprivate) shared(field,xloc) private(det)
 allocate(j(oft_hcurl%nce),rop(3,oft_hcurl%nce))
 !$omp do schedule(guided)
 do i=1,smesh%nc

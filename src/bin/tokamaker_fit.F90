@@ -69,8 +69,8 @@ LOGICAL :: limited_only = .FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
-CHARACTER(LEN=36) :: eqdsk_run_info = ''
-CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = 'none'
+CHARACTER(LEN=40) :: eqdsk_run_info = ''
+CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = ''
 !---Fit Input options
 REAL(8) :: psinorm = 1.d0
 LOGICAL :: adjust_pnorm = .FALSE.
@@ -122,7 +122,7 @@ IF(TRIM(limiter_file)/='none')THEN
   IF(.NOT.file_exists)CALL oft_abort('Specified "limiter_file" cannot be found', &
     'tokamaker_fit', __FILE__)
 END IF
-IF(TRIM(eqdsk_limiter_file)/='none')THEN
+IF(TRIM(eqdsk_limiter_file)/='')THEN
   INQUIRE(EXIST=file_exists,FILE=TRIM(eqdsk_limiter_file))
   IF(.NOT.file_exists)CALL oft_abort('Specified "eqdsk_limiter_file" cannot be found', &
     'tokamaker_fit', __FILE__)
@@ -131,7 +131,8 @@ END IF
 ! Setup Mesh
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf
-CALL smesh%setup_io(order)
+CALL mygs%xdmf%setup("TokaMaker")
+CALL smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
@@ -214,7 +215,7 @@ mygs%plot_final=.TRUE.
 INQUIRE(EXIST=file_exists,FILE='tokamaker_fit_in.rst')
 IF(file_exists)CALL gs_load(mygs,'tokamaker_fit_in.rst')
 !---Solve
-CALL fit_gs(mygs, fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
+CALL fit_gs(mygs, 'fit.in', 'fit.out', fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
             fitR0=adjust_R0, fitV0=adjust_V0, fitCoils=adjust_coils, fitF0=adjust_F0, &
             fixedCentering=fixed_center)
 !---------------------------------------------------------------------------

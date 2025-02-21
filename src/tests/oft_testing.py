@@ -12,7 +12,7 @@ def run_command(command):
 def run_OFT(command, nproc, timeout, return_stdout=False):
     if nproc > 1:
         if int(os.environ.get('OFT_HAVE_MPI', 0)) == 1:
-            command = "mpirun -np {0} {1}".format(nproc, command)
+            command = "mpirun --map-by :OVERSUBSCRIBE -np {0} {1}".format(nproc, command)
         else:
             pytest.skip("Not compiled with MPI")
     pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

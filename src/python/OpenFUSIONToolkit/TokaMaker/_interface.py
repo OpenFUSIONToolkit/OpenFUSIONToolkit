@@ -4,7 +4,7 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
-from ..util import *
+from .._interface import *
 
 
 class tokamaker_settings_struct(c_struct):
@@ -32,7 +32,7 @@ class tokamaker_settings_struct(c_struct):
                 ("nl_tol", c_double),
                 ("rmin", c_double),
                 ("lim_zmax", c_double),
-                ("limiter_file", ctypes.c_char*80)]
+                ("limiter_file", ctypes.c_char_p)]
 
 
 ## @cond
@@ -58,22 +58,21 @@ tokamaker_reset = ctypes_subroutine(oftpy_lib.tokamaker_reset,
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
     [ctypes.POINTER(tokamaker_settings_struct)])
 
-# G-S init function (r0,z0,a,kappa,delta)
+# tokamaker_init_psi(r0,z0,a,kappa,delta,rhs_source,ierr)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
-    [c_double, c_double, c_double, c_double, c_double, c_int_ptr])
+    [c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_char_p])
 
 # G-S load flux functions (f_file,f_offset,p_file)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
     [c_char_p, c_double, c_char_p, c_char_p, c_char_p])
 
-# tokamaker_solve(error_flag)
+# tokamaker_solve(error_str)
 tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
-    [c_int_ptr])
+    [c_char_p])
 
-# tokamaker_vac_solve(psi_in,error_flag)
+# tokamaker_vac_solve(psi_in,rhs_source,error_flag)
 tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
-    [ctypes_numpy_array(float64,1),  c_int_ptr])
-
+    [ctypes_numpy_array(float64,1), c_double_ptr,  c_char_p])
 
 # G-S info function
 tokamaker_analyze = ctypes_subroutine(oftpy_lib.tokamaker_analyze)
@@ -84,7 +83,7 @@ tokamaker_setup_td = ctypes_subroutine(oftpy_lib.tokamaker_setup_td,
 
 # G-S time-dependent run function
 tokamaker_eig_td = ctypes_subroutine(oftpy_lib.tokamaker_eig_td,
-    [c_double, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_bool])
+    [c_double, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_double, c_bool])
 
 # G-S time-dependent run function
 tokamaker_step_td = ctypes_subroutine(oftpy_lib.tokamaker_step_td,
@@ -105,6 +104,10 @@ tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
 #
 tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
     [ctypes_numpy_array(numpy.float64,1)])
+
+# tokamaker_area_int(vec_vals,reg_ind,result)
+tokamaker_area_int = ctypes_subroutine(oftpy_lib.tokamaker_area_int,
+    [ctypes_numpy_array(numpy.float64,1), c_int, c_double_ptr])
 
 #
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
@@ -196,10 +199,10 @@ tokamaker_get_vfixed = ctypes_subroutine(oftpy_lib.tokamaker_get_vfixed, #(npts,
     [c_int_ptr, c_double_ptr_ptr, c_double_ptr_ptr])
 
 tokamaker_get_limiter = ctypes_subroutine(oftpy_lib.tokamaker_get_limiter, #(np,r_loc)
-    [c_int_ptr,c_double_ptr_ptr])
+    [c_int_ptr,c_double_ptr_ptr,c_int_ptr,c_int_ptr_ptr])
 
 tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk, #(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,error_str)
-    [c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p, c_double, c_double, c_char_p])
+    [c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p, c_double, c_double, c_bool, c_char_p, c_char_p])
 ## @endcond
 
 

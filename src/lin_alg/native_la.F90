@@ -982,15 +982,20 @@ class(oft_native_vector), pointer, intent(in) :: self
 integer(i8), intent(in) :: ig(:)
 type(hdf5_rst), intent(out) :: rst_info
 logical, optional, intent(in) :: alloc_only
-integer(i4) :: nemax,ierr,requests(4),i,j,k,l
-integer(i8) :: ii,n
+integer(i4) :: nemax,ierr,i,j,k,l,n
+integer(i8) :: ii
 integer(i8), allocatable, dimension(:) :: t1i,t2i,ind
 real(r8) :: fcount
 real(r8), allocatable, dimension(:) :: t1v,t2v
+#ifdef OFT_MPI_F08
+type(mpi_request) :: requests(4)
+#else
+integer(i4) :: requests(4)
+#endif
 DEBUG_STACK_PUSH
 if(self%stitch_info%full)then
   rst_info%offset=0
-  rst_info%count=self%ng
+  rst_info%count=INT(self%ng,4)
   rst_info%dim=self%ng
   rst_info%full=.TRUE.
   allocate(rst_info%data(rst_info%count))
@@ -1009,8 +1014,8 @@ else
   fcount=REAL(self%ng,8)/oft_env%nprocs
   rst_info%dim=self%ng
   rst_info%offset=CEILING(fcount*oft_env%rank)
-  rst_info%count=CEILING(fcount*(oft_env%rank+1))-rst_info%offset
-  IF(oft_env%rank==oft_env%nprocs-1)rst_info%count=self%ng-rst_info%offset
+  rst_info%count=INT(CEILING(fcount*(oft_env%rank+1))-rst_info%offset,4)
+  IF(oft_env%rank==oft_env%nprocs-1)rst_info%count=INT(self%ng-rst_info%offset,4)
   rst_info%full=.FALSE.
   allocate(rst_info%data(rst_info%count))
   rst_info%data=0.d0
@@ -1048,10 +1053,10 @@ else
   !---Order entries by global index
   n=j
   ALLOCATE(ind(n))
-  ind=(/(i,i=1,n)/)
+  ind=[(i,i=1,n)]
   t2i=t1i
   t2v=t1v
-  CALL sort_array(t1i,ind,n)
+  CALL sort_array(t1i,ind,INT(n,8))
   t1v=0.d0
   DO i=1,n
     t1v(i)=t2v(ind(i))
@@ -1100,7 +1105,7 @@ else
       IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','vector_slice_push',__FILE__)
     END IF
     !---Save elements to output array (from next processor)
-    do i=1,t1i(nemax+1)
+    do i=1,INT(t1i(nemax+1),4)
       IF(t1i(i)<=rst_info%offset)CYCLE
       IF(t1i(i)>rst_info%offset+rst_info%count)EXIT
       rst_info%data(t1i(i)-rst_info%offset)=t1v(i)
@@ -1132,9 +1137,14 @@ subroutine native_vector_slice_pop(self,ig,rst_info)
 class(oft_native_vector), pointer, intent(inout) :: self
 integer(i8), intent(in) :: ig(:)
 type(hdf5_rst), intent(inout) :: rst_info
-integer(i4) :: nemax,ierr,requests(4),i,j,k,l
+integer(i4) :: nemax,ierr,i,j,k,l
 integer(i8) :: ii,t1i(2),t2i(2)
 real(r8), allocatable, dimension(:) :: t1v,t2v
+#ifdef OFT_MPI_F08
+type(mpi_request) :: requests(4)
+#else
+integer(i4) :: requests(4)
+#endif
 DEBUG_STACK_PUSH
 if(self%stitch_info%full)then
   do i=1,self%n
@@ -2861,7 +2871,7 @@ IF(.NOT.uv%stitch_info%full)THEN
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    if(all(oft_env%recv==MPI_REQUEST_NULL))exit ! All recieves have been processed
+    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
     CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','native_matrix_setup_full',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array

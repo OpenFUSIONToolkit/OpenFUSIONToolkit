@@ -326,27 +326,32 @@ END IF
 ! END IF
 end subroutine step_gs_td
 !
-subroutine eig_gs_td(eq_in,neigs,eigs,eig_vecs,omega,include_bounds)
+subroutine eig_gs_td(eq_in,neigs,eigs,eig_vecs,omega,include_bounds,eta_plasma)
 TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
 INTEGER(4), INTENT(in) :: neigs
 REAL(r8), INTENT(out) :: eigs(:,:),eig_vecs(:,:)
 REAL(r8), INTENT(in) :: omega
 LOGICAL, INTENT(in) :: include_bounds
+REAL(r8), INTENT(in) :: eta_plasma
 #ifdef HAVE_ARPACK
 CLASS(oft_matrix), POINTER :: lhs_mat,rhs_mat
 CLASS(oft_vector), POINTER :: eig_vec
 TYPE(oft_lusolver), TARGET :: adv_pre
 TYPE(oft_iram_eigsolver) :: arsolver
 TYPE(eig_wrapper), TARGET :: wrap_mat
-REAL(8) :: lam0
 INTEGER(4) :: i,j
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: sort_tmp
+REAL(8) :: lam0,sigma_plasma
+REAL(8), ALLOCATABLE, DIMENSION(:) :: eig_tmp
 type(oft_tmaker_td_mfop) :: eig_mfop !< NL operator object
 !
 CALL eig_mfop%setup(eq_in)
 
 !---Build linearized opertors
 NULLIFY(lhs_mat,rhs_mat)
-CALL build_linearized(eig_mfop,lhs_mat,rhs_mat,eig_mfop%gs_eq%psi,omega,include_bounds)
+sigma_plasma=0.d0
+IF(eta_plasma>0.d0)sigma_plasma=1.d0/eta_plasma
+CALL build_linearized(eig_mfop,lhs_mat,rhs_mat,eig_mfop%gs_eq%psi,omega,include_bounds,sigma_plasma)
 wrap_mat%rhs_mat=>rhs_mat
 wrap_mat%lhs_inv=>adv_pre
 adv_pre%A=>lhs_mat
@@ -360,10 +365,24 @@ arsolver%which='LM'
 CALL oft_blagrange%vec_create(eig_vec)
 CALL arsolver%apply(eig_vec,lam0)
 
-DO i=1,neigs
-    eigs(:,i)=1.d0/arsolver%eig_val(:,i)+omega
-    eig_vecs(:,i)=arsolver%eig_vec(:,i)
-END DO
+IF(arsolver%info>=0)THEN
+  !---Sort eigenvalues
+  ALLOCATE(sort_tmp(arsolver%nev),eig_tmp(arsolver%nev))
+  eig_tmp=1.d0/arsolver%eig_val(1,1:arsolver%nev)+omega
+  sort_tmp=[(i,i=1,arsolver%nev)]
+  CALL sort_array(eig_tmp,sort_tmp,arsolver%nev)
+  DEALLOCATE(eig_tmp)
+  !---Copy output
+  DO i=1,neigs
+    j = sort_tmp(i)
+    eigs(:,i)=1.d0/arsolver%eig_val(:,j)+omega
+    eig_vecs(:,i)=arsolver%eig_vec(:,j)
+  END DO
+  DEALLOCATE(sort_tmp)
+ELSE
+    eigs=-1.d99
+    eig_vecs=0.d0
+END IF
 
 !---Cleanup
 CALL adv_pre%delete
@@ -1104,12 +1123,13 @@ end subroutine build_vac_op
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine build_linearized(self,lhs_mat,rhs_mat,a,sigma,include_bounds)
+subroutine build_linearized(self,lhs_mat,rhs_mat,a,sigma,include_bounds,sigma_plasma)
 class(oft_tmaker_td_mfop), intent(inout) :: self
 class(oft_matrix), pointer, intent(inout) :: rhs_mat,lhs_mat
 class(oft_vector), target, intent(inout) :: a
 real(8), intent(in) :: sigma
 LOGICAL, INTENT(in) :: include_bounds
+real(8), intent(in) :: sigma_plasma
 integer(i4) :: i,m,jr,jc,rowtmp(1),lim_node,ax_node,cell,nnonaxi
 integer(i4), allocatable :: j(:),bnd_nodes(:)
 real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),eta_source,gs_source,ax_tmp,ftmp(3)
@@ -1270,6 +1290,7 @@ do i=1,oft_blagrange%mesh%nc
                 lim_source=gs_source*(1.d0-(psi_tmp-self%gs_eq%plasma_bounds(1))/psi_norm)
                 ax_source=gs_source*(psi_tmp-self%gs_eq%plasma_bounds(1))/psi_norm
             END IF
+            eta_source=sigma_plasma
         ELSE IF(smesh%reg(i)>1.AND.(self%eta_reg(smesh%reg(i))>0.d0))THEN
             eta_source=1.d0/self%eta_reg(smesh%reg(i))
         END IF

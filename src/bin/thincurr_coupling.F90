@@ -106,7 +106,8 @@ ELSE
 END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL smesh%setup_io(1,basepath='Model1/')
+CALL tw_sim%xdmf%setup("thincurr",'Model1/')
+CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
 ! Load second model
@@ -138,7 +139,8 @@ END IF
 hole_nsets2=>mesh_nsets2
 CALL tw_sim2%setup(hole_nsets2)
 !---Setup I/0
-CALL tw_sim2%mesh%setup_io(1,basepath='Model2/')
+CALL tw_sim2%xdmf%setup("thincurr",'Model2/')
+CALL smesh%setup_io(tw_sim2%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim2%save_debug()
 !
 IF(plot_run)THEN
@@ -156,7 +158,7 @@ IF(plot_run)THEN
   NULLIFY(vals)
   CALL uio%get_local(vals)
   !---Save plot fields
-  CALL tw_sim2%mesh%save_vertex_scalar(vals(1:tw_sim2%mesh%np),'E')
+  CALL tw_sim2%mesh%save_vertex_scalar(vals(1:tw_sim2%mesh%np),tw_sim2%xdmf,'E')
   CALL uio%delete()
   DEALLOCATE(uio)
   CALL oft_finalize()

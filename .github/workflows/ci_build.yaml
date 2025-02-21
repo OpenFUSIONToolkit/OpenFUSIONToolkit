@@ -21,33 +21,55 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        parallel: ["openmp", "mpi_openmp"]
+        parallel: [openmp, mpich, openmpi]
         config:
-        - {
-            name: "Ubuntu 20.04 GCC 10",
-            os: ubuntu-20.04,
-            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python"
-          }
         - {
             name: "Ubuntu 22.04 GCC 12",
             os: ubuntu-22.04,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
+            python: "python3",
+            build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
             os: ubuntu-24.04,
-            cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14", python: "python3"
+            cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
+            python: "python3",
+            build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
+          }
+        - {
+            name: "Ubuntu 24.04 Intel",
+            os: ubuntu-24.04,
+            cc: "icx", cxx: "icx", fc: "ifx",
+            python: "python3",
+            build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT"
           }
         - {
             name: "macOS Ventura GCC 12",
             os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3.12", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
+            python: "python3.12",
+            build_flags: "--build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
+            xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
           }
         - {
             name: "macOS Sonoma GCC 13",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3.12", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
+            python: "python3.12",
+            build_flags: "--build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
+            xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
+        exclude:
+          - parallel: openmpi
+            config: {os: macos-14}
+          - parallel: openmpi
+            config: {cc: icx}
 
     steps:
     - name: Checkout repo
@@ -65,38 +87,48 @@ jobs:
         sudo xcode-select -s ${{ matrix.config.xcode_path }}
         xcode-select -p
 
-    - name: Check compilers
-      run: |
-        $CC --version
-        $CXX --version
-        $FC --version
-
     - name: Install prerequisites (Linux)
       if: startsWith(matrix.config.os, 'ubuntu')
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
-        source ${{ github.workspace }}/oft_venv/bin/activate
-        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py triangle
+        echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
+        source ${{ github.workspace }}/setup_env.sh
+        python -m pip install pytest numpy scipy h5py triangle
     
     - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
       run: |
+        brew install pmix
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
-        source ${{ github.workspace }}/oft_venv/bin/activate
-        ${{ matrix.config.python }} -m pip install pytest numpy scipy h5py setuptools
-        git clone https://github.com/drufat/triangle.git
-        cd triangle
-        git submodule init
-        git submodule update
-        ${{ matrix.config.python }} setup.py build
-        ${{ matrix.config.python }} setup.py install
+        echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
+        source ${{ github.workspace }}/setup_env.sh
+        python -m pip install pytest numpy scipy h5py
+    
+    - name: Install Intel oneAPI
+      if: ${{ matrix.config.cc == 'icx' }}
+      run: |
+        sudo apt-get install -y gpg-agent wget
+        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+        sudo apt-get update -o Dir::Etc::sourcelist="sources.list.d/oneAPI.list" -o APT::Get::List-Cleanup="0"
+        sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp intel-oneapi-compiler-fortran intel-oneapi-mkl-devel
+        echo "source /opt/intel/oneapi/compiler/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
+        echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
+        echo "ulimit -s unlimited" >> ${{ github.workspace }}/setup_env.sh
+    
+    - name: Check compilers
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        $CC --version
+        $CXX --version
+        $FC --version
 
     - name: Cache external libraries
       id: cache-ext-libs
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.config.os }}-build-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
@@ -107,19 +139,27 @@ jobs:
       shell: bash
       timeout-minutes: 30
       working-directory: libs
-      run: >
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
-        --build_umfpack=1 --build_arpack=1 --oft_build_tests=1
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1
     
-    - name: Build external (MPI+OpenMP)
-      if: ${{ matrix.parallel == 'mpi_openmp' }}
+    - name: Build external (MPICH+OpenMP)
+      if: ${{ matrix.parallel == 'mpich' }}
       shell: bash
       timeout-minutes: 60
       working-directory: libs
-      run: >
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --ref_blas
-        --build_mpi=1 --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1
-        --build_arpack=1 --oft_build_tests=1
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
+
+    - name: Build external (OpenMPI+OpenMP)
+      if: ${{ matrix.parallel == 'openmpi' }}
+      shell: bash
+      timeout-minutes: 60
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
@@ -137,30 +177,34 @@ jobs:
       shell: bash
       working-directory: libs
       run: |
-        source ${{ github.workspace }}/oft_venv/bin/activate
+        source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
       working-directory: libs/build_release
-      run: make
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make
     
     - name: Install OFT
       shell: bash
       working-directory: libs/build_release
-      run: make install
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make install
 
     - name: Test OFT
       shell: bash
       timeout-minutes: 90
       working-directory: libs/build_release
       run: |
-        source ${{ github.workspace }}/oft_venv/bin/activate
+        source ${{ github.workspace }}/setup_env.sh
         make test
         mv tests/OFT.junit.xml OFT.junit.xml
     
     - name: Upload test results to Codecov
-      if: ${{ !cancelled() && startsWith(matrix.config.os, 'ubuntu') }}
+      if: ${{ !cancelled() && (matrix.config.os == 'ubuntu-24.04') }}
       uses: codecov/test-results-action@v1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}

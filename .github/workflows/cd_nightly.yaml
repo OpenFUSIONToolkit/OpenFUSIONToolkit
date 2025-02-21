@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - cd_debug
   
 jobs:
   build:
@@ -21,23 +22,46 @@ jobs:
         config:
         - {
             name: "Linux-x86_64",
-            os: ubuntu-20.04,
-            cc: "gcc-10", cxx: "g++-10", fc: "gfortran-10", python: "python", build_libs_flags: ""
+            os: ubuntu-22.04,
+            cc: "gcc-12",cxx: "g++-12", fc: "gfortran-12",
+            python: "python3",
+            build_libs_flags: "--build_umfpack=1 --oblas_dynamic_arch",
+            cache_key: "openmp"
+          }
+        - {
+            name: "Linux-x86_64-Intel",
+            os: ubuntu-22.04,
+            cc: "icx",cxx: "icx", fc: "ifx",
+            python: "python3",
+            build_libs_flags: "--use_mkl --mkl_root=$MKLROOT",
+            cache_key: "openmp"
           }
         - {
             name: "macOS-x86_64",
             os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3.12", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", build_libs_flags: ""
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
+            python: "python3.12",
+            xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer",
+            build_libs_flags: "--build_umfpack=1",
+            cache_key: "openmp"
           }
         - {
             name: "macOS-x86_64-Rosetta",
             os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12", python: "python3.12", xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer", build_libs_flags: "--oblas_no_avx"
+            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
+            python: "python3.12",
+            xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer",
+            build_libs_flags: "--build_umfpack=1 --oblas_no_avx",
+            cache_key: "openmp_noavx"
           }
         - {
             name: "macOS-arm64",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13", python: "python3.12", xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer", build_libs_flags: ""
+            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
+            python: "python3.12",
+            xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer",
+            build_libs_flags: "--build_umfpack=1",
+            cache_key: "openmp"
         }
 
     steps:
@@ -49,7 +73,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.config.os }}-nightly-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cache_key }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Get OS version (Linux)
       if: startsWith(matrix.config.os, 'ubuntu')
@@ -62,9 +86,40 @@ jobs:
         pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
         sudo xcode-select -s ${{ matrix.config.xcode_path }}
         xcode-select -p
+    
+    - name: Install prerequisites (Linux)
+      if: startsWith(matrix.config.os, 'ubuntu')
+      run: |
+        sudo apt-get -y install doxygen graphviz
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
+        echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
+        source ${{ github.workspace }}/setup_env.sh
+        python -m pip install jupyter nbconvert
+    
+    - name: Install prerequisites (macOS)
+      if: startsWith(matrix.config.os, 'macos')
+      run: |
+        brew install doxygen graphviz
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
+        echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
+        source ${{ github.workspace }}/setup_env.sh
+        python -m pip install jupyter nbconvert
+    
+    - name: Install Intel oneAPI
+      if: ${{ matrix.config.cc == 'icx' }}
+      run: |
+        sudo apt-get install -y gpg-agent wget
+        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+        sudo apt-get update -o Dir::Etc::sourcelist="sources.list.d/oneAPI.list" -o APT::Get::List-Cleanup="0"
+        sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp intel-oneapi-compiler-fortran intel-oneapi-mkl-devel
+        echo "source /opt/intel/oneapi/compiler/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
+        echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
+        echo "ulimit -s unlimited" >> ${{ github.workspace }}/setup_env.sh
 
     - name: Check compilers
       run: |
+        source ${{ github.workspace }}/setup_env.sh
         $CC --version
         $CXX --version
         $FC --version
@@ -73,21 +128,12 @@ jobs:
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       run: mkdir libs
 
-    - name: Build external (Linux)
-      if: startsWith(matrix.config.os, 'ubuntu')
+    - name: Build external
       shell: bash
       working-directory: libs
-      run: >
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
-        --build_umfpack=1 --build_arpack=1 --oblas_dynamic_arch --oft_package ${{ matrix.config.build_libs_flags }}
-
-    - name: Build external (macOS)
-      if: startsWith(matrix.config.os, 'macos')
-      shell: bash
-      working-directory: libs
-      run: >
-        ${{ matrix.config.python }} ../src/utilities/build_libs.py --no_dl_progress --nthread=2
-        --build_umfpack=1 --build_arpack=1 --oft_package ${{ matrix.config.build_libs_flags }}
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
@@ -104,22 +150,30 @@ jobs:
     - name: Configure OFT
       shell: bash
       working-directory: libs
-      run: bash config_cmake.sh
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
       working-directory: libs/build_release
-      run: make
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make
     
     - name: Install OFT
       shell: bash
       working-directory: libs/build_release
-      run: make install
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make install
 
     - name: Package OFT
       shell: bash
       working-directory: libs/build_release
-      run: make package
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make package
     
     - name: Upload package artifact
       uses: actions/upload-artifact@v4
