@@ -178,7 +178,14 @@ INTERFACE
 !---------------------------------------------------------------------------
   SUBROUTINE oft_set_signal_handlers()  BIND(C)
   END SUBROUTINE oft_set_signal_handlers
+!---------------------------------------------------------------------------
+!> Prototype for abort callback to override usual abort process
+!---------------------------------------------------------------------------
+  SUBROUTINE oft_abort_callback()  BIND(C)
+  END SUBROUTINE oft_abort_callback
 END INTERFACE
+!> Abort callback for graceful abort in Python interface
+PROCEDURE(oft_abort_callback), POINTER :: oft_abort_cb
 CONTAINS
 !---------------------------------------------------------------------------
 !> Initializes Open FUSION Toolkit run environment
@@ -400,6 +407,7 @@ OPEN(outunit,FILE='abort_'//proc//'.err')
 !---Print error information
 100 FORMAT (A,I5,2A)
 101 FORMAT (2A)
+WRITE(outunit,'(X)')
 WRITE(outunit,'(A)')'#----------------------------------------------'
 IF(oft_env%nprocs>1)THEN
   WRITE(outunit,100)  '[',oft_env%rank,'] ERROR: ',TRIM(error_str)
@@ -410,11 +418,15 @@ ELSE
   WRITE(outunit,101)  'SUBROUTINE: ',TRIM(sname)
   WRITE(outunit,101)  'FILE: ',TRIM(fname)
 END IF
+WRITE(outunit,'(A)')'#----------------------------------------------'
+WRITE(outunit,'(X)')
 #ifdef OFT_ABORT_FILES
 CLOSE(outunit)
 #endif
 !---
 CALL oft_stack_print
+!---
+IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
 !---Abort run
 errcode=99
 #ifdef HAVE_MPI

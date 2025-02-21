@@ -1477,18 +1477,20 @@ class TokaMaker():
             raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
-    def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False):
+    def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
         '''! Compute eigenvalues for the linearized time-dependent system
 
         @param omega Growth rate localization point (eigenvalues closest to this value will be found)
         @param neigs Number of eigenvalues to compute
         @param include_bounds Include bounding flux terms for constant normalized profiles?
         @param pm Print solver statistics and raw eigenvalues?
+        @param damping_scale Scale factor for damping term to artificially limit growth rate (negative to disable)?
         @result eigenvalues[neigs], eigenvectors[neigs,:]
         '''
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
-        tokamaker_eig_td(c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),pm)
+        damp_coeff = abs(omega)*damping_scale
+        tokamaker_eig_td(c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm)
         if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
             raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs

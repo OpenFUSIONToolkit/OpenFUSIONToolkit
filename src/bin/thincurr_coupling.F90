@@ -106,7 +106,7 @@ ELSE
 END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL tw_sim%xdmf%setup("ThinCurr",'Model1/')
+CALL tw_sim%xdmf%setup("thincurr",'Model1/')
 CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ END IF
 hole_nsets2=>mesh_nsets2
 CALL tw_sim2%setup(hole_nsets2)
 !---Setup I/0
-CALL tw_sim2%xdmf%setup("ThinCurr",'Model2/')
+CALL tw_sim2%xdmf%setup("thincurr",'Model2/')
 CALL smesh%setup_io(tw_sim2%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim2%save_debug()
 !

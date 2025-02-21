@@ -2283,9 +2283,12 @@ integer(4) :: ncoil_sets,nread,coil_type
 TYPE(fox_node), POINTER :: doc,coil_set,coil,thincurr_group,xml_attr
 TYPE(fox_nodelist), POINTER :: coil_sets,coil_list
 !---
-INTEGER(4) :: i,j,k,io_unit,ierr,id,cell
+LOGICAL :: success
+INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims
+INTEGER(4), ALLOCATABLE :: dim_sizes(:)
 REAL(8) :: pts_tmp(2),res_per_len,radius,dl,theta
-CHARACTER(LEN=4) :: coil_ind
+CHARACTER(LEN=10) :: coil_ind
+CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
 TYPE(tw_coil_set), POINTER :: coil_tmp
 TYPE(fox_DOMException) :: xml_ex
 ! IF(.NOT.ASSOCIATED(oft_env%xml))RETURN
@@ -2339,39 +2342,67 @@ DO i=1,ncoils
   ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
   DO j=1,coil_tmp%ncoils
     coil=>fox_item(coil_list,j-1)
-    !---Get coil type
-    coil_type=2
-    !xml_attr=>fox_getAttributeNode(coil,"type")
-    !IF(ASSOCIATED(xml_attr))CALL fox_extractDataContent(xml_attr,coil_type,num=nread,iostat=ierr)
-    !---Read number of points
-    xml_attr=>fox_getAttributeNode(coil,"npts")
+    !---Look for HDF5 path
+    xml_attr=>fox_getAttributeNode(coil,"path")
     IF(ASSOCIATED(xml_attr))THEN
-      CALL fox_extractDataContent(xml_attr,coil_tmp%coils(j)%npts,num=nread,iostat=ierr)
+      CALL fox_extractDataContent(xml_attr,coil_path,num=nread,iostat=ierr)
+      IF(ierr/=0)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+      ipath=INDEX(coil_path,":")
+      IF(ipath==0)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Misformatted "path" attribute in coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+      CALL hdf5_field_get_sizes(coil_path(1:ipath-1),coil_path(ipath+1:OFT_PATH_SLEN),ndims,dim_sizes)
+      IF(ndims<0)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Failed to read HDF5 data sizes for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+      IF(dim_sizes(1)/=3)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Incorrect first dimension of HDF5 dataset for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+      coil_tmp%coils(j)%npts=dim_sizes(2)
+      DEALLOCATE(dim_sizes)
+      ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
+      CALL hdf5_read(coil_tmp%coils(j)%pts,coil_path(1:ipath-1),coil_path(ipath+1:OFT_PATH_SLEN),success=success)
+      IF(.NOT.success)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Failed to read HDF5 data for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
     ELSE
-      coil_type=1
-    !   CALL oft_abort('"npts" not specified for general coil', 'tw_load_coils', __FILE__)
+      !---Read number of points
+      xml_attr=>fox_getAttributeNode(coil,"npts")
+      IF(ASSOCIATED(xml_attr))THEN
+        CALL fox_extractDataContent(xml_attr,coil_tmp%coils(j)%npts,num=nread,iostat=ierr)
+        coil_type=2
+      ELSE
+        coil_type=1
+      END IF
+      SELECT CASE(coil_type)
+        CASE(1)
+          CALL fox_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
+          IF(ierr/=0)THEN
+            WRITE(coil_ind,'(I4,2X,I4)')i,j
+            CALL oft_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
+          END IF
+          IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
+          ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
+          DO k=1,coil_tmp%coils(j)%npts
+            theta=(k-1)*2.d0*pi/REAL(coil_tmp%coils(j)%npts-1,8)
+            coil_tmp%coils(j)%pts(:,k)=[pts_tmp(1)*COS(theta),pts_tmp(1)*SIN(theta),pts_tmp(2)]
+          END DO
+        CASE(2)
+          ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
+          CALL fox_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
+          IF(ierr/=0)THEN
+            WRITE(coil_ind,'(I4,2X,I4)')i,j
+            CALL oft_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
+          END IF
+      END SELECT
     END IF
-    SELECT CASE(coil_type)
-      CASE(1)
-        CALL fox_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
-        IF(ierr/=0)THEN
-          WRITE(coil_ind,'(I4)')i
-          CALL oft_abort('Error reading circular coil in set '//coil_ind,'tw_load_coils',__FILE__)
-        END IF
-        IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
-        ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-        DO k=1,coil_tmp%coils(j)%npts
-          theta=(k-1)*2.d0*pi/REAL(coil_tmp%coils(j)%npts-1,8)
-          coil_tmp%coils(j)%pts(:,k)=[pts_tmp(1)*COS(theta),pts_tmp(1)*SIN(theta),pts_tmp(2)]
-        END DO
-      CASE(2)
-        ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-        CALL fox_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
-        IF(ierr/=0)THEN
-          WRITE(coil_ind,'(I4)')i
-          CALL oft_abort('Error reading coil in set '//coil_ind,'tw_load_coils',__FILE__)
-        END IF
-    END SELECT
     !---Get scale factor
     xml_attr=>fox_getAttributeNode(coil,"scale")
     IF(ASSOCIATED(xml_attr))CALL fox_extractDataContent(xml_attr,coil_tmp%scales(j),num=nread,iostat=ierr)

@@ -83,7 +83,7 @@ tokamaker_setup_td = ctypes_subroutine(oftpy_lib.tokamaker_setup_td,
 
 # G-S time-dependent run function
 tokamaker_eig_td = ctypes_subroutine(oftpy_lib.tokamaker_eig_td,
-    [c_double, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_bool])
+    [c_double, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_double, c_bool])
 
 # G-S time-dependent run function
 tokamaker_step_td = ctypes_subroutine(oftpy_lib.tokamaker_step_td,

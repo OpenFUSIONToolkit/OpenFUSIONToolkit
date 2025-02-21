@@ -8,7 +8,9 @@
 ## @file util.py
 #
 # Helper interfaces for Open FUSION Toolkit (OFT) Python interfaces
+import sys
 import os
+import time
 import platform
 import ctypes
 from ctypes import c_bool, c_int, c_double, c_char_p, c_void_p, create_string_buffer
@@ -70,9 +72,18 @@ else:
 oftpy_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboftpy'+lib_suffix))
 oft_triangle_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboft_triangle'+lib_suffix))
 
+# Abort callback
+@ctypes.CFUNCTYPE(None)
+def oft_python_abort():
+    sys.stdout.flush()
+    time.sleep(0.1)
+    sys.stderr.flush()
+    time.sleep(0.1)
+    os._exit(-1)
+
 # Global init function
 oft_init = ctypes_subroutine(oftpy_lib.oftpy_init,
-    [c_int, c_char_p, ctypes_numpy_array(int32,1)])
+    [c_int, c_char_p, ctypes_numpy_array(int32,1), c_void_p])
 
 # oftpy_set_debug(debug_level)
 oftpy_set_debug = ctypes_subroutine(oftpy_lib.oftpy_set_debug,

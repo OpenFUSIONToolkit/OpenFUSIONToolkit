@@ -76,9 +76,9 @@ type :: xdmf_plot_file
   integer(i4) :: n_ts = 0
   integer(i4) :: curr_ts = 0
   integer(i4) :: n_grids = 0
-  character(LEN=80) :: file_path = ''
-  character(LEN=80) :: group_name = ''
-  character(LEN=80) :: grid_names(10) = ''
+  character(LEN=OFT_PATH_SLEN) :: file_path = ''
+  character(LEN=OFT_PATH_SLEN) :: group_name = ''
+  character(LEN=OFT_PATH_SLEN) :: grid_names(10) = ''
 CONTAINS
   PROCEDURE :: setup => xmdf_setup
   PROCEDURE :: add_mesh => xdmf_add_mesh
@@ -335,9 +335,10 @@ IF(PRESENT(basepath))THEN
 ELSE
   self%file_path="oft_xdmf."//hdf5_proc_str()//".h5"
 END IF
-self%group_name=group_name
+self%group_name=TRIM(group_name)
+CALL string_to_lower(self%group_name)
 CALL hdf5_create_file(TRIM(self%file_path),.TRUE.)
-CALL hdf5_create_group(TRIM(self%file_path),TRIM(group_name))
+CALL hdf5_create_group(TRIM(self%file_path),TRIM(self%group_name))
 end subroutine xmdf_setup
 !---------------------------------------------------------------------------
 !> Needs docs
@@ -361,9 +362,10 @@ integer(i4) :: mpi_stat(MPI_STATUS_SIZE)
 DEBUG_STACK_PUSH
 self%n_grids=self%n_grids+1
 self%grid_names(self%n_grids)=TRIM(grid_name)
+CALL string_to_lower(self%grid_names(self%n_grids))
 IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
   "xdmf_add_mesh",__FILE__)
-hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_name)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(self%n_grids))
 CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path))
 CALL hdf5_write(mesh_type,TRIM(self%file_path),TRIM(hdf5_path)//"/TYPE")
 CALL hdf5_write(pt_list,TRIM(self%file_path),TRIM(hdf5_path)//"/R",single_prec=.TRUE.)
@@ -442,11 +444,13 @@ CHARACTER(LEN=*), intent(in) :: grid_name !< Grid name
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4), intent(in) :: centering !< Centering of data (1-> vertex; 2-> cell)
 logical, optional, intent(in) :: single_prec !< Save as single precision?
-CHARACTER(LEN=200) :: hdf5_path
+CHARACTER(LEN=OFT_PATH_SLEN) :: hdf5_path,grid_lower
 CHARACTER(LEN=80) :: attr_data
 IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
   "xdmf_write_scalar",__FILE__)
-hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_name)//"/"//TRIM(hdf5_ts_str(self%n_ts))
+grid_lower = TRIM(grid_name)
+CALL string_to_lower(grid_lower)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_lower)//"/"//TRIM(hdf5_ts_str(self%n_ts))
 IF(.NOT.hdf5_field_exist(TRIM(self%file_path),TRIM(hdf5_path)))CALL oft_abort("Timestep does not exist", &
   "xdmf_write_scalar",__FILE__)
 hdf5_path=TRIM(hdf5_path)//"/"//TRIM(path)
@@ -474,11 +478,13 @@ CHARACTER(LEN=*), intent(in) :: grid_name !< Grid name
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4), intent(in) :: centering !< Centering of data (1-> vertex; 2-> cell)
 logical, optional, intent(in) :: single_prec !< Save as single precision?
-CHARACTER(LEN=200) :: hdf5_path
+CHARACTER(LEN=OFT_PATH_SLEN) :: hdf5_path,grid_lower
 CHARACTER(LEN=80) :: attr_data
 IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
   "xdmf_write_vector",__FILE__)
-hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_name)//"/"//TRIM(hdf5_ts_str(self%n_ts))
+grid_lower = TRIM(grid_name)
+CALL string_to_lower(grid_lower)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_lower)//"/"//TRIM(hdf5_ts_str(self%n_ts))
 IF(.NOT.hdf5_field_exist(TRIM(self%file_path),TRIM(hdf5_path)))CALL oft_abort("Timestep does not exist", &
   "xdmf_write_vector",__FILE__)
 hdf5_path=TRIM(hdf5_path)//"/"//TRIM(path)
@@ -606,6 +612,7 @@ integer(hsize_t), allocatable, dimension(:) :: tmp_sizes,maxdims
 integer(HID_T) :: file_id,dset_id,dspace_id
 DEBUG_STACK_PUSH
 ndims=-1
+IF(.NOT.hdf5_field_exist(filepath,path))RETURN
 !---Try to open file as HDF5 file
 access_flag=H5F_ACC_RDONLY_F
 call h5open_f(error)

@@ -69,7 +69,7 @@ REAL(8) :: cg_tol=1.d-6
 INTEGER(4) :: nsteps = 400
 INTEGER(4) :: nstatus = 10
 INTEGER(4) :: nplot = 10
-INTEGER(4) :: jumper_start = -1
+INTEGER(4) :: jumper_start = 0
 LOGICAL :: timestep_cn=.TRUE.
 LOGICAL :: direct = .TRUE.
 LOGICAL :: save_L = .FALSE.
@@ -134,7 +134,7 @@ CALL tw_sim%setup(hole_nsets)
 IF((TRIM(curr_file)=="none").AND.(tw_sim%n_icoils>0))CALL oft_abort("No waveform filename specified", &
   "thincurr_td",__FILE__)
 !---Setup I/0
-CALL tw_sim%xdmf%setup("ThinCurr")
+CALL tw_sim%xdmf%setup("thincurr")
 CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------

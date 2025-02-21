@@ -53,7 +53,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
 TYPE(oft_tw_hodlr_op), TARGET :: tw_hodlr
 !
 INTEGER(4) :: neigs = 5
-INTEGER(4) :: jumper_start = -1
+INTEGER(4) :: jumper_start = 0
 LOGICAL :: direct = .TRUE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: save_L = .FALSE.
@@ -113,7 +113,7 @@ ELSE
 END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL tw_sim%xdmf%setup("ThinCurr")
+CALL tw_sim%xdmf%setup("thincurr")
 CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------

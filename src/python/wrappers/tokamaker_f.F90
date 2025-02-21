@@ -395,19 +395,20 @@ END SUBROUTINE tokamaker_setup_td
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_eig_td(omega,neigs,eigs,eig_vecs,include_bounds,pm) BIND(C,NAME="tokamaker_eig_td")
+SUBROUTINE tokamaker_eig_td(omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm) BIND(C,NAME="tokamaker_eig_td")
 REAL(c_double), VALUE, INTENT(in) :: omega !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: neigs !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eig_vecs !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: include_bounds !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: eta_plasma !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Needs docs
 REAL(8), POINTER :: eigs_tmp(:,:),eig_vecs_tmp(:,:)
 LOGICAL :: pm_save
 CALL c_f_pointer(eigs, eigs_tmp, [2,neigs])
 CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [gs_global%psi%n,neigs])
 pm_save=oft_env%pm; oft_env%pm=pm
-CALL eig_gs_td(gs_global,neigs,eigs_tmp,eig_vecs_tmp,omega,LOGICAL(include_bounds))
+CALL eig_gs_td(gs_global,neigs,eigs_tmp,eig_vecs_tmp,omega,LOGICAL(include_bounds),eta_plasma)
 oft_env%pm=pm_save
 END SUBROUTINE tokamaker_eig_td
 !------------------------------------------------------------------------------
@@ -426,7 +427,7 @@ CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [gs_global%psi%n,neigs])
 alam_save=gs_global%alam; gs_global%alam=0.d0
 pnorm_save=gs_global%pnorm; gs_global%pnorm=0.d0
 pm_save=oft_env%pm; oft_env%pm=pm
-CALL eig_gs_td(gs_global,neigs,eigs_tmp,eig_vecs_tmp,0.d0,.FALSE.)
+CALL eig_gs_td(gs_global,neigs,eigs_tmp,eig_vecs_tmp,0.d0,.FALSE.,-1.d0)
 oft_env%pm=pm_save
 gs_global%alam=alam_save
 gs_global%pnorm=pnorm_save
