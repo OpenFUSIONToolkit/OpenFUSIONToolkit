@@ -1672,7 +1672,6 @@ TYPE(fox_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
 TYPE(fox_node), POINTER :: hcurl_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 #endif
 DEBUG_STACK_PUSH
 !---
@@ -1718,8 +1717,8 @@ CALL oft_hcurl_set_level(levin)
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  CALL xml_get_element(oft_env%xml,"nedelec_h1curl",hcurl_node,ierr,1)
-  IF(ierr==0)CALL xml_get_element(hcurl_node,"wop",pre_node,ierr,1)
+  CALL xml_get_element(oft_env%xml,"nedelec_h1curl",hcurl_node,ierr)
+  IF(ierr==0)CALL xml_get_element(hcurl_node,"wop",pre_node,ierr)
 END IF
 #endif
 !---------------------------------------------------------------------------
@@ -1760,7 +1759,6 @@ TYPE(fox_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
 TYPE(fox_node), POINTER :: hcurl_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 #endif
 DEBUG_STACK_PUSH
 !---
@@ -1800,8 +1798,8 @@ CALL oft_hcurl_set_level(levin)
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  CALL xml_get_element(oft_env%xml,"nedelec_h1curl",hcurl_node,ierr,1)
-  IF(ierr==0)CALL xml_get_element(hcurl_node,"jmlb",pre_node,ierr,1)
+  CALL xml_get_element(oft_env%xml,"nedelec_h1curl",hcurl_node,ierr)
+  IF(ierr==0)CALL xml_get_element(hcurl_node,"jmlb",pre_node,ierr)
 END IF
 #endif
 !---------------------------------------------------------------------------

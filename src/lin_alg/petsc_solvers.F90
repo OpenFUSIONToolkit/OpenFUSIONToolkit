@@ -642,7 +642,6 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nnodes,nread
 TYPE(fox_node), POINTER :: current_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its
@@ -653,7 +652,7 @@ val_level=1
 IF(PRESENT(level))val_level=level
 ALLOCATE(its(val_level),atol(val_level),rtol(val_level))
 !---
-CALL xml_get_element(solver_node,"its",current_node,ierr,1)
+CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -664,7 +663,7 @@ IF(ierr==0)THEN
   END IF
 END IF
 !---
-CALL xml_get_element(solver_node,"atol",current_node,ierr,1)
+CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,atol,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -675,7 +674,7 @@ IF(ierr==0)THEN
   END IF
 END IF
 !---
-CALL xml_get_element(solver_node,"rtol",current_node,ierr,1)
+CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -839,7 +838,6 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nnodes,nread
 TYPE(fox_node), POINTER :: current_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its,nrits
@@ -850,7 +848,7 @@ val_level=1
 IF(PRESENT(level))val_level=level
 ALLOCATE(its(val_level),nrits(val_level),atol(val_level),rtol(val_level))
 !---
-CALL xml_get_element(solver_node,"its",current_node,ierr,1)
+CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -861,7 +859,7 @@ IF(ierr==0)THEN
   END IF
 END IF
 !---
-CALL xml_get_element(solver_node,"nrits",current_node,ierr,1)
+CALL xml_get_element(solver_node,"nrits",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -872,7 +870,7 @@ IF(ierr==0)THEN
   END IF
 END IF
 !---
-CALL xml_get_element(solver_node,"atol",current_node,ierr,1)
+CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,atol,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -883,7 +881,7 @@ IF(ierr==0)THEN
   END IF
 END IF
 !---
-CALL xml_get_element(solver_node,"rtol",current_node,ierr,1)
+CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -1193,7 +1191,6 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nnodes,nread
 TYPE(fox_node), POINTER :: current_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its
@@ -1204,7 +1201,7 @@ val_level=1
 IF(PRESENT(level))val_level=level
 ALLOCATE(its(val_level),df(val_level))
 !---
-CALL xml_get_element(solver_node,"its",current_node,ierr,1)
+CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -1215,7 +1212,7 @@ IF(ierr==0)THEN
   END IF
 END IF
 !---
-CALL xml_get_element(solver_node,"df",current_node,ierr,1)
+CALL xml_get_element(solver_node,"df",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,df,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -1323,7 +1320,6 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nnodes,nread
 TYPE(fox_node), POINTER :: current_node,sub_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 CHARACTER(LEN=20) :: sub_type
 CHARACTER(LEN=6) :: factor_type,factor_package
 !---
@@ -1824,7 +1820,6 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nnodes,nread
 TYPE(fox_node), POINTER :: current_node,sub_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: overlaps,nlocals
@@ -1834,7 +1829,7 @@ val_level=1
 IF(PRESENT(level))val_level=level
 ALLOCATE(overlaps(val_level),nlocals(val_level))
 !---Read in overlap size
-CALL xml_get_element(solver_node,"overlap",current_node,ierr,1)
+CALL xml_get_element(solver_node,"overlap",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,overlaps,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -1845,7 +1840,7 @@ IF(ierr==0)THEN
   END IF
 END IF
 !---Read in local field splitting flag
-CALL xml_get_element(solver_node,"nlocal",current_node,ierr,1)
+CALL xml_get_element(solver_node,"nlocal",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,nlocals,num=nread,iostat=ierr)
   IF(nread>1)THEN
@@ -1858,7 +1853,7 @@ END IF
 IF(self%n_local<-1)CALL oft_abort("Slice grouping not supported with PETSc","asprecond_setup_xml",__FILE__)
 IF(self%n_local==-1)self%overlap=0
 !---Read-in desired overlap specification
-CALL xml_get_element(solver_node,"boverlap",current_node,ierr,1)
+CALL xml_get_element(solver_node,"boverlap",current_node,ierr)
 IF(ierr==0)CALL oft_abort("Boundary overlap not supported with PETSc","asprecond_setup_xml",__FILE__)
 IF(oft_debug_print(1))THEN
   WRITE(*,*)'Additive Schwartz solver setup:'
@@ -1948,11 +1943,10 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: i,ierr,nnodes,nread
 TYPE(fox_node), POINTER :: current_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 CHARACTER(LEN=6) :: factor_type,factor_package
 STACK_PUSH
 !---
-CALL xml_get_element(solver_node,"type",current_node,ierr,1)
+CALL xml_get_element(solver_node,"type",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,factor_type,num=nread,iostat=ierr)
   IF(nread==1)THEN
@@ -1960,7 +1954,7 @@ IF(ierr==0)THEN
   END IF
 END IF
 !---
-CALL xml_get_element(solver_node,"package",current_node,ierr,1)
+CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN

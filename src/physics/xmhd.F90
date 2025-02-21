@@ -451,11 +451,6 @@ integer(i4), intent(out) :: nclean !< Frequency to clean divergence
 integer(i4), intent(out) :: maxextrap !< Extrapolation order for initial guess
 integer(i4), intent(out) :: ittarget !< Maximum number of linear iterations
 integer(i4), intent(out) :: nl_update !< Maximum number of linear iterations
-!---XML solver fields
-#ifdef HAVE_XML
-integer(i4) :: nnodes
-TYPE(fox_nodelist), POINTER :: current_nodes
-#endif
 integer(i4) :: io_unit,ierr
 !---
 namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,xmhd_ohmic, &
@@ -487,10 +482,10 @@ if(ierr>0)call oft_abort('Error parsing MHD options in input file.','xmhd_read_s
 !---Look for xMHD node
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  CALL xml_get_element(oft_env%xml,"xmhd",xmhd_root_node,ierr,1)
+  CALL xml_get_element(oft_env%xml,"xmhd",xmhd_root_node,ierr)
   IF(ierr==0)THEN
     !---Look for pre node
-    CALL xml_get_element(xmhd_root_node,"pre",xmhd_pre_node,ierr,1)
+    CALL xml_get_element(xmhd_root_node,"pre",xmhd_pre_node,ierr)
   END IF
 END IF
 #endif
@@ -2565,10 +2560,10 @@ end subroutine xmhd_alloc_ops
 subroutine xmhd_setup_regions()
 !---XML solver fields
 #ifdef HAVE_XML
-integer(i4) :: nnodes,nnodes_inner,nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
+integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
 real(r8) :: eta(1)
-TYPE(fox_node), POINTER :: smd_node,reg_node,inner_node
-TYPE(fox_nodelist), POINTER :: current_nodes,reg_nodes,inner_nodes
+TYPE(fox_node), POINTER :: reg_node,inner_node
+TYPE(fox_nodelist), POINTER :: reg_nodes
 #endif
 integer(i4), ALLOCATABLE :: regs(:),reg_types(:)
 DEBUG_STACK_PUSH
@@ -2582,13 +2577,14 @@ solid_cell=.FALSE.
 #ifdef HAVE_XML
 IF(ASSOCIATED(xmhd_root_node))THEN
   !---Look for pre node
-  reg_nodes=>fox_getElementsByTagName(xmhd_root_node,"region")
-  nnodes=fox_getLength(reg_nodes)
-  IF(nnodes>0)THEN
-    DO i=0,nnodes-1
-      reg_node=>fox_item(reg_nodes,i)
+  CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
+  ! reg_nodes=>fox_getElementsByTagName(xmhd_root_node,"region")
+  ! nnodes=fox_getLength(reg_nodes)
+  IF(reg_nodes%n>0)THEN
+    DO i=0,reg_nodes%n-1
+      reg_node=>reg_nodes%nodes(i+1)%this !fox_item(reg_nodes,i)
       !---
-      CALL xml_get_element(reg_node,"id",inner_node,ierr,1)
+      CALL xml_get_element(reg_node,"id",inner_node,ierr)
       IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
         "xmhd_setup_regions",__FILE__)
       CALL fox_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
@@ -2599,9 +2595,7 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(ANY(regs(1:nread_id)>mesh%nreg).OR.ANY(regs(1:nread_id)<=0))CALL oft_abort( &
         "Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
-      CALL xml_get_element(reg_node,"eta",inner_node,ierr,1)
-      IF(nnodes_inner==0)CALL oft_abort("Error reading eta for group", &
-        "xmhd_setup_regions",__FILE__)
+      CALL xml_get_element(reg_node,"eta",inner_node,ierr)
       CALL fox_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
       IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
         "xmhd_setup_regions",__FILE__)
@@ -2610,7 +2604,7 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(eta(1)<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
         __FILE__)
       !---Get region type
-      CALL xml_get_element(reg_node,"type",inner_node,ierr,1)
+      CALL xml_get_element(reg_node,"type",inner_node,ierr)
       IF(ierr/=0)THEN
         reg_type(1)=2.d0
       ELSE

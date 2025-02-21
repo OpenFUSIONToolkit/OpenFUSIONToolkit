@@ -1074,7 +1074,6 @@ TYPE(fox_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
 TYPE(fox_node), POINTER :: h0_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 #endif
 DEBUG_STACK_PUSH
 !---
@@ -1121,8 +1120,8 @@ NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   !---Look for Lagrange node
-  CALL xml_get_element(oft_env%xml,"nedelec_h0",h0_node,ierr,1)
-  IF(ierr==0)CALL xml_get_element(h0_node,"lop",pre_node,ierr,1)
+  CALL xml_get_element(oft_env%xml,"nedelec_h0",h0_node,ierr)
+  IF(ierr==0)CALL xml_get_element(h0_node,"lop",pre_node,ierr)
 END IF
 #endif
 !---------------------------------------------------------------------------

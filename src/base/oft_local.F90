@@ -17,7 +17,7 @@ USE, INTRINSIC :: iso_c_binding, only: c_int, c_ptr, c_long
 USE ifport ! Intel fortran portability library
 #endif
 #ifdef HAVE_XML
-USE fox_dom, ONLY: fox_node => node, fox_nodelist => nodelist, fox_parsefile => parsefile, &
+USE fox_dom, ONLY: fox_node => node, fox_parsefile => parsefile, &
   fox_getelementsbytagname => getElementsByTagname, fox_item => item, fox_getLength => getLength, &
   fox_extractDataAttribute => extractDataAttribute, fox_hasAttribute => hasAttribute, &
   fox_extractDataContent => extractDataContent, fox_getAttributeNode => getAttributeNode, &
@@ -149,6 +149,24 @@ CONTAINS
   procedure :: timeout => oft_timer_timeout
 END TYPE oft_timer
 PRIVATE oft_timer_start, oft_timer_elapsed, oft_timer_intelapsed, oft_timer_timeout
+#ifdef HAVE_XML
+!
+TYPE :: fox_node_ptr
+  TYPE(fox_node), POINTER :: this => NULL()
+END TYPE fox_node_ptr
+!
+TYPE :: fox_nodelist
+  INTEGER(i4) :: n = 0
+  TYPE(fox_node_ptr), POINTER, DIMENSION(:) :: nodes => NULL()
+END TYPE fox_nodelist
+!---------------------------------------------------------------------------
+!> Generate inverse of sparse indexing
+!---------------------------------------------------------------------------
+INTERFACE xml_get_element
+  MODULE PROCEDURE xml_get_element_single
+  MODULE PROCEDURE xml_get_element_list
+END INTERFACE xml_get_element
+#endif
 CONTAINS
 !------------------------------------------------------------------------------
 !> Returns the corresponding lowercase letter, if `c` is an uppercase
@@ -359,7 +377,8 @@ END FUNCTION time_to_string
 !------------------------------------------------------------------------------
 !> Get child element within a given XML node
 !------------------------------------------------------------------------------
-subroutine xml_get_element(parent,name,element,error_flag,index)
+subroutine xml_get_element_single(parent,name,element,error_flag,index)
+USE fox_dom, ONLY: nodelist
 TYPE(fox_node), POINTER, INTENT(in) :: parent
 CHARACTER(LEN=*), INTENT(in) :: name
 TYPE(fox_node), POINTER, INTENT(inout) :: element
@@ -367,7 +386,7 @@ INTEGER(i4), INTENT(out) :: error_flag
 INTEGER(i4), OPTIONAL, INTENT(in) :: index
 INTEGER(i4) :: i,req_index,nchildren,nelements
 TYPE(fox_node), POINTER :: tmp_element
-TYPE(fox_nodelist), POINTER :: tmp_list
+TYPE(nodelist), POINTER :: tmp_list
 NULLIFY(element)
 IF(.NOT.ASSOCIATED(parent))THEN
   error_flag=1
@@ -398,6 +417,47 @@ IF(req_index>nelements)THEN
   RETURN
 END IF
 error_flag=0
-end subroutine xml_get_element
+end subroutine xml_get_element_single
+!------------------------------------------------------------------------------
+!> Get child element within a given XML node
+!------------------------------------------------------------------------------
+subroutine xml_get_element_list(parent,name,elements,error_flag)
+USE fox_dom, ONLY: nodelist
+TYPE(fox_node), POINTER, INTENT(in) :: parent
+CHARACTER(LEN=*), INTENT(in) :: name
+TYPE(fox_nodelist), INTENT(inout) :: elements
+INTEGER(i4), INTENT(out) :: error_flag
+INTEGER(i4) :: i,req_index,nchildren
+TYPE(fox_node), POINTER :: tmp_element
+TYPE(nodelist), POINTER :: tmp_list
+IF(ASSOCIATED(elements%nodes))DEALLOCATE(elements%nodes)
+elements%n=0
+IF(.NOT.ASSOCIATED(parent))THEN
+  error_flag=1
+  RETURN
+END IF
+tmp_list=>fox_getChildNodes(parent)
+nchildren=fox_getLength(tmp_list)
+DO i=1,nchildren
+  tmp_element=>fox_item(tmp_list,i-1)
+  IF(fox_getName(tmp_element)==TRIM(name))THEN
+    elements%n=elements%n+1
+  END IF
+END DO
+IF(elements%n==0)THEN
+  error_flag=4
+  RETURN
+END IF
+ALLOCATE(elements%nodes(elements%n))
+elements%n=0
+DO i=1,nchildren
+  tmp_element=>fox_item(tmp_list,i-1)
+  IF(fox_getName(tmp_element)==TRIM(name))THEN
+    elements%n=elements%n+1
+    elements%nodes(i)%this=>fox_item(tmp_list,i-1)
+  END IF
+END DO
+error_flag=0
+end subroutine xml_get_element_list
 #endif
 END MODULE oft_local

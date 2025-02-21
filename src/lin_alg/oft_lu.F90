@@ -667,14 +667,13 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
 TYPE(fox_node), POINTER :: current_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 !---
 CHARACTER(LEN=7) :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
-CALL xml_get_element(solver_node,"package",current_node,ierr,1)
+CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN
@@ -928,14 +927,13 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
 TYPE(fox_node), POINTER :: current_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 !---
 CHARACTER(LEN=7) :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
-CALL xml_get_element(solver_node,"package",current_node,ierr,1)
+CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
   CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN

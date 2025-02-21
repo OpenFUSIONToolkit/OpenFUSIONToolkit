@@ -2291,22 +2291,23 @@ CHARACTER(LEN=10) :: coil_ind
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
 TYPE(tw_coil_set), POINTER :: coil_tmp
 TYPE(fox_DOMException) :: xml_ex
-! IF(.NOT.ASSOCIATED(oft_env%xml))RETURN
-! thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
-! group_node=>fox_item(fox_getElementsByTagname(thincurr_group,TRIM(xml_node)),0)
 !---Count coil sets
 ncoils=0
-coil_sets=>fox_getElementsByTagName(group_node,"coil_set",ex=xml_ex)
-IF(fox_getExceptionCode(xml_ex)==0)ncoils=fox_getLength(coil_sets)
+CALL xml_get_element(group_node,"coil_set",coil_sets,ierr)
+IF(ierr==0)ncoils=coil_sets%n
+! coil_sets=>fox_getElementsByTagName(group_node,"coil_set",ex=xml_ex)
+! IF(fox_getExceptionCode(xml_ex)==0)ncoils=fox_getLength(coil_sets)
 ALLOCATE(coils(ncoils))
 IF(ncoils==0)RETURN
 !---Setup coil sets
 DO i=1,ncoils
   coil_tmp=>coils(i)
-  coil_set=>fox_item(coil_sets,i-1)
+  coil_set=>coil_sets%nodes(i)%this !fox_item(coil_sets,i-1)
   !
-  coil_list=>fox_getElementsByTagName(coil_set,"coil")
-  coil_tmp%ncoils=fox_getLength(coil_list)
+  CALL xml_get_element(coil_set,"coil",coil_list,ierr)
+  ! coil_list=>fox_getElementsByTagName(coil_set,"coil")
+  ! coil_tmp%ncoils=fox_getLength(coil_list)
+  coil_tmp%ncoils=coil_list%n
   ALLOCATE(coil_tmp%scales(coil_tmp%ncoils))
   ALLOCATE(coil_tmp%res_per_len(coil_tmp%ncoils))
   ALLOCATE(coil_tmp%radius(coil_tmp%ncoils))
@@ -2341,7 +2342,7 @@ DO i=1,ncoils
   END IF
   ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
   DO j=1,coil_tmp%ncoils
-    coil=>fox_item(coil_list,j-1)
+    coil=>coil_list%nodes(i)%this !fox_item(coil_list,j-1)
     !---Look for HDF5 path
     xml_attr=>fox_getAttributeNode(coil,"path")
     IF(ASSOCIATED(xml_attr))THEN
@@ -2413,7 +2414,9 @@ DO i=1,ncoils
     xml_attr=>fox_getAttributeNode(coil,"radius")
     IF(ASSOCIATED(xml_attr))CALL fox_extractDataContent(xml_attr,coil_tmp%radius(j),num=nread,iostat=ierr)
   END DO
+  IF(ASSOCIATED(coil_list%nodes))DEALLOCATE(coil_list%nodes)
 END DO
+IF(ASSOCIATED(coil_sets%nodes))DEALLOCATE(coil_sets%nodes)
 !---
 IF(oft_debug_print(1))THEN
   WRITE(*,*)
@@ -2605,9 +2608,8 @@ IF(.NOT.ASSOCIATED(self%xml))THEN
 END IF
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
-! thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
 !
-CALL xml_get_element(self%xml,"eta",eta_group,ierr,1)
+CALL xml_get_element(self%xml,"eta",eta_group,ierr)
 CALL fox_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
 IF(nread/=nreg_mesh)CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
 ! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
@@ -2616,7 +2618,7 @@ DO i=1,nreg_mesh
   self%Eta_reg(i)=self%Eta_reg(i)/mu0 ! Convert to magnetic units
 END DO
 ! Load sensor mask
-CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr,1)
+CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)
 IF(ierr==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'
   CALL fox_extractDataContent(sens_node,self%sens_mask,num=nread,iostat=ierr)

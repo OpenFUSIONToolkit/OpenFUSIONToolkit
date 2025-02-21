@@ -559,7 +559,6 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nread,nnodes,ierr
 TYPE(fox_node), POINTER :: pre_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 !---
 integer(i4) :: i,val_level
 CHARACTER(LEN=20) :: solver_type,temp_string
@@ -620,7 +619,7 @@ END SELECT
 !---
 CALL solver%setup_from_xml(solver_node,val_level)
 !---
-CALL xml_get_element(solver_node,"pre",pre_node,ierr,1)
+CALL xml_get_element(solver_node,"pre",pre_node,ierr)
 IF(ierr==0)THEN
   CALL create_pre_xml(solver%pre,pre_node,native_solver,val_level)
 END IF
@@ -758,7 +757,6 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nread,nnodes,ierr
 TYPE(fox_node), POINTER :: solver_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 !---
 integer(i4) :: i,val_level,smoother
 logical :: switch
@@ -813,7 +811,7 @@ END SELECT
 !---
 CALL pre%setup_from_xml(pre_node,val_level)
 !---
-CALL xml_get_element(pre_node,"solver",solver_node,ierr,1)
+CALL xml_get_element(pre_node,"solver",solver_node,ierr)
 IF(ierr==0)THEN
   CALL create_solver_xml(pre%pre,solver_node,val_level)
 END IF
@@ -853,7 +851,7 @@ class(oft_ml_precond), pointer :: this_ml
 LOGICAL :: symmetric,up_present,down_present,coarse_present
 CHARACTER(LEN=20) :: dir_type
 TYPE(fox_node), POINTER :: up_node,down_node,coarse_node,current_node,solver_node
-TYPE(fox_nodelist), POINTER :: current_nodes,solver_nodes
+TYPE(fox_nodelist), POINTER :: current_nodes
 DEBUG_STACK_PUSH
 !---
 symmetric=.FALSE.
@@ -862,35 +860,37 @@ down_present=.FALSE.
 coarse_present=.FALSE.
 IF(oft_debug_print(1))WRITE(*,*)'Creating MG smoother'
 !---
-current_nodes=>fox_getElementsByTagName(pre_node,"smoother")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==0)CALL oft_abort("Object contains no smoother definitions.","create_ml_xml",__FILE__)
-DO i=1,nnodes
-  current_node=>fox_item(current_nodes,i-1)
+CALL xml_get_element(pre_node,"smoother",current_nodes,ierr)
+! current_nodes=>fox_getElementsByTagName(pre_node,"smoother")
+! nnodes=fox_getLength(current_nodes)
+IF(current_nodes%n==0)CALL oft_abort("Object contains no smoother definitions.","create_ml_xml",__FILE__)
+DO i=1,current_nodes%n
+  current_node=>current_nodes%nodes(i)%this !fox_item(current_nodes,i-1)
   CALL fox_extractDataAttribute(current_node,"direction",dir_type,iostat=ierr)
   IF(oft_debug_print(2))WRITE(*,*)'Found smoother: ',dir_type
   SELECT CASE(TRIM(dir_type))
     CASE("up")
       up_present=.TRUE.
-      CALL xml_get_element(current_node,"solver",up_node,ierr,1)
+      CALL xml_get_element(current_node,"solver",up_node,ierr)
     CASE("down")
       down_present=.TRUE.
-      CALL xml_get_element(current_node,"solver",down_node,ierr,1)
+      CALL xml_get_element(current_node,"solver",down_node,ierr)
     CASE("both")
       symmetric=.TRUE.
       up_present=.TRUE.
-      CALL xml_get_element(current_node,"solver",up_node,ierr,1)
+      CALL xml_get_element(current_node,"solver",up_node,ierr)
       EXIT
     CASE DEFAULT
       CALL oft_abort("Invalid smoother direction.","create_ml_xml",__FILE__)
   END SELECT
 END DO
+IF(ASSOCIATED(current_nodes%nodes))DEALLOCATE(current_nodes%nodes)
 !---
-CALL xml_get_element(pre_node,"coarse",current_node,ierr,1)
+CALL xml_get_element(pre_node,"coarse",current_node,ierr)
 IF(ierr==0)THEN
   IF(oft_debug_print(2))WRITE(*,*)'Found coarse solver'
   coarse_present=.TRUE.
-  CALL xml_get_element(current_node,"solver",coarse_node,ierr,1)
+  CALL xml_get_element(current_node,"solver",coarse_node,ierr)
 END IF
 !---Set smoother
 ALLOCATE(oft_ml_precond::pre)

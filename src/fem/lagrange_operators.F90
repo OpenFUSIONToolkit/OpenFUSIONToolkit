@@ -2757,7 +2757,6 @@ TYPE(fox_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
 TYPE(fox_node), POINTER :: lag_node
-TYPE(fox_nodelist), POINTER :: current_nodes
 #endif
 DEBUG_STACK_PUSH
 !---
@@ -2803,8 +2802,8 @@ CALL oft_lag_set_level(levin)
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  CALL xml_get_element(oft_env%xml,"lagrange",lag_node,ierr,1)
-  IF(ierr==0)CALL xml_get_element(lag_node,"jmlb",pre_node,ierr,1)
+  CALL xml_get_element(oft_env%xml,"lagrange",lag_node,ierr)
+  IF(ierr==0)CALL xml_get_element(lag_node,"jmlb",pre_node,ierr)
 END IF
 #endif
 !---------------------------------------------------------------------------
