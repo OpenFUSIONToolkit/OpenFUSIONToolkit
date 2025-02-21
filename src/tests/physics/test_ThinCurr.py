@@ -5,6 +5,7 @@ import time
 import multiprocessing
 import pytest
 import numpy as np
+import h5py
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
@@ -267,17 +268,19 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
                 phi = i*phi_fac
                 coil_string += '{0:.12E} {1:.12E} {2:.12E}\n'.format(R*np.cos(phi), R*np.sin(phi), Z)
             coil_string += "</coil>\n"
-        coil_string += "</coil_set></icoils>"
+        coil_string += "</coil_set></icoils>\n"
     if vcoils is not None:
         coil_string += '<vcoils>\n'
-        for pcoil in vcoils:
-            coil_string += '<coil_set type="2" res_per_len="1.256637E-5" radius="1.E-2"><coil npts="{0}">\n'.format(nPhi)
-            R = pcoil[0]; Z = pcoil[1]
-            for i in range(nPhi):
-                phi = i*phi_fac
-                coil_string += '{0:.12E} {1:.12E} {2:.12E}\n'.format(R*np.cos(phi), R*np.sin(phi), Z)
-            coil_string += "</coil></coil_set>\n"
-        coil_string += "</vcoils>"
+        with h5py.File('test_vcoils.h5','w') as h5_file:
+            for j, pcoil in enumerate(vcoils):
+                coil_string += '<coil_set type="2" res_per_len="1.256637E-5" radius="1.E-2"><coil path="test_vcoils.h5:vcoil_{0:04d}"/></coil_set>\n'.format(j+1)
+                R = pcoil[0]; Z = pcoil[1]
+                vcoil_pts = []
+                for i in range(nPhi):
+                    phi = i*phi_fac
+                    vcoil_pts.append([R*np.cos(phi), R*np.sin(phi), Z])
+                h5_file.create_dataset('vcoil_{0:04d}'.format(j+1), data=np.array(vcoil_pts), dtype='f8')
+        coil_string += "</vcoils>\n"
     with open('oft_in.xml','w+') as fid:
         fid.write(oft_in_xml_template_template.format(coil_string, eta*mu0))
     # Create flux loop definition file for sensors

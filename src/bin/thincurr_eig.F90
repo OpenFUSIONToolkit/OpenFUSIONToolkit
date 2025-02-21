@@ -113,7 +113,7 @@ ELSE
 END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL tw_sim%xdmf%setup("ThinCurr")
+CALL tw_sim%xdmf%setup("thincurr")
 CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------

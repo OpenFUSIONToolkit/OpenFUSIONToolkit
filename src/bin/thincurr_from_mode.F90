@@ -67,7 +67,7 @@ ALLOCATE(tw_sim%closures(tw_sim%nclosures))
 tw_sim%closures(1)=1 !INT(tw_sim%mesh%nc/2.d0,4)
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL tw_sim%xdmf%setup("ThinCurr")
+CALL tw_sim%xdmf%setup("thincurr")
 CALL tw_sim%mesh%setup_io(tw_sim%xdmf,1)
 !---Compute face mutuals
 CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat)
