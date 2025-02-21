@@ -2360,7 +2360,7 @@ DO i=1,ncoils
         WRITE(coil_ind,'(I4,2X,I4)')i,j
         CALL oft_abort('Failed to read HDF5 data sizes for coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
-      IF(dim_sizes(2)/=3)THEN
+      IF(dim_sizes(1)/=3)THEN
         WRITE(coil_ind,'(I4,2X,I4)')i,j
         CALL oft_abort('Incorrect first dimension of HDF5 dataset for coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
