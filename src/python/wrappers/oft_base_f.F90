@@ -12,7 +12,7 @@
 !---------------------------------------------------------------------------
 MODULE oft_base_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
-    c_f_pointer, c_bool, c_null_ptr
+    c_f_pointer, c_bool, c_null_ptr, c_funptr, c_associated, c_f_procpointer
 USE oft_base
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_type, ONLY: mesh
@@ -50,15 +50,17 @@ END SUBROUTINE copy_string_rev
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE oftpy_init(nthreads,input_file,slens) BIND(C,NAME="oftpy_init")
+SUBROUTINE oftpy_init(nthreads,input_file,slens,abort_fun) BIND(C,NAME="oftpy_init")
 INTEGER(c_int), VALUE, INTENT(in) :: nthreads !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: input_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: slens !< String lengths
+TYPE(c_funptr), VALUE, INTENT(in) :: abort_fun !< Abort callback for Python
 INTEGER(4), POINTER, DIMENSION(:) :: slens_tmp
 IF(oft_env%ifile/='none')RETURN
 CALL copy_string_rev(input_file,oft_env%ifile)
 CALL oft_init(nthreads)
 CALL c_f_pointer(slens, slens_tmp, [4])
+IF(c_associated(abort_fun))CALL c_f_procpointer(abort_fun,oft_abort_cb)
 slens_tmp=[OFT_MPI_PLEN,OFT_SLEN,OFT_PATH_SLEN,OFT_ERROR_SLEN]
 END SUBROUTINE oftpy_init
 !------------------------------------------------------------------------------

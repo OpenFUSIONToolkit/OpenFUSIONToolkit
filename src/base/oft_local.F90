@@ -150,6 +150,33 @@ END TYPE oft_timer
 PRIVATE oft_timer_start, oft_timer_elapsed, oft_timer_intelapsed, oft_timer_timeout
 CONTAINS
 !------------------------------------------------------------------------------
+!> Returns the corresponding lowercase letter, if `c` is an uppercase
+!! ASCII character, otherwise `c` itself.
+!!
+!! Reproduced from the [Fortran stdlib](https://stdlib.fortran-lang.org/index.html)
+!------------------------------------------------------------------------------
+ELEMENTAL FUNCTION char_to_lower(c) result(t)
+CHARACTER(len=1), INTENT(in) :: c !< Input character
+CHARACTER(len=1) :: t !< Lowercase version
+INTEGER(i4), PARAMETER :: wp=iachar('a')-iachar('A')
+INTEGER(i4), PARAMETER :: BA=iachar('A')
+INTEGER(i4), PARAMETER :: BZ=iachar('Z')
+INTEGER(i4) :: k
+k = ichar(c) 
+IF(k>=BA.and.k<=BZ)k = k + wp 
+t = char(k)
+END FUNCTION char_to_lower
+!------------------------------------------------------------------------------
+!> Converts a string to all lowercase characters
+!------------------------------------------------------------------------------
+SUBROUTINE string_to_lower(c)
+CHARACTER(len=*), INTENT(inout) :: c !< Input/output string
+INTEGER(i4) :: i
+DO i=1,LEN(c)
+  c(i:i)=char_to_lower(c(i:i))
+END DO
+END SUBROUTINE string_to_lower
+!------------------------------------------------------------------------------
 !> Start or reset timer
 !!
 !! @param[in,out] self Calling timer class
