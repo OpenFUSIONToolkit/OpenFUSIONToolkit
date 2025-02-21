@@ -17,7 +17,7 @@
 !! @ingroup doxy_oft_lin_alg
 !---------------------------------------------------------------------------
 MODULE oft_lu
-USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_double, c_ptr, c_null_ptr
+USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr
 USE oft_local
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_graph
@@ -63,13 +63,15 @@ TYPE :: native_ilu_struc
   REAL(r8), POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
 END TYPE native_ilu_struc
 !---------------------------------------------------------------------------
-! TYPE superlu_struc
-!---------------------------------------------------------------------------
 !> SuperLU solver information
 !---------------------------------------------------------------------------
 TYPE :: superlu_struc
   INTEGER(i4) :: col_perm = -1 !< Column permutation to use (-1 for default)
+#ifdef OFT_MPI_F08
+  TYPE(mpi_comm) :: comm = MPI_COMM_NULL !< Private MPI communicator for SuperLU-DIST
+#else
   INTEGER(i4) :: comm = MPI_COMM_NULL !< Private MPI communicator for SuperLU-DIST
+#endif
   TYPE(C_PTR) :: f_factors = C_NULL_PTR !< SuperLU factors pointer
   TYPE(C_PTR) :: grid_handle = C_NULL_PTR !< SuperLU-DIST processor grid pointer
   INTEGER(i4), POINTER, DIMENSION(:) :: kr => NULL() !< Row pointer (0-based indices)
@@ -77,8 +79,6 @@ TYPE :: superlu_struc
   INTEGER(i4), POINTER, DIMENSION(:) :: csc_map => NULL() !< Col pointer (0-based indices)
   REAL(r8), POINTER, DIMENSION(:) :: csc_vals => NULL() !< Col pointer (0-based indices)
 END TYPE superlu_struc
-!---------------------------------------------------------------------------
-! TYPE pardiso_struc
 !---------------------------------------------------------------------------
 !> Pardiso solver information
 !---------------------------------------------------------------------------
@@ -91,26 +91,25 @@ TYPE :: pardiso_struc
   TYPE(C_PTR) :: f_factors = C_NULL_PTR !< ILU0 factors pointer
 END TYPE pardiso_struc
 !---------------------------------------------------------------------------
-! TYPE oft_lusolver
-!---------------------------------------------------------------------------
 !> LU solver class
 !---------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
-  INTEGER(i4) :: nrhs = 1
+  LOGICAL(kind=c_bool) :: iter_refine = .FALSE. !< Perform iterative refinement
+  INTEGER(i4) :: nrhs = 1 !< Number of right hand sides
   INTEGER(i4), POINTER, DIMENSION(:) :: ipiv => NULL() !< Row pivot array ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: atmp => NULL() !< Local dense matrix ("lapack" only)
-  REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL()
+  REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
   CHARACTER(LEN=7) :: package = DEF_LU_PACK !< Factorization package
 #if defined( HAVE_SUPERLU ) || defined( HAVE_SUPERLU_DIST ) || defined( HAVE_UMFPACK )
-  TYPE(superlu_struc) :: superlu_struct
+  TYPE(superlu_struc) :: superlu_struct !< SuperLU solver information
 #endif
 #ifdef HAVE_MKL
-  TYPE(pardiso_struc) :: pardiso_struct
+  TYPE(pardiso_struc) :: pardiso_struct !< MKL/PARDISO solver information
 #endif
 #ifdef HAVE_MUMPS
-  TYPE(DMUMPS_STRUC) :: mumps_struct
+  TYPE(DMUMPS_STRUC) :: mumps_struct !< MUMPS solver information
 #endif
 CONTAINS
   !> Solve linear system
@@ -130,15 +129,15 @@ END TYPE oft_lusolver
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
-  INTEGER(i4) :: nrhs = 1
-  REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL()
+  INTEGER(i4) :: nrhs = 1 !< Number of right hand sides
+  REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
   CHARACTER(LEN=7) :: package = DEF_ILU_PACK !< Factorization package
-  TYPE(native_ilu_struc) :: native_struct
+  TYPE(native_ilu_struc) :: native_struct !< Data for native iLU solver
 #if defined( HAVE_SUPERLU )
-  TYPE(superlu_struc) :: superlu_struct
+  TYPE(superlu_struc) :: superlu_struct !< SuperLU solver information
 #endif
 #ifdef HAVE_MKL
-  TYPE(pardiso_struc) :: pardiso_struct
+  TYPE(pardiso_struc) :: pardiso_struct !< MKL/PARDISO solver information
 #endif
 CONTAINS
   !> Solve linear system
@@ -155,214 +154,143 @@ END TYPE oft_ilusolver
 INTERFACE
 #ifdef HAVE_SUPERLU
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_superlu_dgssv
-!---------------------------------------------------------------------------
 !> Interface to dgssv from SuperLU
-!!
-!! @param[in,out] iopt Operation control (1 -> performs LU decomposition for the
-!! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
-!! same non-zero pattern, 4 -> free all the storage in the end)
-!! @param[in,out] n Number of rows
-!! @param[in,out] nnz Number of non-zeros
-!! @param[in,out] nrhs Number of RHS to solve (nrhs=1 only)
-!! @param[in,out] values Matrix values in CRS format [nnz]
-!! @param[in,out] colind Column indices in CRS format [nnz]
-!! @param[in,out] rowptr Row pointer into colind [n+1]
-!! @param[in,out] b Right hand side -> overwritten with solution [n]
-!! @param[in,out] ldb Lowest dimension of vector `b` [n]
-!! @param[in,out] f_factors Pointer to SuperLU internal data storage
-!! @param[in,out] col_perm Column permutation method (0 -> natural ordering,
-!! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
-!! for unsymmetric matrices)
-!! @param[in,out] info Solver return status (not currently used)
 !---------------------------------------------------------------------------
   SUBROUTINE oft_superlu_dgssv(iopt,n,nnz,nrhs,values,colind, &
-    rowptr,b,ldb,f_factors,col_perm,info) BIND(C,NAME="oft_superlu_dgssv_c")
-  IMPORT c_int, c_double, c_ptr
-  INTEGER(c_int), INTENT(inout) :: iopt
-  INTEGER(c_int), INTENT(inout) :: n
-  INTEGER(c_int), INTENT(inout) :: nnz
-  INTEGER(c_int), INTENT(inout) :: nrhs
-  REAL(c_double), DIMENSION(nnz), INTENT(inout) :: values
-  INTEGER(c_int), DIMENSION(nnz), INTENT(inout) :: colind
-  INTEGER(c_int), DIMENSION(n+1), INTENT(inout) :: rowptr
-  REAL(c_double), DIMENSION(n), INTENT(inout) :: b
-  INTEGER(c_int), INTENT(inout) :: ldb
-  TYPE(c_ptr), INTENT(inout) :: f_factors
-  INTEGER(c_int), VALUE, INTENT(in) :: col_perm
-  INTEGER(c_int), INTENT(out) :: info
+    rowptr,b,ldb,f_factors,col_perm,iter_refine,info) BIND(C,NAME="oft_superlu_dgssv_c")
+  IMPORT c_bool, c_int, c_double, c_ptr
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> performs LU decomposition for the
+  !! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
+  !! same non-zero pattern, 4 -> free all the storage in the end)
+  INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: nnz !< Number of non-zeros
+  INTEGER(c_int), VALUE, INTENT(in) :: nrhs !< Number of RHS to solve (nrhs=1 only)
+  REAL(c_double), DIMENSION(nnz), INTENT(in) :: values !< Matrix values in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(nnz), INTENT(in) :: colind !< Column indices in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind [n+1]
+  REAL(c_double), DIMENSION(n), INTENT(inout) :: b !< Right hand side -> overwritten with solution [n]
+  INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of vector `b` [n]
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to SuperLU internal data storage
+  INTEGER(c_int), VALUE, INTENT(in) :: col_perm !< Column permutation method (0 -> natural ordering,
+  !! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
+  !! for unsymmetric matrices)
+  LOGICAL(c_bool), VALUE, INTENT(in) :: iter_refine !< Perform iterative refinement?
+  INTEGER(c_int), INTENT(out) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dgssv
 !---------------------------------------------------------------------------
-!> Interface to dgsisx (ILUT) from SuperLU
-!!
-!! @param[in,out] iopt Operation control (1 -> performs LU decomposition for the
-!! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
-!! same non-zero pattern, 4 -> free all the storage in the end)
-!! @param[in,out] n Number of rows
-!! @param[in,out] nnz Number of non-zeros
-!! @param[in,out] nrhs Number of RHS to solve (nrhs=1 only)
-!! @param[in,out] values Matrix values in CRS format [nnz]
-!! @param[in,out] colind Column indices in CRS format [nnz]
-!! @param[in,out] rowptr Row pointer into colind [n+1]
-!! @param[in,out] b Right hand side -> overwritten with solution [n]
-!! @param[in,out] ldb Lowest dimension of vector `b` [n]
-!! @param[in,out] f_factors Pointer to SuperLU internal data storage
-!! @param[in,out] col_perm Column permutation method (0 -> natural ordering,
-!! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
-!! for unsymmetric matrices)
-!! @param[in,out] info Solver return status (not currently used)
+!> Interface to dgsisx (iLUT) from SuperLU
 !---------------------------------------------------------------------------
   SUBROUTINE oft_superlu_dgsisx(iopt,n,nnz,nrhs,values,colind, &
     rowptr,b,ldb,f_factors,col_perm,fill_tol,info) BIND(C,NAME="oft_superlu_dgsisx_c")
   IMPORT c_int, c_double, c_ptr
-  INTEGER(c_int), INTENT(inout) :: iopt
-  INTEGER(c_int), INTENT(inout) :: n
-  INTEGER(c_int), INTENT(inout) :: nnz
-  INTEGER(c_int), INTENT(inout) :: nrhs
-  REAL(c_double), DIMENSION(nnz), INTENT(inout) :: values
-  INTEGER(c_int), DIMENSION(nnz), INTENT(inout) :: colind
-  INTEGER(c_int), DIMENSION(n+1), INTENT(inout) :: rowptr
-  REAL(c_double), DIMENSION(n), INTENT(inout) :: b
-  INTEGER(c_int), INTENT(inout) :: ldb
-  TYPE(c_ptr), INTENT(inout) :: f_factors
-  INTEGER(c_int), VALUE, INTENT(in) :: col_perm
-  REAL(c_double), VALUE, INTENT(in) :: fill_tol
-  INTEGER(c_int), INTENT(out) :: info
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> performs LU decomposition for the
+  !! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
+  !! same non-zero pattern, 4 -> free all the storage in the end)
+  INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: nnz !< Number of non-zeros
+  INTEGER(c_int), VALUE, INTENT(in) :: nrhs !< Number of RHS to solve (nrhs=1 only)
+  REAL(c_double), DIMENSION(nnz), INTENT(in) :: values !< Matrix values in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(nnz), INTENT(in) :: colind !< Column indices in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind [n+1]
+  REAL(c_double), DIMENSION(n), INTENT(inout) :: b !< Right hand side -> overwritten with solution [n]
+  INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of vector `b` [n]
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to SuperLU internal data storage
+  INTEGER(c_int), VALUE, INTENT(in) :: col_perm !< Column permutation method (0 -> natural ordering,
+  !! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
+  !! for unsymmetric matrices)
+  REAL(c_double), VALUE, INTENT(in) :: fill_tol !< Fill tolerance for tresholded iLU
+  INTEGER(c_int), INTENT(out) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dgsisx
 #endif
 #ifdef HAVE_SUPERLU_DIST
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_superlu_dist_dgssv
-!---------------------------------------------------------------------------
 !> Interface to dgssv from SuperLU-DIST (local only)
-!!
-!! @param[in,out] iopt Operation control (1 -> performs LU decomposition for the
-!! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
-!! same non-zero pattern, 4 -> free all the storage in the end)
-!! @param[in] n Number of rows
-!! @param[in] nnz Number of non-zeros
-!! @param[in] nrhs Number of RHS to solve (nrhs=1 only)
-!! @param[in] values Matrix values in CRS format [nnz]
-!! @param[in] colind Column indices in CRS format [nnz]
-!! @param[in] rowptr Row pointer into colind [n+1]
-!! @param[in,out] b Right hand side -> overwritten with solution [n]
-!! @param[in] ldb Lowest dimension of vector `b` [n]
-!! @param[in,out] grid_handle Pointer to SuperLU-DIST processor grid
-!! @param[out] berr Backward error of each right-hand side
-!! @param[in,out] f_factors Pointer to SuperLU-DIST internal data storage
-!! @param[in] col_perm Column permutation method (0 -> natural ordering,
-!! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
-!! for unsymmetric matrices)
-!! @param[out] info Solver return status (not currently used)
 !---------------------------------------------------------------------------
   SUBROUTINE oft_superlu_dist_dgssv(iopt,n,nnz,nrhs,values,colind, &
-    rowptr,b,ldb,grid_handle,f_factors,col_perm,info) BIND(C,NAME="oft_superlu_dist_dgssv_c")
-  IMPORT c_int, c_double, c_ptr
-  INTEGER(c_int), INTENT(inout) :: iopt
-  INTEGER(c_int), INTENT(inout) :: n
-  INTEGER(c_int), INTENT(inout) :: nnz
-  INTEGER(c_int), INTENT(inout) :: nrhs
-  REAL(c_double), DIMENSION(nnz), INTENT(inout) :: values
-  INTEGER(c_int), DIMENSION(nnz), INTENT(inout) :: colind
-  INTEGER(c_int), DIMENSION(n+1), INTENT(inout) :: rowptr
-  REAL(c_double), DIMENSION(n), INTENT(inout) :: b
-  INTEGER(c_int), INTENT(inout) :: ldb
-  TYPE(c_ptr), INTENT(inout) :: grid_handle
-  TYPE(c_ptr), INTENT(inout) :: f_factors
-  INTEGER(c_int), INTENT(inout) :: col_perm
-  INTEGER(c_int), INTENT(inout) :: info
+    rowptr,b,ldb,grid_handle,f_factors,col_perm,iter_refine,info) BIND(C,NAME="oft_superlu_dist_dgssv_c")
+  IMPORT c_bool, c_int, c_double, c_ptr
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> performs LU decomposition for the
+  !! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
+  !! same non-zero pattern, 4 -> free all the storage in the end)
+  INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: nnz !< Number of non-zeros
+  INTEGER(c_int), VALUE, INTENT(in) :: nrhs !< Number of RHS to solve (nrhs=1 only)
+  REAL(c_double), DIMENSION(nnz), INTENT(in) :: values !< Matrix values in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(nnz), INTENT(in) :: colind !< Column indices in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind [n+1]
+  REAL(c_double), DIMENSION(n), INTENT(inout) :: b !< Right hand side -> overwritten with solution [n]
+  INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of vector `b` [n]
+  TYPE(c_ptr), INTENT(inout) :: grid_handle !< Pointer to SuperLU-DIST communication object
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to SuperLU-DIST internal data storage
+  LOGICAL(c_bool), VALUE, INTENT(in) :: iter_refine !< Perform iterative refinement?
+  INTEGER(c_int), VALUE, INTENT(in) :: col_perm !< Column permutation method (0 -> natural ordering,
+  !! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
+  !! for unsymmetric matrices)
+  INTEGER(c_int), INTENT(inout) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dist_dgssv
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_superlu_dist_slugrid
-!---------------------------------------------------------------------------
 !> Interface to dgssv from SuperLU
-!!
-!! @param[in,out] iopt Operation control (1 -> Setup grid, 2 -> Clear/Release grid)
-!! @param[in] slu_comm MPI communicator for processor grid (must be MPI_COMM_SELF)
-!! @param[in] nprow Number of rows
-!! @param[in] npcol Number of non-zeros
-!! @param[in,out] grid_handle Pointer to SuperLU-DIST processor grid
-!! @param[out] info Solver return status (not currently used)
 !---------------------------------------------------------------------------
   SUBROUTINE oft_superlu_dist_slugrid(iopt,slu_comm,nprow,npcol,grid_handle,info) BIND(C,NAME="oft_superlu_dist_slugrid_c")
   IMPORT c_int, c_double, c_ptr
-  INTEGER(c_int), INTENT(inout) :: iopt
+#ifdef OFT_MPI_F08
+  IMPORT mpi_comm
+#endif
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> Setup grid, 2 -> Clear/Release grid)
+#ifdef OFT_MPI_F08
+  TYPE(mpi_comm), INTENT(in) :: slu_comm !< MPI communicator for processor grid (must be MPI_COMM_SELF)
+#else
   INTEGER(c_int), INTENT(in) :: slu_comm
-  INTEGER(c_int), INTENT(inout) :: nprow
-  INTEGER(c_int), INTENT(inout) :: npcol
-  TYPE(c_ptr), INTENT(inout) :: grid_handle
-  INTEGER(c_int), INTENT(inout) :: info
+#endif
+  INTEGER(c_int), VALUE, INTENT(in) :: nprow !< Number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: npcol !< Number of non-zeros
+  TYPE(c_ptr), INTENT(inout) :: grid_handle !< Pointer to SuperLU-DIST processor grid
+  INTEGER(c_int), INTENT(inout) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dist_slugrid
 #endif
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_umfpack_dgssv
-!---------------------------------------------------------------------------
 !> Interface to dgssv from UMFPACK
-!!
-!! @param[in,out] iopt Operation control (1 -> performs LU decomposition for the
-!! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
-!! same non-zero pattern, 4 -> free all the storage in the end)
-!! @param[in,out] n Number of rows
-!! @param[in,out] nnz Number of non-zeros
-!! @param[in,out] nrhs Number of RHS to solve (nrhs=1 only)
-!! @param[in,out] values Matrix values in CRS format [nnz]
-!! @param[in,out] colind Column indices in CRS format [nnz]
-!! @param[in,out] rowptr Row pointer into colind [n+1]
-!! @param[in,out] b Right hand side -> overwritten with solution [n]
-!! @param[in,out] ldb Lowest dimension of vector `b` [n]
-!! @param[in,out] f_factors Pointer to UMFPACK internal data storage
-!! @param[in,out] col_perm Column permutation method (0 -> natural ordering,
-!! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
-!! for unsymmetric matrices)
-!! @param[in,out] info Solver return status (not currently used)
 !---------------------------------------------------------------------------
 #ifdef HAVE_UMFPACK
   SUBROUTINE oft_umfpack_dgssv(iopt,n,nnz,nrhs,values,colind, &
-    rowptr,b,ldb,f_factors,col_perm,info) BIND(C,NAME="oft_umfpack_dgssv_c")
-  IMPORT c_int, c_double, c_ptr
-  INTEGER(c_int), INTENT(inout) :: iopt
-  INTEGER(c_int), INTENT(inout) :: n
-  INTEGER(c_int), INTENT(inout) :: nnz
-  INTEGER(c_int), INTENT(inout) :: nrhs
-  REAL(c_double), DIMENSION(nnz), INTENT(inout) :: values
-  INTEGER(c_int), DIMENSION(nnz), INTENT(inout) :: colind
-  INTEGER(c_int), DIMENSION(n+1), INTENT(inout) :: rowptr
-  REAL(c_double), DIMENSION(n), INTENT(inout) :: b
-  INTEGER(c_int), INTENT(inout) :: ldb
-  TYPE(c_ptr), INTENT(inout) :: f_factors
-  INTEGER(c_int), INTENT(inout) :: col_perm
-  INTEGER(c_int), INTENT(inout) :: info
+    rowptr,b,ldb,f_factors,col_perm,iter_refine,info) BIND(C,NAME="oft_umfpack_dgssv_c")
+  IMPORT c_bool, c_int, c_double, c_ptr
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !<  Operation control (1 -> performs LU decomposition for the
+  !! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
+  !! same non-zero pattern, 4 -> free all the storage in the end)
+  INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: nnz !< Number of non-zeros
+  INTEGER(c_int), VALUE, INTENT(in) :: nrhs !< Number of RHS to solve (nrhs=1 only)
+  REAL(c_double), DIMENSION(nnz), INTENT(in) :: values !< Matrix values in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(nnz), INTENT(in) :: colind !< Column indices in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind [n+1]
+  REAL(c_double), DIMENSION(n), INTENT(inout) :: b !< Right hand side -> overwritten with solution [n]
+  INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of vector `b` [n]
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to UMFPACK internal data storage
+  INTEGER(c_int), VALUE, INTENT(in) :: col_perm !< Column permutation method (0 -> natural ordering,
+  !! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
+  !! for unsymmetric matrices)
+  LOGICAL(c_bool), VALUE, INTENT(in) :: iter_refine !< Perform iterative refinement?
+  INTEGER(c_int), INTENT(inout) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_umfpack_dgssv
 #endif
 #ifdef HAVE_MKL
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_mkl_ilu
-!---------------------------------------------------------------------------
 !> Interface to MKL iLU0 solver
-!!
-!! @param[in,out] iopt Operation control (1 -> performs iLU0 decomposition for the
-!! first time, 2 -> performs triangular solve, 3 -> free all the storage in the end)
-!! @param[in,out] n Number of rows
-!! @param[in,out] nnz Number of non-zeros
-!! @param[in,out] values Matrix values in CRS format [nnz]
-!! @param[in,out] colind Column indices in CRS format [nnz]
-!! @param[in,out] rowptr Row pointer into colind [n+1]
-!! @param[in,out] b Right hand side -> overwritten with solution [n]
-!! @param[in,out] f_factors Pointer to MKL internal data storage
-!! @param[in,out] info Solver return status (not currently used)
 !---------------------------------------------------------------------------
   SUBROUTINE oft_mkl_ilu(iopt,n,nnz,values,colind, &
     rowptr,b,f_factors,info) BIND(C,NAME="oft_mkl_ilu_c")
   IMPORT c_int, c_double, c_ptr
-  INTEGER(c_int), INTENT(in) :: iopt
-  INTEGER(c_int), INTENT(in) :: n
-  INTEGER(c_int), INTENT(in) :: nnz
-  REAL(c_double), DIMENSION(nnz), INTENT(inout) :: values
-  INTEGER(c_int), DIMENSION(nnz), INTENT(inout) :: colind
-  INTEGER(c_int), DIMENSION(n+1), INTENT(inout) :: rowptr
-  REAL(c_double), DIMENSION(n), INTENT(inout) :: b
-  TYPE(c_ptr), INTENT(inout) :: f_factors
-  INTEGER(c_int), INTENT(inout) :: info
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> performs iLU0 decomposition for the
+  !! first time, 2 -> performs triangular solve, 3 -> free all the storage in the end)
+  INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: nnz !< Number of non-zeros
+  REAL(c_double), DIMENSION(nnz), INTENT(in) :: values !< Matrix values in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(nnz), INTENT(in) :: colind !< Column indices in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind [n+1]
+  REAL(c_double), DIMENSION(n), INTENT(inout) :: b !< Right hand side -> overwritten with solution [n]
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to MKL internal data storage
+  INTEGER(c_int), INTENT(inout) :: info !< Pointer to MKL internal data storage
   END SUBROUTINE oft_mkl_ilu
 #endif
 END INTERFACE
@@ -376,18 +304,12 @@ INTERFACE lapack_cholesky
 END INTERFACE lapack_cholesky
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE: convert_csr_to_csc
-!---------------------------------------------------------------------------
 !> Convert csr graph to csc storage
-!!
-!! @param[in,out] csr_graph Original graph in csr format
-!! @param[in,out] csc_graph Resulting graph in csc format
-!! @param[in,out] map Mapping from csr entries to csc entries
 !---------------------------------------------------------------------------
 SUBROUTINE convert_csr_to_csc(csr_graph,csc_graph,map)
-TYPE(oft_graph), INTENT(inout) :: csr_graph
-TYPE(oft_graph), INTENT(inout) :: csc_graph
-INTEGER(i4), INTENT(inout) :: map(:)
+TYPE(oft_graph), INTENT(inout) :: csr_graph !< Original graph in csr format
+TYPE(oft_graph), INTENT(inout) :: csc_graph !< Resulting graph in csc format
+INTEGER(i4), INTENT(inout) :: map(:) !< Mapping from csr entries to csc entries
 INTEGER(i4) :: i,j,k
 INTEGER(i4), POINTER :: kr_tmp(:)
 DEBUG_STACK_PUSH
@@ -426,16 +348,12 @@ DEALLOCATE(kr_tmp)
 DEBUG_STACK_POP
 END SUBROUTINE convert_csr_to_csc
 !---------------------------------------------------------------------------
-! SUBROUTINE: lusolver_apply
-!---------------------------------------------------------------------------
 !> Solve a linear system using a direct solve
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE lusolver_apply(self,u,g)
 CLASS(oft_lusolver), INTENT(inout) :: self
-CLASS(oft_vector), INTENT(inout) :: u,g
+CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
+CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
@@ -516,7 +434,11 @@ IF(.NOT.self%initialized)THEN
     CASE("mumps")
 #ifdef HAVE_MUMPS
       self%mumps_struct%job = -1
+#ifdef OFT_MPI_F08
+      self%mumps_struct%comm = MPI_COMM_SELF%MPI_VAL
+#else
       self%mumps_struct%comm = MPI_COMM_SELF
+#endif
       self%mumps_struct%sym = 0
       self%mumps_struct%par = 1
       CALL dmumps(self%mumps_struct)
@@ -562,7 +484,7 @@ SELECT CASE(TRIM(self%package))
 #endif
       CALL oft_superlu_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
-        self%superlu_struct%f_factors,self%superlu_struct%col_perm,ierr)
+        self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
       IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
 #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
       !$omp end critical (superlu_solve)
@@ -576,7 +498,7 @@ SELECT CASE(TRIM(self%package))
 #endif
     CALL oft_superlu_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
-      self%superlu_struct%f_factors,self%superlu_struct%col_perm,ierr)
+      self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
     IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
 #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
     !$omp end critical (superlu_solve)
@@ -601,24 +523,24 @@ CASE("superd")
         mode=1
       END IF
       self%superlu_struct%csc_vals=mat_vals(self%superlu_struct%csc_map)
-!      !$omp critical (superlu_solve)
+      !!$omp critical (superlu_solve)
       CALL oft_superlu_dist_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
         self%superlu_struct%csc_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
         self%superlu_struct%grid_handle,self%superlu_struct%f_factors, &
-        self%superlu_struct%col_perm,ierr)
+        self%superlu_struct%col_perm,self%iter_refine,ierr)
+      !!$omp end critical (superlu_solve)
       IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
-!      !$omp end critical (superlu_solve)
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
     END IF
     mode=2
-!    !$omp critical (superlu_solve)
+    !!$omp critical (superlu_solve)
     CALL oft_superlu_dist_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
       self%superlu_struct%csc_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
       self%superlu_struct%grid_handle,self%superlu_struct%f_factors, &
-      self%superlu_struct%col_perm,ierr)
+      self%superlu_struct%col_perm,self%iter_refine,ierr)
+    !!$omp end critical (superlu_solve)
     IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
-!    !$omp end critical (superlu_solve)
 #else
     CALL oft_abort('OFT not compiled with SuperLU-DIST','lusolver_apply',__FILE__)
 #endif
@@ -630,7 +552,7 @@ CASE("superd")
       !$omp critical (umfpack_solve)
       CALL oft_umfpack_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
-        self%superlu_struct%f_factors,self%superlu_struct%col_perm,ierr)
+        self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
       IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
       !$omp end critical (umfpack_solve)
       self%refactor=.FALSE.
@@ -640,7 +562,7 @@ CASE("superd")
     !$omp critical (umfpack_solve)
     CALL oft_umfpack_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
-      self%superlu_struct%f_factors,self%superlu_struct%col_perm,ierr)
+      self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
     IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
     !$omp end critical (umfpack_solve)
 #else
@@ -664,6 +586,11 @@ CASE("superd")
       self%update_graph=.FALSE.
     END IF
     mode=33
+    IF(self%iter_refine)THEN
+      self%pardiso_struct%iparm(8)=0
+    ELSE
+      self%pardiso_struct%iparm(8)=1
+    END IF
     CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
       mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
       nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
@@ -721,30 +648,21 @@ DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE lusolver_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: lusolver_update
-!---------------------------------------------------------------------------
 !> Update solver after changing settings/operators
-!!
-!! @param[in] new_pattern Update matrix pattern (optional)
 !---------------------------------------------------------------------------
 recursive subroutine lusolver_update(self,new_pattern)
 class(oft_lusolver), intent(inout) :: self
-LOGICAL, optional, intent(in) :: new_pattern
+LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
 self%refactor=.TRUE.
 IF(PRESENT(new_pattern))self%update_graph=new_pattern
 end subroutine lusolver_update
 !---------------------------------------------------------------------------
-! SUBROUTINE: lusolver_setup_xml
-!---------------------------------------------------------------------------
 !> Setup solver from XML definition
-!!
-!! @param[in] solver_node XML node containing solver definition
-!! @param[in] level Leve in MG hierarchy (optional)
 !---------------------------------------------------------------------------
 subroutine lusolver_setup_xml(self,solver_node,level)
 CLASS(oft_lusolver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+TYPE(fox_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
@@ -775,8 +693,6 @@ CALL oft_abort('OFT not compiled with xml support.','lusolver_setup_xml',__FILE_
 #endif
 end subroutine lusolver_setup_xml
 !---------------------------------------------------------------------------
-! FUNCTION: lusolver_check_thread
-!---------------------------------------------------------------------------
 !> Check for thread safety
 !---------------------------------------------------------------------------
 recursive function lusolver_check_thread(self) result(thread_safe)
@@ -786,8 +702,6 @@ thread_safe=.TRUE.
 IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
 IF(self%package(1:6)=='superd')thread_safe=.FALSE.
 end function lusolver_check_thread
-!---------------------------------------------------------------------------
-! SUBROUTINE: lusolver_delete
 !---------------------------------------------------------------------------
 !> Destroy direct solver and deallocate all internal storage
 !---------------------------------------------------------------------------
@@ -808,13 +722,13 @@ SELECT CASE(TRIM(self%package))
   CASE("super")
     mode=4
     CALL oft_superlu_dgssv(mode,nrhs,nrhs,nrhs,rvals,ivals,ivals, &
-      rvals,ldb,self%superlu_struct%f_factors,nrhs,ierr)
+      rvals,ldb,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
 #endif
 #ifdef HAVE_SUPERLU_DIST
   CASE("superd")
     mode=4
     CALL oft_superlu_dist_dgssv(mode,self%A%nr,nrhs,nrhs,rvals,ivals,ivals, &
-      rvals,ldb,self%superlu_struct%grid_handle,self%superlu_struct%f_factors,nrhs,ierr)
+      rvals,ldb,self%superlu_struct%grid_handle,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
     mode=2
     nrhs=1
     CALL oft_superlu_dist_slugrid(mode,self%superlu_struct%comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
@@ -827,7 +741,7 @@ SELECT CASE(TRIM(self%package))
   CASE("umfpack")
     mode=4
     CALL oft_umfpack_dgssv(mode,nrhs,nrhs,nrhs,rvals,ivals,ivals, &
-      rvals,ldb,self%superlu_struct%f_factors,nrhs,ierr)
+      rvals,ldb,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
     DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
 #endif
 #ifdef HAVE_MUMPS
@@ -851,13 +765,11 @@ self%initialized=.FALSE.
 end subroutine lusolver_delete
 !---------------------------------------------------------------------------
 !> Solve a linear system using a direct solve
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE ilusolver_apply(self,u,g)
 CLASS(oft_ilusolver), INTENT(inout) :: self
-CLASS(oft_vector), INTENT(inout) :: u,g
+CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
+CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
@@ -1000,25 +912,20 @@ DEBUG_STACK_POP
 END SUBROUTINE ilusolver_apply
 !---------------------------------------------------------------------------
 !> Update solver after changing settings/operators
-!!
-!! @param[in] new_pattern Update matrix pattern (optional)
 !---------------------------------------------------------------------------
 recursive subroutine ilusolver_update(self,new_pattern)
 class(oft_ilusolver), intent(inout) :: self
-LOGICAL, optional, intent(in) :: new_pattern
+LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
 self%refactor=.TRUE.
 IF(PRESENT(new_pattern))self%update_graph=new_pattern
 end subroutine ilusolver_update
 !---------------------------------------------------------------------------
 !> Setup solver from XML definition
-!!
-!! @param[in] solver_node XML node containing solver definition
-!! @param[in] level Leve in MG hierarchy (optional)
 !---------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+TYPE(fox_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
@@ -1097,9 +1004,9 @@ end subroutine ilusolver_delete
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE lapack_matinv_real(nrows,Amat,error)
-INTEGER(4), INTENT(in) :: nrows
-REAL(8), INTENT(inout) :: Amat(nrows,nrows)
-INTEGER(4), INTENT(out) :: error
+INTEGER(4), INTENT(in) :: nrows !< Number of rows/columns
+REAL(8), INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
+INTEGER(4), INTENT(out) :: error !< Error flag
 !---
 INTEGER(4) :: N,LWORK,info
 REAL(8) :: elapsed_time
@@ -1139,9 +1046,9 @@ END SUBROUTINE lapack_matinv_real
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE lapack_matinv_complex(nrows,Amat,error)
-INTEGER(i4), INTENT(in) :: nrows
-DOUBLE COMPLEX, INTENT(inout) :: Amat(nrows,nrows)
-INTEGER(4), INTENT(out) :: error
+INTEGER(i4), INTENT(in) :: nrows !< Number of rows/columns
+DOUBLE COMPLEX, INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
+INTEGER(4), INTENT(out) :: error !< Error flag
 !---
 INTEGER(i4) :: N,LWORK,info
 REAL(r8) :: elapsed_timer
@@ -1179,9 +1086,9 @@ END SUBROUTINE lapack_matinv_complex
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE lapack_cholesky_real(nrows,Amat,error)
-INTEGER(4), INTENT(in) :: nrows
-REAL(8), INTENT(inout) :: Amat(nrows,nrows)
-INTEGER(4), INTENT(out) :: error
+INTEGER(4), INTENT(in) :: nrows !< Number of rows/columns
+REAL(8), INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
+INTEGER(4), INTENT(out) :: error !< Error flag
 !---
 INTEGER(4) :: N,LWORK,info,i,j
 REAL(8) :: elapsed_time

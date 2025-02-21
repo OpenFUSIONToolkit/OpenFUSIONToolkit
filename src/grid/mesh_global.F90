@@ -552,7 +552,12 @@ integer(i4), intent(in) :: np
 integer(i4), allocatable :: c(:),b(:),a(:)
 integer(i4) :: i,j,k,l,ierr
 #ifdef HAVE_MPI
+#ifdef OFT_MPI_F08
+type(mpi_request) :: req
+type(mpi_status) :: stat
+#else
 integer(i4) :: req,stat(MPI_STATUS_SIZE)
+#endif
 #endif
 DEBUG_STACK_PUSH
 !---Initialize counters for ring update
@@ -698,7 +703,7 @@ IF(.NOT.mesh%fullmesh)THEN
 !---------------------------------------------------------------------------
   DO WHILE(.TRUE.)
     !---All recieves have been processed
-    IF(ALL(oft_env%recv==MPI_REQUEST_NULL))EXIT
+    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT
     !---Wait for completed recieve
     CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','mesh_global_plinkage',__FILE__)
@@ -1013,7 +1018,7 @@ IF(.NOT.mesh%fullmesh)THEN
 !---------------------------------------------------------------------------
   DO WHILE(.TRUE.)
     !---All recieves have been processed
-    IF(ALL(oft_env%recv==MPI_REQUEST_NULL))EXIT
+    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT
     !---Wait for completed recieve
     CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','mesh_global_elinkage',__FILE__)
@@ -1331,7 +1336,7 @@ IF(.NOT.mesh%fullmesh)THEN
 ! Loop over each connected processor
 !---------------------------------------------------------------------------
   DO WHILE(.TRUE.)
-    IF(ALL(oft_env%recv==MPI_REQUEST_NULL))EXIT ! All recieves have been processed
+    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
     CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','mesh_global_flinkage',__FILE__)
     lftmp=>lfrecv(j)%lf ! Point dummy input array to current Recv array

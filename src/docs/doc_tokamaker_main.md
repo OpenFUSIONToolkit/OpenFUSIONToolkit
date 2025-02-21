@@ -17,8 +17,8 @@ conductors (eg. coils and structures).
 \f]
 where \f$ \mathcal{P} \f$, \f$ \mathcal{S} \f$, and \f$ \mathcal{C} \f$ are axisymmetric domains corresponding to the plasma, passive conducting structures (eg. vacuum vessels), coils respectively.
 
-TokaMaker should primarily be used through the python interface using the \ref OpenFUSIONToolkit.TokaMaker "TokaMaker" python module
-and the \ref OpenFUSIONToolkit.TokaMaker.TokaMaker class.
+TokaMaker should primarily be used through the python interface using the \ref OpenFUSIONToolkit.TokaMaker "OpenFUSIONToolkit.TokaMaker" python module
+and the \ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "OpenFUSIONToolkit.TokaMaker.TokaMaker" class.
 
 \section doc_gs_main_ex TokaMaker examples
 The following examples illustrate usage of TokaMaker to compute different Grad-Shafranov equilibria. For examples of how to create
@@ -39,6 +39,9 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 
 ### Equilibrium Reconstruction
  - \subpage doc_tMaker_ITER_ex4
+
+### Other workflows/emaples
+ - \subpage doc_tMaker_ITER_ex5
 
 \section doc_gs_main_mesh Building meshes using gs_Domain
 TokaMaker includes built-in meshing functionality through the \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain "gs_Domain" class,

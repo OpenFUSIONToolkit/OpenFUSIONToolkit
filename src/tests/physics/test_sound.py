@@ -1,6 +1,7 @@
 from __future__ import print_function
 import os
 import sys
+import h5py
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
@@ -134,14 +135,22 @@ def validate_result(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_tem
     step_count=0
     B0_found = False
     Te_found = False
-    with open('dump.dat','r') as fid:
-        for line in fid:
-            if line.count('Time Step') > 0:
-                step_count = step_count + 1
-            if line.count('B0 ') > 0:
-                B0_found = True
-            if line.count('Te ') > 0:
-                Te_found = True
+    with h5py.File("{0}.{1}.h5".format('oft_xdmf',str(1).zfill(4)),'r') as h5_file:
+        if 'mug' in h5_file:
+            for _, mesh_obj in h5_file['mug'].items():
+                if mesh_obj['TYPE'][()] > 30:
+                    for i in range(9999):
+                        timestep = mesh_obj.get('{0:04d}'.format(i),None)
+                        if timestep is None:
+                            break
+                        step_count += 1
+                        if 'B0' in timestep:
+                            B0_found = True
+                        if 'Te' in timestep:
+                            Te_found = True
+        else:
+            print('FAILED: "mug" plot group not found in output file')
+            retval = False
     if step_count != steps_exp:
         print("FAILED: Incorrect number of time steps!")
         print("  Expected = {0}".format(steps_exp))

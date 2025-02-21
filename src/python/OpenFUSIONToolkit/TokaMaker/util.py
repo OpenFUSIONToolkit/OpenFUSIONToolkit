@@ -5,7 +5,7 @@
 @ingroup doxy_oft_python
 '''
 import numpy
-from ..util import *
+from .._interface import *
 
 ## @cond
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
@@ -71,7 +71,7 @@ def create_spline_flux_fun(npts,x,y,axis_bc=[1,0.0],edge_bc=[1,0.0],normalize=Tr
 
 
 def create_power_flux_fun(npts,alpha,gamma):
-    r'''! Build power law flux function of the form \f$ ((1-\hat{\psi})^{\alpha})^{\gamma} \f$
+    r'''! Build power law flux function of the form \f$ (1-\hat{\psi}^{\alpha})^{\gamma} \f$
 
     @param npts Number of points for definition
     @param alpha Inner exponent
@@ -171,3 +171,38 @@ def eval_green(x,xc):
         tokamaker_eval_green(c_int(n),r,z,
             c_double(xc[0]),c_double(xc[1]),vals)
         return vals*mu0
+
+
+def compute_forces_components(tMaker_obj,psi,cell_centered=False):
+    r'''! Compute terms needed for evaluating forces in passively conducting regions
+
+    @param tMaker_obj TokaMaker equilibrium object
+    @param psi \f$ \psi \f$ corresponding to desired currents
+    @param cell_centered Evaluate at cell centers instead of node points?
+    @result J_cond, B_cond, mask, R
+    '''
+    # Get conductor currents at cell centers
+    mask, J_cond = tMaker_obj.get_conductor_currents(psi,cell_centered=cell_centered)
+    
+    # Find points inside conducting regions
+    pt_mask = numpy.zeros((tMaker_obj.r.shape[0],), dtype=numpy.int32)
+    pt_mask[tMaker_obj.lc[mask,:]] = 1
+    
+    # Set psi and evaluate B-field in conducting regions
+    psi_save = tMaker_obj.get_psi(normalized=False)
+    tMaker_obj.set_psi(psi)
+    field_eval = tMaker_obj.get_field_eval('B')
+    B_cond = numpy.zeros((tMaker_obj.r.shape[0],3))
+    for i in range(tMaker_obj.r.shape[0]):
+        if pt_mask[i] == 0:
+            continue
+        B_cond[i,:] = field_eval.eval(tMaker_obj.r[i,:2])
+    tMaker_obj.set_psi(psi_save) # Reset psi
+
+    if cell_centered:
+        # Convert to cell centered
+        Bv_cond = (B_cond[tMaker_obj.lc[:,0],:] + B_cond[tMaker_obj.lc[:,1],:] + B_cond[tMaker_obj.lc[:,2],:])/3.0
+        rcc = (tMaker_obj.r[tMaker_obj.lc[:,0],:] + tMaker_obj.r[tMaker_obj.lc[:,1],:] + tMaker_obj.r[tMaker_obj.lc[:,2],:])/3.0
+        return J_cond, Bv_cond, mask, rcc
+    else:
+        return J_cond, B_cond, mask, tMaker_obj.r

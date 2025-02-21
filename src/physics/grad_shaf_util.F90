@@ -695,6 +695,7 @@ real(8) :: psitmp(1) !< magnetic flux coordinate
 real(8) :: gpsitmp(3) !< needs docs
 integer(4) :: i,m
 !---
+CALL self%eta%update(self) ! Make sure eta is up to date with current equilibrium
 psi_eval%u=>self%psi
 CALL psi_eval%setup
 CALL psi_geval%shared_setup(psi_eval)
@@ -849,13 +850,13 @@ subroutine gs_save_decon(gseq,npsi,ntheta,error_str)
 class(gs_eq), intent(inout) :: gseq
 integer(4), intent(in) :: npsi
 integer(4), intent(in) :: ntheta
-CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
+CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 type(gsinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
 real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
 real(8), allocatable :: ptout(:,:)
-real(4), allocatable :: rout(:,:),zout(:,:),cout(:,:)
+real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
 TYPE(spline_type) :: rz
@@ -1013,7 +1014,7 @@ WRITE(io_unit)INT(npsi-1,4),INT(ntheta-1,4)
 ! cout(4,:) -> q(0:mpsi)
 !---------------------------------------------------------------------------
 DO j=1,4
-  WRITE(io_unit)cout(j,:)
+  WRITE(io_unit)REAL(cout(j,:),4)
 END DO
 !---------------------------------------------------------------------------
 ! Write out inverse representation
@@ -1021,8 +1022,8 @@ END DO
 ! rout -> r(0:mpsi,0:mtheta)
 ! zout -> z(0:mpsi,0:mtheta)
 !---------------------------------------------------------------------------
-WRITE(io_unit)rout
-WRITE(io_unit)zout
+WRITE(io_unit)REAL(rout,4)
+WRITE(io_unit)REAL(zout,4)
 !---------------------------------------------------------------------------
 ! Close output file
 !---------------------------------------------------------------------------
@@ -1053,7 +1054,7 @@ CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
-CHARACTER(LEN=80), OPTIONAL, INTENT(out) :: error_str
+CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)

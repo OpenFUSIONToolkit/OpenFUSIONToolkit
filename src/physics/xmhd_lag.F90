@@ -73,7 +73,7 @@ MODULE xmhd_lag
 #endif
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
-  hdf5_create_timestep, hdf5_field_exist, oft_bin_file
+  hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: mesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh, multigrid_level, multigrid_base_pushcc
@@ -617,7 +617,7 @@ READ(rst_char,104,IOSTAT=io_stat)rst_tmp
 IF((io_stat/=0).OR.(rst_tmp/=rst_ind))CALL oft_abort("Step count exceeds format width", "xmhd_run", __FILE__)
 rst=oft_file_exist(TRIM('xMHD_'//rst_char//'.rst'))
 IF(rst.AND.(rst_ind/=0))THEN
-  CALL oft_xmhd_rst_load(u, 'xMHD_'//rst_char//'.rst', 'U', t, dt)
+  CALL oft_xmhd_rst_load(u, 'xMHD_'//rst_char//'.rst', 'U', t, dt, rst_version_out=rst_version)
   IF(PRESENT(driver))CALL driver%rst_load('xMHD_'//rst_char//'.rst')
   IF(rst_version<2)THEN
     dt = dt*2.d0
@@ -925,7 +925,7 @@ DO i=1,nsteps
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       hist_i4=(/rst_ind+i-1,nksolver%lits,nksolver%nlits/)
-      hist_r4=(/t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time/)
+      hist_r4=REAL([t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,2X,I4,F12.3,ES12.2)
       WRITE(*,103)rst_ind+i,t,nksolver%lits,nksolver%nlits,elapsed_time,dt
       IF(oft_debug_print(1))WRITE(*,*)
@@ -1011,7 +1011,7 @@ class(oft_vector), pointer :: du,u0,v,un1,un2
 type(xmhd_sub_fields) :: sub_fields
 type(oft_xmhd_massmatrix) :: mop
 type(oft_timer) :: mytimer
-integer(i4) :: i,j,ierr,io_unit,io_stat,rst_version,rst_tmp
+integer(i4) :: i,j,ierr,io_unit,io_stat,rst_tmp
 integer(i4) :: itcount(XMHD_ITCACHE)
 real(r8) :: dt,dthist(XMHD_ITCACHE)
 real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr,elapsed_time
@@ -1019,7 +1019,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror,de_scale
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,dtp
 real(r8), pointer, dimension(:) :: vals => NULL()
 character(LEN=XMHD_RST_LEN) :: rst_char
-character(LEN=OFT_HIST_SLEN) :: comm_line
+character(LEN=OFT_SLEN) :: comm_line
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -1306,7 +1306,7 @@ DO i=1,nsteps
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       hist_i4=(/rst_ind+i-1,solver%cits,0/)
-      hist_r4=(/t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time/)
+      hist_r4=REAL([t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,F12.3,ES12.2)
       WRITE(*,103)rst_ind+i,t,solver%cits,elapsed_time,dt
       IF(oft_debug_print(1))WRITE(*,*)
@@ -4099,12 +4099,13 @@ end subroutine oft_xmhd_rst_save
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
 !---------------------------------------------------------------------------
-subroutine oft_xmhd_rst_load(u,filename,path,t,dt)
+subroutine oft_xmhd_rst_load(u,filename,path,t,dt,rst_version_out)
 class(oft_vector), pointer, intent(inout) :: u !< Solution to load
 character(LEN=*), intent(in) :: filename !< Name of restart file
 character(LEN=*), intent(in) :: path !< Path to store solution vector in file
 real(r8), optional, intent(out) :: t !< Time of loaded solution
 real(r8), optional, intent(out) :: dt !< Timestep at loaded time
+integer(i4), optional, intent(out) :: rst_version_out !< Version number
 integer(i4) :: i,rst_version
 real(r8) :: scale_tmp
 real(r8), pointer, dimension(:) :: stmp
@@ -4113,6 +4114,7 @@ CALL xmhd_rep%vec_load(u,filename,path)
 IF(PRESENT(t))CALL hdf5_read(t,filename,'t')
 IF(PRESENT(dt))CALL hdf5_read(dt,filename,'dt')
 CALL hdf5_read(rst_version,filename,'xMHD_Version')
+IF(PRESENT(rst_version_out))rst_version_out=rst_version
 !---Rescale if necessary scales
 IF(rst_version>2)THEN
   CALL hdf5_read(scale_tmp,filename,'vel_scale')
@@ -4472,6 +4474,7 @@ real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr
 real(r8) :: fac,lramp,tflux,tcurr,t,tp,td
 real(r8) :: ndens
 !---
+TYPE(xdmf_plot_file) :: xdmf
 LOGICAL :: rst,first
 character(LEN=XMHD_RST_LEN) :: rst_char
 CHARACTER(LEN=OFT_PATH_SLEN) :: file_tmp,file_prev
@@ -4503,6 +4506,9 @@ read(io_unit,xmhd_plot_options,IOSTAT=ierr)
 close(io_unit)
 if(ierr<0)call oft_abort('No MHD plot options found in input file.','xmhd_plot',__FILE__)
 if(ierr>0)call oft_abort('Error parsing MHD plot options in input file.','xmhd_plot',__FILE__)
+!---
+CALL xdmf%setup("mug")
+CALL mesh%setup_io(xdmf,oft_lagrange%order)
 !---------------------------------------------------------------------------
 ! Check run type and optional fields
 !---------------------------------------------------------------------------
@@ -4606,16 +4612,16 @@ IF(linear)THEN
 !---------------------------------------------------------------------------
   vals=>bvout(1,:)
   CALL sub_fields%Ne%get_local(vals)
-  CALL mesh%save_vertex_scalar(vals,'N0')
+  CALL mesh%save_vertex_scalar(vals,xdmf,'N0')
 !---------------------------------------------------------------------------
 ! Extract temperatures and plot
 !---------------------------------------------------------------------------
   CALL sub_fields%Ti%get_local(vals)
-  CALL mesh%save_vertex_scalar(vals,'T0')
+  CALL mesh%save_vertex_scalar(vals,xdmf,'T0')
   !---Electron temperature
   IF(xmhd_two_temp)THEN
     CALL sub_fields%Te%get_local(vals)
-    CALL mesh%save_vertex_scalar(vals,'Te0')
+    CALL mesh%save_vertex_scalar(vals,xdmf,'Te0')
   END IF
 !---------------------------------------------------------------------------
 ! Extract velocity and plot
@@ -4626,7 +4632,7 @@ IF(linear)THEN
   CALL sub_fields%V%get_local(vals,2)
   vals=>bvout(3,:)
   CALL sub_fields%V%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'V0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'V0')
 !---------------------------------------------------------------------------
 ! Extract magnetic field and plot
 !---------------------------------------------------------------------------
@@ -4636,7 +4642,7 @@ IF(linear)THEN
   CALL sub_fields%B%get_local(vals,2)
   vals=>bvout(3,:)
   CALL sub_fields%B%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'B0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
   CALL Jfield%setup
@@ -4649,7 +4655,7 @@ IF(linear)THEN
   CALL ap%get_local(vals,2)
   vals=>bvout(3,:)
   CALL ap%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'J0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'J0')
 END IF
 !---------------------------------------------------------------------------
 ! Count restart file list
@@ -4753,7 +4759,7 @@ DO
       ELSE
         CALL uc%add(0.d0,(td-t)/(tp-t),up,(td-tp)/(t-tp),u)
       END IF
-      CALL hdf5_create_timestep(td)
+      CALL xdmf%add_timestep(td)
 !---------------------------------------------------------------------------
 ! Retrieve sub-fields and scale
 !---------------------------------------------------------------------------
@@ -4777,21 +4783,21 @@ DO
 !---------------------------------------------------------------------------
       vals=>bvout(1,:)
       CALL sub_fields%Ne%get_local(vals)
-      CALL mesh%save_vertex_scalar(vals,'N')
+      CALL mesh%save_vertex_scalar(vals,xdmf,'N')
       !---Hyper-diff aux field
       IF(n2_ind>0)THEN
         CALL sub_fields%N2%get_local(vals)
-        CALL mesh%save_vertex_scalar(vals,'N2')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'N2')
       END IF
 !---------------------------------------------------------------------------
 ! Extract temperatures and plot
 !---------------------------------------------------------------------------
       CALL sub_fields%Ti%get_local(vals)
-      CALL mesh%save_vertex_scalar(vals,'T')
+      CALL mesh%save_vertex_scalar(vals,xdmf,'T')
       !---Electron temperature
       IF(xmhd_two_temp)THEN
         CALL sub_fields%Te%get_local(vals)
-        CALL mesh%save_vertex_scalar(vals,'Te')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'Te')
       END IF
 !---------------------------------------------------------------------------
 ! Extract velocity and plot
@@ -4802,7 +4808,7 @@ DO
       CALL sub_fields%V%get_local(vals,2)
       vals=>bvout(3,:)
       CALL sub_fields%V%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'V')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'V')
 !---------------------------------------------------------------------------
 ! Project magnetic field and plot
 !---------------------------------------------------------------------------
@@ -4812,7 +4818,7 @@ DO
       CALL sub_fields%B%get_local(vals,2)
       vals=>bvout(3,:)
       CALL sub_fields%B%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'B')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'B')
       !---Hyper-res aux field
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
@@ -4826,7 +4832,7 @@ DO
         CALL ap%get_local(vals,2)
         vals=>bvout(3,:)
         CALL ap%get_local(vals,3)
-        CALL mesh%save_vertex_vector(bvout,'J2')
+        CALL mesh%save_vertex_vector(bvout,xdmf,'J2')
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
@@ -4840,7 +4846,7 @@ DO
       CALL ap%get_local(vals,2)
       vals=>bvout(3,:)
       CALL ap%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'J')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'J')
       !---Divergence error
       IF(plot_div)THEN
         Bfield%u=>sub_fields%B
@@ -4854,7 +4860,7 @@ DO
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
         CALL ap%get_local(vals,1)
-        CALL mesh%save_vertex_scalar(vals,'divB')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'divB')
       END IF
 !---------------------------------------------------------------------------
 ! Update sampling time

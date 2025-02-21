@@ -4,14 +4,14 @@
 @date March 2024
 @ingroup doxy_oft_python
 '''
-from ..util import *
+from .._interface import *
 
 
 ## @cond
-# ThinCurr setup function (load mesh and setup model) (mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,tw_ptr,size,error_str)
+# ThinCurr setup function (load mesh and setup model) (mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start,tw_ptr,size,error_str)
 thincurr_setup = ctypes_subroutine(oftpy_lib.thincurr_setup,
     [c_char_p, c_int, ctypes_numpy_array(float64,2), c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), 
-     ctypes_numpy_array(int32,1), c_void_p, ctypes_numpy_array(int32,1), c_char_p])
+     ctypes_numpy_array(int32,1), c_int, c_void_p, ctypes_numpy_array(int32,1), c_char_p])
 
 # ThinCurr setup plotting (tw_ptr,basepath,save_debug,error_str
 thincurr_setup_io = ctypes_subroutine(oftpy_lib.thincurr_setup_io,
@@ -57,13 +57,25 @@ thincurr_Bmat = ctypes_subroutine(oftpy_lib.thincurr_Bmat,
 thincurr_Mcoil = ctypes_subroutine(oftpy_lib.thincurr_Mcoil,
     [c_void_p, c_void_ptr_ptr, c_char_p, c_char_p])
 
-# thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,cache_file,error_str)
+# thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,njumpers,sensor_ptr,cache_file,error_str)
 thincurr_Msensor = ctypes_subroutine(oftpy_lib.thincurr_Msensor,
-    [c_void_p, c_char_p, c_void_ptr_ptr, c_void_ptr_ptr, c_int_ptr, c_void_p, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_void_ptr_ptr, c_void_ptr_ptr, c_int_ptr, c_int_ptr, c_void_p, c_char_p, c_char_p])
+
+# thincurr_get_sensor_name(sensor_ptr,sensor_ind,sensor_name,error_str)
+thincurr_get_sensor_name = ctypes_subroutine(oftpy_lib.thincurr_get_sensor_name,
+    [c_void_p, c_int, c_char_p, c_char_p])
 
 # Compute model resistivity matrix thincurr_curr_Rmat(tw_ptr,copy_out,Rmat,error_str)
 thincurr_curr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
     [c_void_p, c_bool, ctypes_numpy_array(float64,2), c_char_p])
+
+# thincurr_get_eta(tw_ptr,eta_ptr,error_string)
+thincurr_get_eta = ctypes_subroutine(oftpy_lib.thincurr_get_eta,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
+
+# thincurr_set_eta(tw_ptr,eta_ptr,error_string)
+thincurr_set_eta = ctypes_subroutine(oftpy_lib.thincurr_set_eta,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
 
 # Compute current regularization matrix thincurr_curr_regmat(tw_ptr,Rmat,error_str)
 thincurr_curr_regmat = ctypes_subroutine(oftpy_lib.thincurr_curr_regmat,
@@ -77,14 +89,14 @@ thincurr_eigenvalues = ctypes_subroutine(oftpy_lib.thincurr_eigenvalues,
 thincurr_freq_response = ctypes_subroutine(oftpy_lib.thincurr_freq_response,
     [c_void_p, c_bool, c_int, c_double, ctypes_numpy_array(float64,2), c_void_p, c_char_p])
 
-# thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,hodlr_ptr,error_str)
+# thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str)
 thincurr_time_domain = ctypes_subroutine(oftpy_lib.thincurr_time_domain,
     [c_void_p, c_bool, c_double, c_int, c_double, c_bool, c_int, c_int, ctypes_numpy_array(float64,1), c_void_p, c_int, ctypes_numpy_array(float64,2), c_int,
-     ctypes_numpy_array(float64,2), c_void_p, c_char_p])
+     ctypes_numpy_array(float64,2), c_bool, c_void_p, c_void_p, c_char_p])
 
-# thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot,sensor_ptr,hodlr_ptr,error_str)
+# thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot,sensor_ptr,sensor_vals_ptr,nsensor,hodlr_ptr,error_str)
 thincurr_time_domain_plot = ctypes_subroutine(oftpy_lib.thincurr_time_domain_plot,
-    [c_void_p, c_bool, c_bool, c_int, c_int, c_void_p, c_void_p, c_char_p])
+    [c_void_p, c_bool, c_bool, c_int, c_int, c_void_p, ctypes_numpy_array(float64,2), c_int, c_void_p, c_char_p])
 
 # thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,compute_B,sensor_ptr,hodlr_ptr,error_str)
 thincurr_reduce_model = ctypes_subroutine(oftpy_lib.thincurr_reduce_model,

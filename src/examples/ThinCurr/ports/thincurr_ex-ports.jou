@@ -28,18 +28,19 @@ mesh surface all
 # Create mesh blocks
 set duplicate block elements off
 block 1 add surface all
-#nodeset 1 add vertex 180
-nodeset 1 add vertex 176
-nodeset 2 add vertex 172
-nodeset 3 add vertex 168
-nodeset 4 add vertex 164
-nodeset 5 add vertex 200
-nodeset 6 add vertex 196
-nodeset 7 add vertex 192
-nodeset 8 add vertex 188
-nodeset 9 add vertex 184
-nodeset 10 add curve 303 305
-nodeset 11 add curve 302 331
+
+# The following definitions are no longer required, use "ThinCurr_compute_holes" instead
+#nodeset 1 add vertex 176
+#nodeset 2 add vertex 172
+#nodeset 3 add vertex 168
+#nodeset 4 add vertex 164
+#nodeset 5 add vertex 200
+#nodeset 6 add vertex 196
+#nodeset 7 add vertex 192
+#nodeset 8 add vertex 188
+#nodeset 9 add vertex 184
+#nodeset 10 add curve 303 305
+#nodeset 11 add curve 302 331
 
 # Export grid
 set large exodus file on

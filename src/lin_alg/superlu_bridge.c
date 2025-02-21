@@ -7,7 +7,7 @@
  *
  * Modified for use with Open FUSION Toolkit by Chris Hansen (December 2014)
  */
-
+#include <stdbool.h>
 #include "slu_ddefs.h"
 
 typedef struct {
@@ -23,11 +23,11 @@ typedef struct {
 } factors_t;
 
 void
-oft_superlu_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
+oft_superlu_dgssv_c(int iopt, int n, int nnz, int nrhs,
                     double *values, int *colind, int *rowptr,
-                    double *b, int *ldb,
+                    double *b, int ldb,
                     factors_t **f_factors,
-                    int perm_spec, int *info)
+                    int perm_spec, bool iter_refine, int *info)
 
 {
 /*
@@ -74,7 +74,7 @@ double *x;
 
 trans = TRANS; // Row storage format is passed so we solve the transposed system
 
-    if ( *iopt == 1 || *iopt == 3 ) { /* LU decomposition */
+    if ( iopt == 1 || iopt == 3 ) { /* LU decomposition */
         if ( !*f_factors ) {
             /* Set the default input options. */
             set_default_options(&options);
@@ -86,12 +86,13 @@ trans = TRANS; // Row storage format is passed so we solve the transposed system
             *   permc_spec = 3: approximate minimum degree for unsymmetric matrices
             */
             if ( perm_spec >= 0 ) options.ColPerm = perm_spec;
+            if (!iter_refine) options.IterRefine = NO;
             /* */
             L = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
             U = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
-            if ( !(perm_r = intMalloc(*n)) ) ABORT("Malloc fails for perm_r[].");
-            if ( !(perm_c = intMalloc(*n)) ) ABORT("Malloc fails for perm_c[].");
-            if ( !(etree = intMalloc(*n)) ) ABORT("Malloc fails for etree[].");
+            if ( !(perm_r = intMalloc(n)) ) ABORT("Malloc fails for perm_r[].");
+            if ( !(perm_c = intMalloc(n)) ) ABORT("Malloc fails for perm_c[].");
+            if ( !(etree = intMalloc(n)) ) ABORT("Malloc fails for etree[].");
         } else {
             LUfactors = *f_factors;
             Destroy_SuperNode_Matrix(LUfactors->L);
@@ -106,18 +107,15 @@ trans = TRANS; // Row storage format is passed so we solve the transposed system
             Glu = LUfactors->Glu;
 #endif
         }
-        // Convert indexing to zero-based
-        // for(i = 0; i<=*n; i++) { rowptr[i]--; }
-        // for(i = 0; i<*nnz; i++) { colind[i]--; }
         //
         options.Fact = DOFACT;
-        if ( *iopt == 3 ) options.Fact = SamePattern;
+        if ( iopt == 3 ) options.Fact = SamePattern;
         /* Initialize the statistics variables. */
         StatInit(&stat);
         //
-        dCreate_CompCol_Matrix(&A, *n, *n, *nnz, values, colind, rowptr,
+        dCreate_CompCol_Matrix(&A, n, n, nnz, values, colind, rowptr,
                                SLU_NC, SLU_D, SLU_GE);
-        if ( *iopt == 3 ) {
+        if ( iopt == 3 ) {
             //
             sp_preorder(&options, &A, perm_c, etree, &AC);
             panel_size = sp_ienv(1);
@@ -159,7 +157,7 @@ trans = TRANS; // Row storage format is passed so we solve the transposed system
 //            //       mem_usage.for_lu/1e6, mem_usage.total_needed/1e6);
 //        } else {
 //            printf("dgstrf() error returns INFO= %d\n", *info);
-//            if ( *info <= *n ) { /* factorization completes */
+//            if ( *info <= n ) { /* factorization completes */
 //                dQuerySpace(L, U, &mem_usage);
 //                printf("L\\U MB %.3f\ttotal MB needed %.3f\n",
 //                       mem_usage.for_lu/1e6, mem_usage.total_needed/1e6);
@@ -185,11 +183,8 @@ trans = TRANS; // Row storage format is passed so we solve the transposed system
         Destroy_SuperMatrix_Store(&A);
         Destroy_CompCol_Permuted(&AC);
         StatFree(&stat);
-        // Reset indexing to one-based
-        // for(i = 0; i<=*n; i++) { rowptr[i]++; }
-        // for(i = 0; i<*nnz; i++) { colind[i]++; }
 
-    } else if ( *iopt == 2 ) { /* Triangular solve */
+    } else if ( iopt == 2 ) { /* Triangular solve */
         /* Initialize the statistics variables. */
         StatInit(&stat);
 
@@ -200,7 +195,7 @@ trans = TRANS; // Row storage format is passed so we solve the transposed system
         perm_c = LUfactors->perm_c;
         perm_r = LUfactors->perm_r;
 
-        dCreate_Dense_Matrix(&B, *n, *nrhs, b, *ldb, SLU_DN, SLU_D, SLU_GE);
+        dCreate_Dense_Matrix(&B, n, nrhs, b, ldb, SLU_DN, SLU_D, SLU_GE);
 
         /* Solve the system A*X=B, overwriting B with X. */
         dgstrs (trans, L, U, perm_c, perm_r, &B, &stat, info);
@@ -208,7 +203,7 @@ trans = TRANS; // Row storage format is passed so we solve the transposed system
         Destroy_SuperMatrix_Store(&B);
         StatFree(&stat);
 
-    } else if ( *iopt == 4 ) { /* Free storage */
+    } else if ( iopt == 4 ) { /* Free storage */
         /* Free the LU factors in the factors handle */
         LUfactors = *f_factors;
         SUPERLU_FREE (LUfactors->etree);
@@ -221,15 +216,15 @@ trans = TRANS; // Row storage format is passed so we solve the transposed system
         SUPERLU_FREE (LUfactors);
         f_factors = NULL;
     } else {
-        fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dgssv_c()\n",*iopt);
+        fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dgssv_c()\n",iopt);
         *info = -1;
     }
 }
 
 void
-oft_superlu_dgsisx_c(int *iopt, int *n, int *nnz, int *nrhs,
+oft_superlu_dgsisx_c(int iopt, int n, int nnz, int nrhs,
                     double *values, int *colind, int *rowptr,
-                    double *b, int *ldb,
+                    double *b, int ldb,
                     factors_t **f_factors,
                     int perm_spec, double fill_tol, int *info)
 
@@ -278,7 +273,7 @@ double *x;
 
 trans = TRANS; // Row storage format is passed so we solve the transposed system
 
-if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
+if ( iopt == 1 || iopt == 3 ) { /* iLU decomposition */
     if ( !*f_factors ) {
         /* Set the default input options. */
         ilu_set_default_options(&options);
@@ -298,9 +293,9 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
         /* */
         L = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
         U = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
-        if ( !(perm_r = intMalloc(*n)) ) ABORT("Malloc fails for perm_r[].");
-        if ( !(perm_c = intMalloc(*n)) ) ABORT("Malloc fails for perm_c[].");
-        if ( !(etree = intMalloc(*n)) ) ABORT("Malloc fails for etree[].");
+        if ( !(perm_r = intMalloc(n)) ) ABORT("Malloc fails for perm_r[].");
+        if ( !(perm_c = intMalloc(n)) ) ABORT("Malloc fails for perm_c[].");
+        if ( !(etree = intMalloc(n)) ) ABORT("Malloc fails for etree[].");
     } else {
         LUfactors = *f_factors;
         Destroy_SuperNode_Matrix(LUfactors->L);
@@ -315,18 +310,15 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
         Glu = LUfactors->Glu;
 #endif
     }
-    // Convert indexing to zero-based
-    // for(i = 0; i<=*n; i++) { rowptr[i]--; }
-    // for(i = 0; i<*nnz; i++) { colind[i]--; }
     //
     options.Fact = DOFACT;
-    if ( *iopt == 3 ) options.Fact = SamePattern;
+    if ( iopt == 3 ) options.Fact = SamePattern;
     /* Initialize the statistics variables. */
     StatInit(&stat);
     //
-    dCreate_CompCol_Matrix(&A, *n, *n, *nnz, values, colind, rowptr,
+    dCreate_CompCol_Matrix(&A, n, n, nnz, values, colind, rowptr,
                             SLU_NC, SLU_D, SLU_GE);
-    if ( *iopt == 3 ) {
+    if ( iopt == 3 ) {
         sp_preorder(&options, &A, perm_c, etree, &AC);
         panel_size = sp_ienv(1);
         relax = sp_ienv(2);
@@ -363,7 +355,7 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
     //             mem_usage.for_lu/1e6, mem_usage.total_needed/1e6);
     // } else {
     //     printf("dgsitrf() error returns INFO= %d\n", *info);
-    //     if ( *info <= *n ) { /* factorization completes */
+    //     if ( *info <= n ) { /* factorization completes */
     //         dQuerySpace(L, U, &mem_usage);
     //         printf("L\\U MB %.3f\ttotal MB needed %.3f\n",
     //                 mem_usage.for_lu/1e6, mem_usage.total_needed/1e6);
@@ -389,11 +381,8 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
     Destroy_SuperMatrix_Store(&A);
     Destroy_CompCol_Permuted(&AC);
     StatFree(&stat);
-    // Reset indexing to one-based
-    // for(i = 0; i<=*n; i++) { rowptr[i]++; }
-    // for(i = 0; i<*nnz; i++) { colind[i]++; }
 
-} else if ( *iopt == 2 ) { /* Triangular solve */
+} else if ( iopt == 2 ) { /* Triangular solve */
     /* Initialize the statistics variables. */
     StatInit(&stat);
 
@@ -404,7 +393,7 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
     perm_c = LUfactors->perm_c;
     perm_r = LUfactors->perm_r;
 
-    dCreate_Dense_Matrix(&B, *n, *nrhs, b, *ldb, SLU_DN, SLU_D, SLU_GE);
+    dCreate_Dense_Matrix(&B, n, nrhs, b, ldb, SLU_DN, SLU_D, SLU_GE);
 
     /* Solve the system A*X=B, overwriting B with X. */
     dgstrs(trans, L, U, perm_c, perm_r, &B, &stat, info);
@@ -412,7 +401,7 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
     Destroy_SuperMatrix_Store(&B);
     StatFree(&stat);
 
-} else if ( *iopt == 4 ) { /* Free storage */
+} else if ( iopt == 4 ) { /* Free storage */
     /* Free the LU factors in the factors handle */
     LUfactors = *f_factors;
     SUPERLU_FREE (LUfactors->etree);
@@ -425,7 +414,7 @@ if ( *iopt == 1 || *iopt == 3 ) { /* iLU decomposition */
     SUPERLU_FREE (LUfactors);
     f_factors = NULL;
 } else {
-    fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dgsisx_c()\n",*iopt);
+    fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dgsisx_c()\n",iopt);
     *info = -1;
 }
 }

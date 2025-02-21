@@ -42,8 +42,7 @@ TYPE(tw_type), TARGET :: tw_sim,mode_source
 TYPE(tw_sensors) :: sensors
 !
 INTEGER(4) :: i,n,ierr,io_unit
-REAL(8), POINTER, contiguous, DIMENSION(:,:) :: mode_driver,fr_driver,fr_sensor
-REAL(8), ALLOCATABLE :: eig_rval(:),eig_ival(:),eig_vec(:,:)
+REAL(8), POINTER, contiguous, DIMENSION(:,:) :: mode_driver,fr_driver,fr_sensor,driver_tmp
 CHARACTER(LEN=2) :: eig_tag
 TYPE(oft_timer) :: mytimer
 CLASS(oft_vector), POINTER :: uio
@@ -54,7 +53,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
 TYPE(oft_tw_hodlr_op), TARGET :: tw_hodlr
 !
 INTEGER(4) :: fr_limit = 0
-INTEGER(4) :: jumper_start = -1
+INTEGER(4) :: jumper_start = 0
 LOGICAL :: direct = .TRUE.
 LOGICAL :: save_L = .FALSE.
 LOGICAL :: save_Mcoil = .FALSE.
@@ -105,19 +104,25 @@ tw_sim%mesh=>smesh
 IF(jumper_start>0)THEN
   n=SIZE(mesh_nsets)
   hole_nsets=>mesh_nsets(1:jumper_start-1)
-  jumper_nsets=>mesh_nsets(jumper_start:n)
+  ALLOCATE(tw_sim%jumper_nsets(n-jumper_start+1))
+  DO i=jumper_start,n
+    tw_sim%jumper_nsets(i-jumper_start+1)%n=mesh_nsets(i)%n
+    ALLOCATE(tw_sim%jumper_nsets(i-jumper_start+1)%v(tw_sim%jumper_nsets(i-jumper_start+1)%n))
+    tw_sim%jumper_nsets(i-jumper_start+1)%v=mesh_nsets(i)%v
+  END DO
 ELSE
   hole_nsets=>mesh_nsets
 END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL smesh%setup_io(1)
+CALL tw_sim%xdmf%setup("thincurr")
+CALL smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
 ! Frequency-response run
 !---------------------------------------------------------------------------
 !---Load sensors
-CALL tw_load_sensors('floops.loc',tw_sim,sensors,jumper_nsets)
+CALL tw_load_sensors('floops.loc',tw_sim,sensors)
 !---Setup voltage source
 ALLOCATE(fr_driver(tw_sim%nelems,2),fr_sensor(sensors%nfloops,2))
 fr_driver=0.d0
@@ -158,11 +163,11 @@ ELSE ! Driver coil as source
     CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
   END IF
   !---FR with coil 1
-  fr_driver(:,1)=tw_sim%Ael2dr(:,1)
-  fr_sensor(:,1)=tw_sim%Adr2sen(:,1)
+  fr_driver(:,1)=tw_sim%Ael2dr(:,1)/mu0
+  fr_sensor(:,1)=tw_sim%Adr2sen(:,1)/mu0
   IF(tw_sim%n_icoils>1)THEN ! Second coil if present
-    fr_driver(:,2)=tw_sim%Ael2dr(:,2)
-    fr_sensor(:,2)=tw_sim%Adr2sen(:,2)
+    fr_driver(:,2)=tw_sim%Ael2dr(:,2)/mu0
+    fr_sensor(:,2)=tw_sim%Adr2sen(:,2)/mu0
   END IF
 END IF
 !---------------------------------------------------------------------------
@@ -188,6 +193,13 @@ IF(fr_limit/=2)THEN
 END IF
 !---Setup resistivity matrix
 CALL tw_compute_Rmat(tw_sim,.TRUE.)
+!---Assume fixed current V = -i*omega*M*I
+ALLOCATE(driver_tmp(tw_sim%nelems,1))
+driver_tmp(:,1)=-fr_driver(:,1)
+fr_driver(:,1)=fr_driver(:,2)
+fr_driver(:,2)=driver_tmp(:,1)
+IF(fr_limit==0)fr_driver=fr_driver*freq*2.d0*pi ! Scale driver by frequency
+DEALLOCATE(driver_tmp)
 !---Compute Frequency-response
 IF(tw_hodlr%L_svd_tol>0.d0)THEN
   CALL frequency_response(tw_sim,direct,fr_limit,freq,fr_driver,hodlr_op=tw_hodlr)
