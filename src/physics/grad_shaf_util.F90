@@ -1042,7 +1042,7 @@ end subroutine gs_save_decon
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !---------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1054,6 +1054,7 @@ CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
+REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
@@ -1229,6 +1230,7 @@ IF(PRESENT(error_str))THEN
     RETURN
   END IF
 END IF
+IF(PRESENT(lcfs_press))pres=pres+lcfs_press
 !---Extrapolate q on axis
 f(1) = x2
 f(2) = x2 - xr*(1.d0/REAL(nr-1,8))
