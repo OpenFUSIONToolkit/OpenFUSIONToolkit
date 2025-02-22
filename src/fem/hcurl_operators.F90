@@ -1668,10 +1668,10 @@ INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 !---
-TYPE(fox_node), POINTER :: pre_node
+TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
-TYPE(fox_node), POINTER :: hcurl_node
+TYPE(xml_node), POINTER :: hcurl_node
 #endif
 DEBUG_STACK_PUSH
 !---
@@ -1755,10 +1755,10 @@ LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 CLASS(oft_vector), POINTER :: oft_hcurl_vec
 !---
-TYPE(fox_node), POINTER :: pre_node
+TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
-TYPE(fox_node), POINTER :: hcurl_node
+TYPE(xml_node), POINTER :: hcurl_node
 #endif
 DEBUG_STACK_PUSH
 !---

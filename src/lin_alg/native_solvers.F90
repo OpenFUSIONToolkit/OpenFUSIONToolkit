@@ -505,11 +505,11 @@ end subroutine cg_solver_apply
 !---------------------------------------------------------------------------
 subroutine cg_setup_xml(self,solver_node,level)
 CLASS(oft_native_cg_solver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 #ifdef HAVE_XML
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node
+TYPE(xml_node), POINTER :: current_node
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: atol,rtol
@@ -521,7 +521,7 @@ ALLOCATE(its(val_level),atol(val_level),rtol(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough its values specified","cg_setup_xml",__FILE__)
     self%its=its(val_level)
@@ -532,7 +532,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,atol,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,atol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough atol values specified","cg_setup_xml",__FILE__)
     self%atol=atol(val_level)
@@ -543,7 +543,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough rtol values specified","cg_setup_xml",__FILE__)
     self%rtol=rtol(val_level)
@@ -759,12 +759,12 @@ end subroutine gmres_solver_apply
 !---------------------------------------------------------------------------
 subroutine gmres_setup_xml(self,solver_node,level)
 CLASS(oft_native_gmres_solver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node
+TYPE(xml_node), POINTER :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its,nrits
@@ -777,7 +777,7 @@ ALLOCATE(its(val_level),nrits(val_level),atol(val_level),rtol(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
     self%its=its(val_level)
@@ -788,7 +788,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"nrits",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
     self%nrits=nrits(val_level)
@@ -799,7 +799,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,atol,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,atol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
     self%atol=atol(val_level)
@@ -810,7 +810,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
     self%rtol=rtol(val_level)
@@ -1017,12 +1017,12 @@ end subroutine cgmres_solver_apply
 !---------------------------------------------------------------------------
 subroutine cgmres_setup_xml(self,solver_node,level)
 CLASS(oft_native_gmres_csolver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node
+TYPE(xml_node), POINTER :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its,nrits
@@ -1035,7 +1035,7 @@ ALLOCATE(its(val_level),nrits(val_level),atol(val_level),rtol(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
     self%its=its(val_level)
@@ -1046,7 +1046,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"nrits",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
     self%nrits=nrits(val_level)
@@ -1057,7 +1057,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,atol,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,atol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
     self%atol=atol(val_level)
@@ -1068,7 +1068,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
     self%rtol=rtol(val_level)
@@ -1646,11 +1646,11 @@ end subroutine jblock_precond_apply
 !---------------------------------------------------------------------------
 subroutine jblock_setup_xml(self,solver_node,level)
 CLASS(oft_jblock_precond), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 #ifdef HAVE_XML
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node
+TYPE(xml_node), POINTER :: current_node
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: df
@@ -1662,7 +1662,7 @@ ALLOCATE(its(val_level),df(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,its,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough its values specified","jblock_setup_xml",__FILE__)
     self%its=its(val_level)
@@ -1673,7 +1673,7 @@ END IF
 !---
 CALL xml_get_element(solver_node,"df",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,df,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,df,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough df values specified","jblock_setup_xml",__FILE__)
     self%df=df(val_level)
@@ -2318,11 +2318,11 @@ end subroutine bjprecond_update
 !---------------------------------------------------------------------------
 subroutine bjprecond_setup_xml(self,solver_node,level)
 CLASS(oft_bjprecond), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 #ifdef HAVE_XML
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node,sub_node
+TYPE(xml_node), POINTER :: current_node,sub_node
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: nlocals
 DEBUG_STACK_PUSH
@@ -2333,7 +2333,7 @@ ALLOCATE(nlocals(val_level))
 !---Read-in desired number of subdomains
 CALL xml_get_element(solver_node,"nlocal",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,nlocals,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,nlocals,num=nread,iostat=ierr)
   IF(nread>1)THEN
     IF(ierr<0)CALL oft_abort("Not enough local sizes specified", &
     "bjprecond_setup_xml",__FILE__)
@@ -2346,19 +2346,19 @@ IF(self%nlocal<-1)THEN
   !---Read-in desired number of subdomains
   CALL xml_get_element(solver_node,"groups",current_node,ierr)
   IF(ierr==0)THEN
-    CALL fox_extractDataContent(current_node,self%slice_group,num=nread,iostat=ierr)
+    CALL xml_extractDataContent(current_node,self%slice_group,num=nread,iostat=ierr)
   END IF
 END IF
 !---Read-in desired boundary overlap specification
 CALL xml_get_element(solver_node,"boverlap",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,self%boundary_overlap,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,self%boundary_overlap,num=nread,iostat=ierr)
   IF(nread>1)CALL oft_abort("boverlap must be single value","bjprecond_setup_xml",__FILE__)
 END IF
 !---Read-in desired internal overlap specification
 CALL xml_get_element(solver_node,"loverlap",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,self%loverlap,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,self%loverlap,num=nread,iostat=ierr)
   IF(nread>1)CALL oft_abort("loverlap must be single value","bjprecond_setup_xml",__FILE__)
 END IF
 IF(oft_debug_print(1))THEN

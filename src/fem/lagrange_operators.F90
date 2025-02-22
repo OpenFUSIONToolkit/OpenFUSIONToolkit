@@ -2753,10 +2753,10 @@ INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 !---
-TYPE(fox_node), POINTER :: pre_node
+TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
-TYPE(fox_node), POINTER :: lag_node
+TYPE(xml_node), POINTER :: lag_node
 #endif
 DEBUG_STACK_PUSH
 !---

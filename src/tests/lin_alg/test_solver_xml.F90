@@ -66,7 +66,7 @@ CLASS(oft_matrix), POINTER :: mop => NULL()
 !---
 #ifdef HAVE_XML
 integer(i4) :: nnodes
-TYPE(fox_node), POINTER :: solver_node
+TYPE(xml_node), POINTER :: solver_node
 #endif
 !---Set FE level
 CALL oft_lag_set_level(oft_lagrange_nlevels)

@@ -17,12 +17,8 @@ USE, INTRINSIC :: iso_c_binding, only: c_int, c_ptr, c_long
 USE ifport ! Intel fortran portability library
 #endif
 #ifdef HAVE_XML
-USE fox_dom, ONLY: fox_node => node, fox_parsefile => parsefile, &
-  fox_getelementsbytagname => getElementsByTagname, fox_item => item, fox_getLength => getLength, &
-  fox_extractDataAttribute => extractDataAttribute, fox_hasAttribute => hasAttribute, &
-  fox_extractDataContent => extractDataContent, fox_getAttributeNode => getAttributeNode, &
-  fox_getExceptionCode => getExceptionCode, fox_DOMException => DOMException, &
-  fox_getChildNodes => getChildNodes, fox_getName => getNodeName
+USE fox_dom, ONLY: xml_node => node, xml_parsefile => parsefile, xml_hasAttribute => hasAttribute, &
+  xml_extractDataAttribute => extractDataAttribute, xml_extractDataContent => extractDataContent
 #endif
 IMPLICIT NONE
 !---Local types sizes
@@ -151,14 +147,14 @@ END TYPE oft_timer
 PRIVATE oft_timer_start, oft_timer_elapsed, oft_timer_intelapsed, oft_timer_timeout
 #ifdef HAVE_XML
 !
-TYPE :: fox_node_ptr
-  TYPE(fox_node), POINTER :: this => NULL()
-END TYPE fox_node_ptr
+TYPE :: xml_node_ptr
+  TYPE(xml_node), POINTER :: this => NULL()
+END TYPE xml_node_ptr
 !
-TYPE :: fox_nodelist
+TYPE :: xml_nodelist
   INTEGER(i4) :: n = 0
-  TYPE(fox_node_ptr), POINTER, DIMENSION(:) :: nodes => NULL()
-END TYPE fox_nodelist
+  TYPE(xml_node_ptr), POINTER, DIMENSION(:) :: nodes => NULL()
+END TYPE xml_nodelist
 !---------------------------------------------------------------------------
 !> Generate inverse of sparse indexing
 !---------------------------------------------------------------------------
@@ -375,18 +371,20 @@ END IF
 END FUNCTION time_to_string
 #ifdef HAVE_XML
 !------------------------------------------------------------------------------
-!> Get child element within a given XML node
+!> Get child element with a specific name within a given XML node
 !------------------------------------------------------------------------------
 subroutine xml_get_element_single(parent,name,element,error_flag,index)
-USE fox_dom, ONLY: nodelist
-TYPE(fox_node), POINTER, INTENT(in) :: parent
-CHARACTER(LEN=*), INTENT(in) :: name
-TYPE(fox_node), POINTER, INTENT(inout) :: element
-INTEGER(i4), INTENT(out) :: error_flag
-INTEGER(i4), OPTIONAL, INTENT(in) :: index
+USE fox_dom, ONLY: nodelist, item, getLength, getChildNodes, getNodeName, DOMException, &
+  getExceptionCode
+TYPE(xml_node), POINTER, INTENT(in) :: parent !< Parent element
+CHARACTER(LEN=*), INTENT(in) :: name !< Name of child element to find
+TYPE(xml_node), POINTER, INTENT(inout) :: element !< Found element
+INTEGER(i4), INTENT(out) :: error_flag !< Error flag (0 if successful)
+INTEGER(i4), OPTIONAL, INTENT(in) :: index !< Optional index, defaults to first matching element
 INTEGER(i4) :: i,req_index,nchildren,nelements
-TYPE(fox_node), POINTER :: tmp_element
+TYPE(xml_node), POINTER :: tmp_element
 TYPE(nodelist), POINTER :: tmp_list
+TYPE(DOMException) :: xml_ex
 NULLIFY(element)
 IF(.NOT.ASSOCIATED(parent))THEN
   error_flag=1
@@ -398,14 +396,21 @@ IF(req_index<=0)THEN
   error_flag=3
   RETURN
 END IF
-tmp_list=>fox_getChildNodes(parent)
-nchildren=fox_getLength(tmp_list)
+tmp_list=>getChildNodes(parent,ex=xml_ex)
+IF(getExceptionCode(xml_ex)/=0)THEN
+  error_flag=2
+  RETURN
+END IF
+nchildren=getLength(tmp_list)
 nelements=0
 DO i=1,nchildren
-  tmp_element=>fox_item(tmp_list,i-1)
-  IF(fox_getName(tmp_element)==TRIM(name))THEN
+  tmp_element=>item(tmp_list,i-1)
+  IF(getNodeName(tmp_element)==TRIM(name))THEN
     nelements=nelements+1
-    IF(nelements==req_index)element=>tmp_element
+    IF(nelements==req_index)THEN
+      element=>tmp_element
+      EXIT
+    END IF
   END IF
 END DO
 IF(nelements==0)THEN
@@ -419,28 +424,34 @@ END IF
 error_flag=0
 end subroutine xml_get_element_single
 !------------------------------------------------------------------------------
-!> Get child element within a given XML node
+!> Get all child elements with a specific name within a given XML node
 !------------------------------------------------------------------------------
 subroutine xml_get_element_list(parent,name,elements,error_flag)
-USE fox_dom, ONLY: nodelist
-TYPE(fox_node), POINTER, INTENT(in) :: parent
-CHARACTER(LEN=*), INTENT(in) :: name
-TYPE(fox_nodelist), INTENT(inout) :: elements
-INTEGER(i4), INTENT(out) :: error_flag
-INTEGER(i4) :: i,req_index,nchildren
-TYPE(fox_node), POINTER :: tmp_element
+USE fox_dom, ONLY: nodelist, item, getLength, getChildNodes, getNodeName, DOMException, &
+  getExceptionCode
+TYPE(xml_node), POINTER, INTENT(in) :: parent !< Parent element
+CHARACTER(LEN=*), INTENT(in) :: name !< Name of child element to find
+TYPE(xml_nodelist), INTENT(inout) :: elements !< Found elements
+INTEGER(i4), INTENT(out) :: error_flag !< Error flag (0 if successful)
+INTEGER(i4) :: i,nchildren
+TYPE(xml_node), POINTER :: tmp_element
 TYPE(nodelist), POINTER :: tmp_list
+TYPE(DOMException) :: xml_ex
 IF(ASSOCIATED(elements%nodes))DEALLOCATE(elements%nodes)
 elements%n=0
 IF(.NOT.ASSOCIATED(parent))THEN
   error_flag=1
   RETURN
 END IF
-tmp_list=>fox_getChildNodes(parent)
-nchildren=fox_getLength(tmp_list)
+tmp_list=>getChildNodes(parent,ex=xml_ex)
+IF(getExceptionCode(xml_ex)/=0)THEN
+  error_flag=2
+  RETURN
+END IF
+nchildren=getLength(tmp_list)
 DO i=1,nchildren
-  tmp_element=>fox_item(tmp_list,i-1)
-  IF(fox_getName(tmp_element)==TRIM(name))THEN
+  tmp_element=>item(tmp_list,i-1)
+  IF(getNodeName(tmp_element)==TRIM(name))THEN
     elements%n=elements%n+1
   END IF
 END DO
@@ -451,10 +462,10 @@ END IF
 ALLOCATE(elements%nodes(elements%n))
 elements%n=0
 DO i=1,nchildren
-  tmp_element=>fox_item(tmp_list,i-1)
-  IF(fox_getName(tmp_element)==TRIM(name))THEN
+  tmp_element=>item(tmp_list,i-1)
+  IF(getNodeName(tmp_element)==TRIM(name))THEN
     elements%n=elements%n+1
-    elements%nodes(i)%this=>fox_item(tmp_list,i-1)
+    elements%nodes(elements%n)%this=>tmp_element
   END IF
 END DO
 error_flag=0

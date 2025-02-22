@@ -661,12 +661,12 @@ end subroutine lusolver_update
 !---------------------------------------------------------------------------
 subroutine lusolver_setup_xml(self,solver_node,level)
 CLASS(oft_lusolver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node
+TYPE(xml_node), POINTER :: current_node
 !---
 CHARACTER(LEN=7) :: factor_package
 CHARACTER(LEN=3) :: fac_type
@@ -675,7 +675,7 @@ DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN
     self%package=factor_package
   END IF
@@ -921,12 +921,12 @@ end subroutine ilusolver_update
 !---------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node
+TYPE(xml_node), POINTER :: current_node
 !---
 CHARACTER(LEN=7) :: factor_package
 CHARACTER(LEN=3) :: fac_type
@@ -935,7 +935,7 @@ DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN
     self%package=factor_package
   END IF

@@ -284,8 +284,8 @@ end interface
 ! Global variables
 !---------------------------------------------------------------------------
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
-TYPE(fox_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
-TYPE(fox_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
+TYPE(xml_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
+TYPE(xml_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
 !---Equation control
 LOGICAL :: xmhd_jcb = .TRUE. !< Include JxB force on fluid
 LOGICAL :: xmhd_advec = .TRUE. !< Include fluid advection
@@ -2562,8 +2562,8 @@ subroutine xmhd_setup_regions()
 #ifdef HAVE_XML
 integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
 real(r8) :: eta(1)
-TYPE(fox_node), POINTER :: reg_node,inner_node
-TYPE(fox_nodelist), POINTER :: reg_nodes
+TYPE(xml_node), POINTER :: reg_node,inner_node
+TYPE(xml_nodelist) :: reg_nodes
 #endif
 integer(i4), ALLOCATABLE :: regs(:),reg_types(:)
 DEBUG_STACK_PUSH
@@ -2578,16 +2578,14 @@ solid_cell=.FALSE.
 IF(ASSOCIATED(xmhd_root_node))THEN
   !---Look for pre node
   CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
-  ! reg_nodes=>fox_getElementsByTagName(xmhd_root_node,"region")
-  ! nnodes=fox_getLength(reg_nodes)
   IF(reg_nodes%n>0)THEN
     DO i=0,reg_nodes%n-1
-      reg_node=>reg_nodes%nodes(i+1)%this !fox_item(reg_nodes,i)
+      reg_node=>reg_nodes%nodes(i+1)%this
       !---
       CALL xml_get_element(reg_node,"id",inner_node,ierr)
       IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
         "xmhd_setup_regions",__FILE__)
-      CALL fox_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
+      CALL xml_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
       IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
         "xmhd_setup_regions",__FILE__)
       IF(ierr>0)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
@@ -2596,7 +2594,7 @@ IF(ASSOCIATED(xmhd_root_node))THEN
         "Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
       CALL xml_get_element(reg_node,"eta",inner_node,ierr)
-      CALL fox_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
+      CALL xml_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
       IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
         "xmhd_setup_regions",__FILE__)
       IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
@@ -2608,7 +2606,7 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(ierr/=0)THEN
         reg_type(1)=2.d0
       ELSE
-        CALL fox_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
+        CALL xml_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
         IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
           "xmhd_setup_regions",__FILE__)
         IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
