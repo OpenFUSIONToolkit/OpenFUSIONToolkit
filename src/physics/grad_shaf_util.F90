@@ -929,7 +929,7 @@ do j=1,npsi-1
   END IF
   pt=pt_last
   !$omp critical
-  CALL gs_psi2r(gseq,psi_surf(1),pt)
+  CALL gs_psi2r(gseq,psi_surf(1),pt,psi_int=psi_int)
   !$omp end critical
   CALL tracinginv_fs(pt,ptout)
   pt_last=pt
@@ -979,6 +979,7 @@ end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 !$omp end parallel
+CALL psi_int%delete()
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN
     DEALLOCATE(cout,rout,zout)
@@ -1150,7 +1151,7 @@ do j=1,nr
   IF(j>1)THEN
     pt=pt_last
     !$omp critical
-    CALL gs_psi2r(gseq,psi_trace,pt)
+    CALL gs_psi2r(gseq,psi_trace,pt,psi_int=psi_int)
     !$omp end critical
     IF(j==nr)THEN
       ALLOCATE(ptout(3,active_tracer%maxsteps+1))
@@ -1260,6 +1261,7 @@ DO i=1,nr
     psirz(i,j)=psi_tmp(1)
   END DO
 END DO
+CALL psi_int%delete()
 !---------------------------------------------------------------------------
 ! Create output file
 !---------------------------------------------------------------------------
@@ -1465,7 +1467,7 @@ do j=1,nr
   !
   pt=pt_last
   ! !$omp critical
-  CALL gs_psi2r(gseq,psi_surf,pt)
+  CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
   ! !$omp end critical
   IF(gseq%mode==0)THEN
     field%f_surf=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
@@ -1506,5 +1508,6 @@ CALL field%delete
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 ! !$omp end parallel
+CALL psi_int%delete()
 end subroutine sauter_fc
 END MODULE oft_gs_util
