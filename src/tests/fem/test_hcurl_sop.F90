@@ -17,8 +17,8 @@
 program test_hcurl_sop
 USE oft_base
 ! USE timer
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, oft_hcurl_nlevels, &
   oft_hcurl, oft_bhcurl, oft_hcurl_eval_all
@@ -41,7 +41,7 @@ READ(io_unit,test_hcurl_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct
-IF(mesh_cube_id/=mesh%cad_type)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 CALL oft_hcurl_setup(order)
 !---Run tests

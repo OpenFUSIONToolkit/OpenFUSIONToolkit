@@ -23,7 +23,7 @@
 MODULE oft_lag_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_mesh_type, ONLY: oft_mesh, mesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
@@ -47,8 +47,6 @@ USE oft_lag_fields, ONLY: oft_lag_create, oft_blag_create, oft_lag_vcreate
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
-! CLASS oft_lag_rinterp
-!---------------------------------------------------------------------------
 !> Interpolate a Lagrange field
 !---------------------------------------------------------------------------
 type, extends(fem_interp) :: oft_lag_rinterp
@@ -66,8 +64,6 @@ contains
   procedure :: delete => lag_rinterp_delete
 end type oft_lag_rinterp
 !---------------------------------------------------------------------------
-! CLASS oft_lag_ginterp
-!---------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \f$ of a Lagrange field
 !---------------------------------------------------------------------------
 type, extends(oft_lag_rinterp) :: oft_lag_ginterp
@@ -75,8 +71,6 @@ contains
   !> Reconstruct field
   procedure :: interp => lag_ginterp_apply
 end type oft_lag_ginterp
-! !---------------------------------------------------------------------------
-! ! CLASS oft_lag_brinterp
 ! !---------------------------------------------------------------------------
 ! !> Interpolate a boundary Lagrange field
 ! !---------------------------------------------------------------------------
@@ -92,8 +86,6 @@ end type oft_lag_ginterp
 !   !> Delete reconstruction object
 !   procedure :: delete => lag_brinterp_delete
 ! end type oft_lag_brinterp
-!---------------------------------------------------------------------------
-! CLASS oft_lag_vrinterp
 !---------------------------------------------------------------------------
 !> Interpolate a Lagrange vector field
 !---------------------------------------------------------------------------
@@ -112,8 +104,6 @@ contains
   procedure :: delete => lag_vrinterp_delete
 end type oft_lag_vrinterp
 !---------------------------------------------------------------------------
-! CLASS oft_lag_vcinterp
-!---------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \times \f$ of a Lagrange vector field
 !---------------------------------------------------------------------------
 type, extends(oft_lag_vrinterp) :: oft_lag_vcinterp
@@ -122,8 +112,6 @@ contains
   procedure :: interp => lag_vcinterp
 end type oft_lag_vcinterp
 !---------------------------------------------------------------------------
-! CLASS oft_lag_vdinterp
-!---------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \f$ of a Lagrange vector field
 !---------------------------------------------------------------------------
 type, extends(oft_lag_vrinterp) :: oft_lag_vdinterp
@@ -131,8 +119,6 @@ contains
   !> Reconstruct field
   procedure :: interp => lag_vdinterp
 end type oft_lag_vdinterp
-! !---------------------------------------------------------------------------
-! ! CLASS oft_lag_bvrinterp
 ! !---------------------------------------------------------------------------
 ! !> Interpolate a boundary Lagrange vector field
 ! !---------------------------------------------------------------------------
@@ -159,8 +145,6 @@ REAL(r8), POINTER, DIMENSION(:,:) :: oft_lag_gop => NULL()
 !$omp threadprivate(oft_lag_rop,oft_lag_gop)
 contains
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_mloptions
-!---------------------------------------------------------------------------
 !> Read-in options for the basic Lagrange ML preconditioners
 !---------------------------------------------------------------------------
 subroutine lag_mloptions()
@@ -185,8 +169,6 @@ IF(df_lop(1)<-1.d90)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine lag_mloptions
-!---------------------------------------------------------------------------
-! SUBROUTINE: lag_rinterp_setup
 !---------------------------------------------------------------------------
 !> Setup interpolator for Lagrange scalar fields
 !!
@@ -219,8 +201,6 @@ ELSE
 END IF
 end subroutine lag_rinterp_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_rinterp_delete
-!---------------------------------------------------------------------------
 !> Destroy temporary internal storage
 !!
 !! @note Should only be used via class \ref oft_lag_rinterp or children
@@ -239,23 +219,16 @@ ELSE
 END IF
 end subroutine lag_rinterp_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_rinterp
-!---------------------------------------------------------------------------
 !> Reconstruct a Lagrange scalar field
 !!
 !! @note Should only be used via class \ref oft_lag_rinterp
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed field at f [1]
 !---------------------------------------------------------------------------
 subroutine lag_rinterp(self,cell,f,gop,val)
 class(oft_lag_rinterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [1]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8) :: rop(1)
@@ -290,8 +263,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine lag_rinterp
 ! !---------------------------------------------------------------------------
-! ! SUBROUTINE: lag_brinterp_setup
-! !---------------------------------------------------------------------------
 ! !> Setup interpolator for boundary Lagrange scalar fields
 ! !!
 ! !! Fetches local representation used for interpolation from vector object
@@ -305,8 +276,6 @@ end subroutine lag_rinterp
 ! IF(.NOT.ASSOCIATED(self%lag_rep))self%lag_rep=>oft_blagrange
 ! end subroutine lag_brinterp_setup
 ! !---------------------------------------------------------------------------
-! ! SUBROUTINE: lag_brinterp_delete
-! !---------------------------------------------------------------------------
 ! !> Destroy temporary internal storage
 ! !!
 ! !! @note Should only be used via class \ref oft_lag_brinterp or children
@@ -317,8 +286,6 @@ end subroutine lag_rinterp
 ! IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
 ! NULLIFY(self%lag_rep,self%u)
 ! end subroutine lag_brinterp_delete
-! !---------------------------------------------------------------------------
-! ! SUBROUTINE: lag_brinterp
 ! !---------------------------------------------------------------------------
 ! !> Reconstruct a boundary Lagrange scalar field
 ! !!
@@ -354,23 +321,16 @@ end subroutine lag_rinterp
 ! DEBUG_STACK_POP
 ! end subroutine lag_brinterp
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_ginterp_apply
-!---------------------------------------------------------------------------
 !> Reconstruct the gradient of a Lagrange scalar field
 !!
 !! @note Should only be used via class \ref oft_lag_ginterp
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed gradient at f [3]
 !---------------------------------------------------------------------------
 subroutine lag_ginterp_apply(self,cell,f,gop,val)
-class(oft_lag_ginterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+class(oft_lag_ginterp), intent(inout) :: self !< 
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed gradient at f [3]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8) :: rop(3)
@@ -404,8 +364,6 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine lag_ginterp_apply
-!---------------------------------------------------------------------------
-! SUBROUTINE: lag_vrinterp_setup
 !---------------------------------------------------------------------------
 !> Setup interpolator for Lagrange vector fields
 !!
@@ -445,8 +403,6 @@ ELSE
 END IF
 end subroutine lag_vrinterp_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vrinterp_delete
-!---------------------------------------------------------------------------
 !> Setup interpolator for Lagrange vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
@@ -467,23 +423,16 @@ ELSE
 END IF
 end subroutine lag_vrinterp_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vrinterp
-!---------------------------------------------------------------------------
 !> Reconstruct a Lagrange vector field
 !!
 !! @note Should only be used via class \ref oft_lag_vrinterp
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed field at f [3]
 !---------------------------------------------------------------------------
 subroutine lag_vrinterp(self,cell,f,gop,val)
 class(oft_lag_vrinterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [3]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8) :: rop(1)
@@ -518,23 +467,16 @@ END IF
 DEBUG_STACK_POP
 end subroutine lag_vrinterp
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vcinterp
-!---------------------------------------------------------------------------
 !> Reconstruct the curl of a Lagrange vector field
 !!
 !! @note Should only be used via class \ref oft_lag_vcinterp
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed curl at f [3]
 !---------------------------------------------------------------------------
 subroutine lag_vcinterp(self,cell,f,gop,val)
 class(oft_lag_vcinterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [3]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8) :: x,y,z
@@ -560,8 +502,6 @@ deallocate(j,rop)
 DEBUG_STACK_POP
 end subroutine lag_vcinterp
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vdinterp
-!---------------------------------------------------------------------------
 !> Reconstruct \f$ \nabla v \f$ for a Lagrange vector field.
 !!
 !! The tensor is packed using reshape, to retrieve use
@@ -570,18 +510,13 @@ end subroutine lag_vcinterp
 !!\endcode
 !!
 !! @note Should only be used via class \ref oft_lag_vdinterp
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed tensor at f [9]
 !---------------------------------------------------------------------------
 subroutine lag_vdinterp(self,cell,f,gop,val)
 class(oft_lag_vdinterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [3]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8) :: rop(3),dv(3,3),vtmp(9,1)
@@ -622,8 +557,6 @@ val=vtmp(:,1)
 DEBUG_STACK_POP
 end subroutine lag_vdinterp
 ! !---------------------------------------------------------------------------
-! ! SUBROUTINE: lag_bvrinterp_setup
-! !---------------------------------------------------------------------------
 ! !> Setup interpolator for boundary Lagrange vector fields
 ! !!
 ! !! Fetches local representation used for interpolation from vector object
@@ -644,8 +577,6 @@ end subroutine lag_vdinterp
 ! IF(.NOT.ASSOCIATED(self%lag_rep))self%lag_rep=>oft_blagrange
 ! end subroutine lag_bvrinterp_setup
 ! !---------------------------------------------------------------------------
-! ! SUBROUTINE: lag_bvrinterp_delete
-! !---------------------------------------------------------------------------
 ! !> Destroy temporary internal storage
 ! !!
 ! !! @note Should only be used via class \ref oft_lag_bvrinterp or children
@@ -656,8 +587,6 @@ end subroutine lag_vdinterp
 ! IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
 ! NULLIFY(self%lag_rep,self%u)
 ! end subroutine lag_bvrinterp_delete
-! !---------------------------------------------------------------------------
-! ! SUBROUTINE: lag_bvrinterp
 ! !---------------------------------------------------------------------------
 ! !> Reconstruct a boundary Lagrange vector field
 ! !!
@@ -694,8 +623,6 @@ end subroutine lag_vdinterp
 ! DEBUG_STACK_POP
 ! end subroutine lag_bvrinterp
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_zerob
-!---------------------------------------------------------------------------
 !> Zero a Lagrange scalar field at all boundary nodes
 !!
 !! @param[in,out] a Field to be zeroed
@@ -720,17 +647,13 @@ deallocate(vloc)
 DEBUG_STACK_POP
 end subroutine lag_zerob
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_zerogrnd
-!---------------------------------------------------------------------------
 !> Zero a Lagrange scalar field at the global grounding node
 !!
 !! @note The possition of this node is defined by the mesh pointer igrnd in
-!! mesh.
-!!
-!! @param[in,out] a Field to be zeroed
+!! mesh
 !---------------------------------------------------------------------------
 subroutine lag_zerogrnd(a)
-class(oft_vector), intent(inout) :: a
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
@@ -738,14 +661,12 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc)
 CALL a%get_local(aloc)
 !---
-if(mesh%igrnd(1)>0)aloc(mesh%igrnd(1))=0.d0
-if(mesh%igrnd(2)>0)aloc(mesh%igrnd(2))=0.d0
+if(mg_mesh%mesh%igrnd(1)>0)aloc(mg_mesh%mesh%igrnd(1))=0.d0
+if(mg_mesh%mesh%igrnd(2)>0)aloc(mg_mesh%mesh%igrnd(2))=0.d0
 CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine lag_zerogrnd
-! !---------------------------------------------------------------------------
-! ! SUBROUTINE: blag_zerob
 ! !---------------------------------------------------------------------------
 ! !> Zero a surface Lagrange scalar field at all edge nodes
 ! !!
@@ -770,8 +691,6 @@ end subroutine lag_zerogrnd
 ! deallocate(vloc)
 ! DEBUG_STACK_POP
 ! end subroutine blag_zerob
-! !---------------------------------------------------------------------------
-! ! SUBROUTINE: blag_zeroe
 ! !---------------------------------------------------------------------------
 ! !> Zero a surface Lagrange scalar field at all edge nodes
 ! !!
@@ -798,14 +717,10 @@ end subroutine lag_zerogrnd
 ! DEBUG_STACK_POP
 ! end subroutine blag_zeroe
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vzerob
-!---------------------------------------------------------------------------
 !> Zero a surface Lagrange vector field at all edge nodes
-!!
-!! @param[in,out] a Field to be zeroed
 !---------------------------------------------------------------------------
 subroutine lag_vzerob(a)
-class(oft_vector), intent(inout) :: a
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
 real(r8), pointer :: vloc(:,:),vtmp(:)
 DEBUG_STACK_PUSH
@@ -830,14 +745,10 @@ DEALLOCATE(vloc)
 DEBUG_STACK_POP
 end subroutine lag_vzerob
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vzeron
-!---------------------------------------------------------------------------
 !> Zero normal component of a Lagrange vector field at boundary nodes
-!!
-!! @param[in,out] a Field to be zeroed
 !---------------------------------------------------------------------------
 subroutine lag_vzeron(a)
-class(oft_vector), intent(inout) :: a
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
 real(r8), pointer, dimension(:) :: x,y,z
 integer(i4) :: i,j
@@ -868,14 +779,10 @@ DEALLOCATE(x,y,z)
 DEBUG_STACK_POP
 end subroutine lag_vzeron
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vzerot
-!---------------------------------------------------------------------------
 !> Zero tangential component of a Lagrange vector field at boundary nodes
-!!
-!! @param[in,out] a Field to be zeroed
 !---------------------------------------------------------------------------
 subroutine lag_vzerot(a)
-class(oft_vector), intent(inout) :: a
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
 real(r8), pointer, dimension(:) :: x,y,z
 integer(i4) :: i,j
@@ -906,18 +813,12 @@ DEALLOCATE(x,y,z)
 DEBUG_STACK_POP
 end subroutine lag_vzerot
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vbc_tensor
-!---------------------------------------------------------------------------
 !> Get boundary condition tensor for desired node in a Lagrange vector field
-!!
-!! @param[in] j_lag Local index of Lagrange node
-!! @param[in] bc_type Desired BC (1 -> norm, 2-> tang)
-!! @param[out] nn BC tensor (3,3)
 !---------------------------------------------------------------------------
 subroutine lag_vbc_tensor(j_lag,bc_type,nn)
-integer(i4), intent(in) :: j_lag
-integer(i4), intent(in) :: bc_type
-real(r8), intent(out) :: nn(3,3)
+integer(i4), intent(in) :: j_lag !< Local index of Lagrange node
+integer(i4), intent(in) :: bc_type !< Desired BC (1 -> norm, 2-> tang)
+real(r8), intent(out) :: nn(3,3) !< BC tensor (3,3)
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 IF(oft_lagrange%global%gbe(j_lag))THEN
@@ -954,19 +855,13 @@ END IF
 DEBUG_STACK_POP
 end subroutine lag_vbc_tensor
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vbc_diag
-!---------------------------------------------------------------------------
 !> Get diagonal entries for a given boundary condition and desired node in a
 !! Lagrange vector field
-!!
-!! @param[in] j_lag Local index of Lagrange node
-!! @param[in] bc_type Desired BC (1 -> norm, 2-> tang)
-!! @param[out] nn Diagonal entries (3,3)
 !---------------------------------------------------------------------------
 subroutine lag_vbc_diag(j_lag,bc_type,nn)
-integer(i4), intent(in) :: j_lag
-integer(i4), intent(in) :: bc_type
-real(r8), intent(out) :: nn(3,3)
+integer(i4), intent(in) :: j_lag !< Local index of Lagrange node
+integer(i4), intent(in) :: bc_type !< Desired BC (1 -> norm, 2-> tang)
+real(r8), intent(out) :: nn(3,3) !< Diagonal entries (3,3)
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 SELECT CASE(bc_type)
@@ -1005,20 +900,15 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine lag_vbc_diag
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_getmop
-!---------------------------------------------------------------------------
 !> Construct mass matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine oft_lag_getmop(mat,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-character(LEN=*), intent(in) :: bc
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
@@ -1048,12 +938,12 @@ allocate(j(oft_lagrange%nce)) ! Local DOF and matrix indices
 allocate(rop(oft_lagrange%nce)) ! Reconstructed gradient operator
 allocate(mop(oft_lagrange%nce,oft_lagrange%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_lagrange%mesh%nc
+  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   mop=0.d0
   do m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
     det=vol*oft_lagrange%quad%wts(m)
     call oft_lag_eval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),rop)
     !---Compute local matrix contributions
@@ -1072,9 +962,9 @@ do i=1,mesh%nc
         IF(oft_lagrange%global%gbe(j(jr)))mop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(mesh%igrnd>0))THEN
+      IF(ANY(oft_lagrange%mesh%igrnd>0))THEN
         DO jr=1,oft_lagrange%nce
-          IF(ANY(j(jr)==mesh%igrnd))mop(jr,:)=0.d0
+          IF(ANY(j(jr)==oft_lagrange%mesh%igrnd))mop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
@@ -1098,10 +988,10 @@ SELECT CASE(TRIM(bc))
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(mesh%igrnd>0))THEN
+    IF(ANY(oft_lagrange%mesh%igrnd>0))THEN
       DO i=1,oft_lagrange%nbe
         jr=oft_lagrange%lbe(i)
-        IF(oft_lagrange%linkage%leo(i).AND.ANY(jr==mesh%igrnd))THEN
+        IF(oft_lagrange%linkage%leo(i).AND.ANY(jr==oft_lagrange%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,mop,1,1)
         END IF
@@ -1120,21 +1010,16 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_getmop
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_getlop
-!---------------------------------------------------------------------------
 !> Construct laplacian matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !! - \c 'grnd'  Dirichlet for only groundin point
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine oft_lag_getlop(mat,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-character(LEN=*), intent(in) :: bc
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
@@ -1163,12 +1048,12 @@ allocate(j(oft_lagrange%nce)) ! Local DOF and matrix indices
 allocate(gop(3,oft_lagrange%nce)) ! Reconstructed gradient operator
 allocate(lop(oft_lagrange%nce,oft_lagrange%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_lagrange%mesh%nc
+  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   lop=0.d0
   do m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
     det=vol*oft_lagrange%quad%wts(m)
     call oft_lag_geval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),gop,goptmp)
     !---Compute local matrix contributions
@@ -1187,9 +1072,9 @@ do i=1,mesh%nc
         IF(oft_lagrange%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(mesh%igrnd>0))THEN
+      IF(ANY(oft_lagrange%mesh%igrnd>0))THEN
         DO jr=1,oft_lagrange%nce
-          IF(ANY(j(jr)==mesh%igrnd))lop(jr,:)=0.d0
+          IF(ANY(j(jr)==oft_lagrange%mesh%igrnd))lop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
@@ -1213,10 +1098,10 @@ SELECT CASE(TRIM(bc))
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(mesh%igrnd>0))THEN
+    IF(ANY(oft_lagrange%mesh%igrnd>0))THEN
       DO i=1,oft_lagrange%nbe
         jr=oft_lagrange%lbe(i)
-        IF(oft_lagrange%linkage%leo(i).AND.ANY(jr==mesh%igrnd))THEN
+        IF(oft_lagrange%linkage%leo(i).AND.ANY(jr==oft_lagrange%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,lop,1,1)
         END IF
@@ -1235,27 +1120,19 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_getlop
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_getpdop
-!---------------------------------------------------------------------------
 !> Construct parallel diffusion matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !! - \c 'grnd'  Dirichlet for only groundin point
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in,out] field Vector field defining \f$ \hat{b} \f$
-!! @param[in] bc Boundary condition
-!! @param[in] perp Value of perpendicular conductivity (optional)
-!! @param[in] be_flag Flag for dirichlet nodes if different from boundary [ne] (optional)
 !---------------------------------------------------------------------------
 subroutine oft_lag_getpdop(mat,field,bc,perp,be_flag)
-class(oft_matrix), pointer, intent(inout) :: mat
-class(fem_interp), intent(inout) :: field
-character(LEN=*), intent(in) :: bc
-real(r8), optional, intent(in) :: perp
-logical, optional, intent(in) :: be_flag(:)
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+class(fem_interp), intent(inout) :: field !< Vector field defining \f$ \hat{b} \f$
+character(LEN=*), intent(in) :: bc !< Boundary condition
+real(r8), optional, intent(in) :: perp !< Value of perpendicular conductivity (optional)
+logical, optional, intent(in) :: be_flag(:) !< Flag for dirichlet nodes if different from boundary [ne] (optional)
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),B_nodal(3),par_diff,perp_diff,elapsed_time
@@ -1292,14 +1169,14 @@ allocate(j(oft_lagrange%nce)) ! Local DOF and matrix indices
 allocate(gop(3,oft_lagrange%nce)) ! Reconstructed gradient operator
 allocate(pdop(oft_lagrange%nce,oft_lagrange%nce)) ! Local laplacian matrix
 !$omp do
-do i=1,mesh%nc
+do i=1,oft_lagrange%mesh%nc
   !---Get local to global DOF mapping
   call oft_lagrange%ncdofs(i,j)
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   pdop=0.d0
   do m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
     det=vol*oft_lagrange%quad%wts(m)
     call oft_lag_geval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),gop,goptmp)
     !---Compute bhat
@@ -1371,20 +1248,15 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_getpdop
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_project
-!---------------------------------------------------------------------------
 !> Project a scalar field onto a lagrange basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! test functions for a Lagrange basis. To retrieve the correct projection the
-!! result must be multiplied by the inverse of LAG::MOP.
-!!
-!! @param[in,out] field Scalar field for projection
-!! @param[in,out] x Field projected onto Lagrange basis
+!! result must be multiplied by the inverse of LAG::MOP
 !---------------------------------------------------------------------------
 subroutine oft_lag_project(field,x)
-class(fem_interp), intent(inout) :: field
-class(oft_vector), intent(inout) :: x
+class(fem_interp), intent(inout) :: field !< Scalar field for projection
+class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1402,11 +1274,11 @@ call x%get_local(xloc)
 !---Allocate cell DOF arrays
 allocate(j(oft_lagrange%nce),rop(oft_lagrange%nce))
 !$omp do schedule(guided)
-do i=1,mesh%nc ! Loop over cells
+do i=1,oft_lagrange%mesh%nc ! Loop over cells
   call oft_lagrange%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
   do m=1,oft_lagrange%quad%np
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
     det=vol*oft_lagrange%quad%wts(m)
     call field%interp(i,oft_lagrange%quad%pts(:,m),goptmp,bcc)
     call oft_lag_eval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),rop)
@@ -1423,20 +1295,15 @@ deallocate(xloc)
 DEBUG_STACK_POP
 end subroutine oft_lag_project
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_project_div
-!---------------------------------------------------------------------------
 !> Project the divergence of a scalar field onto a lagrange basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! test functions for a Lagrange basis. To retrieve the correct projection the
-!! result must be multiplied by the inverse of LAG::MOP.
-!!
-!! @param[in,out] field Scalar field for projection
-!! @param[in,out] x Field projected onto Lagrange basis
+!! result must be multiplied by the inverse of LAG::MOP
 !---------------------------------------------------------------------------
 subroutine oft_lag_project_div(field,x)
-class(fem_interp), intent(inout) :: field
-class(oft_vector), intent(inout) :: x
+class(fem_interp), intent(inout) :: field !< Scalar field for projection
+class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,vol,goptmp(3,4)
 real(r8), pointer :: xloc(:)
@@ -1454,11 +1321,11 @@ call x%get_local(xloc)
 !---Allocate cell DOF arrays
 allocate(j(oft_lagrange%nce),gop(3,oft_lagrange%nce))
 !$omp do schedule(guided)
-do i=1,mesh%nc ! Loop over cells
+do i=1,oft_lagrange%mesh%nc ! Loop over cells
   call oft_lagrange%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
   do m=1,oft_lagrange%quad%np
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
     det=vol*oft_lagrange%quad%wts(m)
     call field%interp(i,oft_lagrange%quad%pts(:,m),goptmp,bcc)
     call oft_lag_geval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),gop,goptmp)
@@ -1474,8 +1341,6 @@ call x%restore_local(xloc,add=.TRUE.)
 deallocate(xloc)
 DEBUG_STACK_POP
 end subroutine oft_lag_project_div
-! !---------------------------------------------------------------------------
-! ! SUBROUTINE: oft_blag_getmop
 ! !---------------------------------------------------------------------------
 ! !> Construct mass matrix for a boundary Lagrange scalar representation
 ! !!
@@ -1553,8 +1418,6 @@ end subroutine oft_lag_project_div
 ! END IF
 ! DEBUG_STACK_POP
 ! end subroutine oft_blag_getmop
-! !---------------------------------------------------------------------------
-! ! SUBROUTINE: oft_blag_getlop
 ! !---------------------------------------------------------------------------
 ! !> Construct laplacian matrix for Lagrange scalar representation
 ! !!
@@ -1676,8 +1539,6 @@ end subroutine oft_lag_project_div
 ! DEBUG_STACK_POP
 ! end subroutine oft_blag_getlop
 ! !------------------------------------------------------------------------------
-! ! SUBROUTINE: oft_blag_nproject
-! !------------------------------------------------------------------------------
 ! !> Project the normal component of a vector field onto a boundary Lagrange basis
 ! !!
 ! !! @note This subroutine only performs the integration of the field with
@@ -1729,8 +1590,6 @@ end subroutine oft_lag_project_div
 ! DEBUG_STACK_POP
 ! END SUBROUTINE oft_blag_nproject
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_vgetmop
-!---------------------------------------------------------------------------
 !> Construct mass matrix for Lagrange vector representation
 !!
 !! Supported boundary conditions
@@ -1738,13 +1597,10 @@ end subroutine oft_lag_project_div
 !! - \c 'all' Dirichlet for all components at boundary
 !! - \c 'norm' Dirichlet for normal component at boundary
 !! - \c 'tang' Dirichlet for tangential component at boundary
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine oft_lag_vgetmop(mat,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-character(LEN=*), intent(in) :: bc
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+character(LEN=*), intent(in) :: bc !< Boundary condition
 type :: block_mat
   real(r8), pointer, dimension(:,:) :: m => NULL()
 end type block_mat
@@ -1797,8 +1653,8 @@ DO jr=1,3
   END DO
 END DO
 !$omp do schedule(guided)
-DO i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+DO i=1,oft_lagrange%mesh%nc
+  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
   !---Get local to global DOF mapping
   CALL oft_lagrange%ncdofs(i,j)
   !---Compute local matrix contributions
@@ -1810,7 +1666,7 @@ DO i=1,mesh%nc
   END DO
   !---Get local reconstructed operators
   DO m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    IF(curved.OR.m==1)CALL mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.m==1)CALL oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
     det=vol*oft_lagrange%quad%wts(m)
     call oft_lag_eval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),rop)
     !---Compute local matrix contributions
@@ -1906,20 +1762,15 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_vgetmop
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_vproject
-!---------------------------------------------------------------------------
 !> Project a vector field onto a lagrange basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! test functions for a Lagrange basis. To retrieve the correct projection the
-!! result must be multiplied by the inverse of LAG::VMOP.
-!!
-!! @param[in,out] field Vector field for projection
-!! @param[in,out] x Field projected onto Lagrange basis
+!! result must be multiplied by the inverse of LAG::VMOP
 !---------------------------------------------------------------------------
 subroutine oft_lag_vproject(field,x)
-class(fem_interp), intent(inout) :: field
-class(oft_vector), intent(inout) :: x
+class(fem_interp), intent(inout) :: field !< Vector field for projection
+class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,goptmp(3,4),vol
 real(r8), pointer, dimension(:) :: xloc,yloc,zloc
@@ -1939,11 +1790,11 @@ call x%get_local(zloc,3)
 !---Allocate cell DOF arrays
 allocate(j(oft_lagrange%nce),rop(oft_lagrange%nce))
 !$omp do schedule(guided)
-do i=1,mesh%nc ! Loop over cells
+do i=1,oft_lagrange%mesh%nc ! Loop over cells
   call oft_lagrange%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
   do m=1,oft_lagrange%quad%np
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
     det=vol*oft_lagrange%quad%wts(m)
     call field%interp(i,oft_lagrange%quad%pts(:,m),goptmp,bcc)
     call oft_lag_eval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),rop)
@@ -1966,16 +1817,11 @@ deallocate(xloc,yloc,zloc)
 DEBUG_STACK_POP
 end subroutine oft_lag_vproject
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_div
-!---------------------------------------------------------------------------
-!> Compute the divergence of a Lagrange vector field.
-!!
-!! @param[in,out] a Input field
-!! @param[out] reg \f$ \int_v \nabla \cdot a \; dV \f$
+!> Compute the divergence of a Lagrange vector field
 !---------------------------------------------------------------------------
 subroutine lag_div(a,reg)
-class(oft_vector), intent(inout) :: a
-real(r8), intent(out) :: reg
+class(oft_vector), intent(inout) :: a !< Input field
+real(r8), intent(out) :: reg !< \f$ \int_v \nabla \cdot a \; dV \f$
 real(r8), pointer, dimension(:) :: x,y,z
 integer :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1991,13 +1837,13 @@ CALL a%get_local(z,3)
 !---
 reg=0.d0
 allocate(j(oft_lagrange%nce),gop(3,oft_lagrange%nce))
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_lagrange%mesh%nc
+  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
   !---Get local to global DOF mapping
   call oft_lagrange%ncdofs(i,j)
   !---Get local reconstructed operators
   do m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
     det=vol*oft_lagrange%quad%wts(m)
     call oft_lag_geval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),gop,goptmp)
     div=0.d0
@@ -2015,12 +1861,10 @@ DEALLOCATE(x,y,z)
 DEBUG_STACK_POP
 end subroutine lag_div
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_setup_interp
-!---------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
 !---------------------------------------------------------------------------
 SUBROUTINE lag_setup_interp(create_vec)
-LOGICAL, OPTIONAL, INTENT(in) :: create_vec
+LOGICAL, OPTIONAL, INTENT(in) :: create_vec !< Needs docs
 !---
 class(oft_vector), pointer :: fvec,cvec
 type(oft_graph_ptr) :: graphs(3,3)
@@ -2063,12 +1907,10 @@ END IF
 DEBUG_STACK_POP
 END SUBROUTINE lag_setup_interp
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_ginterpmatrix
-!---------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
 !---------------------------------------------------------------------------
 SUBROUTINE lag_ginterpmatrix(mat)
-class(oft_matrix), pointer, intent(inout) :: mat
+class(oft_matrix), pointer, intent(inout) :: mat !< Needs docs
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
@@ -2182,12 +2024,10 @@ deallocate(emap)
 DEBUG_STACK_POP
 END SUBROUTINE lag_ginterpmatrix
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_pinterpmatrix
-!---------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
 !---------------------------------------------------------------------------
 SUBROUTINE lag_pinterpmatrix(mat)
-class(oft_matrix), pointer, intent(inout) :: mat
+class(oft_matrix), pointer, intent(inout) :: mat !< Needs docs
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,js,jn,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),fc,ed,cell,dof,offset
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap,jcors,ftmp,fetmp,ctmp
@@ -2197,7 +2037,9 @@ CLASS(oft_scalar_fem), POINTER :: lag_cors => NULL()
 TYPE(oft_lag_ops), POINTER :: ops
 CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
+class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
+mesh=>mg_mesh%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
 !---
 ops=>oft_lagrange_ops
@@ -2495,18 +2337,13 @@ DEALLOCATE(ftmp,fetmp,ctmp)
 DEBUG_STACK_POP
 END SUBROUTINE lag_pinterpmatrix
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_interp
-!---------------------------------------------------------------------------
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
 !! @note The global Lagrange level in incremented by one in this subroutine
-!!
-!! @param[in] acors Vector to interpolate
-!! @param[in,out] afine Fine vector from interpolation
 !---------------------------------------------------------------------------
 subroutine lag_interp(acors,afine)
-class(oft_vector), intent(inout) :: acors
-class(oft_vector), intent(inout) :: afine
+class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 DEBUG_STACK_PUSH
 !---Step one level up
 call oft_lag_set_level(oft_lagrange_level+1)
@@ -2521,8 +2358,6 @@ CALL oft_lagrange_ops%interp%apply(acors,afine)
 DEBUG_STACK_POP
 end subroutine lag_interp
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vinterp
-!---------------------------------------------------------------------------
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
 !! @note The global Lagrange level in incremented by one in this subroutine
@@ -2531,8 +2366,8 @@ end subroutine lag_interp
 !! @param[in,out] afine Fine vector from interpolation
 !---------------------------------------------------------------------------
 subroutine lag_vinterp(acors,afine)
-class(oft_vector), intent(inout) :: acors
-class(oft_vector), intent(inout) :: afine
+class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 DEBUG_STACK_PUSH
 !---Step one level up
 call oft_lag_set_level(oft_lagrange_level+1)
@@ -2547,16 +2382,11 @@ CALL oft_lagrange_ops%vinterp%apply(acors,afine)
 DEBUG_STACK_POP
 end subroutine lag_vinterp
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_base_pop
-!---------------------------------------------------------------------------
 !> Transfer a base level Lagrange scalar field to the next MPI level
-!!
-!! @param[in] acors Vector to transfer
-!! @param[in,out] afine Fine vector from transfer
 !---------------------------------------------------------------------------
 subroutine lag_base_pop(acors,afine)
-class(oft_vector), intent(inout) :: acors
-class(oft_vector), intent(inout) :: afine
+class(oft_vector), intent(inout) :: acors !< Vector to transfer
+class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: array_c,array_f
@@ -2573,18 +2403,13 @@ DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine lag_base_pop
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_inject
-!---------------------------------------------------------------------------
 !> Inject a fine level Lagrange scalar field to the next coarsest level
 !!
 !! @note The global Lagrange level in decremented by one in this subroutine
-!!
-!! @param[in] afine Vector to inject
-!! @param[in,out] acors Coarse vector from injection
 !---------------------------------------------------------------------------
 subroutine lag_inject(afine,acors)
-class(oft_vector), intent(inout) :: afine
-class(oft_vector), intent(inout) :: acors
+class(oft_vector), intent(inout) :: afine !< Vector to inject
+class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
 integer(i4) :: i,j,k
 logical :: gcheck
 DEBUG_STACK_PUSH
@@ -2602,18 +2427,13 @@ CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%interp%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine lag_inject
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_vinject
-!---------------------------------------------------------------------------
 !> Inject a fine level Lagrange scalar field to the next coarsest level
 !!
 !! @note The global Lagrange level in decremented by one in this subroutine
-!!
-!! @param[in] afine Vector to inject
-!! @param[in,out] acors Coarse vector from injection
 !---------------------------------------------------------------------------
 subroutine lag_vinject(afine,acors)
-class(oft_vector), intent(inout) :: afine
-class(oft_vector), intent(inout) :: acors
+class(oft_vector), intent(inout) :: afine !< Vector to inject
+class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
 integer(i4) :: i,j,k
 logical :: gcheck
 DEBUG_STACK_PUSH
@@ -2631,16 +2451,11 @@ CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%vinterp%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine lag_vinject
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_base_push
-!---------------------------------------------------------------------------
 !> Transfer a MPI level Lagrange scalar field to the base level
-!!
-!! @param[in] afine Vector to transfer
-!! @param[in,out] acors Fine vector from transfer
 !---------------------------------------------------------------------------
 subroutine lag_base_push(afine,acors)
-class(oft_vector), intent(inout) :: afine
-class(oft_vector), intent(inout) :: acors
+class(oft_vector), intent(inout) :: afine !< Needs docs
+class(oft_vector), intent(inout) :: acors !< Needs docs
 integer(i4), pointer :: lptmp(:)
 integer(i4) :: i,j,ierr
 real(r8), pointer, dimension(:) :: alias,array_c,array_f
@@ -2672,12 +2487,10 @@ deallocate(alias,array_c,array_f)
 DEBUG_STACK_POP
 end subroutine lag_base_push
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_lop_eigs
-!---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator LAG::LOP
 !---------------------------------------------------------------------------
 SUBROUTINE lag_lop_eigs(minlev)
-INTEGER(i4), INTENT(in) :: minlev
+INTEGER(i4), INTENT(in) :: minlev !< Needs docs
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i
 REAL(r8) :: lam0
@@ -2733,15 +2546,13 @@ CALL oft_abort("Subroutine requires ARPACK", "lag_lop_eigs", __FILE__)
 #endif
 END SUBROUTINE lag_lop_eigs
 !---------------------------------------------------------------------------
-! SUBROUTINE: lag_getlop_pre
-!---------------------------------------------------------------------------
 !> Construct default MG preconditioner for LAG::LOP
 !---------------------------------------------------------------------------
 SUBROUTINE lag_getlop_pre(pre,mats,level,nlevels)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
-TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:)
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
-INTEGER(i4), OPTIONAL, INTENT(in) :: nlevels
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Needs docs
+TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:) !< Needs docs
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Needs docs
+INTEGER(i4), OPTIONAL, INTENT(in) :: nlevels !< Needs docs
 !--- ML structures for MG-preconditioner
 TYPE(oft_matrix_ptr), POINTER :: ml_int(:)
 INTEGER(i4), ALLOCATABLE :: levels(:)

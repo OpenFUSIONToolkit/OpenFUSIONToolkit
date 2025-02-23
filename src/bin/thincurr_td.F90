@@ -30,11 +30,11 @@
 PROGRAM thincurr_td
 USE oft_base
 USE oft_io, ONLY: oft_bin_file
-USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
 USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -98,7 +98,7 @@ CALL multigrid_construct_surf
 ! oft_env%nbase=1
 ! mg_mesh%mgdim=mg_mesh%mgmax
 ! CALL smesh_cubit_load
-SELECT CASE(smesh%cad_type)
+SELECT CASE(mg_mesh%smesh%cad_type)
 CASE(0)
   CALL native_read_nodesets(mesh_nsets)
   CALL native_read_sidesets(mesh_ssets)
@@ -117,7 +117,7 @@ IF(ASSOCIATED(mesh_ssets))THEN
     tw_sim%closures=mesh_ssets(1)%v
   END IF
 END IF
-tw_sim%mesh=>smesh
+tw_sim%mesh=>mg_mesh%smesh
 IF(jumper_start>0)THEN
   n=SIZE(mesh_nsets)
   hole_nsets=>mesh_nsets(1:jumper_start-1)
@@ -135,7 +135,7 @@ IF((TRIM(curr_file)=="none").AND.(tw_sim%n_icoils>0))CALL oft_abort("No waveform
   "thincurr_td",__FILE__)
 !---Setup I/0
 CALL tw_sim%xdmf%setup("thincurr")
-CALL smesh%setup_io(tw_sim%xdmf,1)
+CALL mg_mesh%smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
 ! Time-dependent run

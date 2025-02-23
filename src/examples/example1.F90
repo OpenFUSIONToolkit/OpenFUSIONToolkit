@@ -25,7 +25,7 @@ PROGRAM example1
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -76,7 +76,7 @@ CALL multigrid_construct
 !!produce additional tets using the new node points. The level of tesselation is set by
 !!the first argument to \ref oft_mesh_type::oft_mesh::setup_io "mesh%setup_io".
 CALL plot_file%setup("Example1")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!\subsection doc_ex1_code_fem Setup Lagrange FE
 !!
 !!\ref oft_lag_basis::oft_lag_setup "oft_lag_setup" builds the Lagrange finte elements on each grid
@@ -129,7 +129,7 @@ CALL solver%apply(u,lambda)
 !!completing the run, the \c build_xdmf script may be used to construct VisIt files and view the solution
 !!field, saved as tag \c T.
 CALL u%get_local(vtmp)
-CALL mesh%save_vertex_scalar(vtmp,plot_file,'T')
+CALL mg_mesh%mesh%save_vertex_scalar(vtmp,plot_file,'T')
 DEALLOCATE(vtmp)
 !---Program Stop
 CALL oft_finalize

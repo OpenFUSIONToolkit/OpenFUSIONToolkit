@@ -29,7 +29,8 @@ PROGRAM poincare_trace
 USE ISO_FORTRAN_ENV, ONLY: IOSTAT_END
 USE oft_base
 !--Grid
-USE oft_mesh_type, ONLY: mesh_findcell, mesh
+USE oft_mesh_type, ONLY: mesh_findcell
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_io, ONLY: oft_file_exist
 !---Linear Algebra
@@ -149,7 +150,7 @@ pt_flag=1
 !$omp parallel do private(j,f)
 DO i=1,npts
   j=0
-  call mesh_findcell(mesh,j,pts(:,i),f)
+  call mesh_findcell(mg_mesh%mesh,j,pts(:,i),f)
   IF(( MAXVAL(f)>=1.d0+1.d-3 ).OR.( MINVAL(f)<=-1.d-3 ))pt_flag(i)=0
 END DO
 #ifdef HAVE_MPI

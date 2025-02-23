@@ -11,7 +11,8 @@
 !------------------------------------------------------------------------------
 module tracing_2d
 USE oft_base
-USE oft_mesh_type, ONLY: smesh, bmesh_findcell
+USE oft_mesh_type, ONLY: bmesh_findcell
+USE multigrid, ONLY: mg_mesh
 USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_eval, oft_blag_geval
@@ -311,11 +312,11 @@ active_tracer%v=y
 ydot=active_tracer%dv
 if(active_tracer%cell==0)return
 pttmp=[active_tracer%y(1),active_tracer%y(2),0.d0]
-call bmesh_findcell(smesh,active_tracer%cell,pttmp,active_tracer%f)
+call bmesh_findcell(mg_mesh%smesh,active_tracer%cell,pttmp,active_tracer%f)
 if(active_tracer%cell==0)return
 fmin=minval(active_tracer%f)
 fmax=maxval(active_tracer%f)
-call smesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+call mg_mesh%smesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 call active_tracer%B%interp(active_tracer%cell,active_tracer%f,goptmp,ydot)
 active_tracer%dy=ydot(1:2)
 active_tracer%dv=ydot
@@ -342,12 +343,12 @@ active_tracer%v=y
 ydot=active_tracer%dv
 if(active_tracer%cell==0)return
 pttmp=[active_tracer%y(1),active_tracer%y(2),0.d0]
-call bmesh_findcell(smesh,active_tracer%cell,pttmp,active_tracer%f)
+call bmesh_findcell(mg_mesh%smesh,active_tracer%cell,pttmp,active_tracer%f)
 if(active_tracer%cell==0)return
 fmin=minval(active_tracer%f)
 fmax=maxval(active_tracer%f)
 !---
-call smesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+call mg_mesh%smesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 !---
 SELECT TYPE(this=>active_tracer%B)
 CLASS IS(cylinv_interp)
@@ -405,7 +406,7 @@ END IF
 !---
 self%y=y
 pttmp=[self%y(1),self%y(2),0.d0]
-call bmesh_findcell(smesh,self%cell,pttmp,self%f)
+call bmesh_findcell(mg_mesh%smesh,self%cell,pttmp,self%f)
 self%initialized=.TRUE.
 active_tracer%status=0
 end subroutine trace_setup_lsode

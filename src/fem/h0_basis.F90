@@ -21,7 +21,6 @@ MODULE oft_h0_basis
 ! USE timer
 USE oft_base
 USE oft_lag_poly
-USE oft_mesh_type, ONLY: mesh, smesh
 USE oft_mesh_local_util, ONLY: mesh_local_orient, oriented_cell, &
   oriented_edges, oriented_faces
 USE oft_hexmesh_type, ONLY: hex_get_bary, hex_get_bary_gop, &
@@ -75,14 +74,10 @@ type(h0_ops), pointer :: ML_oft_h0_ops(:) !< ML container for all operators
 logical, private :: hex_mesh = .FALSE.
 contains
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_set_level
-!---------------------------------------------------------------------------
 !> Set the current level for Nedelec H0 finite elements
-!!
-!! @param[in] level Desired level
 !---------------------------------------------------------------------------
 subroutine oft_h0_set_level(level)
-integer(i4), intent(in) :: level
+integer(i4), intent(in) :: level !< Desired level
 DEBUG_STACK_PUSH
 if(level>oft_h0_nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
@@ -115,17 +110,13 @@ oft_h0_ops=>ML_oft_h0_ops(level)
 DEBUG_STACK_POP
 end subroutine oft_h0_set_level
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_setup
-!---------------------------------------------------------------------------
 !> Construct Nedelec H0 scalar FE on each mesh level
 !!
-!! @note Highest supported representation is Quartic.
-!!
-!! @param[in] order Order of representation desired
+!! @note Highest supported representation is Quartic
 !---------------------------------------------------------------------------
 subroutine oft_h0_setup(order,minlev)
-integer(i4), intent(in) :: order
-integer(i4), optional, intent(in) :: minlev
+integer(i4), intent(in) :: order !< Order of representation desired
+integer(i4), optional, intent(in) :: minlev !< Lowest level to construct
 integer(i4) :: i,j,k
 REAL(r8), POINTER, DIMENSION(:) :: xnodes
 DEBUG_STACK_PUSH
@@ -137,7 +128,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A,I4)')'Order  = ',order
   WRITE(*,'(2X,A,I4)')'Minlev = ',oft_h0_minlev
 END IF
-IF(mesh%type==3)hex_mesh=.TRUE.
+IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
 ! Allocate multigrid operators
 oft_h0_nlevels=mg_mesh%mgdim+(order-1)
 IF(oft_h0_minlev<0)oft_h0_minlev=oft_h0_nlevels
@@ -156,14 +147,14 @@ do i=1,mg_mesh%mgdim-1
     oft_h0_blevel=i
   END IF
   !---
-  oft_h0%mesh=>mesh
+  oft_h0%mesh=>mg_mesh%mesh
   oft_h0%order=1
   oft_h0%dim=1
   oft_h0%type=oft_h0_id
   oft_h0%gstruct=(/1,0,0,0/)
   call oft_h0%setup(3)
   !---
-  oft_bh0%mesh=>smesh
+  oft_bh0%mesh=>mg_mesh%smesh
   oft_bh0%order=1
   oft_bh0%dim=1
   oft_bh0%type=oft_h0_id
@@ -178,7 +169,7 @@ do i=1,order
   ALLOCATE(oft_h0_bfem::ML_oft_bh0%levels(mg_mesh%mgdim+i-1)%fe)
   call oft_h0_set_level(mg_mesh%mgdim+i-1)
   !---
-  oft_h0%mesh=>mesh
+  oft_h0%mesh=>mg_mesh%mesh
   oft_h0%order=i
   oft_h0%dim=1
   oft_h0%type=oft_h0_id
@@ -217,7 +208,7 @@ do i=1,order
   END IF
   call oft_h0%setup(i*2+1)
   !---
-  oft_bh0%mesh=>smesh
+  oft_bh0%mesh=>mg_mesh%smesh
   oft_bh0%order=i
   oft_bh0%dim=1
   oft_bh0%type=oft_h0_id
@@ -272,25 +263,17 @@ IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_h0_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_eval
-!---------------------------------------------------------------------------
 !> Evaluate Nedelec H0 interpolation function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
-!! vector in physical coordinates.
-!!
-!! @param[in] self Nedelec type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] dof Element to evaluate
-!! @param[in] f Position in cell in logical space
-!! @param[out] val Value of interpolation function (dof) at point (f)
-!! @param[in] gop Cell Jacobian matrix at point (f) [3,4]
+!! vector in physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_eval(self,cell,dof,f,val)
-class(oft_h0_fem), intent(in) :: self
-integer(i4), intent(in) :: cell,dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val
+class(oft_h0_fem), intent(in) :: self !< Nedelec type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+integer(i4), intent(in) :: dof !< Element to evaluate
+real(r8), intent(in) :: f(:) !< Position in cell in logical space
+real(r8), intent(out) :: val !< Value of interpolation function (dof) at point (f)
 integer(i4) :: i,ed,etmp(2),fc,ftmp(3),finds(9),ind,fhtmp(4),inds(4)
 real(r8) :: fhex(6)
 DEBUG_STACK_PUSH
@@ -343,25 +326,17 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_h0_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_bh0_eval
-!---------------------------------------------------------------------------
 !> Evaluate Nedelec H0 interpolation function on the boundary
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
-!! vector in physical coordinates.
-!!
-!! @param[in] self Nedelec type for evaluation (bfem)
-!! @param[in] face Face for evaluation
-!! @param[in] dof Element to evaluate
-!! @param[in] f Position on face in logical space [4]
-!! @param[out] val Value of interpolation function (dof) at point (f)
-!! @param[in] gop Face Jacobian matrix at point (f) [3,3]
+!! vector in physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_bh0_eval(self,face,dof,f,val)
-class(oft_bfem_type), intent(in) :: self
-integer(i4), intent(in) :: face,dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val
+class(oft_bfem_type), intent(in) :: self !< Nedelec type for evaluation (bfem)
+integer(i4), intent(in) :: face !< Face for evaluation
+integer(i4), intent(in) :: dof !< Element to evaluate
+real(r8), intent(in) :: f(:) !< Position on face in logical space [4]
+real(r8), intent(out) :: val !< Value of interpolation function (dof) at point (f)
 integer(i4) :: ed,etmp(2),fc,ftmp(3)
 DEBUG_STACK_PUSH
 select case(self%cmap(dof)%type)
@@ -381,28 +356,26 @@ end select
 DEBUG_STACK_POP
 end subroutine oft_bh0_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_evalp
-!---------------------------------------------------------------------------
 !> Evaluate point based interpolation functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_evalp(order,pt,f,val)
-integer(i4), intent(in) :: order,pt
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: pt !< Needs docs
+real(r8), intent(in) :: f(:) !< Needs docs
+real(r8), intent(out) :: val !< Needs docs
 DEBUG_STACK_PUSH
 val=f(pt)
 DEBUG_STACK_POP
 end subroutine oft_h0_evalp
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_evale
-!---------------------------------------------------------------------------
 !> Evaluate edge based interpolation functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_evale(order,ed,dof,f,val)
-integer(i4), intent(in) :: order
-integer(i4), intent(in) :: ed(2),dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: ed(2) !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
+real(r8), intent(in) :: f(:) !< Needs docs
+real(r8), intent(out) :: val !< Needs docs
 real(r8) :: x1,x2
 DEBUG_STACK_PUSH
 x1=f(ed(1)); x2=f(ed(2))
@@ -421,15 +394,14 @@ end select
 DEBUG_STACK_POP
 end subroutine oft_h0_evale
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_evalf
-!---------------------------------------------------------------------------
 !> Evaluate face based interpolation functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_evalf(order,fc,dof,f,val)
-integer(i4), intent(in) :: order
-integer(i4), intent(in) :: fc(3),dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: fc(3) !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
+real(r8), intent(in) :: f(:) !< Needs docs
+real(r8), intent(out) :: val !< Needs docs
 real(r8) :: x1,x2,x3
 DEBUG_STACK_PUSH
 x1=f(fc(1)); x2=f(fc(2)); x3=f(fc(3))
@@ -452,14 +424,13 @@ end select
 DEBUG_STACK_POP
 end subroutine oft_h0_evalf
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_evalc
-!---------------------------------------------------------------------------
 !> Evaluate cell based interpolation functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_evalc(order,dof,f,val)
-integer(i4), intent(in) :: order,dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
+real(r8), intent(in) :: f(:) !< Needs docs
+real(r8), intent(out) :: val !< Needs docs
 real(r8) :: x1,x2,x3,x4
 DEBUG_STACK_PUSH
 x1=f(1); x2=f(2); x3=f(3); x4=f(4)
@@ -478,22 +449,15 @@ end select
 DEBUG_STACK_POP
 end subroutine oft_h0_evalc
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_eval_all
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_eval_all(self,cell,f,rop)
-class(oft_h0_fem), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), contiguous, intent(out) :: rop(:)
+class(oft_h0_fem), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(:) !< Position in cell in logical space
+real(r8), contiguous, intent(out) :: rop(:) !< Value of interpolation functions at point (f) [ncdofs]
 integer(i4) :: i,j,etmp(2),fhtmp(4),offset
 real(r8) :: fhex(6),vtmp
 DEBUG_STACK_PUSH
@@ -560,22 +524,15 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_h0_eval_all
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_eval_all2
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quadratic)
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_eval_all2(self,cell,f,rop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(out) :: rop(10)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(4) !< Position in cell in logical space
+real(r8), intent(out) :: rop(10) !< Value of interpolation functions at point (f) [ncdofs]
 integer(i4) :: i
 real(r8) :: x1,x2
 DEBUG_STACK_PUSH
@@ -589,22 +546,15 @@ END DO
 DEBUG_STACK_POP
 end subroutine oft_h0_eval_all2
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_eval_all3
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (cubic)
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_eval_all3(self,cell,f,rop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(out) :: rop(20)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(4) !< Position in cell in logical space
+real(r8), intent(out) :: rop(20) !< Value of interpolation functions at point (f) [ncdofs]
 integer(i4) :: i
 real(r8) :: x1,x2,x3
 DEBUG_STACK_PUSH
@@ -625,22 +575,15 @@ END DO
 DEBUG_STACK_POP
 end subroutine oft_h0_eval_all3
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_eval_all4
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quartic)
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_eval_all4(self,cell,f,rop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(out) :: rop(35)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(4) !< Position in cell in logical space
+real(r8), intent(out) :: rop(35) !< Value of interpolation functions at point (f) [ncdofs]
 integer(i4) :: i
 real(r8) :: x1,x2,x3,x4
 DEBUG_STACK_PUSH
@@ -664,22 +607,15 @@ rop(35) = -2.d0*x1*x2*x3*x4
 DEBUG_STACK_POP
 end subroutine oft_h0_eval_all4
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_eval_all5
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quartic)
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_eval_all5(self,cell,f,rop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(out) :: rop(56)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(4) !< Position in cell in logical space
+real(r8), intent(out) :: rop(56) !< Value of interpolation functions at point (f) [ncdofs]
 integer(i4) :: i
 real(r8) :: x1,x2,x3,x4
 DEBUG_STACK_PUSH
@@ -710,26 +646,18 @@ rop(56) = 2.d0*x1*x2*x3*x4*(-x1 + x2)
 DEBUG_STACK_POP
 end subroutine oft_h0_eval_all5
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_geval
-!---------------------------------------------------------------------------
 !> Evaluate Nedelec H0 gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
-!! vector in, and gradient with respect to, physical coordinates.
-!!
-!! @param[in] self Nedelec type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] dof Element to evaluate
-!! @param[in] f Position in cell in logical space
-!! @param[out] val Curl of nedelec element (dof) at point (f) [3]
-!! @param[in] gop Cell Jacobian matrix at point (f) [3,4]
+!! vector in, and gradient with respect to, physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_geval(self,cell,dof,f,val,gop)
-class(oft_h0_fem), intent(in) :: self
-integer(i4), intent(in) :: cell,dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(:,:)
-real(r8), intent(out) :: val(:)
+class(oft_h0_fem), intent(in) :: self !< Nedelec type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+integer(i4), intent(in) :: dof !< Element to evaluate
+real(r8), intent(in) :: f(:) !< Position in cell in logical space
+real(r8), intent(out) :: val(:) !< Curl of nedelec element (dof) at point (f) [3]
+real(r8), intent(in) :: gop(:,:) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i,j,ind,finds(9),fhtmp(4)
 real(r8) :: cofs(4),fhex(6),gbary(3,6),dtmp,vtmp(4)
 DEBUG_STACK_PUSH
@@ -818,26 +746,18 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_h0_geval
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_bh0_geval
-!---------------------------------------------------------------------------
 !> Evaluate Nedelec H0 gradient function on the boundary
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
-!! vector in, and gradient with respect to, physical coordinates.
-!!
-!! @param[in] self Nedelec type for evaluation (bfem)
-!! @param[in] face Face for evaluation
-!! @param[in] dof Element to evaluate
-!! @param[in] f Position on face in logical space [4]
-!! @param[out] val Curl of nedelec element (dof) at point (f) [3]
-!! @param[in] gop Face Jacobian matrix at point (f) [3,3]
+!! vector in, and gradient with respect to, physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_bh0_geval(self,face,dof,f,val,gop)
-class(oft_bfem_type), intent(in) :: self
-integer(i4), intent(in) :: face,dof
-real(r8), intent(in) :: f(:)
-real(r8), optional, intent(in) :: gop(:,:)
-real(r8), intent(out) :: val(3)
+class(oft_bfem_type), intent(in) :: self !< Nedelec type for evaluation (bfem)
+integer(i4), intent(in) :: face !< Face for evaluation
+integer(i4), intent(in) :: dof !< Element to evaluate
+real(r8), intent(in) :: f(:) !< Position on face in logical space [4]
+real(r8), intent(out) :: val(3) !< Curl of nedelec element (dof) at point (f) [3]
+real(r8), optional, intent(in) :: gop(:,:) !< Face Jacobian matrix at point (f) [3,3]
 real(r8) :: grads(3,4),cofs(4)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i
 DEBUG_STACK_PUSH
@@ -865,27 +785,26 @@ end do
 DEBUG_STACK_POP
 end subroutine oft_bh0_geval
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_gevalp
-!---------------------------------------------------------------------------
 !> Evaluate point based gradient functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_gevalp(order,pt,f,val)
-integer(i4), intent(in) :: order,pt
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val(4)
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: pt !< Needs docs
+real(r8), intent(in) :: f(:) !< Needs docs
+real(r8), intent(out) :: val(4) !< Needs docs
 DEBUG_STACK_PUSH
 val(pt)=1.d0
 DEBUG_STACK_POP
 end subroutine oft_h0_gevalp
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_gevale
-!---------------------------------------------------------------------------
 !> Evaluate edge based curl functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_gevale(order,ed,dof,f,val)
-integer(i4), intent(in) :: order,ed(2),dof
-real(r8), intent(in) :: f(4)
-real(r8), intent(out) :: val(4)
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: ed(2) !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
+real(r8), intent(in) :: f(4) !< Needs docs
+real(r8), intent(out) :: val(4) !< Needs docs
 real(r8) :: x1,x2,y1,y2
 DEBUG_STACK_PUSH
 x1=f(ed(1)); x2=f(ed(2))
@@ -909,14 +828,14 @@ val(ed(1))=y1; val(ed(2))=y2
 DEBUG_STACK_POP
 end subroutine oft_h0_gevale
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_gevalf
-!---------------------------------------------------------------------------
 !> Evaluate face based curl functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_gevalf(order,fc,dof,f,val)
-integer(i4), intent(in) :: order,fc(3),dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val(4)
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: fc(3) !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
+real(r8), intent(in) :: f(:) !< Needs docs
+real(r8), intent(out) :: val(4) !< Needs docs
 real(r8) :: x1,x2,x3,y1,y2,y3
 DEBUG_STACK_PUSH
 x1=f(fc(1)); x2=f(fc(2)); x3=f(fc(3))
@@ -952,14 +871,13 @@ val(fc(1))=y1; val(fc(2))=y2; val(fc(3))=y3
 DEBUG_STACK_POP
 end subroutine oft_h0_gevalf
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_gevalc
-!---------------------------------------------------------------------------
 !> Evaluate cell based curl functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_gevalc(order,dof,f,val)
-integer(i4), intent(in) :: order,dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val(4)
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
+real(r8), intent(in) :: f(:) !< Needs docs
+real(r8), intent(out) :: val(4) !< Needs docs
 real(r8) :: x1,x2,x3,x4
 DEBUG_STACK_PUSH
 x1=f(1); x2=f(2); x3=f(3); x4=f(4)
@@ -990,24 +908,16 @@ end select
 DEBUG_STACK_POP
 end subroutine oft_h0_gevalc
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_geval_all
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [3,ncdofs]
-!! @param[in] gop Cell Jacobian matrix at point (f) [3,4]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_geval_all(self,cell,f,rop,gop)
-class(oft_h0_fem), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(:,:)
-real(r8), contiguous, intent(out) :: rop(:,:)
+class(oft_h0_fem), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(:) !< Position in cell in logical space
+real(r8), contiguous, intent(out) :: rop(:,:) !< Value of interpolation functions at point (f) [3,ncdofs]
+real(r8), intent(in) :: gop(:,:) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: i,j,k,etmp(2),fhtmp(4),offset
 real(r8) :: fhex(6),gbary(3,6),val(3),cords(4),dtmp,vtmp(4)
 DEBUG_STACK_PUSH
@@ -1107,23 +1017,16 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_h0_geval_all
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_geval_all2
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quadratic)
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_geval_all2(self,cell,f,rop,gop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,10)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(4) !< Position in cell in logical space
+real(r8), intent(out) :: rop(3,10) !< Value of interpolation functions at point (f) [ncdofs]
+real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: i,etmp(2)
 real(r8) :: x1,x2,u1(3),u2(3)
 DEBUG_STACK_PUSH
@@ -1142,23 +1045,16 @@ END DO
 DEBUG_STACK_POP
 end subroutine oft_h0_geval_all2
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_geval_all3
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (cubic)
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_geval_all3(self,cell,f,rop,gop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,20)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(4) !< Position in cell in logical space
+real(r8), intent(out) :: rop(3,20) !< Value of interpolation functions at point (f) [ncdofs]
+real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: x1,x2,x3,u1(3),u2(3),u3(3)
 DEBUG_STACK_PUSH
@@ -1188,23 +1084,16 @@ END DO
 DEBUG_STACK_POP
 end subroutine oft_h0_geval_all3
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_geval_all4
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quartic)
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_geval_all4(self,cell,f,rop,gop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,35)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(4) !< Position in cell in logical space
+real(r8), intent(out) :: rop(3,35) !< Value of interpolation functions at point (f) [ncdofs]
+real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: x1,x2,x3,x4,u1(3),u2(3),u3(3)
 DEBUG_STACK_PUSH
@@ -1251,23 +1140,16 @@ rop(:,35) = -2.d0*x2*x3*x4*gop(:,1) &
 DEBUG_STACK_POP
 end subroutine oft_h0_geval_all4
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_geval_all5
-!---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quartic)
 !!
-!! @note Evaluation is performed in logical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] f Position in cell in logical space
-!! @param[out] rop Value of interpolation functions at point (f) [ncdofs]
+!! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_geval_all5(self,cell,f,rop,gop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,56)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+real(r8), intent(in) :: f(4) !< Position in cell in logical space
+real(r8), intent(out) :: rop(3,56) !< Value of interpolation functions at point (f) [ncdofs]
+real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: x1,x2,x3,x4,u1(3),u2(3),u3(3)
 DEBUG_STACK_PUSH
@@ -1344,26 +1226,18 @@ rop(:,56) = 2.d0*x2*x3*x4*(-2.d0*x1 + x2)*gop(:,1) &
 DEBUG_STACK_POP
 end subroutine oft_h0_geval_all5
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_h0_d2eval
-!---------------------------------------------------------------------------
 !> Evaluate lagrange gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
-!! gradient with respect to physical coordinates.
-!!
-!! @param[in] self Lagrange type for evaluation
-!! @param[in] cell Cell for evaluation
-!! @param[in] dof Element to evaluate
-!! @param[in] f Position in cell in logical space
-!! @param[out] val Gradient of lagrange element (dof) at point (f) [3]
-!! @param[in] gop Cell Jacobian matrix at point (f) [3,4]
+!! gradient with respect to physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h0_d2eval(self,cell,dof,f,val,g2op)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell,dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: g2op(6,10)
-real(r8), intent(out) :: val(6)
+class(oft_fem_type), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: cell !< Cell for evaluation
+integer(i4), intent(in) :: dof !< Element to evaluate
+real(r8), intent(in) :: f(:) !< Position in cell in logical space
+real(r8), intent(out) :: val(6) !< Gradient of lagrange element (dof) at point (f) [3]
+real(r8), intent(in) :: g2op(6,10) !< Cell Jacobian matrix at point (f) [3,4]
 real(r8) :: grad(2),cofs(10)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i
 IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
@@ -1386,13 +1260,13 @@ do i=1,10
 end do
 end subroutine oft_h0_d2eval
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_h0_d2evale
-!---------------------------------------------------------------------------
 !> @brief Evaluate edge based gradient functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_d2evale(order,ed,el,dof,f,val)
-integer(i4), intent(in) :: order
-integer(i4), intent(in) :: ed(2),el,dof
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: ed(2) !< Needs docs
+integer(i4), intent(in) :: el !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
 real(r8), intent(in) :: f(:)
 real(r8), intent(out) :: val(10)
 real(r8) :: x1,x2
@@ -1418,13 +1292,13 @@ select case(dof)
 end select
 end subroutine oft_h0_d2evale
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_h0_d2evalf
-!---------------------------------------------------------------------------
 !> @brief Evaluate cell based gradient functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_d2evalf(order,fc,el,dof,f,val)
-integer(i4), intent(in) :: order
-integer(i4), intent(in) :: fc(3),el,dof
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: fc(3) !< Needs docs
+integer(i4), intent(in) :: el !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
 real(r8), intent(in) :: f(:)
 real(r8), intent(out) :: val(10)
 real(r8) :: x1,x2,x3
@@ -1477,15 +1351,13 @@ select case(dof)
 end select
 end subroutine oft_h0_d2evalf
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_h0_d2evalc
-!---------------------------------------------------------------------------
 !> @brief Evaluate cell based gradient functions
 !---------------------------------------------------------------------------
 subroutine oft_h0_d2evalc(order,dof,f,val)
-integer(i4), intent(in) :: order
-integer(i4), intent(in) :: dof
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: val(10)
+integer(i4), intent(in) :: order !< Needs docs
+integer(i4), intent(in) :: dof !< Needs docs
+real(r8), intent(in) :: f(:) !< Needs docs
+real(r8), intent(out) :: val(10) !< Needs docs
 real(r8) :: x1,x2,x3,x4
 val=0.d0
 x1=f(1); x2=f(2); x3=f(3); x4=f(4)

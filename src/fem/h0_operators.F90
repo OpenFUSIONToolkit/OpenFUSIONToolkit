@@ -19,7 +19,7 @@
 !---------------------------------------------------------------------------
 MODULE oft_h0_operators
 USE oft_base
-USE oft_mesh_type, ONLY: oft_mesh, mesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
@@ -234,8 +234,8 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc)
 CALL a%get_local(aloc)
 !---
-if(mesh%igrnd(1)>0)aloc(mesh%igrnd(1))=0.d0
-if(mesh%igrnd(2)>0)aloc(mesh%igrnd(2))=0.d0
+if(mg_mesh%mesh%igrnd(1)>0)aloc(mg_mesh%mesh%igrnd(1))=0.d0
+if(mg_mesh%mesh%igrnd(2)>0)aloc(mg_mesh%mesh%igrnd(2))=0.d0
 CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
@@ -308,12 +308,12 @@ allocate(j(oft_h0%nce)) ! Local DOF and matrix indices
 allocate(rop(oft_h0%nce)) ! Reconstructed gradient operator
 allocate(mop(oft_h0%nce,oft_h0%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_h0%mesh%nc
+  curved=cell_is_curved(oft_h0%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   mop=0.d0
   do m=1,oft_h0%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_h0%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_h0%mesh%jacobian(i,oft_h0%quad%pts(:,m),goptmp,vol)
     det=vol*oft_h0%quad%wts(m)
     CALL oft_h0_eval_all(oft_h0,i,oft_h0%quad%pts(:,m),rop)
     !---Compute local matrix contributions
@@ -332,9 +332,9 @@ do i=1,mesh%nc
         IF(oft_h0%global%gbe(j(jr)))mop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(mesh%igrnd>0))THEN
+      IF(ANY(oft_h0%mesh%igrnd>0))THEN
         DO jr=1,oft_h0%nce
-          IF(ANY(mesh%igrnd==j(jr)))mop(jr,:)=0.d0
+          IF(ANY(oft_h0%mesh%igrnd==j(jr)))mop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
@@ -358,10 +358,10 @@ SELECT CASE(TRIM(bc))
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(mesh%igrnd>0))THEN
+    IF(ANY(oft_h0%mesh%igrnd>0))THEN
       DO i=1,oft_h0%nbe
         jr=oft_h0%lbe(i)
-        IF(oft_h0%linkage%leo(i).AND.ANY(jr==mesh%igrnd))THEN
+        IF(oft_h0%linkage%leo(i).AND.ANY(jr==oft_h0%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,mop,1,1)
         END IF
@@ -424,12 +424,12 @@ allocate(j(oft_h0%nce)) ! Local DOF and matrix indices
 allocate(gop(3,oft_h0%nce)) ! Reconstructed gradient operator
 allocate(lop(oft_h0%nce,oft_h0%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_h0%mesh%nc
+  curved=cell_is_curved(oft_h0%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   lop=0.d0
   do m=1,oft_h0%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_h0%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_h0%mesh%jacobian(i,oft_h0%quad%pts(:,m),goptmp,vol)
     det=vol*oft_h0%quad%wts(m)
     CALL oft_h0_geval_all(oft_h0,i,oft_h0%quad%pts(:,m),gop,goptmp)
     !---Compute local matrix contributions
@@ -448,9 +448,9 @@ do i=1,mesh%nc
         IF(oft_h0%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(mesh%igrnd>0))THEN
+      IF(ANY(oft_h0%mesh%igrnd>0))THEN
         DO jr=1,oft_h0%nce
-          IF(ANY(mesh%igrnd==j(jr)))lop(jr,:)=0.d0
+          IF(ANY(oft_h0%mesh%igrnd==j(jr)))lop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
@@ -474,10 +474,10 @@ SELECT CASE(TRIM(bc))
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(mesh%igrnd>0))THEN
+    IF(ANY(oft_h0%mesh%igrnd>0))THEN
       DO i=1,oft_h0%nbe
         jr=oft_h0%lbe(i)
-        IF(oft_h0%linkage%leo(i).AND.ANY(jr==mesh%igrnd))THEN
+        IF(oft_h0%linkage%leo(i).AND.ANY(jr==oft_h0%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,lop,1,1)
         END IF
@@ -526,11 +526,11 @@ call x%get_local(xloc)
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 allocate(j(oft_h0%nce),rop(oft_h0%nce))
 !$omp do schedule(guided)
-do i=1,mesh%nc ! Loop over cells
+do i=1,oft_h0%mesh%nc ! Loop over cells
   call oft_h0%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+  curved=cell_is_curved(oft_h0%mesh,i) ! Straight cell test
   do m=1,oft_h0%quad%np
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_h0%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_h0%mesh%jacobian(i,oft_h0%quad%pts(:,m),goptmp,vol)
     det=vol*oft_h0%quad%wts(m)
     call field%interp(i,oft_h0%quad%pts(:,m),goptmp,bcc)
     CALL oft_h0_eval_all(oft_h0,i,oft_h0%quad%pts(:,m),rop)
@@ -713,8 +713,10 @@ CLASS(oft_fem_type), POINTER :: h0_cors => NULL()
 TYPE(h0_ops), POINTER :: ops
 CLASS(oft_vector), POINTER :: h0_vec,h0_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
+class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 !---
+mesh=>oft_h0%mesh
 ops=>oft_h0_ops
 SELECT TYPE(this=>ML_oft_h0%levels(oft_h0_level-1)%fe)
 CLASS IS(oft_fem_type)

@@ -16,7 +16,6 @@
 !---------------------------------------------------------------------------
 PROGRAM test_h0
 USE oft_base
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
@@ -43,10 +42,10 @@ READ(io_unit,test_h0_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct
-IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 minlev=2
-IF(mesh%type==3)minlev=mg_mesh%mgmax
+IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
 CALL oft_h0_setup(order,minlev)
 IF(mg_test)THEN
   CALL h0_setup_interp

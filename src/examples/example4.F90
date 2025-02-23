@@ -19,7 +19,7 @@ PROGRAM example4
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -78,7 +78,7 @@ CALL oft_init
 !---Setup grid
 CALL multigrid_construct
 CALL plot_file%setup("Example4")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!\subsection doc_ex4_code_fem Setup FE Types
 !!
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
@@ -178,7 +178,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-call mesh%save_vertex_vector(bvout,plot_file,'B')
+call mg_mesh%mesh%save_vertex_vector(bvout,plot_file,'B')
 !!\subsection doc_ex4_code_poincare Create Poincare section
 !!
 !! Poincare sections can be created using the subroutine \ref tracing::tracing_poincare

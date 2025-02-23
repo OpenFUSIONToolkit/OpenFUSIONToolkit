@@ -11,9 +11,10 @@
 !---------------------------------------------------------------------------
 MODULE gs_eq
 USE oft_base
-USE oft_mesh_type, ONLY: mesh, bmesh_findcell
+USE oft_mesh_type, ONLY: bmesh_findcell
 USE oft_mesh_local, ONLY: bmesh_local_init
 USE oft_trimesh_type, ONLY: oft_trimesh
+USE multigrid, ONLY: mg_mesh
 !---
 USE fem_base, ONLY: oft_afem_type, oft_bfem_type
 USE fem_utils, ONLY: fem_interp
@@ -127,7 +128,7 @@ DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%Bvals))CALL oft_abort('Setup has not been called!', &
 'gs_interp',__FILE__)
 !---Get (R,Z) position
-pt=mesh%log2phys(cell,f)
+pt=mg_mesh%mesh%log2phys(cell,f)
 rz(1)=SQRT(SUM(pt(1:2)**2))
 rz(2)=pt(3)
 rhat=pt(1:2)/rz(1)

@@ -75,7 +75,7 @@ USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
@@ -366,6 +366,7 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_rop => NULL()
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_cop => NULL()
 !$omp threadprivate(xmhd_lag_rop,xmhd_lag_gop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
+CLASS(oft_mesh), POINTER :: mesh
 !---------------------------------------------------------------------------
 ! Exported interfaces
 !---------------------------------------------------------------------------
@@ -549,6 +550,7 @@ real(4) :: hist_r4(11)
 real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
+mesh=>mg_mesh%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
 !---------------------------------------------------------------------------
@@ -4483,6 +4485,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,'(2X,A)')'Starting xMHD post-processing'
 END IF
+mesh=>mg_mesh%mesh
 file_list="none"
 open(NEWUNIT=io_unit,FILE=oft_env%ifile)
 read(io_unit,xmhd_plot_options,IOSTAT=ierr)

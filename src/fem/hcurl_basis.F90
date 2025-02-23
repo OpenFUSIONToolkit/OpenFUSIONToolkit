@@ -21,7 +21,6 @@ MODULE oft_hcurl_basis
 ! USE timer
 USE oft_base
 USE oft_lag_poly
-USE oft_mesh_type, ONLY: mesh, smesh
 USE oft_mesh_local_util, ONLY: mesh_local_orient, oriented_cell, &
   oriented_edges, oriented_faces
 USE oft_hexmesh_type, ONLY: hex_bary_ecoords, hex_bary_efcoords, hex_bary_fcoords, &
@@ -138,7 +137,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A,I4)')'Order  = ',order
   WRITE(*,'(2X,A,I4)')'Minlev = ',oft_hcurl_minlev
 END IF
-IF(mesh%type==3)hex_mesh=.TRUE.
+IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
 !---Allocate multigrid operators
 oft_hcurl_nlevels=mg_mesh%mgdim+(order-1)
 IF(oft_hcurl_minlev<0)oft_hcurl_minlev=oft_hcurl_nlevels
@@ -157,14 +156,14 @@ do i=1,mg_mesh%mgdim-1
     oft_hcurl_blevel=i
   END IF
   !---
-  oft_hcurl%mesh=>mesh
+  oft_hcurl%mesh=>mg_mesh%mesh
   oft_hcurl%order=1
   oft_hcurl%dim=1
   oft_hcurl%type=oft_hcurl_id
   oft_hcurl%gstruct=(/0,1,0,0/)
   call oft_hcurl%setup(3)
   !---
-  oft_bhcurl%mesh=>smesh
+  oft_bhcurl%mesh=>mg_mesh%smesh
   oft_bhcurl%order=1
   oft_bhcurl%dim=1
   oft_bhcurl%type=oft_hcurl_id
@@ -179,7 +178,7 @@ do i=1,order
   ALLOCATE(oft_hcurl_bfem::ML_oft_bhcurl%levels(mg_mesh%mgdim+i-1)%fe)
   call oft_hcurl_set_level(mg_mesh%mgdim+i-1)
   !---
-  oft_hcurl%mesh=>mesh
+  oft_hcurl%mesh=>mg_mesh%mesh
   oft_hcurl%order=i
   oft_hcurl%dim=1
   oft_hcurl%type=oft_hcurl_id
@@ -217,7 +216,7 @@ do i=1,order
   END IF
   call oft_hcurl%setup(i*2+1)
   !---
-  oft_bhcurl%mesh=>smesh
+  oft_bhcurl%mesh=>mg_mesh%smesh
   oft_bhcurl%order=i
   oft_bhcurl%dim=1
   oft_bhcurl%type=oft_hcurl_id

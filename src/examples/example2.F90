@@ -27,7 +27,7 @@ PROGRAM example2
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -70,7 +70,7 @@ CALL oft_init
 !---Setup grid
 CALL multigrid_construct
 CALL plot_file%setup("Example2")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---Construct FE levels
 CALL oft_lag_setup(order)
 CALL lag_setup_interp
@@ -118,7 +118,7 @@ CALL lag_zerob(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vtmp)
-CALL mesh%save_vertex_scalar(vtmp,plot_file,'T')
+CALL mg_mesh%mesh%save_vertex_scalar(vtmp,plot_file,'T')
 DEALLOCATE(vtmp)
 !---Finalize enviroment
 CALL oft_finalize

@@ -13,7 +13,7 @@ MODULE oft_gs_util
 USE oft_base
 USE spline_mod
 USE oft_io, ONLY: hdf5_create_file, hdf5_create_group, hdf5_write, hdf5_read
-USE oft_mesh_type, ONLY: smesh, bmesh_findcell
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
@@ -198,13 +198,13 @@ IF(PRESENT(mpsi_sample))m=mpsi_sample
 CALL hdf5_create_file(filename)
 !---Save mesh
 CALL hdf5_create_group(filename,'mesh')
-CALL hdf5_write(smesh%np,filename,'mesh/np')
-CALL hdf5_write(smesh%nc,filename,'mesh/nc')
-CALL hdf5_write(smesh%r(1:2,:),filename,'mesh/r')
-CALL hdf5_write(smesh%lc,filename,'mesh/lc')
-CALL hdf5_write(smesh%reg,filename,'mesh/regions')
+CALL hdf5_write(oft_blagrange%mesh%np,filename,'mesh/np')
+CALL hdf5_write(oft_blagrange%mesh%nc,filename,'mesh/nc')
+CALL hdf5_write(oft_blagrange%mesh%r(1:2,:),filename,'mesh/r')
+CALL hdf5_write(oft_blagrange%mesh%lc,filename,'mesh/lc')
+CALL hdf5_write(oft_blagrange%mesh%reg,filename,'mesh/regions')
 CALL hdf5_write(oft_blagrange%order,filename,'mesh/order')
-CALL smesh%tessellate(rtmp,lctmp,oft_blagrange%order)
+CALL oft_blagrange%mesh%tessellate(rtmp,lctmp,oft_blagrange%order)
 CALL hdf5_write(rtmp,filename,'mesh/r_plot')
 CALL hdf5_write(lctmp,filename,'mesh/lc_plot')
 np_plot=SIZE(rtmp,DIM=2)
@@ -277,7 +277,7 @@ DEALLOCATE(solver%pre)
 CALL solver%delete()
 DEALLOCATE(solver)
 !---Save coil/conductor info
-ALLOCATE(tmpout(smesh%nc,1))
+ALLOCATE(tmpout(oft_blagrange%mesh%nc,1))
 CALL gs_get_cond_source(self,tmpout(:,1))
 CALL hdf5_write(tmpout(:,1),filename,'gs/cond_source')
 DEALLOCATE(tmpout)
@@ -299,7 +299,7 @@ IF(self%ncoils_ext>0)THEN
   DO i=1,self%ncoils_ext
     DO j=1,self%ncoils
       tmpout(i,1)=tmpout(i,1) &
-        + self%coil_currs(j)*self%coil_nturns(smesh%nreg+i,j)
+        + self%coil_currs(j)*self%coil_nturns(oft_blagrange%mesh%nreg+i,j)
     END DO
   END DO
   CALL hdf5_write(tmpout(:,1),filename,'gs/ext_coils')
@@ -372,10 +372,10 @@ real(8), pointer :: vals_tmp(:)
 !---
 CALL hdf5_read(tmp_version,filename,'gs/version')
 !---Load mesh
-! CALL hdf5_read(smesh%np,filename,'mesh/np')
-! CALL hdf5_read(smesh%nf,filename,'mesh/nc')
-! CALL hdf5_read(smesh%r(1:2,:),filename,'mesh/r')
-! CALL hdf5_read(smesh%lf,filename,'mesh/lc')
+! CALL hdf5_read(oft_blagrange%mesh%np,filename,'mesh/np')
+! CALL hdf5_read(oft_blagrange%mesh%nf,filename,'mesh/nc')
+! CALL hdf5_read(oft_blagrange%mesh%r(1:2,:),filename,'mesh/r')
+! CALL hdf5_read(oft_blagrange%mesh%lf,filename,'mesh/lc')
 CALL hdf5_read(tmpval,filename,'mesh/order')
 IF(INT(tmpval)/=oft_blagrange%order)CALL oft_abort("order mismatch","gs_load",__FILE__)
 !---Load GS components
@@ -394,7 +394,7 @@ CALL self%psi%get_local(vals_tmp)
 CALL hdf5_read(vals_tmp,filename,'gs/psi')
 CALL self%psi%restore_local(vals_tmp)
 IF(self%ncond_eigs>0)THEN
-  ALLOCATE(tmpin(smesh%nc,1))
+  ALLOCATE(tmpin(oft_blagrange%mesh%nc,1))
   CALL hdf5_read(tmpin(:,1),filename,'gs/cond_source')
   CALL cond_fit(self,tmpin)
   DEALLOCATE(tmpin)
@@ -480,10 +480,10 @@ integer(4), allocatable, dimension(:) :: ipvt
 !---
 gs_fit=>self
 tmpprof=>tmpin
-ALLOCATE(contmp(smesh%nc),wttmp(self%ncond_eigs))
+ALLOCATE(contmp(oft_blagrange%mesh%nc),wttmp(self%ncond_eigs))
 CALL gs_get_cond_weights(gs_fit,wttmp,.TRUE.)
 !---Use MINPACK to find maximum (zero gradient)
-ncons=smesh%nc
+ncons=oft_blagrange%mesh%nc
 ncofs=self%ncond_eigs
 allocate(diag(ncofs),fjac(ncons,ncofs))
 allocate(qtf(ncofs),wa1(ncofs),wa2(ncofs))
@@ -606,7 +606,9 @@ type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
 real(8) :: pt(3),curr_cent(2),Btor,Bpol(2)
 integer(4) :: i,m
+class(oft_bmesh), pointer :: smesh
 !---
+smesh=>oft_blagrange%mesh
 psi_eval%u=>self%psi
 CALL psi_eval%setup
 CALL psi_geval%shared_setup(psi_eval)
@@ -694,7 +696,9 @@ real(8) :: curr_cent(2) !< needs docs
 real(8) :: psitmp(1) !< magnetic flux coordinate
 real(8) :: gpsitmp(3) !< needs docs
 integer(4) :: i,m
+class(oft_bmesh), pointer :: smesh
 !---
+smesh=>oft_blagrange%mesh
 CALL self%eta%update(self) ! Make sure eta is up to date with current equilibrium
 psi_eval%u=>self%psi
 CALL psi_eval%setup
@@ -881,7 +885,7 @@ rmax=raxis
 cell=0
 DO j=1,100
   pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(smesh,cell,pt,f)
+  CALL bmesh_findcell(oft_blagrange%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
   IF( psi_surf(1) < x1)EXIT
@@ -1103,7 +1107,7 @@ rmax=raxis
 cell=0
 DO j=1,100
   pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(smesh,cell,pt,f)
+  CALL bmesh_findcell(oft_blagrange%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
   IF( psi_tmp(1) < x1)EXIT
@@ -1256,7 +1260,7 @@ DO i=1,nr
   pt(1) = (i-1)*rdim/REAL(nr-1,8) + rbounds(1)
   DO j=1,nz
     pt(2) = (j-1)*zdim/REAL(nz-1,8) + zbounds(1)
-    call bmesh_findcell(smesh,cell,pt,f)
+    call bmesh_findcell(oft_blagrange%mesh,cell,pt,f)
     call psi_int%interp(cell,f,gop,psi_tmp)
     psirz(i,j)=psi_tmp(1)
   END DO
@@ -1295,8 +1299,8 @@ IF(TRIM(limiter_file)=='')THEN
   nlim=gseq%lim_ptr(lim_max+1)-gseq%lim_ptr(lim_max)+1
   ALLOCATE(rlim(nlim),zlim(nlim))
   DO i=gseq%lim_ptr(lim_max),gseq%lim_ptr(lim_max+1)-1
-    rlim(i-gseq%lim_ptr(lim_max)+1)=smesh%r(1,gseq%lim_con(i))
-    zlim(i-gseq%lim_ptr(lim_max)+1)=smesh%r(2,gseq%lim_con(i))
+    rlim(i-gseq%lim_ptr(lim_max)+1)=oft_blagrange%mesh%r(1,gseq%lim_con(i))
+    zlim(i-gseq%lim_ptr(lim_max)+1)=oft_blagrange%mesh%r(2,gseq%lim_con(i))
   END DO
   rlim(nlim)=rlim(1)
   zlim(nlim)=zlim(1)
@@ -1367,7 +1371,7 @@ do jc=1,oft_blagrange%nce
   grad=grad+self%uvals(j(jc))*rop
 end do
 !---Get radial position
-pt=smesh%log2phys(cell,f)
+pt=oft_blagrange%mesh%log2phys(cell,f)
 !---
 s=SIN(self%t)
 c=COS(self%t)
@@ -1424,7 +1428,7 @@ rmax=raxis
 cell=0
 DO j=1,100
   pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(smesh,cell,pt,f)
+  CALL bmesh_findcell(oft_blagrange%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
   IF( psi_tmp(1) < x1)EXIT

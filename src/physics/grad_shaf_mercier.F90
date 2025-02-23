@@ -11,7 +11,7 @@
 !---------------------------------------------------------------------------
 module oft_gs_mercier
 use oft_base
-use oft_mesh_type, only: smesh, bmesh_findcell
+use oft_mesh_type, only: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 use oft_lag_basis, only: oft_blagrange, oft_blag_d2eval, oft_blag_geval
@@ -104,7 +104,7 @@ rmax=raxis
 cell=0
 DO j=1,100
   pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(smesh,cell,pt,f)
+  CALL bmesh_findcell(oft_blagrange%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
   IF( psi_surf(1) < x1)EXIT
@@ -146,8 +146,8 @@ do j=1,self%npsi-1
     !---------------------------------------------------------------------------
     !---Compute poloidal flux
     pt(1:2)=active_tracer%y
-    call bmesh_findcell(smesh,active_tracer%cell,pt,active_tracer%f)
-    call smesh%jacobian(active_tracer%cell,active_tracer%f,gop,vol)
+    call bmesh_findcell(oft_blagrange%mesh,active_tracer%cell,pt,active_tracer%f)
+    call oft_blagrange%mesh%jacobian(active_tracer%cell,active_tracer%f,gop,vol)
     call psi_int%interp(active_tracer%cell,active_tracer%f,gop,psi_surf)
     !---Get flux variables
     I=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
@@ -219,7 +219,7 @@ real(8) :: K(6,3)
 allocate(j(oft_blagrange%nce))
 call oft_blagrange%ncdofs(cell,j)
 !---Reconstruct gradient
-call smesh%hessian(cell,f,g2op,K)
+call oft_blagrange%mesh%hessian(cell,f,g2op,K)
 grad=0.d0
 d2_tmp=0.d0
 do jc=1,oft_blagrange%nce
@@ -230,7 +230,7 @@ do jc=1,oft_blagrange%nce
 end do
 d2=d2_tmp([1,2,4]) ! Map from 3D to 2D
 !---Get radial position
-pt=smesh%log2phys(cell,f)
+pt=oft_blagrange%mesh%log2phys(cell,f)
 !---
 s=SIN(self%t)
 c=COS(self%t)

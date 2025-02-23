@@ -14,7 +14,6 @@
 PROGRAM test_taylor_inj
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
-USE oft_mesh_type, ONLY: mesh
 USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -52,7 +51,7 @@ CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct
 CALL plot_file%setup("Test")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 IF(mg_test)THEN
   taylor_minlev=2
 ELSE
@@ -131,7 +130,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-CALL mesh%save_vertex_vector(bvout,plot_file,'B')
+CALL mg_mesh%mesh%save_vertex_vector(bvout,plot_file,'B')
 END BLOCK
 !---Finalize enviroment
 CALL oft_finalize

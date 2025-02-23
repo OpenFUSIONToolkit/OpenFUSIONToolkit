@@ -673,8 +673,8 @@ ABSTRACT INTERFACE
 END INTERFACE
 !---
 REAL(r8), PUBLIC :: rgrnd(3)=(/1.d0,0.d0,0.d0/) !< Grounding point position
-CLASS(oft_mesh), PUBLIC, POINTER :: mesh => NULL() !< Needs docs
-CLASS(oft_bmesh), PUBLIC, POINTER :: smesh => NULL() !< Needs docs
+! CLASS(oft_mesh), PUBLIC, POINTER :: mesh => NULL() !< Needs docs
+! CLASS(oft_bmesh), PUBLIC, POINTER :: smesh => NULL() !< Needs docs
 INTEGER(i4), PRIVATE, PARAMETER :: ho_find_retry=20 !< Number of retry attempts during high order find_cell
 #ifdef OFT_PLOT_DOUBLE
 LOGICAL, PARAMETER :: PLOT_R4_FLAG=.FALSE.

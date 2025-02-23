@@ -15,8 +15,7 @@
 !---------------------------------------------------------------------------
 program tokamaker_gs
 USE oft_base
-USE oft_mesh_type, ONLY: smesh
-USE multigrid, ONLY: multigrid_reset
+USE multigrid, ONLY: mg_mesh, multigrid_reset
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE fem_base, ONLY: oft_afem_type
 USE oft_la_base, ONLY: oft_vector
@@ -121,7 +120,7 @@ END IF
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf
 CALL mygs%xdmf%setup("TokaMaker")
-CALL smesh%setup_io(mygs%xdmf,order)
+CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
@@ -238,7 +237,7 @@ CALL oft_blagrange%vec_save(mygs%psi,'tokamaker_psi.rst','psi')
 CALL gs_save_prof(mygs,'gs.prof')
 !---Save output grid
 IF(save_mug)THEN
-  CALL smesh%save_to_file('gs_trans_mesh.dat')
+  CALL mg_mesh%smesh%save_to_file('gs_trans_mesh.dat')
   CALL gs_save_fgrid(mygs,'gs_trans_fields.dat')
 ELSE
   CALL gs_save_fgrid(mygs)

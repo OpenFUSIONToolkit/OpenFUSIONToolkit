@@ -14,9 +14,8 @@ MODULE oft_base_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_funptr, c_associated, c_f_procpointer
 USE oft_base
-USE oft_mesh_type, ONLY: smesh
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
 #include "local.h"
@@ -134,7 +133,7 @@ IF(ndim>0)THEN
 END IF
 !---Setup Mesh
 CALL multigrid_construct_surf
-nregs=smesh%nreg
+nregs=mg_mesh%smesh%nreg
 END SUBROUTINE oft_setup_smesh
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -163,6 +162,6 @@ IF(ndim>0)THEN
 END IF
 !---Setup Mesh
 CALL multigrid_construct
-nregs=mesh%nreg
+nregs=mg_mesh%mesh%nreg
 END SUBROUTINE oft_setup_vmesh
 END MODULE oft_base_f

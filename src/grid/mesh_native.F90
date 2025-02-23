@@ -13,14 +13,14 @@
 module oft_mesh_native
 USE oft_base
 USE oft_io, ONLY: hdf5_field_get_sizes, hdf5_read, hdf5_field_exist
-USE oft_mesh_type, ONLY: oft_amesh, oft_mesh, oft_bmesh, mesh, smesh
+USE oft_mesh_type, ONLY: oft_amesh, oft_mesh, oft_bmesh
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_hexmesh_type, ONLY: oft_hexmesh
 USE oft_quadmesh_type, ONLY: oft_quadmesh
 USE oft_mesh_local_util, ONLY: mesh_local_findedge, mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: mg_mesh, multigrid_level
 IMPLICIT NONE
 #include "local.h"
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none' !< Name of input file for mesh
@@ -45,6 +45,8 @@ integer(i4) :: i,id,ierr,io_unit,ndims,np_mem,mesh_order
 integer(i4), allocatable, dimension(:) :: dim_sizes
 LOGICAL :: reflect = .FALSE.
 LOGICAL :: ref_periodic = .FALSE.
+class(oft_mesh), pointer :: mesh
+class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
 namelist/native_mesh_options/filename,reflect,ref_periodic!,zstretch
 DEBUG_STACK_PUSH
@@ -103,9 +105,10 @@ DO i=1,mg_mesh%mgdim
     CALL mg_mesh%smeshes(i)%setup(mesh_native_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
 END DO
+CALL multigrid_level(1)
 mesh=>mg_mesh%meshes(1)
-mesh%nc=dim_sizes(2)
 smesh=>mg_mesh%smeshes(1)
+mesh%nc=dim_sizes(2)
 !
 IF(np_mem>0)THEN
     ALLOCATE(dim_sizes(2))
@@ -197,6 +200,7 @@ integer(i4), allocatable, dimension(:) :: dim_sizes
 real(r8), allocatable, dimension(:,:) :: rtmp
 LOGICAL :: reflect = .FALSE.
 LOGICAL :: ref_periodic = .FALSE.
+class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
 namelist/native_mesh_options/filename,reflect,ref_periodic!,zstretch
 DEBUG_STACK_PUSH
@@ -252,6 +256,7 @@ END SELECT
 DO i=1,mg_mesh%mgdim
     CALL mg_mesh%smeshes(i)%setup(mesh_native_id,.FALSE.)
 END DO
+CALL multigrid_level(1)
 smesh=>mg_mesh%smeshes(1)
 smesh%nc=dim_sizes(2)
 !
@@ -706,7 +711,8 @@ end subroutine native_reflect
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine native_set_periodic
+subroutine native_set_periodic(mesh)
+class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per
 integer(i4), ALLOCATABLE :: pt_f(:)
 IF(.NOT.ALLOCATED(per_nodes))RETURN

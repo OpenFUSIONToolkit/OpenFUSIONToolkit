@@ -17,8 +17,8 @@ PROGRAM test_arpack
 #if defined( HAVE_ARPACK )
 USE oft_base
 !--Grid
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -44,7 +44,7 @@ READ(iounit,test_arpack_options,IOSTAT=ierr)
 CLOSE(iounit)
 !---Setup grid
 CALL multigrid_construct
-IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---------------------------------------------------------------------------
 ! Run tests
 !---------------------------------------------------------------------------

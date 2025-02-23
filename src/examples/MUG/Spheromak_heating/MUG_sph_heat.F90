@@ -30,7 +30,7 @@ PROGRAM MUG_sph_heat
 !---Runtime
 USE oft_base
 !---Grid
-USE oft_mesh_type, ONLY: mesh, rgrnd
+USE oft_mesh_type, ONLY: rgrnd
 USE multigrid_build, ONLY: multigrid_construct, multigrid_add_quad
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix

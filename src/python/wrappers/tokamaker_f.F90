@@ -11,9 +11,9 @@ MODULE tokamaker_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
   c_f_pointer, c_bool, c_null_ptr, c_associated
 USE oft_base
-USE oft_mesh_type, ONLY: smesh, bmesh_findcell
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 ! USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
-USE multigrid, ONLY: multigrid_reset
+USE multigrid, ONLY: mg_mesh, multigrid_reset
 ! USE multigrid_build, ONLY: multigrid_construct_surf
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -119,6 +119,8 @@ real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(i4), POINTER :: contig_tmp(:)
 INTEGER(4) :: i
 INTEGER(4), POINTER :: xpoint_tmp(:)
+CLASS(oft_bmesh), POINTER :: smesh
+smesh=>mg_mesh%smesh
 CALL copy_string_rev(coil_file,gs_global%coil_file)
 IF(TRIM(gs_global%coil_file)=='none')THEN
   !
@@ -233,8 +235,8 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
-! CALL smesh%setup_io(order)
-smesh%tess_order=order
+! CALL mg_mesh%smesh%setup_io(order)
+mg_mesh%smesh%tess_order=order
 CALL oft_lag_setup(order, -1)
 !---------------------------------------------------------------------------
 ! Setup experimental geometry
@@ -453,18 +455,18 @@ TYPE(c_ptr), INTENT(out) :: reg_loc !< Needs docs
 INTEGER(c_int), INTENT(out) :: np !< Needs docs
 INTEGER(c_int), INTENT(out) :: nc !< Needs docs
 INTEGER(4) :: i,j,k,id
-CALL smesh%tessellate(r_plot, lc_plot, smesh%tess_order)
+CALL mg_mesh%smesh%tessellate(r_plot, lc_plot, mg_mesh%smesh%tess_order)
 np=SIZE(r_plot,DIM=2,KIND=c_int)
 nc=SIZE(lc_plot,DIM=2,KIND=c_int)
 r_loc=c_loc(r_plot)
 lc_loc=c_loc(lc_plot)
 !
 ALLOCATE(reg_plot(nc))
-k=nc/smesh%nc
-IF(ASSOCIATED(smesh%reg))THEN
+k=nc/mg_mesh%smesh%nc
+IF(ASSOCIATED(mg_mesh%smesh%reg))THEN
   !$omp parallel do private(j,id)
-  DO i=1,smesh%nc
-    id=smesh%reg(i)
+  DO i=1,mg_mesh%smesh%nc
+    id=mg_mesh%smesh%reg(i)
     DO j=1,k
       reg_plot((i-1)*k+j)=id
     END DO
@@ -488,7 +490,7 @@ np=gs_global%nlim_con
 ALLOCATE(r_tmp(2,gs_global%nlim_con))
 r_loc=C_LOC(r_tmp)
 DO i=1,gs_global%nlim_con
-  r_tmp(:,i)=smesh%r(1:2,gs_global%lim_con(i))
+  r_tmp(:,i)=mg_mesh%smesh%r(1:2,gs_global%lim_con(i))
 END DO
 nloops=gs_global%lim_nloops
 loop_ptr=C_LOC(gs_global%lim_ptr)
@@ -572,7 +574,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Needs docs
 INTEGER(4) :: i,j
 REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,coil_regs
-CALL c_f_pointer(reg_currents, coil_regs, [smesh%nreg])
+CALL c_f_pointer(reg_currents, coil_regs, [mg_mesh%smesh%nreg])
 CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoils])
 vals_tmp=(gs_global%coil_currs + gs_global%coil_vcont*gs_global%vcontrol_val)/mu0
 coil_regs = 0.d0
@@ -795,14 +797,14 @@ IF(int_type<0)THEN
   END IF
   RETURN
 END IF
-call bmesh_findcell(smesh,cell,pt,f)
+call bmesh_findcell(mg_mesh%smesh,cell,pt,f)
 IF(cell==0)RETURN
 fmin=MINVAL(f); fmax=MAXVAL(f)
 IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
   cell=-ABS(cell)
   RETURN
 END IF
-CALL smesh%jacobian(cell,f,goptmp,vol)
+CALL mg_mesh%smesh%jacobian(cell,f,goptmp,vol)
 IF(int_type==1)THEN
   CALL c_f_pointer(int_obj, b_interp_obj)
   CALL b_interp_obj%interp(cell,f,goptmp,field)

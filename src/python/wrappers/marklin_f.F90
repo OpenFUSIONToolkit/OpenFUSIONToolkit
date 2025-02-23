@@ -14,8 +14,9 @@ USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
 USE oft_base
 USE oft_io, ONLY: hdf5_create_file, xdmf_plot_file
 !--Grid
-USE oft_mesh_type, ONLY: mesh, mesh_findcell
+USE oft_mesh_type, ONLY: mesh_findcell
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -117,10 +118,10 @@ CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
   CALL xdmf_plot%setup('Marklin',pathprefix)
-  CALL mesh%setup_io(xdmf_plot,oft_hcurl%order)
+  CALL mg_mesh%mesh%setup_io(xdmf_plot,oft_hcurl%order)
 ELSE
   CALL xdmf_plot%setup('Marklin')
-  CALL mesh%setup_io(xdmf_plot,oft_hcurl%order)
+  CALL mg_mesh%mesh%setup_io(xdmf_plot,oft_hcurl%order)
 END IF
 END SUBROUTINE marklin_setup_io
 !------------------------------------------------------------------------------
@@ -174,7 +175,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-call mesh%save_vertex_vector(bvout,xdmf_plot,TRIM(name_tmp))
+call mg_mesh%mesh%save_vertex_vector(bvout,xdmf_plot,TRIM(name_tmp))
 !---Cleanup
 CALL lminv%pre%delete
 DEALLOCATE(lminv%pre)
@@ -280,14 +281,14 @@ IF(int_type<0)THEN
   END SELECT
   RETURN
 END IF
-call mesh_findcell(mesh,cell,pt,f)
+call mesh_findcell(mg_mesh%mesh,cell,pt,f)
 IF(cell==0)RETURN
 fmin=MINVAL(f); fmax=MAXVAL(f)
 IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
   cell=-ABS(cell)
   RETURN
 END IF
-CALL mesh%jacobian(cell,f,goptmp,vol)
+CALL mg_mesh%mesh%jacobian(cell,f,goptmp,vol)
 SELECT CASE(int_type)
   CASE(1)
     CALL c_f_pointer(int_obj, ainterp_obj)
@@ -296,7 +297,7 @@ SELECT CASE(int_type)
     CALL c_f_pointer(int_obj, binterp_obj)
     CALL binterp_obj%interp(cell,f,goptmp,field)
   CASE DEFAULT
-    cell=-(mesh%np+1)
+    cell=-(mg_mesh%mesh%np+1)
 END SELECT
 END SUBROUTINE marklin_apply_int
 END MODULE marklin_f

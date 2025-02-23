@@ -22,7 +22,7 @@ PROGRAM oft_mesh_check
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !--Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
@@ -58,7 +58,7 @@ CALL multigrid_construct
 ! Output mesh
 !---------------------------------------------------------------------------
 CALL plot_file%setup("mesh_check")
-CALL mesh%setup_io(plot_file,ABS(order))
+CALL mg_mesh%mesh%setup_io(plot_file,ABS(order))
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------

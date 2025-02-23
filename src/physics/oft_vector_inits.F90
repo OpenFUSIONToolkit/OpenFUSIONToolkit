@@ -11,7 +11,7 @@
 !---------------------------------------------------------------------------
 module oft_vector_inits
 use oft_base
-use oft_mesh_type, only: mesh
+use multigrid, only: mg_mesh
 use fem_utils, only: fem_interp
 use mhd_utils, only: mu0
 implicit none
@@ -130,7 +130,7 @@ real(r8), intent(out) :: val(:)
 real(r8) :: pt(3)
 IF(.NOT.ASSOCIATED(self%func))CALL oft_abort("No eval function specified", &
   "poss_vec_interp", __FILE__)
-pt=mesh%log2phys(cell,f)
+pt=mg_mesh%mesh%log2phys(cell,f)
 CALL self%func(pt,val,self%n)
 end subroutine poss_vec_interp
 !---------------------------------------------------------------------------
@@ -149,10 +149,10 @@ IF(ANY(self%rplane>3).OR.ANY(self%rplane<0))CALL oft_abort('Invalid xy-plane','c
 zmin=1.d99
 zmax=-1.d99; rmax=-1.d99
 !$omp parallel do reduction(min:zmin) reduction(max:zmax) reduction(max:rmax)
-DO i=1,mesh%np
-  zmin=MIN(zmin,mesh%r(self%zaxis,i))
-  zmax=MAX(zmax,mesh%r(self%zaxis,i))
-  rmax=MAX(rmax,SQRT(SUM(mesh%r(self%rplane,i)**2)))
+DO i=1,mg_mesh%mesh%np
+  zmin=MIN(zmin,mg_mesh%mesh%r(self%zaxis,i))
+  zmax=MAX(zmax,mg_mesh%mesh%r(self%zaxis,i))
+  rmax=MAX(rmax,SQRT(SUM(mg_mesh%mesh%r(self%rplane,i)**2)))
 END DO
 #ifdef HAVE_MPI
 CALL MPI_ALLREDUCE(zmin,self%zmin,1,OFT_MPI_R8,MPI_MIN,oft_env%COMM,ierr)
@@ -184,7 +184,7 @@ real(r8), intent(in) :: gop(3,4)
 real(r8), intent(out) :: val(:)
 real(r8) :: pt(3),i,ar,az,s,c
 !---
-pt=mesh%log2phys(cell,f)
+pt=mg_mesh%mesh%log2phys(cell,f)
 CALL cyl_taylor_eval(self,pt,val)
 val=val*self%scale
 ! !---
@@ -256,7 +256,7 @@ real(r8), intent(out) :: val(:)
 integer(i4) :: i
 real(r8) :: pt(3),r(3)
 !---
-pt=mesh%log2phys(cell,f)
+pt=mg_mesh%mesh%log2phys(cell,f)
 !---
 val=0.d0
 DO i=1,self%ncoils
@@ -279,7 +279,7 @@ real(r8), intent(out) :: val(:)
 integer(i4) :: i
 real(r8) :: pt(3),r,rhat(3),that(3),phi,theta
 !---Get position in physical coordinates
-pt=mesh%log2phys(cell,f)
+pt=mg_mesh%mesh%log2phys(cell,f)
 !---Convert to toroidal coordinates
 r=magnitude(pt(1:2))
 phi=ATAN2(pt(2),pt(1))

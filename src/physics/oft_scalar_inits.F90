@@ -11,7 +11,7 @@
 !---------------------------------------------------------------------------
 module oft_scalar_inits
 use oft_base
-use oft_mesh_type, only: mesh
+use multigrid, only: mg_mesh
 use fem_utils, only: fem_interp
 implicit none
 !---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8) :: rop(1),pt(3),r,z,d
 !---Get coordinates
-pt=mesh%log2phys(cell,f)
+pt=mg_mesh%mesh%log2phys(cell,f)
 r=sqrt(pt(1)**2+pt(2)**2)
 z=pt(3)
 !---Evaluate function

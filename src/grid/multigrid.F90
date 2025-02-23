@@ -12,7 +12,7 @@
 module multigrid
 use oft_base
 USE oft_sort, ONLY: sort_array, sort_matrix
-use oft_mesh_type, only: oft_mesh, mesh, oft_bmesh, smesh
+use oft_mesh_type, only: oft_mesh, oft_bmesh
 use oft_mesh_local_util, only: mesh_local_findedge, mesh_local_findface
 use oft_mesh_global_util, only: mesh_global_set_curved
 use oft_hexmesh_type, only: hex_fe
@@ -75,11 +75,11 @@ end if
 write(mg_mesh%rlevel,'(I2.2)')mg_mesh%lev
 IF(ASSOCIATED(mg_mesh%meshes))THEN
   mg_mesh%mesh=>mg_mesh%meshes(level)
-  mesh=>mg_mesh%mesh
+  ! mesh=>mg_mesh%mesh
 END IF
 IF(ASSOCIATED(mg_mesh%smeshes))THEN
   mg_mesh%smesh=>mg_mesh%smeshes(level)
-  smesh=>mg_mesh%smesh
+  ! smesh=>mg_mesh%smesh
 END IF
 ! smesh=>mg_mesh%mesh%bmesh
 DEBUG_STACK_POP
@@ -135,7 +135,9 @@ end subroutine multigrid_refine
 subroutine multigrid_reffix_ho
 integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,nfdf,ncde,ncdf,fc,cc
 real(r8) :: f1(4),f2(4),ftmp(4),pt(3)
+class(oft_mesh), pointer :: mesh
 class(oft_mesh), pointer :: pmesh
+mesh=>mg_mesh%mesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 IF(.NOT.ASSOCIATED(pmesh%ho_info%r))RETURN
 DEBUG_STACK_PUSH
@@ -554,7 +556,11 @@ end subroutine multigrid_reffix_ho
 subroutine multigrid_reffix_ho_surf
 integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,ncde,cc
 real(r8) :: f1(4),f2(4),ftmp(4)
+class(oft_mesh), pointer :: mesh
+class(oft_bmesh), pointer :: smesh
 class(oft_bmesh), pointer :: pmesh
+mesh=>mg_mesh%mesh
+smesh=>mg_mesh%smesh
 pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
 IF(.NOT.ASSOCIATED(pmesh%ho_info%r))RETURN
 DEBUG_STACK_PUSH
@@ -1012,7 +1018,7 @@ DEBUG_STACK_PUSH
 if(mg_mesh%level/=mg_mesh%nbase)call oft_abort('Level is not a transfer level.','multigrid_base_pushcc',__FILE__)
 lctmp=>mg_mesh%meshes(mg_mesh%nbase+1)%base%lc
 nccors=mg_mesh%meshes(mg_mesh%nbase+1)%nc
-allocate(bcctmp(n,mesh%nc))
+allocate(bcctmp(n,mg_mesh%mesh%nc))
 bcctmp=0.d0
 do i=1,nccors
   DO j=1,n
@@ -1021,7 +1027,7 @@ do i=1,nccors
 end do
 !---Global reduction over all processors
 #ifdef HAVE_MPI
-call MPI_ALLREDUCE(bcctmp,bcc,n*mesh%nc,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
+call MPI_ALLREDUCE(bcctmp,bcc,n*mg_mesh%mesh%nc,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
 #else
 bcc=bcctmp
 #endif
@@ -1039,9 +1045,9 @@ integer(i4), intent(in) :: n !< Number of values per cell
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 if(mg_mesh%level/=mg_mesh%nbase+1)call oft_abort('Level is not a transfer level.','multigrid_base_popcc',__FILE__)
-do i=1,mesh%nc
+do i=1,mg_mesh%mesh%nc
   DO j=1,n
-    bcc(j,i)=bccg(j,mesh%global%lc(i))
+    bcc(j,i)=bccg(j,mg_mesh%mesh%global%lc(i))
   END DO
 end do
 DEBUG_STACK_POP

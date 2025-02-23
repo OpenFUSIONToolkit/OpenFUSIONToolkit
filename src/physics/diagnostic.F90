@@ -14,8 +14,9 @@
 MODULE diagnostic
 USE oft_base
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, smesh, mesh_findcell2, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, mesh_findcell2, cell_is_curved
 USE oft_io, ONLY: oft_bin_file
+USE multigrid, ONLY: mg_mesh
 USE fem_utils, ONLY: fem_interp, bfem_interp
 IMPLICIT NONE
 #include "local.h"
@@ -129,8 +130,8 @@ ALLOCATE(ptmp(self%nprobes),pown(self%nprobes),fout(self%nprobes))
 ptmp=-1
 self%cells=0
 DO i=1,self%nprobes
-  CALL mesh_findcell2(mesh,self%cells(i),self%pts(:,i),4,f)
-  minf=mesh%in_cell(f, self%tol)
+  CALL mesh_findcell2(mg_mesh%mesh,self%cells(i),self%pts(:,i),4,f)
+  minf=mg_mesh%mesh%in_cell(f, self%tol)
   ! fmin=MINVAL(f)
   ! fmax=MAXVAL(f)
   ! fout(i)=MAX(-fmin,fmax-1.d0)
@@ -187,7 +188,7 @@ ALLOCATE(vtmp(self%dim,self%nprobes))
 vtmp=0.d0
 DO i=1,self%nprobes
   IF(self%cells(i)>0)THEN
-    CALL mesh%jacobian(self%cells(i),self%pts_log(:,i),goptmp,v)
+    CALL mg_mesh%mesh%jacobian(self%cells(i),self%pts_log(:,i),goptmp,v)
     CALL self%B%interp(self%cells(i),self%pts_log(:,i),goptmp,vtmp(:,i))
   END IF
 END DO
@@ -259,7 +260,9 @@ CLASS(flux_probe), INTENT(inout) :: self
 INTEGER(i4) :: i,j,cell
 INTEGER(i4), ALLOCATABLE :: fmap(:)
 REAL(r8) :: r(3),rcc(3),rdv(3)
+CLASS(oft_mesh), POINTER :: mesh
 !---
+mesh=>mg_mesh%mesh
 allocate(fmap(mesh%nf))
 CALL get_inverse_map(mesh%lbf,mesh%nbf,fmap,mesh%nf)
 self%nf=0
@@ -326,7 +329,7 @@ INTEGER(i4) :: i,j,m,fmap(3)
 REAL(r8) :: goptmp(3,4),v,bcc(3),f(4),reg
 TYPE(oft_quad_type) :: quad
 !---Set quadrature order
-CALL mesh%bmesh%quad_rule(self%order,quad)
+CALL mg_mesh%mesh%bmesh%quad_rule(self%order,quad)
 !---
 reg=0.d0
 DO i=1,self%nf
@@ -339,7 +342,7 @@ DO i=1,self%nf
   f=0.d0
   DO m=1,quad%np
     f(fmap)=quad%pts(:,m)
-    CALL mesh%jacobian(self%cells(i),f,goptmp,v)
+    CALL mg_mesh%mesh%jacobian(self%cells(i),f,goptmp,v)
     CALL self%B%interp(self%cells(i),f,goptmp,bcc)
     reg=reg+DOT_PRODUCT(bcc,self%norm(:,i))*quad%wts(m)
   END DO
@@ -368,6 +371,7 @@ INTEGER(i4) :: i,j,k,l,m,ierr,quad_order
 REAL(r8) :: dtmp,ptmp(3)
 REAL(r8), ALLOCATABLE :: dist(:),distout(:),distin(:),ptstmp(:,:)
 TYPE(oft_quad_type) :: quad
+CLASS(oft_mesh), POINTER :: mesh
 #ifdef HAVE_MPI
 #ifdef OFT_MPI_F08
 TYPE(mpi_status) :: stat
@@ -376,6 +380,7 @@ INTEGER(i4) :: stat(MPI_STATUS_SIZE)
 #endif
 #endif
 !---
+mesh=>mg_mesh%mesh
 quad_order=4
 IF(PRESENT(order))quad_order=order
 CALL mesh%bmesh%quad_rule(quad_order,quad)
@@ -462,14 +467,14 @@ IF(PRESENT(axis))raxis=axis
 IF(raxis==1)ptind(1)=3
 IF(raxis==2)ptind(2)=3
 !---Set quadrature order
-CALL mesh%quad_rule(quad_order,quad)
+CALL mg_mesh%mesh%quad_rule(quad_order,quad)
 tflux=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad,raxis,ptind) private(curved) reduction(+:tflux)
-DO i=1,mesh%nc
-  curved=cell_is_curved(mesh,i)
+DO i=1,mg_mesh%mesh%nc
+  curved=cell_is_curved(mg_mesh%mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
-    pt=mesh%log2phys(i,quad%pts(:,m))
+    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    pt=mg_mesh%mesh%log2phys(i,quad%pts(:,m))
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     bcc=cross_product(pt,bcc)
     tflux = tflux + bcc(raxis)/SUM(pt(ptind)**2)*vol*quad%wts(m)
@@ -495,13 +500,13 @@ REAL(r8) :: goptmp(3,4),vol,bcc(1)
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mesh%quad_rule(quad_order,quad)
+CALL mg_mesh%mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
-DO i=1,mesh%nc
-  curved=cell_is_curved(mesh,i)
+DO i=1,mg_mesh%mesh%nc
+  curved=cell_is_curved(mg_mesh%mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     energy=energy+bcc(1)*vol*quad%wts(m)
   END DO
@@ -526,13 +531,13 @@ LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mesh%quad_rule(quad_order,quad)
+CALL mg_mesh%mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
-DO i=1,mesh%nc
-  curved=cell_is_curved(mesh,i)
+DO i=1,mg_mesh%mesh%nc
+  curved=cell_is_curved(mg_mesh%mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     energy = energy + (bcc(1)**2)*vol*quad%wts(m)
   END DO
@@ -557,13 +562,13 @@ LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mesh%quad_rule(quad_order,quad)
+CALL mg_mesh%mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
-DO i=1,mesh%nc
-  curved=cell_is_curved(mesh,i)
+DO i=1,mg_mesh%mesh%nc
+  curved=cell_is_curved(mg_mesh%mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     energy = energy + SUM(bcc**2)*vol*quad%wts(m)
   END DO
@@ -589,13 +594,13 @@ LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mesh%quad_rule(quad_order,quad)
+CALL mg_mesh%mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do  default(firstprivate) shared(field,weight,quad) private(curved) reduction(+:energy)
-DO i=1,mesh%nc
-  curved=cell_is_curved(mesh,i)
+DO i=1,mg_mesh%mesh%nc
+  curved=cell_is_curved(mg_mesh%mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     CALL weight%interp(i,quad%pts(:,m),goptmp,wcc)
     energy = energy + wcc(1)*SUM(bcc**2)*vol*quad%wts(m)
@@ -618,8 +623,10 @@ REAL(r8) :: energy !< \f$ \int u dS \f$
 INTEGER(i4) :: i,m,j,face,cell,ptmap(3)
 REAL(r8) :: vol,area,flog(4),etmp(1),sgop(3,3),vgop(3,4)
 TYPE(oft_quad_type) :: quad
+CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---Setup
+mesh=>mg_mesh%mesh
 CALL mesh%bmesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
@@ -653,16 +660,16 @@ REAL(r8) :: area,etmp(1),sgop(3,3)
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL smesh%quad_rule(quad_order,quad)
+CALL mg_mesh%smesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad,reg_mask) reduction(+:energy)
-do i=1,smesh%nc
+do i=1,mg_mesh%smesh%nc
   IF(PRESENT(reg_mask))THEN
-    IF(smesh%reg(i)/=reg_mask)CYCLE
+    IF(mg_mesh%smesh%reg(i)/=reg_mask)CYCLE
   END IF
   !---Loop over quadrature points
   do m=1,quad%np
-    call smesh%jacobian(i,quad%pts(:,m),sgop,area)
+    call mg_mesh%smesh%jacobian(i,quad%pts(:,m),sgop,area)
     call field%interp(i,quad%pts(:,m),sgop,etmp)
     energy = energy + etmp(1)*area*quad%wts(m)
   end do
@@ -684,8 +691,10 @@ REAL(r8) :: energy !< \f$ \int \textbf{u} \cdot \textbf{dS} \f$
 INTEGER(i4) :: i,m,j,face,cell,ptmap(3)
 REAL(r8) :: vol,area,flog(4),norm(3),etmp(3),sgop(3,3),vgop(3,4)
 TYPE(oft_quad_type) :: quad
+CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---Setup
+mesh=>mg_mesh%mesh
 CALL mesh%bmesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)

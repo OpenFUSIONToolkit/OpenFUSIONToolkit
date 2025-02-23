@@ -7,7 +7,7 @@
 !---------------------------------------------------------------------------
 MODULE test_phys_helpers
 USE oft_base
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: mg_mesh
 USE fem_utils, ONLY: fem_interp
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
@@ -55,7 +55,7 @@ real(r8), intent(in) :: gop(3,4)
 real(r8), intent(out) :: val(:)
 real(r8) :: pt(3),i,ar,az,s,c
 !---
-pt=mesh%log2phys(cell,f)
+pt=mg_mesh%mesh%log2phys(cell,f)
 IF(self%field=='n')THEN
   val=(1.d0+self%delta*SIN(DOT_PRODUCT(pt-self%r0,self%k_dir)*2.d0*pi/self%lam))**(3.d0/5.d0)
   IF(self%diff)val=val-1.d0
@@ -81,7 +81,7 @@ real(r8), intent(in) :: gop(3,4)
 real(r8), intent(out) :: val(:)
 real(r8) :: pt(3),i,ar,az,s,c
 !---
-pt=mesh%log2phys(cell,f)
+pt=mg_mesh%mesh%log2phys(cell,f)
 val=self%v_dir*SIN(DOT_PRODUCT(pt-self%r0,self%k_dir)*2.d0*pi/self%lam)
 end subroutine alfven_eig_interp
 END MODULE test_phys_helpers

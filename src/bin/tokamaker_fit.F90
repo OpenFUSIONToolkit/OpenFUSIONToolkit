@@ -11,8 +11,7 @@
 !---------------------------------------------------------------------------
 PROGRAM tokamaker_fit
 USE oft_base
-USE oft_mesh_type, ONLY: smesh
-USE multigrid_build, ONLY: multigrid_construct_surf
+USE multigrid_build, ONLY: mg_mesh, multigrid_construct_surf
 USE fem_base, ONLY: oft_afem_type
 USE oft_la_base, ONLY: oft_vector
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
@@ -132,7 +131,7 @@ END IF
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf
 CALL mygs%xdmf%setup("TokaMaker")
-CALL smesh%setup_io(mygs%xdmf,order)
+CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
@@ -200,10 +199,10 @@ ELSE
 END IF
 mygs%has_plasma=has_plasma
 IF(.NOT.mygs%has_plasma)mygs%I%ncofs=0
-! mygs%spatial_bounds(1,1)=MAX(MINVAL(smesh%r(1,:)),rbounds(1))
-! mygs%spatial_bounds(2,1)=MIN(MAXVAL(smesh%r(1,:)),rbounds(2))
-! mygs%spatial_bounds(1,2)=MAX(MINVAL(smesh%r(2,:)),zbounds(1))
-! mygs%spatial_bounds(2,2)=MIN(MAXVAL(smesh%r(2,:)),zbounds(2))
+! mygs%spatial_bounds(1,1)=MAX(MINVAL(mg_mesh%smesh%r(1,:)),rbounds(1))
+! mygs%spatial_bounds(2,1)=MIN(MAXVAL(mg_mesh%smesh%r(1,:)),rbounds(2))
+! mygs%spatial_bounds(1,2)=MAX(MINVAL(mg_mesh%smesh%r(2,:)),zbounds(1))
+! mygs%spatial_bounds(2,2)=MIN(MAXVAL(mg_mesh%smesh%r(2,:)),zbounds(2))
 mygs%lim_zmax=lim_zmax
 mygs%rmin=rmin
 mygs%estore_target=estore_target*mu0
@@ -235,7 +234,7 @@ CALL gs_profile_save('p_prof.out',mygs%P)
 CALL gs_save_prof(mygs,'fit.prof')
 !---Save output grid
 IF(save_mug)THEN
-  CALL smesh%save_to_file('gs_trans_mesh.dat')
+  CALL mg_mesh%smesh%save_to_file('gs_trans_mesh.dat')
   CALL gs_save_fgrid(mygs,'gs_trans_fields.dat')
 ELSE
   CALL gs_save_fgrid(mygs)

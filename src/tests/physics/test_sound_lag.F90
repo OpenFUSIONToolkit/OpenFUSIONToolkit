@@ -13,7 +13,7 @@
 PROGRAM test_sound
 USE oft_base
 !--Grid
-USE oft_mesh_type, ONLY: mesh, rgrnd
+USE oft_mesh_type, ONLY: rgrnd
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix

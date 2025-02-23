@@ -21,7 +21,7 @@ PROGRAM marklin_eigs
 USE oft_base
 USE oft_io, ONLY: hdf5_create_file, xdmf_plot_file
 !--Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -68,7 +68,7 @@ IF(ierr>0)CALL oft_abort('Error parsing "marklin_eigs_options" in input file.', 
   'marklin_eigs',__FILE__)
 !---Setup grid
 CALL plot_file%setup("marklin_eigs")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !
 IF(minlev<0)THEN
   taylor_minlev=oft_hcurl_level
@@ -117,7 +117,7 @@ DO i=1,nmodes
   CALL u%get_local(vals,2)
   vals=>bvout(3,:)
   CALL u%get_local(vals,3)
-  call mesh%save_vertex_vector(bvout,plot_file,'B_'//pltnum)
+  call mg_mesh%mesh%save_vertex_vector(bvout,plot_file,'B_'//pltnum)
 END DO
 !---Finalize enviroment
 CALL oft_finalize

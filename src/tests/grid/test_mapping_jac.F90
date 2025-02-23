@@ -16,8 +16,8 @@
 PROGRAM test_mapping_jac
 USE oft_base
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_sphere, ONLY: mesh_sphere_id
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, oft_lag_npos, oft_lag_geval, &
@@ -35,7 +35,7 @@ READ(io_unit,test_mapping_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct
-IF(mesh%cad_type/=mesh_sphere_id)CALL oft_abort('Wrong mesh type, test for SPHERE only.','main',__FILE__)
+IF(mg_mesh%mesh%cad_type/=mesh_sphere_id)CALL oft_abort('Wrong mesh type, test for SPHERE only.','main',__FILE__)
 IF(oft_env%nprocs>1)CALL oft_abort('Test is for serial meshes only.','main',__FILE__)
 !---Setup FEM
 CALL oft_lag_setup(order)
@@ -46,7 +46,7 @@ READ(io_unit,*)ntests
 DO i=1,ntests
   !---Evaluate errors
   READ(io_unit,'(2I12,6E25.17)')xi,xj,check_vec
-  IF((xj==0).OR.(order/mesh%order>=2))nfail=nfail+check_jac2(xi,xj,check_vec,order,tol)
+  IF((xj==0).OR.(order/mg_mesh%mesh%order>=2))nfail=nfail+check_jac2(xi,xj,check_vec,order,tol)
 END DO
 CLOSE(io_unit)
 OPEN(NEWUNIT=io_unit,FILE='mapping_jac.results')
@@ -77,23 +77,23 @@ fail_count=0
 quad=>oft_lagrange%quad
 !$omp parallel private(k,j,f,pt_loc,v,vloc,val,rop,gop,g2op,Kmat) reduction(+:fail_count)
 ALLOCATE(pt_loc(0:3,oft_lagrange%nce))
-IF(mesh%type==3)THEN
+IF(mg_mesh%mesh%type==3)THEN
   ALLOCATE(g2op(6,6),Kmat(6,3))
 ELSE
   ALLOCATE(g2op(6,10),Kmat(10,3))
 END IF
 pt_loc=1.d0
 !$omp do
-DO i=1,mesh%nc
+DO i=1,mg_mesh%mesh%nc
   DO k=1,oft_lagrange%nce
     CALL oft_lag_npos(oft_lagrange,i,k,f)
-    pt_loc(1:3,k)=mesh%log2phys(i,f)
+    pt_loc(1:3,k)=mg_mesh%mesh%log2phys(i,f)
   END DO
   !---
   DO j=1,quad%np ! Loop over quadrature points
     !---
-    CALL mesh%jacobian(i,quad%pts(:,j),gop,v)
-    CALL mesh%hessian(i,quad%pts(:,j),g2op,Kmat)
+    CALL mg_mesh%mesh%jacobian(i,quad%pts(:,j),gop,v)
+    CALL mg_mesh%mesh%hessian(i,quad%pts(:,j),g2op,Kmat)
     vloc=0.d0
     DO k=1,oft_lagrange%nce
       CALL oft_lag_geval(oft_lagrange,i,k,quad%pts(:,j),rop,gop)

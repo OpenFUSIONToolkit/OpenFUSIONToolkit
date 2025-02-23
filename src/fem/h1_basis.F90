@@ -17,7 +17,6 @@
 MODULE oft_h1_basis
 ! USE timer
 USE oft_base
-USE oft_mesh_type, ONLY: mesh
 USE multigrid, ONLY: mg_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_fem_ptr, oft_ml_fem_type, oft_bfem_type!, &
@@ -126,7 +125,7 @@ do i=1,mg_mesh%mgdim-1
     oft_h1_blevel=i
   END IF
   !---
-  oft_hgrad%mesh=>mesh
+  oft_hgrad%mesh=>mg_mesh%mesh
   oft_hgrad%order=2
   oft_hgrad%dim=1
   oft_hgrad%gstruct=(/1,1,0,0/)
@@ -150,7 +149,7 @@ do i=1,order
     ! oft_hgrad=>ML_oft_hgrad%levels(oft_h1_level)%fe
   ELSE
     !---
-    oft_hgrad%mesh=>mesh
+    oft_hgrad%mesh=>mg_mesh%mesh
     oft_hgrad%order=i+1
     oft_hgrad%dim=1
     select case(oft_hgrad%order)

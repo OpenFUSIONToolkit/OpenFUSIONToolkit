@@ -15,7 +15,6 @@
 !---------------------------------------------------------------------------
 program test_h1
 USE oft_base
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
 ! USE oft_io
 USE multigrid, ONLY: mg_mesh, multigrid_level
@@ -53,7 +52,7 @@ READ(io_unit,test_h1_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct
-IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
@@ -116,7 +115,7 @@ uu=u%dot(u)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='h1.results')
   WRITE(io_unit,*)winv%cits
-  WRITE(io_unit,*)uu/(u%ng-mesh%global%np)
+  WRITE(io_unit,*)uu/(u%ng-mg_mesh%mesh%global%np)
   CLOSE(io_unit)
 END IF
 !---Destroy vectors
@@ -166,7 +165,7 @@ uu=u%dot(u)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='h1.results')
   WRITE(io_unit,*)winv%cits
-  WRITE(io_unit,*)uu/(u%ng-mesh%global%np)
+  WRITE(io_unit,*)uu/(u%ng-mg_mesh%mesh%global%np)
   CLOSE(io_unit)
 END IF
 !---Destroy vectors

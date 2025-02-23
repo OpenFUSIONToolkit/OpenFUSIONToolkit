@@ -14,7 +14,7 @@
 !------------------------------------------------------------------------------
 module tracing
 use oft_base
-use oft_mesh_type, only: mesh, mesh_findcell
+use oft_mesh_type, only: mesh_findcell
 use multigrid, only: mg_mesh
 USE oft_io, only: hdf5_write
 !---
@@ -380,7 +380,7 @@ do while(active_tracer%ntrans<active_tracer%maxtrans)
     IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
       call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,active_tracer%y(1:3),f)
     ELSE
-      call mesh_findcell(mesh,cell,active_tracer%y(1:3),f)
+      call mesh_findcell(mg_mesh%mesh,cell,active_tracer%y(1:3),f)
     END IF
     fmin=MINVAL(f); fmax=MAXVAL(f)
     !---Disable point if off mesh
@@ -673,9 +673,9 @@ DO
         cell=0
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
           call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
-          tol_ratio=mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
+          tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
         ELSE
-          call mesh_findcell(mesh,cell,loc_tracer%y,f)
+          call mesh_findcell(mg_mesh%mesh,cell,loc_tracer%y,f)
           tol_ratio=.1d0
         END IF
         fmin=minval(f)
@@ -738,9 +738,9 @@ DO
         cell=0
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
           call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
-          tol_ratio=mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
+          tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
         ELSE
-          call mesh_findcell(mesh,cell,loc_tracer%y,f)
+          call mesh_findcell(mg_mesh%mesh,cell,loc_tracer%y,f)
           tol_ratio=.1d0
         END IF
         fmin=minval(f)
@@ -792,9 +792,9 @@ DO
         cell=0
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
           call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
-          tol_ratio=mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
+          tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
         ELSE
-          call mesh_findcell(mesh,cell,loc_tracer%y,f)
+          call mesh_findcell(mg_mesh%mesh,cell,loc_tracer%y,f)
           tol_ratio=.1d0
         END IF
         fmin=minval(f)
@@ -829,9 +829,9 @@ DO
       cell=0
       IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
         call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
-        tol_ratio=mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
+        tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
       ELSE
-        call mesh_findcell(mesh,cell,loc_tracer%y,f)
+        call mesh_findcell(mg_mesh%mesh,cell,loc_tracer%y,f)
         tol_ratio=.1d0
       END IF
       fmin=minval(f)
@@ -1014,7 +1014,7 @@ END IF
 self%cell=0
 if(present(cell))self%cell=cell
 self%y=y
-call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
 self%initialized=.TRUE.
 DEBUG_STACK_POP
 end subroutine tracer_euler_setup
@@ -1155,11 +1155,11 @@ real(r8) :: B(3),goptmp(3,4),v,fmin,fmax
 DEBUG_STACK_PUSH
 ALLOCATE(ydot(self%neq))
 !---Prediction
-call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
 IF(self%cell==0)RETURN
-CALL mesh%jacobian(self%cell,self%f,goptmp,v)
+CALL mg_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
 CALL self%B%interp(self%cell,self%f,goptmp,B)
 self%dyp=self%dy
 IF(ASSOCIATED(active_tracer%ydot))THEN
@@ -1171,11 +1171,11 @@ IF(self%nsteps==0)self%dt=1.d-3/SQRT(SUM(self%dy**2))
 !---Step
 self%y=self%y+self%dt*self%dy
 !---Compute second derivative for error approximation
-call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
 IF(self%cell==0)RETURN
-CALL mesh%jacobian(self%cell,self%f,goptmp,v)
+CALL mg_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
 CALL self%B%interp(self%cell,self%f,goptmp,B)
 IF(ASSOCIATED(active_tracer%ydot))THEN
   CALL self%ydot(0.d0,self%y,B,self%neq,ydot)
@@ -1284,7 +1284,7 @@ END IF
 self%cell=0
 if(present(cell))self%cell=cell
 self%y=y
-call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
 self%initialized=.TRUE.
 IF(self%comm_load)THEN
   call dsrcom(self%rsav,self%isav,2)
@@ -1454,7 +1454,7 @@ IF(self%istate<0.OR.ANY(self%y(1:3)>1.d20))THEN
   self%estatus=TRACER_ERROR_FAIL
 END IF
 IF(self%cell/=0)THEN ! Check for exit mesh
-  call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+  call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
   fmin=minval(self%f)
   fmax=maxval(self%f)
   IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
@@ -1475,9 +1475,9 @@ real(r8), intent(out) :: ydot(neq)
 real(r8) :: goptmp(3,4),v,B(3)
 DEBUG_STACK_PUSH
 ydot=active_tracer%dy
-call mesh_findcell(mesh,active_tracer%cell,y(1:3),active_tracer%f)
+call mesh_findcell(mg_mesh%mesh,active_tracer%cell,y(1:3),active_tracer%f)
 IF(active_tracer%cell==0)RETURN
-CALL mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+CALL mg_mesh%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 CALL active_tracer%B%interp(active_tracer%cell,active_tracer%f,goptmp,B)
 IF(ASSOCIATED(active_tracer%ydot))THEN
   CALL active_tracer%ydot(t,y,B,neq,ydot)

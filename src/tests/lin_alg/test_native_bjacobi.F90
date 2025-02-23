@@ -15,8 +15,8 @@
 !---------------------------------------------------------------------------
 PROGRAM test_native_bjacobi
 USE oft_base
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---LA imports
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -78,7 +78,7 @@ END IF
 #endif
 !---Setup grid
 CALL multigrid_construct
-IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 CALL oft_lag_setup(order)
 !---Run tests

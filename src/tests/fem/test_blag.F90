@@ -16,8 +16,8 @@
 PROGRAM test_blag
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
-USE oft_mesh_type, ONLY: mesh, smesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE multigrid, ONLY: mg_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, oft_blagrange
 USE oft_lag_fields, ONLY: oft_blag_create
@@ -39,12 +39,12 @@ READ(io_unit,test_blag_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct
-IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---------------------------------------------------------------------------
 ! Setup I/0
 !---------------------------------------------------------------------------
 CALL plot_file%setup("Test")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---
 CALL oft_lag_setup(order,minlev)
 !---Run tests
@@ -89,7 +89,7 @@ CALL blag_zeroe(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vals)
-CALL smesh%save_vertex_scalar(vals,plot_file,'T')
+CALL mg_mesh%smesh%save_vertex_scalar(vals,plot_file,'T')
 uu=u%dot(u)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='lagrange.results')

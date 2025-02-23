@@ -27,7 +27,7 @@
 module oft_hcurl_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_mesh_type, ONLY: oft_mesh, mesh, smesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
@@ -54,8 +54,6 @@ USE oft_hcurl_fields, ONLY: oft_hcurl_create
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
-! CLASS oft_hcurl_orthog
-!---------------------------------------------------------------------------
 !> Orthogonalize a H1(Curl) vector against a library of given modes
 !---------------------------------------------------------------------------
 type, extends(oft_orthog) :: oft_hcurl_orthog
@@ -68,8 +66,6 @@ contains
   !> Clean-up internal variables
   procedure :: delete => hcurl_orthog_delete
 end type oft_hcurl_orthog
-!---------------------------------------------------------------------------
-! CLASS oft_hcurl_rinterp
 !---------------------------------------------------------------------------
 !> Interpolate a H1(Curl) field
 !---------------------------------------------------------------------------
@@ -86,8 +82,6 @@ contains
   procedure :: delete => hcurl_rinterp_delete
 end type oft_hcurl_rinterp
 !---------------------------------------------------------------------------
-! CLASS oft_hcurl_cinterp
-!---------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \times \f$ of a H1(Curl) field
 !---------------------------------------------------------------------------
 type, extends(oft_hcurl_rinterp) :: oft_hcurl_cinterp
@@ -95,8 +89,6 @@ contains
   !> Reconstruct field
   procedure :: interp => hcurl_cinterp
 end type oft_hcurl_cinterp
-!---------------------------------------------------------------------------
-! CLASS oft_hcurl_divout
 !---------------------------------------------------------------------------
 !> Clean the divergence from a H1(Curl) vector field
 !!
@@ -136,8 +128,6 @@ REAL(r8), POINTER, DIMENSION(:,:) :: oft_hcurl_cop => NULL()
 !$omp threadprivate(oft_hcurl_rop,oft_hcurl_cop)
 contains
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_mloptions
-!---------------------------------------------------------------------------
 !> Read-in options for the basic Nedelec H1(Curl) ML preconditioners
 !---------------------------------------------------------------------------
 subroutine hcurl_mloptions
@@ -175,8 +165,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine hcurl_mloptions
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_rinterp_setup
-!---------------------------------------------------------------------------
 !> Setup interpolator for H1(Curl) fields
 !!
 !! Fetches local representation used for interpolation from vector object
@@ -190,8 +178,6 @@ CALL self%u%get_local(self%vals)
 self%hcurl_rep=>oft_hcurl
 end subroutine hcurl_rinterp_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_rinterp_delete
-!---------------------------------------------------------------------------
 !> Destroy temporary internal storage
 !!
 !! @note Should only be used via class \ref oft_hcurl_rinterp or children
@@ -203,21 +189,14 @@ IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
 NULLIFY(self%hcurl_rep,self%u)
 end subroutine hcurl_rinterp_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_rinterp
-!---------------------------------------------------------------------------
 !> Reconstruct a Nedelec H1(Curl) vector field
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed field at f [3]
 !---------------------------------------------------------------------------
 subroutine hcurl_rinterp(self,cell,f,gop,val)
 class(oft_hcurl_rinterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [3]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8), allocatable  :: rop(:,:)
@@ -237,21 +216,14 @@ deallocate(j,rop)
 DEBUG_STACK_POP
 end subroutine hcurl_rinterp
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_cinterp
-!---------------------------------------------------------------------------
 !> Reconstruct the curl of a Nedelec H1(Curl) vector field
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed gradient at f [3]
 !---------------------------------------------------------------------------
 subroutine hcurl_cinterp(self,cell,f,gop,val)
 class(oft_hcurl_cinterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [3]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8) :: cgop(3,6)
@@ -273,16 +245,14 @@ deallocate(j,cop)
 DEBUG_STACK_POP
 end subroutine hcurl_cinterp
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_div
-!---------------------------------------------------------------------------
 !> Apply the divergence operator to a H1(Curl) field
 !!
 !! @note This subroutine computes the divergence of a H1(Curl) field as
 !! projected on to a linear Lagrange scalar basis.
 !---------------------------------------------------------------------------
 subroutine hcurl_div(a,b)
-class(oft_vector), intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_vector), intent(inout) :: a !< Needs docs
+class(oft_vector), intent(inout) :: b !< Needs docs
 real(r8), pointer, dimension(:) :: aloc
 real(r8), pointer, dimension(:) :: bloc
 integer(i4) :: i,jr,jc,m
@@ -312,15 +282,15 @@ allocate(rop_grad(3,oft_lagrange%nce)) ! Reconstructed gradient operator
 allocate(rop_curl(3,oft_hcurl%nce)) ! Reconstructed gradient operator
 allocate(btmp(oft_lagrange%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
+do i=1,oft_hcurl%mesh%nc
   !---Get local to global DOF mapping
   call oft_hcurl%ncdofs(i,j_curl)
   call oft_lagrange%ncdofs(i,j_grad)
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+  curved=cell_is_curved(oft_hcurl%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   btmp=0.d0
   do m=1,oft_hcurl%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,v)
+    if(curved.OR.m==1)call oft_hcurl%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,v)
     det=v*oft_hcurl%quad%wts(m)
     call oft_hcurl_eval_all(oft_hcurl,i,oft_hcurl%quad%pts(:,m),rop_curl,goptmp)
     call oft_lag_geval_all(oft_lagrange,i,oft_hcurl%quad%pts(:,m),rop_grad,goptmp)
@@ -345,13 +315,11 @@ deallocate(aloc,bloc)
 DEBUG_STACK_POP
 end subroutine hcurl_div
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_grad
-!---------------------------------------------------------------------------
 !> Add the gradient of a linear Lagrange scalar field to a H1(Curl) field
 !---------------------------------------------------------------------------
 subroutine hcurl_grad(a,b)
-class(oft_vector), intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_vector), intent(inout) :: a !< Needs docs
+class(oft_vector), intent(inout) :: b !< Needs docs
 real(r8), pointer, dimension(:) :: aloc,bloc
 integer(i4), allocatable :: emap(:)
 integer :: i,j,k,l
@@ -362,9 +330,9 @@ NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
 CALL b%get_local(bloc)
 !---Get boundary map
-do i=1,mesh%ne
+do i=1,oft_hcurl%mesh%ne
   bloc((i-1)*oft_hcurl%gstruct(2)+1)=bloc((i-1)*oft_hcurl%gstruct(2)+1) + &
-  (aloc(mesh%le(2,i))-aloc(mesh%le(1,i)))*SIGN(1_i8,mesh%global%le(i))
+    (aloc(oft_hcurl%mesh%le(2,i))-aloc(oft_hcurl%mesh%le(1,i)))*SIGN(1_i8,oft_hcurl%mesh%global%le(i))
 enddo
 !---
 CALL b%restore_local(bloc)
@@ -372,28 +340,25 @@ DEALLOCATE(aloc,bloc)
 DEBUG_STACK_POP
 end subroutine hcurl_grad
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_gradtp
-!---------------------------------------------------------------------------
 !> Apply the transposed gradient operator to a Nedelec H1(Curl) vector field.
 !!
 !! @note Only the 0th order component is computed from the discrete gradient
 !! operator
-!!
-!! @param[in,out] a Input field
-!! @param[in,out] b \f$ G^{T} a \f$
 !---------------------------------------------------------------------------
 subroutine hcurl_gradtp(a,b)
-class(oft_vector), intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_vector), intent(inout) :: a !< Input field
+class(oft_vector), intent(inout) :: b !< \f$ G^{T} a \f$
 real(r8), pointer, dimension(:) :: aloc,bloc
 integer(i4), allocatable, dimension(:) :: emap
 integer :: i,j,k
+class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 !---Get local values
 NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
 CALL b%get_local(bloc)
 !---
+mesh=>mg_mesh%mesh
 allocate(emap(mesh%ne))
 CALL get_inverse_map(mesh%lbe,mesh%nbe,emap,mesh%ne)
 !$omp parallel do private(j,k)
@@ -420,14 +385,10 @@ DEALLOCATE(aloc,bloc)
 DEBUG_STACK_POP
 end subroutine hcurl_gradtp
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_zerob
-!---------------------------------------------------------------------------
 !> Zero the tangential component of a Nedelec H1(Curl) vector field on the boundary
-!!
-!! @param[in,out] a Field to be zeroed
 !---------------------------------------------------------------------------
 subroutine hcurl_zerob(a)
-class(oft_vector), intent(inout) :: a
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
@@ -444,20 +405,15 @@ DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine hcurl_zerob
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_hcurl_getmop
-!---------------------------------------------------------------------------
 !> Construct mass matrix for a H1(Curl) representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_getmop(mat,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-character(LEN=*), intent(in) :: bc
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
@@ -487,12 +443,12 @@ allocate(j(oft_hcurl%nce)) ! Local DOF and matrix indices
 allocate(rop(3,oft_hcurl%nce)) ! Reconstructed gradient operator
 allocate(mop(oft_hcurl%nce,oft_hcurl%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_hcurl%mesh%nc
+  curved=cell_is_curved(oft_hcurl%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   mop=0.d0
   do m=1,oft_hcurl%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_hcurl%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
     det=vol*oft_hcurl%quad%wts(m)
     call oft_hcurl_eval_all(oft_hcurl,i,oft_hcurl%quad%pts(:,m),rop,goptmp)
     !---Compute local matrix contributions
@@ -545,20 +501,15 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getmop
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_hcurl_getkop
-!---------------------------------------------------------------------------
 !> Construct helicity matrix for a H1(Curl) representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_getkop(mat,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-character(LEN=*), intent(in) :: bc
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),cgop(3,6),elapsed_time
@@ -589,13 +540,13 @@ allocate(rop(3,oft_hcurl%nce)) ! Reconstructed gradient operator
 allocate(cop(3,oft_hcurl%nce)) ! Reconstructed gradient operator
 allocate(kop(oft_hcurl%nce,oft_hcurl%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_hcurl%mesh%nc
+  curved=cell_is_curved(oft_hcurl%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   kop=0.d0
   do m=1,oft_hcurl%quad%np ! Loop over quadrature points
     if(curved.OR.m==1)then
-      call mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
+      call oft_hcurl%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
       call oft_hcurl_get_cgops(goptmp,cgop)
     end if
     det=vol*oft_hcurl%quad%wts(m)
@@ -649,20 +600,15 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getkop
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_hcurl_getwop
-!---------------------------------------------------------------------------
 !> Construct energy matrix for a H1(Curl) representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_getwop(mat,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-character(LEN=*), intent(in) :: bc
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),cgop(3,6),elapsed_time
@@ -692,13 +638,13 @@ allocate(j(oft_hcurl%nce)) ! Local DOF and matrix indices
 allocate(cop(3,oft_hcurl%nce)) ! Reconstructed gradient operator
 allocate(wop(oft_hcurl%nce,oft_hcurl%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_hcurl%mesh%nc
+  curved=cell_is_curved(oft_hcurl%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   wop=0.d0
   do m=1,oft_hcurl%quad%np ! Loop over quadrature points
     if(curved.OR.m==1)then
-      call mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
+      call oft_hcurl%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
       call oft_hcurl_get_cgops(goptmp,cgop)
     end if
     det=vol*oft_hcurl%quad%wts(m)
@@ -751,22 +697,16 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getwop
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_hcurl_getjmlb
-!---------------------------------------------------------------------------
 !> Construct force-free response matrix for a H1(Curl) representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] alam Lambda for response
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_getjmlb(mat,alam,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-real(r8), intent(in) :: alam
-character(LEN=*), intent(in) :: bc
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+real(r8), intent(in) :: alam !< Lambda for response
+character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),cgop(3,6),elapsed_time
@@ -797,13 +737,13 @@ allocate(rop(3,oft_hcurl%nce)) ! Reconstructed gradient operator
 allocate(cop(3,oft_hcurl%nce)) ! Reconstructed gradient operator
 allocate(wop(oft_hcurl%nce,oft_hcurl%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,mesh%nc
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+do i=1,oft_hcurl%mesh%nc
+  curved=cell_is_curved(oft_hcurl%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   wop=0.d0
   do m=1,oft_hcurl%quad%np ! Loop over quadrature points
     if(curved.OR.m==1)then
-      call mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
+      call oft_hcurl%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
       call oft_hcurl_get_cgops(goptmp,cgop)
     end if
     det=vol*oft_hcurl%quad%wts(m)
@@ -857,20 +797,15 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getjmlb
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_hcurl_project
-!---------------------------------------------------------------------------
 !> Project a vector field onto a H1(Curl) basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! test functions for a H1(Curl) basis. To retrieve the correct projection the
-!! result must be multiplied by the inverse of H1(Curl)::MOP.
-!!
-!! @param[in,out] field Vector field for projection
-!! @param[in,out] x Field projected onto H1(Curl) basis
+!! result must be multiplied by the inverse of H1(Curl)::MOP
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_project(field,x)
-class(fem_interp), intent(inout) :: field
-class(oft_vector), intent(inout) :: x
+class(fem_interp), intent(inout) :: field !< Vector field for projection
+class(oft_vector), intent(inout) :: x !< Field projected onto H1(Curl) basis
 !---
 integer(i4) :: i,jc,m
 integer(i4), allocatable, dimension(:) :: j
@@ -887,11 +822,11 @@ call x%get_local(xloc)
 !$omp parallel default(firstprivate) shared(xloc) private(curved,det)
 allocate(j(oft_hcurl%nce),rop(3,oft_hcurl%nce))
 !$omp do schedule(guided)
-do i=1,mesh%nc ! Loop over cells
+do i=1,oft_hcurl%mesh%nc ! Loop over cells
   call oft_hcurl%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(mesh,i) ! Straight cell test
+  curved=cell_is_curved(oft_hcurl%mesh,i) ! Straight cell test
   do m=1,oft_hcurl%quad%np
-    if(curved.OR.m==1)call mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
+    if(curved.OR.m==1)call oft_hcurl%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
     det=vol*oft_hcurl%quad%wts(m)
     call field%interp(i,oft_hcurl%quad%pts(:,m),goptmp,bcc)
     call oft_hcurl_eval_all(oft_hcurl,i,oft_hcurl%quad%pts(:,m),rop,goptmp)
@@ -922,7 +857,11 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j
 REAL(r8) :: vol,det,flog(4),norm(3),etmp(3),sgop(3,3),vgop(3,4)
 REAL(r8), POINTER, DIMENSION(:) :: xloc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: rop
+CLASS(oft_mesh), POINTER :: mesh
+CLASS(oft_bmesh), POINTER :: smesh
 DEBUG_STACK_PUSH
+mesh=>mg_mesh%mesh
+smesh=>mg_mesh%smesh
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -959,17 +898,13 @@ deallocate(xloc)
 DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_bcurl
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_divout_setup
-!---------------------------------------------------------------------------
 !> Setup matrix and solver with default
 !!
 !! @note Should only be used via class \ref oft_hcurl_divout
-!!
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine hcurl_divout_setup(self,bc)
 class(oft_hcurl_divout), intent(inout) :: self
-character(LEN=*), intent(in) :: bc
+character(LEN=*), intent(in) :: bc !< Boundary condition
 DEBUG_STACK_PUSH
 CALL create_cg_solver(self%solver)
 self%solver%its=-3
@@ -983,17 +918,13 @@ END IF
 DEBUG_STACK_POP
 end subroutine hcurl_divout_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_divout_apply
-!---------------------------------------------------------------------------
 !> Remove divergence from a H1(Curl) vector field by adding a gradient correction
 !!
 !! @note Should only be used via class \ref oft_hcurl_divout
-!!
-!! @param[in,out] u Field for divergence cleaning
 !---------------------------------------------------------------------------
 subroutine hcurl_divout_apply(self,u)
 class(oft_hcurl_divout), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
+class(oft_vector), intent(inout) :: u !< Field for divergence cleaning
 class(oft_vector), pointer :: a,g,tmp,tmp2
 integer(i4) :: i,order_tmp
 real(r8) :: uu
@@ -1042,8 +973,6 @@ deallocate(tmp,a,g)
 DEBUG_STACK_POP
 end subroutine hcurl_divout_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_divout_delete
-!---------------------------------------------------------------------------
 !> Clean-up internal storage for a oft_hcurl_divout object
 !!
 !! @note Should only be used via class \ref oft_hcurl_divout
@@ -1052,17 +981,13 @@ subroutine hcurl_divout_delete(self)
 class(oft_hcurl_divout), intent(inout) :: self
 end subroutine hcurl_divout_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_orthog_apply
-!---------------------------------------------------------------------------
 !> Orthogonalize a H1(Curl) vector against a library of given modes.
 !!
 !! @note Used as a member function of oft_hcurl_orthog only
-!!
-!! @param[in,out] u Field to orthogonalize
 !---------------------------------------------------------------------------
 subroutine hcurl_orthog_apply(self,u)
 class(oft_hcurl_orthog), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
+class(oft_vector), intent(inout) :: u !< Field to orthogonalize
 class(oft_vector), pointer :: b
 real(r8) :: c
 integer(i4) :: i
@@ -1082,8 +1007,6 @@ deallocate(b)
 DEBUG_STACK_POP
 end subroutine hcurl_orthog_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_orthog_delete
-!---------------------------------------------------------------------------
 !> Clean-up internal storage for a oft_hcurl_orthog object
 !!
 !! @note Used as a member function of oft_hcurl_orthog only
@@ -1091,8 +1014,6 @@ end subroutine hcurl_orthog_apply
 subroutine hcurl_orthog_delete(self)
 class(oft_hcurl_orthog), intent(inout) :: self
 end subroutine hcurl_orthog_delete
-!---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_setup_interp
 !---------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
 !---------------------------------------------------------------------------
@@ -1120,12 +1041,10 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_setup_interp
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_ginterpmatrix
-!---------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
 !---------------------------------------------------------------------------
 SUBROUTINE hcurl_ginterpmatrix(mat)
-class(oft_matrix), pointer, intent(inout) :: mat
+class(oft_matrix), pointer, intent(inout) :: mat !< Interpolation matrix
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
@@ -1138,11 +1057,13 @@ integer(i4) :: jfe(3),jce(6)
 integer(i4), pointer :: lcdg(:),lfde(:,:),lede(:,:),lcde(:,:)
 real(r8) :: f(4),incr,val,d(3),goptmp(3,4),v,mop(1),h_rop(3,6)
 type(oft_graph_ptr), pointer :: graphs(:,:)
+CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---
 if(mg_mesh%level<1)then
   call oft_abort('Invalid mesh level','hcurl_ginterpmatrix',__FILE__)
 end if
+mesh=>mg_mesh%mesh
 cmesh=>mg_mesh%meshes(mg_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "hcurl_ginterpmatrix", __FILE__)
@@ -1318,12 +1239,10 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_ginterpmatrix
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_pinterpmatrix
-!---------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
 !---------------------------------------------------------------------------
 SUBROUTINE hcurl_pinterpmatrix(mat)
-class(oft_matrix), pointer, intent(inout) :: mat
+class(oft_matrix), pointer, intent(inout) :: mat !< Interolation matrix
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,js,jn,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4) :: offsetc,offsetf
@@ -1333,8 +1252,10 @@ TYPE(oft_fem_type), POINTER :: hcurl_cors => NULL()
 TYPE(oft_nedelec_ops), POINTER :: ops
 CLASS(oft_vector), POINTER :: hcurl_vec,hcurl_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
+CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---
+mesh=>mg_mesh%mesh
 ops=>oft_hcurl_ops
 SELECT TYPE(this=>ML_oft_hcurl%levels(oft_hcurl_level-1)%fe)
 CLASS IS(oft_fem_type)
@@ -1465,18 +1386,13 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_pinterpmatrix
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_interp
-!---------------------------------------------------------------------------
 !> Interpolate a coarse level H1(Curl) vector field to the next finest level
 !!
 !! @note The global H1(Curl) level in incremented by one in this subroutine
-!!
-!! @param[in] acors Vector to interpolate
-!! @param[in,out] afine Fine vector from interpolation
 !---------------------------------------------------------------------------
 subroutine hcurl_interp(acors,afine)
-class(oft_vector), intent(inout) :: acors
-class(oft_vector), intent(inout) :: afine
+class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 DEBUG_STACK_PUSH
 !---Step one level up
 call oft_hcurl_set_level(oft_hcurl_level+1)
@@ -1491,16 +1407,11 @@ CALL oft_hcurl_ops%interp%apply(acors,afine)
 DEBUG_STACK_POP
 end subroutine hcurl_interp
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_base_pop
-!---------------------------------------------------------------------------
 !> Transfer a base level H1(Curl) vector field to the next MPI level
-!!
-!! @param[in] acors Vector to transfer
-!! @param[in,out] afine Fine vector from transfer
 !---------------------------------------------------------------------------
 subroutine hcurl_base_pop(acors,afine)
-class(oft_vector), intent(inout) :: acors
-class(oft_vector), intent(inout) :: afine
+class(oft_vector), intent(inout) :: acors !< Vector to transfer
+class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer :: lbege(:)
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: array_c,array_f
@@ -1517,18 +1428,13 @@ DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine hcurl_base_pop
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_inject
-!---------------------------------------------------------------------------
 !> Inject a fine level H1(Curl) vector field to the next coarsest level
 !!
 !! @note The global H1(Curl) level in decremented by one in this subroutine
-!!
-!! @param[in] afine Vector to inject
-!! @param[in,out] acors Coarse vector from injection
 !---------------------------------------------------------------------------
 subroutine hcurl_inject(afine,acors)
-class(oft_vector), intent(inout) :: afine
-class(oft_vector), intent(inout) :: acors
+class(oft_vector), intent(inout) :: afine !< Vector to inject
+class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
 integer(i4) :: i,j,k
 logical :: gcheck
 DEBUG_STACK_PUSH
@@ -1546,16 +1452,11 @@ CALL ML_oft_hcurl_ops(oft_hcurl_level+1)%interp%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine hcurl_inject
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_base_push
-!---------------------------------------------------------------------------
 !> Transfer a MPI level H1(Curl) vector field to the base level
-!!
-!! @param[in] afine Vector to transfer
-!! @param[in,out] acors Fine vector from transfer
 !---------------------------------------------------------------------------
 subroutine hcurl_base_push(afine,acors)
-class(oft_vector), intent(inout) :: afine
-class(oft_vector), intent(inout) :: acors
+class(oft_vector), intent(inout) :: afine !< Vector to transfer
+class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
 integer(i4), pointer :: lbege(:)
 integer(i4) :: i,j,ierr
 real(r8), pointer, dimension(:) :: alias,array_c,array_f
@@ -1587,12 +1488,10 @@ deallocate(alias,array_c,array_f)
 DEBUG_STACK_POP
 end subroutine hcurl_base_push
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_wop_eigs
-!---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H1(Curl)::WOP
 !---------------------------------------------------------------------------
 SUBROUTINE hcurl_wop_eigs(minlev)
-INTEGER(i4), INTENT(in) :: minlev
+INTEGER(i4), INTENT(in) :: minlev !< Needs docs
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i
 REAL(r8) :: lam0
@@ -1648,15 +1547,13 @@ CALL oft_abort("Subroutine requires ARPACK", "lag_lop_eigs", __FILE__)
 #endif
 END SUBROUTINE hcurl_wop_eigs
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_getwop_pre
-!---------------------------------------------------------------------------
 !> Construct default MG preconditioner for H1(Curl)::WOP
 !---------------------------------------------------------------------------
 SUBROUTINE hcurl_getwop_pre(pre,mats,level,nlevels)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
-TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:)
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
-INTEGER(i4), OPTIONAL, INTENT(in) :: nlevels
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Needs docs
+TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:) !< Needs docs
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Needs docs
+INTEGER(i4), OPTIONAL, INTENT(in) :: nlevels !< Needs docs
 !--- ML structures for MG-preconditioner
 TYPE(oft_matrix_ptr), POINTER :: ml_int(:)
 INTEGER(i4), ALLOCATABLE :: levels(:)
@@ -1734,16 +1631,14 @@ DEALLOCATE(ml_int,levels,df,nu)
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_getwop_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: hcurl_getjmlb_pre
-!---------------------------------------------------------------------------
 !> Construct default MG preconditioner for H1(Curl)::JMLB
 !---------------------------------------------------------------------------
 SUBROUTINE hcurl_getjmlb_pre(pre,mats,alam,level,nlevels)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
-TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:)
-REAL(r8), INTENT(in) :: alam
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
-INTEGER(i4), OPTIONAL, INTENT(in) :: nlevels
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Needs docs
+TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:) !< Needs docs
+REAL(r8), INTENT(in) :: alam !< Needs docs
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Needs docs
+INTEGER(i4), OPTIONAL, INTENT(in) :: nlevels !< Needs docs
 !--- ML structures for MG-preconditioner
 TYPE(oft_matrix_ptr), POINTER :: ml_int(:)
 INTEGER(i4), ALLOCATABLE :: levels(:)

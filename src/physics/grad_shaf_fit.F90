@@ -12,7 +12,7 @@
 MODULE oft_gs_fit
 use oft_base
 USE oft_io, ONLY: hdf5_read, oft_file_exist
-USE oft_mesh_type, ONLY: smesh, bmesh_findcell
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 !---
 use oft_la_base, only: oft_vector
 use oft_lu, only: lapack_matinv
@@ -1397,7 +1397,8 @@ TYPE(oft_lag_brinterp), TARGET :: psi_eval
 TYPE(oft_lag_bginterp), TARGET :: psi_geval
 REAL(8) :: goptmp(3,3),v,psi(1),gpsi(3),rmin,rdiff,btmp(3)
 INTEGER(4) :: i,ip
-!---
+CLASS(oft_bmesh), POINTER :: smesh
+smesh=>oft_blagrange%mesh
 IF(self%cell==0)THEN
   call bmesh_findcell(smesh,self%cell,self%r,self%f)
   IF((minval(self%f)<-1.d-6).OR.(maxval(self%f)>1.d0+1.d-6))THEN
@@ -1470,6 +1471,8 @@ REAL(8) :: val
 TYPE(oft_lag_brinterp), TARGET :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
 INTEGER(4) :: i,ip
+CLASS(oft_bmesh), POINTER :: smesh
+smesh=>oft_blagrange%mesh
 IF(self%cell==0)THEN
   call bmesh_findcell(smesh,self%cell,self%r,self%f)
   IF((minval(self%f)<-1.d-6).OR.(maxval(self%f)>1.d0+1.d-6))THEN
@@ -1523,7 +1526,7 @@ REAL(8) :: goptmp(3,3),psi(1,2)
 INTEGER(4) :: i
 IF(self%cells(1)==0)THEN
   DO i=1,2
-    call bmesh_findcell(smesh,self%cells(i),self%r(:,i),self%f(:,i))
+    call bmesh_findcell(oft_blagrange%mesh,self%cells(i),self%r(:,i),self%f(:,i))
     IF((MINVAL(self%f(:,i))<-1.d-6).OR.(MAXVAL(self%f(:,i))>1.d0+1.d-6))THEN
       CALL oft_abort("Saddle coil off mesh","fit_saddle_error",__FILE__)
     END IF
@@ -1657,6 +1660,8 @@ REAL(8) :: val
 TYPE(oft_lag_brinterp), TARGET :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
 INTEGER(4) :: i,ip
+CLASS(oft_bmesh), POINTER :: smesh
+smesh=>oft_blagrange%mesh
 IF(self%r(1)<0.d0)THEN ! Magnetic axis pressure constraint
   val = gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(gs%plasma_bounds(2))/mu0
   RETURN

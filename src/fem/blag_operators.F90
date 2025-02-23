@@ -18,7 +18,7 @@
 MODULE oft_blag_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_mesh_type, ONLY: oft_mesh, mesh, oft_bmesh, smesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
@@ -221,7 +221,7 @@ IF(.NOT.ASSOCIATED(self%vals))CALL oft_abort('Setup has not been called!','lag_b
 allocate(j(self%lag_rep%nce))
 call self%lag_rep%ncdofs(cell,j) ! get DOFs
 !---Reconstruct field
-call smesh%hessian(cell,f,g2op,Kmat)
+call self%lag_rep%mesh%hessian(cell,f,g2op,Kmat)
 val=0.d0
 do jc=1,self%lag_rep%nce
   CALL oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
@@ -501,9 +501,9 @@ do i=1,oft_blagrange%mesh%nc
         IF(oft_blagrange%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(smesh%igrnd>0))THEN
+      IF(ANY(oft_blagrange%mesh%igrnd>0))THEN
         DO jr=1,oft_blagrange%nce
-          IF(ANY(j(jr)==smesh%igrnd))lop(jr,:)=0.d0
+          IF(ANY(j(jr)==oft_blagrange%mesh%igrnd))lop(jr,:)=0.d0
         END DO
       END IF
     CASE("edges")
@@ -533,11 +533,11 @@ SELECT CASE(TRIM(bc))
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(smesh%igrnd>0))THEN
+    IF(ANY(oft_blagrange%mesh%igrnd>0))THEN
       DO i=1,oft_blagrange%nbe
         IF(.NOT.oft_blagrange%linkage%leo(i))CYCLE
         jr=oft_blagrange%lbe(i)
-        IF(ANY(jr==smesh%igrnd))THEN
+        IF(ANY(jr==oft_blagrange%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,lop,1,1)
         END IF
@@ -595,11 +595,11 @@ call x%get_local(xloc)
 !$omp parallel default(firstprivate) shared(field,xloc) private(det)
 allocate(j(oft_blagrange%nce))
 !$omp do schedule(guided)
-do i=1,smesh%nc
+do i=1,oft_blagrange%mesh%nc
   call oft_blagrange%ncdofs(i,j) ! Get local to global DOF mapping
   !---Loop over quadrature points
   do m=1,oft_blagrange%quad%np
-    call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),sgop,vol)
+    call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),sgop,vol)
     det=vol*oft_blagrange%quad%wts(m)
     call field%interp(i,oft_blagrange%quad%pts(:,m),sgop,etmp)
     !---Project on to Lagrange basis
@@ -644,11 +644,11 @@ call z%get_local(zloc)
 !$omp parallel default(firstprivate) shared(field,xloc,yloc,zloc) private(det)
 allocate(j(oft_blagrange%nce))
 !$omp do schedule(guided)
-do i=1,smesh%nc
+do i=1,oft_blagrange%mesh%nc
   call oft_blagrange%ncdofs(i,j) ! Get local to global DOF mapping
   !---Loop over quadrature points
   do m=1,oft_blagrange%quad%np
-    call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),sgop,vol)
+    call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),sgop,vol)
     det=vol*oft_blagrange%quad%wts(m)
     call field%interp(i,oft_blagrange%quad%pts(:,m),sgop,etmp)
     !---Project on to Lagrange basis
@@ -693,17 +693,17 @@ call x%get_local(xloc)
 !$omp parallel default(firstprivate) shared(field,xloc) private(det)
 allocate(j(oft_blagrange%nce))
 !$omp do schedule(guided)
-do i=1,smesh%nc
-  CALL mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
+do i=1,oft_blagrange%mesh%nc
+  CALL mg_mesh%mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
   call oft_blagrange%ncdofs(i,j) ! Get local to global DOF mapping
   !---Loop over quadrature points
   do m=1,oft_blagrange%quad%np
-    call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),sgop,vol)
-    call smesh%norm(i,oft_blagrange%quad%pts(:,m),norm)
+    call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),sgop,vol)
+    call oft_blagrange%mesh%norm(i,oft_blagrange%quad%pts(:,m),norm)
     det=vol*oft_blagrange%quad%wts(m)
     !---Evaluate in cell coordinates
-    CALL mesh%surf_to_vol(oft_blagrange%quad%pts(:,m),ptmap,flog)
-    call mesh%jacobian(cell,flog,vgop,vol)
+    CALL mg_mesh%mesh%surf_to_vol(oft_blagrange%quad%pts(:,m),ptmap,flog)
+    call mg_mesh%mesh%jacobian(cell,flog,vgop,vol)
     call field%interp(cell,flog,vgop,etmp)
     !---Project on to Lagrange basis
     do jc=1,oft_blagrange%nce
