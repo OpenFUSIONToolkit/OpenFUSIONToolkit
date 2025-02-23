@@ -850,7 +850,7 @@ DO i=1,n
     CALL oft_abort('"a" is not a native vector.','vec_mdot_vec',__FILE__)
   end select
 END DO
-dots=oft_mpi_sum(dots,n)
+IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function vec_mdot_vec
 !------------------------------------------------------------------------------
@@ -882,7 +882,7 @@ DO i=1,n
   end select
 END DO
 deallocate(vtmp)
-dots=oft_mpi_sum(dots,n)
+IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function vec_mdot_cvec
 !------------------------------------------------------------------------------

@@ -378,7 +378,7 @@ END SUBROUTINE solver_update
 !---------------------------------------------------------------------------
 SUBROUTINE solver_setup_xml(self,solver_node,level)
 class(oft_solver), intent(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 end SUBROUTINE solver_setup_xml
 !---------------------------------------------------------------------------
@@ -445,7 +445,7 @@ END SUBROUTINE csolver_update
 !---------------------------------------------------------------------------
 SUBROUTINE csolver_setup_xml(self,solver_node,level)
 class(oft_csolver), intent(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 end SUBROUTINE csolver_setup_xml
 !---------------------------------------------------------------------------
