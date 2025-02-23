@@ -2753,11 +2753,10 @@ INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 !---
-TYPE(fox_node), POINTER :: pre_node
+TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
-TYPE(fox_node), POINTER :: lag_node
-TYPE(fox_nodelist), POINTER :: current_nodes
+TYPE(xml_node), POINTER :: lag_node
 #endif
 DEBUG_STACK_PUSH
 !---
@@ -2803,16 +2802,8 @@ CALL oft_lag_set_level(levin)
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  !---Look for Lagrange node
-  current_nodes=>fox_getElementsByTagName(oft_env%xml,"lagrange")
-  nnodes=fox_getLength(current_nodes)
-  IF(nnodes>0)THEN
-    lag_node=>fox_item(current_nodes,0)
-    !---Look for lop node
-    current_nodes=>fox_getElementsByTagName(lag_node,"lop")
-    nnodes=fox_getLength(current_nodes)
-    IF(nnodes>0)pre_node=>fox_item(current_nodes,0)
-  END IF
+  CALL xml_get_element(oft_env%xml,"lagrange",lag_node,ierr)
+  IF(ierr==0)CALL xml_get_element(lag_node,"jmlb",pre_node,ierr)
 END IF
 #endif
 !---------------------------------------------------------------------------

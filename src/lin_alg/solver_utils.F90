@@ -66,7 +66,7 @@ procedure(oft_bc_proto), optional :: bc
 integer(i4), optional, intent(in) :: stype
 real(r8), optional, intent(in) :: df(:)
 integer(i4), optional, intent(in) :: nu(:)
-TYPE(fox_node), optional, pointer, intent(in) :: xml_root
+TYPE(xml_node), optional, pointer, intent(in) :: xml_root
 !---
 NULLIFY(pre)
 #ifdef HAVE_XML
@@ -553,13 +553,12 @@ end subroutine create_gmres_solver
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_solver_xml(solver,solver_node,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nread,nnodes,ierr
-TYPE(fox_node), POINTER :: pre_node
-TYPE(fox_nodelist), POINTER :: current_nodes
+TYPE(xml_node), POINTER :: pre_node
 !---
 integer(i4) :: i,val_level
 CHARACTER(LEN=20) :: solver_type,temp_string
@@ -569,12 +568,12 @@ val_level=1
 IF(PRESENT(level))val_level=level
 native_solver=.FALSE.
 !---
-CALL fox_extractDataAttribute(solver_node,"type",solver_type,iostat=ierr)
+CALL xml_extractDataAttribute(solver_node,"type",solver_type,iostat=ierr)
 IF(oft_debug_print(2))WRITE(*,*)'Found solver: ',solver_type
 force_native=.FALSE.
-IF(fox_hasAttribute(solver_node,"native"))THEN
-  CALL fox_extractDataAttribute(solver_node,"native",temp_string,iostat=ierr)
-  force_native=(TRIM(temp_string)=='true')
+IF(xml_hasAttribute(solver_node,"native"))THEN
+  CALL xml_extractDataAttribute(solver_node,"native",temp_string,iostat=ierr)
+  force_native=((temp_string(1:1)=='t').OR.(temp_string(1:1)=='T'))
 END IF
 !---
 petsc_solver=use_petsc.AND.(.NOT.force_native)
@@ -620,10 +619,8 @@ END SELECT
 !---
 CALL solver%setup_from_xml(solver_node,val_level)
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"pre")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  pre_node=>fox_item(current_nodes,0)
+CALL xml_get_element(solver_node,"pre",pre_node,ierr)
+IF(ierr==0)THEN
   CALL create_pre_xml(solver%pre,pre_node,native_solver,val_level)
 END IF
 DEBUG_STACK_POP
@@ -753,14 +750,13 @@ end subroutine create_bjacobi_pre
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_pre_xml(pre,pre_node,native_solver,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
-TYPE(fox_node), POINTER, INTENT(in) :: pre_node
+TYPE(xml_node), POINTER, INTENT(in) :: pre_node
 LOGICAL, INTENT(in) :: native_solver
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nread,nnodes,ierr
-TYPE(fox_node), POINTER :: solver_node
-TYPE(fox_nodelist), POINTER :: current_nodes
+TYPE(xml_node), POINTER :: solver_node
 !---
 integer(i4) :: i,val_level,smoother
 logical :: switch
@@ -769,7 +765,7 @@ DEBUG_STACK_PUSH
 val_level=1
 IF(PRESENT(level))val_level=level
 !---
-CALL fox_extractDataAttribute(pre_node,"type",pre_type,iostat=ierr)
+CALL xml_extractDataAttribute(pre_node,"type",pre_type,iostat=ierr)
 IF(oft_debug_print(2))WRITE(*,*)'Found preconditioner: ',pre_type
 !---
 SELECT CASE(TRIM(pre_type))
@@ -815,10 +811,8 @@ END SELECT
 !---
 CALL pre%setup_from_xml(pre_node,val_level)
 !---
-current_nodes=>fox_getElementsByTagName(pre_node,"solver")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  solver_node=>fox_item(current_nodes,0)
+CALL xml_get_element(pre_node,"solver",solver_node,ierr)
+IF(ierr==0)THEN
   CALL create_solver_xml(pre%pre,solver_node,val_level)
 END IF
 DEBUG_STACK_POP
@@ -848,7 +842,7 @@ integer(i4), intent(in) :: nlevels
 procedure(oft_veccreate_proto) :: create_vec
 procedure(oft_interp_proto) :: interp
 procedure(oft_interp_proto) :: inject
-TYPE(fox_node), POINTER, INTENT(in) :: pre_node
+TYPE(xml_node), POINTER, INTENT(in) :: pre_node
 procedure(oft_bc_proto), optional :: bc
 #ifdef HAVE_XML
 !---
@@ -856,8 +850,8 @@ integer(i4) :: i,ierr,nnodes
 class(oft_ml_precond), pointer :: this_ml
 LOGICAL :: symmetric,up_present,down_present,coarse_present
 CHARACTER(LEN=20) :: dir_type
-TYPE(fox_node), POINTER :: up_node,down_node,coarse_node,current_node,solver_node
-TYPE(fox_nodelist), POINTER :: current_nodes,solver_nodes
+TYPE(xml_node), POINTER :: up_node,down_node,coarse_node,current_node,solver_node
+TYPE(xml_nodelist) :: current_nodes
 DEBUG_STACK_PUSH
 !---
 symmetric=.FALSE.
@@ -866,41 +860,35 @@ down_present=.FALSE.
 coarse_present=.FALSE.
 IF(oft_debug_print(1))WRITE(*,*)'Creating MG smoother'
 !---
-current_nodes=>fox_getElementsByTagName(pre_node,"smoother")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==0)CALL oft_abort("Object contains no smoother definitions.","create_ml_xml",__FILE__)
-DO i=1,nnodes
-  current_node=>fox_item(current_nodes,i-1)
-  CALL fox_extractDataAttribute(current_node,"direction",dir_type,iostat=ierr)
+CALL xml_get_element(pre_node,"smoother",current_nodes,ierr)
+IF(current_nodes%n==0)CALL oft_abort("Object contains no smoother definitions.","create_ml_xml",__FILE__)
+DO i=1,current_nodes%n
+  current_node=>current_nodes%nodes(i)%this
+  CALL xml_extractDataAttribute(current_node,"direction",dir_type,iostat=ierr)
   IF(oft_debug_print(2))WRITE(*,*)'Found smoother: ',dir_type
   SELECT CASE(TRIM(dir_type))
     CASE("up")
       up_present=.TRUE.
-      solver_nodes=>fox_getElementsByTagName(current_node,"solver")
-      up_node=>fox_item(solver_nodes,0)
+      CALL xml_get_element(current_node,"solver",up_node,ierr)
     CASE("down")
       down_present=.TRUE.
-      solver_nodes=>fox_getElementsByTagName(current_node,"solver")
-      down_node=>fox_item(solver_nodes,0)
+      CALL xml_get_element(current_node,"solver",down_node,ierr)
     CASE("both")
       symmetric=.TRUE.
       up_present=.TRUE.
-      solver_nodes=>fox_getElementsByTagName(current_node,"solver")
-      up_node=>fox_item(solver_nodes,0)
+      CALL xml_get_element(current_node,"solver",up_node,ierr)
       EXIT
     CASE DEFAULT
       CALL oft_abort("Invalid smoother direction.","create_ml_xml",__FILE__)
   END SELECT
 END DO
+IF(ASSOCIATED(current_nodes%nodes))DEALLOCATE(current_nodes%nodes)
 !---
-current_nodes=>fox_getElementsByTagName(pre_node,"coarse")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
+CALL xml_get_element(pre_node,"coarse",current_node,ierr)
+IF(ierr==0)THEN
   IF(oft_debug_print(2))WRITE(*,*)'Found coarse solver'
-  current_node=>fox_item(current_nodes,0)
   coarse_present=.TRUE.
-  solver_nodes=>fox_getElementsByTagName(current_node,"solver")
-  coarse_node=>fox_item(solver_nodes,0)
+  CALL xml_get_element(current_node,"solver",coarse_node,ierr)
 END IF
 !---Set smoother
 ALLOCATE(oft_ml_precond::pre)

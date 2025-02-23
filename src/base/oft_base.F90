@@ -100,7 +100,7 @@ PRIVATE oft_random_number_r8
 !> Dummy shadow type for Fox XML node
 !---------------------------------------------------------------------------
 #if !defined(HAVE_XML)
-TYPE :: fox_node
+TYPE :: xml_node
   INTEGER(i4) :: dummy = 0
 END TYPE
 #endif
@@ -142,7 +142,7 @@ TYPE :: oft_env_type
   CHARACTER(LEN=OFT_PATH_SLEN) :: ifile = 'none' !< Name of input file
   CHARACTER(LEN=OFT_PATH_SLEN) :: xml_file = 'none' !< Name of XML input file
 #ifdef HAVE_XML
-  TYPE(fox_node), POINTER :: xml => NULL()
+  TYPE(xml_node), POINTER :: xml => NULL()
 #endif
 END TYPE oft_env_type
 !---Global variables
@@ -193,7 +193,7 @@ CONTAINS
 !! Also calls MPI_INIT
 !---------------------------------------------------------------------------
 SUBROUTINE oft_init(nthreads)
-INTEGER(i4), INTENT(in), OPTIONAL :: nthreads
+INTEGER(i4), INTENT(in), OPTIONAL :: nthreads !< Number for threads to use (negative for default)
 INTEGER(i4) :: ierr,thrdtype,nargs,io_unit
 REAL(r8) :: elapsed_time
 INTEGER(i4) :: ppn=1
@@ -204,7 +204,7 @@ LOGICAL :: test_run=.FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
 #ifdef HAVE_XML
-TYPE(fox_node), POINTER :: doc
+TYPE(xml_node), POINTER :: doc
 #endif
 LOGICAL :: rst
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,stack_disabled,use_petsc,test_run,nparts
@@ -292,8 +292,10 @@ IF(oft_env%xml_file(1:4)/='none')THEN
   !---Test for existence of XML file
   INQUIRE(FILE=TRIM(oft_env%xml_file),exist=rst)
   IF(.NOT.rst)CALL oft_abort('XML file specified but does not exist.','oft_init',__FILE__)
-  doc=>fox_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
-  oft_env%xml=>fox_item(fox_getElementsByTagname(doc,"oft"),0)
+  doc=>xml_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
+  IF(ierr/=0)CALL oft_abort('Error parsing XML input file','oft_init',__FILE__)
+  CALL xml_get_element(doc,"oft",oft_env%xml,ierr)
+  IF(ierr/=0)CALL oft_abort('Error finding "oft" XML root element','oft_init',__FILE__)
 #else
   CALL oft_warn("Open FUSION Toolkit not built wit xml support, ignoring xml input.")
 #endif

@@ -73,12 +73,12 @@ TYPE(c_ptr), INTENT(out) :: oft_node_ptr !< Needs docs
 INTEGER(i4) :: ierr
 LOGICAL :: rst
 CHARACTER(LEN=OFT_PATH_SLEN) :: xml_filename = 'none'
-TYPE(fox_node), POINTER :: doc,oft_node
+TYPE(xml_node), POINTER :: doc,oft_node
 !---Test for existence of XML file
 CALL copy_string_rev(xml_file,xml_filename)
 INQUIRE(FILE=TRIM(xml_filename),exist=rst)
 IF(.NOT.rst)RETURN
-doc=>fox_parseFile(TRIM(xml_filename),iostat=ierr)
+doc=>xml_parseFile(TRIM(xml_filename),iostat=ierr)
 IF(ierr/=0)RETURN
 CALL xml_get_element(doc,"oft",oft_node,ierr)
 IF(ierr/=0)RETURN

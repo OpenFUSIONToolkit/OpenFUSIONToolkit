@@ -1066,15 +1066,14 @@ REAL(r8), ALLOCATABLE :: df(:)
 INTEGER(i4), ALLOCATABLE :: nu(:)
 !---
 INTEGER(i4) :: minlev,toplev,nl
-INTEGER(i4) :: i,j,levin
+INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 !---
-TYPE(fox_node), POINTER :: pre_node
+TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
 integer(i4) :: nnodes
-TYPE(fox_node), POINTER :: h0_node
-TYPE(fox_nodelist), POINTER :: current_nodes
+TYPE(xml_node), POINTER :: h0_node
 #endif
 DEBUG_STACK_PUSH
 !---
@@ -1121,15 +1120,8 @@ NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   !---Look for Lagrange node
-  current_nodes=>fox_getElementsByTagName(oft_env%xml,"nedelec_h0")
-  nnodes=fox_getLength(current_nodes)
-  IF(nnodes>0)THEN
-    h0_node=>fox_item(current_nodes,0)
-    !---Look for lop node
-    current_nodes=>fox_getElementsByTagName(h0_node,"lop")
-    nnodes=fox_getLength(current_nodes)
-    IF(nnodes>0)pre_node=>fox_item(current_nodes,0)
-  END IF
+  CALL xml_get_element(oft_env%xml,"nedelec_h0",h0_node,ierr)
+  IF(ierr==0)CALL xml_get_element(h0_node,"lop",pre_node,ierr)
 END IF
 #endif
 !---------------------------------------------------------------------------
