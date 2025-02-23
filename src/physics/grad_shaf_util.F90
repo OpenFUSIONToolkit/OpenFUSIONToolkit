@@ -929,7 +929,7 @@ do j=1,npsi-1
   END IF
   pt=pt_last
   !$omp critical
-  CALL gs_psi2r(gseq,psi_surf(1),pt)
+  CALL gs_psi2r(gseq,psi_surf(1),pt,psi_int=psi_int)
   !$omp end critical
   CALL tracinginv_fs(pt,ptout)
   pt_last=pt
@@ -979,6 +979,7 @@ end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 !$omp end parallel
+CALL psi_int%delete()
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN
     DEALLOCATE(cout,rout,zout)
@@ -1042,7 +1043,7 @@ end subroutine gs_save_decon
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !---------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1054,6 +1055,7 @@ CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
+REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
@@ -1149,7 +1151,7 @@ do j=1,nr
   IF(j>1)THEN
     pt=pt_last
     !$omp critical
-    CALL gs_psi2r(gseq,psi_trace,pt)
+    CALL gs_psi2r(gseq,psi_trace,pt,psi_int=psi_int)
     !$omp end critical
     IF(j==nr)THEN
       ALLOCATE(ptout(3,active_tracer%maxsteps+1))
@@ -1229,6 +1231,7 @@ IF(PRESENT(error_str))THEN
     RETURN
   END IF
 END IF
+IF(PRESENT(lcfs_press))pres=pres+lcfs_press
 !---Extrapolate q on axis
 f(1) = x2
 f(2) = x2 - xr*(1.d0/REAL(nr-1,8))
@@ -1258,6 +1261,7 @@ DO i=1,nr
     psirz(i,j)=psi_tmp(1)
   END DO
 END DO
+CALL psi_int%delete()
 !---------------------------------------------------------------------------
 ! Create output file
 !---------------------------------------------------------------------------
@@ -1463,7 +1467,7 @@ do j=1,nr
   !
   pt=pt_last
   ! !$omp critical
-  CALL gs_psi2r(gseq,psi_surf,pt)
+  CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
   ! !$omp end critical
   IF(gseq%mode==0)THEN
     field%f_surf=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
@@ -1504,5 +1508,6 @@ CALL field%delete
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 ! !$omp end parallel
+CALL psi_int%delete()
 end subroutine sauter_fc
 END MODULE oft_gs_util

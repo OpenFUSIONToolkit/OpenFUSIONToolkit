@@ -995,7 +995,7 @@ END SUBROUTINE tokamaker_set_coil_vsc
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
+SUBROUTINE tokamaker_save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nr !< Needs docs
@@ -1006,6 +1006,7 @@ REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(OFT_PATH_SLEN) !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 CHARACTER(LEN=40) :: run_info_f
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp,lim_file
@@ -1015,10 +1016,10 @@ CALL copy_string_rev(filename,filename_tmp)
 CALL copy_string_rev(lim_filename,lim_file)
 IF(rcentr>0.d0)THEN
   CALL gs_save_eqdsk(gs_global,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
-    rcentr_in=rcentr,trunc_eq=LOGICAL(trunc_eq),error_str=error_flag)
+    rcentr_in=rcentr,trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,error_str=error_flag)
 ELSE
   CALL gs_save_eqdsk(gs_global,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
-    trunc_eq=LOGICAL(trunc_eq),error_str=error_flag)
+    trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,error_str=error_flag)
 END IF
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_eqdsk
