@@ -444,6 +444,7 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
         eig_vals, _ = mygs.eig_td(-1.E2,10,False)
         mp_q.put([{'gamma': eig_vals[:5,0]}])
         return
+    mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
     eq_info = mygs.get_stats(li_normalization='ITER')
     Lmat = mygs.get_coil_Lmat()
     eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
@@ -598,6 +599,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     Ip_target = 9.0E4
     mygs.set_targets(Ip=Ip_target,Ip_ratio=2.0)
     mygs.solve()
+    mygs.save_eqdsk('test.eqdsk')
     #
     mp_q.put([mygs.get_stats()])
     oftpy_dump_cov()
