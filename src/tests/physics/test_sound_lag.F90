@@ -14,6 +14,7 @@ PROGRAM test_sound
 USE oft_base
 !--Grid
 USE oft_mesh_type, ONLY: rgrnd
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -45,6 +46,7 @@ TYPE(oft_lag_rinterp), TARGET :: sfield
 TYPE(oft_lag_vrinterp), TARGET :: vfield
 TYPE(sound_eig), TARGET :: sound_field
 TYPE(diff_interp) :: err_field
+TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: io_unit
 REAL(r8) :: T0,v_delta,nerr,nierr,terr,tierr,verr,vierr
 REAL(r8), POINTER :: tmp(:),bvals(:),uvals(:),vals(:)
@@ -69,12 +71,12 @@ CLOSE(io_unit)
 ! Setup grid
 !---------------------------------------------------------------------------
 rgrnd=(/2.d0,0.d0,0.d0/)
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(order,minlev)
+CALL oft_lag_setup(mg_mesh,order,minlev)
 CALL lag_setup_interp
 !---------------------------------------------------------------------------
 ! Create Lagrange metric solver
@@ -98,6 +100,7 @@ CALL oft_lag_create(ti)
 !---------------------------------------------------------------------------
 ! Set dn from sound wave init
 !---------------------------------------------------------------------------
+sound_field%mesh=>mg_mesh%mesh
 sound_field%delta=delta
 sound_field%field='n'
 CALL oft_lag_project(sound_field,v)
@@ -214,19 +217,19 @@ CALL u%set(1.d0)
 !---Compare density waveform
 sound_field%field='n'
 sound_field%diff=.TRUE.
-nierr=scal_energy(sound_field,order*2)
+nierr=scal_energy(mg_mesh%mesh,sound_field,order*2)
 err_field%dim=1
 err_field%a=>sound_field
 err_field%b=>sfield
 CALL n%scale(1.d0/N0)
 CALL n%add(1.d0,-1.d0,u)
 sfield%u=>n
-CALL sfield%setup
-nerr=scal_energy(err_field,order*2)
+CALL sfield%setup(mg_mesh%mesh)
+nerr=scal_energy(mg_mesh%mesh,err_field,order*2)
 !---Compare temperature waveform
 sound_field%field='t'
 sound_field%diff=.TRUE.
-tierr=scal_energy(sound_field,order*2)
+tierr=scal_energy(mg_mesh%mesh,sound_field,order*2)
 err_field%dim=1
 err_field%a=>sound_field
 err_field%b=>sfield
@@ -238,19 +241,19 @@ IF(two_temp)THEN
   CALL temp%add(5.d-1,5.d-1,tempe)
 END IF
 sfield%u=>temp
-CALL sfield%setup
-terr=scal_energy(err_field,order*2)
+CALL sfield%setup(mg_mesh%mesh)
+terr=scal_energy(mg_mesh%mesh,err_field,order*2)
 !---Compare velocity waveform
 sound_field%field='v'
 sound_field%diff=.FALSE.
-vierr=vec_energy(sound_field,order*2)
+vierr=vec_energy(mg_mesh%mesh,sound_field,order*2)
 err_field%dim=3
 err_field%a=>sound_field
 err_field%b=>vfield
 CALL vel%scale(1.d0/v_delta)
 vfield%u=>vel
-CALL vfield%setup
-verr=vec_energy(err_field,order*2)
+CALL vfield%setup(mg_mesh%mesh)
+verr=vec_energy(mg_mesh%mesh,err_field,order*2)
 !---Output wave comparisons
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='sound.results')

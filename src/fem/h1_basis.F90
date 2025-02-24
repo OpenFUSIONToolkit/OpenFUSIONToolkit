@@ -17,7 +17,7 @@
 MODULE oft_h1_basis
 ! USE timer
 USE oft_base
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_fem_ptr, oft_ml_fem_type, oft_bfem_type!, &
 ! oft_ml_bfem_type
@@ -66,11 +66,11 @@ if(level>oft_h1_nlevels.OR.level<=0)then
   write(*,*)level
   call oft_abort('Invalid FE level','oft_h1_set_level',__FILE__)
 end if
-if(level<mg_mesh%mgdim)then
-  call multigrid_level(level)
-else
-  call multigrid_level(mg_mesh%mgdim)
-end if
+! if(level<mg_mesh%mgdim)then
+!   call multigrid_level(level)
+! else
+!   call multigrid_level(mg_mesh%mgdim)
+! end if
 CALL ML_oft_h1%set_level(level)
 oft_h1=>ML_oft_h1%current_level
 CALL ML_oft_hgrad%set_level(level)
@@ -96,7 +96,8 @@ end subroutine oft_h1_set_level
 !!
 !! @param[in] order Order of representation desired
 !---------------------------------------------------------------------------
-subroutine oft_h1_setup(order,minlev)
+subroutine oft_h1_setup(mg_mesh,order,minlev)
+type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order
 integer(i4), optional, intent(in) :: minlev
 integer(i4) :: i
@@ -109,6 +110,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A,I4)')'Order  = ',order
   WRITE(*,'(2X,A,I4)')'Minlev = ',oft_h1_minlev
 END IF
+ML_oft_hgrad%ml_mesh=>mg_mesh
 !---Allocate multigrid operators
 oft_h1_nlevels=mg_mesh%mgdim+(order-1)
 IF(oft_h1_minlev<0)oft_h1_minlev=oft_h1_nlevels
@@ -131,7 +133,7 @@ do i=1,mg_mesh%mgdim-1
   oft_hgrad%gstruct=(/1,1,0,0/)
   call oft_hgrad%setup(5)
 end do
-call multigrid_level(mg_mesh%mgdim)
+call multigrid_level(mg_mesh,mg_mesh%mgdim)
 !---Set high order elements
 do i=1,order
   IF(mg_mesh%mgdim+i-1<oft_h1_minlev)CYCLE

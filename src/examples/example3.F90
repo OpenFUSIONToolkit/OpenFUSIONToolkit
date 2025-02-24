@@ -170,7 +170,7 @@ PROGRAM example3
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -208,6 +208,7 @@ REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !!\subsection doc_ex3_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting files must be setup
@@ -215,7 +216,7 @@ TYPE(xdmf_plot_file) :: plot_file
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Example3")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!\subsection doc_ex3_code_fem Setup FE Types
@@ -223,11 +224,11 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
 !---Lagrange
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order)
 CALL lag_setup_interp
 CALL lag_mloptions
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(order)
+CALL oft_hcurl_setup(mg_mesh,order)
 CALL hcurl_setup_interp
 CALL hcurl_mloptions
 !!\subsection doc_ex3_code_taylor Compute Taylor state
@@ -272,7 +273,7 @@ CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)
 !---Setup field interpolation
 Bfield%u=>taylor_hffa(1,oft_hcurl_level)%f
-CALL Bfield%setup
+CALL Bfield%setup(mg_mesh%mesh)
 !---Project field
 CALL oft_lag_vproject(Bfield,v)
 CALL u%set(0.d0)

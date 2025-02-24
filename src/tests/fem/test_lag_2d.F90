@@ -17,7 +17,7 @@ PROGRAM test_lag_2d
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_cube, ONLY: mesh_cube_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, oft_blagrange
 USE oft_lag_fields, ONLY: oft_blag_create
@@ -29,6 +29,7 @@ IMPLICIT NONE
 INTEGER(i4), PARAMETER :: minlev=2
 INTEGER(i4) :: ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: order
 NAMELIST/test_blag_options/order
 !---Initialize enviroment
@@ -38,7 +39,7 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_blag_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---------------------------------------------------------------------------
 ! Setup I/0
@@ -46,7 +47,7 @@ IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test fo
 CALL plot_file%setup("Test")
 CALL mg_mesh%smesh%setup_io(plot_file,order)
 !---
-CALL oft_lag_setup(order,-1)
+CALL oft_lag_setup(mg_mesh,order,-1)
 !---Run tests
 ! oft_env%pm=.FALSE.
 CALL test_lap

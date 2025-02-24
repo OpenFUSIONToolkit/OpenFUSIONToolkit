@@ -725,7 +725,7 @@ program tokamaker_wall
 USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: hdf5_create_file, hdf5_write, hdf5_create_group
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE fem_base, ONLY: oft_afem_type
 USE oft_la_base, ONLY: oft_vector
@@ -741,6 +741,7 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4) :: i,ierr,io_unit
 TYPE(gs_eq) :: mygs
+TYPE(multigrid_mesh) :: mg_mesh
 !---GS input options
 INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30
@@ -812,13 +813,13 @@ IF(ierr>0)CALL oft_abort('Error parsing "tokamaker_wall_options" in input file.'
 !---------------------------------------------------------------------------
 ! Setup Mesh
 !---------------------------------------------------------------------------
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 CALL mygs%xdmf%setup("TokaMaker")
 CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order)
 !---------------------------------------------------------------------------
 ! Setup experimental geometry
 !---------------------------------------------------------------------------

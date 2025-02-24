@@ -31,6 +31,7 @@ PROGRAM oft_trace
 USE ISO_FORTRAN_ENV, ONLY: IOSTAT_END
 USE oft_base
 !--Grid
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_io, ONLY: oft_file_exist
 !---Linear Algebra
@@ -71,6 +72,7 @@ TYPE(oft_lag_vrinterp), TARGET :: Bfield_lag
 TYPE(oft_h1_rinterp), TARGET :: Bfield_H1
 TYPE(oft_hcurl_cinterp), TARGET :: Bfield_HCurl
 CLASS(oft_tracer), POINTER :: tracer
+TYPE(multigrid_mesh) :: mg_mesh
 REAL(r8), PARAMETER :: vel_scale = 1.d3
 !---Input options
 INTEGER(i4) :: order = 2
@@ -100,7 +102,7 @@ IF(ierr<0)CALL oft_abort('No "oft_trace_options" found in input file.', &
 IF(ierr>0)CALL oft_abort('Error parsing "oft_trace_options" in input file.', &
   'oft_trace',__FILE__)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !---Setup tracer
 CALL set_timeout(tracer_timeout)
 CALL create_tracer(tracer,tracer_type)
@@ -124,7 +126,7 @@ END IF
 !---Setup necessary FE space
 SELECT CASE(type)
   CASE(1) ! Vector Lagrange field
-    CALL oft_lag_setup(order, -1)
+    CALL oft_lag_setup(mg_mesh,order, -1)
     !---Create field structure
     CALL oft_lag_create(x1)
     CALL oft_lag_vcreate(u)
@@ -139,9 +141,9 @@ SELECT CASE(type)
     Bfield_lag%u=>u
     tracer%B=>Bfield_lag
   CASE(2) !  Nedelec H1 field
-    CALL oft_hcurl_setup(order, -1)
-    CALL oft_h0_setup(order+1, -1)
-    CALL oft_h1_setup(order, -1)
+    CALL oft_hcurl_setup(mg_mesh,order, -1)
+    CALL oft_h0_setup(mg_mesh,order+1, -1)
+    CALL oft_h1_setup(mg_mesh,order, -1)
     !---Create field structure
     CALL oft_hcurl_create(x1)
     CALL oft_h0_create(x2)
@@ -159,7 +161,7 @@ SELECT CASE(type)
     Bfield_H1%u=>u
     tracer%B=>Bfield_H1
   CASE(3) !  Nedelec HCurl field
-    CALL oft_hcurl_setup(order, -1)
+    CALL oft_hcurl_setup(mg_mesh,order, -1)
     !---Create field structure
     CALL oft_hcurl_create(u)
     !---Load H1(Curl) field
@@ -171,7 +173,7 @@ SELECT CASE(type)
   CASE DEFAULT
     CALL oft_abort("Unknown field type", "oft_trace", __FILE__)
 END SELECT
-CALL tracer%B%setup()
+CALL tracer%B%setup(mg_mesh%mesh)
 !---Loop over launch points
 ind=0
 OPEN(newunit=pt_file_unit,FILE=TRIM(pt_file),IOSTAT=io_stat)

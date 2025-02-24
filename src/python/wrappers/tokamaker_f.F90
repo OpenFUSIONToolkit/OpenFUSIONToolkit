@@ -12,9 +12,7 @@ USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
   c_f_pointer, c_bool, c_null_ptr, c_associated
 USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
-! USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
-USE multigrid, ONLY: mg_mesh, multigrid_reset
-! USE multigrid_build, ONLY: multigrid_construct_surf
+USE multigrid, ONLY: multigrid_mesh, multigrid_reset
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -108,18 +106,27 @@ END SUBROUTINE tokamaker_eval_green
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_regions(coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils) BIND(C,NAME="tokamaker_setup_regions")
+SUBROUTINE tokamaker_setup_regions(mesh_ptr,coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils,error_str) BIND(C,NAME="tokamaker_setup_regions")
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(i4), POINTER :: contig_tmp(:)
 INTEGER(4) :: i
 INTEGER(4), POINTER :: xpoint_tmp(:)
+TYPE(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_bmesh), POINTER :: smesh
+CALL copy_string('',error_str)
+IF(.NOT.c_associated(mesh_ptr))THEN
+  CALL copy_string('Mesh object not associated',error_str)
+  RETURN
+END IF
+CALL c_f_pointer(mesh_ptr,mg_mesh)
 smesh=>mg_mesh%smesh
 CALL copy_string_rev(coil_file,gs_global%coil_file)
 IF(TRIM(gs_global%coil_file)=='none')THEN
@@ -173,12 +180,14 @@ END SUBROUTINE tokamaker_setup_regions
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_reset(error_str) BIND(C,NAME="tokamaker_reset")
+SUBROUTINE tokamaker_reset(mesh_ptr,error_str) BIND(C,NAME="tokamaker_reset")
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
 LOGICAL :: file_exists
 real(r8), POINTER :: vals_tmp(:)
+TYPE(multigrid_mesh), POINTER :: mg_mesh
 ! CHARACTER(LEN=OFT_ERROR_SLEN) :: tmp_str
 !---Clear error flag
 CALL copy_string('',error_str)
@@ -190,13 +199,20 @@ IF(ASSOCIATED(reg_plot))DEALLOCATE(reg_plot)
 CALL gs_global%delete()
 DEALLOCATE(gs_global)
 CALL oft_blagrange%delete()
-CALL multigrid_reset
+IF(.NOT.c_associated(mesh_ptr))THEN
+  CALL copy_string('Mesh object not associated',error_str)
+  RETURN
+END IF
+CALL c_f_pointer(mesh_ptr,mg_mesh)
+CALL multigrid_reset(mg_mesh)
+DEALLOCATE(mg_mesh)
 ALLOCATE(gs_global)
 END SUBROUTINE tokamaker_reset
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(order,full_domain,ncoils,error_str) BIND(C,NAME="tokamaker_setup")
+SUBROUTINE tokamaker_setup(mesh_ptr,order,full_domain,ncoils,error_str) BIND(C,NAME="tokamaker_setup")
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Needs docs
@@ -205,9 +221,15 @@ INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
 LOGICAL :: file_exists
 real(r8), POINTER :: vals_tmp(:)
+TYPE(multigrid_mesh), POINTER :: mg_mesh
 ! CHARACTER(LEN=80) :: tmp_str
 !---Clear error flag
 CALL copy_string('',error_str)
+IF(.NOT.c_associated(mesh_ptr))THEN
+  CALL copy_string('Mesh object not associated',error_str)
+  RETURN
+END IF
+CALL c_f_pointer(mesh_ptr,mg_mesh)
 !---------------------------------------------------------------------------
 ! Check input files
 !---------------------------------------------------------------------------
@@ -235,19 +257,12 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
-! CALL mg_mesh%smesh%setup_io(order)
 mg_mesh%smesh%tess_order=order
-CALL oft_lag_setup(order, -1)
+CALL oft_lag_setup(mg_mesh,order,-1)
 !---------------------------------------------------------------------------
 ! Setup experimental geometry
 !---------------------------------------------------------------------------
 gs_global%save_visit=.FALSE.
-! CALL gs_load_regions(gs_global)
-! IF(gs_global%free)THEN
-!     CALL gs_global%load_coils
-! ELSE
-!     CALL gs_load_regions(gs_global)
-! END IF
 gs_global%full_domain=full_domain
 CALL gs_setup_walls(gs_global)
 CALL gs_global%load_limiters
@@ -329,7 +344,7 @@ IF(c_associated(rhs_source))THEN
   CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
   CALL rhs_vec%restore_local(rhs_tmp)
   source_field%u=>rhs_vec
-  CALL source_field%setup()
+  CALL source_field%setup(oft_blagrange%mesh)
   CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=ierr)
   CALL source_field%delete()
   CALL rhs_vec%delete()
@@ -455,18 +470,18 @@ TYPE(c_ptr), INTENT(out) :: reg_loc !< Needs docs
 INTEGER(c_int), INTENT(out) :: np !< Needs docs
 INTEGER(c_int), INTENT(out) :: nc !< Needs docs
 INTEGER(4) :: i,j,k,id
-CALL mg_mesh%smesh%tessellate(r_plot, lc_plot, mg_mesh%smesh%tess_order)
+CALL oft_blagrange%mesh%tessellate(r_plot, lc_plot, oft_blagrange%mesh%tess_order)
 np=SIZE(r_plot,DIM=2,KIND=c_int)
 nc=SIZE(lc_plot,DIM=2,KIND=c_int)
 r_loc=c_loc(r_plot)
 lc_loc=c_loc(lc_plot)
 !
 ALLOCATE(reg_plot(nc))
-k=nc/mg_mesh%smesh%nc
-IF(ASSOCIATED(mg_mesh%smesh%reg))THEN
+k=nc/oft_blagrange%mesh%nc
+IF(ASSOCIATED(oft_blagrange%mesh%reg))THEN
   !$omp parallel do private(j,id)
-  DO i=1,mg_mesh%smesh%nc
-    id=mg_mesh%smesh%reg(i)
+  DO i=1,oft_blagrange%mesh%nc
+    id=oft_blagrange%mesh%reg(i)
     DO j=1,k
       reg_plot((i-1)*k+j)=id
     END DO
@@ -490,7 +505,7 @@ np=gs_global%nlim_con
 ALLOCATE(r_tmp(2,gs_global%nlim_con))
 r_loc=C_LOC(r_tmp)
 DO i=1,gs_global%nlim_con
-  r_tmp(:,i)=mg_mesh%smesh%r(1:2,gs_global%lim_con(i))
+  r_tmp(:,i)=oft_blagrange%mesh%r(1:2,gs_global%lim_con(i))
 END DO
 nloops=gs_global%lim_nloops
 loop_ptr=C_LOC(gs_global%lim_ptr)
@@ -555,11 +570,11 @@ NULLIFY(field%u)
 CALL gs_global%psi%new(field%u)
 CALL c_f_pointer(vec_vals, vals_tmp, [gs_global%psi%n])
 CALL field%u%restore_local(vals_tmp)
-CALL field%setup()
+CALL field%setup(oft_blagrange%mesh)
 IF(reg_ind>0)THEN
-  result = bscal_surf_int(field,oft_blagrange%quad%order,reg_ind)
+  result = bscal_surf_int(oft_blagrange%mesh,field,oft_blagrange%quad%order,reg_ind)
 ELSE
-  result = bscal_surf_int(field,oft_blagrange%quad%order)
+  result = bscal_surf_int(oft_blagrange%mesh,field,oft_blagrange%quad%order)
 END IF
 CALL field%u%delete
 DEALLOCATE(field%u)
@@ -574,7 +589,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Needs docs
 INTEGER(4) :: i,j
 REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,coil_regs
-CALL c_f_pointer(reg_currents, coil_regs, [mg_mesh%smesh%nreg])
+CALL c_f_pointer(reg_currents, coil_regs, [oft_blagrange%mesh%nreg])
 CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoils])
 vals_tmp=(gs_global%coil_currs + gs_global%coil_vcont*gs_global%vcontrol_val)/mu0
 coil_regs = 0.d0
@@ -762,13 +777,13 @@ CALL copy_string('',error_str)
 IF(imode==1)THEN
   ALLOCATE(b_interp_obj)
   b_interp_obj%gs=>gs_global
-  CALL b_interp_obj%setup()
+  CALL b_interp_obj%setup(oft_blagrange%mesh)
   int_obj=C_LOC(b_interp_obj)
 ELSE
   ALLOCATE(prof_interp_obj)
   prof_interp_obj%gs=>gs_global
   prof_interp_obj%mode=imode-1
-  CALL prof_interp_obj%setup()
+  CALL prof_interp_obj%setup(oft_blagrange%mesh)
   int_obj=C_LOC(prof_interp_obj)
 END IF
 END SUBROUTINE tokamaker_get_field_eval
@@ -797,14 +812,14 @@ IF(int_type<0)THEN
   END IF
   RETURN
 END IF
-call bmesh_findcell(mg_mesh%smesh,cell,pt,f)
+call bmesh_findcell(oft_blagrange%mesh,cell,pt,f)
 IF(cell==0)RETURN
 fmin=MINVAL(f); fmax=MAXVAL(f)
 IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
   cell=-ABS(cell)
   RETURN
 END IF
-CALL mg_mesh%smesh%jacobian(cell,f,goptmp,vol)
+CALL oft_blagrange%mesh%jacobian(cell,f,goptmp,vol)
 IF(int_type==1)THEN
   CALL c_f_pointer(int_obj, b_interp_obj)
   CALL b_interp_obj%interp(cell,f,goptmp,field)

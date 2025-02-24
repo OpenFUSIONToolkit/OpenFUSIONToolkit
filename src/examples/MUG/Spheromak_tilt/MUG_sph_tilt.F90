@@ -28,6 +28,7 @@ PROGRAM MUG_sph_tilt
 USE oft_base
 !---Grid
 USE oft_mesh_type, ONLY: rgrnd
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_add_quad
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -62,6 +63,7 @@ CLASS(oft_matrix), pointer :: lop => NULL()
 INTEGER(i4) :: ierr,io_unit
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(xmhd_sub_fields) :: ic_fields,pert_fields
+TYPE(multigrid_mesh) :: mg_mesh
 !---Runtime options
 INTEGER(i4) :: order = 2
 REAL(r8) :: b0_scale = 1.E-1_r8
@@ -83,18 +85,18 @@ CLOSE(io_unit)
 ! Setup grid
 !---------------------------------------------------------------------------
 rgrnd=(/2.d0,0.d0,0.d0/)
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(order, -1)
+CALL oft_lag_setup(mg_mesh,order,-1)
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(order, -1)
+CALL oft_hcurl_setup(mg_mesh,order,-1)
 !---H1(Grad) subspace
-CALL oft_h0_setup(order+1, -1)
+CALL oft_h0_setup(mg_mesh,order+1,-1)
 !---H1 full space
-CALL oft_h1_setup(order, -1)
+CALL oft_h1_setup(mg_mesh,order,-1)
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
 !! To visualize the solution fields once a simulation has completed, the \ref xmhd::xmhd_plot

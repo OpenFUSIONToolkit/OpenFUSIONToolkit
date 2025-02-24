@@ -21,7 +21,7 @@ use oft_mesh_global_util, only: mesh_global_orient, mesh_global_stats, &
   mesh_global_set_curved
 use oft_stitching, only: oft_global_stitch
 USE oft_tetmesh_type, only: oft_tetmesh
-use multigrid, only: mg_mesh, multigrid_refine, multigrid_hybrid_base, &
+use multigrid, only: multigrid_mesh, multigrid_refine, multigrid_hybrid_base, &
   multigrid_hybrid_bmesh, multigrid_brefine, hexmesh_mg_globals, tetmesh_mg_globals, &
   multigrid_level, trimesh_mg_globals, quadmesh_mg_globals, multigrid_reffix_ho, &
   multigrid_reffix_ho_surf
@@ -59,25 +59,26 @@ contains
 !! - Read in mesh points and cells
 !! - Read in CAD information for refinement
 !---------------------------------------------------------------------------
-subroutine multigrid_load(cad_type)
+subroutine multigrid_load(mg_mesh,cad_type)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: cad_type !< Mesh type to load
 DEBUG_STACK_PUSH
 !---Select mesh type and load
 select case(cad_type)
   case(mesh_native_id) ! Native Mesh
-    CALL native_load_vmesh
+    CALL native_load_vmesh(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
     CALL native_hobase(mg_mesh%mesh)
     CALL native_set_periodic(mg_mesh%mesh)
   case(mesh_t3d_id) ! T3D Mesh
-    CALL mesh_t3d_load
+    CALL mesh_t3d_load(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
-    CALL mesh_t3d_cadsync
+    CALL mesh_t3d_cadsync(mg_mesh)
     CALL mesh_t3d_cadlink(mg_mesh%mesh)
     CALL mesh_t3d_set_periodic(mg_mesh%mesh)
   case(mesh_cubit_id) ! Exodus Mesh
 #ifdef HAVE_NCDF
-    CALL mesh_cubit_load
+    CALL mesh_cubit_load(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
     CALL mesh_cubit_cadlink(mg_mesh%mesh)
     CALL mesh_cubit_hobase(mg_mesh%mesh)
@@ -86,15 +87,15 @@ select case(cad_type)
     CALL oft_abort('CUBIT interface requires NETCDF','multigrid_load',__FILE__)
 #endif
   case(mesh_gmsh_id) ! GMSH Mesh
-    CALL mesh_gmsh_load
+    CALL mesh_gmsh_load(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
     CALL mesh_gmsh_cadlink(mg_mesh%mesh)
   case(mesh_sphere_id) ! Sphere Test Mesh
-    CALL mesh_sphere_load
+    CALL mesh_sphere_load(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
     CALL mesh_sphere_cadlink(mg_mesh%mesh)
   case(mesh_cube_id) ! Cube Test Mesh
-    CALL mesh_cube_load
+    CALL mesh_cube_load(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
     CALL mesh_cube_cadlink(mg_mesh%mesh)
     CALL mesh_cube_set_periodic(mg_mesh%mesh)
@@ -107,7 +108,8 @@ end subroutine multigrid_load
 !---------------------------------------------------------------------------
 !> Adjust boundary points to CAD boundary following refinement.
 !---------------------------------------------------------------------------
-subroutine multigrid_reffix
+subroutine multigrid_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
@@ -118,21 +120,21 @@ IF(.NOT.fix_boundary)THEN
 END IF
 mesh=>mg_mesh%mesh
 !---Always refine using mesh mapping first
-CALL multigrid_reffix_ho
+CALL multigrid_reffix_ho(mg_mesh)
 !---Select mesh type and adjust boundary
 select case(mesh%cad_type)
   case(mesh_native_id)
     ! Do nothing
   case(mesh_t3d_id)
-    call mesh_t3d_reffix
+    call mesh_t3d_reffix(mg_mesh)
   case(mesh_cubit_id)
 #ifdef HAVE_NCDF
     call mesh_cubit_reffix(mg_mesh%mesh)
 #endif
   case(mesh_gmsh_id)
-    call mesh_gmsh_reffix
+    call mesh_gmsh_reffix(mg_mesh)
   case(mesh_sphere_id)
-    call mesh_sphere_reffix(mg_mesh%mesh)
+    call mesh_sphere_reffix(mg_mesh)
   case(mesh_cube_id)
     ! Do nothing
   case default
@@ -150,10 +152,11 @@ end subroutine multigrid_reffix
 !---------------------------------------------------------------------------
 !> Add node points for quadratic elements
 !---------------------------------------------------------------------------
-subroutine multigrid_add_quad
+subroutine multigrid_add_quad(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+class(oft_mesh), pointer :: mesh
 INTEGER(i4) :: i,j
 REAL(r8) :: pttmp(3)
-class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 mesh=>mg_mesh%mesh
 !---Initialize high order points with straight edges
@@ -192,13 +195,13 @@ select case(mesh%cad_type)
   case(mesh_native_id)
     ! Do nothing CALL mesh_cube_add_quad
   case(mesh_t3d_id)
-    call mesh_t3d_add_quad(mg_mesh%mesh)
+    call mesh_t3d_add_quad(mg_mesh)
   case(mesh_cubit_id)
 #ifdef HAVE_NCDF
-    call mesh_cubit_add_quad(mg_mesh%mesh)
+    call mesh_cubit_add_quad(mg_mesh)
 #endif
   case(mesh_gmsh_id)
-    call mesh_gmsh_add_quad(mg_mesh%mesh)
+    call mesh_gmsh_add_quad(mg_mesh)
   case(mesh_sphere_id)
     call mesh_sphere_add_quad(mg_mesh%mesh)
   case(mesh_cube_id)
@@ -206,7 +209,7 @@ select case(mesh%cad_type)
   case default
     call oft_abort('Invalid mesh type.','multigrid_add_quad',__FILE__)
 end select
-CALL multigrid_check_ho
+CALL multigrid_check_ho(mg_mesh%mesh)
 !---Propogate to boundary mesh
 CALL mesh%bmesh%set_order(2)
 CALL mesh_global_set_curved(mesh%bmesh,1)
@@ -236,15 +239,14 @@ end subroutine multigrid_add_quad
 !! locally when negative grid jacobians are detected. Cells where ill conditioned
 !! mappings are found are straightened back to their original linear spatial mapping.
 !---------------------------------------------------------------------------
-subroutine multigrid_check_ho
+subroutine multigrid_check_ho(mesh)
+class(oft_mesh), intent(inout) :: mesh
 INTEGER(i4) :: i,j,k,cell,nbad,ed,etmp(2)
 INTEGER(i4), PARAMETER :: nx = 5
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: eflag,fflag
 REAL(r8) :: u,v,w,f(4),goptmp(3,4),vol,vol_min,vol_max
 CHARACTER(LEN=70) :: error_str
-class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
-mesh=>mg_mesh%mesh
 !---Check cells for negative jacobians
 IF(oft_debug_print(2))WRITE(*,'(A)')'Checking cell curvature'
 ALLOCATE(eflag(mesh%ne),fflag(mesh%nf))
@@ -321,7 +323,8 @@ end subroutine multigrid_check_ho
 !------------------------------------------------------------------------------
 !> Set corner flags for distributed and local meshes.
 !------------------------------------------------------------------------------
-subroutine multigrid_corners
+subroutine multigrid_corners(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,jc,jr,je(12)
 REAL(r8) :: v,v1,v2,goptmp(3,4),f(4),ftmp(4)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: btrans
@@ -425,7 +428,8 @@ end subroutine multigrid_corners
 !! - Decompose mesh
 !! - Setup distributed meshes
 !---------------------------------------------------------------------------
-subroutine multigrid_construct
+subroutine multigrid_construct(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,level,io_unit
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
@@ -447,7 +451,7 @@ IF(ierr<0)CALL oft_abort('No mesh options found in input file.','multigrid_const
 if(nlevels<=0)call oft_abort('Invalid number of MG levels','multigrid_construct',__FILE__)
 if(nbase<=0.OR.nbase>nlevels)call oft_abort('Invalid number of MG base levels','multigrid_construct',__FILE__)
 !---Setup basic mesh structure and runtime
-allocate(mg_mesh)
+! allocate(mg_mesh)
 if(nbase==nlevels)then
   if(oft_env%nprocs/=1)call oft_abort('Requested shared run with more than one proccess.', &
     'multigrid_construct',__FILE__)
@@ -473,7 +477,7 @@ mg_mesh%level=1
 mg_mesh%lev=1
 mg_mesh%rlevel='01'
 !---Load and initialize mesh on processes
-CALL multigrid_load(cad_type)
+CALL multigrid_load(mg_mesh,cad_type)
 mesh=>mg_mesh%mesh
 smesh=>mg_mesh%smesh
 !---Setup mesh
@@ -511,7 +515,7 @@ END DO
 call mesh_global_orient(mesh)
 CALL bmesh_global_orient(smesh,mesh)
 !---Locate corners
-call multigrid_corners
+call multigrid_corners(mg_mesh)
 !---
 call mesh_global_stats(mesh)
 call mesh_global_igrnd(mesh)
@@ -524,7 +528,7 @@ do level=2,mg_mesh%nbase
   ! call multigrid_add
   CALL add_vol
   CALL add_surf
-  CALL multigrid_level(level)
+  CALL multigrid_level(mg_mesh,level)
   mesh=>mg_mesh%mesh
   smesh=>mg_mesh%smesh
   call multigrid_shared_level
@@ -534,7 +538,7 @@ if(nbase<nlevels)then
   ! call multigrid_add
   CALL add_vol
   CALL add_surf
-  CALL multigrid_level(mg_mesh%nbase+1)
+  CALL multigrid_level(mg_mesh,mg_mesh%nbase+1)
   mesh=>mg_mesh%mesh
   smesh=>mg_mesh%smesh
   call multigrid_decomp
@@ -542,7 +546,7 @@ if(nbase<nlevels)then
     ! call multigrid_add
     CALL add_vol
     CALL add_surf
-    CALL multigrid_level(level)
+    CALL multigrid_level(mg_mesh,level)
     mesh=>mg_mesh%mesh
     smesh=>mg_mesh%smesh
     call multigrid_dist_level
@@ -553,7 +557,7 @@ SELECT CASE(grid_order)
   CASE(1)
     !---Do nothing
   CASE(2)
-    CALL multigrid_add_quad
+    CALL multigrid_add_quad(mg_mesh)
   ! CASE(3)
   !   CALL multigrid_add_cubic
   CASE DEFAULT
@@ -624,28 +628,28 @@ CALL oft_increase_indent
 !---Refine and setup local geometry
 mesh%fullmesh=.TRUE.
 smesh%fullmesh=.TRUE.
-call multigrid_refine
-call multigrid_brefine
+call multigrid_refine(mg_mesh)
+call multigrid_brefine(mg_mesh)
 call mesh_local_init(mesh)
 CALL bmesh_local_init(smesh,mesh)
 !---Set global context information
 IF(mesh%type==3)THEN
-  call hexmesh_mg_globals(mg_mesh%meshes(mg_mesh%level-1),mesh)
+  call hexmesh_mg_globals(mg_mesh,mg_mesh%meshes(mg_mesh%level-1),mesh)
 ELSE
-  call tetmesh_mg_globals(mg_mesh%meshes(mg_mesh%level-1),mesh)
+  call tetmesh_mg_globals(mg_mesh,mg_mesh%meshes(mg_mesh%level-1),mesh)
 END IF
 CALL mesh_global_link(mesh)
 CALL mesh_global_boundary(mesh)
 CALL bmesh_global_link(smesh,mesh)
 call mesh_global_save(mesh)
 !---Adjust new boundary points
-call multigrid_reffix
+call multigrid_reffix(mg_mesh)
 call mesh_volumes(mesh)
 !---Orient geometry
 call mesh_global_orient(mesh)
 CALL bmesh_global_orient(smesh,mesh)
 !---Locate corners
-call multigrid_corners
+call multigrid_corners(mg_mesh)
 !---Print mesh statistics
 call mesh_global_stats(mesh)
 call mesh_global_igrnd(mesh)
@@ -677,7 +681,7 @@ call mesh_global_decomp(mesh,part_meth)
 call mesh_local_init(mesh)
 mesh%fullmesh=.FALSE.
 !---Setup hybrid transfer level
-call multigrid_hybrid_base
+call multigrid_hybrid_base(mg_mesh)
 !---Set global context information
 call mesh_global_link(mesh)
 call mesh_global_boundary(mesh)
@@ -687,15 +691,15 @@ CALL bmesh_global_init(mesh)
 smesh%fullmesh=.FALSE.
 CALL bmesh_global_link(smesh,mesh)
 !---
-CALL multigrid_hybrid_bmesh
+CALL multigrid_hybrid_bmesh(mg_mesh)
 !---Adjust new boundary points
-call multigrid_reffix
+call multigrid_reffix(mg_mesh)
 call mesh_volumes(mesh)
 !---Orient geometry
 call mesh_global_orient(mesh)
 CALL bmesh_global_orient(smesh,mesh)
 !---Locate corners
-call multigrid_corners
+call multigrid_corners(mg_mesh)
 !---Print mesh statistics
 call mesh_global_stats(mesh)
 call mesh_global_igrnd(mesh)
@@ -724,15 +728,15 @@ CALL oft_increase_indent
 !---Refine and setup local geometry
 mesh%fullmesh=.FALSE.
 smesh%fullmesh=.FALSE.
-call multigrid_refine
-call multigrid_brefine
+call multigrid_refine(mg_mesh)
+call multigrid_brefine(mg_mesh)
 call mesh_local_init(mesh)
 CALL bmesh_local_init(smesh,mesh)
 !---Set global context information
 IF(mesh%type==3)THEN
-  call hexmesh_mg_globals(mg_mesh%meshes(mg_mesh%level-1),mesh)
+  call hexmesh_mg_globals(mg_mesh,mg_mesh%meshes(mg_mesh%level-1),mesh)
 ELSE
-  call tetmesh_mg_globals(mg_mesh%meshes(mg_mesh%level-1),mesh)
+  call tetmesh_mg_globals(mg_mesh,mg_mesh%meshes(mg_mesh%level-1),mesh)
 END IF
 call mesh_global_link(mesh)
 call mesh_global_boundary(mesh)
@@ -741,13 +745,13 @@ CALL bmesh_global_link(smesh,mesh)
 !---
 call mesh_global_save(mesh)
 !---Adjust new boundary points
-call multigrid_reffix
+call multigrid_reffix(mg_mesh)
 call mesh_volumes(mesh)
 !---Orient geometry
 call mesh_global_orient(mesh)
 CALL bmesh_global_orient(smesh,mesh)
 !---Locate corners
-call multigrid_corners
+call multigrid_corners(mg_mesh)
 !---Print mesh statistics
 call mesh_global_stats(mesh)
 call mesh_global_igrnd(mesh)
@@ -759,26 +763,27 @@ end subroutine multigrid_construct
 !! - Read in mesh points and cells
 !! - Read in CAD information for refinement
 !---------------------------------------------------------------------------
-subroutine multigrid_load_surf(cad_type)
+subroutine multigrid_load_surf(mg_mesh,cad_type)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: cad_type
 integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Select mesh type and load
 select case(cad_type)
   case(mesh_native_id) ! Native Mesh
-    CALL native_load_smesh
+    CALL native_load_smesh(mg_mesh)
     CALL smesh_global_init(mg_mesh%smesh)
     CALL native_hobase(mg_mesh%smesh)
     ! CALL native_set_periodic
   case(mesh_t3d_id) ! T3D Mesh
-    CALL smesh_t3d_load
+    CALL smesh_t3d_load(mg_mesh)
     CALL smesh_global_init(mg_mesh%smesh)
   !   CALL mesh_t3d_cadsync
   !   CALL mesh_t3d_cadlink
   !   CALL mesh_t3d_set_periodic
   case(mesh_cubit_id) ! Exodus Mesh
 #ifdef HAVE_NCDF
-    CALL smesh_cubit_load
+    CALL smesh_cubit_load(mg_mesh)
     CALL smesh_global_init(mg_mesh%smesh)
     ! CALL mesh_cubit_cadlink
     CALL mesh_cubit_hobase(mg_mesh%smesh)
@@ -791,11 +796,11 @@ select case(cad_type)
   !   CALL mesh_global_init
   !   CALL mesh_gmsh_cadlink
   case(mesh_sphere_id) ! Sphere Test Mesh
-    CALL smesh_circle_load
+    CALL smesh_circle_load(mg_mesh)
     CALL smesh_global_init(mg_mesh%smesh)
     CALL smesh_circle_cadlink(mg_mesh%smesh)
   case(mesh_cube_id) ! Cube Test Mesh
-    CALL smesh_square_load
+    CALL smesh_square_load(mg_mesh)
     CALL smesh_global_init(mg_mesh%smesh)
     CALL smesh_square_cadlink(mg_mesh%smesh)
     CALL smesh_square_set_periodic(mg_mesh%smesh)
@@ -808,7 +813,8 @@ end subroutine multigrid_load_surf
 !---------------------------------------------------------------------------
 !> Adjust boundary points to CAD boundary following refinement.
 !---------------------------------------------------------------------------
-subroutine multigrid_reffix_surf
+subroutine multigrid_reffix_surf(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 DEBUG_STACK_PUSH
 IF(.NOT.fix_boundary)THEN
   IF(oft_env%head_proc)WRITE(*,*)'Skipping boundary corrections'
@@ -816,7 +822,7 @@ IF(.NOT.fix_boundary)THEN
   RETURN
 END IF
 !---Always refine using mesh mapping first
-CALL multigrid_reffix_ho_surf
+CALL multigrid_reffix_ho_surf(mg_mesh)
 !---Select mesh type and adjust boundary
 select case(mg_mesh%smesh%cad_type)
   case(mesh_native_id)
@@ -830,7 +836,7 @@ select case(mg_mesh%smesh%cad_type)
   case(mesh_gmsh_id)
     ! call mesh_gmsh_reffix
   case(mesh_sphere_id)
-    call smesh_circle_reffix(mg_mesh%smesh)
+    call smesh_circle_reffix(mg_mesh)
   case(mesh_cube_id)
     ! Do nothing
   case default
@@ -842,12 +848,11 @@ end subroutine multigrid_reffix_surf
 !---------------------------------------------------------------------------
 !> Add node points for quadratic elements
 !---------------------------------------------------------------------------
-subroutine multigrid_add_quad_surf
+subroutine multigrid_add_quad_surf(smesh)
+class(oft_bmesh), intent(inout) :: smesh
 INTEGER(i4) :: i,j
 REAL(r8) :: pttmp(3)
-class(oft_bmesh), pointer :: smesh
 DEBUG_STACK_PUSH
-smesh=>mg_mesh%smesh
 !---Initialize high order points with straight edges
 IF(.NOT.ASSOCIATED(smesh%ho_info%r))THEN
   CALL smesh%set_order(2)
@@ -882,7 +887,7 @@ select case(smesh%cad_type)
   case(mesh_gmsh_id)
     ! call smesh_gmsh_add_quad
   case(mesh_sphere_id)
-    call smesh_circle_add_quad(mg_mesh%smesh)
+    call smesh_circle_add_quad(smesh)
   case(mesh_cube_id)
     ! Do nothing
   case default
@@ -900,7 +905,8 @@ end subroutine multigrid_add_quad_surf
 !! - Decompose mesh
 !! - Setup distributed meshes
 !---------------------------------------------------------------------------
-subroutine multigrid_construct_surf
+subroutine multigrid_construct_surf(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,level,io_unit
 class(oft_bmesh), pointer :: smesh
 character(LEN=20) :: meshname
@@ -922,7 +928,7 @@ if(nlevels<=0)call oft_abort('Invalid number of MG levels','multigrid_construct'
 if(nbase<=0.OR.nbase>nlevels)call oft_abort('Invalid number of MG base levels', &
   'multigrid_construct_surf',__FILE__)
 !---Setup basic mesh structure and runtime
-allocate(mg_mesh)
+! allocate(mg_mesh)
 if(nbase==nlevels)then
   if(oft_env%nprocs/=1)call oft_abort('Requested shared run with more than one proccess.', &
     'multigrid_construct_surf',__FILE__)
@@ -948,7 +954,7 @@ mg_mesh%level=1
 mg_mesh%lev=1
 mg_mesh%rlevel='01'
 !---Load and initialize mesh on processes
-CALL multigrid_load_surf(cad_type)
+CALL multigrid_load_surf(mg_mesh,cad_type)
 smesh=>mg_mesh%smesh
 ! smesh%cad_type=cad_type
 ! smesh%meshname=meshname
@@ -975,19 +981,19 @@ CALL oft_decrease_indent
 !---Construct OpenMP base meshes
 do level=2,mg_mesh%nbase
   CALL add_surf
-  CALL multigrid_level(level)
+  CALL multigrid_level(mg_mesh,level)
   smesh=>mg_mesh%smesh
   call multigrid_shared_level
 end do
 !---Construct distributed levels
 if(nbase<nlevels)then
   CALL add_surf
-  CALL multigrid_level(mg_mesh%nbase+1)
+  CALL multigrid_level(mg_mesh,mg_mesh%nbase+1)
   smesh=>mg_mesh%smesh
   call multigrid_decomp
   do level=mg_mesh%nbase+2,mg_mesh%mgmax
     CALL add_surf
-    CALL multigrid_level(level)
+    CALL multigrid_level(mg_mesh,level)
     smesh=>mg_mesh%smesh
     call multigrid_dist_level
   end do
@@ -997,7 +1003,7 @@ SELECT CASE(grid_order)
   CASE(1)
     !---Do nothing
   CASE(2)
-    CALL multigrid_add_quad_surf
+    CALL multigrid_add_quad_surf(mg_mesh%smesh)
   CASE DEFAULT
     CALL oft_abort('Requested invalid grid order.','multigrid_construct',__FILE__)
 END SELECT
@@ -1046,19 +1052,19 @@ END IF
 CALL oft_increase_indent
 !---Refine and setup local geometry
 smesh%fullmesh=.TRUE.
-call multigrid_brefine
+call multigrid_brefine(mg_mesh)
 CALL bmesh_local_init(smesh)
 !---Set global context information
 IF(smesh%type==3)THEN
-  call quadmesh_mg_globals(mg_mesh%smeshes(mg_mesh%level-1),smesh)
+  call quadmesh_mg_globals(mg_mesh,mg_mesh%smeshes(mg_mesh%level-1),smesh)
 ELSE
-  CALL trimesh_mg_globals(mg_mesh%smeshes(mg_mesh%level-1),smesh)
+  CALL trimesh_mg_globals(mg_mesh,mg_mesh%smeshes(mg_mesh%level-1),smesh)
 END IF
 CALL bmesh_global_link(smesh)
 CALL bmesh_global_boundary(smesh)
 CALL mesh_global_save(smesh)
 !---Adjust new boundary points
-call multigrid_reffix_surf
+call multigrid_reffix_surf(mg_mesh)
 call bmesh_areas(smesh)
 !---Orient geometry
 CALL bmesh_global_orient(smesh)
@@ -1092,15 +1098,15 @@ call mesh_global_decomp(smesh,part_meth)
 CALL bmesh_local_init(smesh)
 smesh%fullmesh=.FALSE.
 !---Setup hybrid transfer level
-call multigrid_hybrid_bmesh
+call multigrid_hybrid_bmesh(mg_mesh)
 !---Set global context information
 CALL bmesh_global_link(smesh)
 CALL bmesh_global_boundary(smesh)
 CALL mesh_global_save(smesh)
 !---
-CALL multigrid_hybrid_bmesh
+CALL multigrid_hybrid_bmesh(mg_mesh)
 !---Adjust new boundary points
-call multigrid_reffix_surf
+call multigrid_reffix_surf(mg_mesh)
 call bmesh_areas(smesh)
 !---Orient geometry
 CALL bmesh_global_orient(smesh)
@@ -1130,19 +1136,19 @@ END IF
 CALL oft_increase_indent
 !---Refine and setup local geometry
 smesh%fullmesh=.FALSE.
-call multigrid_brefine
+call multigrid_brefine(mg_mesh)
 CALL bmesh_local_init(smesh)
 !---Set global context information
 IF(smesh%type==3)THEN
-  call quadmesh_mg_globals(mg_mesh%smeshes(mg_mesh%level-1),smesh)
+  call quadmesh_mg_globals(mg_mesh,mg_mesh%smeshes(mg_mesh%level-1),smesh)
 ELSE
-  CALL trimesh_mg_globals(mg_mesh%smeshes(mg_mesh%level-1),smesh)
+  CALL trimesh_mg_globals(mg_mesh,mg_mesh%smeshes(mg_mesh%level-1),smesh)
 END IF
 CALL bmesh_global_link(smesh)
 CALL bmesh_global_boundary(smesh)
 CALL mesh_global_save(smesh)
 !---Adjust new boundary points
-call multigrid_reffix_surf
+call multigrid_reffix_surf(mg_mesh)
 call bmesh_areas(smesh)
 !---Orient geometry
 CALL bmesh_global_orient(smesh)

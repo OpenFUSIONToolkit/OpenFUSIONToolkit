@@ -20,7 +20,6 @@
 MODULE oft_h0_operators
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
-USE multigrid, ONLY: mg_mesh
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver
@@ -38,8 +37,6 @@ USE oft_h0_fields, ONLY: oft_h0_create
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
-! CLASS fem_interp
-!---------------------------------------------------------------------------
 !> Interpolate a H0 field
 !---------------------------------------------------------------------------
 type, extends(fem_interp) :: oft_h0_rinterp
@@ -54,8 +51,6 @@ contains
   !> Destroy temporary internal storage
   procedure :: delete => h0_rinterp_delete
 end type oft_h0_rinterp
-!---------------------------------------------------------------------------
-! CLASS oft_h0_ginterp
 !---------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \f$ of a H0 field
 !---------------------------------------------------------------------------
@@ -72,8 +67,6 @@ REAL(r8), POINTER, DIMENSION(:) :: oft_h0_rop => NULL()
 REAL(r8), POINTER, DIMENSION(:,:) :: oft_h0_gop => NULL()
 !$omp threadprivate(oft_h0_rop,oft_h0_gop)
 contains
-!---------------------------------------------------------------------------
-! SUBROUTINE: h0_mloptions
 !---------------------------------------------------------------------------
 !> Read-in options for the basic Nedelec H0 ML preconditioners
 !---------------------------------------------------------------------------
@@ -98,22 +91,21 @@ END IF
 DEBUG_STACK_POP
 end subroutine h0_mloptions
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_rinterp_setup
-!---------------------------------------------------------------------------
 !> Setup interpolator for H0 scalar fields
 !!
 !! Fetches local representation used for interpolation from vector object
 !!
 !! @note Should only be used via class \ref oft_h0_rinterp or children
 !---------------------------------------------------------------------------
-subroutine h0_rinterp_setup(self)
+subroutine h0_rinterp_setup(self,mesh)
 class(oft_h0_rinterp), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
 self%h0_rep=>oft_h0
+IF((mesh%np/=self%h0_rep%mesh%np))CALL oft_abort("Mesh mismatch","h0_rinterp_setup",__FILE__)
+self%mesh=>mesh
 end subroutine h0_rinterp_setup
-!---------------------------------------------------------------------------
-! SUBROUTINE: h0_rinterp_delete
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
 !!
@@ -126,21 +118,14 @@ IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
 NULLIFY(self%h0_rep,self%u)
 end subroutine h0_rinterp_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_rinterp
-!---------------------------------------------------------------------------
 !> Reconstruct a Nedelec H0 scalar field
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed field at f [1]
 !---------------------------------------------------------------------------
 subroutine h0_rinterp(self,cell,f,gop,val)
 class(oft_h0_rinterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [1]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8), allocatable :: rop(:)
@@ -159,21 +144,14 @@ deallocate(rop,j)
 DEBUG_STACK_POP
 end subroutine h0_rinterp
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_ginterp_apply
-!---------------------------------------------------------------------------
 !> Reconstruct the gradient of a Nedelec H0 scalar field
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed gradient at f [3]
 !---------------------------------------------------------------------------
 subroutine h0_ginterp_apply(self,cell,f,gop,val)
 class(oft_h0_ginterp), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: val(:)
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [3]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8), allocatable :: rop(:,:)
@@ -192,14 +170,10 @@ DEALLOCATE(rop,j)
 DEBUG_STACK_POP
 end subroutine h0_ginterp_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_zerob
-!---------------------------------------------------------------------------
 !> Zero a Nedelec H0 scalar field at all boundary nodes
-!!
-!! @param[in,out] a Field to be zeroed
 !---------------------------------------------------------------------------
 subroutine h0_zerob(a)
-class(oft_vector), intent(inout) :: a
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
@@ -216,17 +190,13 @@ DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine h0_zerob
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_zerogrnd
-!---------------------------------------------------------------------------
 !> Zero a Nedelec H0 scalar field at the global grounding node
 !!
 !! @note The possition of this node is defined by the mesh pointer igrnd in
-!! mesh.
-!!
-!! @param[in,out] a Field to be zeroed
+!! mesh
 !---------------------------------------------------------------------------
 subroutine h0_zerogrnd(a)
-class(oft_vector), intent(inout) :: a
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
@@ -234,21 +204,17 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc)
 CALL a%get_local(aloc)
 !---
-if(mg_mesh%mesh%igrnd(1)>0)aloc(mg_mesh%mesh%igrnd(1))=0.d0
-if(mg_mesh%mesh%igrnd(2)>0)aloc(mg_mesh%mesh%igrnd(2))=0.d0
+if(oft_h0%mesh%igrnd(1)>0)aloc(oft_h0%mesh%igrnd(1))=0.d0
+if(oft_h0%mesh%igrnd(2)>0)aloc(oft_h0%mesh%igrnd(2))=0.d0
 CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine h0_zerogrnd
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_zeroi
-!---------------------------------------------------------------------------
 !> Zero a Nedelec H0 scalar field at all interior nodes
-!!
-!! @param[in,out] a Field to be zeroed
 !---------------------------------------------------------------------------
 subroutine h0_zeroi(a)
-class(oft_vector), intent(inout) :: a
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i
 DEBUG_STACK_PUSH
@@ -265,20 +231,15 @@ DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine h0_zeroi
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_getmop
-!---------------------------------------------------------------------------
 !> Construct mass matrix for H0 scalar representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
 subroutine oft_h0_getmop(mat,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-character(LEN=*), intent(in) :: bc
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
@@ -594,10 +555,10 @@ real(r8) :: f(4),incr,val,d(3),h_rop(3),goptmp(3,4),v,mop(1)
 type(oft_graph_ptr), pointer :: graphs(:,:)
 DEBUG_STACK_PUSH
 !---
-if(mg_mesh%level<1)then
+if(ML_oft_h0%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','h0_ginterpmatrix',__FILE__)
 end if
-cmesh=>mg_mesh%meshes(mg_mesh%level-1)
+cmesh=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "h0_ginterpmatrix", __FILE__)
 if(oft_h0%order/=1)then
@@ -605,8 +566,8 @@ if(oft_h0%order/=1)then
 end if
 ops=>oft_h0_ops
 h0_cors=>ML_oft_h0%levels(oft_h0_level-1)%fe
-lede=>mg_mesh%inter(mg_mesh%level-1)%lede
-lfde=>mg_mesh%inter(mg_mesh%level-1)%lfde
+lede=>ML_oft_h0%ml_mesh%inter(ML_oft_h0%ml_mesh%level-1)%lede
+lfde=>ML_oft_h0%ml_mesh%inter(ML_oft_h0%ml_mesh%level-1)%lfde
 ALLOCATE(ML_oft_h0%interp_graphs(ML_oft_h0%level)%g)
 ops%interp_graph=>ML_oft_h0%interp_graphs(ML_oft_h0%level)%g
 !---Setup matrix sizes
@@ -909,7 +870,7 @@ integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: array_c,array_f
 DEBUG_STACK_PUSH
-lptmp=>mg_mesh%meshes(mg_mesh%nbase+1)%base%lp
+lptmp=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 !$omp parallel do
@@ -966,7 +927,7 @@ real(r8), pointer, dimension(:) :: alias,array_c,array_f
 CLASS(oft_afem_type), POINTER :: h0_fine => NULL()
 DEBUG_STACK_PUSH
 !---
-lptmp=>mg_mesh%meshes(mg_mesh%nbase+1)%base%lp
+lptmp=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 h0_fine=>ML_oft_h0%levels(oft_h0_level+1)%fe

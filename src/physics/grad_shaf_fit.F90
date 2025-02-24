@@ -24,7 +24,7 @@ use oft_gs, only: gs_eq, gs_dflux, gs_get_cond_weights, gs_itor_nl, gs_psi2r, &
   gs_psimax, gs_set_cond_weights, gs_err_reason, gs_test_bounds, gs_get_cond_scales, &
   gs_get_qprof, gs_epsilon, gsinv_interp, oft_indent, oft_decrease_indent, oft_increase_indent
 use oft_gs_profiles, only: twolam_flux_func
-use tracing_2d, only: active_tracer, tracer, set_tracer, tracinginv_fs
+use tracing_2d, only: active_tracer, tracer, set_tracer
 use mhd_utils, only: mu0
 IMPLICIT NONE
 #include "local.h"
@@ -1419,9 +1419,9 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup()
+CALL psi_eval%setup(oft_blagrange%mesh)
 psi_geval%u=>gs%psi
-CALL psi_geval%setup()
+CALL psi_geval%setup(oft_blagrange%mesh)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 call psi_geval%interp(self%cell,self%f,goptmp,gpsi)
@@ -1493,7 +1493,7 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup()
+CALL psi_eval%setup(oft_blagrange%mesh)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 !---
@@ -1534,7 +1534,7 @@ IF(self%cells(1)==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup()
+CALL psi_eval%setup(oft_blagrange%mesh)
 DO i=1,2
   call psi_eval%interp(self%cells(i),self%f(:,i),goptmp,psi(:,i))
 END DO
@@ -1632,7 +1632,7 @@ press = self%eval(gs)
 !---Handle outside plasma guidance
 IF(self%r(1)>0.d0)THEN
   psi_eval%u=>gs%psi
-  CALL psi_eval%setup()
+  CALL psi_eval%setup(oft_blagrange%mesh)
   call psi_eval%interp(self%cell,self%f,goptmp,psi)
   in_plasma=.TRUE.
   IF(gs_test_bounds(gs,self%r))THEN
@@ -1686,7 +1686,7 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup
+CALL psi_eval%setup(oft_blagrange%mesh)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 !---

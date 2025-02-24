@@ -18,7 +18,7 @@ program test_hcurl_sop
 USE oft_base
 ! USE timer
 USE oft_mesh_cube, ONLY: mesh_cube_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, oft_hcurl_nlevels, &
   oft_hcurl, oft_bhcurl, oft_hcurl_eval_all
@@ -32,6 +32,7 @@ USE oft_vector_inits, ONLY: uniform_field
 USE diagnostic, ONLY: vec_energy
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit
+TYPE(multigrid_mesh) :: mg_mesh
 NAMELIST/test_hcurl_options/order
 !---Initialize enviroment
 CALL oft_init
@@ -40,10 +41,10 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_hcurl_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
-CALL oft_hcurl_setup(order)
+CALL oft_hcurl_setup(mg_mesh,order)
 !---Run tests
 oft_env%pm=.FALSE.
 CALL test_wop
@@ -85,8 +86,8 @@ CALL u%set(0.d0)
 CALL winv%apply(u,v)
 !---Check results
 Bfield%u=>u
-CALL Bfield%setup
-uu=vec_energy(Bfield,oft_hcurl%quad%order)
+CALL Bfield%setup(oft_hcurl%mesh)
+uu=vec_energy(oft_hcurl%mesh,Bfield,oft_hcurl%quad%order)
 !---Report results
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='hcurl.results')

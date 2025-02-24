@@ -15,11 +15,13 @@ PROGRAM test_quad
 USE oft_base
 USE oft_tet_quadrature, ONLY: oft_quad_type, set_quad_1d
 USE oft_mesh_cube, ONLY: mesh_cube_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 IMPLICIT NONE
 REAL(r8) :: x(3),c(3),y,y0
-INTEGER(i4) :: e(3),ntests,i,ierr,order,io_unit1,io_unit2
+INTEGER(i4) :: e(3),ntests,i,ierr,io_unit1,io_unit2
+TYPE(multigrid_mesh) :: mg_mesh
+INTEGER(i4) :: order
 NAMELIST/test_quad_options/order
 !---Initialize enviroment
 CALL oft_init
@@ -29,7 +31,7 @@ READ(io_unit1,test_quad_options,IOSTAT=ierr)
 CLOSE(io_unit1)
 IF(ierr<0)CALL oft_abort('No options found in input file.','main',__FILE__)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !---Check mesh type
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test vaild for cube only.','test_quad',__FILE__)
 !---Init exponent and coefficients to zero

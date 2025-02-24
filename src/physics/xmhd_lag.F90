@@ -76,7 +76,7 @@ USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
-USE multigrid, ONLY: mg_mesh, multigrid_level, multigrid_base_pushcc
+USE multigrid, ONLY: multigrid_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
   oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat
@@ -104,8 +104,7 @@ USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_eval_all, oft_hcurl_set_level, &
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
 !---
-USE diagnostic, ONLY: tfluxfun, vec_energy, weighted_vec_energy, scal_energy, &
-  scal_int, field_probe
+USE diagnostic, ONLY: tfluxfun, vec_energy, weighted_vec_energy
 USE mhd_utils
 IMPLICIT NONE
 #include "local.h"
@@ -366,6 +365,7 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_rop => NULL()
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_cop => NULL()
 !$omp threadprivate(xmhd_lag_rop,xmhd_lag_gop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
+CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
 !---------------------------------------------------------------------------
 ! Exported interfaces
@@ -550,7 +550,8 @@ real(4) :: hist_r4(11)
 real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
-mesh=>mg_mesh%mesh
+mg_mesh=>ML_oft_lagrange%ml_mesh
+mesh=>oft_lagrange%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
 !---------------------------------------------------------------------------
@@ -1026,6 +1027,8 @@ logical :: rst
 real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
+mg_mesh=>ML_oft_lagrange%ml_mesh
+mesh=>oft_lagrange%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
 !---------------------------------------------------------------------------
@@ -2614,7 +2617,7 @@ neg_vols=0.d0
 ! Get local field values from source
 !---------------------------------------------------------------------------
 full_interp%u=>a
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 !---------------------------------------------------------------------------
 ! Get local field values from previous step if necessary
 !---------------------------------------------------------------------------
@@ -3268,7 +3271,7 @@ quad=>oft_lagrange%quad
 ! Get local field values from source
 !---------------------------------------------------------------------------
 full_interp%u=>a
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 NULLIFY(neqin)
 IF(ASSOCIATED(self%u0))THEN
   neq_present=.TRUE.
@@ -3540,7 +3543,7 @@ quad=>oft_lagrange%quad
 !---------------------------------------------------------------------------
 NULLIFY(neqin)
 full_interp%u=>u
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 IF(PRESENT(ueq))THEN
   neq_present=.TRUE.
   CALL ueq%get_local(neqin,7)
@@ -3708,11 +3711,11 @@ integer(i4), intent(in) :: level !< Desired level
 if(level>oft_lagrange_nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','xmhd_set_level',__FILE__)
 end if
-if(level<mg_mesh%mgdim)then
-  call multigrid_level(level)
-else
-  call multigrid_level(mg_mesh%mgdim)
-end if
+! if(level<mg_mesh%mgdim)then
+!   call multigrid_level(level)
+! else
+!   call multigrid_level(mg_mesh%mgdim)
+! end if
 CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
@@ -3737,13 +3740,15 @@ END SUBROUTINE xmhd_mfnk_update
 !!
 !! @note Should only be used via class \ref xmhd_interp
 !---------------------------------------------------------------------------
-subroutine xmhd_interp_setup(self)
+subroutine xmhd_interp_setup(self,mesh)
 CLASS(xmhd_interp), INTENT(inout) :: self !< Interpolation object
+class(oft_mesh), target, intent(inout) :: mesh
 INTEGER(i4) :: i
 REAL(r8), POINTER, DIMENSION(:) :: vtmp
 !---Set FEM link
 self%lag_rep=>oft_lagrange
 self%hcurl_rep=>oft_hcurl
+self%mesh=>mesh
 !---Get local slice
 IF(.NOT.ASSOCIATED(self%lf_loc))THEN
   ALLOCATE(self%lf_loc(self%lag_rep%ne,8))
@@ -3984,7 +3989,7 @@ IF(oft_debug_print(1))write(*,'(2X,A)')'Update xMHD Jacobians'
 !---------------------------------------------------------------------------
 NULLIFY(fullcc,fullcctmp)
 full_interp%u=>uin
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 !---------------------------------------------------------------------------
 ! Construct Jacobian on each sublevel
 !---------------------------------------------------------------------------
@@ -4006,7 +4011,7 @@ do i=levelin,minlev,-1
     !---Average on lowest level to cell centers
     if(oft_lagrange%order==1.AND.i>xmhd_minlev)then
       allocate(fullcc(nfields,mesh%nc))
-      call fem_avg_bcc(full_interp,fullcc,qorder,n=nfields)
+      call fem_avg_bcc(mesh,full_interp,fullcc,qorder,n=nfields)
     end if
 !---------------------------------------------------------------------------
 ! Level is on coarse mesh, average fields to coarser grid
@@ -4017,7 +4022,7 @@ do i=levelin,minlev,-1
     allocate(fullcctmp(26,mesh%nc))
     !---Transfer from distributed to local grid
     if(oft_lagrange_level==oft_lagrange_blevel)then
-      call multigrid_base_pushcc(fullcc,fullcctmp,26)
+      call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,26)
     !---Average values to over child cells
     else
       !$omp parallel do private(k)
@@ -4485,7 +4490,8 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,'(2X,A)')'Starting xMHD post-processing'
 END IF
-mesh=>mg_mesh%mesh
+mg_mesh=>ML_oft_lagrange%ml_mesh
+mesh=>oft_lagrange%mesh
 file_list="none"
 open(NEWUNIT=io_unit,FILE=oft_env%ifile)
 read(io_unit,xmhd_plot_options,IOSTAT=ierr)
@@ -4631,7 +4637,7 @@ IF(linear)THEN
   CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
-  CALL Jfield%setup
+  CALL Jfield%setup(mesh)
   CALL oft_lag_vproject(Jfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
@@ -4808,7 +4814,7 @@ DO
       !---Hyper-res aux field
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
-        CALL J2field%setup
+        CALL J2field%setup(mesh)
         CALL oft_lag_vproject(J2field,bp)
         CALL ap%set(0.d0)
         CALL lminv%apply(ap,bp)
@@ -4822,7 +4828,7 @@ DO
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
-      CALL Jfield%setup
+      CALL Jfield%setup(mesh)
       CALL oft_lag_vproject(Jfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
@@ -4836,7 +4842,7 @@ DO
       !---Divergence error
       IF(plot_div)THEN
         Bfield%u=>sub_fields%B
-        CALL Bfield%setup
+        CALL Bfield%setup(mesh)
         CALL oft_lag_project_div(Bfield,x)
         vals=>bvout(1,:)
         CALL x%get_local(vals)

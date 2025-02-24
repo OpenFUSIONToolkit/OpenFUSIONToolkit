@@ -17,7 +17,7 @@
 PROGRAM test_solver_xml
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -32,14 +32,15 @@ lag_interp, lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlo
 IMPLICIT NONE
 INTEGER(i4), PARAMETER :: order=4
 INTEGER(i4) :: io_unit,ierr
+TYPE(multigrid_mesh) :: mg_mesh
 #if defined(HAVE_XML)
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order)
 !---Run tests
 oft_env%pm=.FALSE.
 CALL test_lap

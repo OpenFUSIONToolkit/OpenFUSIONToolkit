@@ -16,7 +16,6 @@ USE oft_base
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, mesh_findcell2, cell_is_curved
 USE oft_io, ONLY: oft_bin_file
-USE multigrid, ONLY: mg_mesh
 USE fem_utils, ONLY: fem_interp, bfem_interp
 IMPLICIT NONE
 #include "local.h"
@@ -39,6 +38,7 @@ TYPE :: field_probe
   LOGICAL :: project = .FALSE. !< Project points to mesh boundary
   CHARACTER(LEN=OFT_PATH_SLEN) :: filename = '' !< History file name
   CLASS(fem_interp), POINTER :: B => NULL() !< Interpolation operator for field
+  CLASS(oft_mesh), POINTER :: mesh => NULL() !< Mesh containing field
   TYPE(oft_bin_file) :: hist_file
 CONTAINS
   !> Initialize point list and setup ownership
@@ -74,6 +74,7 @@ TYPE :: flux_probe
   REAL(r8) :: hcpv(3) = 0.d0 !< Normal vector for circular cut plane
   REAL(r8), POINTER, DIMENSION(:,:) :: norm => NULL() !< List of face normals
   CLASS(fem_interp), POINTER :: B => NULL() !< Interpolation operator for field
+  CLASS(oft_mesh), POINTER :: mesh => NULL() !< Mesh containing field
 CONTAINS
   !> Determine surface and setup mappings
   PROCEDURE :: setup => flux_probe_setup
@@ -123,15 +124,15 @@ ELSE IF(PRESENT(filename))THEN
 ELSE
   CALL oft_abort('Neither locations nor a probe file were specified.','field_probe_setup',__FILE__)
 END IF
-IF(self%project)CALL project_points_to_boundary(self%nprobes,self%pts)
+IF(self%project)CALL project_points_to_boundary(self%mesh,self%nprobes,self%pts)
 !---
 ALLOCATE(self%cells(self%nprobes),self%pts_log(4,self%nprobes))
 ALLOCATE(ptmp(self%nprobes),pown(self%nprobes),fout(self%nprobes))
 ptmp=-1
 self%cells=0
 DO i=1,self%nprobes
-  CALL mesh_findcell2(mg_mesh%mesh,self%cells(i),self%pts(:,i),4,f)
-  minf=mg_mesh%mesh%in_cell(f, self%tol)
+  CALL mesh_findcell2(self%mesh,self%cells(i),self%pts(:,i),4,f)
+  minf=self%mesh%in_cell(f, self%tol)
   ! fmin=MINVAL(f)
   ! fmax=MAXVAL(f)
   ! fout(i)=MAX(-fmin,fmax-1.d0)
@@ -188,7 +189,7 @@ ALLOCATE(vtmp(self%dim,self%nprobes))
 vtmp=0.d0
 DO i=1,self%nprobes
   IF(self%cells(i)>0)THEN
-    CALL mg_mesh%mesh%jacobian(self%cells(i),self%pts_log(:,i),goptmp,v)
+    CALL self%mesh%jacobian(self%cells(i),self%pts_log(:,i),goptmp,v)
     CALL self%B%interp(self%cells(i),self%pts_log(:,i),goptmp,vtmp(:,i))
   END IF
 END DO
@@ -262,7 +263,7 @@ INTEGER(i4), ALLOCATABLE :: fmap(:)
 REAL(r8) :: r(3),rcc(3),rdv(3)
 CLASS(oft_mesh), POINTER :: mesh
 !---
-mesh=>mg_mesh%mesh
+mesh=>self%mesh
 allocate(fmap(mesh%nf))
 CALL get_inverse_map(mesh%lbf,mesh%nbf,fmap,mesh%nf)
 self%nf=0
@@ -329,7 +330,7 @@ INTEGER(i4) :: i,j,m,fmap(3)
 REAL(r8) :: goptmp(3,4),v,bcc(3),f(4),reg
 TYPE(oft_quad_type) :: quad
 !---Set quadrature order
-CALL mg_mesh%mesh%bmesh%quad_rule(self%order,quad)
+CALL self%mesh%bmesh%quad_rule(self%order,quad)
 !---
 reg=0.d0
 DO i=1,self%nf
@@ -342,7 +343,7 @@ DO i=1,self%nf
   f=0.d0
   DO m=1,quad%np
     f(fmap)=quad%pts(:,m)
-    CALL mg_mesh%mesh%jacobian(self%cells(i),f,goptmp,v)
+    CALL self%mesh%jacobian(self%cells(i),f,goptmp,v)
     CALL self%B%interp(self%cells(i),f,goptmp,bcc)
     reg=reg+DOT_PRODUCT(bcc,self%norm(:,i))*quad%wts(m)
   END DO
@@ -362,7 +363,8 @@ END SUBROUTINE flux_probe_eval
 !! rule. This provides a relatively evenly spaced set of points over each boundary
 !! triangle.
 !---------------------------------------------------------------------------
-SUBROUTINE project_points_to_boundary(npts,pts,order)
+SUBROUTINE project_points_to_boundary(mesh,npts,pts,order)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 INTEGER(i4), INTENT(in) :: npts !< Number of points
 REAL(r8), INTENT(inout) :: pts(:,:) !< List of points [3,npts]
 INTEGER(i4), OPTIONAL, INTENT(in) :: order !< Order of 2D quadrature rule used (optional)
@@ -371,7 +373,6 @@ INTEGER(i4) :: i,j,k,l,m,ierr,quad_order
 REAL(r8) :: dtmp,ptmp(3)
 REAL(r8), ALLOCATABLE :: dist(:),distout(:),distin(:),ptstmp(:,:)
 TYPE(oft_quad_type) :: quad
-CLASS(oft_mesh), POINTER :: mesh
 #ifdef HAVE_MPI
 #ifdef OFT_MPI_F08
 TYPE(mpi_status) :: stat
@@ -380,7 +381,6 @@ INTEGER(i4) :: stat(MPI_STATUS_SIZE)
 #endif
 #endif
 !---
-mesh=>mg_mesh%mesh
 quad_order=4
 IF(PRESENT(order))quad_order=order
 CALL mesh%bmesh%quad_rule(quad_order,quad)
@@ -450,7 +450,8 @@ END SUBROUTINE project_points_to_boundary
 !! @note This requires your geometry is oriented with one of the principle axes
 !! as the axis of toroidal symmetry.
 !---------------------------------------------------------------------------
-FUNCTION tfluxfun(field,quad_order,axis) RESULT(tflux)
+FUNCTION tfluxfun(mesh,field,quad_order,axis) RESULT(tflux)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 INTEGER(i4), OPTIONAL, INTENT(in) :: axis !< Index of axis coordinate (optional)
@@ -467,14 +468,14 @@ IF(PRESENT(axis))raxis=axis
 IF(raxis==1)ptind(1)=3
 IF(raxis==2)ptind(2)=3
 !---Set quadrature order
-CALL mg_mesh%mesh%quad_rule(quad_order,quad)
+CALL mesh%quad_rule(quad_order,quad)
 tflux=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad,raxis,ptind) private(curved) reduction(+:tflux)
-DO i=1,mg_mesh%mesh%nc
-  curved=cell_is_curved(mg_mesh%mesh,i)
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
-    pt=mg_mesh%mesh%log2phys(i,quad%pts(:,m))
+    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    pt=mesh%log2phys(i,quad%pts(:,m))
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     bcc=cross_product(pt,bcc)
     tflux = tflux + bcc(raxis)/SUM(pt(ptind)**2)*vol*quad%wts(m)
@@ -490,7 +491,8 @@ END FUNCTION tfluxfun
 !
 !> Evaluate the volume integral of a scalar
 !---------------------------------------------------------------------------
-FUNCTION scal_int(field,quad_order) RESULT(energy)
+FUNCTION scal_int(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u dV \f$
@@ -500,13 +502,13 @@ REAL(r8) :: goptmp(3,4),vol,bcc(1)
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mg_mesh%mesh%quad_rule(quad_order,quad)
+CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
-DO i=1,mg_mesh%mesh%nc
-  curved=cell_is_curved(mg_mesh%mesh,i)
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     energy=energy+bcc(1)*vol*quad%wts(m)
   END DO
@@ -521,7 +523,8 @@ END FUNCTION scal_int
 !
 !> Evaluate the field energy of a scalar
 !---------------------------------------------------------------------------
-FUNCTION scal_energy(field,quad_order) RESULT(energy)
+FUNCTION scal_energy(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u^2 dV \f$
@@ -531,13 +534,13 @@ LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mg_mesh%mesh%quad_rule(quad_order,quad)
+CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
-DO i=1,mg_mesh%mesh%nc
-  curved=cell_is_curved(mg_mesh%mesh,i)
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     energy = energy + (bcc(1)**2)*vol*quad%wts(m)
   END DO
@@ -552,7 +555,8 @@ END FUNCTION scal_energy
 !
 !> Evaluate the field energy of a 3-vector
 !---------------------------------------------------------------------------
-FUNCTION vec_energy(field,quad_order) RESULT(energy)
+FUNCTION vec_energy(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int \left| \textbf{u} \right|^2 dV \f$
@@ -562,13 +566,13 @@ LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mg_mesh%mesh%quad_rule(quad_order,quad)
+CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
-DO i=1,mg_mesh%mesh%nc
-  curved=cell_is_curved(mg_mesh%mesh,i)
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     energy = energy + SUM(bcc**2)*vol*quad%wts(m)
   END DO
@@ -583,7 +587,8 @@ END FUNCTION vec_energy
 !
 !> Evaluate the field energy of a 3-vector with a scalar weight field
 !---------------------------------------------------------------------------
-FUNCTION weighted_vec_energy(field,weight,quad_order) RESULT(energy)
+FUNCTION weighted_vec_energy(mesh,field,weight,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field \f$ (u) \f$
 CLASS(fem_interp), INTENT(inout) :: weight !< Weight field \f$ (\omega) \f$
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
@@ -594,13 +599,13 @@ LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mg_mesh%mesh%quad_rule(quad_order,quad)
+CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do  default(firstprivate) shared(field,weight,quad) private(curved) reduction(+:energy)
-DO i=1,mg_mesh%mesh%nc
-  curved=cell_is_curved(mg_mesh%mesh,i)
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcc)
     CALL weight%interp(i,quad%pts(:,m),goptmp,wcc)
     energy = energy + wcc(1)*SUM(bcc**2)*vol*quad%wts(m)
@@ -616,17 +621,16 @@ END FUNCTION weighted_vec_energy
 !
 !> Evaluate the boundary integral of a scalar field
 !---------------------------------------------------------------------------
-FUNCTION scal_surf_int(field,quad_order) RESULT(energy)
+FUNCTION scal_surf_int(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u dS \f$
 INTEGER(i4) :: i,m,j,face,cell,ptmap(3)
 REAL(r8) :: vol,area,flog(4),etmp(1),sgop(3,3),vgop(3,4)
 TYPE(oft_quad_type) :: quad
-CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---Setup
-mesh=>mg_mesh%mesh
 CALL mesh%bmesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
@@ -650,7 +654,8 @@ END FUNCTION scal_surf_int
 !---------------------------------------------------------------------------
 !> Evaluate the boundary integral of a boundary scalar field
 !---------------------------------------------------------------------------
-FUNCTION bscal_surf_int(field,quad_order,reg_mask) RESULT(energy)
+FUNCTION bscal_surf_int(mesh,field,quad_order,reg_mask) RESULT(energy)
+CLASS(oft_bmesh), INTENT(inout) :: mesh
 CLASS(bfem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 INTEGER(i4), OPTIONAL, INTENT(in) :: reg_mask !< Region to integrate over
@@ -660,16 +665,16 @@ REAL(r8) :: area,etmp(1),sgop(3,3)
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL mg_mesh%smesh%quad_rule(quad_order,quad)
+CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad,reg_mask) reduction(+:energy)
-do i=1,mg_mesh%smesh%nc
+do i=1,mesh%nc
   IF(PRESENT(reg_mask))THEN
-    IF(mg_mesh%smesh%reg(i)/=reg_mask)CYCLE
+    IF(mesh%reg(i)/=reg_mask)CYCLE
   END IF
   !---Loop over quadrature points
   do m=1,quad%np
-    call mg_mesh%smesh%jacobian(i,quad%pts(:,m),sgop,area)
+    call mesh%jacobian(i,quad%pts(:,m),sgop,area)
     call field%interp(i,quad%pts(:,m),sgop,etmp)
     energy = energy + etmp(1)*area*quad%wts(m)
   end do
@@ -684,17 +689,16 @@ END FUNCTION bscal_surf_int
 !
 !> Evaluate the boundary flux of a vector field
 !---------------------------------------------------------------------------
-FUNCTION vec_surf_int(field,quad_order) RESULT(energy)
+FUNCTION vec_surf_int(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int \textbf{u} \cdot \textbf{dS} \f$
 INTEGER(i4) :: i,m,j,face,cell,ptmap(3)
 REAL(r8) :: vol,area,flog(4),norm(3),etmp(3),sgop(3,3),vgop(3,4)
 TYPE(oft_quad_type) :: quad
-CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---Setup
-mesh=>mg_mesh%mesh
 CALL mesh%bmesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)

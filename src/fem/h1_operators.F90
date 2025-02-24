@@ -28,7 +28,6 @@ USE oft_sort, ONLY: sort_array
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_trimesh_type, ONLY: oft_trimesh
-USE multigrid, ONLY: mg_mesh
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
   oft_graph_ptr
 USE oft_solver_base, ONLY: oft_solver, oft_orthog, oft_bc_proto
@@ -164,8 +163,9 @@ end subroutine h1_mloptions
 !!
 !! @note Should only be used via class \ref oft_h1_rinterp or children
 !---------------------------------------------------------------------------
-subroutine h1_rinterp_setup(self)
+subroutine h1_rinterp_setup(self,mesh)
 class(oft_h1_rinterp), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
     CLASS IS(oft_h1_rinterp)
@@ -194,6 +194,8 @@ ELSE
   self%cache_grad=0.d0
   self%cache_curl=0.d0
 END IF
+IF((mesh%np/=self%hgrad_rep%mesh%np))CALL oft_abort("Mesh mismatch","h1_rinterp_setup",__FILE__)
+self%mesh=>mesh
 end subroutine h1_rinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
@@ -425,7 +427,7 @@ DEBUG_STACK_PUSH
 NULLIFY(agrad)
 CALL a%get_local(agrad,2)
 ! Apply operator
-do i=1,mg_mesh%mesh%np
+do i=1,oft_hgrad%mesh%np
   agrad(i)=0.d0
 end do
 CALL a%restore_local(agrad,2)
@@ -481,7 +483,7 @@ class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 tol=1.d-8
 IF(PRESENT(new_tol))tol=new_tol
-mesh=>mg_mesh%mesh
+mesh=>oft_hcurl%mesh
 !---Get local values
 NULLIFY(acurl)
 CALL a%get_local(acurl,1)
@@ -524,7 +526,7 @@ class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 tol=1.d-8
 IF(PRESENT(new_tol))tol=new_tol
-mesh=>mg_mesh%mesh
+mesh=>oft_hcurl%mesh
 !---Get local values
 NULLIFY(acurl)
 CALL a%get_local(acurl,1)
@@ -568,7 +570,7 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc,bcurl,bgrad)
 zero_boundary=.FALSE.
 IF(PRESENT(keep_boundary))zero_boundary=keep_boundary
-mesh=>mg_mesh%mesh
+mesh=>oft_hcurl%mesh
 !---Cast to H1 type and get aliases
 CALL a%get_local(aloc)
 !---Zero output and get aliases
@@ -613,7 +615,7 @@ real(r8) :: reg
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 NULLIFY(acurl,agrad,bloc)
-mesh=>mg_mesh%mesh
+mesh=>oft_hcurl%mesh
 !---Cast to H1 type and get aliases
 CALL a%get_local(acurl,1)
 CALL a%get_local(agrad,2)
@@ -1036,8 +1038,8 @@ REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: rop_curl,rop_grad
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_bmesh), POINTER :: smesh
 DEBUG_STACK_PUSH
-mesh=>mg_mesh%mesh
-smesh=>mg_mesh%smesh
+mesh=>oft_hcurl%mesh
+smesh=>oft_hcurl%mesh%bmesh
 !---Initialize vectors to zero
 NULLIFY(xcurl,xgrad)
 call x%set(0.d0)
@@ -1268,11 +1270,11 @@ real(r8) :: f(4),incr,val,d(3),h_rop(3),goptmp(3,4),v,mop(1)
 type(oft_graph_ptr), pointer :: graphs(:,:)
 DEBUG_STACK_PUSH
 !---
-if(mg_mesh%level<1)then
+if(ML_oft_hgrad%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','hgrad_ginterpmatrix',__FILE__)
 end if
-mesh=>mg_mesh%mesh
-cmesh=>mg_mesh%meshes(mg_mesh%level-1)
+mesh=>ML_oft_hgrad%ml_mesh%mesh
+cmesh=>ML_oft_hgrad%ml_mesh%meshes(ML_oft_hgrad%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "hgrad_ginterpmatrix", __FILE__)
 if(oft_hgrad%order/=2)then
@@ -1281,10 +1283,10 @@ end if
 !---
 ops=>oft_h1_ops
 hgrad_cors=>ML_oft_hgrad%levels(oft_h1_level-1)%fe
-lede=>mg_mesh%inter(mg_mesh%level-1)%lede
-lfde=>mg_mesh%inter(mg_mesh%level-1)%lfde
-lcdg=>mg_mesh%inter(mg_mesh%level-1)%lcdg
-lcde=>mg_mesh%inter(mg_mesh%level-1)%lcde
+lede=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%level-1)%lede
+lfde=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%level-1)%lfde
+lcdg=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%level-1)%lcdg
+lcde=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%level-1)%lcde
 ALLOCATE(ML_oft_hgrad%interp_graphs(ML_oft_hgrad%level)%g)
 ops%hgrad_interp_graph=>ML_oft_hgrad%interp_graphs(ML_oft_hgrad%level)%g
 !---Setup matrix sizes
@@ -1514,7 +1516,7 @@ real(r8), pointer, dimension(:) :: array_c,array_f
 DEBUG_STACK_PUSH
 !---
 NULLIFY(array_c,array_f)
-lbege=>mg_mesh%inter(mg_mesh%nbase)%lbege
+lbege=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%nbase)%lbege
 CALL acors%get_local(array_c,1)
 CALL afine%get_local(array_f,1)
 !$omp parallel do
@@ -1524,7 +1526,7 @@ end do
 CALL afine%restore_local(array_f,1)
 DEALLOCATE(array_c,array_f)
 !---
-lptmp=>mg_mesh%meshes(mg_mesh%nbase+1)%base%lp
+lptmp=>ML_oft_hgrad%ml_mesh%meshes(ML_oft_hgrad%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c,2)
 CALL afine%get_local(array_f,2)
 !$omp parallel do
@@ -1574,8 +1576,8 @@ real(r8), pointer, dimension(:) :: alias,array_c,array_f
 DEBUG_STACK_PUSH
 !---
 NULLIFY(array_c,array_f)
-lbege=>mg_mesh%inter(mg_mesh%nbase)%lbege
-lptmp=>mg_mesh%meshes(mg_mesh%nbase+1)%base%lp
+lbege=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%nbase)%lbege
+lptmp=>ML_oft_hgrad%ml_mesh%meshes(ML_oft_hgrad%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 !---
@@ -1786,7 +1788,7 @@ ALLOCATE(Bn(2,quad%np))
 ALLOCATE(j_hcurl(oft_hcurl%nce),j_hgrad(oft_hgrad%nce))
 ALLOCATE(rop_curl(3,oft_hcurl%nce),rop_grad(3,oft_hgrad%nce))
 !---
-mesh=>mg_mesh%mesh
+mesh=>oft_hcurl%mesh
 mesh_tmp%np=3
 mesh_tmp%nc=1
 ALLOCATE(mesh_tmp%lc(3,1),mesh_tmp%r(3,3))

@@ -22,7 +22,7 @@ PROGRAM oft_mesh_check
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !--Grid
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
@@ -39,6 +39,7 @@ USE oft_h1_operators, ONLY: h1_mop_eigs
 IMPLICIT NONE
 INTEGER(i4) :: ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: order=1
 INTEGER(i4) :: minlev=1
 NAMELIST/oft_mesh_check_options/order,minlev
@@ -53,7 +54,7 @@ CLOSE(io_unit)
 !---------------------------------------------------------------------------
 ! Setup grid
 !---------------------------------------------------------------------------
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Output mesh
 !---------------------------------------------------------------------------
@@ -64,13 +65,13 @@ CALL mg_mesh%mesh%setup_io(plot_file,ABS(order))
 !---------------------------------------------------------------------------
 IF(order>0)THEN
   !---Lagrange
-  CALL oft_lag_setup(order,minlev)
+  CALL oft_lag_setup(mg_mesh,order,minlev)
   !---H1(Curl) subspace
-  CALL oft_hcurl_setup(order,minlev)
+  CALL oft_hcurl_setup(mg_mesh,order,minlev)
   !---H1(Grad) subspace
-  CALL oft_h0_setup(order+1,minlev)
+  CALL oft_h0_setup(mg_mesh,order+1,minlev)
   !---H1 space
-  CALL oft_h1_setup(order,minlev)
+  CALL oft_h1_setup(mg_mesh,order,minlev)
 !---------------------------------------------------------------------------
 ! Compute smoother coefficients
 !---------------------------------------------------------------------------

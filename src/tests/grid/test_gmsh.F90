@@ -19,15 +19,16 @@ USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_native, ONLY: mesh_native_id
 USE oft_mesh_gmsh, ONLY: mesh_gmsh_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 IMPLICIT NONE
 INTEGER(i4) :: io_unit
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(ALL(mg_mesh%mesh%cad_type/=[mesh_gmsh_id,mesh_native_id]))CALL oft_abort('Wrong mesh type.','main',__FILE__)
 CALL plot_file%setup("Test")
 CALL mg_mesh%mesh%setup_io(plot_file,1)

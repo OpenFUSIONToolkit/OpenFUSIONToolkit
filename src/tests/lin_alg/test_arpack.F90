@@ -18,7 +18,7 @@ PROGRAM test_arpack
 USE oft_base
 !--Grid
 USE oft_mesh_cube, ONLY: mesh_cube_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -31,6 +31,7 @@ USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, lag_zerob
 IMPLICIT NONE
 INTEGER(i4) :: iounit,ierr
+TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: order=1
 INTEGER(i4) :: minlev=1
 NAMELIST/test_arpack_options/order,minlev
@@ -43,13 +44,13 @@ OPEN(NEWUNIT=iounit,FILE=oft_env%ifile)
 READ(iounit,test_arpack_options,IOSTAT=ierr)
 CLOSE(iounit)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---------------------------------------------------------------------------
 ! Run tests
 !---------------------------------------------------------------------------
 oft_env%pm=.FALSE.
-CALL oft_lag_setup(order,minlev)
+CALL oft_lag_setup(mg_mesh,order,minlev)
 CALL test_lop_eig()
 !---Finalize enviroment
 CALL oft_finalize

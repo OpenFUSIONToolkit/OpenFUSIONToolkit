@@ -25,7 +25,7 @@ PROGRAM example1
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -59,6 +59,7 @@ INTEGER(i4), PARAMETER :: order = 3
 REAL(r8) :: lambda
 REAL(r8), POINTER, DIMENSION(:) :: vtmp => NULL()
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !!\subsection doc_ex1_code_init Initialize Enviroment
 !!
 !!This call setups of the basics OFT run environment, including initializing MPI and PETSc if
@@ -68,7 +69,7 @@ CALL oft_init
 !!
 !!This call constructs the grid levels through heirarchical refinement,
 !!\ref multigrid_build::multigrid_construct "multigrid_construct".
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !!\subsection doc_ex1_code_hdf5 Create Output Files
 !!
 !!This call sets up metadata files for I/O and saves the mesh for use with solution fields output
@@ -83,7 +84,7 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!and polynomial level. This create element interaction lists as well as boundary and seam information.
 !!All FE index fields are encapsulated in the \ref fem_base::oft_fem_type "oft_fem_type" structure,
 !!see \ref fem_base::fem_setup "fem_setup".
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order)
 !!\subsection doc_ex1_code_ops Setup linear system
 !!
 !!Solving the Helmholtz eigensystem requires the operators coresponding the general eigenvalue problem

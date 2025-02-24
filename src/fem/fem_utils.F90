@@ -14,10 +14,9 @@
 module fem_utils
 USE oft_base
 USE oft_quadrature
-USE oft_mesh_type, ONLY: cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_mesh_local, ONLY: mesh_local_partition
 USE oft_stitching, ONLY: oft_global_stitch
-USE multigrid, ONLY: mg_mesh
 USE oft_la_base, ONLY: oft_matrix
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type
 IMPLICIT NONE
@@ -28,6 +27,7 @@ IMPLICIT NONE
 type, abstract :: fem_interp
   integer(i4) :: dim = 0 !< Dimension of field
   class(fem_interp), pointer :: parent => NULL() !< Parent interpolator
+  class(oft_mesh), pointer :: mesh => NULL() !< Mesh for interpolation
 contains
   !> Reconstruct field
   procedure(oft_fem_interp), deferred :: interp
@@ -56,6 +56,7 @@ end interface
 type, abstract :: bfem_interp
   integer(i4) :: dim = 0 !< Dimension of field
   class(bfem_interp), pointer :: parent => NULL() !< Parent interpolator
+  class(oft_bmesh), pointer :: mesh => NULL() !< Mesh for interpolation
 contains
   !> Reconstruct field
   procedure(oft_bfem_interp), deferred :: interp
@@ -224,8 +225,10 @@ end subroutine tensor_dot_interp_apply
 !!
 !! @note Should only be used via class @ref tensor_dot_interp or children
 !---------------------------------------------------------------------------
-subroutine tensor_dot_interp_setup(self)
+subroutine tensor_dot_interp_setup(self,mesh)
 class(tensor_dot_interp), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
+self%mesh=>mesh
 IF(.NOT.ASSOCIATED(self%bvals))ALLOCATE(self%bvals(3*self%bshape))
 end subroutine tensor_dot_interp_setup
 !---------------------------------------------------------------------------
@@ -240,8 +243,10 @@ end subroutine tensor_dot_interp_delete
 !---------------------------------------------------------------------------
 !> Dummy setup function
 !---------------------------------------------------------------------------
-subroutine fem_interp_setup(self)
+subroutine fem_interp_setup(self,mesh)
 class(fem_interp), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
+self%mesh=>mesh
 call oft_warn('Setup called on general interpolator, this may indicate an error.')
 end subroutine fem_interp_setup
 !---------------------------------------------------------------------------
@@ -254,8 +259,10 @@ end subroutine fem_interp_delete
 !---------------------------------------------------------------------------
 !> Dummy setup function
 !---------------------------------------------------------------------------
-subroutine bfem_interp_setup(self)
+subroutine bfem_interp_setup(self,mesh)
 class(bfem_interp), intent(inout) :: self
+class(oft_bmesh), target, intent(inout) :: mesh
+self%mesh=>mesh
 call oft_warn('Setup called on general interpolator, this may indicate an error.')
 end subroutine bfem_interp_setup
 !---------------------------------------------------------------------------
@@ -268,7 +275,8 @@ end subroutine bfem_interp_delete
 !---------------------------------------------------------------------------
 !> Average a FE interpolator field to cell centers, by volume averaging
 !---------------------------------------------------------------------------
-subroutine fem_avg_bcc(field,bcc,order,n)
+subroutine fem_avg_bcc(mesh,field,bcc,order,n)
+CLASS(oft_mesh), INTENT(in) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Source field intepolator
 REAL(r8), INTENT(inout) :: bcc(:,:) !< Averaged field over each cell
 INTEGER(i4), INTENT(in) :: order !< Desired integration order
@@ -281,18 +289,18 @@ TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 nf=1
 IF(PRESENT(n))nf=n
-CALL mg_mesh%mesh%quad_rule(order,quad)
+CALL mesh%quad_rule(order,quad)
 !---Construct operators
 !$omp parallel private(dets,curved,goptmp,m,v,bcctmp)
 ALLOCATE(dets(quad%np),bcctmp(nf))
 !$omp do
-DO i=1,mg_mesh%mesh%nc
+DO i=1,mesh%nc
   bcc(:,i)=0.d0
   ! Get reconstructed operators
-  curved=cell_is_curved(mg_mesh%mesh,i)
-  IF(.NOT.curved)CALL mg_mesh%mesh%jacobian(i,quad%pts(:,1),goptmp,v)
+  curved=cell_is_curved(mesh,i)
+  IF(.NOT.curved)CALL mesh%jacobian(i,quad%pts(:,1),goptmp,v)
   DO m=1,quad%np
-    IF(curved)CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    IF(curved)CALL mesh%jacobian(i,quad%pts(:,m),goptmp,v)
     dets(m)=v*quad%wts(m)
     CALL field%interp(i,quad%pts(:,m),goptmp,bcctmp)
     bcc(:,i)=bcc(:,i)+bcctmp*dets(m)

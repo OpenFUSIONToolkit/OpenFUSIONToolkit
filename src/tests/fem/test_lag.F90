@@ -18,7 +18,7 @@ PROGRAM test_lag
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_cube, ONLY: mesh_cube_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, &
   oft_lag_set_level
@@ -31,6 +31,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 IMPLICIT NONE
 INTEGER(i4) :: minlev,ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: order
 LOGICAL :: mg_test
 NAMELIST/test_lag_options/order,mg_test
@@ -41,12 +42,12 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_lag_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 minlev=2
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
-CALL oft_lag_setup(order,minlev)
+CALL oft_lag_setup(mg_mesh,order,minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp
   CALL lag_mloptions

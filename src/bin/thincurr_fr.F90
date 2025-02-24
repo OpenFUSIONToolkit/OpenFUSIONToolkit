@@ -27,7 +27,7 @@ USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
 USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
 USE oft_la_base, ONLY: oft_vector
@@ -40,6 +40,7 @@ IMPLICIT NONE
 INTEGER(4) :: nsensors = 0
 TYPE(tw_type), TARGET :: tw_sim,mode_source
 TYPE(tw_sensors) :: sensors
+TYPE(multigrid_mesh) :: mg_mesh
 !
 INTEGER(4) :: i,n,ierr,io_unit
 REAL(8), POINTER, contiguous, DIMENSION(:,:) :: mode_driver,fr_driver,fr_sensor,driver_tmp
@@ -74,7 +75,7 @@ if(ierr<0)call oft_abort('No thin-wall options found in input file.', &
 if(ierr>0)call oft_abort('Error parsing thin-wall options in input file.', &
   'thincurr_fr',__FILE__)
 !---Setup mesh
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 ! ALLOCATE(mg_mesh)
 ! mg_mesh%mgmax=1
 ! mg_mesh%nbase=1

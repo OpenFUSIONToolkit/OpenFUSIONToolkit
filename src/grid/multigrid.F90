@@ -57,12 +57,13 @@ end type multigrid_mesh
 !---Global variables
 integer(i4), parameter :: mgdim=10 !< Dimension of MG mesh (decrecated)
 character(4) :: clevel(mgdim)=(/'.L01','.L02','.L03','.L04','.L05','.L06','.L07','.L08','.L09','.L10'/)
-type(multigrid_mesh), pointer :: mg_mesh => NULL() !< Global ML Mesh
+! type(multigrid_mesh), pointer :: mg_mesh => NULL() !< Global ML Mesh
 contains
 !---------------------------------------------------------------------------
 !> Set mesh level in ML mesh
 !---------------------------------------------------------------------------
-subroutine multigrid_level(level)
+subroutine multigrid_level(mg_mesh,level)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: level !< Desired mesh level
 DEBUG_STACK_PUSH
 if(level<0.OR.level>mg_mesh%mgmax)call oft_abort('Requested invalid mesh level.','multigrid_level',__FILE__)
@@ -89,7 +90,8 @@ end subroutine multigrid_level
 !! - Add new points at the center of each edge
 !! - Update cell lists
 !---------------------------------------------------------------------------
-subroutine multigrid_refine
+subroutine multigrid_refine(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,k,reg_tmp,neskip,nfskip,ncskip
 integer(i4) :: lccors(4),lecors(2),lcecors(6),lfcors(3),lfecors(3)
 real(r8) :: diag(3)
@@ -132,7 +134,8 @@ end subroutine multigrid_refine
 !------------------------------------------------------------------------------
 !> Adjust points to CAD boundary and propogate CAD linkage
 !------------------------------------------------------------------------------
-subroutine multigrid_reffix_ho
+subroutine multigrid_reffix_ho(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,nfdf,ncde,ncdf,fc,cc
 real(r8) :: f1(4),f2(4),ftmp(4),pt(3)
 class(oft_mesh), pointer :: mesh
@@ -553,7 +556,8 @@ end subroutine multigrid_reffix_ho
 !------------------------------------------------------------------------------
 !> Adjust points to CAD boundary and propogate CAD linkage
 !------------------------------------------------------------------------------
-subroutine multigrid_reffix_ho_surf
+subroutine multigrid_reffix_ho_surf(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,ncde,cc
 real(r8) :: f1(4),f2(4),ftmp(4)
 class(oft_mesh), pointer :: mesh
@@ -749,7 +753,8 @@ end subroutine multigrid_reffix_ho_surf
 !! - Add new points at the center of each edge
 !! - Update face lists
 !---------------------------------------------------------------------------
-subroutine multigrid_brefine
+subroutine multigrid_brefine(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,reg_tmp,lecors(2),lfcors(3),lfecors(3)
 class(oft_bmesh), pointer :: cmesh,fmesh
 DEBUG_STACK_PUSH
@@ -828,7 +833,8 @@ end subroutine multigrid_brefine
 !> Generate a transfer level for local to global mapping.
 !! - Populate global indexing for grid block
 !---------------------------------------------------------------------------
-subroutine multigrid_hybrid_base
+subroutine multigrid_hybrid_base(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,e(2),eind,find,f(4)
 integer(i4), allocatable :: lptmp(:)
 integer(i4), allocatable :: g_fmap(:),l_fmap(:)
@@ -891,7 +897,8 @@ end subroutine multigrid_hybrid_base
 !> Generate a transfer level for local to global mapping for the boundary mesh.
 !! - Populate global indexing for grid block
 !---------------------------------------------------------------------------
-subroutine multigrid_hybrid_bmesh
+subroutine multigrid_hybrid_bmesh(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,e(2),eind
 integer(i4), ALLOCATABLE :: lptmp(:),letmp(:),lftmp(:)
 class(oft_mesh), pointer :: lmesh_tet,gmesh_tet
@@ -1007,7 +1014,8 @@ end subroutine multigrid_hybrid_bmesh
 !> Transfer a cell based field from the distributed to base level
 !! - Synchronize cell variables to the base mesh
 !---------------------------------------------------------------------------
-subroutine multigrid_base_pushcc(bccl,bcc,n)
+subroutine multigrid_base_pushcc(mg_mesh,bccl,bcc,n)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8), intent(in) :: bccl(:,:) !< Cell field on local domain [n,local%nc]
 real(r8), intent(out) :: bcc(:,:) !< Cell field on base mesh [n,base%nc]
 integer(i4), intent(in) :: n !< Number of values per cell
@@ -1038,7 +1046,8 @@ end subroutine multigrid_base_pushcc
 !> Transfer a cell based field from the base level to the distributed mesh
 !! - Sample local cell variables from the base level
 !---------------------------------------------------------------------------
-subroutine multigrid_base_popcc(bccg,bcc,n)
+subroutine multigrid_base_popcc(mg_mesh,bccg,bcc,n)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8), intent(in) :: bccg(:,:) !< Cell field on base mesh [n,base%nc]
 real(r8), intent(out) :: bcc(:,:) !< Cell field on local domain [n,local%nc]
 integer(i4), intent(in) :: n !< Number of values per cell
@@ -1060,7 +1069,8 @@ end subroutine multigrid_base_popcc
 !! - Decompose mesh
 !! - Setup distributed meshes
 !---------------------------------------------------------------------------
-subroutine multigrid_reset
+subroutine multigrid_reset(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,level,io_unit
 NULLIFY(mg_mesh%mesh,mg_mesh%smesh)
 IF(ASSOCIATED(mg_mesh%smeshes))THEN
@@ -1083,7 +1093,7 @@ IF(ASSOCIATED(mg_mesh%inter))THEN
     CALL destory_inter(mg_mesh%inter(i))
   END DO
 END IF
-DEALLOCATE(mg_mesh)
+! DEALLOCATE(mg_mesh)
 !---Reset global environment info (needs to be moved to a mesh-specific object)
 oft_env%nbase = -1
 oft_env%nproc_con = 0
@@ -1106,7 +1116,8 @@ end subroutine multigrid_reset
 !> Update global indices following refinement
 !! - Populate new indices using consistent mapping
 !---------------------------------------------------------------------------
-subroutine tetmesh_mg_globals(self,fmesh)
+subroutine tetmesh_mg_globals(mg_mesh,self,fmesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 CLASS(oft_mesh), INTENT(in) :: self
 CLASS(oft_mesh), INTENT(inout) :: fmesh
 integer(i4), pointer :: lfde(:,:),lede(:,:),lfdf(:,:),lcde(:,:),lcdf(:,:),lcdg(:)
@@ -1261,7 +1272,7 @@ enddo
 !
 ! Boundary mesh
 !
-CALL trimesh_mg_globals(self%bmesh,fmesh%bmesh)
+CALL trimesh_mg_globals(mg_mesh,self%bmesh,fmesh%bmesh)
 !---Get edge and face boundary mapping
 allocate(fmap(fmesh%nf))
 CALL get_inverse_map(fmesh%lbf,fmesh%nbf,fmap,fmesh%nf) ! Get face map
@@ -1280,7 +1291,8 @@ end subroutine tetmesh_mg_globals
 !> Update global indices following refinement.
 !! - Populate new indices using consistent mapping
 !---------------------------------------------------------------------------
-subroutine trimesh_mg_globals(self,fmesh)
+subroutine trimesh_mg_globals(mg_mesh,self,fmesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 CLASS(oft_bmesh), INTENT(in) :: self
 CLASS(oft_bmesh), INTENT(inout) :: fmesh
 integer(i4), pointer :: lede(:,:),lcde(:,:)
@@ -1358,7 +1370,8 @@ end subroutine trimesh_mg_globals
 !> Update global indices following refinement.
 !! - Populate new indices using consistent mapping
 !---------------------------------------------------------------------------
-subroutine hexmesh_mg_globals(self,fmesh)
+subroutine hexmesh_mg_globals(mg_mesh,self,fmesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 CLASS(oft_mesh), INTENT(in) :: self
 CLASS(oft_mesh), INTENT(inout) :: fmesh
 integer(i4), pointer :: lfde(:,:),lede(:,:),lfdf(:,:),lcde(:,:),lcdf(:,:)
@@ -1504,7 +1517,7 @@ enddo
 !
 ! Boundary mesh
 !
-CALL quadmesh_mg_globals(self%bmesh,fmesh%bmesh)
+CALL quadmesh_mg_globals(mg_mesh,self%bmesh,fmesh%bmesh)
 !---Get edge and face boundary mapping
 allocate(fmap(fmesh%nf))
 CALL get_inverse_map(fmesh%lbf,fmesh%nbf,fmap,fmesh%nf) ! Get face map
@@ -1523,7 +1536,8 @@ end subroutine hexmesh_mg_globals
 !> Update global indices following refinement.
 !! - Populate new indices using consistent mapping
 !---------------------------------------------------------------------------
-subroutine quadmesh_mg_globals(self,fmesh)
+subroutine quadmesh_mg_globals(mg_mesh,self,fmesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 CLASS(oft_bmesh), INTENT(in) :: self
 CLASS(oft_bmesh), INTENT(inout) :: fmesh
 integer(i4), pointer :: lede(:,:),lcde(:,:)

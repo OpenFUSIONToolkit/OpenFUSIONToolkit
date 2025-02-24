@@ -23,7 +23,7 @@ USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_mesh_local_util, ONLY: mesh_local_findedge, mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 !---End include modules
 IMPLICIT NONE
 #include "local.h"
@@ -97,7 +97,8 @@ contains
 !! - Read in mesh points and cells
 !! - Read in surface IDs for CAD edges and faces
 !------------------------------------------------------------------------------
-subroutine mesh_t3d_load
+subroutine mesh_t3d_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,id,lenreflag,ierr,io_unit
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
@@ -153,7 +154,7 @@ DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_t3d_id,.TRUE.)
   mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
 END DO
-CALL multigrid_level(1)
+CALL multigrid_level(mg_mesh,1)
 mesh=>mg_mesh%meshes(1)
 smesh=>mg_mesh%smeshes(1)
 IF(.NOT.oft_env%head_proc)THEN
@@ -221,7 +222,8 @@ end subroutine mesh_t3d_load
 !! - Read in mesh points and cells
 !! - Read in surface IDs for CAD edges and faces
 !------------------------------------------------------------------------------
-subroutine smesh_t3d_load
+subroutine smesh_t3d_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,id,lenreflag,ierr,io_unit
 class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
@@ -273,7 +275,7 @@ allocate(oft_trimesh::mg_mesh%smeshes(mg_mesh%mgdim))
 DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_t3d_id,.FALSE.)
 END DO
-CALL multigrid_level(1)
+CALL multigrid_level(mg_mesh,1)
 smesh=>mg_mesh%smeshes(1)
 IF(.NOT.oft_env%head_proc)THEN
   DEBUG_STACK_POP
@@ -487,7 +489,8 @@ end subroutine mesh_t3d_geom
 !------------------------------------------------------------------------------
 !> Synchronize T3D geometry information.
 !------------------------------------------------------------------------------
-subroutine mesh_t3d_cadsync
+subroutine mesh_t3d_cadsync(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: tmp(11),ierr
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2X,A)')'Syncing T3D geometry'
@@ -805,7 +808,8 @@ end subroutine mesh_t3d_surfconst
 !------------------------------------------------------------------------------
 !> Adjust boundary points to CAD boundary.
 !------------------------------------------------------------------------------
-subroutine mesh_t3d_reffix
+subroutine mesh_t3d_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8) :: pt(3)
 integer(i4) :: i,ierr,j,k,ind,ed,ep(2),fp(3),npcors,nerr
 integer(i4), pointer :: tmp(:)
@@ -958,15 +962,17 @@ end subroutine mesh_t3d_reffix
 !------------------------------------------------------------------------------
 !> Add quadratic mesh node points using CAD model
 !------------------------------------------------------------------------------
-subroutine mesh_t3d_add_quad(mesh)
-class(oft_mesh), intent(inout) :: mesh
+subroutine mesh_t3d_add_quad(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8) :: pt(3)
 integer(i4) :: i,j,k,ierr,nerr
 integer(i4), allocatable :: emap(:)
+class(oft_mesh), pointer :: mesh
 CHARACTER(LEN=60) :: error_str
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,*)'Setting T3D quadratic nodes'
 !---Get CAD representation alias
+mesh=>mg_mesh%mesh
 cad_rep=>ML_cad_rep(mg_mesh%level)
 cad_link=>ML_cad_link(mg_mesh%level)
 !---Get edge boundary mapping

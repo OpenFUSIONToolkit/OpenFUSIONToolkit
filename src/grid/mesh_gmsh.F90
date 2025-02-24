@@ -27,7 +27,7 @@ USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_mesh_local, ONLY: bmesh_local_init
 USE oft_mesh_local_util, ONLY: mesh_local_findedge, mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 !---End include modules
 IMPLICIT NONE
 #include "local.h"
@@ -58,7 +58,8 @@ contains
 !! - Read in GMSH options from input file
 !! - Read in mesh points and cells
 !------------------------------------------------------------------------------
-subroutine mesh_gmsh_load
+subroutine mesh_gmsh_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,ed,nptmp,id,ierr,io_unit
 integer(i4) :: np_cad,ne_cad,nf_cad,nep,nfp,ncp
 integer(i4), allocatable, dimension(:) :: cad_ptmp,ptmp,ctmp
@@ -96,7 +97,7 @@ DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_gmsh_id,.TRUE.)
   mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
 END DO
-CALL multigrid_level(1)
+CALL multigrid_level(mg_mesh,1)
 mesh=>mg_mesh%meshes(1)
 smesh=>mg_mesh%smeshes(1)
 !---Setup geometry information
@@ -277,7 +278,8 @@ end subroutine mesh_gmsh_hobase
 !------------------------------------------------------------------------------
 !> Adjust boundary points to CAD boundary.
 !------------------------------------------------------------------------------
-subroutine mesh_gmsh_reffix
+subroutine mesh_gmsh_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8) :: pt(3)
 integer(i4) :: i,ierr,j,k,ind,ed,fp(3),npcors,edge,face
 integer(i4), pointer :: tmp(:)
@@ -366,13 +368,15 @@ end subroutine mesh_gmsh_reffix
 !------------------------------------------------------------------------------
 !> Add quadratic mesh node points using CAD model
 !------------------------------------------------------------------------------
-subroutine mesh_gmsh_add_quad(mesh)
-class(oft_mesh), intent(inout) :: mesh
+subroutine mesh_gmsh_add_quad(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+class(oft_mesh), pointer :: mesh
 real(r8) :: pt(3)
 integer(i4) :: i,ierr,j,k,edge,face
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,*)'Setting GMSH quadratic nodes'
 !---Get CAD representation alias
+mesh=>mg_mesh%mesh
 cad_link=>ML_cad_link(mg_mesh%level)
 !---Locate edge end points and place daughter node
 do i=1,mesh%ne

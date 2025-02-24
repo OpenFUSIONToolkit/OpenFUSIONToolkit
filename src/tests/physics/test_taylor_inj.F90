@@ -14,7 +14,7 @@
 PROGRAM test_taylor_inj
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -39,6 +39,7 @@ INTEGER(i4), PARAMETER :: nh = 1
 REAL(r8) :: fluxes(nh),hcpc(3,nh),hcpv(3,nh),energy(nh)
 CHARACTER(LEN=taylor_tag_size) :: htags(nh)
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: order=1
 LOGICAL :: mg_test=.FALSE.
 NAMELIST/test_taylor_options/order,mg_test
@@ -49,7 +50,7 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_taylor_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Test")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 IF(mg_test)THEN
@@ -58,10 +59,10 @@ ELSE
   taylor_minlev=mg_mesh%mgmax+order-1
 END IF
 !---
-CALL oft_lag_setup(order,taylor_minlev)
-CALL oft_hcurl_setup(order,taylor_minlev)
-CALL oft_h0_setup(order+1,taylor_minlev)
-CALL oft_h1_setup(order,taylor_minlev)
+CALL oft_lag_setup(mg_mesh,order,taylor_minlev)
+CALL oft_hcurl_setup(mg_mesh,order,taylor_minlev)
+CALL oft_h0_setup(mg_mesh,order+1,taylor_minlev)
+CALL oft_h1_setup(mg_mesh,order,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp
   CALL lag_mloptions
@@ -117,7 +118,7 @@ CALL oft_vlagrange%vec_create(v)
 !---Plot solution
 Bfield%uvac=>taylor_hvac(1,oft_h1_level)%f
 Bfield%ua=>taylor_gffa(1,oft_h1_level)%f
-CALL Bfield%setup
+CALL Bfield%setup(mg_mesh%mesh)
 !---Project field
 CALL oft_lag_vproject(Bfield,v)
 CALL u%set(0.d0)

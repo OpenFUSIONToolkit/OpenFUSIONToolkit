@@ -15,7 +15,7 @@
 !---------------------------------------------------------------------------
 program tokamaker_gs
 USE oft_base
-USE multigrid, ONLY: mg_mesh, multigrid_reset
+USE multigrid, ONLY: multigrid_mesh, multigrid_reset
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE fem_base, ONLY: oft_afem_type
 USE oft_la_base, ONLY: oft_vector
@@ -35,6 +35,7 @@ REAL(8), ALLOCATABLE, DIMENSION(:,:) :: pts
 TYPE(gs_eq) :: mygs
 CLASS(oft_afem_type), POINTER :: lag_fem
 real(r8), POINTER :: vals_tmp(:)
+TYPE(multigrid_mesh) :: mg_mesh
 !---Input options
 INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30
@@ -118,13 +119,13 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup Mesh
 !---------------------------------------------------------------------------
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 CALL mygs%xdmf%setup("TokaMaker")
 CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
-CALL oft_lag_setup(order, -1)
+CALL oft_lag_setup(mg_mesh,order, -1)
 !---------------------------------------------------------------------------
 ! Compute optimized smoother coefficients
 !---------------------------------------------------------------------------

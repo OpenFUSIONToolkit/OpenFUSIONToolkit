@@ -28,7 +28,7 @@ USE oft_hexmesh_type, ONLY: oft_hexmesh
 USE oft_quadmesh_type, ONLY: oft_quadmesh
 USE oft_mesh_local_util, ONLY: mesh_local_findedge, mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 !---End include modules
 IMPLICIT NONE
 #include "local.h"
@@ -143,7 +143,8 @@ CONTAINS
 !! - Read in surface mesh
 !! - Load and initialize OpenNURBS CAD representation
 !------------------------------------------------------------------------------
-subroutine mesh_cubit_load
+subroutine mesh_cubit_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8), allocatable :: rtmp(:,:)
 integer(i4) :: blkID,nodesID,att_len
 integer(i4) :: i,j,id,it,lenreflag,ierr,io_unit

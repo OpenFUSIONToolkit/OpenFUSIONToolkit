@@ -19,14 +19,15 @@ USE oft_base
 USE oft_quadrature
 USE oft_mesh_type, ONLY: mesh_findcell
 USE oft_mesh_sphere, ONLY: mesh_sphere_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 IMPLICIT NONE
 INTEGER(i4) :: ierr
+TYPE(multigrid_mesh) :: mg_mesh
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_sphere_id)CALL oft_abort('Wrong mesh type, test for SPHERE only.','main',__FILE__)
 IF(oft_env%nprocs>1)CALL oft_abort('Test is for serial meshes only.','main',__FILE__)
 !---Run test

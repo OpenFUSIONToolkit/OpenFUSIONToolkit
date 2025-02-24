@@ -27,7 +27,7 @@ USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
 USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
 USE oft_la_base, ONLY: oft_vector
@@ -51,6 +51,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
 TYPE(oft_tw_hodlr_op), TARGET :: tw_hodlr
+TYPE(multigrid_mesh) :: mg_mesh
 !
 INTEGER(4) :: neigs = 5
 INTEGER(4) :: jumper_start = 0
@@ -72,7 +73,7 @@ CLOSE(io_unit)
 if(ierr<0)call oft_abort('No "thincurr_eig_options" found in input file.','thincurr_eig',__FILE__)
 if(ierr>0)call oft_abort('Error parsing "thincurr_eig_options" in input file.','thincurr_eig',__FILE__)
 !---Setup mesh
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 ! ALLOCATE(mg_mesh)
 ! mg_mesh%mgmax=1
 ! mg_mesh%nbase=1

@@ -30,7 +30,7 @@ USE ISO_FORTRAN_ENV, ONLY: IOSTAT_END
 USE oft_base
 !--Grid
 USE oft_mesh_type, ONLY: mesh_findcell
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_io, ONLY: oft_file_exist
 !---Linear Algebra
@@ -71,6 +71,7 @@ TYPE(oft_lag_vrinterp), TARGET :: Bfield_lag
 TYPE(oft_h1_rinterp), TARGET :: Bfield_H1
 TYPE(oft_hcurl_cinterp), TARGET :: Bfield_HCurl
 CLASS(oft_tracer), POINTER :: tracer
+TYPE(multigrid_mesh) :: mg_mesh
 !---Input options
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: type = 1
@@ -100,7 +101,7 @@ IF(ierr>0)CALL oft_abort('Error parsing "poincare_trace_options" in input file.'
 IF(TRIM(pt_file)=='none')CALL oft_abort('No launch point file specified.',  &
   'poincare_trace',__FILE__)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !---Setup tracer
 CALL set_timeout(tracer_timeout)
 CALL create_tracer(tracer,tracer_type)
@@ -110,16 +111,16 @@ tracer%maxtrans=INT(tracer_maxtrans)
 !---Setup necessary FE space
 SELECT CASE(type)
   CASE(1) ! Vector Lagrange field
-    CALL oft_lag_setup(order, -1)
+    CALL oft_lag_setup(mg_mesh,order, -1)
     !---Create field structure
     CALL oft_lag_create(x1)
     CALL oft_lag_vcreate(u)
     Bfield_lag%u=>u
     tracer%B=>Bfield_lag
   CASE(2) !  Nedelec H1 field
-    CALL oft_hcurl_setup(order, -1)
-    CALL oft_h0_setup(order+1, -1)
-    CALL oft_h1_setup(order, -1)
+    CALL oft_hcurl_setup(mg_mesh,order, -1)
+    CALL oft_h0_setup(mg_mesh,order+1, -1)
+    CALL oft_h1_setup(mg_mesh,order, -1)
     !---Create field structure
     CALL oft_hcurl_create(x1)
     CALL oft_h0_create(x2)
@@ -127,7 +128,7 @@ SELECT CASE(type)
     Bfield_H1%u=>u
     tracer%B=>Bfield_H1
   CASE(3) !  Nedelec HCurl field
-    CALL oft_hcurl_setup(order, -1)
+    CALL oft_hcurl_setup(mg_mesh,order, -1)
     !---Create field structure
     CALL oft_hcurl_create(u)
     Bfield_HCurl%u=>u
@@ -209,7 +210,7 @@ DO
     CASE(3) !  Nedelec HCurl field
       CALL oft_hcurl%vec_load(u,filename,fields(1))
   END SELECT
-  CALL tracer%B%setup
+  CALL tracer%B%setup(mg_mesh%mesh)
   !---Perform tracing
   ind=ind+1
   WRITE(pltnum,'(I4.4)')ind

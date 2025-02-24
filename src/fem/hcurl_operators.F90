@@ -28,7 +28,6 @@ module oft_hcurl_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
-USE multigrid, ONLY: mg_mesh
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
   oft_graph_ptr
@@ -171,11 +170,14 @@ end subroutine hcurl_mloptions
 !!
 !! @note Should only be used via class \ref oft_hcurl_rinterp or children
 !---------------------------------------------------------------------------
-subroutine hcurl_rinterp_setup(self)
+subroutine hcurl_rinterp_setup(self,mesh)
 class(oft_hcurl_rinterp), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
 self%hcurl_rep=>oft_hcurl
+IF((mesh%np/=self%hcurl_rep%mesh%np))CALL oft_abort("Mesh mismatch","hcurl_rinterp_setup",__FILE__)
+self%mesh=>mesh
 end subroutine hcurl_rinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
@@ -358,7 +360,7 @@ NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
 CALL b%get_local(bloc)
 !---
-mesh=>mg_mesh%mesh
+mesh=>oft_hcurl%mesh
 allocate(emap(mesh%ne))
 CALL get_inverse_map(mesh%lbe,mesh%nbe,emap,mesh%ne)
 !$omp parallel do private(j,k)
@@ -860,8 +862,8 @@ REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: rop
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_bmesh), POINTER :: smesh
 DEBUG_STACK_PUSH
-mesh=>mg_mesh%mesh
-smesh=>mg_mesh%smesh
+mesh=>oft_hcurl%mesh
+smesh=>oft_hcurl%mesh%bmesh
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -1060,11 +1062,11 @@ type(oft_graph_ptr), pointer :: graphs(:,:)
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---
-if(mg_mesh%level<1)then
+if(ML_oft_hcurl%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','hcurl_ginterpmatrix',__FILE__)
 end if
-mesh=>mg_mesh%mesh
-cmesh=>mg_mesh%meshes(mg_mesh%level-1)
+mesh=>ML_oft_hcurl%ml_mesh%mesh
+cmesh=>ML_oft_hcurl%ml_mesh%meshes(ML_oft_hcurl%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "hcurl_ginterpmatrix", __FILE__)
 if(oft_hcurl%order/=1)then
@@ -1079,10 +1081,10 @@ SELECT TYPE(this=>ML_oft_hcurl%levels(oft_hcurl_level-1)%fe)
     CALL oft_abort("Error casting coarse level", "hcurl_ginterpmatrix", __FILE__)
 END SELECT
 ! hcurl_cors=>ML_oft_hcurl%levels(oft_hcurl_level-1)%fe
-lede=>mg_mesh%inter(mg_mesh%level-1)%lede
-lfde=>mg_mesh%inter(mg_mesh%level-1)%lfde
-lcdg=>mg_mesh%inter(mg_mesh%level-1)%lcdg
-lcde=>mg_mesh%inter(mg_mesh%level-1)%lcde
+lede=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%level-1)%lede
+lfde=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%level-1)%lfde
+lcdg=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%level-1)%lcdg
+lcde=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%level-1)%lcde
 ALLOCATE(ML_oft_hcurl%interp_graphs(ML_oft_hcurl%level)%g)
 ops%interp_graph=>ML_oft_hcurl%interp_graphs(ML_oft_hcurl%level)%g
 !---Setup matrix sizes
@@ -1255,7 +1257,7 @@ type(oft_graph_ptr), pointer :: graphs(:,:)
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---
-mesh=>mg_mesh%mesh
+mesh=>oft_hcurl%mesh
 ops=>oft_hcurl_ops
 SELECT TYPE(this=>ML_oft_hcurl%levels(oft_hcurl_level-1)%fe)
 CLASS IS(oft_fem_type)
@@ -1416,7 +1418,7 @@ integer(i4), pointer :: lbege(:)
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: array_c,array_f
 DEBUG_STACK_PUSH
-lbege=>mg_mesh%inter(mg_mesh%nbase)%lbege
+lbege=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%nbase)%lbege
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 !$omp parallel do
@@ -1463,7 +1465,7 @@ real(r8), pointer, dimension(:) :: alias,array_c,array_f
 CLASS(oft_afem_type), POINTER :: hcurl_fine => NULL()
 DEBUG_STACK_PUSH
 !---
-lbege=>mg_mesh%inter(mg_mesh%nbase)%lbege
+lbege=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%nbase)%lbege
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 hcurl_fine=>ML_oft_hcurl%levels(oft_hcurl_level+1)%fe

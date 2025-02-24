@@ -22,13 +22,14 @@ USE oft_quadrature
 #ifdef HAVE_NCDF
 USE oft_mesh_cubit, ONLY: mesh_cubit_id, inpname
 #endif
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
 #include "local.h"
 INTEGER(i4) :: io_unit
 INTEGER(i4) :: ierr
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 #if !defined(HAVE_NCDF)
 CHARACTER(LEN=OFT_PATH_SLEN) :: inpname = 'none'
 #endif
@@ -53,7 +54,7 @@ IF(cad_type==2)THEN
 END IF
 #endif
 IF(test_surf)THEN
-  CALL multigrid_construct_surf
+  CALL multigrid_construct_surf(mg_mesh)
   IF(mg_mesh%smesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
 #if !defined(HAVE_ONURBS)
   IF(TRIM(inpname)/='none')THEN
@@ -71,7 +72,7 @@ IF(test_surf)THEN
   IF(oft_env%head_proc)CLOSE(io_unit)
 ELSE
   !---Setup grid
-  CALL multigrid_construct
+  CALL multigrid_construct(mg_mesh)
   IF(mg_mesh%mesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
 #if !defined(HAVE_ONURBS)
   IF(TRIM(inpname)/='none')THEN

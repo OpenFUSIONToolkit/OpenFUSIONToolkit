@@ -22,7 +22,7 @@ USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_hexmesh_type, ONLY: oft_hexmesh
 USE oft_quadmesh_type, ONLY: oft_quadmesh
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 IMPLICIT NONE
 #include "local.h"
 private
@@ -40,7 +40,8 @@ contains
 !! - 7 Points
 !! - 8 Cells
 !------------------------------------------------------------------------------
-subroutine mesh_sphere_load
+subroutine mesh_sphere_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,ierr,io_unit
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
@@ -70,7 +71,7 @@ IF(mesh_type==1)THEN
     CALL mg_mesh%smeshes(i)%setup(mesh_sphere_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
   END DO
-  CALL multigrid_level(1)
+  CALL multigrid_level(mg_mesh,1)
   mesh=>mg_mesh%meshes(1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
@@ -114,7 +115,7 @@ ELSE
     CALL mg_mesh%smeshes(i)%setup(mesh_sphere_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
   END DO
-  CALL multigrid_level(1)
+  CALL multigrid_level(mg_mesh,1)
   mesh=>mg_mesh%meshes(1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
@@ -169,13 +170,14 @@ end subroutine mesh_sphere_cadlink
 !------------------------------------------------------------------------------
 !> Refine boundary points onto the sphere
 !------------------------------------------------------------------------------
-subroutine mesh_sphere_reffix(mesh)
-class(oft_mesh), intent(inout) :: mesh
+subroutine mesh_sphere_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j
 real(r8) :: u1,v1,u2,v2,u,v,pt(3),r
-class(oft_mesh), pointer :: pmesh
+class(oft_mesh), pointer :: pmesh,mesh
 DEBUG_STACK_PUSH
 !---Get parent mesh
+mesh=>mg_mesh%mesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN
   ! Do nothing
@@ -260,7 +262,8 @@ end subroutine mesh_sphere_add_quad
 !! - 7 Points
 !! - 8 Cells
 !------------------------------------------------------------------------------
-subroutine smesh_circle_load
+subroutine smesh_circle_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,ierr,io_unit
 class(oft_bmesh), pointer :: smesh
 namelist/sphere_options/mesh_type
@@ -286,7 +289,7 @@ IF(mesh_type==1)THEN
   DO i=1,mg_mesh%mgdim
     CALL mg_mesh%smeshes(i)%setup(mesh_sphere_id,.FALSE.)
   END DO
-  CALL multigrid_level(1)
+  CALL multigrid_level(mg_mesh,1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
     !---Setup points
@@ -311,7 +314,7 @@ ELSE
   DO i=1,mg_mesh%mgdim
     CALL mg_mesh%smeshes(i)%setup(mesh_sphere_id,.FALSE.)
   END DO
-  CALL multigrid_level(1)
+  CALL multigrid_level(mg_mesh,1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
     !---Setup points
@@ -350,13 +353,14 @@ end subroutine smesh_circle_cadlink
 !------------------------------------------------------------------------------
 !> Refine boundary points onto the sphere
 !------------------------------------------------------------------------------
-subroutine smesh_circle_reffix(smesh)
-class(oft_bmesh), intent(inout) :: smesh
+subroutine smesh_circle_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j
 real(r8) :: u1,v1,u2,v2,u,v,pt(3),r
-class(oft_bmesh), pointer :: pmesh
+class(oft_bmesh), pointer :: pmesh,smesh
 DEBUG_STACK_PUSH
 !---Get parent mesh
+smesh=>mg_mesh%smesh
 pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
 IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN
   ! Do nothing

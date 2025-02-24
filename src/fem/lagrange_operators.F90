@@ -24,7 +24,6 @@ MODULE oft_lag_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
-USE multigrid, ONLY: mg_mesh
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
   oft_graph, oft_graph_ptr
@@ -176,8 +175,9 @@ end subroutine lag_mloptions
 !!
 !! @note Should only be used via class \ref oft_lag_rinterp or children
 !---------------------------------------------------------------------------
-subroutine lag_rinterp_setup(self)
+subroutine lag_rinterp_setup(self,mesh)
 class(oft_lag_rinterp), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
     CLASS IS(oft_lag_rinterp)
@@ -199,6 +199,8 @@ ELSE
   self%cache_cell=-1
   self%cache_vals=0.d0
 END IF
+IF((mesh%np/=self%lag_rep%mesh%np))CALL oft_abort("Mesh mismatch","lag_rinterp_setup",__FILE__)
+self%mesh=>mesh
 end subroutine lag_rinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
@@ -371,8 +373,9 @@ end subroutine lag_ginterp_apply
 !!
 !! @note Should only be used via class \ref oft_lag_vrinterp or children
 !---------------------------------------------------------------------------
-subroutine lag_vrinterp_setup(self)
+subroutine lag_vrinterp_setup(self,mesh)
 class(oft_lag_vrinterp), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
 real(r8), pointer, dimension(:) :: vtmp
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
@@ -401,6 +404,8 @@ ELSE
   self%cache_cell=-1
   self%cache_vals=0.d0
 END IF
+IF((mesh%np/=self%lag_rep%mesh%np))CALL oft_abort("Mesh mismatch","lag_vrinterp_setup",__FILE__)
+self%mesh=>mesh
 end subroutine lag_vrinterp_setup
 !---------------------------------------------------------------------------
 !> Setup interpolator for Lagrange vector fields
@@ -661,8 +666,8 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc)
 CALL a%get_local(aloc)
 !---
-if(mg_mesh%mesh%igrnd(1)>0)aloc(mg_mesh%mesh%igrnd(1))=0.d0
-if(mg_mesh%mesh%igrnd(2)>0)aloc(mg_mesh%mesh%igrnd(2))=0.d0
+if(oft_lagrange%mesh%igrnd(1)>0)aloc(oft_lagrange%mesh%igrnd(1))=0.d0
+if(oft_lagrange%mesh%igrnd(2)>0)aloc(oft_lagrange%mesh%igrnd(2))=0.d0
 CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
@@ -1923,10 +1928,10 @@ CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 DEBUG_STACK_PUSH
 !---
-if(mg_mesh%level<1)then
+if(ML_oft_lagrange%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','lag_ginterpmatrix',__FILE__)
 end if
-cmesh=>mg_mesh%meshes(mg_mesh%level-1)
+cmesh=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "lag_ginterpmatrix", __FILE__)
 if(oft_lagrange%order/=1)then
@@ -2039,7 +2044,7 @@ CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
-mesh=>mg_mesh%mesh
+mesh=>oft_lagrange%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
 !---
 ops=>oft_lagrange_ops
@@ -2391,7 +2396,7 @@ integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: array_c,array_f
 DEBUG_STACK_PUSH
-lptmp=>mg_mesh%meshes(mg_mesh%nbase+1)%base%lp
+lptmp=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 !$omp parallel do
@@ -2462,7 +2467,7 @@ real(r8), pointer, dimension(:) :: alias,array_c,array_f
 CLASS(oft_afem_type), POINTER :: lag_fine => NULL()
 DEBUG_STACK_PUSH
 !---
-lptmp=>mg_mesh%meshes(mg_mesh%nbase+1)%base%lp
+lptmp=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 lag_fine=>ML_oft_lagrange%levels(oft_lagrange_level+1)%fe

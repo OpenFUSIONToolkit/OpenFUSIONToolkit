@@ -14,6 +14,7 @@ PROGRAM test_alfven
 USE oft_base
 !--Grid
 USE oft_mesh_type, ONLY: rgrnd
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -59,6 +60,7 @@ TYPE(alfven_eig), TARGET :: alf_field
 TYPE(oft_h1_rinterp), TARGET :: bfield
 TYPE(oft_lag_vrinterp), TARGET :: vfield
 TYPE(diff_interp) :: err_field
+TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: io_unit
 REAL(r8) :: B0,verr,vierr,berr,bierr
 REAL(r8), POINTER :: tmp(:),bvals(:),uvals(:)
@@ -81,21 +83,21 @@ CLOSE(io_unit)
 ! Setup grid
 !---------------------------------------------------------------------------
 rgrnd=(/2.d0,0.d0,0.d0/)
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(order,minlev)
+CALL oft_lag_setup(mg_mesh,order,minlev)
 CALL lag_setup_interp
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(order,minlev)
+CALL oft_hcurl_setup(mg_mesh,order,minlev)
 CALL hcurl_setup_interp
 !---H1(Grad) subspace
-CALL oft_h0_setup(order+1,minlev)
+CALL oft_h0_setup(mg_mesh,order+1,minlev)
 CALL h0_setup_interp
 !---H1 full space
-CALL oft_h1_setup(order,minlev)
+CALL oft_h1_setup(mg_mesh,order,minlev)
 CALL h1_setup_interp
 !---------------------------------------------------------------------------
 ! Create H1 metric solver
@@ -127,6 +129,7 @@ CALL be%add(0.d0,1.d0,u)
 !---------------------------------------------------------------------------
 ! Set dB from alfven wave init
 !---------------------------------------------------------------------------
+alf_field%mesh=>mg_mesh%mesh
 CALL oft_h1_project(alf_field,v)
 CALL h1grad_zerop(v)
 CALL u%set(0.d0)
@@ -211,7 +214,7 @@ ELSE
   DEALLOCATE(den,temp)
 END IF
 !---Check magnetic field waveform
-bierr=vec_energy(alf_field,order*2)
+bierr=vec_energy(mg_mesh%mesh,alf_field,order*2)
 err_field%dim=3
 err_field%a=>alf_field
 err_field%b=>bfield
@@ -219,17 +222,17 @@ CALL b%scale(1.d0/B0)
 CALL b%add(-1.d0,1.d0,be)
 CALL b%scale(1.d0/delta)
 bfield%u=>b
-CALL bfield%setup
-berr=vec_energy(err_field,order*2)
+CALL bfield%setup(mg_mesh%mesh)
+berr=vec_energy(mg_mesh%mesh,err_field,order*2)
 !---Check velocity field waveform
-vierr=vec_energy(alf_field,order*2)
+vierr=vec_energy(mg_mesh%mesh,alf_field,order*2)
 err_field%dim=3
 err_field%a=>alf_field
 err_field%b=>vfield
 CALL vel%scale(-1.d0/(delta*v_alf))
 vfield%u=>vel
-CALL vfield%setup
-verr=vec_energy(err_field,order*2)
+CALL vfield%setup(mg_mesh%mesh)
+verr=vec_energy(mg_mesh%mesh,err_field,order*2)
 !---Output wave comparisons
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='alfven.results')

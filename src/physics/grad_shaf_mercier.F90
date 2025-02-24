@@ -90,7 +90,7 @@ IF(oft_debug_print(2))THEN
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi
-CALL psi_int%setup()
+CALL psi_int%setup(oft_blagrange%mesh)
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
 IF(oft_debug_print(2))WRITE(*,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
@@ -116,7 +116,7 @@ call set_tracer(1)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 field%u=>gseq%psi
-CALL field%setup()
+CALL field%setup(oft_blagrange%mesh)
 active_tracer%neq=8
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -135,7 +135,7 @@ do j=1,self%npsi-1
     !$omp critical
     CALL gs_psi2r(gseq,psi_surf(1),pt)
     !$omp end critical
-    call tracinginv_fs(pt(1:2))
+    call tracinginv_fs(oft_blagrange%mesh,pt(1:2))
     !---Exit if trace fails
     if(active_tracer%status/=1)THEN
       WRITE(*,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
@@ -194,10 +194,12 @@ end subroutine mercier_update
 !---------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------
-subroutine minterpinv_setup(self)
+subroutine minterpinv_setup(self,mesh)
 class(mercierinv_interp), intent(inout) :: self
+class(oft_bmesh), target, intent(inout) :: mesh
 NULLIFY(self%uvals)
 CALL self%u%get_local(self%uvals)
+self%mesh=>mesh
 end subroutine minterpinv_setup
 !---------------------------------------------------------------------------
 ! SUBROUTINE minterpinv_apply

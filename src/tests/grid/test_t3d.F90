@@ -23,15 +23,16 @@ USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_t3d, ONLY: mesh_t3d_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 IMPLICIT NONE
 INTEGER(i4) :: io_unit
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_t3d_id)CALL oft_abort('Wrong mesh type, test for T3D only.','main',__FILE__)
 CALL plot_file%setup("Test")
 CALL mg_mesh%mesh%setup_io(plot_file,1)

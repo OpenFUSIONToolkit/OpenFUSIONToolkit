@@ -19,7 +19,6 @@ MODULE oft_blag_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
-USE multigrid, ONLY: mg_mesh
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
   oft_graph, oft_graph_ptr
@@ -104,11 +103,14 @@ contains
 !!
 !! @note Should only be used via class \ref oft_lag_brinterp or children
 !---------------------------------------------------------------------------
-subroutine lag_brinterp_setup(self)
+subroutine lag_brinterp_setup(self,mesh)
 class(oft_lag_brinterp), intent(inout) :: self
+class(oft_bmesh), target, intent(inout) :: mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
 IF(.NOT.ASSOCIATED(self%lag_rep))self%lag_rep=>oft_blagrange
+IF((mesh%np/=self%lag_rep%mesh%np))CALL oft_abort("Mesh mismatch","lag_brinterp_setup",__FILE__)
+self%mesh=>mesh
 end subroutine lag_brinterp_setup
 !---------------------------------------------------------------------------
 !> Setup interpolator by linking to another interpolator of the same class
@@ -238,8 +240,9 @@ end subroutine lag_bg2interp
 !!
 !! @note Should only be used via class \ref oft_lag_bvrinterp or children
 !---------------------------------------------------------------------------
-subroutine lag_bvrinterp_setup(self)
+subroutine lag_bvrinterp_setup(self,mesh)
 class(oft_lag_bvrinterp), intent(inout) :: self
+class(oft_bmesh), target, intent(inout) :: mesh
 real(r8), pointer, dimension(:) :: vtmp
 !---Get local slice
 IF(.NOT.ASSOCIATED(self%vals))ALLOCATE(self%vals(3,oft_lagrange%ne))
@@ -250,6 +253,8 @@ CALL self%u%get_local(vtmp,2)
 vtmp=>self%vals(3,:)
 CALL self%u%get_local(vtmp,3)
 IF(.NOT.ASSOCIATED(self%lag_rep))self%lag_rep=>oft_blagrange
+IF((mesh%np/=self%lag_rep%mesh%np))CALL oft_abort("Mesh mismatch","lag_bvrinterp_setup",__FILE__)
+self%mesh=>mesh
 end subroutine lag_bvrinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
@@ -694,7 +699,7 @@ call x%get_local(xloc)
 allocate(j(oft_blagrange%nce))
 !$omp do schedule(guided)
 do i=1,oft_blagrange%mesh%nc
-  CALL mg_mesh%mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
+  CALL oft_lagrange%mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
   call oft_blagrange%ncdofs(i,j) ! Get local to global DOF mapping
   !---Loop over quadrature points
   do m=1,oft_blagrange%quad%np
@@ -702,8 +707,8 @@ do i=1,oft_blagrange%mesh%nc
     call oft_blagrange%mesh%norm(i,oft_blagrange%quad%pts(:,m),norm)
     det=vol*oft_blagrange%quad%wts(m)
     !---Evaluate in cell coordinates
-    CALL mg_mesh%mesh%surf_to_vol(oft_blagrange%quad%pts(:,m),ptmap,flog)
-    call mg_mesh%mesh%jacobian(cell,flog,vgop,vol)
+    CALL oft_lagrange%mesh%surf_to_vol(oft_blagrange%quad%pts(:,m),ptmap,flog)
+    call oft_lagrange%mesh%jacobian(cell,flog,vgop,vol)
     call field%interp(cell,flog,vgop,etmp)
     !---Project on to Lagrange basis
     do jc=1,oft_blagrange%nce

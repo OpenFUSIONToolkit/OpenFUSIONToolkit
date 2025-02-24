@@ -19,7 +19,7 @@
 module taylor
 USE oft_base
 USE oft_io
-USE multigrid, ONLY: mg_mesh
+USE oft_mesh_type, ONLY: oft_mesh
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -36,8 +36,8 @@ USE oft_h0_basis, ONLY: oft_h0, oft_h0_nlevels, oft_h0_geval_all, oft_h0_fem
 USE oft_h0_operators, ONLY: h0_zerogrnd, h0_getlop_pre, oft_h0_getlop
 USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_level, oft_hcurl_nlevels, &
 oft_hcurl_blevel, oft_hcurl_eval_all, oft_hcurl_ceval_all, oft_hcurl_set_level, &
-oft_hcurl_get_cgops, oft_hcurl_fem
-USE oft_hcurl_fields, ONLY: oft_hcurl_create!, oft_hcurl_save
+oft_hcurl_get_cgops, oft_hcurl_fem, ML_oft_hcurl
+USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, oft_hcurl_orthog, &
 oft_hcurl_divout, hcurl_getwop_pre, hcurl_zerob, oft_hcurl_getmop, oft_hcurl_getkop, &
 oft_hcurl_getwop, hcurl_interp, oft_hcurl_getjmlb, hcurl_getjmlb_pre
@@ -189,7 +189,7 @@ do k=1,taylor_nm
     if(taylor_rst)then
       write(pnum,'(I2.2)')oft_hcurl%order
       write(mnum,'(I2.2)')k
-      filename='hffa_r'//mg_mesh%rlevel//'_p'//pnum//'_m'//mnum//'.rst'
+      filename='hffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_m'//mnum//'.rst'
       if(oft_file_exist(filename))then
         CALL oft_hcurl%vec_load(u,filename,'hffa')
       end if
@@ -235,8 +235,8 @@ do k=1,taylor_nm
     DEALLOCATE(kop)
     !---
     Bfield%u=>u
-    CALL Bfield%setup
-    taylor_htor(k,i) = tfluxfun(Bfield,oft_hcurl%quad%order)
+    CALL Bfield%setup(oft_hcurl%mesh)
+    taylor_htor(k,i) = tfluxfun(oft_hcurl%mesh,Bfield,oft_hcurl%quad%order)
     CALL Bfield%delete
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
@@ -272,7 +272,7 @@ do k=1,taylor_nm
     if(taylor_rst)then
       write(pnum,'(I2.2)')oft_hcurl%order
       write(mnum,'(I2.2)')k
-      filename='hffa_r'//mg_mesh%rlevel//'_p'//pnum//'_m'//mnum//'.rst'
+      filename='hffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_m'//mnum//'.rst'
       if(.NOT.oft_file_exist(filename))then
         CALL oft_mpi_barrier(ierr)
         CALL oft_hcurl%vec_save(u,filename,'hffa')
@@ -375,9 +375,9 @@ IF(taylor_rst)THEN
   DO i=1,taylor_nh
     WRITE(pnum,'(I2.2)')oft_hcurl%order
     WRITE(mnum,'(I2.2)')i
-    filename='hvac_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='hvac_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     rst=rst.AND.oft_file_exist(filename)
-    filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='hcur_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     rst=rst.AND.oft_file_exist(filename)
   END DO
 ELSE
@@ -471,7 +471,7 @@ DO i=1,taylor_nh
   IF(taylor_rst)THEN
     WRITE(pnum,'(I2.2)')oft_hcurl%order
     WRITE(mnum,'(I2.2)')i
-    filename='hvac_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='hvac_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(oft_file_exist(filename))THEN
       CALL oft_h1%vec_load(u,filename,'hvac')
       rst=.TRUE.
@@ -491,7 +491,7 @@ DO i=1,taylor_nh
   IF(taylor_rst)THEN
     WRITE(pnum,'(I2.2)')oft_hcurl%order
     WRITE(mnum,'(I2.2)')i
-    filename='hvac_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='hvac_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(.NOT.oft_file_exist(filename))THEN
       CALL oft_mpi_barrier(ierr)
       CALL oft_h1%vec_save(u,filename,'hvac')
@@ -517,7 +517,7 @@ DO i=1,taylor_nh
   IF(taylor_rst)THEN
     WRITE(pnum,'(I2.2)')oft_hcurl%order
     WRITE(mnum,'(I2.2)')i
-    filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='hcur_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(oft_file_exist(filename))THEN
       CALL oft_hcurl%vec_load(u,filename,'hcur')
       rst=.TRUE.
@@ -552,7 +552,7 @@ DO i=1,taylor_nh
   IF(taylor_rst)THEN
     WRITE(pnum,'(I2.2)')oft_hcurl%order
     WRITE(mnum,'(I2.2)')i
-    filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='hcur_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(.NOT.oft_file_exist(filename))THEN
       CALL oft_mpi_barrier(ierr)
       CALL oft_hcurl%vec_save(u,filename,'hcur')
@@ -637,7 +637,7 @@ IF(taylor_rst)THEN
   DO i=1,taylor_nh
     WRITE(pnum,'(I2.2)')oft_hcurl%order
     WRITE(mnum,'(I2.2)')i
-    filename='gffa_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='gffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     rst=rst.AND.oft_file_exist(filename)
   END DO
 ELSE
@@ -710,7 +710,7 @@ do i=1,taylor_nh
   IF(taylor_rst)THEN
     WRITE(pnum,'(I2.2)')oft_hcurl%order
     WRITE(mnum,'(I2.2)')i
-    filename='gffa_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='gffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(oft_file_exist(filename))THEN
       CALL hdf5_read(lam_file,filename,'lambda')
       IF(ABS(lam_file-lambda)<1.d-5)THEN
@@ -740,7 +740,7 @@ do i=1,taylor_nh
   IF(taylor_rst)THEN
     WRITE(pnum,'(I2.2)')oft_hcurl%order
     WRITE(mnum,'(I2.2)')i
-    filename='gffa_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='gffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(.NOT.oft_file_exist(filename))THEN
       CALL oft_mpi_barrier(ierr)
       CALL oft_hcurl%vec_save(u,filename,'gffa')
@@ -917,17 +917,17 @@ CALL oft_lag_set_level(oft_lagrange_nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_injector_single
 !---------------------------------------------------------------------------
-! SUBROUTINE: taylor_rinterp_setup
-!---------------------------------------------------------------------------
 !> Setup interpolator for composite Taylor state fields
 !!
 !! Fetches local representation used for interpolation from vector object
 !!
 !! @note Should only be used via class \ref oft_taylor_rinterp or children
 !---------------------------------------------------------------------------
-subroutine taylor_rinterp_setup(self)
+subroutine taylor_rinterp_setup(self,mesh)
 class(oft_taylor_rinterp), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
 DEBUG_STACK_PUSH
+self%mesh=>mesh
 !---Get local slice
 CALL self%ua%get_local(self%acurl)
 CALL self%uvac%get_local(self%vac_curl,1)

@@ -20,6 +20,7 @@ USE oft_base
 USE oft_sort, ONLY: sort_array, search_array, sort_matrix
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_stitch_check, destory_seam
 USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
 !---
@@ -154,8 +155,9 @@ TYPE, PUBLIC :: oft_ml_fem_type
   INTEGER(i4) :: level = 0 !< Current FE level
   INTEGER(i4) :: abs_level = 0 !< Asoblute FE refinement level
   INTEGER(i4) :: blevel = 0 !< FE base level
-  TYPE(oft_fem_ptr) :: levels(fem_max_levels)
+  TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Structure containing bound ML mesh
   CLASS(oft_afem_type), POINTER :: current_level => NULL()
+  TYPE(oft_fem_ptr) :: levels(fem_max_levels)
   TYPE(oft_graph_ptr) :: interp_graphs(fem_max_levels)
   TYPE(oft_matrix_ptr) :: interp_matrices(fem_max_levels)
 CONTAINS
@@ -1703,6 +1705,12 @@ self%level=level
 self%current_level=>self%levels(self%level)%fe
 self%abs_level=self%level
 IF(self%level>self%blevel.AND.self%blevel>0)self%abs_level=self%level-1
+!---Set grid level
+if(level<self%ml_mesh%mgdim)then
+  call multigrid_level(self%ml_mesh,level)
+else
+  call multigrid_level(self%ml_mesh,self%ml_mesh%mgdim)
+end if
 DEBUG_STACK_POP
 end subroutine ml_fem_set_level
 !---------------------------------------------------------------------------

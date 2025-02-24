@@ -21,7 +21,7 @@ PROGRAM marklin_eigs
 USE oft_base
 USE oft_io, ONLY: hdf5_create_file, xdmf_plot_file
 !--Grid
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -51,6 +51,7 @@ CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 CHARACTER(LEN=3) :: pltnum
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: nmodes = 1
 INTEGER(i4) :: minlev = 1
@@ -67,6 +68,7 @@ IF(ierr<0)CALL oft_abort('No "marklin_eigs_options" found in input file.', &
 IF(ierr>0)CALL oft_abort('Error parsing "marklin_eigs_options" in input file.', &
   'marklin_eigs',__FILE__)
 !---Setup grid
+CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("marklin_eigs")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !
@@ -77,11 +79,11 @@ ELSE
   IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,minlev)
 END IF
 !---Lagrange
-CALL oft_lag_setup(order, taylor_minlev)
+CALL oft_lag_setup(mg_mesh,order, taylor_minlev)
 CALL lag_setup_interp
 CALL lag_mloptions
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(order, taylor_minlev)
+CALL oft_hcurl_setup(mg_mesh,order, taylor_minlev)
 CALL hcurl_setup_interp
 CALL hcurl_mloptions
 oft_env%pm=.TRUE.
@@ -105,7 +107,7 @@ DO i=1,nmodes
                           'marklin_eigs.rst','A_'//pltnum, append=(i/=1))
   !---Setup field interpolation
   Bfield%u=>taylor_hffa(i,oft_hcurl_level)%f
-  CALL Bfield%setup
+  CALL Bfield%setup(mg_mesh%mesh)
   !---Project field
   CALL oft_lag_vproject(Bfield,v)
   CALL u%set(0.d0)

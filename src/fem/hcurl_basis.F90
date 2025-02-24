@@ -25,7 +25,7 @@ USE oft_mesh_local_util, ONLY: mesh_local_orient, oriented_cell, &
   oriented_edges, oriented_faces
 USE oft_hexmesh_type, ONLY: hex_bary_ecoords, hex_bary_efcoords, hex_bary_fcoords, &
   hex_get_bary, hex_get_bary_gop, hex_get_bary_cgop
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type
 IMPLICIT NONE
@@ -88,11 +88,11 @@ if(level>oft_hcurl_nlevels.OR.level<=0)then
   write(*,*)level
   call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
 end if
-if(level<mg_mesh%mgdim)then
-  call multigrid_level(level)
-else
-  call multigrid_level(mg_mesh%mgdim)
-end if
+! if(level<mg_mesh%mgdim)then
+!   call multigrid_level(level)
+! else
+!   call multigrid_level(mg_mesh%mgdim)
+! end if
 CALL ML_oft_hcurl%set_level(level)
 SELECT TYPE(this=>ML_oft_hcurl%current_level)
   CLASS IS(oft_hcurl_fem)
@@ -124,7 +124,8 @@ end subroutine oft_hcurl_set_level
 !!
 !! @param[in] order Order of representation desired
 !---------------------------------------------------------------------------
-subroutine oft_hcurl_setup(order,minlev)
+subroutine oft_hcurl_setup(mg_mesh,order,minlev)
+type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order
 integer(i4), optional, intent(in) :: minlev
 integer(i4) :: i,j
@@ -138,6 +139,8 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A,I4)')'Minlev = ',oft_hcurl_minlev
 END IF
 IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
+ML_oft_hcurl%ml_mesh=>mg_mesh
+ML_oft_bhcurl%ml_mesh=>mg_mesh
 !---Allocate multigrid operators
 oft_hcurl_nlevels=mg_mesh%mgdim+(order-1)
 IF(oft_hcurl_minlev<0)oft_hcurl_minlev=oft_hcurl_nlevels
@@ -170,7 +173,7 @@ do i=1,mg_mesh%mgdim-1
   oft_bhcurl%gstruct=(/0,1,0/)
   call oft_bhcurl%setup(3)
 end do
-call multigrid_level(mg_mesh%mgdim)
+call multigrid_level(mg_mesh,mg_mesh%mgdim)
 !---Set high order elements
 do i=1,order
   IF(mg_mesh%mgdim+i-1<oft_hcurl_minlev)CYCLE

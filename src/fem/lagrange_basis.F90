@@ -29,7 +29,7 @@ USE oft_trimesh_type, ONLY: tri_2d_grid
 USE oft_quadmesh_type, ONLY: quad_2d_grid, quad_grid_orient
 USE oft_tetmesh_type, ONLY: tet_3d_grid
 USE oft_hexmesh_type, ONLY: hex_3d_grid, hex_grid_forient
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_ml_fem_type, oft_bfem_type, &
   fem_delete, bfem_delete
@@ -115,7 +115,7 @@ REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: f,ct
 REAL(r8), POINTER, DIMENSION(:,:) :: sn
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
-mesh=>mg_mesh%mesh
+mesh=>oft_lagrange%mesh
 !---
 ALLOCATE(oft_lagrange%sn(3,oft_lagrange%ne),oft_lagrange%bc(oft_lagrange%ne))
 sn=>oft_lagrange%sn
@@ -303,11 +303,11 @@ DEBUG_STACK_PUSH
 if(level>oft_lagrange_nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
 end if
-if(level<mg_mesh%mgdim)then
-  call multigrid_level(level)
-else
-  call multigrid_level(mg_mesh%mgdim)
-end if
+! if(level<mg_mesh%mgdim)then
+!   call multigrid_level(level)
+! else
+!   call multigrid_level(mg_mesh%mgdim)
+! end if
 !---Volume FEs
 IF(ML_oft_lagrange%nlevels>0)THEN
   CALL ML_oft_lagrange%set_level(level)
@@ -343,7 +343,8 @@ end subroutine oft_lag_set_level
 !!
 !! @note Highest supported representation is quartic
 !---------------------------------------------------------------------------
-subroutine  oft_lag_setup(order,minlev)
+subroutine  oft_lag_setup(mg_mesh,order,minlev)
+type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
 integer(i4), optional, intent(in) :: minlev !< Lowest level to construct
 integer(i4) :: i
@@ -363,16 +364,18 @@ IF(oft_lagrange_minlev<0)oft_lagrange_minlev=oft_lagrange_nlevels
 IF(ASSOCIATED(mg_mesh%meshes))THEN
   ML_oft_lagrange%nlevels=oft_lagrange_nlevels
   ML_oft_vlagrange%nlevels=oft_lagrange_nlevels
+  ML_oft_lagrange%ml_mesh=>mg_mesh
   IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
 ELSE
   IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
 END IF
+ML_oft_blagrange%ml_mesh=>mg_mesh
 ML_oft_blagrange%nlevels=oft_lagrange_nlevels
 ALLOCATE(ML_oft_lagrange_ops(oft_lagrange_nlevels))
 !---Set linear elements
 do i=1,mg_mesh%mgdim-1
   IF(i<oft_lagrange_minlev)CYCLE
-  CALL multigrid_level(i)
+  CALL multigrid_level(mg_mesh,i)
   IF(ML_oft_lagrange%nlevels>0)THEN
     CALL oft_lag_setup_vol(ML_oft_lagrange%levels(i)%fe,mg_mesh%mesh,1)
     IF(mg_mesh%level==mg_mesh%nbase)ML_oft_lagrange%blevel=i
@@ -387,7 +390,7 @@ do i=1,mg_mesh%mgdim-1
   END IF
   IF(mg_mesh%level==mg_mesh%nbase)oft_lagrange_blevel=i
 end do
-call multigrid_level(mg_mesh%mgdim)
+call multigrid_level(mg_mesh,mg_mesh%mgdim)
 !---Set high order elements
 do i=1,order
   IF(i>1.AND.mg_mesh%mgdim+i-1<oft_lagrange_minlev)CYCLE

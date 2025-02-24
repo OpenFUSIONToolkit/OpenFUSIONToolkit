@@ -20,7 +20,7 @@ USE oft_hexmesh_type, ONLY: oft_hexmesh
 USE oft_quadmesh_type, ONLY: oft_quadmesh
 USE oft_mesh_local_util, ONLY: mesh_local_findedge, mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 IMPLICIT NONE
 #include "local.h"
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none' !< Name of input file for mesh
@@ -39,7 +39,8 @@ CONTAINS
 !! - Read in mesh points and cells
 !! - Read in surface IDs for CAD edges and faces
 !------------------------------------------------------------------------------
-subroutine native_load_vmesh
+subroutine native_load_vmesh(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 logical :: success
 integer(i4) :: i,id,ierr,io_unit,ndims,np_mem,mesh_order
 integer(i4), allocatable, dimension(:) :: dim_sizes
@@ -105,7 +106,7 @@ DO i=1,mg_mesh%mgdim
     CALL mg_mesh%smeshes(i)%setup(mesh_native_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
 END DO
-CALL multigrid_level(1)
+CALL multigrid_level(mg_mesh,1)
 mesh=>mg_mesh%meshes(1)
 smesh=>mg_mesh%smeshes(1)
 mesh%nc=dim_sizes(2)
@@ -193,7 +194,8 @@ end subroutine native_load_vmesh
 !! - Read in mesh points and cells
 !! - Read in surface IDs for CAD edges and faces
 !------------------------------------------------------------------------------
-subroutine native_load_smesh
+subroutine native_load_smesh(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 logical :: is_2d,success
 integer(i4) :: i,id,lenreflag,ierr,io_unit,ndims,np_mem,mesh_order
 integer(i4), allocatable, dimension(:) :: dim_sizes
@@ -256,7 +258,7 @@ END SELECT
 DO i=1,mg_mesh%mgdim
     CALL mg_mesh%smeshes(i)%setup(mesh_native_id,.FALSE.)
 END DO
-CALL multigrid_level(1)
+CALL multigrid_level(mg_mesh,1)
 smesh=>mg_mesh%smeshes(1)
 smesh%nc=dim_sizes(2)
 !

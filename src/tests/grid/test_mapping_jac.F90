@@ -17,15 +17,16 @@ PROGRAM test_mapping_jac
 USE oft_base
 USE oft_quadrature
 USE oft_mesh_sphere, ONLY: mesh_sphere_id
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, oft_lag_npos, oft_lag_geval, &
 oft_lag_d2eval
 IMPLICIT NONE
 INTEGER(i4) :: xi,xj,ierr,nfail,i,ntests,io_unit
-INTEGER(i4) :: order
 REAL(r8) :: check_vec(6),tol=1.d-6
+TYPE(multigrid_mesh) :: mg_mesh
+INTEGER(i4) :: order
 NAMELIST/test_mapping_options/order
 !---Initialize enviroment
 CALL oft_init
@@ -34,11 +35,11 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_mapping_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_sphere_id)CALL oft_abort('Wrong mesh type, test for SPHERE only.','main',__FILE__)
 IF(oft_env%nprocs>1)CALL oft_abort('Test is for serial meshes only.','main',__FILE__)
 !---Setup FEM
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order)
 !---Run test cases
 nfail=0
 OPEN(NEWUNIT=io_unit,FILE='mapping_jac.tests')

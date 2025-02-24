@@ -11,7 +11,7 @@
 !---------------------------------------------------------------------------
 PROGRAM tokamaker_fit
 USE oft_base
-USE multigrid_build, ONLY: mg_mesh, multigrid_construct_surf
+USE multigrid_build, ONLY: multigrid_mesh, multigrid_construct_surf
 USE fem_base, ONLY: oft_afem_type
 USE oft_la_base, ONLY: oft_vector
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
@@ -29,6 +29,7 @@ LOGICAL :: file_exists
 REAL(8), ALLOCATABLE :: pts(:,:)
 TYPE(gs_eq) :: mygs
 CLASS(oft_vector), POINTER :: xv
+TYPE(multigrid_mesh) :: mg_mesh
 !---GS input options
 INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30
@@ -129,13 +130,13 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup Mesh
 !---------------------------------------------------------------------------
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 CALL mygs%xdmf%setup("TokaMaker")
 CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
-CALL oft_lag_setup(order, -1)
+CALL oft_lag_setup(mg_mesh,order, -1)
 !---------------------------------------------------------------------------
 ! Compute optimized smoother coefficients
 !---------------------------------------------------------------------------

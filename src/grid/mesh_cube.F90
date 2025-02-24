@@ -22,7 +22,7 @@ USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_hexmesh_type, ONLY: oft_hexmesh
 USE oft_quadmesh_type, ONLY: oft_quadmesh
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 IMPLICIT NONE
 #include "local.h"
 private
@@ -42,7 +42,8 @@ contains
 !! - 9 Points
 !! - 12 Cells
 !------------------------------------------------------------------------------
-subroutine mesh_cube_load
+subroutine mesh_cube_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j,k,ierr,io_unit
 INTEGER(i4), ALLOCATABLE :: pmap(:,:,:)
 class(oft_mesh), pointer :: mesh
@@ -83,7 +84,7 @@ IF(mesh_type==1)THEN
     CALL mg_mesh%smeshes(i)%setup(mesh_cube_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
   END DO
-  CALL multigrid_level(1)
+  CALL multigrid_level(mg_mesh,1)
   mesh=>mg_mesh%meshes(1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
@@ -127,7 +128,7 @@ ELSE
     CALL mg_mesh%smeshes(i)%setup(mesh_cube_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
   END DO
-  CALL multigrid_level(1)
+  CALL multigrid_level(mg_mesh,1)
   mesh=>mg_mesh%meshes(1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
@@ -306,7 +307,8 @@ end subroutine mesh_cube_set_periodic
 !! - 9 Points
 !! - 12 Cells
 !------------------------------------------------------------------------------
-subroutine smesh_square_load
+subroutine smesh_square_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j,k,ierr,io_unit,nptmp,nctmp
 INTEGER(i4), ALLOCATABLE :: pmap(:,:),lctmp(:,:)
 REAL(r8), ALLOCATABLE :: rtmp(:,:)
@@ -348,7 +350,7 @@ END IF
 DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_cube_id,.FALSE.)
 END DO
-CALL multigrid_level(1)
+CALL multigrid_level(mg_mesh,1)
 smesh=>mg_mesh%smeshes(1)
 smesh%dim=2
 !---Create mesh as quads

@@ -19,7 +19,7 @@ PROGRAM example4
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -69,6 +69,7 @@ CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_taylor_rinterp), TARGET :: Bfield
 CLASS(oft_tracer), POINTER :: tracer
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !!\subsection doc_ex4_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting
@@ -76,7 +77,7 @@ TYPE(xdmf_plot_file) :: plot_file
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Example4")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!\subsection doc_ex4_code_fem Setup FE Types
@@ -84,19 +85,19 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
 !---Lagrange
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order)
 CALL lag_setup_interp
 CALL lag_mloptions
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(order)
+CALL oft_hcurl_setup(mg_mesh,order)
 CALL hcurl_setup_interp
 CALL hcurl_mloptions
 !---H1(Grad) subspace
-CALL oft_h0_setup(order+1)
+CALL oft_h0_setup(mg_mesh,order+1)
 CALL h0_setup_interp
 CALL h0_mloptions
 !---H1 full space
-CALL oft_h1_setup(order)
+CALL oft_h1_setup(mg_mesh,order)
 !!\subsection doc_ex4_code_taylor Compute Taylor state
 !!
 !!For composite Taylor states the lowest eigenmode is used used in addition to the injector fields. This
@@ -165,7 +166,7 @@ CALL create_diag_pre(lminv%pre) ! Setup Preconditioner
 CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)
 !---Setup field interpolation
-CALL Bfield%setup
+CALL Bfield%setup(mg_mesh%mesh)
 !---Project field
 CALL oft_lag_vproject(Bfield,v)
 CALL u%set(0.d0)

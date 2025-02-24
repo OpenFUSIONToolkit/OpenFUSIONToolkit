@@ -15,7 +15,7 @@
 module tracing
 use oft_base
 use oft_mesh_type, only: mesh_findcell
-use multigrid, only: mg_mesh
+use multigrid, only: multigrid_mesh
 USE oft_io, only: hdf5_write
 !---
 use fem_utils, only: fem_interp
@@ -49,6 +49,7 @@ type, abstract :: oft_tracer
   real(r8), pointer, dimension(:) :: dy !< Change from previous trace point
   real(r8), pointer, dimension(:) :: dyp !< Previous derivative
   real(r8) :: f(4) = 0.d0 !< Logical cell position of last/current trace point
+  type(multigrid_mesh), pointer :: ml_mesh => NULL() !< Muli-grid mesh
   class(fem_interp), pointer :: B => NULL() !< Interpolation operator for trace field
   procedure(tracer_ydot), pointer, nopass :: ydot => NULL() !< General ODE function
 contains
@@ -377,10 +378,10 @@ send_reqi=MPI_REQUEST_NULL
 !---
 do while(active_tracer%ntrans<active_tracer%maxtrans)
     cell=0
-    IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
-      call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,active_tracer%y(1:3),f)
+    IF(active_tracer%ml_mesh%nbase<active_tracer%ml_mesh%mgdim)THEN
+      call mesh_findcell(active_tracer%ml_mesh%meshes(active_tracer%ml_mesh%nbase),cell,active_tracer%y(1:3),f)
     ELSE
-      call mesh_findcell(mg_mesh%mesh,cell,active_tracer%y(1:3),f)
+      call mesh_findcell(active_tracer%ml_mesh%mesh,cell,active_tracer%y(1:3),f)
     END IF
     fmin=MINVAL(f); fmax=MAXVAL(f)
     !---Disable point if off mesh
@@ -395,8 +396,8 @@ do while(active_tracer%ntrans<active_tracer%maxtrans)
     IF(active_tracer%status<0)EXIT
     IF(timeout_timer%timeout(timeout))EXIT
     !---Get new processor
-    IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
-      active_tracer%proc=mg_mesh%meshes(mg_mesh%nbase+1)%base%lcpart(cell)-1
+    IF(active_tracer%ml_mesh%nbase<active_tracer%ml_mesh%mgdim)THEN
+      active_tracer%proc=active_tracer%ml_mesh%meshes(active_tracer%ml_mesh%nbase+1)%base%lcpart(cell)-1
       active_tracer%cell=(cell-1)*8+1
     ELSE
       active_tracer%proc=oft_env%rank
@@ -647,7 +648,9 @@ integer(i4), allocatable, dimension(:,:) :: send_reqr,send_reqi
 logical :: testr,testi,testc
 real(r8) :: f(4),fmin,fmax,tol_ratio
 class(oft_tracer), pointer :: loc_tracer
+type(multigrid_mesh), pointer :: mg_mesh
 DEBUG_STACK_PUSH
+mg_mesh=>tracers(1)%t%ml_mesh
 !---Setup send/recv arrays
 allocate(send_reqr(oft_env%nprocs,n),send_reqi(oft_env%nprocs,n))
 allocate(recv_reqr(n),recv_reqi(n))
@@ -1014,7 +1017,7 @@ END IF
 self%cell=0
 if(present(cell))self%cell=cell
 self%y=y
-call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 self%initialized=.TRUE.
 DEBUG_STACK_POP
 end subroutine tracer_euler_setup
@@ -1155,11 +1158,11 @@ real(r8) :: B(3),goptmp(3,4),v,fmin,fmax
 DEBUG_STACK_PUSH
 ALLOCATE(ydot(self%neq))
 !---Prediction
-call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
 IF(self%cell==0)RETURN
-CALL mg_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
+CALL self%ml_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
 CALL self%B%interp(self%cell,self%f,goptmp,B)
 self%dyp=self%dy
 IF(ASSOCIATED(active_tracer%ydot))THEN
@@ -1171,11 +1174,11 @@ IF(self%nsteps==0)self%dt=1.d-3/SQRT(SUM(self%dy**2))
 !---Step
 self%y=self%y+self%dt*self%dy
 !---Compute second derivative for error approximation
-call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
 IF(self%cell==0)RETURN
-CALL mg_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
+CALL self%ml_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
 CALL self%B%interp(self%cell,self%f,goptmp,B)
 IF(ASSOCIATED(active_tracer%ydot))THEN
   CALL self%ydot(0.d0,self%y,B,self%neq,ydot)
@@ -1284,7 +1287,7 @@ END IF
 self%cell=0
 if(present(cell))self%cell=cell
 self%y=y
-call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 self%initialized=.TRUE.
 IF(self%comm_load)THEN
   call dsrcom(self%rsav,self%isav,2)
@@ -1454,7 +1457,7 @@ IF(self%istate<0.OR.ANY(self%y(1:3)>1.d20))THEN
   self%estatus=TRACER_ERROR_FAIL
 END IF
 IF(self%cell/=0)THEN ! Check for exit mesh
-  call mesh_findcell(mg_mesh%mesh,self%cell,self%y(1:3),self%f)
+  call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
   fmin=minval(self%f)
   fmax=maxval(self%f)
   IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
@@ -1475,9 +1478,9 @@ real(r8), intent(out) :: ydot(neq)
 real(r8) :: goptmp(3,4),v,B(3)
 DEBUG_STACK_PUSH
 ydot=active_tracer%dy
-call mesh_findcell(mg_mesh%mesh,active_tracer%cell,y(1:3),active_tracer%f)
+call mesh_findcell(active_tracer%ml_mesh%mesh,active_tracer%cell,y(1:3),active_tracer%f)
 IF(active_tracer%cell==0)RETURN
-CALL mg_mesh%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+CALL active_tracer%ml_mesh%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 CALL active_tracer%B%interp(active_tracer%cell,active_tracer%f,goptmp,B)
 IF(ASSOCIATED(active_tracer%ydot))THEN
   CALL active_tracer%ydot(t,y,B,neq,ydot)

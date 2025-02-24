@@ -17,7 +17,7 @@ program test_h1
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 ! USE oft_io
-USE multigrid, ONLY: mg_mesh, multigrid_level
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -42,6 +42,7 @@ USE oft_h1_operators, ONLY: h1_getmop, h1_setup_interp, h1_getmop_pre, h1_mlopti
   oft_h1_rinterp, h1_zerob, h1grad_zerop
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit
+TYPE(multigrid_mesh) :: mg_mesh
 LOGICAL :: mg_test
 NAMELIST/test_h1_options/order,mg_test
 !---Initialize enviroment
@@ -51,19 +52,19 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_h1_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(order)
+CALL oft_hcurl_setup(mg_mesh,order)
 IF(mg_test)CALL hcurl_setup_interp
 !---H1(Grad) subspace
-CALL oft_h0_setup(order+1)
+CALL oft_h0_setup(mg_mesh,order+1)
 IF(mg_test)CALL h0_setup_interp
 !---H1 full space
-CALL oft_h1_setup(order)
+CALL oft_h1_setup(mg_mesh,order)
 IF(mg_test)THEN
   CALL h1_setup_interp(create_full=.TRUE.)
   CALL h1_mloptions

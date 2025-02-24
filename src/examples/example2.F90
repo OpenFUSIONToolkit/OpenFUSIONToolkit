@@ -27,7 +27,7 @@ PROGRAM example2
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -59,6 +59,7 @@ REAL(r8), POINTER, DIMENSION(:) :: vtmp => NULL()
 INTEGER(i4) :: i,nlevels
 INTEGER(i4), PARAMETER :: order = 3
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !!\subsection doc_ex2_code_fem Setup Lagrange FE
 !!
 !!When MG is used it is also desirable to construct field caches for each FE representation to be used. This is done with
@@ -68,11 +69,11 @@ TYPE(xdmf_plot_file) :: plot_file
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Example2")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---Construct FE levels
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order)
 CALL lag_setup_interp
 CALL lag_mloptions
 !!\subsection doc_ex2_code_ml Construct ML structures

@@ -243,7 +243,7 @@ CALL self%psi%new(bt)
 CALL self%psi%new(bz)
 ! CALL vector_cast(psiv,a)
 field%gs=>self
-CALL field%setup()
+CALL field%setup(oft_blagrange%mesh)
 CALL create_cg_solver(solver)
 solver%A=>self%mop
 solver%its=-2
@@ -610,7 +610,7 @@ class(oft_bmesh), pointer :: smesh
 !---
 smesh=>oft_blagrange%mesh
 psi_eval%u=>self%psi
-CALL psi_eval%setup
+CALL psi_eval%setup(oft_blagrange%mesh)
 CALL psi_geval%shared_setup(psi_eval)
 !---
 itor = 0.d0
@@ -701,7 +701,7 @@ class(oft_bmesh), pointer :: smesh
 smesh=>oft_blagrange%mesh
 CALL self%eta%update(self) ! Make sure eta is up to date with current equilibrium
 psi_eval%u=>self%psi
-CALL psi_eval%setup
+CALL psi_eval%setup(oft_blagrange%mesh)
 CALL psi_geval%shared_setup(psi_eval)
 !---
 eta_jsq = 0.d0
@@ -879,7 +879,7 @@ xr = (x2-x1)
 x1 = x1 + xr*1.d-3
 x2 = x2 - xr*1.d-3
 psi_int%u=>gseq%psi
-CALL psi_int%setup()
+CALL psi_int%setup(oft_blagrange%mesh)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
@@ -908,7 +908,7 @@ ALLOCATE(rout(npsi,ntheta))
 ALLOCATE(zout(npsi,ntheta))
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 field%u=>gseq%psi
-CALL field%setup()
+CALL field%setup(oft_blagrange%mesh)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -935,7 +935,7 @@ do j=1,npsi-1
   !$omp critical
   CALL gs_psi2r(gseq,psi_surf(1),pt,psi_int=psi_int)
   !$omp end critical
-  CALL tracinginv_fs(pt,ptout)
+  CALL tracinginv_fs(oft_blagrange%mesh,pt,ptout)
   pt_last=pt
   !---Exit if trace fails
   IF(active_tracer%status/=1)THEN
@@ -1101,7 +1101,7 @@ IF(do_truncate)THEN
   xr = (x2-x1)
 END IF
 psi_int%u=>gseq%psi
-CALL psi_int%setup()
+CALL psi_int%setup(oft_blagrange%mesh)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
@@ -1129,7 +1129,7 @@ ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
 field%u=>gseq%psi
-CALL field%setup()
+CALL field%setup(oft_blagrange%mesh)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -1159,9 +1159,9 @@ do j=1,nr
     !$omp end critical
     IF(j==nr)THEN
       ALLOCATE(ptout(3,active_tracer%maxsteps+1))
-      CALL tracinginv_fs(pt(1:2),ptout)
+      CALL tracinginv_fs(oft_blagrange%mesh,pt(1:2),ptout)
     ELSE
-      CALL tracinginv_fs(pt(1:2))
+      CALL tracinginv_fs(oft_blagrange%mesh,pt(1:2))
     END IF
     pt_last=pt
     !---Exit if trace fails
@@ -1422,7 +1422,7 @@ IF(gseq%plasma_bounds(1)>-1.d98)THEN
 END IF
 ! IF(.NOT.gseq%free)x1 = x1 + (x2-x1)*2.d-2
 psi_int%u=>gseq%psi
-CALL psi_int%setup()
+CALL psi_int%setup(oft_blagrange%mesh)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
@@ -1449,7 +1449,7 @@ call set_tracer(1)
 ! !$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 field%mag_axis=gseq%o_point
-CALL field%setup()
+CALL field%setup(oft_blagrange%mesh)
 active_tracer%neq=8
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -1481,9 +1481,9 @@ do j=1,nr
   END IF
   field%bmax=0.d0
   field%stage_1=.TRUE.
-  CALL tracinginv_fs(pt(1:2))
+  CALL tracinginv_fs(oft_blagrange%mesh,pt(1:2))
   field%stage_1=.FALSE.
-  CALL tracinginv_fs(pt(1:2))
+  CALL tracinginv_fs(oft_blagrange%mesh,pt(1:2))
   pt_last=pt
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN

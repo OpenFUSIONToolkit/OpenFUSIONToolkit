@@ -46,7 +46,8 @@ def run_marklin(meshfile,nmodes,order,grid_order,mp_q):
         myOFT = OFT_env(nthreads=-1)
         taylor_solver = Marklin(myOFT)
         taylor_solver.setup_mesh(mesh_file=meshfile,grid_order=grid_order)
-        taylor_solver.compute(nmodes,order,minlev=1)
+        taylor_solver.setup(order,minlev=1)
+        taylor_solver.compute(nmodes)
         result = True
     except BaseException as e:
         print(e)
