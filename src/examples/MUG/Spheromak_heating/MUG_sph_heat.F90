@@ -43,14 +43,13 @@ USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
-USE oft_hcurl_operators, ONLY: hcurl_zerob
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: oft_h0_getlop, h0_zerogrnd
+USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0
+USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad
 USE oft_h1_fields, ONLY: oft_h1_create
-USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob
+USE oft_h1_operators, ONLY: oft_h1_divout, h1_mc
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, &
@@ -68,6 +67,7 @@ INTEGER(i4) :: ierr,io_unit
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(xmhd_sub_fields) :: ic_fields
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_h0_zerogrnd), TARGET :: h0_zerogrnd
 !---Runtime options
 INTEGER(i4) :: order = 2
 REAL(r8) :: b0_scale = 1.E-1_r8
@@ -99,6 +99,7 @@ CALL oft_hcurl_setup(mg_mesh,order,-1)
 CALL oft_h0_setup(mg_mesh,order+1,-1)
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order,-1)
+h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
 !!\subsection doc_mug_sph_ex2_code_plot Perform post-processing
 !!
 !! To visualize the solution fields once a simulation has completed the \ref xmhd::xmhd_plot
@@ -126,7 +127,7 @@ CALL oft_lag_set_level(oft_lagrange_nlevels)
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
 NULLIFY(lop)
-CALL oft_h0_getlop(lop,"grnd")
+CALL oft_h0_getlop(oft_h0,lop,"grnd")
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2

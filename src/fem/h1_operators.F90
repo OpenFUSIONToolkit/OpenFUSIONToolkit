@@ -30,7 +30,7 @@ USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
   oft_graph_ptr
-USE oft_solver_base, ONLY: oft_solver, oft_orthog, oft_bc_proto
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_deriv_matrices, ONLY: create_diagmatrix
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
@@ -40,12 +40,13 @@ USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
   create_native_pre
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels
 USE fem_utils, ONLY: fem_interp
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lag_geval_all
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_h0_basis, ONLY: oft_h0, oft_h0_ops, ML_oft_h0_ops, oft_h0_geval_all, &
   oft_h0_d2eval, oft_h0_fem
 USE oft_h0_fields, ONLY: oft_h0_create
-USE oft_h0_operators, ONLY: h0_zerob, h0_zerogrnd, oft_h0_getlop, oft_h0_gop
+USE oft_h0_operators, ONLY: oft_h0_zerob, oft_h0_zerogrnd, oft_h0_getlop, oft_h0_gop
 USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, oft_bhcurl, oft_hcurl_eval_all, &
 oft_hcurl_ceval_all, oft_hcurl_level, oft_hcurl_blevel, oft_hcurl_get_cgops, &
 oft_hcurl_fem
@@ -102,13 +103,13 @@ end type oft_h1_dinterp
 !! \phi \f$. The mass matrix version is applied if \c mop is associated with the
 !! corresponding H1::MOP.
 !---------------------------------------------------------------------------
-type, extends(oft_orthog) :: oft_h1_divout
+type, extends(oft_solver_bc) :: oft_h1_divout
   integer(i4) :: count = 0 !< Number of times apply has been called
   integer(i4) :: app_freq = 1 !< Frequency to apply solver
   logical :: keep_boundary = .FALSE. !< Flag for keeping boundary gradients
   logical :: pm = .FALSE. !< Flag for solver convergence monitor
   class(oft_solver), pointer :: solver => NULL() !< Solver object for H0::LOP operator
-  procedure(oft_bc_proto), pointer, nopass :: bc => NULL() !< Boundary condition
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   class(oft_matrix), pointer :: mop => NULL() !< Mass matrix, applies divoutm if associated
   class(oft_vector), pointer :: bnorm => NULL() !< Normal field source on boundary
 contains
@@ -122,13 +123,43 @@ end type oft_h1_divout
 !---------------------------------------------------------------------------
 !> Orthogonalize a H1 vector field by zeroing the gradient subspace
 !---------------------------------------------------------------------------
-type, extends(oft_orthog) :: oft_h1_zerograd
+type, extends(oft_solver_bc) :: oft_h1_zerograd
 contains
   !> Perform orthoganlization
   procedure :: apply => h1_zerograd_apply
   !> Clean-up internal variables
   procedure :: delete => h1_zerograd_delete
 end type oft_h1_zerograd
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_solver_bc) :: oft_h1_zerob
+  class(oft_ml_fem_comp_type), pointer :: ML_h1_rep => NULL() !< FE representation
+contains
+  procedure :: apply => zerob_apply
+  procedure :: delete => zerob_delete
+end type oft_h1_zerob
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_h1_zerob) :: oft_h1_curl_zerob
+contains
+  procedure :: apply => curl_zerob_apply
+end type oft_h1_curl_zerob
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_h1_zerob) :: oft_h1_grad_zerop
+contains
+  procedure :: apply => grad_zerop_apply
+end type oft_h1_grad_zerop
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_h1_zerob) :: oft_h1_zeroi
+contains
+  procedure :: apply => zeroi_apply
+end type oft_h1_zeroi
 !---Pre options
 integer(i4), private :: nu_mop(fem_max_levels)=0 !< Needs Docs
 real(r8), private :: df_mop(fem_max_levels)=-1.d99 !< Needs Docs
@@ -371,96 +402,124 @@ end subroutine h1_dinterp
 !---------------------------------------------------------------------------
 !> Zero a Nedelec H1 vector field at all boundary nodes
 !---------------------------------------------------------------------------
-subroutine h1_zerob(a)
+subroutine zerob_apply(self,a)
+class(oft_h1_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: agrad,acurl
 integer(i4) :: i,j
+class(oft_afem_type), pointer :: hcurl_rep,hgrad_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(agrad,acurl)
 CALL a%get_local(acurl,1)
 CALL a%get_local(agrad,2)
+hcurl_rep=>self%ML_h1_rep%current_level%fields(1)%fe
+hgrad_rep=>self%ML_h1_rep%current_level%fields(2)%fe
 ! Apply operator
-do i=1,oft_hcurl%nbe
-  j=oft_hcurl%lbe(i)
-  if(oft_hcurl%global%gbe(j))acurl(j)=0.d0
+do i=1,hcurl_rep%nbe
+  j=hcurl_rep%lbe(i)
+  if(hcurl_rep%global%gbe(j))acurl(j)=0.d0
 end do
 ! Apply operator
-do i=1,oft_hgrad%nbe
-  j=oft_hgrad%lbe(i)
-  if(oft_hgrad%global%gbe(j))agrad(j)=0.d0
+do i=1,hgrad_rep%nbe
+  j=hgrad_rep%lbe(i)
+  if(hgrad_rep%global%gbe(j))agrad(j)=0.d0
 end do
 CALL a%restore_local(acurl,1)
 CALL a%restore_local(agrad,2)
 DEALLOCATE(acurl,agrad)
 DEBUG_STACK_POP
-end subroutine h1_zerob
+end subroutine zerob_apply
+!---------------------------------------------------------------------------
+!> Zero a Nedelec H1 vector field at all boundary nodes
+!---------------------------------------------------------------------------
+subroutine zerob_delete(self)
+class(oft_h1_zerob), intent(inout) :: self
+NULLIFY(self%ML_h1_rep)
+end subroutine zerob_delete
 !---------------------------------------------------------------------------
 !> Zero the curl components of a Nedelec H1 vector field at all boundary nodes
 !---------------------------------------------------------------------------
-subroutine h1curl_zerob(a)
+subroutine curl_zerob_apply(self,a)
+class(oft_h1_curl_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: acurl
 integer(i4) :: i,j
+class(oft_afem_type), pointer :: hcurl_rep
 DEBUG_STACK_PUSH
-!---Cast to vector type
-NULLIFY(acurl)
-CALL a%get_local(acurl,1)
-! Apply operator
-do i=1,oft_hcurl%nbe
-  j=oft_hcurl%lbe(i)
-  if(oft_hcurl%global%gbe(j))acurl(j)=0.d0
-end do
-CALL a%restore_local(acurl,1)
-DEALLOCATE(acurl)
+SELECT TYPE(this=>self%ML_h1_rep%current_level%fields(1)%fe)
+CLASS IS(oft_fem_type)
+  !---Cast to vector type
+  NULLIFY(acurl)
+  CALL a%get_local(acurl,1)
+  ! Apply operator
+  do i=1,this%nbe
+    j=this%lbe(i)
+    if(this%global%gbe(j))acurl(j)=0.d0
+  end do
+  CALL a%restore_local(acurl,1)
+  DEALLOCATE(acurl)
+CLASS DEFAULT
+  CALL oft_abort("Invalid fe object","curl_zerob_apply",__FILE__)
+END SELECT
 DEBUG_STACK_POP
-end subroutine h1curl_zerob
+end subroutine curl_zerob_apply
 !---------------------------------------------------------------------------
 !> Zero the gradient components of a Nedelec H1 vector field at all boundary nodes
 !---------------------------------------------------------------------------
-subroutine h1grad_zerop(a)
+subroutine grad_zerop_apply(self,a)
+class(oft_h1_grad_zerop), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: agrad
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
-!---Cast to vector type
-NULLIFY(agrad)
-CALL a%get_local(agrad,2)
-! Apply operator
-do i=1,oft_hgrad%mesh%np
-  agrad(i)=0.d0
-end do
-CALL a%restore_local(agrad,2)
-DEALLOCATE(agrad)
+SELECT TYPE(this=>self%ML_h1_rep%current_level%fields(2)%fe)
+CLASS IS(oft_fem_type)
+  !---Cast to vector type
+  NULLIFY(agrad)
+  CALL a%get_local(agrad,2)
+  ! Apply operator
+  do i=1,this%mesh%np
+    agrad(i)=0.d0
+  end do
+  CALL a%restore_local(agrad,2)
+  DEALLOCATE(agrad)
+CLASS DEFAULT
+  CALL oft_abort("Invalid fe object","grad_zerop_apply",__FILE__)
+END SELECT
 DEBUG_STACK_POP
-end subroutine h1grad_zerop
+end subroutine grad_zerop_apply
 !---------------------------------------------------------------------------
 !> Zero a Nedelec H1 vector field at all interior nodes
 !---------------------------------------------------------------------------
-subroutine h1_zeroi(a)
+subroutine zeroi_apply(self,a)
+class(oft_h1_zeroi), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: agrad,acurl
 integer(i4) :: i
+class(oft_afem_type), pointer :: hcurl_rep,hgrad_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(agrad,acurl)
 CALL a%get_local(acurl,1)
 CALL a%get_local(agrad,2)
+hcurl_rep=>self%ML_h1_rep%current_level%fields(1)%fe
+hgrad_rep=>self%ML_h1_rep%current_level%fields(2)%fe
 ! Apply operator
-DO i=1,oft_hcurl%ne
-  IF(oft_hcurl%global%gbe(i))CYCLE
+DO i=1,hcurl_rep%ne
+  IF(hcurl_rep%global%gbe(i))CYCLE
   acurl(i)=0.d0
 END DO
 ! Apply operator
-DO i=1,oft_hgrad%ne
-  IF(oft_hgrad%global%gbe(i))CYCLE
+DO i=1,hgrad_rep%ne
+  IF(hgrad_rep%global%gbe(i))CYCLE
   agrad(i)=0.d0
 END DO
 CALL a%restore_local(acurl,1)
 CALL a%restore_local(agrad,2)
 DEALLOCATE(acurl,agrad)
 DEBUG_STACK_POP
-end subroutine h1_zeroi
+end subroutine zeroi_apply
 !---------------------------------------------------------------------------
 !> Compute the 0-th order gradient due to a jump plane
 !!
@@ -1096,18 +1155,24 @@ character(LEN=*), intent(in) :: bc !< Boundary condition
 !---
 CLASS(oft_matrix), POINTER :: lop
 CLASS(oft_solver), POINTER :: linv
+TYPE(oft_h0_zerob), POINTER :: bc_zerob
+TYPE(oft_h0_zerogrnd), POINTER :: bc_zerogrnd
 DEBUG_STACK_PUSH
 NULLIFY(lop)
-CALL oft_h0_getlop(lop,bc)
+CALL oft_h0_getlop(oft_hgrad,lop,bc)
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-3
 CALL create_diag_pre(linv%pre)
 self%solver=>linv
 IF(TRIM(bc)=='grnd')THEN
-  self%bc=>h0_zerogrnd
+  ALLOCATE(bc_zerogrnd)
+  bc_zerogrnd%ML_H0_rep=>ML_oft_hgrad
+  self%bc=>bc_zerogrnd
 ELSE
-  self%bc=>h0_zerob
+  ALLOCATE(bc_zerob)
+  bc_zerob%ML_H0_rep=>ML_oft_hgrad
+  self%bc=>bc_zerob
 END IF
 DEBUG_STACK_POP
 end subroutine h1_divout_setup
@@ -1116,10 +1181,10 @@ end subroutine h1_divout_setup
 !!
 !! @note Should only be used via class \ref oft_h1_divout
 !---------------------------------------------------------------------------
-subroutine h1_divout_apply(self,u)
+subroutine h1_divout_apply(self,a)
 class(oft_h1_divout), intent(inout) :: self
-class(oft_vector), intent(inout) :: u !< Field for divergence cleaning
-class(oft_vector), pointer :: a,g,tmp,tmp2
+class(oft_vector), intent(inout) :: a !< Field for divergence cleaning
+class(oft_vector), pointer :: u,g,tmp,tmp2
 integer(i4) :: i,order_tmp
 real(r8) :: uu
 logical :: pm_save
@@ -1132,39 +1197,39 @@ IF(mod(self%count,self%app_freq)/=0)THEN
 END IF
 !---
 call oft_h0_create(g)
-call oft_h0_create(a)
+call oft_h0_create(u)
 !---
 IF(ASSOCIATED(self%mop))THEN
-  CALL h1_gradtp(u,g)
+  CALL h1_gradtp(a,g)
 ELSE
-  CALL h1_div(u,g)
+  CALL h1_div(a,g)
 END IF
-uu=u%dot(u)
+uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
-call a%set(0.d0)
+call u%set(0.d0)
 IF(ASSOCIATED(self%bnorm))CALL g%add(1.d0,-1.d0,self%bnorm)
-call self%bc(g)
+call self%bc%apply(g)
 !---
 pm_save=oft_env%pm; oft_env%pm=self%pm
-call self%solver%apply(a,g)
+call self%solver%apply(u,g)
 oft_env%pm=pm_save
 !---
-CALL a%scale(-1.d0)
-CALL u%new(tmp)
-CALL h1_grad(a,tmp,self%keep_boundary)
+CALL u%scale(-1.d0)
+CALL a%new(tmp)
+CALL h1_grad(u,tmp,self%keep_boundary)
 IF(ASSOCIATED(self%mop))THEN
-  CALL u%new(tmp2)
+  CALL a%new(tmp2)
   CALL self%mop%apply(tmp,tmp2)
-  CALL u%add(1.d0,1.d0,tmp2)
+  CALL a%add(1.d0,1.d0,tmp2)
   CALL tmp2%delete()
   DEALLOCATE(tmp2)
 ELSE
-  CALL u%add(1.d0,1.d0,tmp)
+  CALL a%add(1.d0,1.d0,tmp)
 END IF
 CALL tmp%delete
-call a%delete
+call u%delete
 call g%delete
-DEALLOCATE(tmp,a,g)
+DEALLOCATE(tmp,u,g)
 DEBUG_STACK_POP
 end subroutine h1_divout_apply
 !---------------------------------------------------------------------------
@@ -1186,16 +1251,16 @@ end subroutine h1_divout_delete
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine h1_zerograd_apply(self,u)
+subroutine h1_zerograd_apply(self,a)
 class(oft_h1_zerograd), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
+class(oft_vector), intent(inout) :: a
 real(r8), pointer, dimension(:) :: ugrad
 DEBUG_STACK_PUSH
 !---Get local field
 NULLIFY(ugrad)
-CALL u%get_local(ugrad,2)
+CALL a%get_local(ugrad,2)
 ugrad=0.d0
-CALL u%restore_local(ugrad,2)
+CALL a%restore_local(ugrad,2)
 DEALLOCATE(ugrad)
 DEBUG_STACK_POP
 end subroutine h1_zerograd_apply
@@ -1624,11 +1689,13 @@ CLASS(oft_vector), POINTER :: u
 TYPE(oft_irlm_eigsolver) :: arsolver
 CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
+TYPE(oft_h1_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
 !---------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H1::MOP'
+bc_tmp%ML_h1_rep=>ML_oft_h1
 ALLOCATE(df(oft_h1_nlevels))
 df=0.d0
 DO i=minlev,oft_h1_nlevels
@@ -1644,7 +1711,7 @@ DO i=minlev,oft_h1_nlevels
   arsolver%M=>md
   arsolver%mode=2
   arsolver%tol=1.E-5_r8
-  arsolver%bc=>h1_zerob
+  arsolver%bc=>bc_tmp
   CALL create_native_pre(arsolver%Minv, "jacobi")
   arsolver%Minv%A=>mop
   !---

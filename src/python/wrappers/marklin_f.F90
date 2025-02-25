@@ -25,7 +25,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
 USE fem_utils, ONLY: fem_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
     oft_lag_vgetmop, oft_lag_vproject
@@ -35,12 +35,13 @@ USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, oft_hcurl_level, &
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
     hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, h0_zerogrnd, h0_zerob
+USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0
+USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, oft_h0_zerogrnd, &
+  oft_h0_zerob
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_nlevels
+USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_nlevels, ML_oft_hgrad
 USE oft_h1_fields, ONLY: oft_h1_create
-USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob, &
+USE oft_h1_operators, ONLY: oft_h1_divout, oft_h1_zeroi, h1_mc, oft_h1_curl_zerob, &
   h1_setup_interp, oft_h1_rinterp
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
@@ -213,7 +214,7 @@ CALL c_f_pointer(marklin_ptr,self)
 CALL copy_string_rev(key,name_tmp)
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(lmop,'none')
+CALL oft_lag_vgetmop(oft_vlagrange,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 CALL create_diag_pre(lminv%pre)
@@ -227,10 +228,10 @@ ALLOCATE(bvout(3,u%n/3))
 SELECT CASE(int_type)
 CASE(1)
   CALL c_f_pointer(int_obj, ainterp_obj)
-  CALL oft_lag_vproject(ainterp_obj,v)
+  CALL oft_lag_vproject(oft_vlagrange,ainterp_obj,v)
 CASE(2)
   CALL c_f_pointer(int_obj, binterp_obj)
-  CALL oft_lag_vproject(binterp_obj,v)
+  CALL oft_lag_vproject(oft_vlagrange,binterp_obj,v)
 END SELECT
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
@@ -266,6 +267,8 @@ CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_h1_divout) :: divout
 CLASS(oft_matrix), POINTER :: lop => NULL()
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
+TYPE(oft_h0_zerogrnd), TARGET :: h0_zerogrnd
+TYPE(oft_h0_zerob), TARGET :: h0_zerob
 CALL copy_string('',error_str)
 IF(.NOT.c_associated(marklin_ptr))THEN
   CALL copy_string('Marklin object not associated',error_str)
@@ -285,9 +288,9 @@ END IF
 !---------------------------------------------------------------------------
 NULLIFY(lop,tmp)
 IF(zero_norm)THEN
-  CALL oft_h0_getlop(lop,"grnd")
+  CALL oft_h0_getlop(oft_h0,lop,"grnd")
 ELSE
-  CALL oft_h0_getlop(lop,"zerob")
+  CALL oft_h0_getlop(oft_h0,lop,"zerob")
 END IF
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -295,9 +298,11 @@ linv%its=-2
 CALL create_diag_pre(linv%pre) ! Setup Preconditioner
 divout%solver=>linv
 IF(zero_norm)THEN
+  h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
   divout%bc=>h0_zerogrnd
   divout%keep_boundary=.TRUE.
 ELSE
+  h0_zerob%ML_H0_rep=>ML_oft_hgrad
   divout%bc=>h0_zerob
 END IF
 !---------------------------------------------------------------------------

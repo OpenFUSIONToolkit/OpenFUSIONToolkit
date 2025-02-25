@@ -50,7 +50,7 @@ class(oft_h0_fem), pointer :: oft_hgrad_lin !< Highest linear element representa
 type(oft_ml_fem_type), TARGET :: ML_oft_hgrad !< ML container for all FE representations
 !
 type(oft_fem_comp_type), pointer :: oft_h1 !< Active H1 representation
-type(oft_ml_fem_comp_type) :: ML_oft_h1 !< ML container for H1 representations
+type(oft_ml_fem_comp_type), TARGET :: ML_oft_h1 !< ML container for H1 representations
 contains
 !---------------------------------------------------------------------------
 ! SUBROUTINE: oft_h1_set_level

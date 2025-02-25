@@ -106,7 +106,7 @@ CLASS(oft_solver), POINTER :: lminv => NULL()
 TYPE(oft_taylor_rinterp), TARGET :: Bfield
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(lmop,'none')
+CALL oft_lag_vgetmop(oft_vlagrange,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 CALL create_diag_pre(lminv%pre)
@@ -120,7 +120,7 @@ Bfield%uvac=>taylor_hvac(1,oft_h1_level)%f
 Bfield%ua=>taylor_gffa(1,oft_h1_level)%f
 CALL Bfield%setup(mg_mesh%mesh)
 !---Project field
-CALL oft_lag_vproject(Bfield,v)
+CALL oft_lag_vproject(oft_vlagrange,Bfield,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save

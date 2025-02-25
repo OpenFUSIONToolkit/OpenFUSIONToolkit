@@ -25,13 +25,14 @@ USE oft_native_solvers, ONLY: oft_bjprecond, oft_native_gmres_solver
 USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 !---FE imports
 USE fem_utils, ONLY: fem_partition
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_lag_operators, ONLY: lag_zerob, oft_lag_getlop, oft_lag_getmop
+USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 INTEGER(i4), PARAMETER :: order=3
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: nlocal = 1
 INTEGER(i4) :: sol_type = 1
 LOGICAL :: use_ilu = .FALSE.
@@ -82,6 +83,7 @@ CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 CALL oft_lag_setup(mg_mesh,order)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---Run tests
 oft_env%pm=.FALSE.
 CALL test_lap(nlocal,sol_type)
@@ -112,8 +114,8 @@ CLASS(oft_matrix), POINTER :: mop => NULL()
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
-CALL oft_lag_getlop(lop,'zerob')
-CALL oft_lag_getmop(mop,'none')
+CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
+CALL oft_lag_getmop(oft_lagrange,mop,'none')
 !---Setup matrix solver
 linv%A=>lop
 linv%its=-3
@@ -165,7 +167,7 @@ END IF
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL lag_zerob(v)
+CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 uu=SQRT(u%dot(u))

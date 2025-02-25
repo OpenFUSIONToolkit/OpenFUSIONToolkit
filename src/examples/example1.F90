@@ -32,9 +32,9 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
 USE oft_solver_utils, ONLY: create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, lag_zerob
+USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob
 IMPLICIT NONE
 !!The first two modules import runtime and helper functions. The \ref tetmesh_local module contains
 !!the main global mesh object \ref tetmesh_local::mesh "mesh" and \ref multigrid_build contains
@@ -60,6 +60,7 @@ REAL(r8) :: lambda
 REAL(r8), POINTER, DIMENSION(:) :: vtmp => NULL()
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_lag_zerob) :: lag_zerob
 !!\subsection doc_ex1_code_init Initialize Enviroment
 !!
 !!This call setups of the basics OFT run environment, including initializing MPI and PETSc if
@@ -85,6 +86,7 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!All FE index fields are encapsulated in the \ref fem_base::oft_fem_type "oft_fem_type" structure,
 !!see \ref fem_base::fem_setup "fem_setup".
 CALL oft_lag_setup(mg_mesh,order)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!\subsection doc_ex1_code_ops Setup linear system
 !!
 !!Solving the Helmholtz eigensystem requires the operators coresponding the general eigenvalue problem
@@ -97,8 +99,8 @@ CALL oft_lag_setup(mg_mesh,order)
 CALL oft_lag_create(u)
 !---Create Operators
 NULLIFY(lop,mop)
-CALL oft_lag_getlop(lop,'zerob')
-CALL oft_lag_getmop(mop,'zerob')
+CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
+CALL oft_lag_getmop(oft_lagrange,mop,'zerob')
 !!\subsection doc_ex1_code_solver Setup solver
 !!
 !!This section assembles the solver object by fill the required references. The solver object used here
@@ -117,7 +119,7 @@ solver%its=-2
 CALL create_diag_pre(solver%pre) ! Setup Preconditioner
 !---Compute EV
 CALL u%set(1.d0)
-CALL lag_zerob(u)
+CALL lag_zerob%apply(u)
 CALL solver%apply(u,lambda)
 !!\subsection doc_ex1_code_plot Save Solution
 !!

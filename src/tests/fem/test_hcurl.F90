@@ -18,9 +18,10 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, oft_hcurl_nlevels
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, oft_hcurl_nlevels, &
+  ML_oft_hcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
-USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, hcurl_zerob, &
+USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, oft_hcurl_zerob, &
   hcurl_setup_interp, hcurl_mloptions, hcurl_getwop_pre
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -29,6 +30,7 @@ IMPLICIT NONE
 INTEGER(i4) :: minlev
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_hcurl_zerob), TARGET :: hcurl_zerob
 LOGICAL :: mg_test
 NAMELIST/test_hcurl_options/order,mg_test
 !---Initialize enviroment
@@ -44,6 +46,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 minlev=2
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
 CALL oft_hcurl_setup(mg_mesh,order,minlev)
+hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
 IF(mg_test)THEN
   CALL hcurl_setup_interp
   CALL hcurl_mloptions
@@ -58,8 +61,6 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE: test_wop
 !------------------------------------------------------------------------------
 !> Solve the equation \f$ \nabla \times \nabla \times B = K \hat{I} \f$, where
 !! \f$ K \f$ is the helicity matrix and \f$ \hat{I} \f$ is the identity vector
@@ -89,7 +90,7 @@ CALL create_diag_pre(winv%pre)
 !---Solve
 CALL u%set(1.d0)
 CALL kop%apply(u,v)
-CALL hcurl_zerob(v)
+CALL hcurl_zerob%apply(v)
 CALL u%set(0.d0)
 CALL winv%apply(u,v)
 CALL kop%apply(u,v)
@@ -113,8 +114,6 @@ CALL winv%pre%delete
 !---Destory solver
 CALL winv%delete
 END SUBROUTINE test_wop
-!------------------------------------------------------------------------------
-! SUBROUTINE: test_wopmg
 !------------------------------------------------------------------------------
 !> Same as \ref test_hcurl::test_wop "test_wop" but use MG preconditioning.
 !------------------------------------------------------------------------------
@@ -151,7 +150,7 @@ winv%A=>wop
 !---------------------------------------------------------------------------
 CALL u%set(1.d0)
 CALL kop%apply(u,v)
-CALL hcurl_zerob(v)
+CALL hcurl_zerob%apply(v)
 CALL u%set(0.d0)
 CALL winv%apply(u,v)
 CALL kop%apply(u,v)

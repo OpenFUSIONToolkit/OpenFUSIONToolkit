@@ -40,8 +40,6 @@ USE oft_native_la, ONLY: oft_native_vector, oft_native_cvector, &
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
-! INTERFACE create_vector
-!-----------------------------------------------------------------------------
 !> Create a new vector by combining a set of vectors.
 !!
 !! @param[in,out] vec Resulting vector
@@ -54,8 +52,6 @@ INTERFACE create_vector
   MODULE PROCEDURE create_vector_comp
 END INTERFACE create_vector
 !---------------------------------------------------------------------------
-! INTERFACE create_matrix
-!-----------------------------------------------------------------------------
 !> Create a matrix using a set of non-overlapping graphs.
 !!
 !! Native and PETSc (real only)s matrices are supported.
@@ -71,8 +67,6 @@ INTERFACE create_matrix
   MODULE PROCEDURE create_matrix_comp
 END INTERFACE create_matrix
 !---------------------------------------------------------------------------
-! INTERFACE combine_matrices
-!-----------------------------------------------------------------------------
 !> Combine a set of non-overlapping sub-matrices into a single matrix.
 !!
 !! Native and PETSc (real only) matrices are supported. The matrix should be created using
@@ -88,8 +82,6 @@ INTERFACE combine_matrices
   MODULE PROCEDURE combine_matrices_comp
 END INTERFACE combine_matrices
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE: create_vector_real
 !------------------------------------------------------------------------------
 !> Real implementation for \ref create_vector
 !------------------------------------------------------------------------------
@@ -161,6 +153,7 @@ SELECT TYPE(this=>vec)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE setup_native_vec(this)
 TYPE(oft_native_vector), INTENT(inout) :: this
 INTEGER(i4) :: i
@@ -177,6 +170,7 @@ DO i=1,this%n
   this%stitch_info%lie(this%stitch_info%nie)=i
 END DO
 END SUBROUTINE setup_native_vec
+!
 #ifdef HAVE_PETSC
 SUBROUTINE setup_petsc_vec(this)
 TYPE(oft_petsc_vector), INTENT(inout) :: this
@@ -223,8 +217,6 @@ DEALLOCATE(is0)
 END SUBROUTINE setup_petsc_vec
 #endif
 END SUBROUTINE create_vector_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: create_vector_comp
 !------------------------------------------------------------------------------
 !> Complex implementation for \ref create_vector
 !------------------------------------------------------------------------------
@@ -310,18 +302,12 @@ END DO
 END SUBROUTINE setup_native_vec
 END SUBROUTINE create_vector_comp
 !------------------------------------------------------------------------------
-! SUBROUTINE: condense_stitch
-!------------------------------------------------------------------------------
-!> Combine seam information for a set of vectors.
-!!
-!! @param[in] stitch_info Array of seam structures
-!! @param[in] maps Mapping from sub-vectors into full vector
-!! @param[in,out] stitcher Resulting seam structure for full vector
+!> Combine seam information for a set of vectors
 !------------------------------------------------------------------------------
 SUBROUTINE condense_stitch(stitch_info,map,stitcher)
-TYPE(seam_list), INTENT(in) :: stitch_info(:)
-type(oft_map), INTENT(in) :: map(:)
-TYPE(oft_seam), INTENT(inout) :: stitcher
+TYPE(seam_list), INTENT(in) :: stitch_info(:) !< Array of seam structures
+type(oft_map), INTENT(in) :: map(:) !< Mapping from sub-vectors into full vector
+TYPE(oft_seam), INTENT(inout) :: stitcher !< Resulting seam structure for full vector
 INTEGER(i4) :: i,j,k,m,nblocks,offset1,offset2
 DEBUG_STACK_PUSH
 !---
@@ -413,8 +399,6 @@ CALL oft_stitch_check(stitcher)
 DEBUG_STACK_POP
 END SUBROUTINE condense_stitch
 !------------------------------------------------------------------------------
-! SUBROUTINE: create_matrix_real
-!------------------------------------------------------------------------------
 !> Real implementation for \ref create_matrix
 !------------------------------------------------------------------------------
 SUBROUTINE create_matrix_real(mat,ingraphs,row_vec,col_vec,native)
@@ -504,6 +488,7 @@ SELECT TYPE(this=>mat)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE setup_native(this)
 TYPE(oft_native_matrix), INTENT(inout) :: this
 TYPE(oft_graph), POINTER :: outgraph
@@ -590,8 +575,6 @@ CALL MatGetSize(this%M,m,n,ierr)
 END SUBROUTINE setup_petsc
 #endif
 END SUBROUTINE create_matrix_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: create_matrix_comp
 !------------------------------------------------------------------------------
 !> Real implementation for \ref create_matrix
 !------------------------------------------------------------------------------
@@ -686,6 +669,7 @@ SELECT TYPE(this=>mat)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE setup_native(this)
 TYPE(oft_native_cmatrix), INTENT(inout) :: this
 CLASS(oft_native_cvector), POINTER :: rowv,colv
@@ -756,21 +740,14 @@ lc=lctmp(1:kr(nr+1)-1)
 DEALLOCATE(lctmp)
 END SUBROUTINE csr_remove_redundant
 !------------------------------------------------------------------------------
-! SUBROUTINE: condense_graph
-!------------------------------------------------------------------------------
-!> Combine a set of non-overlapping CRS-graphs into a graph.
-!!
-!! @param[in] ingraphs Array of graphs representing submatrices
-!! @param[in,out] outgraph Resulting graph
-!! @param[out] maps Mapping from sub-graphs into full graph
-!! @param[in] row_vec Vector representing matrix rows
-!! @param[in] col_vec Vector representing matrix columns
+!> Combine a set of non-overlapping CRS-graphs into a graph
 !------------------------------------------------------------------------------
 SUBROUTINE condense_graph(ingraphs,outgraph,maps,row_map,col_map)
-TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:)
-TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph
-TYPE(oft_matrix_map), POINTER, INTENT(out) :: maps(:,:)
-TYPE(oft_map), DIMENSION(:), INTENT(in) :: row_map,col_map
+TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing submatrices
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+TYPE(oft_matrix_map), POINTER, INTENT(out) :: maps(:,:) !< Mapping from sub-graphs into full graph
+TYPE(oft_map), DIMENSION(:), INTENT(in) :: row_map !< Vector representing matrix rows
+TYPE(oft_map), DIMENSION(:), INTENT(in) :: col_map !< Vector representing matrix rows
 !---
 INTEGER(i4) :: ni,nj
 INTEGER(i4) :: i,j,jj,l,k
@@ -999,8 +976,6 @@ DEALLOCATE(ltmp)
 DEBUG_STACK_POP
 end subroutine graph_add_full_col
 !------------------------------------------------------------------------------
-! SUBROUTINE: combine_matrices_real
-!------------------------------------------------------------------------------
 !> Real implementation for \ref combine_matrices
 !------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_real(mats,nr,nc,mat)
@@ -1023,6 +998,7 @@ SELECT TYPE(this=>mat)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE combine_native(this)
 TYPE(oft_native_matrix), INTENT(inout) :: this
 INTEGER(i4) :: i,j,ii,jj,jp,jn
@@ -1045,6 +1021,7 @@ DO i=1,nr
   END DO
 END DO
 END SUBROUTINE combine_native
+!
 #ifdef HAVE_PETSC
 SUBROUTINE combine_petsc(this)
 TYPE(oft_petsc_matrix), INTENT(inout) :: this
@@ -1175,8 +1152,6 @@ END SUBROUTINE combine_petsc
 #endif
 END SUBROUTINE combine_matrices_real
 !------------------------------------------------------------------------------
-! SUBROUTINE: combine_matrices_comp
-!------------------------------------------------------------------------------
 !> Real implementation for \ref combine_matrices
 !------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_comp(mats,nr,nc,mat)
@@ -1194,6 +1169,7 @@ SELECT TYPE(this=>mat)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE combine_native(this)
 TYPE(oft_native_cmatrix), INTENT(inout) :: this
 INTEGER(i4) :: i,j,ii,jj,jp,jn
@@ -1216,16 +1192,11 @@ END DO
 END SUBROUTINE combine_native
 END SUBROUTINE combine_matrices_comp
 !------------------------------------------------------------------------------
-! SUBROUTINE: create_identity_graph
-!------------------------------------------------------------------------------
 !> Create an identity graph for a given vector
-!!
-!! @param[in,out] outgraph Resulting graph
-!! @param[in] vec Vector representing matrix rows/columns
 !------------------------------------------------------------------------------
 SUBROUTINE create_identity_graph(outgraph,vec)
-TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph
-CLASS(oft_vector), POINTER, INTENT(in) :: vec
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+CLASS(oft_vector), POINTER, INTENT(in) :: vec !< Vector representing matrix rows/columns
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Setup graph

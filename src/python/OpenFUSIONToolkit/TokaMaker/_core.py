@@ -1159,7 +1159,7 @@ class TokaMaker():
         if coil_colormap is not None:
             _, region_currents = self.get_coil_currents()
             mesh_currents = numpy.zeros((self.lc.shape[0],))
-            for _ in range(self.ncoils):
+            if self.ncoils > 0:
                 mesh_currents = region_currents[self.reg-1]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:

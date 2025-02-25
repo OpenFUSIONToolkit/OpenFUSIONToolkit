@@ -23,16 +23,17 @@ USE oft_mesh_local_util, ONLY: mesh_local_findedge
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr
 USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks
-USE oft_solver_base, ONLY: oft_solver, oft_eigsolver
+USE oft_solver_base, ONLY: oft_solver, oft_eigsolver, oft_solver_bc
 USE oft_solver_utils, ONLY: create_diag_pre, create_cg_solver
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv
 !
+USE fem_base, ONLY: oft_ml_fem_type
 USE fem_utils, ONLY: bfem_interp, bfem_map_flag
 USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_eval, oft_blag_geval, &
-  oft_blag_npos, oft_blag_d2eval
+  oft_blag_npos, oft_blag_d2eval, oft_scalar_bfem, ML_oft_blagrange
 USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp, &
-  oft_lag_bg2interp, blag_zerob, blag_zerogrnd, oft_blag_getmop, &
+  oft_lag_bg2interp, oft_blag_zerob, oft_blag_zerogrnd, oft_blag_getmop, &
   oft_blag_vproject
 !---
 USE fem_utils, ONLY: fem_interp
@@ -138,6 +139,16 @@ TYPE :: gs_region_info
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: noaxi_nodes => NULL()
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: bc_nodes => NULL()
 END TYPE gs_region_info
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_solver_bc) :: oft_gs_zerob
+  logical, pointer, dimension(:) :: node_flag => NULL()
+  CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< FE representation
+contains
+  procedure :: apply => zerob_apply
+  procedure :: delete => zerob_delete
+end type oft_gs_zerob
 !---------------------------------------------------------------------------
 ! CLASS gs_eq
 !---------------------------------------------------------------------------
@@ -267,6 +278,11 @@ TYPE :: gs_eq
   CLASS(flux_func), POINTER :: P => NULL() !< Pressure flux function
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
+  CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL()
+  TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL()
+  TYPE(oft_blag_zerob), POINTER :: zerob_bc => NULL()
+  TYPE(oft_blag_zerogrnd), POINTER :: zerogrnd_bc => NULL()
+  TYPE(oft_gs_zerob), POINTER :: gs_zerob_bc => NULL()
   PROCEDURE(region_eta_set), NOPASS, POINTER :: set_eta => NULL()
 CONTAINS
   !
@@ -390,7 +406,7 @@ abstract interface
       real(8) :: eta
    end function region_eta_set
 end interface
-logical, allocatable, dimension(:) :: node_flag
+! logical, allocatable, dimension(:) :: node_flag
 real(r8), PARAMETER :: gs_epsilon = 1.d-12
 !
 integer(i4) :: cell_active = 0
@@ -1119,6 +1135,12 @@ CLASS(oft_bmesh), POINTER :: smesh
 ! do_compute=.TRUE.
 ! IF(PRESENT(compute))do_compute=compute
 smesh=>oft_blagrange%mesh
+self%ML_fe_rep=>ML_oft_blagrange
+self%fe_rep=>oft_blagrange
+ALLOCATE(self%zerob_bc)
+self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
+ALLOCATE(self%zerogrnd_bc)
+self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
 !---Get Vector
 call oft_blagrange%vec_create(self%psi)
 call self%psi%set(0.d0)
@@ -1147,7 +1169,9 @@ END IF
 IF(.NOT.ASSOCIATED(self%mrop))CALL build_mrop(self%mrop,"none")
 IF(.NOT.ASSOCIATED(self%mop))CALL oft_blag_getmop(self%mop,"none")
 !---Setup boundary conditions
-ALLOCATE(node_flag(oft_blagrange%ne),cdofs(oft_blagrange%nce))
+ALLOCATE(self%gs_zerob_bc)
+self%gs_zerob_bc%fe_rep=>self%fe_rep
+ALLOCATE(self%gs_zerob_bc%node_flag(oft_blagrange%ne),cdofs(oft_blagrange%nce))
 IF(.NOT.ASSOCIATED(self%saddle_rmask))THEN
   ALLOCATE(self%saddle_rmask(smesh%nreg))
   self%saddle_rmask=.TRUE.
@@ -1156,14 +1180,14 @@ END IF
 ALLOCATE(self%saddle_cmask(smesh%nc),self%saddle_pmask(smesh%np))
 self%spatial_bounds(:,1)=[1.d99,-1.d99]
 self%spatial_bounds(:,2)=[1.d99,-1.d99]
-node_flag=oft_blagrange%be
+self%gs_zerob_bc%node_flag=oft_blagrange%be
 self%saddle_pmask=.TRUE.
 self%saddle_cmask=.TRUE.
 DO i=1,smesh%nc
   IF(smesh%reg(i)>1)THEN
     CALL oft_blagrange%ncdofs(i,cdofs)
     DO j=1,oft_blagrange%nce
-      node_flag(cdofs(j))=.TRUE.
+      self%gs_zerob_bc%node_flag(cdofs(j))=.TRUE.
     END DO
     IF(.NOT.self%saddle_rmask(smesh%reg(i)))THEN
       self%saddle_cmask(i)=.FALSE.
@@ -1231,7 +1255,7 @@ self%Lcoils=0.d0
 DO i=1,self%ncoils
   CALL self%psi%new(self%psi_coil(i)%f)
   CALL gs_coil_source(self,i,tmp_vec)
-  CALL blag_zerob(tmp_vec)
+  CALL self%zerob_bc%apply(tmp_vec)
   CALL gs_vacuum_solve(self,self%psi_coil(i)%f,tmp_vec)
   CALL self%psi_coil(i)%f%get_local(psi_vals)
   WRITE(coil_tag,'(I3.3)')i
@@ -1251,7 +1275,7 @@ DO i=1,self%ncond_regs
   DO j=1,self%cond_regions(i)%neigs
     CALL self%psi%new(self%cond_regions(i)%psi_eig(j)%f)
     CALL gs_cond_source(self,i,j,tmp_vec)
-    CALL blag_zerob(tmp_vec)
+    CALL self%zerob_bc%apply(tmp_vec)
     CALL gs_vacuum_solve(self,self%cond_regions(i)%psi_eig(j)%f,tmp_vec)
     CALL self%cond_regions(i)%psi_eig(j)%f%get_local(psi_vals)
     WRITE(cond_tag,'(I2.2)')i
@@ -1409,7 +1433,7 @@ ELSE
   !---Setup Solver
   eigsolver%A=>self%dels
   eigsolver%M=>self%mrop
-  eigsolver%bc=>gs_zerob
+  eigsolver%bc=>self%gs_zerob_bc
   eigsolver%its=-2
   !---Setup Preconditioner
   ! if(oft_blagrange_level==1)then
@@ -1487,13 +1511,12 @@ END IF
 ! DEALLOCATE(tmp_vec)
 end subroutine gs_init_psi
 !---------------------------------------------------------------------------
-! SUBROUTINE: gs_zerob
-!---------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all edge nodes
 !!
 !! @param[in,out] a Field to be zeroed
 !---------------------------------------------------------------------------
-subroutine gs_zerob(a)
+subroutine zerob_apply(self,a)
+class(oft_gs_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
 integer(i4) :: i,j
 real(r8), pointer, dimension(:) :: vloc
@@ -1504,14 +1527,24 @@ NULLIFY(vloc)
 call a%get_local(vloc)
 !---Zero boundary values
 !$omp parallel do
-do i=1,oft_blagrange%ne
-  IF(node_flag(i))vloc(i)=0.d0
+do i=1,self%fe_rep%ne
+  IF(self%node_flag(i))vloc(i)=0.d0
 end do
 !---
 call a%restore_local(vloc)
 deallocate(vloc)
 DEBUG_STACK_POP
-end subroutine gs_zerob
+end subroutine zerob_apply
+!---------------------------------------------------------------------------
+!> Zero a surface Lagrange scalar field at all edge nodes
+!!
+!! @param[in,out] a Field to be zeroed
+!---------------------------------------------------------------------------
+subroutine zerob_delete(self)
+class(oft_gs_zerob), intent(inout) :: self
+NULLIFY(self%fe_rep)
+IF(ASSOCIATED(self%node_flag))DEALLOCATE(self%node_flag)
+end subroutine zerob_delete
 !---------------------------------------------------------------------------
 ! SUBROUTINE torus_interp
 !---------------------------------------------------------------------------
@@ -1610,7 +1643,7 @@ CALL pol_flux%new(rhs)
 !---Solve
 CALL rhs%add(0.d0,1.d0,source)
 CALL pol_flux%set(0.d0)
-CALL blag_zerob(rhs)
+CALL self%zerob_bc%apply(rhs)
 !---Solve linear system
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 CALL self%lu_solver%apply(pol_flux,rhs)
@@ -2281,7 +2314,7 @@ t0=omp_get_wtime()
 IF(.NOT.self%free)THEN
   CALL rhs_bc%add(0.d0,1.d0,self%psi)
   CALL psi_bc%add(0.d0,1.d0,rhs_bc)
-  CALL blag_zerob(psi_bc)
+  CALL self%zerob_bc%apply(psi_bc)
   CALL rhs_bc%add(1.d0,-1.d0,psi_bc)
   CALL psi_bc%set(0.d0)
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
@@ -2390,13 +2423,13 @@ DO i=1,self%maxits
 
   !---Compute toroidal flux contribution
   CALL rhs%add(0.d0,1.d0,psi_alam)
-  CALL blag_zerob(rhs)
+  CALL self%zerob_bc%apply(rhs)
   !---Solve linear system
   CALL rhs%get_local(vals_tmp)
   self%lu_solver%sec_rhs(:,1) = vals_tmp
   !---Compute pressure contribution
   CALL rhs%add(0.d0,1.d0,psi_press)
-  CALL blag_zerob(rhs)
+  CALL self%zerob_bc%apply(rhs)
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
   t1=omp_get_wtime()
   self%lu_solver%nrhs=2
@@ -2578,7 +2611,7 @@ DO i=1,self%maxits
     CALL psi_dt%set(0.d0)
     CALL psi_dt%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
     CALL gs_wall_source(self,psi_dt,tmp_vec)
-    CALL blag_zerob(tmp_vec)
+    CALL self%zerob_bc%apply(tmp_vec)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
     oft_env%pm=pm_save
@@ -2606,7 +2639,7 @@ DO i=1,self%maxits
   !---Update flux scale for free and fixed boundary
   ! CALL self%psi%add(1.d0,-1.d0,psi_vac)
   ! CALL self%psi%add(1.d0,-self%vcontrol_val,psi_vcont)
-  ! CALL blag_zerob(self%psi)
+  ! CALL self%zerob_bc%apply(self%psi)
   IF(self%free)THEN
     ! CALL self%psi%add(1.d0,1.d0,psi_bc)
     ! CALL self%psi%add(1.d0,1.d0,psi_vac)
@@ -2614,7 +2647,7 @@ DO i=1,self%maxits
   ELSE
     CALL self%psi%add(1.d0,-1.d0,psi_vac)
     CALL self%psi%add(1.d0,-self%vcontrol_val,psi_vcont)
-    CALL blag_zerob(self%psi)
+    CALL self%zerob_bc%apply(self%psi)
     IF(self%I%f_offset==0.d0)THEN
       CALL self%psi%get_local(vals_tmp)
       self%psimax=MAXVAL(vals_tmp)
@@ -2670,7 +2703,7 @@ DO i=1,self%maxits
   CALL tmp_vec%add(1.d0,-self%vcontrol_val,psi_vcont)
   CALL self%dels%apply(tmp_vec,psip)
   CALL psip%add(1.d0,-1.d0,rhs)
-  IF(.NOT.self%free)CALL blag_zerob(psip)
+  IF(.NOT.self%free)CALL self%zerob_bc%apply(psip)
   nl_res=psip%dot(psip)
   !---Output progress
   IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,self%alam,self%pnorm, &
@@ -2896,17 +2929,17 @@ CALL self%psi%add(1.d0,self%vcontrol_val,psi_vcont)
 !   IF(self%free)THEN ! Set BC for dirichlet flux
 !     CALL psi_bc%set(0.d0)
 !     CALL gs_set_bc(self,self%u_hom,psi_bc)
-!     CALL blag_zerob(rhs)
+!     CALL self%zerob_bc%apply(rhs)
 !     CALL rhs%add(1.d0,1.d0,psi_bc)
 !   ELSE
-!     CALL blag_zerob(rhs)
+!     CALL self%zerob_bc%apply(rhs)
 !   END IF
 !   !---Solve linear system
 !   CALL rhs%get_local(vals_tmp)
 !   self%lu_solver%sec_rhs(:,1) = vals_tmp
 !   !---Compute pressure contribution
 !   CALL rhs%add(0.d0,1.d0,psi_press)
-!   CALL blag_zerob(rhs)
+!   CALL self%zerob_bc%apply(rhs)
 !   pm_save=oft_env%pm; oft_env%pm=.FALSE.
 !   t1=omp_get_wtime()
 !   self%lu_solver%nrhs=2
@@ -2970,14 +3003,14 @@ CALL self%psi%add(1.d0,self%vcontrol_val,psi_vcont)
 !     CALL psi_bc%set(0.d0)
 !     CALL gs_set_bc(self,self%u_hom,psi_bc)
 !     IF(self%use_lu)THEN
-!       CALL blag_zerob(rhs)
+!       CALL self%zerob_bc%apply(rhs)
 !       CALL rhs%add(1.d0,1.d0,psi_bc)
 !     ! ELSE
 !     !   CALL self%solver%a%apply(psi_bc,rhs_bc)
 !     !   CALL rhs%add(1.d0,-1.d0,rhs_bc)
 !     END IF
 !   ELSE
-!     CALL blag_zerob(rhs)
+!     CALL self%zerob_bc%apply(rhs)
 !   END IF
 !   !---Solve linear system
 !   t1=omp_get_wtime()
@@ -3098,7 +3131,7 @@ IF(psimax>1.d-14)THEN
   CALL self%psi%new(psi_bc)
   CALL rhs_bc%add(0.d0,1.d0,psi_sol)
   CALL psi_bc%add(0.d0,1.d0,rhs_bc)
-  CALL blag_zerob(psi_bc)
+  CALL self%zerob_bc%apply(psi_bc)
   CALL rhs_bc%add(1.d0,-1.d0,psi_bc)
   CALL psi_bc%set(0.d0)
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
@@ -3121,7 +3154,7 @@ IF(self%dt>0.d0)THEN
     CALL gs_gen_source(self,rhs_source,tmp_vec)
     CALL psi_dt%add(1.d0,1.d0,tmp_vec)
   END IF
-  CALL blag_zerob(psi_dt)
+  CALL self%zerob_bc%apply(psi_dt)
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
   CALL self%lu_solver_dt%apply(tmp_vec,psi_dt)
   oft_env%pm=pm_save
@@ -3130,7 +3163,7 @@ ELSE
   IF(PRESENT(rhs_source))THEN
     CALL tmp_vec%set(0.d0)
     CALL gs_gen_source(self,rhs_source,psi_dt)
-    CALL blag_zerob(psi_dt)
+    CALL self%zerob_bc%apply(psi_dt)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%lu_solver%apply(tmp_vec,psi_dt)
     oft_env%pm=pm_save
@@ -3215,7 +3248,7 @@ CALL self%psi%new(psi_fixed)
 CALL self%psi%new(psi_dummy)
 CALL gs_source(self,self%psi,rhs,psi_fixed,psi_dummy,itor_alam,itor_press,estored)
 CALL psi_fixed%set(0.d0)
-CALL blag_zerob(rhs)
+CALL self%zerob_bc%apply(rhs)
 CALL lu_solver%apply(psi_fixed,rhs)
 !---Write out error at boundary points
 NULLIFY(vals_tmp)
@@ -3402,7 +3435,7 @@ CALL build_dels(dels_grnd,self,"grnd")
 !---Setup Solver
 CALL create_cg_solver(solver)
 solver%A=>dels_grnd
-solver%bc=>blag_zerogrnd
+solver%bc=>self%zerogrnd_bc
 solver%its=-2
 CALL create_diag_pre(solver%pre)
 !---
@@ -3450,7 +3483,7 @@ end do
 deallocate(rhs_loc,j_lag)
 !$omp end parallel
 CALL rhs%restore_local(vals_tmp,add=.TRUE.)
-call blag_zerob(rhs)
+call self%zerob_bc%apply(rhs)
 call solver%apply(self%chi,rhs)
 !---
 call rhs%delete
@@ -3491,7 +3524,7 @@ IF(PRESENT(psi_vec))THEN
 ELSE
   call self%dels%apply(self%psi,x)
 END IF
-call gs_zerob(x)
+call self%gs_zerob_bc%apply(x)
 NULLIFY(vals_tmp)
 call x%get_local(vals_tmp)
 itor=sum(vals_tmp)*self%psiscale
@@ -5605,7 +5638,7 @@ end subroutine build_dels
 subroutine gs_destroy(self)
 class(gs_eq), intent(inout) :: self
 integer(i4) :: i,j
-IF(ALLOCATED(node_flag))DEALLOCATE(node_flag)
+IF(ASSOCIATED(self%gs_zerob_bc%node_flag))DEALLOCATE(self%gs_zerob_bc%node_flag)
 !
 ! IF(ASSOCIATED(self%cflag))DEALLOCATE(self%cflag)
 IF(ASSOCIATED(self%lim_con))DEALLOCATE(self%lim_con)

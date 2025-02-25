@@ -2238,27 +2238,17 @@ IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_applyt_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_set_values
-!------------------------------------------------------------------------------
-!> Set values of a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to set [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Set values of a matrix
 !------------------------------------------------------------------------------
 subroutine mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: i,j,jp,jn,jk
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
@@ -2288,28 +2278,18 @@ END IF
 DEBUG_STACK_POP
 end subroutine mat_set_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: i,j,jp,jn,jk,jktmp(n,m)
 logical :: fail_test,use_cache
 DEBUG_STACK_PUSH
@@ -2360,28 +2340,18 @@ IF(fail_test)CALL oft_abort('Entry not found!','mat_add_values',__FILE__)
 DEBUG_STACK_POP
 end subroutine mat_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_atomic_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: i,j,jp,jn,jk,jktmp(n,m)
 logical :: fail_test,use_cache
 DEBUG_STACK_PUSH
@@ -2434,15 +2404,11 @@ IF(fail_test)CALL oft_abort('Entry not found!','mat_add_values',__FILE__)
 DEBUG_STACK_POP
 end subroutine mat_atomic_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_assemble
-!------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
 !------------------------------------------------------------------------------
 subroutine mat_assemble(self,diag)
 class(oft_native_matrix), intent(inout) :: self
-class(oft_vector), optional, target, intent(inout) :: diag
+class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 integer(i4) :: i,jp,jn,jr
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
@@ -2480,8 +2446,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine mat_assemble
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_zero
-!------------------------------------------------------------------------------
 !> Zero all entries in matrix
 !------------------------------------------------------------------------------
 subroutine mat_zero(self)
@@ -2492,21 +2456,14 @@ self%M=0.d0
 DEBUG_STACK_POP
 end subroutine mat_zero
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_zero_rows
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine mat_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_native_matrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
 integer(i4) :: i,j,ir
 DEBUG_STACK_PUSH
@@ -2535,21 +2492,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine mat_zero_rows
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_zero_cols
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
-!!
-!! @param[in] ncols Number of columns to zero
-!! @param[in] icols Indices of columns to zero [ncols]
-!! @param[in] jblock Column block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine mat_zero_cols(self,ncols,icols,jblock,keep_diag)
 class(oft_native_matrix), intent(inout) :: self
-integer(i4), intent(in) :: ncols
-integer(i4), intent(in) :: icols(ncols)
-integer(i4), optional, intent(in) :: jblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: ncols !< Number of columns to zero
+integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 !---
 integer(i4) :: i,j
 logical :: zero_diag
@@ -2580,8 +2530,6 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine mat_zero_cols
-!------------------------------------------------------------------------------
-! SUBROUTINE: mat_delete
 !------------------------------------------------------------------------------
 !> Delete matrix
 !------------------------------------------------------------------------------
@@ -2630,16 +2578,12 @@ self%nred=0
 DEBUG_STACK_POP
 end subroutine mat_delete
 !------------------------------------------------------------------------------
-! SUBROUTINE: native_matrix_setup_full
-!------------------------------------------------------------------------------
 !> Build full local submatrix for matrix
 !! - Create stitching structures
-!!
-!! @param[in,out] u Constructed vector for parent row space
 !------------------------------------------------------------------------------
 subroutine native_matrix_setup_full(self,u)
 class(oft_native_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: u
+class(oft_vector), target, intent(inout) :: u !< Constructed vector for parent row space
 class(oft_native_vector), pointer :: uv
 type :: eout
   integer(i8), pointer, dimension(:,:) :: le => NULL()
@@ -3041,8 +2985,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine native_matrix_setup_full
 !------------------------------------------------------------------------------
-! SUBROUTINE: matrix_update_slice
-!------------------------------------------------------------------------------
 !> Update full local matrix with values from other processors
 !------------------------------------------------------------------------------
 subroutine matrix_update_slice(self)
@@ -3073,22 +3015,15 @@ self%full_current=.TRUE.
 DEBUG_STACK_POP
 end subroutine matrix_update_slice
 !------------------------------------------------------------------------------
-! SUBROUTINE: submatrix_setup
-!------------------------------------------------------------------------------
 !> Setup local submatrix from parent matrix
 !! - Create stitching structures for parent matrix if necessary
-!!
-!! @param[in,out] mat Parent matrix
-!! @param[in,out] u Constructed vector for parent row space
-!! @param[in] slice Index of field slice to use (optional)
-!! @param[in] part Array of elements to define submatrix [:] (optional)
 !------------------------------------------------------------------------------
 subroutine submatrix_setup(self,mat,u,slice,part)
 class(oft_native_submatrix), intent(inout) :: self
-class(oft_matrix), intent(inout) :: mat
-class(oft_vector), intent(inout) :: u
-integer(i4), optional, intent(in) :: slice
-integer(i4), optional, target, intent(in) :: part(:)
+class(oft_matrix), intent(inout) :: mat !< Parent matrix
+class(oft_vector), intent(inout) :: u !< Constructed vector for parent row space
+integer(i4), optional, intent(in) :: slice !< Index of field slice to use (optional)
+integer(i4), optional, target, intent(in) :: part(:) !< Array of elements to define submatrix [:] (optional)
 class(oft_native_matrix), pointer :: parent
 DEBUG_STACK_PUSH
 !---
@@ -3122,8 +3057,6 @@ CALL self%update_slice
 ! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine submatrix_setup
-!------------------------------------------------------------------------------
-! SUBROUTINE: submatrix_update_slice
 !------------------------------------------------------------------------------
 !> Update matrix with values from parent matrix
 !------------------------------------------------------------------------------
@@ -3210,8 +3143,6 @@ self%full_current=.FALSE.
 DEBUG_STACK_POP
 end subroutine submatrix_update_slice
 !------------------------------------------------------------------------------
-! SUBROUTINE: submatrix_delete
-!------------------------------------------------------------------------------
 !> Delete matrix
 !------------------------------------------------------------------------------
 subroutine submatrix_delete(self)
@@ -3224,18 +3155,12 @@ NULLIFY(self%parent)
 DEBUG_STACK_POP
 end subroutine submatrix_delete
 !------------------------------------------------------------------------------
-! SUBROUTINE: partition_graph
-!------------------------------------------------------------------------------
 !> Perform graph partitioning (METIS)
-!!
-!! @param[in] graph Graph to partition
-!! @param[in] n Desired number of partitions
-!! @param[in,out] part Array of partition ID for each element [graph%nr]
 !------------------------------------------------------------------------------
 subroutine partition_graph(graph,n,part)
-type(oft_graph), intent(inout) :: graph
-integer(i4), intent(in) :: n
-integer(i4), intent(inout) :: part(:)
+type(oft_graph), intent(inout) :: graph !< Graph to partition
+integer(i4), intent(in) :: n !< Desired number of partitions
+integer(i4), intent(inout) :: part(:) !< Array of partition ID for each element [graph%nr]
 integer(i4) :: ptype,ierr
 DEBUG_STACK_PUSH
 ptype=2 ! Use ML K-Way
@@ -3244,18 +3169,13 @@ IF(ierr<0)CALL oft_abort('Graph paritioning failed','partition_graph',__FILE__)
 DEBUG_STACK_POP
 end subroutine partition_graph
 !------------------------------------------------------------------------------
-! FUNCTION: native_cmatrix_cast
-!------------------------------------------------------------------------------
 !> Cast a matrix object to a oft_native_matrix
 !!
-!! The source matrix must be oft_native_matrix or a child class, otherwise an error will be thrown.
-!!
-!! @param[out] self Pointer to cast crsmatrix
-!! @param[in] source Source matrix to cast
+!! The source matrix must be oft_native_matrix or a child class, otherwise an error will be thrown
 !------------------------------------------------------------------------------
 FUNCTION native_cmatrix_cast(self,source) result(ierr)
-class(oft_native_cmatrix), pointer, intent(out) :: self
-class(oft_cmatrix), target, intent(in) :: source
+class(oft_native_cmatrix), pointer, intent(out) :: self !< Pointer to cast crsmatrix
+class(oft_cmatrix), target, intent(in) :: source !< Source matrix to cast
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 select type(source)
@@ -3268,19 +3188,14 @@ end select
 DEBUG_STACK_POP
 end FUNCTION native_cmatrix_cast
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_apply_vec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine cmat_apply_vec(self,a,b)
 class(oft_native_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
 integer(i4) :: i,j
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
@@ -3337,19 +3252,14 @@ IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_apply_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_apply_cvec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine cmat_apply_cvec(self,a,b)
 class(oft_native_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
 integer(i4) :: i,j
 complex(c8) :: tmp
@@ -3405,19 +3315,14 @@ IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_apply_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_applyt_vec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine cmat_applyt_vec(self,a,b)
 class(oft_native_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
 integer(i4) :: i,j,k
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
@@ -3473,19 +3378,14 @@ IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_applyt_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_applyt_cvec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine cmat_applyt_cvec(self,a,b)
 class(oft_native_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
 integer(i4) :: i,j,k
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
@@ -3540,27 +3440,17 @@ IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_applyt_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_set_values
-!------------------------------------------------------------------------------
-!> Set values of a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to set [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Set values of a matrix
 !------------------------------------------------------------------------------
 subroutine cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-COMPLEX(c8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: i,j,jp,jn,jk
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
@@ -3590,28 +3480,18 @@ END IF
 DEBUG_STACK_POP
 end subroutine cmat_set_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-COMPLEX(c8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: i,j,jp,jn,jk,jktmp(n,m)
 logical :: fail_test,use_cache
 DEBUG_STACK_PUSH
@@ -3662,28 +3542,18 @@ IF(fail_test)CALL oft_abort('Entry not found!','cmat_add_values',__FILE__)
 DEBUG_STACK_POP
 end subroutine cmat_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_atomic_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-COMPLEX(c8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: i,j,jp,jn,jk,jktmp(n,m)
 logical :: fail_test,use_cache
 DEBUG_STACK_PUSH
@@ -3736,15 +3606,11 @@ IF(fail_test)CALL oft_abort('Entry not found!','cmat_atomic_add_values',__FILE__
 DEBUG_STACK_POP
 end subroutine cmat_atomic_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_assemble
-!------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
 !------------------------------------------------------------------------------
 subroutine cmat_assemble(self,diag)
 class(oft_native_cmatrix), intent(inout) :: self
-class(oft_cvector), optional, target, intent(inout) :: diag
+class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 integer(i4) :: i,jp,jn,jr
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
@@ -3781,8 +3647,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine cmat_assemble
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_zero
-!------------------------------------------------------------------------------
 !> Zero all entries in matrix
 !------------------------------------------------------------------------------
 subroutine cmat_zero(self)
@@ -3793,21 +3657,14 @@ self%M=(0.d0,0.d0)
 DEBUG_STACK_POP
 end subroutine cmat_zero
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_zero_rows
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_native_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
 integer(i4) :: i,j,ir
 DEBUG_STACK_PUSH
@@ -3836,21 +3693,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine cmat_zero_rows
 !------------------------------------------------------------------------------
-! SUBROUTINE: cmat_zero_cols
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
-!!
-!! @param[in] ncols Number of columns to zero
-!! @param[in] icols Indices of columns to zero [ncols]
-!! @param[in] jblock Column block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine cmat_zero_cols(self,ncols,icols,jblock,keep_diag)
 class(oft_native_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: ncols
-integer(i4), intent(in) :: icols(ncols)
-integer(i4), optional, intent(in) :: jblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: ncols !< Number of columns to zero
+integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 !---
 integer(i4) :: i,j
 logical :: zero_diag
@@ -3881,8 +3731,6 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine cmat_zero_cols
-!------------------------------------------------------------------------------
-! SUBROUTINE: cmat_delete
 !------------------------------------------------------------------------------
 !> Delete matrix
 !------------------------------------------------------------------------------
@@ -3931,22 +3779,14 @@ self%nred=0
 DEBUG_STACK_POP
 end subroutine cmat_delete
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_apply_vec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine dense_mat_apply_vec(self,a,b)
 class(oft_native_dense_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 integer(i4) :: i,j,i1,i2
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
 !---
@@ -3971,22 +3811,14 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_mat_apply_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_apply_cvec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine dense_mat_apply_cvec(self,a,b)
 class(oft_native_dense_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 integer(i4) :: i,j,i1,i2
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
 !---
@@ -4011,22 +3843,14 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_mat_apply_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_applyt_vec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine dense_mat_applyt_vec(self,a,b)
 class(oft_native_dense_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 integer(i4) :: i,j,j1,j2
 real(r8) :: tmp
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -4054,22 +3878,14 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_mat_applyt_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_applyt_cvec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine dense_mat_applyt_cvec(self,a,b)
 class(oft_native_dense_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 integer(i4) :: i,j,j1,j2
 COMPLEX(c8) :: tmp
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -4097,27 +3913,17 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_mat_applyt_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_set_values
-!------------------------------------------------------------------------------
-!> Set values of a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to set [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Set values of a matrix
 !------------------------------------------------------------------------------
 subroutine dense_mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_dense_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: i,j,ii,jj
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
@@ -4144,28 +3950,18 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_set_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine dense_mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: i,j,ii,jj
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
@@ -4192,28 +3988,18 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_atomic_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine dense_mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: i,j,ii,jj
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
@@ -4244,15 +4030,11 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_atomic_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_assemble
-!------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
 !------------------------------------------------------------------------------
 subroutine dense_mat_assemble(self,diag)
 class(oft_native_dense_matrix), intent(inout) :: self
-class(oft_vector), optional, target, intent(inout) :: diag
+class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
@@ -4278,8 +4060,6 @@ end if
 DEBUG_STACK_POP
 end subroutine dense_mat_assemble
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_zero
-!------------------------------------------------------------------------------
 !> Zero all entries in matrix
 !------------------------------------------------------------------------------
 subroutine dense_mat_zero(self)
@@ -4289,21 +4069,14 @@ self%M=0.d0
 DEBUG_STACK_POP
 end subroutine dense_mat_zero
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_zero_rows
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine dense_mat_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_native_dense_matrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
 integer(i4) :: i,j,ir
 DEBUG_STACK_PUSH
@@ -4330,21 +4103,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_zero_rows
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_zero_cols
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
-!!
-!! @param[in] ncols Number of columns to zero
-!! @param[in] icols Indices of columns to zero [ncols]
-!! @param[in] jblock Column block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine dense_mat_zero_cols(self,ncols,icols,jblock,keep_diag)
 class(oft_native_dense_matrix), intent(inout) :: self
-integer(i4), intent(in) :: ncols
-integer(i4), intent(in) :: icols(ncols)
-integer(i4), optional, intent(in) :: jblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: ncols !< Number of columns to zero
+integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 !---
 integer(i4) :: i,j,ic
 logical :: zero_diag
@@ -4373,8 +4139,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_zero_cols
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_mat_delete
-!------------------------------------------------------------------------------
 !> Delete matrix
 !------------------------------------------------------------------------------
 subroutine dense_mat_delete(self)
@@ -4388,22 +4152,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_delete
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_apply_vec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine dense_cmat_apply_vec(self,a,b)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 integer(i4) :: i,j,i1,i2
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: bvals
@@ -4429,22 +4185,14 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_cmat_apply_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_apply_cvec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine dense_cmat_apply_cvec(self,a,b)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 integer(i4) :: i,j,i1,i2
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
 !---
@@ -4469,22 +4217,14 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_cmat_apply_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_applyt_vec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine dense_cmat_applyt_vec(self,a,b)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !<  Result of matrix product
 integer(i4) :: i,j,j1,j2
 COMPLEX(c8) :: tmp
 real(r8), pointer, CONTIGUOUS, dimension(:) :: avals
@@ -4513,22 +4253,14 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_cmat_applyt_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_applyt_cvec
-!------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine dense_cmat_applyt_cvec(self,a,b)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 integer(i4) :: i,j,j1,j2
 COMPLEX(c8) :: tmp
 COMPLEX(c8), pointer, CONTIGUOUS, dimension(:) :: avals,bvals
@@ -4556,27 +4288,17 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_cmat_applyt_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_set_values
-!------------------------------------------------------------------------------
-!> Set values of a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to set [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Set values of a matrix
 !------------------------------------------------------------------------------
 subroutine dense_cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-COMPLEX(c8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: i,j,ii,jj
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
@@ -4603,28 +4325,18 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_set_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine dense_cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-COMPLEX(c8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: i,j,ii,jj
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
@@ -4651,28 +4363,18 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_atomic_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine dense_cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-COMPLEX(c8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: i,j,ii,jj
 DEBUG_STACK_PUSH
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
@@ -4703,15 +4405,11 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_atomic_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_assemble
-!------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
 !------------------------------------------------------------------------------
 subroutine dense_cmat_assemble(self,diag)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-class(oft_cvector), optional, target, intent(inout) :: diag
+class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
@@ -4737,8 +4435,6 @@ end if
 DEBUG_STACK_POP
 end subroutine dense_cmat_assemble
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_zero
-!------------------------------------------------------------------------------
 !> Zero all entries in matrix
 !------------------------------------------------------------------------------
 subroutine dense_cmat_zero(self)
@@ -4748,21 +4444,14 @@ self%M=(0.d0,0.d0)
 DEBUG_STACK_POP
 end subroutine dense_cmat_zero
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_zero_rows
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine dense_cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 logical :: zero_diag
 integer(i4) :: i,j,ir
 DEBUG_STACK_PUSH
@@ -4789,21 +4478,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_zero_rows
 !------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_zero_cols
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
-!!
-!! @param[in] ncols Number of columns to zero
-!! @param[in] icols Indices of columns to zero [ncols]
-!! @param[in] jblock Column block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine dense_cmat_zero_cols(self,ncols,icols,jblock,keep_diag)
 class(oft_native_dense_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: ncols
-integer(i4), intent(in) :: icols(ncols)
-integer(i4), optional, intent(in) :: jblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: ncols !< Number of columns to zero
+integer(i4), intent(in) :: icols(ncols) !< Indices of columns to zero [ncols]
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 !---
 integer(i4) :: i,j,ic
 logical :: zero_diag
@@ -4831,8 +4513,6 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_zero_cols
-!------------------------------------------------------------------------------
-! SUBROUTINE: dense_cmat_delete
 !------------------------------------------------------------------------------
 !> Delete matrix
 !------------------------------------------------------------------------------

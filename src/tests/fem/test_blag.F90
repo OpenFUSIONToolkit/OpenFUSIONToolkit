@@ -19,9 +19,10 @@ USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, oft_blagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, &
+  oft_blagrange, ML_oft_blagrange
 USE oft_lag_fields, ONLY: oft_blag_create
-USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, blag_zeroe
+USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zeroe
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
@@ -30,6 +31,7 @@ INTEGER(i4), PARAMETER :: minlev=2
 INTEGER(i4) :: ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_blag_zeroe), TARGET :: blag_zeroe
 INTEGER(i4) :: order
 NAMELIST/test_blag_options/order
 !---Initialize enviroment
@@ -48,6 +50,7 @@ CALL plot_file%setup("Test")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---
 CALL oft_lag_setup(mg_mesh,order,minlev)
+blag_zeroe%ML_lag_rep=>ML_oft_blagrange
 !---Run tests
 oft_env%pm=.FALSE.
 CALL test_lap
@@ -86,7 +89,7 @@ CALL create_diag_pre(linv%pre)
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL blag_zeroe(v)
+CALL blag_zeroe%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vals)

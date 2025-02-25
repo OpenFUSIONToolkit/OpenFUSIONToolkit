@@ -35,10 +35,11 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_mlpre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, &
-  oft_lag_set_level, oft_lagrange_ops, oft_lagrange_blevel
+  oft_lag_set_level, oft_lagrange_ops, oft_lagrange_blevel, oft_lagrange, &
+  ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
-  oft_lag_getmop, oft_lag_getlop, df_lop, nu_lop, lag_zerob, &
+  oft_lag_getmop, oft_lag_getlop, df_lop, nu_lop, oft_lag_zerob, &
   lag_interp, lag_inject
 IMPLICIT NONE
 !!\subsection ex2_code_vars Variable Definitions
@@ -60,6 +61,7 @@ INTEGER(i4) :: i,nlevels
 INTEGER(i4), PARAMETER :: order = 3
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_lag_zerob) :: lag_zerob
 !!\subsection doc_ex2_code_fem Setup Lagrange FE
 !!
 !!When MG is used it is also desirable to construct field caches for each FE representation to be used. This is done with
@@ -76,6 +78,7 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 CALL oft_lag_setup(mg_mesh,order)
 CALL lag_setup_interp
 CALL lag_mloptions
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!\subsection doc_ex2_code_ml Construct ML structures
 !!
 !!To form a MG preconditioner the approximate matrices corresponding to each level must be
@@ -93,7 +96,7 @@ DO i=1,nlevels
   nu(i)=nu_lop(i)
   !---
   NULLIFY(ml_lop(i)%M)
-  CALL oft_lag_getlop(ml_lop(i)%M,'zerob')
+  CALL oft_lag_getlop(oft_lagrange,ml_lop(i)%M,'zerob')
   IF(i>1)ml_int(i-1)%M=>oft_lagrange_ops%interp
 END DO
 CALL oft_lag_set_level(oft_lagrange_nlevels)
@@ -103,19 +106,19 @@ CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
 lop=>ml_lop(nlevels)%M
-CALL oft_lag_getmop(mop,'none')
+CALL oft_lag_getmop(oft_lagrange,mop,'none')
 !!\subsection doc_ex2_code_solver Setup linear solver
 CALL create_cg_solver(linv)
 linv%its=-3
 linv%A=>lop
 !---Setup MG preconditioner
 CALL create_mlpre(linv%pre,ml_lop,levels, &
-nlevels=nlevels,create_vec=oft_lag_create,interp=lag_interp,inject=lag_inject, &
-bc=lag_zerob,stype=1,df=df,nu=nu)
+  nlevels=nlevels,create_vec=oft_lag_create,interp=lag_interp,inject=lag_inject, &
+  bc=lag_zerob,stype=1,df=df,nu=nu)
 !!\subsection doc_ex2_code_compute Solve linear system
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL lag_zerob(v)
+CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vtmp)

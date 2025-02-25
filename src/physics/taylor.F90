@@ -30,17 +30,18 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_base, ONLY: oft_fem_type
 USE fem_utils, ONLY: fem_interp
 USE oft_lag_basis, ONLY: oft_lagrange_level, oft_lagrange_lin_level, &
-oft_lagrange_nlevels, oft_lag_set_level
-USE oft_lag_operators, ONLY: lag_zerob, lag_getlop_pre, oft_lag_getlop
-USE oft_h0_basis, ONLY: oft_h0, oft_h0_nlevels, oft_h0_geval_all, oft_h0_fem
-USE oft_h0_operators, ONLY: h0_zerogrnd, h0_getlop_pre, oft_h0_getlop
+  oft_lagrange_nlevels, oft_lag_set_level, oft_lagrange, ML_oft_lagrange
+USE oft_lag_operators, ONLY: oft_lag_zerob, lag_getlop_pre, oft_lag_getlop
+USE oft_h0_basis, ONLY: oft_h0, oft_h0_nlevels, oft_h0_geval_all, oft_h0_fem, &
+  ML_oft_h0
+USE oft_h0_operators, ONLY: oft_h0_zerogrnd, h0_getlop_pre, oft_h0_getlop
 USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_level, oft_hcurl_nlevels, &
-oft_hcurl_blevel, oft_hcurl_eval_all, oft_hcurl_ceval_all, oft_hcurl_set_level, &
-oft_hcurl_get_cgops, oft_hcurl_fem, ML_oft_hcurl
+  oft_hcurl_blevel, oft_hcurl_eval_all, oft_hcurl_ceval_all, oft_hcurl_set_level, &
+  oft_hcurl_get_cgops, oft_hcurl_fem, ML_oft_hcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, oft_hcurl_orthog, &
-oft_hcurl_divout, hcurl_getwop_pre, hcurl_zerob, oft_hcurl_getmop, oft_hcurl_getkop, &
-oft_hcurl_getwop, hcurl_interp, oft_hcurl_getjmlb, hcurl_getjmlb_pre
+  oft_hcurl_divout, hcurl_getwop_pre, oft_hcurl_zerob, oft_hcurl_getmop, oft_hcurl_getkop, &
+  oft_hcurl_getwop, hcurl_interp, oft_hcurl_getjmlb, hcurl_getjmlb_pre
 USE oft_h1_basis, ONLY: oft_h1, oft_h1_level, oft_h1_nlevels, oft_h1_set_level
 USE oft_h1_fields, ONLY: oft_h1_create!, oft_h1_save
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_getmop, h1_mc
@@ -124,6 +125,8 @@ character(2) :: pnum,mnum
 character(40) :: filename
 logical :: rst
 type(oft_timer) :: mytimer
+type(oft_hcurl_zerob), target :: hcurl_zerob
+type(oft_lag_zerob), target :: lag_zerob
 !---
 DEBUG_STACK_PUSH
 IF(PRESENT(nm))THEN
@@ -160,13 +163,15 @@ DO i=1,nlevels_wop
   IF(oft_hcurl_level<=oft_lagrange_lin_level)THEN
     CALL oft_lag_set_level(oft_hcurl_level)
     NULLIFY(ml_lop(i)%M)
-    CALL oft_lag_getlop(ml_lop(i)%M,"zerob")
+    CALL oft_lag_getlop(oft_lagrange,ml_lop(i)%M,"zerob")
   END IF
 END DO
 CALL oft_hcurl_set_level(oft_hcurl_nlevels)
 !---------------------------------------------------------------------------
 ! Loop over desired number of modes
 !---------------------------------------------------------------------------
+hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 do k=1,taylor_nm
   orthog%nm=k-1
   call oft_hcurl_set_level(taylor_minlev)
@@ -195,7 +200,7 @@ do k=1,taylor_nm
       end if
     end if
     !---Apply BC
-    CALL hcurl_zerob(u)
+    CALL hcurl_zerob%apply(u)
     !---Setup Solver
     wop=>ml_wop(i-taylor_minlev+1)%M
     orthog%wop=>wop
@@ -244,7 +249,7 @@ do k=1,taylor_nm
     CALL oft_lag_set_level(MIN(oft_hcurl_level,oft_lagrange_lin_level))
     IF(nlevels_lop<=0)THEN
       NULLIFY(lop)
-      CALL oft_lag_getlop(lop,"zerob")
+      CALL oft_lag_getlop(oft_lagrange,lop,"zerob")
     ELSE
       lop=>ml_lop(oft_lagrange_level-taylor_minlev+1)%M
     END IF
@@ -353,6 +358,9 @@ integer(i4) :: i,j,k,nlevels,ierr
 logical :: rst=.FALSE.
 character(2) :: pnum,mnum
 character(40) :: filename
+type(oft_hcurl_zerob), target :: hcurl_zerob
+type(oft_h0_zerogrnd), target :: h0_zerogrnd
+type(oft_lag_zerob), target :: lag_zerob
 DEBUG_STACK_PUSH
 NULLIFY(lop,lop_lag,mop,mop_hcurl,wop)
 NULLIFY(ml_int,ml_lop,ml_wop)
@@ -369,6 +377,9 @@ ELSE
     WRITE(taylor_htag(i),'(A3,I1)')'INJ',i
   END DO
 END IF
+hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
+h0_zerogrnd%ML_H0_rep=>ML_oft_h0
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---Loop over cut planes
 IF(taylor_rst)THEN
   rst=.TRUE.
@@ -389,13 +400,13 @@ IF(.NOT.rst)THEN
 ! Setup H0::LOP preconditioner
 !---------------------------------------------------------------------------
   if(taylor_minlev==oft_h0_nlevels-1)then ! Lowest level uses diag precond
-    CALL oft_h0_getlop(lop,'grnd')
+    CALL oft_h0_getlop(oft_h0,lop,'grnd')
     CALL create_cg_solver(linv)
     CALL create_diag_pre(linv%pre)
   else ! Nested levels use MG
     CALL create_cg_solver(linv, force_native=.TRUE.)
-    CALL h0_getlop_pre(linv%pre,ml_lop,nlevels=oft_h0_nlevels-taylor_minlev+1)
-    lop=>ml_lop(oft_h0_nlevels-taylor_minlev+1)%M
+    CALL h0_getlop_pre(linv%pre,ml_lop,'grnd',nlevels=oft_h0_nlevels-taylor_minlev+1)
+      lop=>ml_lop(oft_h0_nlevels-taylor_minlev+1)%M
   end if
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
@@ -436,7 +447,7 @@ END SELECT
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL oft_lag_set_level(MIN(oft_hcurl_level,oft_lagrange_lin_level))
-CALL oft_lag_getlop(lop_lag,"zerob")
+CALL oft_lag_getlop(oft_lagrange,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
 !linv_lag%its=-2
@@ -532,7 +543,7 @@ DO i=1,taylor_nh
     !---Compute current field
     hcurl_divout%pm=.FALSE.
     hcurl_divout%mop=>mop_hcurl
-    CALL hcurl_zerob(b)
+    CALL hcurl_zerob%apply(b)
     CALL winv%apply(u,b)
   END IF
   !---Clean divergence
@@ -629,6 +640,8 @@ integer(i4) :: i,k,ierr
 logical :: do_orthog,rst
 character(2) :: pnum,mnum
 character(40) :: filename
+type(oft_hcurl_zerob), target :: hcurl_zerob
+type(oft_lag_zerob), target :: lag_zerob
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(taylor_hcpc))CALL oft_abort("Vacuum fields not available", &
 "taylor_injectors", __FILE__)
@@ -643,6 +656,8 @@ IF(taylor_rst)THEN
 ELSE
   rst=.FALSE.
 END IF
+hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 IF(taylor_minlev<0)taylor_minlev=oft_hcurl_nlevels
 NULLIFY(mop,kop,wop,jmlb_mat,ml_jmlb)
 IF(.NOT.rst)THEN
@@ -681,7 +696,7 @@ END IF
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL oft_lag_set_level(MIN(oft_hcurl_level,oft_lagrange_lin_level))
-CALL oft_lag_getlop(lop_lag,"zerob")
+CALL oft_lag_getlop(oft_lagrange,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
 linv_lag%its=-2
@@ -725,7 +740,7 @@ do i=1,taylor_nh
     CALL kop%apply(u,tmp)
     !---Solve
     b=>tmp
-    CALL hcurl_zerob(b)
+    CALL hcurl_zerob%apply(b)
     CALL u%set(0.d0)
     CALL jmlb_inv%apply(u,b)
   END IF
@@ -813,6 +828,8 @@ real(r8) :: venergy,lam_file
 integer(i4) :: i,k
 character(2) :: pnum,mnum
 character(40) :: filename
+type(oft_hcurl_zerob), target :: hcurl_zerob
+type(oft_lag_zerob), target :: lag_zerob
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(taylor_hcpc))CALL oft_abort("Vacuum fields not available", &
 "taylor_injector_single", __FILE__)
@@ -828,6 +845,8 @@ ELSE ! Nested levels use MG
   CALL hcurl_getjmlb_pre(jmlb_inv%pre,ml_jmlb,lambda,nlevels=1)
   jmlb_mat=>ml_jmlb(1)%M
 END IF
+hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---------------------------------------------------------------------------
 ! Create H1(Curl)::WOP solver
 !---------------------------------------------------------------------------
@@ -841,7 +860,7 @@ jmlb_inv%itplot=1
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL oft_lag_set_level(MIN(oft_hcurl_level,oft_lagrange_lin_level))
-CALL oft_lag_getlop(lop_lag,"zerob")
+CALL oft_lag_getlop(oft_lagrange,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
 linv_lag%its=-2
@@ -883,7 +902,7 @@ CALL kop%apply(gffa,tmp)
 CALL kop%delete
 DEALLOCATE(kop)
 !---Solve
-CALL hcurl_zerob(tmp)
+CALL hcurl_zerob%apply(tmp)
 CALL gffa%set(0.d0)
 CALL jmlb_inv%apply(gffa,tmp)
 !---Clean divergence

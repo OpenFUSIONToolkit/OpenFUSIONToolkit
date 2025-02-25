@@ -23,14 +23,14 @@ USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
   oft_graph, oft_graph_ptr
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
-USE oft_solver_base, ONLY: oft_solver
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_native_pre
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
 !---
-USE fem_base, ONLY: oft_fem_type, oft_bfem_type, fem_max_levels
+USE fem_base, ONLY: oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp, bfem_interp
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_level, oft_lagrange_nlevels, oft_lag_set_level, &
 oft_lagrange_blevel, ML_oft_lagrange, oft_lagrange_ops, oft_lag_ops, ML_oft_lagrange_ops, &
@@ -88,6 +88,29 @@ contains
   !> Delete reconstruction object
   procedure :: delete => lag_bvrinterp_delete
 end type oft_lag_bvrinterp
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_solver_bc) :: oft_blag_zerob
+  class(oft_ml_fem_type), pointer :: ML_lag_rep => NULL() !< FE representation
+contains
+  procedure :: apply => zerob_apply
+  procedure :: delete => zerob_delete
+end type oft_blag_zerob
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_blag_zerob) :: oft_blag_zerogrnd
+contains
+  procedure :: apply => zerogrnd_apply
+end type oft_blag_zerogrnd
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_blag_zerob) :: oft_blag_zeroe
+contains
+  procedure :: apply => zeroe_apply
+end type oft_blag_zeroe
 !---Pre options
 integer(i4) :: nu_lop_surf(fem_max_levels)=0
 real(r8) :: df_lop_surf(fem_max_levels)=-1.d99
@@ -245,7 +268,7 @@ class(oft_lag_bvrinterp), intent(inout) :: self
 class(oft_bmesh), target, intent(inout) :: mesh
 real(r8), pointer, dimension(:) :: vtmp
 !---Get local slice
-IF(.NOT.ASSOCIATED(self%vals))ALLOCATE(self%vals(3,oft_lagrange%ne))
+IF(.NOT.ASSOCIATED(self%vals))ALLOCATE(self%vals(3,oft_blagrange%ne))
 vtmp=>self%vals(1,:)
 CALL self%u%get_local(vtmp,1)
 vtmp=>self%vals(2,:)
@@ -300,7 +323,8 @@ end subroutine lag_bvrinterp
 !---------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all boundary nodes
 !---------------------------------------------------------------------------
-subroutine blag_zerob(a)
+subroutine zerob_apply(self,a)
+class(oft_blag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
 real(r8), pointer, dimension(:) :: vloc
@@ -311,22 +335,30 @@ NULLIFY(vloc)
 call a%get_local(vloc)
 !---Zero boundary values
 !$omp parallel do private(j)
-do i=1,oft_blagrange%nbe
-  j=oft_blagrange%lbe(i)
+do i=1,self%ML_lag_rep%current_level%nbe
+  j=self%ML_lag_rep%current_level%lbe(i)
   ! vloc(j)=0.d0
-  IF(oft_blagrange%global%gbe(j))vloc(j)=0.d0
+  IF(self%ML_lag_rep%current_level%global%gbe(j))vloc(j)=0.d0
 end do
 !---
 call a%restore_local(vloc)
 deallocate(vloc)
 DEBUG_STACK_POP
-end subroutine blag_zerob
+end subroutine zerob_apply
+!---------------------------------------------------------------------------
+!> Zero a surface Lagrange scalar field at all boundary nodes
+!---------------------------------------------------------------------------
+subroutine zerob_delete(self)
+class(oft_blag_zerob), intent(inout) :: self
+NULLIFY(self%ML_lag_rep)
+end subroutine zerob_delete
 !---------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at the mesh "grounding" node
 !!
 !! @note Presently the first boundary node is used as the "grounding" node
 !---------------------------------------------------------------------------
-subroutine blag_zerogrnd(a)
+subroutine zerogrnd_apply(self,a)
+class(oft_blag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
 real(r8), pointer, dimension(:) :: vloc
@@ -335,7 +367,7 @@ NULLIFY(vloc)
 !---Cast to vector type
 NULLIFY(vloc)
 call a%get_local(vloc)
-vloc(oft_blagrange%lbe(1))=0.d0
+vloc(self%ML_lag_rep%current_level%lbe(1))=0.d0
 ! !---Zero boundary values
 ! !$omp parallel do
 ! do i=1,oft_blagrange%nbe
@@ -344,30 +376,33 @@ vloc(oft_blagrange%lbe(1))=0.d0
 call a%restore_local(vloc)
 deallocate(vloc)
 DEBUG_STACK_POP
-end subroutine blag_zerogrnd
+end subroutine zerogrnd_apply
 !---------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all edge nodes
 !---------------------------------------------------------------------------
-subroutine blag_zeroe(a)
+subroutine zeroe_apply(self,a)
+class(oft_blag_zeroe), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
 real(r8), pointer, dimension(:) :: vloc
 DEBUG_STACK_PUSH
-NULLIFY(vloc)
+SELECT TYPE(this=>self%ML_lag_rep%current_level)
+CLASS IS(oft_scalar_bfem)
 !---Cast to vector type
 NULLIFY(vloc)
 call a%get_local(vloc)
 !---Zero boundary values
 !$omp parallel do private(j)
-do i=1,oft_blagrange%ne
-  j=oft_blagrange%parent%le(i)
+do i=1,this%ne
+  j=this%parent%le(i)
   if(oft_lagrange%bc(j)/=3)vloc(i)=0.d0
 end do
 !---
 call a%restore_local(vloc)
 deallocate(vloc)
+END SELECT
 DEBUG_STACK_POP
-end subroutine blag_zeroe
+end subroutine zeroe_apply
 !---------------------------------------------------------------------------
 !> Construct mass matrix for a boundary Lagrange scalar representation
 !!

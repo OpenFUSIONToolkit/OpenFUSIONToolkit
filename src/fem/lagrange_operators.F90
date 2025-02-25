@@ -28,15 +28,16 @@ USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
   oft_graph, oft_graph_ptr
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
-USE oft_solver_base, ONLY: oft_solver
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_native_pre
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
 !---
-USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type, fem_max_levels
+USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
+USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_level, oft_lagrange_nlevels, oft_lag_set_level, &
 oft_lagrange_blevel, ML_oft_lagrange, oft_lagrange_ops, oft_lag_ops, ML_oft_lagrange_ops, &
 oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
@@ -133,6 +134,45 @@ end type oft_lag_vdinterp
 !   !> Delete reconstruction object
 !   procedure :: delete => lag_bvrinterp_delete
 ! end type oft_lag_bvrinterp
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_solver_bc) :: oft_lag_zerob
+  class(oft_ml_fem_type), pointer :: ML_lag_rep => NULL() !< FE representation
+contains
+  procedure :: apply => zerob_apply
+  procedure :: delete => zerob_delete
+end type oft_lag_zerob
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_lag_zerob) :: oft_lag_zerogrnd
+contains
+  procedure :: apply => zerogrnd_apply
+end type oft_lag_zerogrnd
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_solver_bc) :: oft_vlag_zerob
+  class(oft_ml_fem_comp_type), pointer :: ML_vlag_rep => NULL() !< FE representation
+contains
+  procedure :: apply => vzerob_apply
+  procedure :: delete => vzerob_delete
+end type oft_vlag_zerob
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_vlag_zerob) :: oft_vlag_zeron
+contains
+  procedure :: apply => vzeron_apply
+end type oft_vlag_zeron
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_vlag_zerob) :: oft_vlag_zerot
+contains
+  procedure :: apply => vzerot_apply
+end type oft_vlag_zerot
 !---Pre options
 integer(i4) :: nu_lop(fem_max_levels)=0
 real(r8) :: df_lop(fem_max_levels)=-1.d99
@@ -561,78 +601,13 @@ vtmp=RESHAPE(dv,(/9,1/))
 val=vtmp(:,1)
 DEBUG_STACK_POP
 end subroutine lag_vdinterp
-! !---------------------------------------------------------------------------
-! !> Setup interpolator for boundary Lagrange vector fields
-! !!
-! !! Fetches local representation used for interpolation from vector object
-! !!
-! !! @note Should only be used via class \ref oft_lag_bvrinterp or children
-! !---------------------------------------------------------------------------
-! subroutine lag_bvrinterp_setup(self)
-! class(oft_lag_bvrinterp), intent(inout) :: self
-! real(r8), pointer, dimension(:) :: vtmp
-! !---Get local slice
-! IF(.NOT.ASSOCIATED(self%vals))ALLOCATE(self%vals(3,oft_lagrange%ne))
-! vtmp=>self%vals(1,:)
-! CALL self%u%get_local(vtmp,1)
-! vtmp=>self%vals(2,:)
-! CALL self%u%get_local(vtmp,2)
-! vtmp=>self%vals(3,:)
-! CALL self%u%get_local(vtmp,3)
-! IF(.NOT.ASSOCIATED(self%lag_rep))self%lag_rep=>oft_blagrange
-! end subroutine lag_bvrinterp_setup
-! !---------------------------------------------------------------------------
-! !> Destroy temporary internal storage
-! !!
-! !! @note Should only be used via class \ref oft_lag_bvrinterp or children
-! !---------------------------------------------------------------------------
-! subroutine lag_bvrinterp_delete(self)
-! class(oft_lag_bvrinterp), intent(inout) :: self
-! !---Destroy locals
-! IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
-! NULLIFY(self%lag_rep,self%u)
-! end subroutine lag_bvrinterp_delete
-! !---------------------------------------------------------------------------
-! !> Reconstruct a boundary Lagrange vector field
-! !!
-! !! @note Should only be used via class \ref oft_lag_bvrinterp
-! !!
-! !! @param[in] cell Cell for interpolation
-! !! @param[in] f Possition in cell in logical coord [4]
-! !! @param[in] gop Logical gradient vectors at f [3,4]
-! !! @param[out] val Reconstructed field at f [3]
-! !---------------------------------------------------------------------------
-! subroutine lag_bvrinterp(self,cell,f,gop,val)
-! class(oft_lag_bvrinterp), intent(inout) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(:)
-! real(r8), intent(in) :: gop(3,4)
-! real(r8), intent(out) :: val(:)
-! integer(i4), allocatable :: j(:)
-! integer(i4) :: jc
-! real(r8) :: rop(1)
-! DEBUG_STACK_PUSH
-! !---
-! IF(.NOT.ASSOCIATED(self%vals))CALL oft_abort('Setup has not been called!', &
-! 'lag_bvrinterp',__FILE__)
-! !---Get dofs
-! allocate(j(self%lag_rep%nfe))
-! call self%lag_rep%nfdofs(cell,j) ! get DOFs
-! !---Reconstruct field
-! val=0.d0
-! do jc=1,self%lag_rep%nfe
-!   call oft_blag_eval(self%lag_rep,cell,jc,f,rop(1))
-!   val=val+self%vals(:,j(jc))*rop(1)
-! end do
-! deallocate(j)
-! DEBUG_STACK_POP
-! end subroutine lag_bvrinterp
 !---------------------------------------------------------------------------
 !> Zero a Lagrange scalar field at all boundary nodes
 !!
 !! @param[in,out] a Field to be zeroed
 !---------------------------------------------------------------------------
-subroutine lag_zerob(a)
+subroutine zerob_apply(self,a)
+class(oft_lag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
 integer(i4) :: i,j
 real(r8), pointer, dimension(:) :: vloc
@@ -642,92 +617,60 @@ NULLIFY(vloc)
 call a%get_local(vloc)
 !---Zero boundary values
 !$omp parallel do private(j)
-do i=1,oft_lagrange%nbe
-  j=oft_lagrange%lbe(i)
-  if(oft_lagrange%global%gbe(j))vloc(j)=0.d0
+do i=1,self%ML_lag_rep%current_level%nbe
+  j=self%ML_lag_rep%current_level%lbe(i)
+  if(self%ML_lag_rep%current_level%global%gbe(j))vloc(j)=0.d0
 end do
 !---
 call a%restore_local(vloc)
 deallocate(vloc)
 DEBUG_STACK_POP
-end subroutine lag_zerob
+end subroutine zerob_apply
+!---------------------------------------------------------------------------
+!> Zero a Lagrange scalar field at all boundary nodes
+!!
+!! @param[in,out] a Field to be zeroed
+!---------------------------------------------------------------------------
+subroutine zerob_delete(self)
+class(oft_lag_zerob), intent(inout) :: self
+NULLIFY(self%ML_lag_rep)
+end subroutine zerob_delete
 !---------------------------------------------------------------------------
 !> Zero a Lagrange scalar field at the global grounding node
 !!
 !! @note The possition of this node is defined by the mesh pointer igrnd in
 !! mesh
 !---------------------------------------------------------------------------
-subroutine lag_zerogrnd(a)
+subroutine zerogrnd_apply(self,a)
+class(oft_lag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
-!---Zero boundary values
-NULLIFY(aloc)
-CALL a%get_local(aloc)
-!---
-if(oft_lagrange%mesh%igrnd(1)>0)aloc(oft_lagrange%mesh%igrnd(1))=0.d0
-if(oft_lagrange%mesh%igrnd(2)>0)aloc(oft_lagrange%mesh%igrnd(2))=0.d0
-CALL a%restore_local(aloc)
-DEALLOCATE(aloc)
+SELECT TYPE(this=>self%ML_lag_rep%current_level)
+CLASS IS(oft_fem_type)
+  !---Zero boundary values
+  NULLIFY(aloc)
+  CALL a%get_local(aloc)
+  !---
+  if(this%mesh%igrnd(1)>0)aloc(this%mesh%igrnd(1))=0.d0
+  if(this%mesh%igrnd(2)>0)aloc(this%mesh%igrnd(2))=0.d0
+  CALL a%restore_local(aloc)
+  DEALLOCATE(aloc)
+CLASS DEFAULT
+  CALL oft_abort("Invalid fe object","zerogrnd_apply",__FILE__)
+END SELECT
 DEBUG_STACK_POP
-end subroutine lag_zerogrnd
-! !---------------------------------------------------------------------------
-! !> Zero a surface Lagrange scalar field at all edge nodes
-! !!
-! !! @param[in,out] a Field to be zeroed
-! !---------------------------------------------------------------------------
-! subroutine blag_zerob(a)
-! class(oft_vector), intent(inout) :: a
-! integer(i4) :: i,j
-! real(r8), pointer, dimension(:) :: vloc
-! DEBUG_STACK_PUSH
-! NULLIFY(vloc)
-! !---Cast to vector type
-! NULLIFY(vloc)
-! call a%get_local(vloc)
-! !---Zero boundary values
-! !$omp parallel do
-! do i=1,oft_blagrange%nbe
-!   vloc(oft_blagrange%lbe(i))=0.d0
-! end do
-! !---
-! call a%restore_local(vloc)
-! deallocate(vloc)
-! DEBUG_STACK_POP
-! end subroutine blag_zerob
-! !---------------------------------------------------------------------------
-! !> Zero a surface Lagrange scalar field at all edge nodes
-! !!
-! !! @param[in,out] a Field to be zeroed
-! !---------------------------------------------------------------------------
-! subroutine blag_zeroe(a)
-! class(oft_vector), intent(inout) :: a
-! integer(i4) :: i,j
-! real(r8), pointer, dimension(:) :: vloc
-! DEBUG_STACK_PUSH
-! NULLIFY(vloc)
-! !---Cast to vector type
-! NULLIFY(vloc)
-! call a%get_local(vloc)
-! !---Zero boundary values
-! !$omp parallel do private(j)
-! do i=1,oft_blagrange%ne
-!   j=oft_blagrange%parent%le(i)
-!   if(oft_lagrange%bc(j)/=3)vloc(i)=0.d0
-! end do
-! !---
-! call a%restore_local(vloc)
-! deallocate(vloc)
-! DEBUG_STACK_POP
-! end subroutine blag_zeroe
+end subroutine zerogrnd_apply
 !---------------------------------------------------------------------------
 !> Zero a surface Lagrange vector field at all edge nodes
 !---------------------------------------------------------------------------
-subroutine lag_vzerob(a)
+subroutine vzerob_apply(self,a)
+class(oft_vlag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
 real(r8), pointer :: vloc(:,:),vtmp(:)
+CLASS(oft_afem_type), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
 ALLOCATE(vloc(3,a%n))
@@ -736,10 +679,11 @@ DO i=1,3
   call a%get_local(vtmp,i)
 END DO
 !---Zero boundary values
+lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j)
-do i=1,oft_lagrange%nbe
-  j=oft_lagrange%lbe(i)
-  if(oft_lagrange%global%gbe(j))vloc(:,j)=0.d0
+do i=1,lag_rep%nbe
+  j=lag_rep%lbe(i)
+  if(lag_rep%global%gbe(j))vloc(:,j)=0.d0
 end do
 !---
 DO i=1,3
@@ -748,15 +692,26 @@ DO i=1,3
 END DO
 DEALLOCATE(vloc)
 DEBUG_STACK_POP
-end subroutine lag_vzerob
+end subroutine vzerob_apply
+!---------------------------------------------------------------------------
+!> Zero a Lagrange scalar field at all boundary nodes
+!!
+!! @param[in,out] a Field to be zeroed
+!---------------------------------------------------------------------------
+subroutine vzerob_delete(self)
+class(oft_vlag_zerob), intent(inout) :: self
+NULLIFY(self%ML_vlag_rep)
+end subroutine vzerob_delete
 !---------------------------------------------------------------------------
 !> Zero normal component of a Lagrange vector field at boundary nodes
 !---------------------------------------------------------------------------
-subroutine lag_vzeron(a)
+subroutine vzeron_apply(self,a)
+class(oft_vlag_zeron), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
 real(r8), pointer, dimension(:) :: x,y,z
 integer(i4) :: i,j
+CLASS(oft_afem_type), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(x,y,z)
@@ -764,10 +719,11 @@ CALL a%get_local(x,1)
 CALL a%get_local(y,2)
 CALL a%get_local(z,3)
 !---Zero boundary values
+lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j,vec,nn)
-do i=1,oft_lagrange%nbe
-  j=oft_lagrange%lbe(i)
-  if(oft_lagrange%global%gbe(j))then
+do i=1,lag_rep%nbe
+  j=lag_rep%lbe(i)
+  if(lag_rep%global%gbe(j))then
     CALL lag_vbc_tensor(j,1,nn)
     vec=(/x(j),y(j),z(j)/)
     vec=MATMUL(nn,vec)
@@ -782,15 +738,17 @@ CALL a%restore_local(y,2,wait=.TRUE.)
 CALL a%restore_local(z,3)
 DEALLOCATE(x,y,z)
 DEBUG_STACK_POP
-end subroutine lag_vzeron
+end subroutine vzeron_apply
 !---------------------------------------------------------------------------
 !> Zero tangential component of a Lagrange vector field at boundary nodes
 !---------------------------------------------------------------------------
-subroutine lag_vzerot(a)
+subroutine vzerot_apply(self,a)
+class(oft_vlag_zerot), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
 real(r8), pointer, dimension(:) :: x,y,z
 integer(i4) :: i,j
+CLASS(oft_afem_type), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 !---Cast to vector type
 NULLIFY(x,y,z)
@@ -798,10 +756,11 @@ CALL a%get_local(x,1)
 CALL a%get_local(y,2)
 CALL a%get_local(z,3)
 !---Zero boundary values
+lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j,vec,nn)
-do i=1,oft_lagrange%nbe
-  j=oft_lagrange%lbe(i)
-  if(oft_lagrange%global%gbe(j))then
+do i=1,lag_rep%nbe
+  j=lag_rep%lbe(i)
+  if(lag_rep%global%gbe(j))then
     CALL lag_vbc_tensor(j,2,nn)
     vec=(/x(j),y(j),z(j)/)
     vec=MATMUL(nn,vec)
@@ -816,7 +775,7 @@ CALL a%restore_local(y,2,wait=.TRUE.)
 CALL a%restore_local(z,3)
 DEALLOCATE(x,y,z)
 DEBUG_STACK_POP
-end subroutine lag_vzerot
+end subroutine vzerot_apply
 !---------------------------------------------------------------------------
 !> Get boundary condition tensor for desired node in a Lagrange vector field
 !---------------------------------------------------------------------------
@@ -911,7 +870,8 @@ end subroutine lag_vbc_diag
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
-subroutine oft_lag_getmop(mat,bc)
+subroutine oft_lag_getmop(lag_rep,mat,bc)
+type(oft_scalar_fem), intent(inout) :: lag_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
@@ -930,7 +890,7 @@ END IF
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL oft_lagrange%mat_create(mat)
+  CALL lag_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
@@ -939,43 +899,43 @@ END IF
 !---------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,det,mop,curved,goptmp,m,vol,jc,jr)
-allocate(j(oft_lagrange%nce)) ! Local DOF and matrix indices
-allocate(rop(oft_lagrange%nce)) ! Reconstructed gradient operator
-allocate(mop(oft_lagrange%nce,oft_lagrange%nce)) ! Local laplacian matrix
+allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
+allocate(rop(lag_rep%nce)) ! Reconstructed gradient operator
+allocate(mop(lag_rep%nce,lag_rep%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,oft_lagrange%mesh%nc
-  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
+do i=1,lag_rep%mesh%nc
+  curved=cell_is_curved(lag_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   mop=0.d0
-  do m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_lagrange%quad%wts(m)
-    call oft_lag_eval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),rop)
+  do m=1,lag_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*lag_rep%quad%wts(m)
+    call oft_lag_eval_all(lag_rep,i,lag_rep%quad%pts(:,m),rop)
     !---Compute local matrix contributions
-    do jr=1,oft_lagrange%nce
-      do jc=1,oft_lagrange%nce
+    do jr=1,lag_rep%nce
+      do jc=1,lag_rep%nce
         mop(jr,jc) = mop(jr,jc) + rop(jr)*rop(jc)*det
       end do
     end do
   end do
   !---Get local to global DOF mapping
-  call oft_lagrange%ncdofs(i,j)
+  call lag_rep%ncdofs(i,j)
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("zerob")
-      DO jr=1,oft_lagrange%nce
-        IF(oft_lagrange%global%gbe(j(jr)))mop(jr,:)=0.d0
+      DO jr=1,lag_rep%nce
+        IF(lag_rep%global%gbe(j(jr)))mop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(oft_lagrange%mesh%igrnd>0))THEN
-        DO jr=1,oft_lagrange%nce
-          IF(ANY(j(jr)==oft_lagrange%mesh%igrnd))mop(jr,:)=0.d0
+      IF(ANY(lag_rep%mesh%igrnd>0))THEN
+        DO jr=1,lag_rep%nce
+          IF(ANY(j(jr)==lag_rep%mesh%igrnd))mop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
   !---Add local values to global matrix
   ! !$omp critical
-  call mat%atomic_add_values(j,j,mop,oft_lagrange%nce,oft_lagrange%nce)
+  call mat%atomic_add_values(j,j,mop,lag_rep%nce,lag_rep%nce)
   ! !$omp end critical
 end do
 deallocate(j,rop,mop)
@@ -985,18 +945,18 @@ ALLOCATE(mop(1,1),j(1))
 mop(1,1)=1.d0
 SELECT CASE(TRIM(bc))
   CASE("zerob")
-    DO i=1,oft_lagrange%nbe
-      jr=oft_lagrange%lbe(i)
-      IF(oft_lagrange%global%gbe(jr).AND.oft_lagrange%linkage%leo(i))THEN
+    DO i=1,lag_rep%nbe
+      jr=lag_rep%lbe(i)
+      IF(lag_rep%global%gbe(jr).AND.lag_rep%linkage%leo(i))THEN
         j=jr
         call mat%add_values(j,j,mop,1,1)
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(oft_lagrange%mesh%igrnd>0))THEN
-      DO i=1,oft_lagrange%nbe
-        jr=oft_lagrange%lbe(i)
-        IF(oft_lagrange%linkage%leo(i).AND.ANY(jr==oft_lagrange%mesh%igrnd))THEN
+    IF(ANY(lag_rep%mesh%igrnd>0))THEN
+      DO i=1,lag_rep%nbe
+        jr=lag_rep%lbe(i)
+        IF(lag_rep%linkage%leo(i).AND.ANY(jr==lag_rep%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,mop,1,1)
         END IF
@@ -1022,7 +982,8 @@ end subroutine oft_lag_getmop
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !! - \c 'grnd'  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
-subroutine oft_lag_getlop(mat,bc)
+subroutine oft_lag_getlop(lag_rep,mat,bc)
+type(oft_scalar_fem), intent(inout) :: lag_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
@@ -1041,7 +1002,7 @@ END IF
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL oft_lagrange%mat_create(mat)
+  CALL lag_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
@@ -1049,43 +1010,43 @@ END IF
 ! Operator integration
 !---------------------------------------------------------------------------
 !$omp parallel private(j,gop,det,lop,curved,goptmp,m,vol,jc,jr)
-allocate(j(oft_lagrange%nce)) ! Local DOF and matrix indices
-allocate(gop(3,oft_lagrange%nce)) ! Reconstructed gradient operator
-allocate(lop(oft_lagrange%nce,oft_lagrange%nce)) ! Local laplacian matrix
+allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
+allocate(gop(3,lag_rep%nce)) ! Reconstructed gradient operator
+allocate(lop(lag_rep%nce,lag_rep%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,oft_lagrange%mesh%nc
-  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
+do i=1,lag_rep%mesh%nc
+  curved=cell_is_curved(lag_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   lop=0.d0
-  do m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_lagrange%quad%wts(m)
-    call oft_lag_geval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),gop,goptmp)
+  do m=1,lag_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*lag_rep%quad%wts(m)
+    call oft_lag_geval_all(lag_rep,i,lag_rep%quad%pts(:,m),gop,goptmp)
     !---Compute local matrix contributions
-    do jr=1,oft_lagrange%nce
-      do jc=1,oft_lagrange%nce
+    do jr=1,lag_rep%nce
+      do jc=1,lag_rep%nce
         lop(jr,jc) = lop(jr,jc) + dot_product(gop(:,jr),gop(:,jc))*det
       end do
     end do
   end do
   !---Get local to global DOF mapping
-  call oft_lagrange%ncdofs(i,j)
+  call lag_rep%ncdofs(i,j)
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("zerob")
-      DO jr=1,oft_lagrange%nce
-        IF(oft_lagrange%global%gbe(j(jr)))lop(jr,:)=0.d0
+      DO jr=1,lag_rep%nce
+        IF(lag_rep%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(oft_lagrange%mesh%igrnd>0))THEN
-        DO jr=1,oft_lagrange%nce
-          IF(ANY(j(jr)==oft_lagrange%mesh%igrnd))lop(jr,:)=0.d0
+      IF(ANY(lag_rep%mesh%igrnd>0))THEN
+        DO jr=1,lag_rep%nce
+          IF(ANY(j(jr)==lag_rep%mesh%igrnd))lop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
   !---Add local values to global matrix
   ! !$omp critical
-  call mat%atomic_add_values(j,j,lop,oft_lagrange%nce,oft_lagrange%nce)
+  call mat%atomic_add_values(j,j,lop,lag_rep%nce,lag_rep%nce)
   ! !$omp end critical
 end do
 deallocate(j,gop,lop)
@@ -1095,18 +1056,18 @@ ALLOCATE(lop(1,1),j(1))
 lop(1,1)=1.d0
 SELECT CASE(TRIM(bc))
   CASE("zerob")
-    DO i=1,oft_lagrange%nbe
-      jr=oft_lagrange%lbe(i)
-      IF(oft_lagrange%global%gbe(jr).AND.oft_lagrange%linkage%leo(i))THEN
+    DO i=1,lag_rep%nbe
+      jr=lag_rep%lbe(i)
+      IF(lag_rep%global%gbe(jr).AND.lag_rep%linkage%leo(i))THEN
         j=jr
         call mat%add_values(j,j,lop,1,1)
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(oft_lagrange%mesh%igrnd>0))THEN
-      DO i=1,oft_lagrange%nbe
-        jr=oft_lagrange%lbe(i)
-        IF(oft_lagrange%linkage%leo(i).AND.ANY(jr==oft_lagrange%mesh%igrnd))THEN
+    IF(ANY(lag_rep%mesh%igrnd>0))THEN
+      DO i=1,lag_rep%nbe
+        jr=lag_rep%lbe(i)
+        IF(lag_rep%linkage%leo(i).AND.ANY(jr==lag_rep%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,lop,1,1)
         END IF
@@ -1132,7 +1093,8 @@ end subroutine oft_lag_getlop
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !! - \c 'grnd'  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
-subroutine oft_lag_getpdop(mat,field,bc,perp,be_flag)
+subroutine oft_lag_getpdop(lag_rep,mat,field,bc,perp,be_flag)
+type(oft_scalar_fem), intent(inout) :: lag_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 class(fem_interp), intent(inout) :: field !< Vector field defining \f$ \hat{b} \f$
 character(LEN=*), intent(in) :: bc !< Boundary condition
@@ -1161,7 +1123,7 @@ oft_abort('Boundary flag array not provided.','oft_lag_getpdop',__FILE__)
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL oft_lagrange%mat_create(mat)
+  CALL lag_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
@@ -1170,26 +1132,26 @@ END IF
 !---------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,gop,det,pdop,B_nodal,curved,goptmp,m,vol,jc,jr)
-allocate(j(oft_lagrange%nce)) ! Local DOF and matrix indices
-allocate(gop(3,oft_lagrange%nce)) ! Reconstructed gradient operator
-allocate(pdop(oft_lagrange%nce,oft_lagrange%nce)) ! Local laplacian matrix
+allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
+allocate(gop(3,lag_rep%nce)) ! Reconstructed gradient operator
+allocate(pdop(lag_rep%nce,lag_rep%nce)) ! Local laplacian matrix
 !$omp do
-do i=1,oft_lagrange%mesh%nc
+do i=1,lag_rep%mesh%nc
   !---Get local to global DOF mapping
-  call oft_lagrange%ncdofs(i,j)
-  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
+  call lag_rep%ncdofs(i,j)
+  curved=cell_is_curved(lag_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   pdop=0.d0
-  do m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_lagrange%quad%wts(m)
-    call oft_lag_geval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),gop,goptmp)
+  do m=1,lag_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*lag_rep%quad%wts(m)
+    call oft_lag_geval_all(lag_rep,i,lag_rep%quad%pts(:,m),gop,goptmp)
     !---Compute bhat
-    call field%interp(i,oft_lagrange%quad%pts(:,m),goptmp,B_nodal)
+    call field%interp(i,lag_rep%quad%pts(:,m),goptmp,B_nodal)
     B_nodal=B_nodal/SQRT(SUM(B_nodal**2))
     !---Compute local matrix contributions
-    do jr=1,oft_lagrange%nce
-      do jc=1,oft_lagrange%nce
+    do jr=1,lag_rep%nce
+      do jc=1,lag_rep%nce
         pdop(jr,jc) = pdop(jr,jc) + &
         par_diff*DOT_PRODUCT(gop(:,jr),B_nodal)*DOT_PRODUCT(gop(:,jc),B_nodal)*det + &
         perp_diff*DOT_PRODUCT(gop(:,jr),gop(:,jc))*det
@@ -1199,17 +1161,17 @@ do i=1,oft_lagrange%mesh%nc
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("zerob")
-      DO jr=1,oft_lagrange%nce
-        IF(oft_lagrange%global%gbe(j(jr)))pdop(jr,:)=0.d0
+      DO jr=1,lag_rep%nce
+        IF(lag_rep%global%gbe(j(jr)))pdop(jr,:)=0.d0
       END DO
     CASE("list")
-      DO jr=1,oft_lagrange%nce
+      DO jr=1,lag_rep%nce
         IF(be_flag(j(jr)))pdop(jr,:)=0.d0
       END DO
   END SELECT
   !---Add local values to global matrix
   ! !$omp critical
-  call mat%atomic_add_values(j,j,pdop,oft_lagrange%nce,oft_lagrange%nce)
+  call mat%atomic_add_values(j,j,pdop,lag_rep%nce,lag_rep%nce)
   ! !$omp end critical
 end do
 deallocate(j,gop,pdop)
@@ -1219,25 +1181,25 @@ ALLOCATE(pdop(1,1),j(1))
 SELECT CASE(TRIM(bc))
   CASE("zerob")
     pdop(1,1)=1.d0
-    DO i=1,oft_lagrange%nbe
-      jr=oft_lagrange%lbe(i)
-      IF(.NOT.oft_lagrange%global%gbe(jr))CYCLE
-      IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
+    DO i=1,lag_rep%nbe
+      jr=lag_rep%lbe(i)
+      IF(.NOT.lag_rep%global%gbe(jr))CYCLE
+      IF(.NOT.lag_rep%linkage%leo(i))CYCLE
       j=jr
       call mat%add_values(j,j,pdop,1,1)
     END DO
   CASE("list")
     pdop(1,1)=1.d0
-    DO i=1,oft_lagrange%ne
-      IF(oft_lagrange%be(i))CYCLE
+    DO i=1,lag_rep%ne
+      IF(lag_rep%be(i))CYCLE
       IF(.NOT.be_flag(i))CYCLE
       j=i
       call mat%add_values(j,j,pdop,1,1)
     END DO
-    DO i=1,oft_lagrange%nbe
-      IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-      IF(.NOT.be_flag(oft_lagrange%lbe(i)))CYCLE
-      j=oft_lagrange%lbe(i)
+    DO i=1,lag_rep%nbe
+      IF(.NOT.lag_rep%linkage%leo(i))CYCLE
+      IF(.NOT.be_flag(lag_rep%lbe(i)))CYCLE
+      j=lag_rep%lbe(i)
       call mat%add_values(j,j,pdop,1,1)
     END DO
 END SELECT
@@ -1259,7 +1221,8 @@ end subroutine oft_lag_getpdop
 !! test functions for a Lagrange basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of LAG::MOP
 !---------------------------------------------------------------------------
-subroutine oft_lag_project(field,x)
+subroutine oft_lag_project(lag_rep,field,x)
+type(oft_scalar_fem), intent(inout) :: lag_rep
 class(fem_interp), intent(inout) :: field !< Scalar field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
@@ -1277,17 +1240,17 @@ call x%get_local(xloc)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
-allocate(j(oft_lagrange%nce),rop(oft_lagrange%nce))
+allocate(j(lag_rep%nce),rop(lag_rep%nce))
 !$omp do schedule(guided)
-do i=1,oft_lagrange%mesh%nc ! Loop over cells
-  call oft_lagrange%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
-  do m=1,oft_lagrange%quad%np
-    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_lagrange%quad%wts(m)
-    call field%interp(i,oft_lagrange%quad%pts(:,m),goptmp,bcc)
-    call oft_lag_eval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),rop)
-    do jc=1,oft_lagrange%nce
+do i=1,lag_rep%mesh%nc ! Loop over cells
+  call lag_rep%ncdofs(i,j) ! Get DOFs
+  curved=cell_is_curved(lag_rep%mesh,i) ! Straight cell test
+  do m=1,lag_rep%quad%np
+    if(curved.OR.m==1)call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*lag_rep%quad%wts(m)
+    call field%interp(i,lag_rep%quad%pts(:,m),goptmp,bcc)
+    call oft_lag_eval_all(lag_rep,i,lag_rep%quad%pts(:,m),rop)
+    do jc=1,lag_rep%nce
       !$omp atomic
       xloc(j(jc))=xloc(j(jc))+rop(jc)*bcc(1)*det
     end do
@@ -1306,7 +1269,8 @@ end subroutine oft_lag_project
 !! test functions for a Lagrange basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of LAG::MOP
 !---------------------------------------------------------------------------
-subroutine oft_lag_project_div(field,x)
+subroutine oft_lag_project_div(lag_rep,field,x)
+type(oft_scalar_fem), intent(inout) :: lag_rep
 class(fem_interp), intent(inout) :: field !< Scalar field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
@@ -1324,17 +1288,17 @@ call x%get_local(xloc)
 !---Integerate over the volume
 !$omp parallel private(j,gop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
-allocate(j(oft_lagrange%nce),gop(3,oft_lagrange%nce))
+allocate(j(lag_rep%nce),gop(3,lag_rep%nce))
 !$omp do schedule(guided)
-do i=1,oft_lagrange%mesh%nc ! Loop over cells
-  call oft_lagrange%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
-  do m=1,oft_lagrange%quad%np
-    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_lagrange%quad%wts(m)
-    call field%interp(i,oft_lagrange%quad%pts(:,m),goptmp,bcc)
-    call oft_lag_geval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),gop,goptmp)
-    do jc=1,oft_lagrange%nce
+do i=1,lag_rep%mesh%nc ! Loop over cells
+  call lag_rep%ncdofs(i,j) ! Get DOFs
+  curved=cell_is_curved(lag_rep%mesh,i) ! Straight cell test
+  do m=1,lag_rep%quad%np
+    if(curved.OR.m==1)call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*lag_rep%quad%wts(m)
+    call field%interp(i,lag_rep%quad%pts(:,m),goptmp,bcc)
+    call oft_lag_geval_all(lag_rep,i,lag_rep%quad%pts(:,m),gop,goptmp)
+    do jc=1,lag_rep%nce
       !$omp atomic
       xloc(j(jc))=xloc(j(jc))+DOT_PRODUCT(gop(:,jc),bcc)*det
     end do
@@ -1346,254 +1310,6 @@ call x%restore_local(xloc,add=.TRUE.)
 deallocate(xloc)
 DEBUG_STACK_POP
 end subroutine oft_lag_project_div
-! !---------------------------------------------------------------------------
-! !> Construct mass matrix for a boundary Lagrange scalar representation
-! !!
-! !! Supported boundary conditions
-! !! - \c 'none' Full matrix
-! !! - \c 'zerob' Dirichlet for all boundary DOF
-! !!
-! !! @param[in,out] mat Matrix object
-! !! @param[in] bc Boundary condition
-! !---------------------------------------------------------------------------
-! subroutine oft_blag_getmop(mat,bc)
-! class(oft_matrix), pointer, intent(inout) :: mat
-! character(LEN=*), intent(in) :: bc
-! integer(i4) :: i,m,jr,jc
-! integer(i4), allocatable :: j(:)
-! real(r8) :: vol,det,goptmp(3,4),elapsed_time
-! real(r8), allocatable :: rop(:),mop(:,:)
-! logical :: curved
-! CLASS(oft_vector), POINTER :: oft_lag_vec
-! type(oft_timer) :: mytimer
-! DEBUG_STACK_PUSH
-! IF(oft_debug_print(1))THEN
-!   WRITE(*,'(2X,A)')'Constructing Boundary LAG::MOP'
-!   CALL mytimer%tick()
-! END IF
-! !---------------------------------------------------------------------------
-! ! Allocate matrix
-! !---------------------------------------------------------------------------
-! IF(.NOT.ASSOCIATED(mat))THEN
-!   CALL oft_blagrange%mat_create(mat)
-! ELSE
-!   CALL mat%zero
-! END IF
-! !---------------------------------------------------------------------------
-! !
-! !---------------------------------------------------------------------------
-! !---Operator integration loop
-! !$omp parallel private(j,rop,det,mop,curved,goptmp,m,vol,jc,jr)
-! allocate(j(oft_blagrange%nfe)) ! Local DOF and matrix indices
-! allocate(rop(oft_blagrange%nfe)) ! Reconstructed gradient operator
-! allocate(mop(oft_blagrange%nfe,oft_blagrange%nfe)) ! Local laplacian matrix
-! !$omp do
-! do i=1,oft_blagrange%mesh%nf
-!   !---Get local reconstructed operators
-!   mop=0.d0
-!   do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-!     call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-!     det=vol*oft_blagrange%quad%wts(m)
-!     do jc=1,oft_blagrange%nfe ! Loop over degrees of freedom
-!       call oft_blag_eval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),rop(jc))
-!     end do
-!     !---Compute local matrix contributions
-!     do jr=1,oft_blagrange%nfe
-!       do jc=1,oft_blagrange%nfe
-!         mop(jr,jc) = mop(jr,jc) + rop(jr)*rop(jc)*det
-!       end do
-!     end do
-!   end do
-!   !---Get local to global DOF mapping
-!   call oft_blagrange%nfdofs(i,j)
-!   !---Add local values to global matrix
-!   ! !$omp critical
-!   call mat%atomic_add_values(j,j,mop,oft_blagrange%nfe,oft_blagrange%nfe)
-!   ! !$omp end critical
-! end do
-! deallocate(j,rop,mop)
-! !$omp end parallel
-! CALL oft_blagrange%vec_create(oft_lag_vec)
-! CALL mat%assemble(oft_lag_vec)
-! CALL oft_lag_vec%delete
-! DEALLOCATE(oft_lag_vec)
-! IF(oft_debug_print(1))THEN
-!   elapsed_time=mytimer%tock()
-!   WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
-! END IF
-! DEBUG_STACK_POP
-! end subroutine oft_blag_getmop
-! !---------------------------------------------------------------------------
-! !> Construct laplacian matrix for Lagrange scalar representation
-! !!
-! !! Supported boundary conditions
-! !! - \c 'none' Full matrix
-! !! - \c 'zerob' Dirichlet for all boundary DOF
-! !! - \c 'grnd'  Dirichlet for only groundin point
-! !!
-! !! @param[in,out] mat Matrix object
-! !! @param[in] bc Boundary condition
-! !---------------------------------------------------------------------------
-! subroutine oft_blag_getlop(mat,bc)
-! class(oft_matrix), pointer, intent(inout) :: mat
-! character(LEN=*), intent(in) :: bc
-! integer(i4) :: i,m,jr,jc
-! integer(i4), allocatable :: j(:)
-! real(r8) :: vol,det,goptmp(3,4),elapsed_time
-! real(r8), allocatable :: gop(:,:),lop(:,:)
-! logical :: curved
-! CLASS(oft_vector), POINTER :: oft_lag_vec
-! type(oft_timer) :: mytimer
-! DEBUG_STACK_PUSH
-! IF(oft_debug_print(1))THEN
-!   WRITE(*,'(2X,A)')'Constructing Boundary LAG::LOP'
-!   CALL mytimer%tick()
-! END IF
-! !---------------------------------------------------------------------------
-! ! Allocate matrix
-! !---------------------------------------------------------------------------
-! IF(.NOT.ASSOCIATED(mat))THEN
-!   CALL oft_blagrange%mat_create(mat)
-! ELSE
-!   CALL mat%zero
-! END IF
-! !---------------------------------------------------------------------------
-! ! Operator integration
-! !---------------------------------------------------------------------------
-! !$omp parallel private(j,gop,det,lop,curved,goptmp,m,vol,jc,jr)
-! allocate(j(oft_blagrange%nfe)) ! Local DOF and matrix indices
-! allocate(gop(3,oft_blagrange%nfe)) ! Reconstructed gradient operator
-! allocate(lop(oft_blagrange%nfe,oft_blagrange%nfe)) ! Local laplacian matrix
-! !$omp do
-! do i=1,oft_blagrange%mesh%nf
-!   !---Get local reconstructed operators
-!   lop=0.d0
-!   do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-!     call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-!     det=vol*oft_blagrange%quad%wts(m)
-!     do jc=1,oft_blagrange%nfe ! Loop over degrees of freedom
-!       call oft_blag_geval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),gop(:,jc),goptmp)
-!     end do
-!     !---Compute local matrix contributions
-!     do jr=1,oft_blagrange%nfe
-!       do jc=1,oft_blagrange%nfe
-!         lop(jr,jc) = lop(jr,jc) + DOT_PRODUCT(gop(:,jr),gop(:,jc))*det
-!       end do
-!     end do
-!   end do
-!   !---Get local to global DOF mapping
-!   call oft_blagrange%nfdofs(i,j)
-!   !---Apply bc to local matrix
-!   SELECT CASE(TRIM(bc))
-!     CASE("zerob")
-!       DO jr=1,oft_blagrange%nfe
-!         IF(oft_blagrange%be(j(jr)))lop(jr,:)=0.d0
-!       END DO
-!     CASE("edges")
-!       DO jr=1,oft_blagrange%nfe
-!         jc=oft_blagrange%parent%le(j(jr))
-!         IF(oft_lagrange%bc(jc)/=3)lop(jr,:)=0.d0
-!       END DO
-!   END SELECT
-!   !---Add local values to global matrix
-!   ! !$omp critical
-!   call mat%atomic_add_values(j,j,lop,oft_blagrange%nfe,oft_blagrange%nfe)
-!   ! !$omp end critical
-! end do
-! deallocate(j,gop,lop)
-! !$omp end parallel
-! ALLOCATE(lop(1,1),j(1))
-! !---Set diagonal entries for dirichlet rows
-! SELECT CASE(TRIM(bc))
-!   CASE("zerob")
-!     lop(1,1)=1.d0
-!     DO i=1,oft_blagrange%nbe
-!       IF(.NOT.oft_blagrange%linkage%leo(i))CYCLE
-!       j=oft_blagrange%lbe(i)
-!       call mat%add_values(j,j,lop,1,1)
-!     END DO
-!   CASE("edges")
-!     lop(1,1)=1.d0
-!     DO i=1,oft_blagrange%ne
-!       IF(oft_blagrange%be(i))CYCLE
-!       jr=oft_blagrange%parent%le(i)
-!       IF(oft_lagrange%bc(jr)/=3)THEN
-!         j=i
-!         call mat%add_values(j,j,lop,1,1)
-!       END IF
-!     END DO
-!     DO i=1,oft_blagrange%nbe
-!       IF(.NOT.oft_blagrange%linkage%leo(i))CYCLE
-!       jc=oft_blagrange%lbe(i)
-!       jr=oft_blagrange%parent%le(jc)
-!       IF(oft_lagrange%bc(jr)/=3)THEN
-!         j=jc
-!         call mat%add_values(j,j,lop,1,1)
-!       END IF
-!     END DO
-! END SELECT
-! DEALLOCATE(j,lop)
-! CALL oft_blagrange%vec_create(oft_lag_vec)
-! CALL mat%assemble(oft_lag_vec)
-! CALL oft_lag_vec%delete
-! DEALLOCATE(oft_lag_vec)
-! IF(oft_debug_print(1))THEN
-!   elapsed_time=mytimer%tock()
-!   WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
-! END IF
-! DEBUG_STACK_POP
-! end subroutine oft_blag_getlop
-! !------------------------------------------------------------------------------
-! !> Project the normal component of a vector field onto a boundary Lagrange basis
-! !!
-! !! @note This subroutine only performs the integration of the field with
-! !! boundary test functions for a Lagrange basis.
-! !!
-! !! @param[in,out] field Vector field for projection
-! !! @param[in,out] x Field projected onto boundary Lagrange basis
-! !------------------------------------------------------------------------------
-! SUBROUTINE oft_blag_nproject(field,x)
-! CLASS(fem_interp), INTENT(inout) :: field
-! CLASS(oft_vector), INTENT(inout) :: x
-! INTEGER(i4) :: i,m,k,jc,cell,ptmap(3)
-! INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j
-! REAL(r8) :: vol,det,flog(4),norm(3),etmp(3),sgop(3,3),vgop(3,4),rop
-! REAL(r8), POINTER, DIMENSION(:) :: xloc
-! DEBUG_STACK_PUSH
-! !---Initialize vectors to zero
-! NULLIFY(xloc)
-! call x%set(0.d0)
-! call x%get_local(xloc)
-! !---Operator integration loop
-! !$omp parallel default(firstprivate) shared(field,xloc)
-! allocate(j(oft_blagrange%nfe))
-! !$omp do schedule(guided)
-! do i=1,smesh%nf
-!   CALL mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
-!   call oft_blagrange%nfdofs(i,j) ! Get local to global DOF mapping
-!   !---Loop over quadrature points
-!   do m=1,oft_blagrange%quad%np
-!     call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),sgop,vol)
-!     call smesh%norm(i,oft_blagrange%quad%pts(:,m),norm)
-!     det=vol*oft_blagrange%quad%wts(m)
-!     !---Evaluate in cell coordinates
-!     CALL mesh%surf_to_vol(oft_blagrange%quad%pts(:,m),ptmap,flog)
-!     call mesh%jacobian(cell,flog,vgop,vol)
-!     call field%interp(cell,flog,vgop,etmp)
-!     !---Project on to Lagrange basis
-!     do jc=1,oft_blagrange%nfe
-!       call oft_blag_eval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),rop)
-!       !$omp atomic
-!       xloc(j(jc))=xloc(j(jc)) + rop*DOT_PRODUCT(etmp,norm)*det
-!     end do
-!   end do
-! end do
-! deallocate(j)
-! !$omp end parallel
-! call x%restore_local(xloc,add=.TRUE.)
-! deallocate(xloc)
-! DEBUG_STACK_POP
-! END SUBROUTINE oft_blag_nproject
 !---------------------------------------------------------------------------
 !> Construct mass matrix for Lagrange vector representation
 !!
@@ -1603,7 +1319,8 @@ end subroutine oft_lag_project_div
 !! - \c 'norm' Dirichlet for normal component at boundary
 !! - \c 'tang' Dirichlet for tangential component at boundary
 !---------------------------------------------------------------------------
-subroutine oft_lag_vgetmop(mat,bc)
+subroutine oft_lag_vgetmop(vlag_rep,mat,bc)
+type(oft_fem_comp_type), intent(inout) :: vlag_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 type :: block_mat
@@ -1617,6 +1334,7 @@ real(r8), allocatable :: rop(:)
 integer(i4), allocatable, dimension(:,:) :: lcache
 logical :: curved
 CLASS(oft_vector), POINTER :: oft_lag_vec
+class(oft_scalar_fem), pointer :: lag_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
@@ -1640,28 +1358,34 @@ END SELECT
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL oft_vlagrange%mat_create(mat)
+  CALL vlag_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
+SELECT TYPE(this=>vlag_rep%fields(1)%fe)
+  CLASS IS(oft_scalar_fem)
+    lag_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE object","oft_lag_vgetmop",__FILE__)
+END SELECT
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,det,mtmp,nn,mloc,curved,goptmp,m,u,vol,jc,jr,lcache)
-allocate(j(oft_lagrange%nce)) ! Local DOF and matrix indices
-allocate(rop(oft_lagrange%nce)) ! Reconstructed gradient operator
-allocate(lcache(oft_lagrange%nce,oft_lagrange%nce))
+allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
+allocate(rop(lag_rep%nce)) ! Reconstructed gradient operator
+allocate(lcache(lag_rep%nce,lag_rep%nce))
 DO jr=1,3
   DO jc=1,3
-    allocate(mtmp(jr,jc)%m(oft_lagrange%nce,oft_lagrange%nce)) ! Local laplacian matrix
+    allocate(mtmp(jr,jc)%m(lag_rep%nce,lag_rep%nce)) ! Local laplacian matrix
   END DO
 END DO
 !$omp do schedule(guided)
-DO i=1,oft_lagrange%mesh%nc
-  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
+DO i=1,lag_rep%mesh%nc
+  curved=cell_is_curved(lag_rep%mesh,i) ! Straight cell test
   !---Get local to global DOF mapping
-  CALL oft_lagrange%ncdofs(i,j)
+  CALL lag_rep%ncdofs(i,j)
   !---Compute local matrix contributions
   DO jp=1,3
     DO jn=1,3
@@ -1670,14 +1394,14 @@ DO i=1,oft_lagrange%mesh%nc
     END DO
   END DO
   !---Get local reconstructed operators
-  DO m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    IF(curved.OR.m==1)CALL oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_lagrange%quad%wts(m)
-    call oft_lag_eval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),rop)
+  DO m=1,lag_rep%quad%np ! Loop over quadrature points
+    IF(curved.OR.m==1)CALL lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*lag_rep%quad%wts(m)
+    call oft_lag_eval_all(lag_rep,i,lag_rep%quad%pts(:,m),rop)
     !---Compute local matrix contributions
-    DO jc=1,oft_lagrange%nce
+    DO jc=1,lag_rep%nce
       u=rop(jc)*det
-      DO jr=1,oft_lagrange%nce
+      DO jr=1,lag_rep%nce
         DO jp=1,3
           mtmp(jp,jp)%m(jr,jc) = mtmp(jp,jp)%m(jr,jc) + rop(jr)*u
         END DO
@@ -1685,14 +1409,14 @@ DO i=1,oft_lagrange%mesh%nc
     END DO
   END DO
   !---Compute BC projection matrices
-  DO jr=1,oft_lagrange%nce
-    IF(oft_lagrange%global%gbe(j(jr)))THEN
+  DO jr=1,lag_rep%nce
+    IF(lag_rep%global%gbe(j(jr)))THEN
       IF(vbc_type==0)THEN
         DO jp=1,3
           mtmp(jp,jp)%m(jr,:)=0.d0
         END DO
       ELSE IF(vbc_type>0)THEN
-        DO jc=1,oft_lagrange%nce
+        DO jc=1,lag_rep%nce
           mloc=0.d0
           u=mtmp(1,1)%m(jr,jc)
           DO jp=1,3
@@ -1715,7 +1439,7 @@ DO i=1,oft_lagrange%mesh%nc
   DO jp=1,3
     DO jn=1,3
       IF(vbc_type<=0.AND.jp/=jn)CYCLE
-      CALL mat%atomic_add_values(j,j,mtmp(jp,jn)%m,oft_lagrange%nce,oft_lagrange%nce,jp,jn,lcache)
+      CALL mat%atomic_add_values(j,j,mtmp(jp,jn)%m,lag_rep%nce,lag_rep%nce,jp,jn,lcache)
     END DO
   END DO
   ! !$omp end critical
@@ -1732,20 +1456,20 @@ ALLOCATE(j(1),rop(1))
 !---Set diagonal entries for dirichlet rows
 IF(vbc_type==0)THEN
   rop=1.d0
-  DO i=1,oft_lagrange%nbe
-    IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    jr=oft_lagrange%lbe(i)
-    IF(.NOT.oft_lagrange%global%gbe(jr))CYCLE
+  DO i=1,lag_rep%nbe
+    IF(.NOT.lag_rep%linkage%leo(i))CYCLE
+    jr=lag_rep%lbe(i)
+    IF(.NOT.lag_rep%global%gbe(jr))CYCLE
     j=jr
     CALL mat%add_values(j,j,rop,1,1,1,1)
     CALL mat%add_values(j,j,rop,1,1,2,2)
     CALL mat%add_values(j,j,rop,1,1,3,3)
   END DO
 ELSE IF(vbc_type>0)THEN
-  DO i=1,oft_lagrange%nbe
-    IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    jr=oft_lagrange%lbe(i)
-    IF(.NOT.oft_lagrange%global%gbe(jr))CYCLE
+  DO i=1,lag_rep%nbe
+    IF(.NOT.lag_rep%linkage%leo(i))CYCLE
+    jr=lag_rep%lbe(i)
+    IF(.NOT.lag_rep%global%gbe(jr))CYCLE
     j=jr
     CALL lag_vbc_diag(jr,vbc_type,mloc)
     DO jr=1,3
@@ -1773,7 +1497,8 @@ end subroutine oft_lag_vgetmop
 !! test functions for a Lagrange basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of LAG::VMOP
 !---------------------------------------------------------------------------
-subroutine oft_lag_vproject(field,x)
+subroutine oft_lag_vproject(vlag_rep,field,x)
+type(oft_fem_comp_type), intent(inout) :: vlag_rep
 class(fem_interp), intent(inout) :: field !< Vector field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
@@ -1783,7 +1508,15 @@ real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 logical :: curved
+class(oft_scalar_fem), pointer :: lag_rep
 DEBUG_STACK_PUSH
+!---
+SELECT TYPE(this=>vlag_rep%fields(1)%fe)
+  CLASS IS(oft_scalar_fem)
+    lag_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE object","oft_lag_vproject",__FILE__)
+END SELECT
 !---Initialize vectors to zero
 NULLIFY(xloc,yloc,zloc)
 call x%set(0.d0)
@@ -1793,17 +1526,17 @@ call x%get_local(zloc,3)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
-allocate(j(oft_lagrange%nce),rop(oft_lagrange%nce))
+allocate(j(lag_rep%nce),rop(lag_rep%nce))
 !$omp do schedule(guided)
-do i=1,oft_lagrange%mesh%nc ! Loop over cells
-  call oft_lagrange%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
-  do m=1,oft_lagrange%quad%np
-    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_lagrange%quad%wts(m)
-    call field%interp(i,oft_lagrange%quad%pts(:,m),goptmp,bcc)
-    call oft_lag_eval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),rop)
-    do jc=1,oft_lagrange%nce
+do i=1,lag_rep%mesh%nc ! Loop over cells
+  call lag_rep%ncdofs(i,j) ! Get DOFs
+  curved=cell_is_curved(lag_rep%mesh,i) ! Straight cell test
+  do m=1,lag_rep%quad%np
+    if(curved.OR.m==1)call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*lag_rep%quad%wts(m)
+    call field%interp(i,lag_rep%quad%pts(:,m),goptmp,bcc)
+    call oft_lag_eval_all(lag_rep,i,lag_rep%quad%pts(:,m),rop)
+    do jc=1,lag_rep%nce
       !$omp atomic
       xloc(j(jc))=xloc(j(jc))+rop(jc)*bcc(1)*det
       !$omp atomic
@@ -1824,7 +1557,8 @@ end subroutine oft_lag_vproject
 !---------------------------------------------------------------------------
 !> Compute the divergence of a Lagrange vector field
 !---------------------------------------------------------------------------
-subroutine lag_div(a,reg)
+subroutine lag_div(vlag_rep,a,reg)
+type(oft_fem_comp_type), intent(inout) :: vlag_rep
 class(oft_vector), intent(inout) :: a !< Input field
 real(r8), intent(out) :: reg !< \f$ \int_v \nabla \cdot a \; dV \f$
 real(r8), pointer, dimension(:) :: x,y,z
@@ -1833,7 +1567,15 @@ integer(i4), allocatable :: j(:)
 real(r8) :: goptmp(3,4),vol,det,div
 real(r8), allocatable :: gop(:,:)
 logical :: curved
+class(oft_scalar_fem), pointer :: lag_rep
 DEBUG_STACK_PUSH
+!---
+SELECT TYPE(this=>vlag_rep%fields(1)%fe)
+  CLASS IS(oft_scalar_fem)
+    lag_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE object","oft_lag_vproject",__FILE__)
+END SELECT
 !---Cast to vector type
 NULLIFY(x,y,z)
 CALL a%get_local(x,1)
@@ -1841,18 +1583,18 @@ CALL a%get_local(y,2)
 CALL a%get_local(z,3)
 !---
 reg=0.d0
-allocate(j(oft_lagrange%nce),gop(3,oft_lagrange%nce))
-do i=1,oft_lagrange%mesh%nc
-  curved=cell_is_curved(oft_lagrange%mesh,i) ! Straight cell test
+allocate(j(lag_rep%nce),gop(3,lag_rep%nce))
+do i=1,lag_rep%mesh%nc
+  curved=cell_is_curved(lag_rep%mesh,i) ! Straight cell test
   !---Get local to global DOF mapping
-  call oft_lagrange%ncdofs(i,j)
+  call lag_rep%ncdofs(i,j)
   !---Get local reconstructed operators
-  do m=1,oft_lagrange%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call oft_lagrange%mesh%jacobian(i,oft_lagrange%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_lagrange%quad%wts(m)
-    call oft_lag_geval_all(oft_lagrange,i,oft_lagrange%quad%pts(:,m),gop,goptmp)
+  do m=1,lag_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*lag_rep%quad%wts(m)
+    call oft_lag_geval_all(lag_rep,i,lag_rep%quad%pts(:,m),gop,goptmp)
     div=0.d0
-    do jc=1,oft_lagrange%nce ! Loop over degrees of freedom
+    do jc=1,lag_rep%nce ! Loop over degrees of freedom
       div=div+x(j(jc))*gop(1,jc)
       div=div+y(j(jc))*gop(2,jc)
       div=div+z(j(jc))*gop(3,jc)
@@ -1910,7 +1652,7 @@ IF(vec_interp)THEN
   END DO
 END IF
 DEBUG_STACK_POP
-END SUBROUTINE lag_setup_interp
+CONTAINS
 !---------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
 !---------------------------------------------------------------------------
@@ -2341,6 +2083,7 @@ DEALLOCATE(ed_nodes,fc_nodes,c_nodes)
 DEALLOCATE(ftmp,fetmp,ctmp)
 DEBUG_STACK_POP
 END SUBROUTINE lag_pinterpmatrix
+END SUBROUTINE lag_setup_interp
 !---------------------------------------------------------------------------
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
@@ -2366,9 +2109,6 @@ end subroutine lag_interp
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
 !! @note The global Lagrange level in incremented by one in this subroutine
-!!
-!! @param[in] acors Vector to interpolate
-!! @param[in,out] afine Fine vector from interpolation
 !---------------------------------------------------------------------------
 subroutine lag_vinterp(acors,afine)
 class(oft_vector), intent(inout) :: acors !< Vector to interpolate
@@ -2494,7 +2234,8 @@ end subroutine lag_base_push
 !---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator LAG::LOP
 !---------------------------------------------------------------------------
-SUBROUTINE lag_lop_eigs(minlev)
+SUBROUTINE lag_lop_eigs(ML_lag_rep,minlev)
+type(oft_ml_fem_type), intent(inout) :: ML_lag_rep
 INTEGER(i4), INTENT(in) :: minlev !< Needs docs
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i
@@ -2504,27 +2245,36 @@ CLASS(oft_vector), POINTER :: u
 TYPE(oft_irlm_eigsolver) :: arsolver
 CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: lop => NULL()
+CLASS(oft_scalar_fem), pointer :: lag_rep
+TYPE(oft_lag_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
+bc_tmp%ML_lag_rep=>ML_oft_lagrange
 !---------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for LAG::LOP'
-ALLOCATE(df(oft_lagrange_nlevels))
+ALLOCATE(df(ML_lag_rep%nlevels))
 df=0.d0
-DO i=minlev,oft_lagrange_nlevels
-  CALL oft_lag_set_level(i)
+DO i=minlev,ML_lag_rep%nlevels
+  CALL ML_lag_rep%set_level(i)
   !---Create fields
-  CALL oft_lag_create(u)
+  CALL ML_lag_rep%vec_create(u)
+  SELECT TYPE(this=>ML_lag_rep%current_level)
+  CLASS IS(oft_scalar_fem)
+    lag_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Error getting current FE rep","lag_lop_eigs",__FILE__)
+  END SELECT
   !---Get Ev range
   NULLIFY(lop)
-  CALL oft_lag_getlop(lop,'zerob')
+  CALL oft_lag_getlop(lag_rep,lop,'zerob')
   CALL create_diagmatrix(md,lop%D)
   !---
   arsolver%A=>lop
   arsolver%M=>md
   arsolver%mode=2
   arsolver%tol=1.E-5_r8
-  arsolver%bc=>lag_zerob
+  arsolver%bc=>bc_tmp
   CALL create_native_pre(arsolver%Minv, "jacobi")
   arsolver%Minv%A=>lop
   !---
@@ -2539,10 +2289,10 @@ END DO
 !---Output
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A)',ADVANCE='NO')' df_lop = '
-  DO i=1,oft_lagrange_nlevels-1
+  DO i=1,ML_lag_rep%nlevels-1
     WRITE(*,'(F5.3,A)',ADVANCE='NO')df(i),', '
   END DO
-  WRITE(*,'(F5.3,A)')df(oft_lagrange_nlevels)
+  WRITE(*,'(F5.3,A)')df(ML_lag_rep%nlevels)
 END IF
 DEALLOCATE(df)
 DEBUG_STACK_POP
@@ -2568,6 +2318,7 @@ INTEGER(i4) :: minlev,toplev,nl
 INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
+TYPE(oft_lag_zerob), POINTER :: bc_tmp
 !---
 TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
@@ -2607,7 +2358,7 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_lag_getlop(mats(i)%M,'zerob')
+    CALL oft_lag_getlop(oft_lagrange,mats(i)%M,'zerob')
   END IF
   IF(i>1)ml_int(i-1)%M=>oft_lagrange_ops%interp
 END DO
@@ -2625,9 +2376,11 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup preconditioner
 !---------------------------------------------------------------------------
+ALLOCATE(bc_tmp)
+bc_tmp%ML_lag_rep=>ML_oft_lagrange
 NULLIFY(pre)
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_lag_create,interp=lag_interp, &
-     inject=lag_inject,bc=lag_zerob,stype=1,df=df,nu=nu,xml_root=pre_node)
+     inject=lag_inject,bc=bc_tmp,stype=1,df=df,nu=nu,xml_root=pre_node)
 !---------------------------------------------------------------------------
 ! Cleanup
 !---------------------------------------------------------------------------

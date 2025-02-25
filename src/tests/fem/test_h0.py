@@ -97,7 +97,7 @@ def test_r3_p1(mpi, petsc_flag):
     single_level(3, 1, 17, 8.0768670061291750E-2, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p1_mg(petsc_flag):
-    multi_level(3, 1, 22, 8.0768670061291750E-2, petsc_flag=petsc_flag)
+    multi_level(3, 1, 3, 8.0768670061291750E-2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=2
@@ -110,7 +110,7 @@ def test_r3_p2(mpi, petsc_flag):
     single_level(3, 2, 54, 1.5558865184434981E-002, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p2_mg(petsc_flag):
-    multi_level(3, 2, 30, 1.5558865184434981E-002, petsc_flag=petsc_flag)
+    multi_level(3, 2, 11, 1.5558865184434981E-002, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=3
@@ -123,7 +123,7 @@ def test_r3_p3(mpi, petsc_flag):
     single_level(3, 3, 113, 1.6127657918294260E-002, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p3_mg(petsc_flag):
-    multi_level(3, 3, 52, 1.6127657918294260E-002, petsc_flag=petsc_flag)
+    multi_level(3, 3, 22, 1.6127657918294260E-002, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=4
@@ -136,7 +136,7 @@ def test_r3_p4(mpi, petsc_flag):
     single_level(3, 4, 208, 2.1650972314821715E-002, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p4_mg(petsc_flag):
-    multi_level(3, 4, 93, 2.1650972314821715E-002, petsc_flag=petsc_flag)
+    multi_level(3, 4, 40, 2.1650972314821715E-002, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=5
@@ -150,7 +150,7 @@ def test_r3_p5(mpi, petsc_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p5_mg(petsc_flag):
-     multi_level(3, 5, 197, 4.1329169495863446E-002, petsc_flag=petsc_flag)
+     multi_level(3, 5, 87, 4.1329169495863446E-002, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=1
@@ -161,9 +161,9 @@ def test_hex_r2_p1(petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p1(mpi, petsc_flag):
     single_level(3, 1, 4, 4.8062570071622540E-002, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
-# @pytest.mark.parametrize("petsc_flag", ('F','T'))
-# def test_r3_p1_mg(petsc_flag):
-#     multi_level(3, 1, 4, 4.8062570071622540E-002, grid_type=2, petsc_flag=petsc_flag)
+@pytest.mark.parametrize("petsc_flag", ('F','T'))
+def test_hex_r3_p1_mg(petsc_flag):
+    multi_level(3, 1, 4, 4.8062570071622540E-002, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=2
@@ -176,7 +176,7 @@ def test_hex_r3_p2(mpi, petsc_flag):
     single_level(3, 2, 30, 0.27417620914726598, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p2_mg(petsc_flag):
-    multi_level(3, 2, 70, 0.27417620914726598, grid_type=2, petsc_flag=petsc_flag)
+    multi_level(3, 2, 18, 0.27417620914726598, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=3
@@ -189,7 +189,7 @@ def test_hex_r3_p3(mpi, petsc_flag):
     single_level(3, 3, 123, 0.33381655550161526, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p3_mg(petsc_flag):
-    multi_level(3, 3, 103, 0.33381655550161526, grid_type=2, petsc_flag=petsc_flag)
+    multi_level(3, 3, 50, 0.33381655550161526, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=4
@@ -202,7 +202,7 @@ def test_hex_r3_p4(mpi, petsc_flag):
     single_level(3, 4, 250, 0.29892496503486543, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p4_mg(petsc_flag):
-    multi_level(3, 4, 245, 0.29892496503486543, grid_type=2, petsc_flag=petsc_flag)
+    multi_level(3, 4, 89, 0.29892496503486543, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=5
@@ -216,4 +216,4 @@ def test_hex_r3_p5(mpi, petsc_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p5_mg(petsc_flag):
-     multi_level(3, 5, 277, 0.29647336194316470, grid_type=2, petsc_flag=petsc_flag)
+     multi_level(3, 5, 123, 0.29647336194316470, grid_type=2, petsc_flag=petsc_flag)

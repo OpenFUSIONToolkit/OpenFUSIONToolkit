@@ -23,7 +23,7 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, oft_hcurl_nlevels, &
   oft_hcurl, oft_bhcurl, oft_hcurl_eval_all
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
-USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, hcurl_zerob, &
+USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, &
   oft_hcurl_cinterp, oft_hcurl_bcurl
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver

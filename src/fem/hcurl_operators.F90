@@ -32,7 +32,7 @@ USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
   oft_graph_ptr
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
-USE oft_solver_base, ONLY: oft_solver, oft_orthog, oft_bc_proto
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
@@ -40,11 +40,11 @@ USE oft_la_utils, ONLY: create_matrix
 USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
   create_native_pre
 !---
-USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels
+USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lag_geval_all
+USE oft_lag_basis, ONLY: oft_lagrange, oft_lag_geval_all, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_lag_operators, ONLY: oft_lag_getlop, lag_zerob, lag_zerogrnd
+USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_zerob, oft_lag_zerogrnd
 USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, oft_bhcurl, oft_hcurl_level, oft_hcurl_blevel, &
 oft_hcurl_nlevels, oft_nedelec_ops, oft_hcurl_ops, ML_oft_hcurl_ops, oft_hcurl_eval_all, &
 oft_hcurl_ceval_all, oft_hcurl_set_level, oft_hcurl_lev, oft_hcurl_minlev, oft_hcurl_get_cgops, &
@@ -55,7 +55,7 @@ IMPLICIT NONE
 !---------------------------------------------------------------------------
 !> Orthogonalize a H1(Curl) vector against a library of given modes
 !---------------------------------------------------------------------------
-type, extends(oft_orthog) :: oft_hcurl_orthog
+type, extends(oft_solver_bc) :: oft_hcurl_orthog
   integer(i4) :: nm = 0 !< Number of modes to orthogonalize against
   type(oft_vector_ptr), pointer, dimension(:,:) :: orthog => NULL() !< Library of modes
   class(oft_matrix), pointer :: wop => NULL() !< H1(Curl)::WOP, used as metric
@@ -102,12 +102,12 @@ end type oft_hcurl_cinterp
 !! orthogonalization against the H1(Curl)::WOP null space. Higher order cleaning
 !! requires the full H1 vector space.
 !---------------------------------------------------------------------------
-type, extends(oft_orthog) :: oft_hcurl_divout
+type, extends(oft_solver_bc) :: oft_hcurl_divout
   integer(i4) :: count=0 !< Number of times apply has been called
   integer(i4) :: app_freq=1 !< Frequency to apply solver
   logical :: pm = .FALSE. !< Flag for solver convergence monitor
   class(oft_solver), pointer :: solver => NULL() !< Solver object for LAG::LOP operator
-  procedure(oft_bc_proto), pointer, nopass :: bc => NULL() !< Boundary condition
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   class(oft_matrix), pointer :: mop => NULL() !< Mass matrix, applies divoutm if associated
 contains
   !> Setup matrix and solver with default
@@ -117,6 +117,15 @@ contains
   !> Clean-up internal storage
   procedure :: delete => hcurl_divout_delete
 end type oft_hcurl_divout
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_solver_bc) :: oft_hcurl_zerob
+  class(oft_ml_fem_type), pointer :: ML_hcurl_rep => NULL() !< FE representation
+contains
+  procedure :: apply => zerob_apply
+  procedure :: delete => zerob_delete
+end type oft_hcurl_zerob
 !---Pre options
 integer(i4) :: nu_wop(fem_max_levels)=0
 real(r8) :: df_wop(fem_max_levels)=-1.d99
@@ -389,7 +398,8 @@ end subroutine hcurl_gradtp
 !---------------------------------------------------------------------------
 !> Zero the tangential component of a Nedelec H1(Curl) vector field on the boundary
 !---------------------------------------------------------------------------
-subroutine hcurl_zerob(a)
+subroutine zerob_apply(self,a)
+class(oft_hcurl_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
@@ -398,14 +408,21 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc)
 CALL a%get_local(aloc)
 ! Apply operator
-do i=1,oft_hcurl%nbe
-  j=oft_hcurl%lbe(i)
-  if(oft_hcurl%global%gbe(j))aloc(j)=0.d0
+do i=1,self%ML_hcurl_rep%current_level%nbe
+  j=self%ML_hcurl_rep%current_level%lbe(i)
+  if(self%ML_hcurl_rep%current_level%global%gbe(j))aloc(j)=0.d0
 end do
 CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
-end subroutine hcurl_zerob
+end subroutine zerob_apply
+!---------------------------------------------------------------------------
+!> Zero the tangential component of a Nedelec H1(Curl) vector field on the boundary
+!---------------------------------------------------------------------------
+subroutine zerob_delete(self)
+class(oft_hcurl_zerob), intent(inout) :: self
+NULLIFY(self%ML_hcurl_rep)
+end subroutine zerob_delete
 !---------------------------------------------------------------------------
 !> Construct mass matrix for a H1(Curl) representation
 !!
@@ -907,15 +924,21 @@ END SUBROUTINE oft_hcurl_bcurl
 subroutine hcurl_divout_setup(self,bc)
 class(oft_hcurl_divout), intent(inout) :: self
 character(LEN=*), intent(in) :: bc !< Boundary condition
+TYPE(oft_lag_zerob), POINTER :: bc_zerob
+TYPE(oft_lag_zerogrnd), POINTER :: bc_zerogrnd
 DEBUG_STACK_PUSH
 CALL create_cg_solver(self%solver)
 self%solver%its=-3
-CALL oft_lag_getlop(self%solver%A,bc)
+CALL oft_lag_getlop(oft_lagrange,self%solver%A,bc)
 CALL create_diag_pre(self%solver%pre)
 IF(TRIM(bc)=='grnd')THEN
-  self%bc=>lag_zerogrnd
+  ALLOCATE(bc_zerogrnd)
+  bc_zerogrnd%ML_lag_rep=>ML_oft_lagrange
+  self%bc=>bc_zerogrnd
 ELSE
-  self%bc=>lag_zerob
+  ALLOCATE(bc_zerob)
+  bc_zerob%ML_lag_rep=>ML_oft_lagrange
+  self%bc=>bc_zerob
 END IF
 DEBUG_STACK_POP
 end subroutine hcurl_divout_setup
@@ -924,10 +947,10 @@ end subroutine hcurl_divout_setup
 !!
 !! @note Should only be used via class \ref oft_hcurl_divout
 !---------------------------------------------------------------------------
-subroutine hcurl_divout_apply(self,u)
+subroutine hcurl_divout_apply(self,a)
 class(oft_hcurl_divout), intent(inout) :: self
-class(oft_vector), intent(inout) :: u !< Field for divergence cleaning
-class(oft_vector), pointer :: a,g,tmp,tmp2
+class(oft_vector), intent(inout) :: a !< Field for divergence cleaning
+class(oft_vector), pointer :: u,g,tmp,tmp2
 integer(i4) :: i,order_tmp
 real(r8) :: uu
 logical :: pm_save
@@ -940,38 +963,38 @@ IF(mod(self%count,self%app_freq)/=0)THEN
 END IF
 !---
 call oft_lag_create(g)
-call oft_lag_create(a)
+call oft_lag_create(u)
 !---
 IF(ASSOCIATED(self%mop))THEN
-  CALL hcurl_gradtp(u,g)
+  CALL hcurl_gradtp(a,g)
 ELSE
-  CALL hcurl_div(u,g)
+  CALL hcurl_div(a,g)
 END IF
-uu=u%dot(u)
+uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
-call a%set(0.d0)
-call self%bc(g)
+call u%set(0.d0)
+call self%bc%apply(g)
 !---
 pm_save=oft_env%pm; oft_env%pm=self%pm
-call self%solver%apply(a,g)
+call self%solver%apply(u,g)
 oft_env%pm=pm_save
 !---
-CALL a%scale(-1.d0)
-CALL u%new(tmp)
-CALL hcurl_grad(a,tmp)
+CALL u%scale(-1.d0)
+CALL a%new(tmp)
+CALL hcurl_grad(u,tmp)
 IF(ASSOCIATED(self%mop))THEN
-  CALL u%new(tmp2)
+  CALL a%new(tmp2)
   CALL self%mop%apply(tmp,tmp2)
-  CALL u%add(1.d0,1.d0,tmp2)
+  CALL a%add(1.d0,1.d0,tmp2)
   CALL tmp2%delete()
   DEALLOCATE(tmp2)
 ELSE
-  CALL u%add(1.d0,1.d0,tmp)
+  CALL a%add(1.d0,1.d0,tmp)
 END IF
 CALL tmp%delete
-call a%delete
+call u%delete
 call g%delete
-deallocate(tmp,a,g)
+deallocate(tmp,u,g)
 DEBUG_STACK_POP
 end subroutine hcurl_divout_apply
 !---------------------------------------------------------------------------
@@ -987,21 +1010,21 @@ end subroutine hcurl_divout_delete
 !!
 !! @note Used as a member function of oft_hcurl_orthog only
 !---------------------------------------------------------------------------
-subroutine hcurl_orthog_apply(self,u)
+subroutine hcurl_orthog_apply(self,a)
 class(oft_hcurl_orthog), intent(inout) :: self
-class(oft_vector), intent(inout) :: u !< Field to orthogonalize
+class(oft_vector), intent(inout) :: a !< Field to orthogonalize
 class(oft_vector), pointer :: b
 real(r8) :: c
 integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Get temporary variable
-call u%new(b)
+call a%new(b)
 do i=1,self%nm
   !---Compute coupling
   call self%wop%apply(self%orthog(i,oft_hcurl_level)%f,b)
-  c=u%dot(b)
+  c=a%dot(b)
   !---Remove coupling
-  call u%add(1.d0,-c,self%orthog(i,oft_hcurl_level)%f)
+  call a%add(1.d0,-c,self%orthog(i,oft_hcurl_level)%f)
 end do
 !---Delete temporary variable
 call b%delete
@@ -1502,11 +1525,13 @@ CLASS(oft_vector), POINTER :: u
 TYPE(oft_irlm_eigsolver) :: arsolver
 CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: wop => NULL()
+TYPE(oft_hcurl_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
 !---------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H1(Curl)::WOP'
+bc_tmp%ML_hcurl_rep=>ML_oft_hcurl
 ALLOCATE(df(oft_hcurl_nlevels))
 df=0.d0
 DO i=minlev,oft_hcurl_nlevels
@@ -1522,7 +1547,7 @@ DO i=minlev,oft_hcurl_nlevels
   arsolver%M=>md
   arsolver%mode=2
   arsolver%tol=1.E-5_r8
-  arsolver%bc=>hcurl_zerob
+  arsolver%bc=>bc_tmp
   CALL create_native_pre(arsolver%Minv, "jacobi")
   arsolver%Minv%A=>wop
   !---
@@ -1566,6 +1591,7 @@ INTEGER(i4) :: minlev,toplev,nl
 INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
+TYPE(oft_hcurl_zerob), POINTER :: bc_tmp
 !---
 TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
@@ -1623,9 +1649,11 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup preconditioner
 !---------------------------------------------------------------------------
+ALLOCATE(bc_tmp)
+bc_tmp%ML_hcurl_rep=>ML_oft_hcurl
 NULLIFY(pre)
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_hcurl_create, &
-     interp=hcurl_interp,inject=hcurl_inject,bc=hcurl_zerob,stype=1,df=df,nu=nu,xml_root=pre_node)
+     interp=hcurl_interp,inject=hcurl_inject,bc=bc_tmp,stype=1,df=df,nu=nu,xml_root=pre_node)
 !---------------------------------------------------------------------------
 ! Cleanup
 !---------------------------------------------------------------------------
@@ -1651,6 +1679,7 @@ INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 CLASS(oft_vector), POINTER :: oft_hcurl_vec
+TYPE(oft_hcurl_zerob), POINTER :: bc_tmp
 !---
 TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
@@ -1702,9 +1731,11 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup preconditioner
 !---------------------------------------------------------------------------
+ALLOCATE(bc_tmp)
+bc_tmp%ML_hcurl_rep=>ML_oft_hcurl
 NULLIFY(pre)
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_hcurl_create, &
-     interp=hcurl_interp,inject=hcurl_inject,bc=hcurl_zerob,stype=2,nu=nu,xml_root=pre_node)
+     interp=hcurl_interp,inject=hcurl_inject,bc=bc_tmp,stype=2,nu=nu,xml_root=pre_node)
 !---------------------------------------------------------------------------
 ! Cleanup
 !---------------------------------------------------------------------------

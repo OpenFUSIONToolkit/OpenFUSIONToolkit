@@ -22,13 +22,13 @@ USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
-USE oft_solver_base, ONLY: oft_solver
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_matrix
 USE oft_solver_utils, ONLY: create_mlpre, create_native_pre
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
-USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels
+USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
 USE oft_h0_basis, ONLY: oft_h0, ML_oft_h0, oft_h0_level, oft_h0_blevel, oft_h0_nlevels, &
 h0_ops, oft_h0_ops, ML_oft_h0_ops, oft_h0_eval_all, oft_h0_geval_all, oft_h0_set_level, &
@@ -59,6 +59,29 @@ contains
   !> Reconstruct field
   procedure :: interp => h0_ginterp_apply
 end type oft_h0_ginterp
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_solver_bc) :: oft_h0_zerob
+  class(oft_ml_fem_type), pointer :: ML_H0_rep => NULL() !< FE representation
+contains
+  procedure :: apply => zerob_apply
+  procedure :: delete => zerob_delete
+end type oft_h0_zerob
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_h0_zerob) :: oft_h0_zerogrnd
+contains
+  procedure :: apply => zerogrnd_apply
+end type oft_h0_zerogrnd
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, extends(oft_h0_zerob) :: oft_h0_zeroi
+contains
+  procedure :: apply => zeroi_apply
+end type oft_h0_zeroi
 !---Pre options
 integer(i4) :: nu_lop(fem_max_levels)=0
 real(r8) :: df_lop(fem_max_levels)=-1.d99
@@ -172,7 +195,8 @@ end subroutine h0_ginterp_apply
 !---------------------------------------------------------------------------
 !> Zero a Nedelec H0 scalar field at all boundary nodes
 !---------------------------------------------------------------------------
-subroutine h0_zerob(a)
+subroutine zerob_apply(self,a)
+class(oft_h0_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
@@ -181,6 +205,10 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc)
 CALL a%get_local(aloc)
 ! Apply operator
+! do i=1,self%ML_H0_rep%current_level%nbe
+!   j=self%ML_H0_rep%current_level%lbe(i)
+!   if(self%ML_H0_rep%current_level%global%gbe(j))aloc(j)=0.d0
+! end do
 do i=1,oft_h0%nbe
   j=oft_h0%lbe(i)
   if(oft_h0%global%gbe(j))aloc(j)=0.d0
@@ -188,32 +216,46 @@ end do
 CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
-end subroutine h0_zerob
+end subroutine zerob_apply
+!---------------------------------------------------------------------------
+!> Zero a Nedelec H0 scalar field at all boundary nodes
+!---------------------------------------------------------------------------
+subroutine zerob_delete(self)
+class(oft_h0_zerob), intent(inout) :: self
+NULLIFY(self%ML_H0_rep)
+end subroutine zerob_delete
 !---------------------------------------------------------------------------
 !> Zero a Nedelec H0 scalar field at the global grounding node
 !!
 !! @note The possition of this node is defined by the mesh pointer igrnd in
 !! mesh
 !---------------------------------------------------------------------------
-subroutine h0_zerogrnd(a)
+subroutine zerogrnd_apply(self,a)
+class(oft_h0_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
-! Cast to vector type
-NULLIFY(aloc)
-CALL a%get_local(aloc)
-!---
-if(oft_h0%mesh%igrnd(1)>0)aloc(oft_h0%mesh%igrnd(1))=0.d0
-if(oft_h0%mesh%igrnd(2)>0)aloc(oft_h0%mesh%igrnd(2))=0.d0
-CALL a%restore_local(aloc)
-DEALLOCATE(aloc)
+SELECT TYPE(this=>self%ML_H0_rep%current_level)
+CLASS IS(oft_fem_type)
+  ! Cast to vector type
+  NULLIFY(aloc)
+  CALL a%get_local(aloc)
+  !---
+  if(this%mesh%igrnd(1)>0)aloc(this%mesh%igrnd(1))=0.d0
+  if(this%mesh%igrnd(2)>0)aloc(this%mesh%igrnd(2))=0.d0
+  CALL a%restore_local(aloc)
+  DEALLOCATE(aloc)
+CLASS DEFAULT
+  CALL oft_abort("Invalid fe object","zerogrnd_apply",__FILE__)
+END SELECT
 DEBUG_STACK_POP
-end subroutine h0_zerogrnd
+end subroutine zerogrnd_apply
 !---------------------------------------------------------------------------
 !> Zero a Nedelec H0 scalar field at all interior nodes
 !---------------------------------------------------------------------------
-subroutine h0_zeroi(a)
+subroutine zeroi_apply(self,a)
+class(oft_h0_zeroi), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i
@@ -222,14 +264,14 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc)
 CALL a%get_local(aloc)
 ! Apply operator
-DO i=1,oft_h0%ne
-  IF(oft_h0%global%gbe(i))CYCLE
+DO i=1,self%ML_H0_rep%current_level%ne
+  IF(self%ML_H0_rep%current_level%global%gbe(i))CYCLE
   aloc(i)=0.d0
 END DO
 CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
-end subroutine h0_zeroi
+end subroutine zeroi_apply
 !---------------------------------------------------------------------------
 !> Construct mass matrix for H0 scalar representation
 !!
@@ -341,21 +383,17 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_h0_getmop
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_getlop
-!---------------------------------------------------------------------------
 !> Construct laplacian matrix for H0 scalar representation
 !!
 !! Supported boundary conditions
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !! - \c 'grnd'  Dirichlet for only groundin point
-!!
-!! @param[in,out] mat Matrix object
-!! @param[in] bc Boundary condition
 !---------------------------------------------------------------------------
-subroutine oft_h0_getlop(mat,bc)
-class(oft_matrix), pointer, intent(inout) :: mat
-character(LEN=*), intent(in) :: bc
+subroutine oft_h0_getlop(fe_rep,mat,bc)
+class(oft_h0_fem), intent(inout) :: fe_rep
+class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
+character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
@@ -372,7 +410,7 @@ END IF
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL oft_h0%mat_create(mat)
+  CALL fe_rep%mat_create(mat)
 ELSE
   CALL mat%zero()
 END IF
@@ -381,43 +419,43 @@ END IF
 !---------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,gop,det,lop,curved,goptmp,m,vol,jc,jr)
-allocate(j(oft_h0%nce)) ! Local DOF and matrix indices
-allocate(gop(3,oft_h0%nce)) ! Reconstructed gradient operator
-allocate(lop(oft_h0%nce,oft_h0%nce)) ! Local laplacian matrix
+allocate(j(fe_rep%nce)) ! Local DOF and matrix indices
+allocate(gop(3,fe_rep%nce)) ! Reconstructed gradient operator
+allocate(lop(fe_rep%nce,fe_rep%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,oft_h0%mesh%nc
-  curved=cell_is_curved(oft_h0%mesh,i) ! Straight cell test
+do i=1,fe_rep%mesh%nc
+  curved=cell_is_curved(fe_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   lop=0.d0
-  do m=1,oft_h0%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call oft_h0%mesh%jacobian(i,oft_h0%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_h0%quad%wts(m)
-    CALL oft_h0_geval_all(oft_h0,i,oft_h0%quad%pts(:,m),gop,goptmp)
+  do m=1,fe_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call fe_rep%mesh%jacobian(i,fe_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*fe_rep%quad%wts(m)
+    CALL oft_h0_geval_all(fe_rep,i,fe_rep%quad%pts(:,m),gop,goptmp)
     !---Compute local matrix contributions
-    do jr=1,oft_h0%nce
-      do jc=1,oft_h0%nce
+    do jr=1,fe_rep%nce
+      do jc=1,fe_rep%nce
         lop(jr,jc) = lop(jr,jc) + DOT_PRODUCT(gop(:,jr),gop(:,jc))*det
       end do
     end do
   end do
   !---Get local to global DOF mapping
-  call oft_h0%ncdofs(i,j)
+  call fe_rep%ncdofs(i,j)
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("zerob")
-      DO jr=1,oft_h0%nce
-        IF(oft_h0%global%gbe(j(jr)))lop(jr,:)=0.d0
+      DO jr=1,fe_rep%nce
+        IF(fe_rep%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(oft_h0%mesh%igrnd>0))THEN
-        DO jr=1,oft_h0%nce
-          IF(ANY(oft_h0%mesh%igrnd==j(jr)))lop(jr,:)=0.d0
+      IF(ANY(fe_rep%mesh%igrnd>0))THEN
+        DO jr=1,fe_rep%nce
+          IF(ANY(fe_rep%mesh%igrnd==j(jr)))lop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
   !---Add local values to global matrix
   ! !$omp critical
-  call mat%atomic_add_values(j,j,lop,oft_h0%nce,oft_h0%nce)
+  call mat%atomic_add_values(j,j,lop,fe_rep%nce,fe_rep%nce)
   ! !$omp end critical
 end do
 deallocate(j,gop,lop)
@@ -427,18 +465,18 @@ ALLOCATE(lop(1,1),j(1))
 lop(1,1)=1.d0
 SELECT CASE(TRIM(bc))
   CASE("zerob")
-    DO i=1,oft_h0%nbe
-      jr=oft_h0%lbe(i)
-      IF(oft_h0%linkage%leo(i).AND.oft_h0%global%gbe(jr))THEN
+    DO i=1,fe_rep%nbe
+      jr=fe_rep%lbe(i)
+      IF(fe_rep%linkage%leo(i).AND.fe_rep%global%gbe(jr))THEN
         j=jr
         call mat%add_values(j,j,lop,1,1)
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(oft_h0%mesh%igrnd>0))THEN
-      DO i=1,oft_h0%nbe
-        jr=oft_h0%lbe(i)
-        IF(oft_h0%linkage%leo(i).AND.ANY(jr==oft_h0%mesh%igrnd))THEN
+    IF(ANY(fe_rep%mesh%igrnd>0))THEN
+      DO i=1,fe_rep%nbe
+        jr=fe_rep%lbe(i)
+        IF(fe_rep%linkage%leo(i).AND.ANY(jr==fe_rep%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,lop,1,1)
         END IF
@@ -446,7 +484,7 @@ SELECT CASE(TRIM(bc))
     END IF
 END SELECT
 DEALLOCATE(j,lop)
-CALL oft_h0_create(oft_h0_vec)
+CALL fe_rep%vec_create(oft_h0_vec)
 CALL mat%assemble(oft_h0_vec)
 CALL oft_h0_vec%delete
 DEALLOCATE(oft_h0_vec)
@@ -456,8 +494,6 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_h0_getlop
-!---------------------------------------------------------------------------
-! SUBROUTINE: oft_h0_project
 !---------------------------------------------------------------------------
 !> Project a scalar field onto a H0 basis
 !!
@@ -966,7 +1002,9 @@ CLASS(oft_vector), POINTER :: u
 TYPE(oft_irlm_eigsolver) :: arsolver
 CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: lop => NULL()
+TYPE(oft_h0_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
+bc_tmp%ML_H0_rep=>ML_oft_h0
 !---------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
@@ -979,14 +1017,14 @@ DO i=minlev,oft_h0_nlevels
   CALL oft_h0_create(u)
   !---Get Ev range
   NULLIFY(lop)
-  CALL oft_h0_getlop(lop,'grnd')
+  CALL oft_h0_getlop(oft_h0,lop,'grnd')
   CALL create_diagmatrix(md,lop%D)
   !---
   arsolver%A=>lop
   arsolver%M=>md
   arsolver%mode=2
   arsolver%tol=1.E-5_r8
-  arsolver%bc=>h0_zerogrnd
+  arsolver%bc=>bc_tmp
   CALL create_native_pre(arsolver%Minv, "jacobi")
   arsolver%Minv%A=>lop
   !---
@@ -1013,13 +1051,12 @@ CALL oft_abort("Subroutine requires ARPACK", "lag_lop_eigs", __FILE__)
 #endif
 END SUBROUTINE h0_lop_eigs
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_getlop_pre
-!---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H0::LOP
 !---------------------------------------------------------------------------
-SUBROUTINE h0_getlop_pre(pre,mats,level,nlevels)
+SUBROUTINE h0_getlop_pre(pre,mats,bc_type,level,nlevels)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:)
+CHARACTER(LEN=*), INTENT(in) :: bc_type !< Boundary condition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 INTEGER(i4), OPTIONAL, INTENT(in) :: nlevels
 !--- ML structures for MG-preconditioner
@@ -1032,6 +1069,8 @@ INTEGER(i4) :: minlev,toplev,nl
 INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
+TYPE(oft_h0_zerob), POINTER :: zerob_bc
+TYPE(oft_h0_zerogrnd), POINTER :: zerogrnd_bc
 !---
 TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
@@ -1071,7 +1110,7 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_h0_getlop(mats(i)%M,'grnd')
+    CALL oft_h0_getlop(oft_h0,mats(i)%M,'grnd')
   END IF
   IF(i>1)ml_int(i-1)%M=>oft_h0_ops%interp
 END DO
@@ -1091,8 +1130,20 @@ END IF
 ! Setup preconditioner
 !---------------------------------------------------------------------------
 NULLIFY(pre)
-CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_h0_create,interp=h0_interp, &
-     inject=h0_inject,bc=h0_zerogrnd,stype=1,df=df,nu=nu,xml_root=pre_node)
+SELECT CASE(TRIM(bc_type))
+  CASE("zerob")
+    ALLOCATE(zerob_bc)
+    zerob_bc%ML_H0_rep=>ML_oft_h0
+    CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_h0_create,interp=h0_interp, &
+      inject=h0_inject,bc=zerob_bc,stype=1,df=df,nu=nu,xml_root=pre_node)
+  CASE("grnd")
+    ALLOCATE(zerogrnd_bc)
+    zerogrnd_bc%ML_H0_rep=>ML_oft_h0
+    CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_h0_create,interp=h0_interp, &
+      inject=h0_inject,bc=zerogrnd_bc,stype=1,df=df,nu=nu,xml_root=pre_node)
+  CASE DEFAULT
+    CALL oft_abort("Unknown BC type","h0_getlop_pre",__FILE__)
+END SELECT
 !---------------------------------------------------------------------------
 ! Cleanup
 !---------------------------------------------------------------------------

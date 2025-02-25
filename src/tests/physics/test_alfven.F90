@@ -22,21 +22,22 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, &
+  oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, &
   oft_lag_vgetmop, oft_lag_vrinterp
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions, hcurl_zerob
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, h0_zerogrnd
+USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project, &
-  h1grad_zerop, oft_h1_rinterp
+  oft_h1_grad_zerop, oft_h1_rinterp
 !---Physics
 USE oft_vector_inits, ONLY: uniform_field
 USE diagnostic, ONLY: vec_energy
@@ -61,6 +62,7 @@ TYPE(oft_h1_rinterp), TARGET :: bfield
 TYPE(oft_lag_vrinterp), TARGET :: vfield
 TYPE(diff_interp) :: err_field
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_h1_grad_zerop), TARGET :: h1grad_zerop
 INTEGER(i4) :: io_unit
 REAL(r8) :: B0,verr,vierr,berr,bierr
 REAL(r8), POINTER :: tmp(:),bvals(:),uvals(:)
@@ -99,6 +101,7 @@ CALL h0_setup_interp
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order,minlev)
 CALL h1_setup_interp
+h1grad_zerop%ML_h1_rep=>ML_oft_h1
 !---------------------------------------------------------------------------
 ! Create H1 metric solver
 !---------------------------------------------------------------------------
@@ -121,7 +124,7 @@ CALL oft_h1_create(bi)
 !---------------------------------------------------------------------------
 z_field%val=(/0.d0,0.d0,1.d0/)
 CALL oft_h1_project(z_field,v)
-CALL h1grad_zerop(v)
+CALL h1grad_zerop%apply(v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL b%add(0.d0,1.d0,u)
@@ -131,7 +134,7 @@ CALL be%add(0.d0,1.d0,u)
 !---------------------------------------------------------------------------
 alf_field%mesh=>mg_mesh%mesh
 CALL oft_h1_project(alf_field,v)
-CALL h1grad_zerop(v)
+CALL h1grad_zerop%apply(v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL db%add(0.d0,delta,u)
@@ -141,7 +144,7 @@ CALL bi%add(0.d0,1.d0,u)
 ! Create Lagrange metric solver
 !---------------------------------------------------------------------------
 NULLIFY(lag_mop)
-CALL oft_lag_vgetmop(lag_mop,"none")
+CALL oft_lag_vgetmop(oft_vlagrange,lag_mop,"none")
 CALL create_cg_solver(lag_minv)
 lag_minv%A=>lag_mop
 lag_minv%its=-3
@@ -156,7 +159,7 @@ CALL oft_lag_vcreate(vi)
 !---------------------------------------------------------------------------
 ! Set dB from alfven wave init
 !---------------------------------------------------------------------------
-CALL oft_lag_vproject(alf_field,lag_v)
+CALL oft_lag_vproject(oft_vlagrange,alf_field,lag_v)
 CALL lag_u%set(0.d0)
 CALL lag_minv%apply(lag_u,lag_v)
 CALL dvel%add(0.d0,delta,lag_u)

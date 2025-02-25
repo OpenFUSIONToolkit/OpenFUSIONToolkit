@@ -95,7 +95,7 @@ USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
   oft_lagrange_nlevels, oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
   oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, oft_lagrange_lev
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
+USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate, oft_vlagrange
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag, oft_lag_vcinterp
@@ -4581,7 +4581,7 @@ IF(j2_ind>0)call oft_hcurl_create(sub_fields%J2)
 ! Setup Lagrange mass solver
 !---------------------------------------------------------------------------
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(lmop,'none')
+CALL oft_lag_vgetmop(oft_vlagrange,lmop,'none')
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
@@ -4638,7 +4638,7 @@ IF(linear)THEN
   !---Project current density and plot
   Jfield%u=>sub_fields%B
   CALL Jfield%setup(mesh)
-  CALL oft_lag_vproject(Jfield,bp)
+  CALL oft_lag_vproject(oft_vlagrange,Jfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
   vals=>bvout(1,:)
@@ -4815,7 +4815,7 @@ DO
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
         CALL J2field%setup(mesh)
-        CALL oft_lag_vproject(J2field,bp)
+        CALL oft_lag_vproject(oft_vlagrange,J2field,bp)
         CALL ap%set(0.d0)
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
@@ -4829,7 +4829,7 @@ DO
       !---Current density
       Jfield%u=>sub_fields%B
       CALL Jfield%setup(mesh)
-      CALL oft_lag_vproject(Jfield,bp)
+      CALL oft_lag_vproject(oft_vlagrange,Jfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
       vals=>bvout(1,:)
@@ -4843,7 +4843,7 @@ DO
       IF(plot_div)THEN
         Bfield%u=>sub_fields%B
         CALL Bfield%setup(mesh)
-        CALL oft_lag_project_div(Bfield,x)
+        CALL oft_lag_project_div(oft_lagrange,Bfield,x)
         vals=>bvout(1,:)
         CALL x%get_local(vals)
         CALL bp%set(0.d0)

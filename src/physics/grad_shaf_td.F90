@@ -29,10 +29,10 @@ USE oft_arpack, ONLY: oft_iram_eigsolver
 #endif
 USE fem_utils, ONLY: bfem_map_flag
 USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_geval, oft_blag_eval, oft_blag_npos
-USE oft_blag_operators, ONLY: blag_zerob, oft_lag_brinterp
+USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE axi_green, ONLY: green, grad_green
 USE oft_gs, ONLY: gs_epsilon, flux_func, gs_eq, gs_update_bounds, &
-    gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, gs_zerob, build_dels
+    gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, build_dels
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
 #include "local.h"
@@ -279,7 +279,7 @@ END IF
 !
 CALL self%psi_tmp%add(0.d0,1.d0,self%psi_sol)
 CALL apply_rhs(self%mfop,self%psi_sol,self%rhs)
-CALL blag_zerob(self%rhs)
+CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
 ! ! Extrapolate solution (linear)
 ! DO j=maxextrap,2,-1
 !   CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
@@ -299,7 +299,7 @@ DO j=1,4
         IF(ASSOCIATED(self%adv_op))CALL build_jop(self%mfop,self%adv_op,self%psi_sol)
         CALL self%vac_pre%update(.TRUE.)
         CALL apply_rhs(self%mfop,self%psi_sol,self%rhs)
-        CALL blag_zerob(self%rhs)
+        CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
         CYCLE
     ELSE
         EXIT

@@ -19,7 +19,7 @@ use oft_lu, only: lapack_matinv
 !---
 use oft_lag_basis, only: oft_blagrange, oft_blag_d2eval, &
   oft_blag_geval
-use oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp, blag_zerob
+use oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_eq, gs_dflux, gs_get_cond_weights, gs_itor_nl, gs_psi2r, &
   gs_psimax, gs_set_cond_weights, gs_err_reason, gs_test_bounds, gs_get_cond_scales, &
   gs_get_qprof, gs_epsilon, gsinv_interp, oft_indent, oft_decrease_indent, oft_increase_indent

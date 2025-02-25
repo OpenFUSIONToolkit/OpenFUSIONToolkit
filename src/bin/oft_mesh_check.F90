@@ -25,7 +25,7 @@ USE oft_io, ONLY: xdmf_plot_file
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange
 USE oft_lag_operators, ONLY: lag_lop_eigs
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup
@@ -81,7 +81,7 @@ IF(order>0)THEN
     WRITE(*,*)'  NP = ',INT(order,2)
   END IF
   oft_env%pm=.FALSE.
-  CALL lag_lop_eigs(minlev)
+  CALL lag_lop_eigs(ML_oft_lagrange,minlev)
   CALL h0_lop_eigs(minlev)
   CALL hcurl_wop_eigs(minlev)
   CALL h1_mop_eigs(minlev)

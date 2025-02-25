@@ -22,7 +22,8 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, &
+  oft_lagrange, oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, &
   oft_lag_vgetmop, oft_lag_vrinterp
@@ -79,7 +80,7 @@ CALL lag_setup_interp
 ! Create Lagrange metric solver
 !---------------------------------------------------------------------------
 NULLIFY(mop)
-CALL oft_lag_vgetmop(mop,"none")
+CALL oft_lag_vgetmop(oft_vlagrange,mop,"none")
 CALL create_cg_solver(minv)
 minv%A=>mop
 minv%its=-3
@@ -99,7 +100,7 @@ CALL oft_lag_vcreate(vi)
 ! Set uniform B0 = zhat
 !---------------------------------------------------------------------------
 z_field%val=(/0.d0,0.d0,1.d0/)
-CALL oft_lag_vproject(z_field,v)
+CALL oft_lag_vproject(oft_vlagrange,z_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL b%add(0.d0,1.d0,u)
@@ -108,7 +109,7 @@ CALL be%add(0.d0,1.d0,u)
 ! Set dB from alfven wave init
 !---------------------------------------------------------------------------
 alf_field%mesh=>mg_mesh%mesh
-CALL oft_lag_vproject(alf_field,v)
+CALL oft_lag_vproject(oft_vlagrange,alf_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL db%add(0.d0,delta,u)
@@ -117,7 +118,7 @@ CALL bi%add(0.d0,1.d0,u)
 !---------------------------------------------------------------------------
 ! Set dV from alfven wave init
 !---------------------------------------------------------------------------
-CALL oft_lag_vproject(alf_field,v)
+CALL oft_lag_vproject(oft_vlagrange,alf_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL dvel%add(0.d0,delta,u)

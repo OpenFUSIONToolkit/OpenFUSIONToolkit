@@ -28,7 +28,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
@@ -90,7 +90,7 @@ oft_env%pm=.TRUE.
 CALL taylor_hmodes(nmodes)
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(lmop,'none')
+CALL oft_lag_vgetmop(oft_vlagrange,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 CALL create_diag_pre(lminv%pre)
@@ -109,7 +109,7 @@ DO i=1,nmodes
   Bfield%u=>taylor_hffa(i,oft_hcurl_level)%f
   CALL Bfield%setup(mg_mesh%mesh)
   !---Project field
-  CALL oft_lag_vproject(Bfield,v)
+  CALL oft_lag_vproject(oft_vlagrange,Bfield,v)
   CALL u%set(0.d0)
   CALL lminv%apply(u,v)
   !---Retrieve local values and save

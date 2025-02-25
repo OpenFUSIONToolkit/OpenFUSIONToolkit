@@ -16,7 +16,7 @@ USE oft_stitching, ONLY: oft_seam, seam_list, oft_global_stitch, &
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_matrix, oft_matrix_ptr, &
   oft_graph, oft_graph_ptr, oft_matrix_map
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, oft_native_matrix
-USE oft_solver_base, ONLY: oft_solver, oft_bc_proto
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_native_solvers, ONLY: oft_native_cg_solver, native_cg_solver_cast, &
   oft_native_gmres_solver, native_gmres_solver_cast, oft_jblock_precond, &
   oft_ml_precond, oft_veccreate_proto, oft_interp_proto, jblock_precond_cast, &
@@ -33,40 +33,25 @@ IMPLICIT NONE
 #include "local.h"
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_mlpre
-!---------------------------------------------------------------------------
 !> Construct Multi-Grid preconditioner
 !!
 !! This subroutine is a wrapper around specific subroutines for construction
-!! from an XML specification or standard native/PETSc preconditioners.
-!!
-!! @param[out] pre Preconditioner object
-!! @param[in] Mats Operator matrices [nlevels]
-!! @param[in] levels List of level indices [nlevels]
-!! @param[in] nlevels Number of levels
-!! @param[in] create_vec Vector creation subroutine
-!! @param[in] interp Interpolation subroutine
-!! @param[in] inject Restriction subroutine
-!! param[in] bc Bondary condition subroutine (optional)
-!! @param[in] stype Smoother type (optional)
-!! @param[in] df Smoother damping factors [nlevels] (optional)
-!! @param[in] nu Number of smoother iterations [nlevels] (optional)
-!! @param[in] xml_root Preconditioner definition node (optional)
+!! from an XML specification or standard native/PETSc preconditioners
 !---------------------------------------------------------------------------
 subroutine create_mlpre(pre,Mats,levels,nlevels,create_vec,interp, &
   inject,bc,stype,df,nu,xml_root)
-class(oft_solver), pointer, intent(out) :: pre
-TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:)
-integer(i4), intent(in) :: levels(:)
-integer(i4), intent(in) :: nlevels
-procedure(oft_veccreate_proto) :: create_vec
-procedure(oft_interp_proto) :: interp
-procedure(oft_interp_proto) :: inject
-procedure(oft_bc_proto), optional :: bc
-integer(i4), optional, intent(in) :: stype
-real(r8), optional, intent(in) :: df(:)
-integer(i4), optional, intent(in) :: nu(:)
-TYPE(xml_node), optional, pointer, intent(in) :: xml_root
+class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
+TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: nlevels !< Number of levels
+procedure(oft_veccreate_proto) :: create_vec !< Vector creation subroutine
+procedure(oft_interp_proto) :: interp !< Interpolation subroutine
+procedure(oft_interp_proto) :: inject !< Restriction subroutine
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition subroutine (optional)
+integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
+real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
+integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
+TYPE(xml_node), optional, pointer, intent(in) :: xml_root !< Preconditioner definition node (optional)
 !---
 NULLIFY(pre)
 #ifdef HAVE_XML
@@ -92,34 +77,20 @@ IF(.NOT.ASSOCIATED(pre))THEN
 END IF
 end subroutine create_mlpre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_native_mlpre
-!---------------------------------------------------------------------------
 !> Construct native Multi-Grid preconditioner
-!!
-!! @param[out] pre Preconditioner object
-!! @param[in] Mats Operator matrices [nlevels]
-!! @param[in] levels List of level indices [nlevels]
-!! @param[in] nlevels Number of levels
-!! @param[in] create_vec Vector creation subroutine
-!! @param[in] interp Interpolation subroutine
-!! @param[in] inject Restriction subroutine
-!! @param[in] bc Bondary condition subroutine (optional)
-!! @param[in] stype Smoother type (optional)
-!! @param[in] df Smoother damping factors [nlevels] (optional)
-!! @param[in] nu Number of smoother iterations [nlevels] (optional)
 !---------------------------------------------------------------------------
 subroutine create_native_mlpre(pre,Mats,levels,nlevels,create_vec,interp,inject,bc,stype,df,nu)
-class(oft_solver), pointer, intent(out) :: pre
-TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:)
-integer(i4), intent(in) :: levels(:)
-integer(i4), intent(in) :: nlevels
-procedure(oft_veccreate_proto) :: create_vec
-procedure(oft_interp_proto) :: interp
-procedure(oft_interp_proto) :: inject
-procedure(oft_bc_proto), optional :: bc
-integer(i4), optional, intent(in) :: stype
-real(r8), optional, intent(in) :: df(:)
-integer(i4), optional, intent(in) :: nu(:)
+class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
+TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: nlevels !< Number of levels
+procedure(oft_veccreate_proto) :: create_vec !< Vector creation subroutine
+procedure(oft_interp_proto) :: interp !< Interpolation subroutine
+procedure(oft_interp_proto) :: inject !< Restriction subroutine
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition subroutine (optional)
+integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
+real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
+integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
 integer(i4) :: i,smoother
 class(oft_ml_precond), pointer :: this_ml
 type(oft_jblock_precond), pointer :: this_jac
@@ -258,34 +229,20 @@ END DO
 DEBUG_STACK_POP
 end subroutine create_native_mlpre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_petsc_mlpre
-!---------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
-!!
-!! @param[out] pre Preconditioner object
-!! @param[in] Mats Operator matrices [nlevels]
-!! @param[in] levels List of level indices [nlevels]
-!! @param[in] nlevels Number of levels
-!! @param[in] create_vec Vector creation subroutine
-!! @param[in] interp Interpolation subroutine
-!! @param[in] inject Restriction subroutine
-!! @param[in] bc Bondary condition subroutine (optional)
-!! @param[in] stype Smoother type (optional)
-!! @param[in] df Smoother damping factors [nlevels] (optional)
-!! @param[in] nu Number of smoother iterations [nlevels] (optional)
 !---------------------------------------------------------------------------
 subroutine create_petsc_mlpre(pre,Mats,levels,nlevels,create_vec,interp,inject,bc,stype,df,nu)
-class(oft_solver), pointer, intent(out) :: pre
-TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:)
-integer(i4), intent(in) :: levels(:)
-integer(i4), intent(in) :: nlevels
-procedure(oft_veccreate_proto) :: create_vec
-procedure(oft_interp_proto) :: interp
-procedure(oft_interp_proto) :: inject
-procedure(oft_bc_proto), optional :: bc
-integer(i4), optional, intent(in) :: stype
-real(r8), optional, intent(in) :: df(:)
-integer(i4), optional, intent(in) :: nu(:)
+class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
+TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: nlevels !< Number of levels
+procedure(oft_veccreate_proto) :: create_vec !< Vector creation subroutine
+procedure(oft_interp_proto) :: interp !< Interpolation subroutine
+procedure(oft_interp_proto) :: inject !< Restriction subroutine
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition subroutine (optional)
+integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
+real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
+integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
 #ifdef HAVE_PETSC
 !---
 integer(i4) :: i,smoother
@@ -440,9 +397,7 @@ CALL oft_abort("Not compiled with PETSc", "create_petsc_mlpre", __FILE__)
 #endif
 end subroutine create_petsc_mlpre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_native_solver
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_native_solver(solver,solver_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -465,9 +420,7 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine create_native_solver
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_petsc_solver
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_petsc_solver(solver,solver_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -494,9 +447,7 @@ DEBUG_STACK_POP
 #endif
 end subroutine create_petsc_solver
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_cg_solver
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_cg_solver(solver,force_native)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -513,9 +464,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_cg_solver
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_cg_solver
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_gmres_solver(solver,nrits,force_native)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -547,9 +496,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_gmres_solver
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_solver_xml
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_solver_xml(solver,solver_node,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -629,9 +576,7 @@ CALL oft_abort('OFT not compiled with xml support.','create_solver_xml',__FILE__
 #endif
 end subroutine create_solver_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_native_pre
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_native_pre(pre,pre_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -652,9 +597,7 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine create_native_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_petsc_pre
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_petsc_pre(pre,pre_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -686,9 +629,7 @@ DEBUG_STACK_POP
 #endif
 end subroutine create_petsc_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_diag_pre
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_diag_pre(pre)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -716,9 +657,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_ilu_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_bjacobi_pre
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_bjacobi_pre(pre,nlocal)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -744,9 +683,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_bjacobi_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_pre_xml
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_pre_xml(pre,pre_node,native_solver,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -821,29 +758,18 @@ CALL oft_abort('OFT not compiled with xml support.','create_pre_xml',__FILE__)
 #endif
 end subroutine create_pre_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_ml_xml
-!---------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
-!!
-!! @param[out] pre Preconditioner object
-!! @param[in] Mats Operator matrices [nlevels]
-!! @param[in] levels List of level indices [nlevels]
-!! @param[in] nlevels Number of levels
-!! @param[in] create_vec Vector creation subroutine
-!! @param[in] interp Interpolation subroutine
-!! @param[in] inject Restriction subroutine
-!! @param[in] pre_node
 !---------------------------------------------------------------------------
 subroutine create_ml_xml(pre,Mats,levels,nlevels,create_vec,interp,inject,pre_node,bc)
-class(oft_solver), pointer, intent(out) :: pre
-TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:)
-integer(i4), intent(in) :: levels(:)
-integer(i4), intent(in) :: nlevels
-procedure(oft_veccreate_proto) :: create_vec
-procedure(oft_interp_proto) :: interp
-procedure(oft_interp_proto) :: inject
-TYPE(xml_node), POINTER, INTENT(in) :: pre_node
-procedure(oft_bc_proto), optional :: bc
+class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
+TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: nlevels !< Number of levels
+procedure(oft_veccreate_proto) :: create_vec !< Vector creation subroutine
+procedure(oft_interp_proto) :: interp !< Interpolation subroutine
+procedure(oft_interp_proto) :: inject !< Restriction subroutine
+TYPE(xml_node), POINTER, INTENT(in) :: pre_node !< Preconditioner XML element
+class(oft_solver_bc), target, optional, intent(in) :: bc
 #ifdef HAVE_XML
 !---
 integer(i4) :: i,ierr,nnodes

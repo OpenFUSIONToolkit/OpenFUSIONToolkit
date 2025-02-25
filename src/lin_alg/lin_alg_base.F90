@@ -29,26 +29,20 @@ IMPLICIT NONE
 #include "local.h"
 PRIVATE
 !------------------------------------------------------------------------------
-! TYPE oft_local_mat
-!------------------------------------------------------------------------------
-!
+!> Needs docs
 !------------------------------------------------------------------------------
 type, public :: oft_local_mat
   real(r8), pointer, contiguous, dimension(:,:) :: m => NULL()
   integer(i4), pointer, contiguous, dimension(:,:) :: ind => NULL()
 end type oft_local_mat
 !------------------------------------------------------------------------------
-! TYPE oft_local_cmat
-!------------------------------------------------------------------------------
-!
+!> Needs docs
 !------------------------------------------------------------------------------
 type, public :: oft_local_cmat
   real(r8), pointer, contiguous, dimension(:,:) :: mreal => NULL()
   real(r8), pointer, contiguous, dimension(:,:) :: mcomp => NULL()
   integer(i4), pointer, contiguous, dimension(:,:) :: ind => NULL()
 end type oft_local_cmat
-!------------------------------------------------------------------------------
-! TYPE oft_map
 !------------------------------------------------------------------------------
 !> Block mapping structure
 !------------------------------------------------------------------------------
@@ -66,15 +60,11 @@ TYPE, PUBLIC :: oft_map
   INTEGER(i8), POINTER, CONTIGUOUS, DIMENSION(:)  :: lge => NULL() !< List of global indices
 END TYPE oft_map
 !------------------------------------------------------------------------------
-! TYPE map_list
-!------------------------------------------------------------------------------
 !> Block mapping pointer
 !------------------------------------------------------------------------------
 TYPE, PUBLIC :: map_list
   TYPE(oft_map), POINTER :: m => NULL()
 END TYPE map_list
-!------------------------------------------------------------------------------
-! TYPE oft_vector
 !------------------------------------------------------------------------------
 !> Abstract field class
 !!
@@ -126,15 +116,11 @@ CONTAINS
   procedure :: delete => vector_delete
 END TYPE oft_vector
 !------------------------------------------------------------------------------
-! TYPE oft_vector_ptr
-!------------------------------------------------------------------------------
 !> Field pointer
 !------------------------------------------------------------------------------
 type, public :: oft_vector_ptr
   class(oft_vector), pointer :: f => NULL()
 end type oft_vector_ptr
-!------------------------------------------------------------------------------
-! TYPE oft_cvector
 !------------------------------------------------------------------------------
 !> Abstract complex vector class
 !!
@@ -190,8 +176,6 @@ CONTAINS
   procedure :: delete => cvector_delete
 END TYPE oft_cvector
 !------------------------------------------------------------------------------
-! TYPE oft_cvector_ptr
-!------------------------------------------------------------------------------
 !> Field pointer
 !------------------------------------------------------------------------------
 type, public :: oft_cvector_ptr
@@ -199,199 +183,150 @@ type, public :: oft_cvector_ptr
 end type oft_cvector_ptr
 ABSTRACT INTERFACE
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_new_vec
-  !------------------------------------------------------------------------------
   !> Create a new field as a bare copy
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
-  !!
-  !! @param[out] new New field
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_new_vec(self,new)
   import oft_vector
   class(oft_vector), intent(in) :: self
-  class(oft_vector), pointer, intent(out) :: new
+  class(oft_vector), pointer, intent(out) :: new !< New field
   end subroutine vec_new_vec
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_new_cvec
   !------------------------------------------------------------------------------
   !> Create a new field as a bare copy
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
-  !!
-  !! @param[out] new New field
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_new_cvec(self,new)
   import oft_vector, oft_cvector
   class(oft_vector), intent(in) :: self
-  class(oft_cvector), pointer, intent(out) :: new
+  class(oft_cvector), pointer, intent(out) :: new !< New field
   end subroutine vec_new_cvec
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_set
   !------------------------------------------------------------------------------
   !> Set all elements to a scalar
   !!
-  !! @param[in] alpha Updated field value
-  !! @param[in] random Set to random number, if true alpha is ignored (optional)
-  !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_set(self,alpha,iblock,random)
   import oft_vector, i4, r8
   class(oft_vector), intent(inout) :: self
-  real(r8), intent(in) :: alpha
-  integer(i4), optional, intent(in) :: iblock
-  logical, optional, intent(in) :: random
+  real(r8), intent(in) :: alpha !< Updated field value
+  integer(i4), optional, intent(in) :: iblock !< Vector sub-block to act on
+  logical, optional, intent(in) :: random !< Set to random number, if true alpha is ignored (optional)
   end subroutine vec_set
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_get_local
-  !------------------------------------------------------------------------------
-  !> Set all elements to a scalar
-  !!
-  !! @param[in] alpha Updated field value
+  !> Needs docs
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_get_local(self,array,iblock)
   import oft_vector, i4, r8
   class(oft_vector), intent(inout) :: self
-  real(r8), pointer, intent(inout) :: array(:)
-  integer(i4), optional, intent(in) :: iblock
+  real(r8), pointer, intent(inout) :: array(:) !< Local values
+  integer(i4), optional, intent(in) :: iblock !< Vector sub-block
   end subroutine vec_get_local
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_restore_local
-  !------------------------------------------------------------------------------
-  !> Set all elements to a scalar
-  !!
-  !! @param[in] alpha Updated field value
+  !> Needs docs
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_restore_local(self,array,iblock,add,wait)
   import oft_vector, i4, r8
   class(oft_vector), intent(inout) :: self
-  real(r8), intent(in) :: array(:)
-  integer(i4), optional, intent(in) :: iblock
-  logical, optional, intent(in) :: add
-  logical, optional, intent(in) :: wait
+  real(r8), intent(in) :: array(:) !< Local values
+  integer(i4), optional, intent(in) :: iblock !< Vector sub-block
+  logical, optional, intent(in) :: add !< Add values instead of replace
+  logical, optional, intent(in) :: wait !< Wait to perform global sync
   end subroutine vec_restore_local
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_get_slice
-  !------------------------------------------------------------------------------
-  !> Set all elements to a scalar
-  !!
-  !! @param[in] alpha Updated field value
+  !> Needs docs
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_get_slice(self,array,iblock)
   import oft_vector, i4, r8
   class(oft_vector), intent(inout) :: self
-  real(r8), pointer, intent(inout) :: array(:)
-  integer(i4), optional, intent(in) :: iblock
+  real(r8), pointer, intent(inout) :: array(:) !< Slice values
+  integer(i4), optional, intent(in) :: iblock !< Vector sub-block
   end subroutine vec_get_slice
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_restore_slice
-  !------------------------------------------------------------------------------
-  !> Set all elements to a scalar
-  !!
-  !! @param[in] alpha Updated field value
+  !> Needs docs
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_restore_slice(self,array,iblock,wait)
   import oft_vector, i4, r8
   class(oft_vector), intent(inout) :: self
-  real(r8), intent(in) :: array(:)
-  integer(i4), optional, intent(in) :: iblock
-  logical, optional, intent(in) :: wait
+  real(r8), intent(in) :: array(:) !< Slice values
+  integer(i4), optional, intent(in) :: iblock !< Vector sub-block
+  logical, optional, intent(in) :: wait !< Wait to perform global sync
   end subroutine vec_restore_slice
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_add
   !------------------------------------------------------------------------------
   !> Add fields
   !!
   !! self = \f$ \gamma \f$ self + \f$ \alpha \f$ a + \f$ \beta \f$ b
-  !! @param[in] gamma Scale of source field
-  !! @param[in] alpha Scale of first field
-  !! @param[in] a First field to add
-  !! @param[in] beta Scale of second field (optional)
-  !! @param[in] b Second field to add (optional)
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_add(self,gamma,alpha,a,beta,b)
   import oft_vector, r8
   class(oft_vector), intent(inout) :: self
-  real(r8), intent(in) :: gamma
-  real(r8), intent(in) :: alpha
-  class(oft_vector), target, intent(inout) :: a
-  real(r8), optional, intent(in) :: beta
-  class(oft_vector), target, optional, intent(inout) :: b
+  real(r8), intent(in) :: gamma !< Scale of source field
+  real(r8), intent(in) :: alpha !< Scale of first field
+  class(oft_vector), target, intent(inout) :: a !< First field to add
+  real(r8), optional, intent(in) :: beta !< Scale of second field (optional)
+  class(oft_vector), target, optional, intent(inout) :: b !< Second field to add (optional)
   end subroutine vec_add
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_mult
   !------------------------------------------------------------------------------
   !> Multiply fields element by element
   !!
   !! \f$ self_i = self_i * a_i \f$
-  !! @param[in] a First field to add
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_mult(self,a,div_flag)
   import oft_vector
   class(oft_vector), intent(inout) :: self
-  class(oft_vector), target, intent(inout) :: a
+  class(oft_vector), target, intent(inout) :: a !< Field for multiplication
   logical, optional, intent(in) :: div_flag
   end subroutine vec_mult
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_scale
-  !------------------------------------------------------------------------------
   !> Scale field by a scalar
   !!
-  !! @param[in] alpha Factor to scale field
-  !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_scale(self,alpha)
   import oft_vector, r8
   class(oft_vector), intent(inout) :: self
-  real(r8), intent(in) :: alpha
+  real(r8), intent(in) :: alpha !< Scale factor
   end subroutine vec_scale
   !------------------------------------------------------------------------------
-  ! FUNCTION: vec_dot_vec
-  !------------------------------------------------------------------------------
-  !> Dot product with a second field
+  !> Dot product with a second field (real)
   !!
-  !! @param[in] a Second field for dot product
   !! @result dot(self,a)
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   function vec_dot_vec(self,a) result(dot)
   import oft_vector, r8
   class(oft_vector), intent(inout) :: self
-  class(oft_vector), target, intent(inout) :: a
+  class(oft_vector), target, intent(inout) :: a !< Second field for dot product
   real(r8) :: dot
   end function vec_dot_vec
   !------------------------------------------------------------------------------
-  ! FUNCTION: vec_dot_cvec
-  !------------------------------------------------------------------------------
-  !> Dot product with a second field
+  !> Dot product with a second field (complex)
   !!
-  !! @param[in] a Second field for dot product
   !! @result dot(self,a)
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
@@ -400,50 +335,40 @@ ABSTRACT INTERFACE
   function vec_dot_cvec(self,a) result(dot)
   import oft_vector, oft_cvector, c8
   class(oft_vector), intent(inout) :: self
-  class(oft_cvector), target, intent(inout) :: a
+  class(oft_cvector), target, intent(inout) :: a !< Second field for dot product
   complex(c8) :: dot
   end function vec_dot_cvec
   !------------------------------------------------------------------------------
-  ! FUNCTION: vec_mdot_vec
-  !------------------------------------------------------------------------------
   !> Dot product with an arrays of vectors
   !!
-  !! @param[in] a Array of vectors for dot product [n]
-  !! @param[in] n Length of vector array
   !! @result \f$ \sum_i self_i a(j)_i \f$
   !------------------------------------------------------------------------------
   function vec_mdot_vec(self,a,n) result(dots)
   import oft_vector, oft_vector_ptr, r8, i4
   class(oft_vector), intent(inout) :: self
-  type(oft_vector_ptr), intent(inout) :: a(n)
-  integer(i4), intent(in) :: n
+  type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
+  integer(i4), intent(in) :: n !< Length of vector array
   real(r8) :: dots(n)
   end function vec_mdot_vec
   !------------------------------------------------------------------------------
-  ! FUNCTION: vec_mdot_cvec
-  !------------------------------------------------------------------------------
   !> Dot product with an arrays of vectors
   !!
-  !! @param[in] a Array of vectors for dot product [n]
-  !! @param[in] n Length of vector array
   !! @result \f$ \sum_i self_i a(j)_i \f$
   !------------------------------------------------------------------------------
   function vec_mdot_cvec(self,a,n) result(dots)
   import oft_vector, oft_cvector_ptr, c8, i4
   class(oft_vector), intent(inout) :: self
-  type(oft_cvector_ptr), intent(inout) :: a(n)
-  integer(i4), intent(in) :: n
+  type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
+  integer(i4), intent(in) :: n !< Length of vector array
   complex(c8) :: dots(n)
   end function vec_mdot_cvec
-  !------------------------------------------------------------------------------
-  ! FUNCTION: vec_sum
   !------------------------------------------------------------------------------
   !> Sum reduction over a field
   !!
   !! @result sum(self)
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   function vec_sum(self) result(sum)
   import oft_vector, r8
@@ -451,42 +376,33 @@ ABSTRACT INTERFACE
   real(r8) :: sum
   end function vec_sum
   !------------------------------------------------------------------------------
-  ! FUNCTION: vec_norm
-  !------------------------------------------------------------------------------
   !> Norm of a field
   !!
-  !! @param[in] itype Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
   !! @result norm(self)
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   function vec_norm(self,itype) result(norm)
   import oft_vector, i4, r8
   class(oft_vector), intent(inout) :: self
-  integer(i4), intent(in) :: itype
+  integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
   real(r8) :: norm
   end function vec_norm
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: vec_stitch
-  !------------------------------------------------------------------------------
   !> Perform global stitching
   !!
-  !! @param[in] up_method Type of stitching to perform
-  !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized fields.
+  !! of the member function and catch errors in uninitialized fields
   !------------------------------------------------------------------------------
   subroutine vec_stitch(self,up_method)
   import oft_vector, i4
   class(oft_vector), intent(inout) :: self
-  integer(i4), intent(in) :: up_method
+  integer(i4), intent(in) :: up_method !< Type of stitching to perform
   end subroutine vec_stitch
 END INTERFACE
 !
 ABSTRACT INTERFACE
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_new_vec
   !------------------------------------------------------------------------------
   !> Create a new field as a bare copy
   !!
@@ -501,8 +417,6 @@ ABSTRACT INTERFACE
   class(oft_vector), pointer, intent(out) :: new
   end subroutine cvec_new_vec
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_new_cvec
-  !------------------------------------------------------------------------------
   !> Create a new field as a bare copy
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
@@ -515,8 +429,6 @@ ABSTRACT INTERFACE
   class(oft_cvector), intent(in) :: self
   class(oft_cvector), pointer, intent(out) :: new
   end subroutine cvec_new_cvec
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_set
   !------------------------------------------------------------------------------
   !> Set all elements to a scalar
   !!
@@ -534,8 +446,6 @@ ABSTRACT INTERFACE
   logical, optional, intent(in) :: random
   end subroutine cvec_set
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_get_local
-  !------------------------------------------------------------------------------
   !> Set all elements to a scalar
   !!
   !! @param[in] alpha Updated field value
@@ -549,8 +459,6 @@ ABSTRACT INTERFACE
   complex(c8), pointer, intent(inout) :: array(:)
   integer(i4), optional, intent(in) :: iblock
   end subroutine cvec_get_local
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_restore_local
   !------------------------------------------------------------------------------
   !> Set all elements to a scalar
   !!
@@ -568,8 +476,6 @@ ABSTRACT INTERFACE
   logical, optional, intent(in) :: wait
   end subroutine cvec_restore_local
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_get_slice
-  !------------------------------------------------------------------------------
   !> Set all elements to a scalar
   !!
   !! @param[in] alpha Updated field value
@@ -583,8 +489,6 @@ ABSTRACT INTERFACE
   complex(c8), pointer, intent(inout) :: array(:)
   integer(i4), optional, intent(in) :: iblock
   end subroutine cvec_get_slice
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_restore_slice
   !------------------------------------------------------------------------------
   !> Set all elements to a scalar
   !!
@@ -600,8 +504,6 @@ ABSTRACT INTERFACE
   integer(i4), optional, intent(in) :: iblock
   logical, optional, intent(in) :: wait
   end subroutine cvec_restore_slice
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_add_vec
   !------------------------------------------------------------------------------
   !> Add fields
   !!
@@ -625,8 +527,6 @@ ABSTRACT INTERFACE
   class(oft_vector), target, optional, intent(inout) :: b
   end subroutine cvec_add_vec
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_add_cvec
-  !------------------------------------------------------------------------------
   !> Add fields
   !!
   !! self = \f$ \gamma \f$ self + \f$ \alpha \f$ a + \f$ \beta \f$ b
@@ -649,8 +549,6 @@ ABSTRACT INTERFACE
   class(oft_cvector), target, optional, intent(inout) :: b
   end subroutine cvec_add_cvec
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_mult_vec
-  !------------------------------------------------------------------------------
   !> Multiply fields element by element
   !!
   !! \f$ self_i = self_i * a_i \f$
@@ -665,8 +563,6 @@ ABSTRACT INTERFACE
   class(oft_vector), target, intent(inout) :: a
   logical, optional, intent(in) :: div_flag
   end subroutine cvec_mult_vec
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_mult_cvec
   !------------------------------------------------------------------------------
   !> Multiply fields element by element
   !!
@@ -683,8 +579,6 @@ ABSTRACT INTERFACE
   logical, optional, intent(in) :: div_flag
   end subroutine cvec_mult_cvec
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_scale
-  !------------------------------------------------------------------------------
   !> Scale field by a scalar
   !!
   !! @param[in] alpha Factor to scale field
@@ -697,8 +591,6 @@ ABSTRACT INTERFACE
   class(oft_cvector), intent(inout) :: self
   complex(c8), intent(in) :: alpha
   end subroutine cvec_scale
-  !------------------------------------------------------------------------------
-  ! FUNCTION: cvec_dot_cvec
   !------------------------------------------------------------------------------
   !> Dot product with a second field
   !!
@@ -715,8 +607,6 @@ ABSTRACT INTERFACE
   complex(c8) :: dot
   end function cvec_dot_vec
   !------------------------------------------------------------------------------
-  ! FUNCTION: cvec_dot_cvec
-  !------------------------------------------------------------------------------
   !> Dot product with a second field
   !!
   !! @param[in] a Second field for dot product
@@ -732,8 +622,6 @@ ABSTRACT INTERFACE
   complex(c8) :: dot
   end function cvec_dot_cvec
   !------------------------------------------------------------------------------
-  ! FUNCTION: cvec_mdot_vec
-  !------------------------------------------------------------------------------
   !> Dot product with an arrays of vectors
   !!
   !! @param[in] a Array of vectors for dot product [n]
@@ -747,8 +635,6 @@ ABSTRACT INTERFACE
   integer(i4), intent(in) :: n
   complex(c8) :: dots(n)
   end function cvec_mdot_vec
-  !------------------------------------------------------------------------------
-  ! FUNCTION: cvec_mdot_cvec
   !------------------------------------------------------------------------------
   !> Dot product with an arrays of vectors
   !!
@@ -764,8 +650,6 @@ ABSTRACT INTERFACE
   complex(c8) :: dots(n)
   end function cvec_mdot_cvec
   !------------------------------------------------------------------------------
-  ! FUNCTION: cvec_sum
-  !------------------------------------------------------------------------------
   !> Sum reduction over a field
   !!
   !! @result sum(self)
@@ -778,8 +662,6 @@ ABSTRACT INTERFACE
   class(oft_cvector), intent(inout) :: self
   complex(c8) :: sum
   end function cvec_sum
-  !------------------------------------------------------------------------------
-  ! FUNCTION: cvec_norm
   !------------------------------------------------------------------------------
   !> Norm of a field
   !!
@@ -796,8 +678,6 @@ ABSTRACT INTERFACE
   REAL(r8) :: norm
   end function cvec_norm
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cvec_stitch
-  !------------------------------------------------------------------------------
   !> Perform global stitching
   !!
   !! @param[in] up_method Type of stitching to perform
@@ -812,8 +692,6 @@ ABSTRACT INTERFACE
   end subroutine cvec_stitch
 END INTERFACE
 !------------------------------------------------------------------------------
-! TYPE oft_matrix_map
-!------------------------------------------------------------------------------
 !> Sub-matrix mapping
 !------------------------------------------------------------------------------
 type, public :: oft_matrix_map
@@ -823,8 +701,6 @@ type, public :: oft_matrix_map
   integer(i4), pointer, CONTIGUOUS, dimension(:) :: lc_map => NULL() !< List of entries in full matrix
   integer(i4), pointer, CONTIGUOUS, dimension(:,:) :: ext => NULL() !< Row extents within full matrix
 end type oft_matrix_map
-!------------------------------------------------------------------------------
-! TYPE oft_graph
 !------------------------------------------------------------------------------
 !> CSR graph representation
 !------------------------------------------------------------------------------
@@ -838,15 +714,11 @@ type, public :: oft_graph
   INTEGER(i4), CONTIGUOUS, POINTER, dimension(:) :: lc => NULL() !< Column list
 end type oft_graph
 !------------------------------------------------------------------------------
-! TYPE oft_graph_ptr
-!------------------------------------------------------------------------------
 !> Graph pointer
 !------------------------------------------------------------------------------
 type, public :: oft_graph_ptr
   type(oft_graph), pointer :: g => NULL() !< Graph
 end type oft_graph_ptr
-!------------------------------------------------------------------------------
-! CLASS oft_matrix
 !------------------------------------------------------------------------------
 !> Abstract matrix class
 !!
@@ -890,15 +762,11 @@ contains
   procedure :: delete => matrix_delete
 end type oft_matrix
 !------------------------------------------------------------------------------
-! TYPE oft_matrix_ptr
-!------------------------------------------------------------------------------
 !> Matrix pointer
 !------------------------------------------------------------------------------
 type, public :: oft_matrix_ptr
   class(oft_matrix), pointer :: m => NULL() !< Matrix
 end type oft_matrix_ptr
-!------------------------------------------------------------------------------
-! CLASS oft_cmatrix
 !------------------------------------------------------------------------------
 !> Abstract complex matrix class
 !!
@@ -942,8 +810,6 @@ contains
   procedure :: delete => cmatrix_delete
 end type oft_cmatrix
 !------------------------------------------------------------------------------
-! TYPE oft_cmatrix_ptr
-!------------------------------------------------------------------------------
 !> Matrix pointer
 !------------------------------------------------------------------------------
 type, public :: oft_cmatrix_ptr
@@ -951,151 +817,106 @@ type, public :: oft_cmatrix_ptr
 end type oft_cmatrix_ptr
 ABSTRACT INTERFACE
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: mat_apply_vec
-  !------------------------------------------------------------------------------
-  !> Apply the matrix to a field and optionally add it to an existing field.
+  !> Apply the matrix to a field (real)
   !!
   !! b = self * a
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] a Source field
-  !! @param[in,out] b Result of matrix product
-  !! @param[in] beta Factor for matrix addition
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine mat_apply_vec(self,a,b)
   import oft_vector, oft_matrix
   class(oft_matrix), intent(inout) :: self
-  class(oft_vector), target, intent(inout) :: a
-  class(oft_vector), intent(inout) :: b
+  class(oft_vector), target, intent(inout) :: a !< Source vector
+  class(oft_vector), intent(inout) :: b !< Result of matrix product
   end subroutine mat_apply_vec
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: mat_apply_cvec
-  !------------------------------------------------------------------------------
-  !> Apply the matrix to a field and optionally add it to an existing field.
+  !> Apply the matrix to a field (complex)
   !!
-  !! b = self^T * a
+  !! b = self * a
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] a Source field
-  !! @param[in,out] b Result of matrix product
-  !! @param[in] beta Factor for matrix addition
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine mat_apply_cvec(self,a,b)
   import oft_cvector, oft_matrix
   class(oft_matrix), intent(inout) :: self
-  class(oft_cvector), target, intent(inout) :: a
-  class(oft_cvector), intent(inout) :: b
+  class(oft_cvector), target, intent(inout) :: a !< Source vector
+  class(oft_cvector), intent(inout) :: b !< Result of matrix product
   end subroutine mat_apply_cvec
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: mat_set_values
-  !------------------------------------------------------------------------------
-  !> Set values of a matrix.
+  !> Set values of a matrix
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] i_inds Row indices of entries to set [n]
-  !! @param[in] j_inds Column indices of entries to set [m]
-  !! @param[in] b Values to set [n,m]
-  !! @param[in] n Number of rows in local matrix
-  !! @param[in] m Number of columns in local matrix
-  !! @param[in] iblock Row block (optional)
-  !! @param[in] jblock Column block (optional)
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
   import oft_matrix, i4, r8
   class(oft_matrix), intent(inout) :: self
-  integer(i4), intent(in) :: i_inds(n)
-  integer(i4), intent(in) :: j_inds(m)
-  real(r8), intent(in) :: b(n,m)
-  integer(i4), intent(in) :: n
-  integer(i4), intent(in) :: m
-  integer(i4), optional, intent(in) :: iblock
-  integer(i4), optional, intent(in) :: jblock
+  integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+  integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+  real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+  integer(i4), intent(in) :: n !< Number of rows in local matrix
+  integer(i4), intent(in) :: m !< Number of columns in local matrix
+  integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+  integer(i4), optional, intent(in) :: jblock !< Column block (optional)
   end subroutine mat_set_values
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: mat_add_values
-  !------------------------------------------------------------------------------
-  !> Add values to a matrix.
+  !> Add values to a matrix
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] i_inds Row indices of entries to set [n]
-  !! @param[in] j_inds Column indices of entries to set [m]
-  !! @param[in] b Values to add [n,m]
-  !! @param[in] n Number of rows in local matrix
-  !! @param[in] m Number of columns in local matrix
-  !! @param[in] iblock Row block (optional)
-  !! @param[in] jblock Column block (optional)
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
   import oft_matrix, i4, r8
   class(oft_matrix), intent(inout) :: self
-  integer(i4), intent(in) :: i_inds(n)
-  integer(i4), intent(in) :: j_inds(m)
-  real(r8), intent(in) :: b(n,m)
-  integer(i4), intent(in) :: n
-  integer(i4), intent(in) :: m
-  integer(i4), optional, intent(in) :: iblock
-  integer(i4), optional, intent(in) :: jblock
-  integer(i4), optional, intent(inout) :: loc_cache(n,m)
+  integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+  integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+  real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+  integer(i4), intent(in) :: n !< Number of rows in local matrix
+  integer(i4), intent(in) :: m !< Number of columns in local matrix
+  integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+  integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+  integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
   end subroutine mat_add_values
   !------------------------------------------------------------------------------
   !> Finish assembly of matrix and optionally extract real diagonal
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine mat_assemble(self,diag)
   import oft_matrix, oft_vector
   class(oft_matrix), intent(inout) :: self
-  class(oft_vector), optional, target, intent(inout) :: diag
+  class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
   end subroutine mat_assemble
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: mat_zero
   !------------------------------------------------------------------------------
   !> Zero all entries in matrix
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine mat_zero(self)
   import oft_matrix
   class(oft_matrix), intent(inout) :: self
   end subroutine mat_zero
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: mat_zero_rows
-  !------------------------------------------------------------------------------
   !> Zero all entries in the specified rows
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] nrows Number of rows to zero
-  !! @param[in] irows Indices of rows to zero [nrows]
-  !! @param[in] iblock Row block (optional)
-  !! @param[in] keep_diag Keep diagonal entries
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine mat_zero_rows(self,nrows,irows,iblock,keep_diag)
   import oft_matrix, i4
   class(oft_matrix), intent(inout) :: self
-  integer(i4), intent(in) :: nrows
-  integer(i4), intent(in) :: irows(nrows)
-  integer(i4), optional, intent(in) :: iblock
-  logical, optional, intent(in) :: keep_diag
+  integer(i4), intent(in) :: nrows !< Number of rows to zero
+  integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+  integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+  logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
   end subroutine mat_zero_rows
 END INTERFACE
 !
 ABSTRACT INTERFACE
-  ! !------------------------------------------------------------------------------
-  ! ! SUBROUTINE: cmat_apply_vec
   ! !------------------------------------------------------------------------------
   ! !> Apply the matrix to a field and optionally add it to an existing field.
   ! !!
@@ -1115,134 +936,93 @@ ABSTRACT INTERFACE
   ! class(oft_cvector), intent(inout) :: b
   ! end subroutine cmat_apply_vec
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cmat_apply_cvec
-  !------------------------------------------------------------------------------
-  !> Apply the matrix to a field and optionally add it to an existing field.
+  !> Apply the matrix to a field
   !!
-  !! b = self^T * a
+  !! b = self * a
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] a Source field
-  !! @param[in,out] b Result of matrix product
-  !! @param[in] beta Factor for matrix addition
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine cmat_apply_cvec(self,a,b)
   import oft_cvector, oft_cmatrix
   class(oft_cmatrix), intent(inout) :: self
-  class(oft_cvector), target, intent(inout) :: a
-  class(oft_cvector), intent(inout) :: b
+  class(oft_cvector), target, intent(inout) :: a !< Source vector
+  class(oft_cvector), intent(inout) :: b !< Result of matrix product
   end subroutine cmat_apply_cvec
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cmat_set_values
-  !------------------------------------------------------------------------------
-  !> Set values of a matrix.
+  !> Set values of a matrix
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] i_inds Row indices of entries to set [n]
-  !! @param[in] j_inds Column indices of entries to set [m]
-  !! @param[in] b Values to set [n,m]
-  !! @param[in] n Number of rows in local matrix
-  !! @param[in] m Number of columns in local matrix
-  !! @param[in] iblock Row block (optional)
-  !! @param[in] jblock Column block (optional)
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
   import oft_cmatrix, i4, c8
   class(oft_cmatrix), intent(inout) :: self
-  integer(i4), intent(in) :: i_inds(n)
-  integer(i4), intent(in) :: j_inds(m)
-  complex(c8), intent(in) :: b(n,m)
-  integer(i4), intent(in) :: n
-  integer(i4), intent(in) :: m
-  integer(i4), optional, intent(in) :: iblock
-  integer(i4), optional, intent(in) :: jblock
+  integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+  integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+  complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
+  integer(i4), intent(in) :: n !< Number of rows in local matrix
+  integer(i4), intent(in) :: m !< Number of columns in local matrix
+  integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+  integer(i4), optional, intent(in) :: jblock !< Column block (optional)
   end subroutine cmat_set_values
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cmat_add_values
   !------------------------------------------------------------------------------
   !> Add values to a matrix.
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] i_inds Row indices of entries to set [n]
-  !! @param[in] j_inds Column indices of entries to set [m]
-  !! @param[in] b Values to add [n,m]
-  !! @param[in] n Number of rows in local matrix
-  !! @param[in] m Number of columns in local matrix
-  !! @param[in] iblock Row block (optional)
-  !! @param[in] jblock Column block (optional)
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
   import oft_cmatrix, i4, c8
   class(oft_cmatrix), intent(inout) :: self
-  integer(i4), intent(in) :: i_inds(n)
-  integer(i4), intent(in) :: j_inds(m)
-  complex(c8), intent(in) :: b(n,m)
-  integer(i4), intent(in) :: n
-  integer(i4), intent(in) :: m
-  integer(i4), optional, intent(in) :: iblock
-  integer(i4), optional, intent(in) :: jblock
-  integer(i4), optional, intent(inout) :: loc_cache(n,m)
+  integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+  integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+  complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+  integer(i4), intent(in) :: n !< Number of rows in local matrix
+  integer(i4), intent(in) :: m !< Number of columns in local matrix
+  integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+  integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+  integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
   end subroutine cmat_add_values
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cmat_assemble
   !------------------------------------------------------------------------------
   !> Finish assembly of matrix and optionally extract diagonals
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine cmat_assemble(self,diag)
   import oft_cmatrix, oft_cvector
   class(oft_cmatrix), intent(inout) :: self
-  class(oft_cvector), optional, target, intent(inout) :: diag
+  class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
   end subroutine cmat_assemble
-  !------------------------------------------------------------------------------
-  ! SUBROUTINE: cmat_zero
   !------------------------------------------------------------------------------
   !> Zero all entries in matrix
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine cmat_zero(self)
   import oft_cmatrix
   class(oft_cmatrix), intent(inout) :: self
   end subroutine cmat_zero
   !------------------------------------------------------------------------------
-  ! SUBROUTINE: cmat_zero_rows
-  !------------------------------------------------------------------------------
   !> Zero all entries in the specified rows
   !!
   !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized matrices.
-  !!
-  !! @param[in] nrows Number of rows to zero
-  !! @param[in] irows Indices of rows to zero [nrows]
-  !! @param[in] iblock Row block (optional)
-  !! @param[in] keep_diag Keep diagonal entries
+  !! of the member function and catch errors in uninitialized matrices
   !------------------------------------------------------------------------------
   subroutine cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
   import oft_cmatrix, i4
   class(oft_cmatrix), intent(inout) :: self
-  integer(i4), intent(in) :: nrows
-  integer(i4), intent(in) :: irows(nrows)
-  integer(i4), optional, intent(in) :: iblock
-  logical, optional, intent(in) :: keep_diag
+  integer(i4), intent(in) :: nrows !< Number of rows to zero
+  integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+  integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+  logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
   end subroutine cmat_zero_rows
 END INTERFACE
 !---Declare public entities
 public vector_extrapolate
 contains
-!------------------------------------------------------------------------------
-! SUBROUTINE: vector_delete
 !------------------------------------------------------------------------------
 !> Finalize field
 !!
@@ -1253,8 +1033,6 @@ subroutine vector_delete(self)
 class(oft_vector), intent(inout) :: self
 call oft_warn('Finalizing general real vector, this may indicate an error.')
 end subroutine vector_delete
-!------------------------------------------------------------------------------
-! SUBROUTINE: cvector_delete
 !------------------------------------------------------------------------------
 !> Finalize field
 !!
@@ -1338,8 +1116,6 @@ CALL btmp%delete()
 DEALLOCATE(atmp,btmp,avals)
 end subroutine matrix_applyt_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: matrix_delete
-!------------------------------------------------------------------------------
 !> Delete matrix
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
@@ -1395,8 +1171,6 @@ CALL self%applyt(atmp,b)
 CALL atmp%delete()
 DEALLOCATE(atmp)
 end subroutine cmatrix_applyt_vec
-!------------------------------------------------------------------------------
-! SUBROUTINE: cmatrix_delete
 !------------------------------------------------------------------------------
 !> Delete matrix
 !!

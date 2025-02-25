@@ -36,8 +36,8 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr,
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
   partition_graph, native_matrix_setup_full, oft_native_submatrix
-USE oft_solver_base, ONLY: oft_solver, oft_bc_proto, oft_orthog, oft_solver_ptr, &
-  oft_csolver, oft_cbc_proto, oft_corthog, oft_eigsolver, solver_setup, csolver_setup, &
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
+  oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
   eigsolver_setup
 IMPLICIT NONE
 #include "local.h"
@@ -51,8 +51,8 @@ private
 !---------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_native_cg_solver
   logical :: precond=.FALSE. !< Solver as preconditioner
-  class(oft_orthog), pointer :: orthog => NULL() !< Orthogonalization
-  class(oft_orthog), pointer :: cleaner => NULL() !< Null-Space cleaner
+  class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
 contains
   !> Solve system
   procedure :: apply => cg_solver_apply
@@ -69,8 +69,8 @@ end type oft_native_cg_solver
 type, public, extends(oft_solver) :: oft_native_gmres_solver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
   integer(i4) :: nrits=10 !< Convergence specification
-  class(oft_orthog), pointer :: orthog => NULL() !< Orthogonalization
-  class(oft_orthog), pointer :: cleaner => NULL() !< Null-Space cleaner
+  class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
   class(oft_vector), private, pointer :: r => NULL() !< Temporary storage vector
   class(oft_vector), private, pointer :: w => NULL() !< Temporary storage vector
   type(oft_vector_ptr), private, pointer, dimension(:) :: v => NULL() !< Search directions
@@ -91,8 +91,8 @@ end type oft_native_gmres_solver
 type, public, extends(oft_csolver) :: oft_native_gmres_csolver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
   integer(i4) :: nrits=10 !< Convergence specification
-  class(oft_corthog), pointer :: orthog => NULL() !< Orthogonalization
-  class(oft_corthog), pointer :: cleaner => NULL() !< Null-Space cleaner
+  class(oft_csolver_bc), pointer :: orthog => NULL() !< Orthogonalization
+  class(oft_csolver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
   class(oft_cvector), private, pointer :: r => NULL() !< Temporary storage vector
   class(oft_cvector), private, pointer :: w => NULL() !< Temporary storage vector
   type(oft_cvector_ptr), private, pointer, dimension(:) :: v => NULL() !< Search directions
@@ -115,9 +115,8 @@ end type oft_native_gmres_csolver
 type, public, extends(oft_eigsolver) :: oft_native_cg_eigsolver
   integer(i4) :: nrestarts = 2
   integer(i4) :: ninner = -1
-  !> Boundary condition
-  procedure(oft_bc_proto), pointer, nopass :: bc => NULL()
-  class(oft_orthog), pointer :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
+  class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
 contains
   !> Solve system
   procedure :: apply => cg_eigsolver_apply
@@ -146,8 +145,8 @@ TYPE, PUBLIC :: oft_nksolver
   CLASS(oft_vector), POINTER :: du => NULL() !< Storage for non-linear corrections
   CLASS(oft_matrix), POINTER :: A => NULL() !< Metric matrix
   CLASS(oft_solver), POINTER :: J_inv => NULL() !< Jacobian inverse solver
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   PROCEDURE(oft_update_jacobian), POINTER, NOPASS :: J_update => NULL() !< Jacobian update subroutine
-  PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL() !< Boundary condition
 CONTAINS
   !> Solve non-linear system
   PROCEDURE :: apply => nksolver_apply
@@ -285,15 +284,15 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => bjprecond_delete
 END TYPE oft_bjprecond
-!---------------------------------------------------------------------------
-! TYPE oft_bc_ptr
-!---------------------------------------------------------------------------
-!> Boundary condition container
-!---------------------------------------------------------------------------
-type, public :: oft_bc_ptr
-  !> Apply boundary condition to vector
-  PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
-end type oft_bc_ptr
+! !---------------------------------------------------------------------------
+! ! TYPE oft_bc_ptr
+! !---------------------------------------------------------------------------
+! !> Boundary condition container
+! !---------------------------------------------------------------------------
+! type, public :: oft_bc_ptr
+!   !> Apply boundary condition to vector
+!   PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
+! end type oft_bc_ptr
 !---Interfaces
 ABSTRACT INTERFACE
 !---------------------------------------------------------------------------
@@ -406,7 +405,7 @@ if(self%precond)then
   call r%add(0.d0,1.d0,g)
 end if
 if(associated(self%pre))call u%new(s)
-if(associated(self%bc))call self%bc(g)
+if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
 gg = g%dot(u)
 if(gg==0.d0)then
@@ -414,7 +413,7 @@ if(gg==0.d0)then
   call q%set(0.d0)
 else
   call A%apply(u,q)
-  if(associated(self%bc))call self%bc(q)
+  if(associated(self%bc))call self%bc%apply(q)
   pdq = u%dot(q)
   alfa=1.d0; f=pdq/2.d0-gg
 endif
@@ -424,7 +423,7 @@ if(associated(self%pre))then
   pm_save=oft_env%pm; oft_env%pm=self%pre%pm
   call self%pre%apply(s,p)
   oft_env%pm=pm_save
-  if(associated(self%bc))call self%bc(s)
+  if(associated(self%bc))call self%bc%apply(s)
   call p%add(0.d0,1.d0,s)
 end if
 gg = g%dot(p)
@@ -450,7 +449,7 @@ do k=1,max_its
   if(associated(self%orthog))call self%orthog%apply(p)
   call A%apply(p,q)
   pdq = p%dot(q)
-  if(associated(self%bc))call self%bc(q)
+  if(associated(self%bc))call self%bc%apply(q)
   alfa=gg/pdq
   fold=f; f=f-alfa*gg/2
   call u%add(1.d0,alfa,p)
@@ -461,7 +460,7 @@ do k=1,max_its
     pm_save=oft_env%pm; oft_env%pm=self%pre%pm
     call self%pre%apply(s,q)
     oft_env%pm=pm_save
-    if(associated(self%bc))call self%bc(s)
+    if(associated(self%bc))call self%bc%apply(s)
     call q%add(0.d0,1.d0,s)
   end if
   if(associated(self%orthog))call self%orthog%apply(q)
@@ -634,7 +633,7 @@ END IF
 if((oft_env%pm.AND.oft_env%head_proc))write(*,'(A)')'Starting GMRES solver'
 if(u%n/=g%n)call oft_abort('Vectors are not the same length','gmres_solver_apply',__FILE__)
 !
-if(associated(self%bc))call self%bc(g)
+if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%cleaner))call self%cleaner%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
 !
@@ -648,7 +647,7 @@ c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
 uu = u%dot(u)
 IF(uu>0.d0)call A%apply(u,w)
-if(associated(self%bc))call self%bc(w)
+if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add(0.d0,1.d0,g,-1.d0,w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
@@ -677,10 +676,10 @@ do j=1,INT(u%ng,4)
     else
       call z(i)%f%add(0.d0,1.d0,v(i)%f)
     end if
-    if(associated(self%bc))call self%bc(z(i)%f)
+    if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
     call A%apply(z(i)%f,w)
-    if(associated(self%bc))call self%bc(w)
+    if(associated(self%bc))call self%bc%apply(w)
     !---Arnoldi iteration
     h(1:i,i)=w%mdot(v(1:i),i)
     do k=1,i
@@ -724,7 +723,7 @@ do j=1,INT(u%ng,4)
   enddo
   IF(((nits==its).OR.(k<nrits)).AND.(.NOT.self%full_residual))EXIT
   call A%apply(u,w)
-  IF(associated(self%bc))call self%bc(w)
+  IF(associated(self%bc))call self%bc%apply(w)
   call r%add(0.d0,1.d0,g,-1.d0,w)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
@@ -892,7 +891,7 @@ END IF
 if((oft_env%pm.AND.oft_env%head_proc))write(*,'(A)')'Starting GMRES solver'
 if(u%n/=g%n)call oft_abort('Vectors are not the same length','gmres_solver_apply',__FILE__)
 !
-if(associated(self%bc))call self%bc(g)
+if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%cleaner))call self%cleaner%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
 !
@@ -906,7 +905,7 @@ c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
 uu = REAL(u%dot(u))
 IF(uu>0.d0)call A%apply(u,w)
-if(associated(self%bc))call self%bc(w)
+if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
@@ -935,10 +934,10 @@ do j=1,INT(u%ng,4)
     else
       call z(i)%f%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
     end if
-    if(associated(self%bc))call self%bc(z(i)%f)
+    if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
     call A%apply(z(i)%f,w)
-    if(associated(self%bc))call self%bc(w)
+    if(associated(self%bc))call self%bc%apply(w)
     !---Arnoldi iteration
     ! h(1:i,i)=w%mdot(v,i)
     do k=1,i
@@ -983,7 +982,7 @@ do j=1,INT(u%ng,4)
   enddo
   IF((nits==its).AND.(.NOT.self%full_residual))EXIT
   call A%apply(u,w)
-  IF(associated(self%bc))call self%bc(w)
+  IF(associated(self%bc))call self%bc%apply(w)
   call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
@@ -1170,12 +1169,12 @@ call u%new(e)
 call u%new(f)
 call u%new(g)
 if(associated(self%pre))call u%new(s)
-if(associated(self%bc))call self%bc(u)
+if(associated(self%bc))call self%bc%apply(u)
 if(associated(self%orthog))call self%orthog%apply(u)
 call A%apply(u,c)
 call M%apply(u,b)
-if(associated(self%bc))call self%bc(b)
-if(associated(self%bc))call self%bc(c)
+if(associated(self%bc))call self%bc%apply(b)
+if(associated(self%bc))call self%bc%apply(c)
 h0 = u%dot(b)
 if(h0==0.d0)call oft_abort('Metric is Zero','cgeigsolver_apply',__FILE__)
 e0 = u%dot(c)
@@ -1194,7 +1193,7 @@ if(associated(self%pre))then
   pm_save=oft_env%pm; oft_env%pm=self%pre%pm
   call self%pre%apply(s,f)
   oft_env%pm=pm_save
-  if(associated(self%bc))call self%bc(s)
+  if(associated(self%bc))call self%bc%apply(s)
   call f%add(0.d0,1.d0,s)
 end if
 gg = g%dot(f)
@@ -1226,8 +1225,8 @@ do n=1,ninner
   call A%apply(e,g)
   call M%apply(e,f)
   if(associated(self%bc))then
-    call self%bc(f)
-    call self%bc(g)
+    call self%bc%apply(f)
+    call self%bc%apply(g)
   end if
   h1 = u%dot(f)+e%dot(b)
   e1 = u%dot(g)+e%dot(c)
@@ -1259,7 +1258,7 @@ do n=1,ninner
     pm_save=oft_env%pm; oft_env%pm=self%pre%pm
     call self%pre%apply(s,f)
     oft_env%pm=pm_save
-    if(associated(self%bc))call self%bc(s)
+    if(associated(self%bc))call self%bc%apply(s)
     call f%add(0.d0,1.d0,s)
   end if
   gg = g%dot(f)
@@ -1329,7 +1328,7 @@ CALL u%new(v)
 self%lits=0
 self%nlits=-1
 self%cits=1
-!IF(ASSOCIATED(self%bc))call self%bc(g)
+!IF(ASSOCIATED(self%bc))call self%bc%apply(g)
 !---Initialize Newton loop
 res=1.d99 ! Set residual to a large number
 its=100
@@ -1343,7 +1342,7 @@ outer: do i=0,its
     !---Compute current residual
     call self%A%apply(u,v)
     call v%add(1.d0,-1.d0,g)
-    IF(ASSOCIATED(self%bc))call self%bc(v)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(v)
     res=v%dot(v)
     uu=u%dot(u)
     if(oft_env%head_proc)met_time=met_time+mytimer%tock()
@@ -1593,17 +1592,17 @@ if(self%down) then ! Down smoother
     uv%v(i)=0.d0
     self%p%v(i)=self%df*gv%v(i)/md%v(i)
   end do
-  IF(ASSOCIATED(self%bc))call self%bc(self%p)
+  IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   do k=1,self%its
     call self%A%apply(self%p,self%q)
-    IF(ASSOCIATED(self%bc))call self%bc(self%q)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
     !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
     do i=1,u%n
       uv%v(i)=uv%v(i)+self%p%v(i)
       gv%v(i)=gv%v(i)-self%q%v(i)
       self%p%v(i)=self%df*gv%v(i)/md%v(i)
     end do
-    IF(ASSOCIATED(self%bc))call self%bc(self%p)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   end do
   !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
   do i=1,u%n
@@ -1617,16 +1616,16 @@ else ! Up smoother
     self%p%v(i)=uv%v(i)-self%u_save(i)
     gv%v(i)=self%g_save(i)
   end do
-  IF(ASSOCIATED(self%bc))call self%bc(self%p)
+  IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   do k=1,self%its
     call self%A%apply(self%p,self%q)
-    IF(ASSOCIATED(self%bc))call self%bc(self%q)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
     !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
     do i=1,u%n
       gv%v(i)=gv%v(i)-self%q%v(i)
       self%p%v(i)=self%df*gv%v(i)/md%v(i)
     end do
-    IF(ASSOCIATED(self%bc))call self%bc(self%p)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
     !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
     do i=1,u%n
       uv%v(i)=uv%v(i)+self%p%v(i)
@@ -1809,7 +1808,7 @@ if(associated(self%base_solve))then
   CALL mytimer%tick
   !---Interpolate Solution
   call self%interp(self%ucors,self%p)
-  if(associated(self%bc))call self%bc(self%p)
+  if(associated(self%bc))call self%bc%apply(self%p)
   !---Add coarse correction
   call u%add(1.d0,1.d0,self%p)
   self%timings(4)=self%timings(4)+mytimer%tock()

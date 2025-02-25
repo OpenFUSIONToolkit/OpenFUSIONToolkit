@@ -22,9 +22,9 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, &
   oft_lag_set_level
-USE oft_lag_fields, ONLY: oft_lag_create
+USE oft_lag_fields, ONLY: oft_lag_create, oft_lagrange, ML_oft_lagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, lag_inject, &
-  lag_interp, lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
+  lag_interp, oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
@@ -32,6 +32,7 @@ IMPLICIT NONE
 INTEGER(i4) :: minlev,ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: order
 LOGICAL :: mg_test
 NAMELIST/test_lag_options/order,mg_test
@@ -48,6 +49,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 minlev=2
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
 CALL oft_lag_setup(mg_mesh,order,minlev)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 IF(mg_test)THEN
   CALL lag_setup_interp
   CALL lag_mloptions
@@ -85,8 +87,8 @@ CALL oft_lag_set_level(oft_lagrange_nlevels)
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
-CALL oft_lag_getlop(lop,'zerob')
-CALL oft_lag_getmop(mop,'none')
+CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
+CALL oft_lag_getmop(oft_lagrange,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -95,7 +97,7 @@ CALL create_diag_pre(linv%pre)
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL lag_zerob(v)
+CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vals)
@@ -143,7 +145,7 @@ nlevels=oft_lagrange_nlevels-minlev+1
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
-CALL oft_lag_getmop(mop,'none')
+CALL oft_lag_getmop(oft_lagrange,mop,'none')
 !---------------------------------------------------------------------------
 ! Setup matrix solver
 !---------------------------------------------------------------------------
@@ -159,7 +161,7 @@ linv%bc=>lag_zerob
 !---------------------------------------------------------------------------
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL lag_zerob(v)
+CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 uu=u%dot(u)

@@ -92,7 +92,7 @@ TYPE(oft_scalar_fem), POINTER :: oft_lagrange_lin !< Highest linear element repr
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange !< ML container for all FE representations
 !
 TYPE(oft_fem_comp_type), POINTER :: oft_vlagrange !< Active vector representation
-TYPE(oft_ml_fem_comp_type) :: ML_oft_vlagrange !< ML container for vector representation
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange !< ML container for vector representation
 !
 type(oft_lag_ops), pointer :: oft_lagrange_ops !< Active operators
 type(oft_lag_ops), pointer :: oft_lagrange_ops_lin !< Highest linear element operators

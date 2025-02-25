@@ -30,19 +30,20 @@ USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions, hcurl_zerob
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, h0_zerogrnd
+USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_nlevels, oft_h1_set_level, oft_h1_ops, &
-  oft_h1_level
+  oft_h1_level, ML_oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: h1_getmop, h1_setup_interp, h1_getmop_pre, h1_mloptions, &
-  oft_h1_rinterp, h1_zerob, h1grad_zerop
+  oft_h1_rinterp, oft_h1_grad_zerop
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_h1_grad_zerop), TARGET :: h1grad_zerop
 LOGICAL :: mg_test
 NAMELIST/test_h1_options/order,mg_test
 !---Initialize enviroment
@@ -65,6 +66,7 @@ CALL oft_h0_setup(mg_mesh,order+1)
 IF(mg_test)CALL h0_setup_interp
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order)
+h1grad_zerop%ML_h1_rep=>ML_oft_h1
 IF(mg_test)THEN
   CALL h1_setup_interp(create_full=.TRUE.)
   CALL h1_mloptions
@@ -108,7 +110,7 @@ winv%rtol=1.d-10
 CALL create_diag_pre(winv%pre)
 !---Solve
 CALL u%set(1.d0)
-CALL h1grad_zerop(u)
+CALL h1grad_zerop%apply(u)
 CALL mop%apply(u,v)
 CALL u%set(0.d0)
 CALL winv%apply(u,v)
@@ -158,7 +160,7 @@ winv%its=-3
 winv%rtol=1.d-9
 !---Solve
 CALL u%set(1.d0)
-CALL h1grad_zerop(u)
+CALL h1grad_zerop%apply(u)
 CALL mop%apply(u,v)
 CALL u%set(0.d0)
 CALL winv%apply(u,v)

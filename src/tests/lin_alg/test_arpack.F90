@@ -26,12 +26,14 @@ USE oft_deriv_matrices, ONLY: create_diagmatrix
 USE oft_solver_utils, ONLY: create_native_pre
 USE oft_arpack, ONLY: oft_irlm_eigsolver, oft_iram_eigsolver
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, oft_lagrange_nlevels
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, oft_lagrange_nlevels, &
+  oft_lagrange, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, lag_zerob
+USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, oft_lag_zerob
 IMPLICIT NONE
 INTEGER(i4) :: iounit,ierr
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: order=1
 INTEGER(i4) :: minlev=1
 NAMELIST/test_arpack_options/order,minlev
@@ -51,6 +53,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 !---------------------------------------------------------------------------
 oft_env%pm=.FALSE.
 CALL oft_lag_setup(mg_mesh,order,minlev)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 CALL test_lop_eig()
 !---Finalize enviroment
 CALL oft_finalize
@@ -77,7 +80,7 @@ DO i=oft_lagrange_nlevels-order+1,oft_lagrange_nlevels
   !---Create fields
   CALL oft_lag_create(u)
   !---Create matrices
-  CALL oft_lag_getlop(lop,'zerob')
+  CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
   CALL create_diagmatrix(md,lop%D)
   !---Test Lanzcos solver
   arsolver1%A=>lop

@@ -713,6 +713,8 @@ IF(.NOT.self%initialized)THEN
   NULLIFY(self%A)
   RETURN
 END IF
+nrhs=0
+ldb=0
 ALLOCATE(ivals(1),rvals(1))
 SELECT CASE(TRIM(self%package))
 #ifdef HAVE_SUPERLU

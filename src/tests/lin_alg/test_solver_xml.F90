@@ -25,14 +25,15 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_solver_xml
 !
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, &
-oft_lag_set_level
+  oft_lag_set_level, oft_lagrange, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, lag_inject, &
-lag_interp, lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
+  lag_interp, oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
 IMPLICIT NONE
 INTEGER(i4), PARAMETER :: order=4
 INTEGER(i4) :: io_unit,ierr
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_lag_zerob), TARGET :: lag_zerob
 #if defined(HAVE_XML)
 !---Initialize enviroment
 CALL oft_init
@@ -41,6 +42,7 @@ CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 CALL oft_lag_setup(mg_mesh,order)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---Run tests
 oft_env%pm=.FALSE.
 CALL test_lap
@@ -75,8 +77,8 @@ CALL oft_lag_set_level(oft_lagrange_nlevels)
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
-CALL oft_lag_getlop(lop,'zerob')
-CALL oft_lag_getmop(mop,'none')
+CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
+CALL oft_lag_getmop(oft_lagrange,mop,'none')
 !---Setup matrix solver
 #ifdef HAVE_XML
 CALL xml_get_element(oft_env%xml,"solver",solver_node,ierr)
@@ -90,7 +92,7 @@ linv%A=>lop
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL lag_zerob(v)
+CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 uu=u%dot(u)
