@@ -85,7 +85,7 @@ CALL oft_h0_create(u)
 CALL oft_h0_create(v)
 !---Get FE operators
 CALL oft_h0_getlop(oft_h0,lop,'zerob')
-CALL oft_h0_getmop(mop,'none')
+CALL oft_h0_getmop(oft_h0,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -140,7 +140,7 @@ nlevels=oft_h0_nlevels-minlev+1
 CALL oft_h0_create(u)
 CALL oft_h0_create(v)
 !---Get FE operators
-CALL oft_h0_getmop(mop,'none')
+CALL oft_h0_getmop(oft_h0,mop,'none')
 !---------------------------------------------------------------------------
 ! Setup matrix solver
 !---------------------------------------------------------------------------

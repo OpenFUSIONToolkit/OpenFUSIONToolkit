@@ -18,8 +18,8 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, &
-  oft_lagrange, oft_lagrange_ops, oft_vlagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
+  oft_lagrange, oft_lagrange_ops, oft_vlagrange, ML_oft_vlagrange, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, lag_vinterp, lag_vinject, oft_vlag_zerob, &
   df_lop, nu_lop, lag_setup_interp, lag_mloptions, oft_lag_getlop
@@ -47,7 +47,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 CALL oft_lag_setup(mg_mesh,order,minlev)
 vlag_zerob%ML_vlag_rep=>ML_oft_vlagrange
 IF(mg_test)THEN
-  CALL lag_setup_interp(.TRUE.)
+  CALL lag_setup_interp(ML_oft_lagrange,.TRUE.)
   CALL lag_mloptions
 END IF
 !---Run tests
@@ -73,7 +73,7 @@ REAL(r8) :: uu
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Set FE level
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields
 CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)
@@ -134,7 +134,7 @@ INTEGER(i4) :: i,nlevels
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
-nlevels=oft_lagrange_nlevels-minlev+1
+nlevels=ML_oft_lagrange%nlevels-minlev+1
 !---Get FE operators
 ALLOCATE(ml_int(nlevels-1),ml_vlop(nlevels),ml_lop(nlevels))
 ALLOCATE(levels(nlevels),df(nlevels),nu(nlevels))
@@ -184,7 +184,7 @@ DO i=1,nlevels
   !---
   IF(i>1)ml_int(i-1)%M=>oft_lagrange_ops%vinterp
 END DO
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields
 CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)

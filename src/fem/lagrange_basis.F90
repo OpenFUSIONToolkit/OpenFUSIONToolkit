@@ -84,7 +84,7 @@ integer(i4) :: oft_lagrange_minlev = 0 !< Lowest constructed level
 integer(i4) :: oft_lagrange_nlevels = 0 !< Number of total levels
 !
 type(oft_scalar_bfem), pointer :: oft_blagrange !< Active FE representation
-type(oft_scalar_bfem), pointer :: oft_blagrange_lin !< Highest linear element representation
+! type(oft_scalar_bfem), pointer :: oft_blagrange_lin !< Highest linear element representation
 type(oft_ml_fem_type), TARGET :: ML_oft_blagrange !< ML container for all FE representations
 !
 TYPE(oft_scalar_fem), POINTER :: oft_lagrange !< Active FE representation
@@ -103,7 +103,8 @@ contains
 !---------------------------------------------------------------------------
 !> Compute surface normals for use in boundary conditions
 !---------------------------------------------------------------------------
-SUBROUTINE oft_lag_boundary
+SUBROUTINE oft_lag_boundary(lag_rep)
+class(oft_scalar_fem), intent(inout) :: lag_rep
 INTEGER(i4), PARAMETER :: i2(3)=(/2,3,1/),i3(3)=(/3,1,2/)
 INTEGER(i4), PARAMETER :: fc1(4)=(/2,3,1,1/),fc2(4)=(/3,1,2,2/),fc3(4)=(/4,4,4,3/)
 INTEGER(i4), PARAMETER :: ed1(6)=(/1,2,3,2,3,1/),ed2(6)=(/4,4,4,3,1,2/)
@@ -115,27 +116,27 @@ REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: f,ct
 REAL(r8), POINTER, DIMENSION(:,:) :: sn
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
-mesh=>oft_lagrange%mesh
+mesh=>lag_rep%mesh
 !---
-ALLOCATE(oft_lagrange%sn(3,oft_lagrange%ne),oft_lagrange%bc(oft_lagrange%ne))
-sn=>oft_lagrange%sn
+ALLOCATE(lag_rep%sn(3,lag_rep%ne),lag_rep%bc(lag_rep%ne))
+sn=>lag_rep%sn
 sn=0._r8
-oft_lagrange%bc=0_i4
+lag_rep%bc=0_i4
 !---
-ALLOCATE(f(4,oft_lagrange%nce))
+ALLOCATE(f(4,lag_rep%nce))
 !---
-ALLOCATE(j(oft_lagrange%nce))
+ALLOCATE(j(lag_rep%nce))
 DO i=1,mesh%nbc
   !---Check if boundary cell
   l=mesh%lbc(i)
   IF(.NOT.mesh%global%gbc(l))CYCLE
   !---Get local to global DOF mapping
-  call oft_lagrange%ncdofs(l,j)
+  call lag_rep%ncdofs(l,j)
   !---
-  DO m=1,oft_lagrange%nce
-    CALL oft_lag_npos(oft_lagrange,l,m,f(:,m))
-    k=oft_lagrange%cmap(m)%el
-    SELECT CASE(oft_lagrange%cmap(m)%type)
+  DO m=1,lag_rep%nce
+    CALL oft_lag_npos(lag_rep,l,m,f(:,m))
+    k=lag_rep%cmap(m)%el
+    SELECT CASE(lag_rep%cmap(m)%type)
       CASE(2)
         el=ABS(mesh%lce(k,l))
         IF(.NOT.mesh%global%gbe(el))CYCLE
@@ -143,15 +144,15 @@ DO i=1,mesh%nbc
         IF(mesh%ce(el))THEN
           CALL mesh%ctang(l,k,f(:,m),norm)
           sn(:,j(m))=norm
-          oft_lagrange%bc(j(m))=2._i4
+          lag_rep%bc(j(m))=2._i4
         ELSE
           DO k=1,mesh%cell_nf
             ! IF(f(k,m)/=0._r8)CYCLE
             IF(.NOT.mesh%global%gbf(ABS(mesh%lcf(k,l))))CYCLE
-            IF(ALL(oft_lagrange%cmap(m)%el/=ABS(mesh%cell_fe(:,k))))CYCLE
+            IF(ALL(lag_rep%cmap(m)%el/=ABS(mesh%cell_fe(:,k))))CYCLE
             CALL mesh%snormal(l,k,f(:,m),norm)
             sn(:,j(m))=sn(:,j(m))+norm
-            oft_lagrange%bc(j(m))=3._i4
+            lag_rep%bc(j(m))=3._i4
           END DO
         END IF
       CASE(3)
@@ -160,18 +161,18 @@ DO i=1,mesh%nbc
         !---
         CALL mesh%snormal(l,k,f(:,m),norm)
         sn(:,j(m))=norm
-        oft_lagrange%bc(j(m))=3._i4
+        lag_rep%bc(j(m))=3._i4
       CASE DEFAULT
         CYCLE
       END SELECT
   END DO
 END DO
 !---
-CALL oft_global_stitch(oft_lagrange%linkage,sn(1,:),1)
-CALL oft_global_stitch(oft_lagrange%linkage,sn(2,:),1)
-CALL oft_global_stitch(oft_lagrange%linkage,sn(3,:),1)
+CALL oft_global_stitch(lag_rep%linkage,sn(1,:),1)
+CALL oft_global_stitch(lag_rep%linkage,sn(2,:),1)
+CALL oft_global_stitch(lag_rep%linkage,sn(3,:),1)
 !---
-DO i=1,oft_lagrange%ne
+DO i=1,lag_rep%ne
   v=SQRT(SUM(sn(:,i)**2))
   IF(v>1.E-10_r8)sn(:,i)=sn(:,i)/v
 END DO
@@ -181,18 +182,18 @@ DO i=1,mesh%nbe
   IF(.NOT.mesh%global%gbe(jc))CYCLE
   l=mesh%lec(mesh%kec(jc))
   !---Get local to global DOF mapping
-  call oft_lagrange%ncdofs(l,j)
+  call lag_rep%ncdofs(l,j)
   !---
-  DO m=1,oft_lagrange%nce
-    k=oft_lagrange%cmap(m)%el
-    IF(oft_lagrange%cmap(m)%type/=2)CYCLE
+  DO m=1,lag_rep%nce
+    k=lag_rep%cmap(m)%el
+    IF(lag_rep%cmap(m)%type/=2)CYCLE
     el=ABS(mesh%lce(k,l))
     IF(el/=jc)CYCLE
     !---
     IF(mesh%ce(el))THEN
-      oft_lagrange%bc(j(m))=2._i4
+      lag_rep%bc(j(m))=2._i4
     ELSE
-      oft_lagrange%bc(j(m))=3._i4
+      lag_rep%bc(j(m))=3._i4
     END IF
   END DO
 END DO
@@ -222,7 +223,7 @@ DO i=1,mesh%nbp
   IF(.NOT.mesh%global%gbp(l))CYCLE
   IF(pc(l)>2)then
     sn(:,l)=0._r8
-    oft_lagrange%bc(l)=1._i4
+    lag_rep%bc(l)=1._i4
     CYCLE
   END IF
   !---
@@ -237,7 +238,7 @@ DO i=1,mesh%nbp
     CALL mesh%vlog(el, f(:,1))
     !---
     IF(pc(l)==0)THEN
-      oft_lagrange%bc(l)=3._i4
+      lag_rep%bc(l)=3._i4
       IF(.NOT.mesh%global%gbc(k))CYCLE
       DO m=1,mesh%cell_nf
         IF(.NOT.mesh%global%gbf(mesh%lcf(m,k)))CYCLE
@@ -248,7 +249,7 @@ DO i=1,mesh%nbp
         END IF
       END DO
     ELSE IF(pc(l)>0)THEN
-      oft_lagrange%bc(l)=2._i4
+      lag_rep%bc(l)=2._i4
       IF(.NOT.mesh%global%gbc(k))CYCLE
       DO m=1,mesh%cell_ne
         IF(.NOT.mesh%global%gbe(ABS(mesh%lce(m,k))))CYCLE
@@ -270,7 +271,7 @@ CALL oft_global_stitch(mesh%pstitch,sn(3,1:mesh%np),1)
 !---
 DO i=1,mesh%nbp
   l=mesh%lbp(i)
-  IF(oft_lagrange%bc(l)/=2._i4)CYCLE
+  IF(lag_rep%bc(l)/=2._i4)CYCLE
   sn(:,l)=ct(:,l)
   v=SQRT(SUM(sn(:,l)**2))
   IF(v>1.E-10_r8)sn(:,l)=sn(:,l)/v
@@ -282,7 +283,7 @@ CALL oft_global_stitch(mesh%pstitch,ct(3,1:mesh%np),2)
 !---
 DO i=1,mesh%nbp
   l=mesh%lbp(i)
-  IF(oft_lagrange%bc(l)/=2._i4)CYCLE
+  IF(lag_rep%bc(l)/=2._i4)CYCLE
   sn(:,l)=sn(:,l)+ct(:,l)*SIGN(1._r8,DOT_PRODUCT(ct(:,l),sn(:,l))+1.E-10_r8)
   v=SQRT(SUM(sn(:,l)**2))
   IF(v>1.E-10_r8)sn(:,l)=sn(:,l)/v
@@ -300,7 +301,7 @@ END SUBROUTINE oft_lag_boundary
 subroutine oft_lag_set_level(level)
 integer(i4), intent(in) :: level !< Desired level
 DEBUG_STACK_PUSH
-if(level>oft_lagrange_nlevels.OR.level<=0)then
+if(level>ML_oft_lagrange%nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
 end if
 ! if(level<mg_mesh%mgdim)then
@@ -349,32 +350,31 @@ integer(i4), intent(in) :: order !< Order of representation desired
 integer(i4), optional, intent(in) :: minlev !< Lowest level to construct
 integer(i4) :: i
 DEBUG_STACK_PUSH
-oft_lagrange_minlev=1
-IF(PRESENT(minlev))oft_lagrange_minlev=minlev
+ML_oft_lagrange%minlev=1
+IF(PRESENT(minlev))ML_oft_lagrange%minlev=minlev
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'**** Creating Lagrange FE space'
   WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Minlev = ',oft_lagrange_minlev
+  WRITE(*,'(A,2X,A,I4)')oft_indent,'Minlev = ',ML_oft_lagrange%minlev
 END IF
 CALL oft_increase_indent
 !---Allocate multigrid operators
-oft_lagrange_nlevels=mg_mesh%mgdim+(order-1)
-IF(oft_lagrange_minlev<0)oft_lagrange_minlev=oft_lagrange_nlevels
+ML_oft_lagrange%nlevels=mg_mesh%mgdim+(order-1)
+IF(ML_oft_lagrange%minlev<0)ML_oft_lagrange%minlev=ML_oft_lagrange%nlevels
 IF(ASSOCIATED(mg_mesh%meshes))THEN
-  ML_oft_lagrange%nlevels=oft_lagrange_nlevels
-  ML_oft_vlagrange%nlevels=oft_lagrange_nlevels
+  ML_oft_vlagrange%nlevels=ML_oft_lagrange%nlevels
   ML_oft_lagrange%ml_mesh=>mg_mesh
   IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
 ELSE
   IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
 END IF
 ML_oft_blagrange%ml_mesh=>mg_mesh
-ML_oft_blagrange%nlevels=oft_lagrange_nlevels
-ALLOCATE(ML_oft_lagrange_ops(oft_lagrange_nlevels))
+ML_oft_blagrange%nlevels=ML_oft_lagrange%nlevels
+ALLOCATE(ML_oft_lagrange_ops(ML_oft_lagrange%nlevels))
 !---Set linear elements
 do i=1,mg_mesh%mgdim-1
-  IF(i<oft_lagrange_minlev)CYCLE
+  IF(i<ML_oft_lagrange%minlev)CYCLE
   CALL multigrid_level(mg_mesh,i)
   IF(ML_oft_lagrange%nlevels>0)THEN
     CALL oft_lag_setup_vol(ML_oft_lagrange%levels(i)%fe,mg_mesh%mesh,1)
@@ -386,14 +386,14 @@ do i=1,mg_mesh%mgdim-1
   END IF
   IF(ML_oft_lagrange%nlevels>0)THEN
     CALL oft_lag_set_level(i)
-    CALL oft_lag_boundary
+    CALL oft_lag_boundary(oft_lagrange)
   END IF
-  IF(mg_mesh%level==mg_mesh%nbase)oft_lagrange_blevel=i
+  IF(mg_mesh%level==mg_mesh%nbase)ML_oft_lagrange%blevel=i
 end do
 call multigrid_level(mg_mesh,mg_mesh%mgdim)
 !---Set high order elements
 do i=1,order
-  IF(i>1.AND.mg_mesh%mgdim+i-1<oft_lagrange_minlev)CYCLE
+  IF(i>1.AND.mg_mesh%mgdim+i-1<ML_oft_lagrange%minlev)CYCLE
   IF(ML_oft_lagrange%nlevels>0)THEN
     CALL oft_lag_setup_vol(ML_oft_lagrange%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
   END IF
@@ -402,7 +402,7 @@ do i=1,order
   END IF
   IF(ML_oft_lagrange%nlevels>0)THEN
     CALL oft_lag_set_level(mg_mesh%mgdim+i-1)
-    CALL oft_lag_boundary
+    CALL oft_lag_boundary(oft_lagrange)
   END IF
 end do
 !---Set linear level for finest-mesh
@@ -418,7 +418,7 @@ IF(ML_oft_lagrange%nlevels>0)THEN
 END IF
 !---Setup vector rep
 IF(ML_oft_lagrange%nlevels>0)THEN
-  ML_oft_vlagrange%nlevels=oft_lagrange_nlevels
+  ML_oft_vlagrange%nlevels=ML_oft_lagrange%nlevels
   ML_oft_vlagrange%nfields=3
   ALLOCATE(ML_oft_vlagrange%ml_fields(ML_oft_vlagrange%nfields))
   ALLOCATE(ML_oft_vlagrange%field_tags(ML_oft_vlagrange%nfields))
@@ -431,7 +431,7 @@ IF(ML_oft_lagrange%nlevels>0)THEN
   CALL ML_oft_vlagrange%setup
 END IF
 !---Set to highest level when done
-call oft_lag_set_level(oft_lagrange_nlevels)
+call oft_lag_set_level(ML_oft_lagrange%nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 CALL oft_decrease_indent
 DEBUG_STACK_POP

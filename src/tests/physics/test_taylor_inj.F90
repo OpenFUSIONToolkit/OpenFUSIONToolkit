@@ -19,7 +19,8 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, ML_oft_lagrange, &
+  oft_lagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, oft_lag_vgetmop, &
   oft_lag_vproject
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_nlevels
@@ -64,7 +65,7 @@ CALL oft_hcurl_setup(mg_mesh,order,taylor_minlev)
 CALL oft_h0_setup(mg_mesh,order+1,taylor_minlev)
 CALL oft_h1_setup(mg_mesh,order,taylor_minlev)
 IF(mg_test)THEN
-  CALL lag_setup_interp
+  CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
   CALL hcurl_setup_interp
   CALL hcurl_mloptions
@@ -120,7 +121,7 @@ Bfield%uvac=>taylor_hvac(1,oft_h1_level)%f
 Bfield%ua=>taylor_gffa(1,oft_h1_level)%f
 CALL Bfield%setup(mg_mesh%mesh)
 !---Project field
-CALL oft_lag_vproject(oft_vlagrange,Bfield,v)
+CALL oft_lag_vproject(oft_lagrange,Bfield,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save

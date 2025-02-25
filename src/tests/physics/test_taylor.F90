@@ -16,7 +16,7 @@ USE oft_base
 USE oft_mesh_sphere, ONLY: mesh_sphere_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_nlevels
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
@@ -52,7 +52,7 @@ END IF
 !---
 CALL oft_lag_setup(mg_mesh,order,taylor_minlev)
 IF(mg_test)THEN
-  CALL lag_setup_interp
+  CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
 END IF
 !---Run tests

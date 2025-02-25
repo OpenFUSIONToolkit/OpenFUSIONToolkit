@@ -24,8 +24,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_solver_xml
 !
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, &
-  oft_lag_set_level, oft_lagrange, ML_oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, oft_lagrange, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, lag_inject, &
   lag_interp, oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
@@ -72,7 +71,7 @@ integer(i4) :: nnodes
 TYPE(xml_node), POINTER :: solver_node
 #endif
 !---Set FE level
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)

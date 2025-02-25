@@ -155,6 +155,7 @@ TYPE, PUBLIC :: oft_ml_fem_type
   INTEGER(i4) :: level = 0 !< Current FE level
   INTEGER(i4) :: abs_level = 0 !< Asoblute FE refinement level
   INTEGER(i4) :: blevel = 0 !< FE base level
+  INTEGER(i4) :: minlev = 1 !< Lowest level
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Structure containing bound ML mesh
   CLASS(oft_afem_type), POINTER :: current_level => NULL()
   TYPE(oft_fem_ptr) :: levels(fem_max_levels)

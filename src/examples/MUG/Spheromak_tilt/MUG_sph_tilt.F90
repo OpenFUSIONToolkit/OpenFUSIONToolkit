@@ -36,7 +36,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
   create_ilu_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
@@ -124,7 +124,7 @@ END IF
 !! This also leads us to our choice of an intial perturbation to the equilibrium,
 !! which we will chose to match field of the lowest eigenstate.
 CALL taylor_hmodes(3)
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" subroutine computes the vector
 !! potential for each of the requested eignestates. However, the MHD
 !! solver uses magnetic field as the primary variable. With force-free eigenstate

@@ -93,9 +93,10 @@ USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
-  oft_lagrange_nlevels, oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
-  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, oft_lagrange_lev
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate, oft_vlagrange
+  oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
+  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, oft_lagrange_lev, &
+  oft_vlagrange
+USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag, oft_lag_vcinterp
@@ -2136,7 +2137,7 @@ do ii=1,mesh%tloc_c(ip)%n
   IF(xmhd_adv_b)THEN
     DO jr=1,oft_lagrange%nce
       IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(j_lag(jr),1,umat)
+        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),1,umat)
         DO m=1,xmhd_rep%nfields
           IF(ASSOCIATED(mtmp(1,m)%m))THEN
             DO jc=1,oft_lagrange%nce
@@ -2164,7 +2165,7 @@ do ii=1,mesh%tloc_c(ip)%n
   IF(xmhd_vbcdir)THEN
     DO jr=1,oft_lagrange%nce
       IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(j_lag(jr),vbc_type,umat)
+        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),vbc_type,umat)
         DO m=1,xmhd_rep%nfields
           IF(ASSOCIATED(mtmp(4,m)%m))THEN
             DO jc=1,oft_lagrange%nce
@@ -2224,7 +2225,7 @@ IF(xmhd_adv_b)THEN
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
     jtmp=j
-    CALL lag_vbc_diag(j,1,umat)
+    CALL lag_vbc_diag(oft_lagrange,j,1,umat)
     DO jr=1,3
       DO jc=1,3
         CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr,jc)
@@ -2243,7 +2244,7 @@ IF(xmhd_vbcdir)THEN
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
     jtmp=j
-    CALL lag_vbc_diag(j,vbc_type,umat)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,umat)
     DO jr=1,3
       DO jc=1,3
         CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr+3,jc+3)
@@ -2278,11 +2279,11 @@ DEBUG_STACK_PUSH
 !---------------------------------------------------------------------------
 ! Setup Operators and ML environment
 !---------------------------------------------------------------------------
-allocate(ml_J(oft_lagrange_nlevels-xmhd_minlev+1),ml_int(oft_lagrange_nlevels-xmhd_minlev))
-allocate(oft_xmhd_ops_ML(oft_lagrange_nlevels))
-xmhd_blevel=oft_lagrange_blevel
-xmhd_nlevels=oft_lagrange_nlevels
-xmhd_level=oft_lagrange_level
+allocate(ml_J(ML_oft_lagrange%nlevels-xmhd_minlev+1),ml_int(ML_oft_lagrange%nlevels-xmhd_minlev))
+allocate(oft_xmhd_ops_ML(ML_oft_lagrange%nlevels))
+xmhd_blevel=ML_oft_lagrange%blevel
+xmhd_nlevels=ML_oft_lagrange%nlevels
+xmhd_level=ML_oft_lagrange%level
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Allocating xMHD structures'
 !---------------------------------------------------------------------------
 ! Setup matrix mask based on included physics
@@ -3169,10 +3170,10 @@ IF(xmhd_adv_b)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,1,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,1,mloc)
     bout(:,j)=MATMUL(mloc,bout(:,j))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,1,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,1,mloc)
     bout(:,j)=bout(:,j)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3186,10 +3187,10 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,mloc)
     vout(:,j)=MATMUL(mloc,vout(:,j))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,mloc)
     vout(:,j)=vout(:,j)+MATMUL(mloc,full_interp%lf_loc(j,4:6))
   END DO
 ELSE
@@ -3451,10 +3452,10 @@ IF(xmhd_adv_b)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,1,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,1,mloc)
     bout(:,j)=MATMUL(mloc,bout(:,j))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,1,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,1,mloc)
     bout(:,j)=bout(:,j)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3469,10 +3470,10 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,mloc)
     vout(:,j)=MATMUL(mloc,vout(:,j))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,mloc)
     vout(:,j)=vout(:,j)+MATMUL(mloc,full_interp%lf_loc(j,4:6))
   END DO
 ELSE
@@ -3650,7 +3651,7 @@ end subroutine xmhd_diag
 subroutine xmhd_setup_rep
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating xMHD FE type'
 !---Create FE representation
-ML_xmhd_rep%nlevels=oft_lagrange_nlevels
+ML_xmhd_rep%nlevels=ML_oft_lagrange%nlevels
 ML_xmhd_rep%nfields=8
 IF(xmhd_two_temp)THEN
   ML_xmhd_rep%nfields=ML_xmhd_rep%nfields+1
@@ -3700,15 +3701,15 @@ call ML_xmhd_rep%setup
 xmhd_rep=>ML_xmhd_rep%current_level
 !---Declare legacy variables
 xmhd_blevel=oft_lagrange_blevel
-xmhd_nlevels=oft_lagrange_nlevels
-xmhd_level=oft_lagrange_level
+xmhd_nlevels=ML_oft_lagrange%nlevels
+xmhd_level=ML_oft_lagrange%level
 end subroutine xmhd_setup_rep
 !---------------------------------------------------------------------------
 !> Set the current level for xMHD
 !---------------------------------------------------------------------------
 subroutine xmhd_set_level(level)
 integer(i4), intent(in) :: level !< Desired level
-if(level>oft_lagrange_nlevels.OR.level<=0)then
+if(level>ML_oft_lagrange%nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','xmhd_set_level',__FILE__)
 end if
 ! if(level<mg_mesh%mgdim)then
@@ -4267,7 +4268,7 @@ IF(xmhd_adv_b)THEN
   do i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     if(oft_lagrange%global%gbe(j))then
-      CALL lag_vbc_tensor(j,1,nn)
+      CALL lag_vbc_tensor(oft_lagrange,j,1,nn)
       v3tmp(:,j)=MATMUL(nn, v3tmp(:,j))
     end if
   end do
@@ -4288,7 +4289,7 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(oft_lagrange%global%gbe(j))THEN
-      CALL lag_vbc_tensor(j,vbc_type,nn)
+      CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,nn)
       v3tmp(:,j)=MATMUL(nn, v3tmp(:,j))
     END IF
   END DO
@@ -4349,7 +4350,7 @@ IF(xmhd_adv_b)THEN
   do i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     if(oft_lagrange%global%gbe(j))then
-      CALL lag_vbc_tensor(j,1,nn)
+      CALL lag_vbc_tensor(oft_lagrange,j,1,nn)
       v3tmp(:,j)=MATMUL(nn, v3tmp(:,j))
     end if
   end do
@@ -4370,7 +4371,7 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(oft_lagrange%global%gbe(j))THEN
-      CALL lag_vbc_tensor(j,vbc_type,nn)
+      CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,nn)
       v3tmp(:,j)=MATMUL(nn, v3tmp(:,j))
     END IF
   END DO
@@ -4553,7 +4554,7 @@ nsteps=rst_end
 !---Build composite representation if necessary
 IF(ML_xmhd_rep%nlevels==0)THEN
   CALL xmhd_setup_rep
-  ALLOCATE(oft_xmhd_ops_ML(oft_lagrange_nlevels))
+  ALLOCATE(oft_xmhd_ops_ML(ML_oft_lagrange%nlevels))
 END IF
 !---------------------------------------------------------------------------
 ! Create solver fields
@@ -4637,8 +4638,8 @@ IF(linear)THEN
   CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
-  CALL Jfield%setup(mesh)
-  CALL oft_lag_vproject(oft_vlagrange,Jfield,bp)
+  CALL Jfield%setup(oft_lagrange)
+  CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
   vals=>bvout(1,:)
@@ -4814,8 +4815,8 @@ DO
       !---Hyper-res aux field
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
-        CALL J2field%setup(mesh)
-        CALL oft_lag_vproject(oft_vlagrange,J2field,bp)
+        CALL J2field%setup(oft_hcurl)
+        CALL oft_lag_vproject(oft_lagrange,J2field,bp)
         CALL ap%set(0.d0)
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
@@ -4828,8 +4829,8 @@ DO
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
-      CALL Jfield%setup(mesh)
-      CALL oft_lag_vproject(oft_vlagrange,Jfield,bp)
+      CALL Jfield%setup(oft_lagrange)
+      CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
       vals=>bvout(1,:)
@@ -4842,7 +4843,7 @@ DO
       !---Divergence error
       IF(plot_div)THEN
         Bfield%u=>sub_fields%B
-        CALL Bfield%setup(mesh)
+        CALL Bfield%setup(oft_lagrange)
         CALL oft_lag_project_div(oft_lagrange,Bfield,x)
         vals=>bvout(1,:)
         CALL x%get_local(vals)

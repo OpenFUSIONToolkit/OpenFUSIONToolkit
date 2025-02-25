@@ -177,12 +177,12 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject, oft_vlagrange
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
@@ -225,7 +225,7 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!operators. In this case the setup procedure is done for each required finite element space.
 !---Lagrange
 CALL oft_lag_setup(mg_mesh,order)
-CALL lag_setup_interp
+CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 !---H1(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order)
@@ -273,9 +273,9 @@ CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)
 !---Setup field interpolation
 Bfield%u=>taylor_hffa(1,oft_hcurl_level)%f
-CALL Bfield%setup(mg_mesh%mesh)
+CALL Bfield%setup(oft_hcurl)
 !---Project field
-CALL oft_lag_vproject(oft_vlagrange,Bfield,v)
+CALL oft_lag_vproject(oft_lagrange,Bfield,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save

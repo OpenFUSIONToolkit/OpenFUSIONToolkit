@@ -26,13 +26,11 @@ IMPLICIT NONE
 !---------------------------------------------------------------------------
 type, abstract :: fem_interp
   integer(i4) :: dim = 0 !< Dimension of field
-  class(fem_interp), pointer :: parent => NULL() !< Parent interpolator
   class(oft_mesh), pointer :: mesh => NULL() !< Mesh for interpolation
+  class(fem_interp), pointer :: parent => NULL() !< Parent interpolator
 contains
   !> Reconstruct field
   procedure(oft_fem_interp), deferred :: interp
-  !> Setup reconstruction object
-  procedure :: setup => fem_interp_setup
   !> Delete reconstruction object
   procedure :: delete => fem_interp_delete
 end type fem_interp
@@ -55,13 +53,11 @@ end interface
 !---------------------------------------------------------------------------
 type, abstract :: bfem_interp
   integer(i4) :: dim = 0 !< Dimension of field
-  class(bfem_interp), pointer :: parent => NULL() !< Parent interpolator
   class(oft_bmesh), pointer :: mesh => NULL() !< Mesh for interpolation
+  class(bfem_interp), pointer :: parent => NULL() !< Parent interpolator
 contains
   !> Reconstruct field
   procedure(oft_bfem_interp), deferred :: interp
-  !> Setup reconstruction object
-  procedure :: setup => bfem_interp_setup
   !> Delete reconstruction object
   procedure :: delete => bfem_interp_delete
 end type bfem_interp
@@ -241,30 +237,12 @@ class(tensor_dot_interp), intent(inout) :: self
 IF(ASSOCIATED(self%bvals))DEALLOCATE(self%bvals)
 end subroutine tensor_dot_interp_delete
 !---------------------------------------------------------------------------
-!> Dummy setup function
-!---------------------------------------------------------------------------
-subroutine fem_interp_setup(self,mesh)
-class(fem_interp), intent(inout) :: self
-class(oft_mesh), target, intent(inout) :: mesh
-self%mesh=>mesh
-call oft_warn('Setup called on general interpolator, this may indicate an error.')
-end subroutine fem_interp_setup
-!---------------------------------------------------------------------------
 !> Dummy destroy function
 !---------------------------------------------------------------------------
 subroutine fem_interp_delete(self)
 class(fem_interp), intent(inout) :: self
 call oft_warn('Finalize called on general interpolator, this may indicate an error.')
 end subroutine fem_interp_delete
-!---------------------------------------------------------------------------
-!> Dummy setup function
-!---------------------------------------------------------------------------
-subroutine bfem_interp_setup(self,mesh)
-class(bfem_interp), intent(inout) :: self
-class(oft_bmesh), target, intent(inout) :: mesh
-self%mesh=>mesh
-call oft_warn('Setup called on general interpolator, this may indicate an error.')
-end subroutine bfem_interp_setup
 !---------------------------------------------------------------------------
 !> Dummy destroy function
 !---------------------------------------------------------------------------

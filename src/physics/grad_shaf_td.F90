@@ -977,7 +977,7 @@ END IF
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat%mat))THEN
-    CALL gs_mat_create(mat%mat)
+    CALL gs_mat_create(self%gs_eq%fe_rep,mat%mat)
     ALLOCATE(mat%lim_nodes(oft_blagrange%nce),mat%lim_vals(a%n,oft_blagrange%nce))
     ALLOCATE(mat%ax_nodes(oft_blagrange%nce),mat%ax_vals(a%n,oft_blagrange%nce))
 ELSE

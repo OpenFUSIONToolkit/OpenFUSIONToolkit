@@ -39,7 +39,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
   create_ilu_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
@@ -119,7 +119,7 @@ END IF
 !! force-free eignstate in this geometry. As a result the initial condition
 !! is stable to all types of mode activity.
 CALL taylor_hmodes(1)
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !! As in \ref doc_mug_sph_ex1 we must transform the gauge of the Taylor
 !! state solution to the appropriate magnetic field BCs. For more information
 !! on this see the description in \ref doc_mug_sph_ex1_ic of that example.

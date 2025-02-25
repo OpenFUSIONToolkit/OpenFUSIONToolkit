@@ -30,7 +30,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_base, ONLY: oft_fem_type
 USE fem_utils, ONLY: fem_interp
 USE oft_lag_basis, ONLY: oft_lagrange_level, oft_lagrange_lin_level, &
-  oft_lagrange_nlevels, oft_lag_set_level, oft_lagrange, ML_oft_lagrange
+  oft_lag_set_level, oft_lagrange, ML_oft_lagrange
 USE oft_lag_operators, ONLY: oft_lag_zerob, lag_getlop_pre, oft_lag_getlop
 USE oft_h0_basis, ONLY: oft_h0, oft_h0_nlevels, oft_h0_geval_all, oft_h0_fem, &
   ML_oft_h0
@@ -159,7 +159,7 @@ ALLOCATE(ml_wop(nlevels_wop),ml_lop(nlevels_lop))
 DO i=1,nlevels_wop
   CALL oft_hcurl_set_level(taylor_minlev+i-1)
   NULLIFY(ml_wop(i)%M)
-  CALL oft_hcurl_getwop(ml_wop(i)%M,'zerob')
+  CALL oft_hcurl_getwop(oft_hcurl,ml_wop(i)%M,'zerob')
   IF(oft_hcurl_level<=oft_lagrange_lin_level)THEN
     CALL oft_lag_set_level(oft_hcurl_level)
     NULLIFY(ml_lop(i)%M)
@@ -205,7 +205,7 @@ do k=1,taylor_nm
     wop=>ml_wop(i-taylor_minlev+1)%M
     orthog%wop=>wop
     NULLIFY(kop)
-    CALL oft_hcurl_getkop(kop,"zerob")
+    CALL oft_hcurl_getkop(oft_hcurl,kop,"zerob")
 !---------------------------------------------------------------------------
 ! Create eigenvalue solver
 !---------------------------------------------------------------------------
@@ -240,7 +240,7 @@ do k=1,taylor_nm
     DEALLOCATE(kop)
     !---
     Bfield%u=>u
-    CALL Bfield%setup(oft_hcurl%mesh)
+    CALL Bfield%setup(oft_hcurl)
     taylor_htor(k,i) = tfluxfun(oft_hcurl%mesh,Bfield,oft_hcurl%quad%order)
     CALL Bfield%delete
 !---------------------------------------------------------------------------
@@ -308,7 +308,7 @@ DO i=1,nlevels_wop
   END IF
 END DO
 DEALLOCATE(ml_wop,ml_lop)
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_hmodes
 !---------------------------------------------------------------------------
@@ -425,7 +425,7 @@ END IF
 CALL create_cg_solver(winv, force_native=.TRUE.)
 IF((taylor_minlev==oft_hcurl_nlevels).OR.rst)THEN ! Lowest level uses diag precond
   NULLIFY(wop)
-  CALL oft_hcurl_getwop(wop,'zerob')
+  CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
   CALL create_diag_pre(winv%pre)
 ELSE ! Nested levels use MG
   CALL hcurl_getwop_pre(winv%pre,ml_wop,nlevels=oft_hcurl_nlevels-taylor_minlev+1)
@@ -456,14 +456,14 @@ linv_lag%its=40
 hcurl_divout%solver=>linv_lag
 hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=2
-CALL oft_hcurl_getmop(mop_hcurl,'zerob')
+CALL oft_hcurl_getmop(oft_hcurl,mop_hcurl,'zerob')
 hcurl_divout%mop=>mop_hcurl
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
 NULLIFY(tmp)
 !---Get H1 mass matrix
-CALL h1_getmop(mop,'none')
+CALL h1_getmop(oft_h1,mop,'none')
 !---Allocate vacuum and current field containers
 ALLOCATE(taylor_hvac(taylor_nh,oft_h1_nlevels))
 ALLOCATE(taylor_hcur(taylor_nh,oft_h1_nlevels))
@@ -604,7 +604,7 @@ CALL linv_lag%pre%delete
 DEALLOCATE(linv_lag%pre)
 CALL linv_lag%delete
 DEALLOCATE(linv_lag)
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_vacuum
 !---------------------------------------------------------------------------
@@ -665,7 +665,7 @@ IF(.NOT.rst)THEN
   do_orthog=.FALSE.
   IF(taylor_nm>0)THEN
     IF(ABS((lambda-taylor_hlam(1,oft_hcurl_level))/taylor_hlam(1,oft_hcurl_level))<5.d-2)THEN
-      CALL oft_hcurl_getwop(wop,'zerob')
+      CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
       orthog%orthog=>taylor_hffa
       orthog%nm=1
       orthog%wop=>wop
@@ -676,7 +676,7 @@ IF(.NOT.rst)THEN
 ! Setup H1(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
   IF(taylor_minlev==oft_hcurl_nlevels)THEN ! Lowest level uses diag precond
-    CALL oft_hcurl_getjmlb(jmlb_mat,lambda,'zerob')
+    CALL oft_hcurl_getjmlb(oft_hcurl,jmlb_mat,lambda,'zerob')
     CALL create_diag_pre(jmlb_inv%pre)
   ELSE ! Nested levels use MG
     CALL hcurl_getjmlb_pre(jmlb_inv%pre,ml_jmlb,lambda,nlevels=oft_hcurl_nlevels-taylor_minlev+1)
@@ -705,7 +705,7 @@ linv_lag%its=40
 hcurl_divout%solver=>linv_lag
 hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=10
-CALL oft_hcurl_getmop(mop,'zerob')
+CALL oft_hcurl_getmop(oft_hcurl,mop,'zerob')
 hcurl_divout%mop=>mop
 !jmlb_inv%cleaner=>hcurl_divout
 !---------------------------------------------------------------------------
@@ -715,7 +715,7 @@ call oft_h1_set_level(oft_h1_nlevels)
 !---
 call oft_hcurl_create(tmp)
 allocate(taylor_gffa(taylor_nh,oft_h1_nlevels))
-IF(.NOT.rst)CALL oft_hcurl_getkop(kop,'zerob')
+IF(.NOT.rst)CALL oft_hcurl_getkop(oft_hcurl,kop,'zerob')
 !---
 do i=1,taylor_nh
   !---
@@ -793,7 +793,7 @@ ELSE
 END IF
 !---
 IF(.NOT.rst)CALL jmlb_inv%pre%delete
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_injectors
 !---------------------------------------------------------------------------
@@ -839,7 +839,7 @@ IF(taylor_minlev<0)taylor_minlev=oft_hcurl_nlevels
 ! Setup H1(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
 IF(taylor_minlev==oft_hcurl_nlevels)THEN ! Lowest level uses diag precond
-  CALL oft_hcurl_getjmlb(jmlb_mat,lambda,'zerob')
+  CALL oft_hcurl_getjmlb(oft_hcurl,jmlb_mat,lambda,'zerob')
   CALL create_diag_pre(jmlb_inv%pre)
 ELSE ! Nested levels use MG
   CALL hcurl_getjmlb_pre(jmlb_inv%pre,ml_jmlb,lambda,nlevels=1)
@@ -869,7 +869,7 @@ linv_lag%its=40
 hcurl_divout%solver=>linv_lag
 hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=10
-CALL oft_hcurl_getmop(mop,'zerob')
+CALL oft_hcurl_getmop(oft_hcurl,mop,'zerob')
 hcurl_divout%mop=>mop
 !jmlb_inv%cleaner=>hcurl_divout
 !---------------------------------------------------------------------------
@@ -887,7 +887,7 @@ end do
 !---Orthogonalize (if within 5% of Taylor state)
 IF(taylor_nm>0)THEN
   IF(ABS((lambda-taylor_hlam(1,oft_hcurl_level))/taylor_hlam(1,oft_hcurl_level))<5.d-2)THEN
-    CALL oft_hcurl_getwop(wop,'zerob')
+    CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
     orthog%orthog=>taylor_hffa
     orthog%nm=1
     orthog%wop=>wop
@@ -897,7 +897,7 @@ IF(taylor_nm>0)THEN
   END IF
 END IF
 !---Get H1(Curl) helicity matrix
-CALL oft_hcurl_getkop(kop,'zerob')
+CALL oft_hcurl_getkop(oft_hcurl,kop,'zerob')
 CALL kop%apply(gffa,tmp)
 CALL kop%delete
 DEALLOCATE(kop)
@@ -932,7 +932,7 @@ ELSE
 END IF
 !---
 CALL jmlb_inv%pre%delete
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_injector_single
 !---------------------------------------------------------------------------

@@ -251,7 +251,7 @@ CALL create_diag_pre(solver%pre)
 !---Project to plotting grid
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 ALLOCATE(tmpout(3,a%n))
-CALL oft_blag_vproject(field,br,bt,bz)
+CALL oft_blag_vproject(self%fe_rep,field,br,bt,bz)
 CALL a%set(0.d0)
 CALL solver%apply(a,br)
 CALL a%get_local(vals_tmp)

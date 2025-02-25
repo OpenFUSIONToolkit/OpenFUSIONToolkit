@@ -25,7 +25,8 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
 USE fem_utils, ONLY: fem_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, &
+  oft_lagrange, ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
     oft_lag_vgetmop, oft_lag_vproject
@@ -96,7 +97,7 @@ ELSE
   IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,self%minlev)
 END IF
 IF(taylor_minlev<oft_hcurl_level)THEN
-  CALL lag_setup_interp
+  CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
   CALL hcurl_setup_interp
   CALL hcurl_mloptions
@@ -228,10 +229,10 @@ ALLOCATE(bvout(3,u%n/3))
 SELECT CASE(int_type)
 CASE(1)
   CALL c_f_pointer(int_obj, ainterp_obj)
-  CALL oft_lag_vproject(oft_vlagrange,ainterp_obj,v)
+  CALL oft_lag_vproject(oft_lagrange,ainterp_obj,v)
 CASE(2)
   CALL c_f_pointer(int_obj, binterp_obj)
-  CALL oft_lag_vproject(oft_vlagrange,binterp_obj,v)
+  CALL oft_lag_vproject(oft_lagrange,binterp_obj,v)
 END SELECT
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
@@ -315,7 +316,7 @@ CALL interp_obj%u%restore_local(tmp,1)
 IF(zero_norm)WRITE(*,*)'Setting gauge'
 divout%pm=.TRUE.
 CALL divout%apply(interp_obj%u)
-CALL interp_obj%setup(self%ml_mesh%mesh)
+CALL interp_obj%setup(oft_hcurl,oft_h0)
 int_obj=C_LOC(interp_obj)
 !---Cleanup
 CALL divout%delete()
@@ -339,7 +340,7 @@ END IF
 CALL c_f_pointer(marklin_ptr,self)
 ALLOCATE(interp_obj)
 interp_obj%u=>taylor_hffa(imode,oft_hcurl_level)%f
-CALL interp_obj%setup(self%ml_mesh%mesh)
+CALL interp_obj%setup(oft_hcurl)
 int_obj=C_LOC(interp_obj)
 END SUBROUTINE marklin_get_bint
 !------------------------------------------------------------------------------

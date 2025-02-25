@@ -22,8 +22,8 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, &
-  oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
+  oft_vlagrange, ML_oft_lagrange, oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, &
   oft_lag_vgetmop, oft_lag_vrinterp
@@ -34,7 +34,7 @@ USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1, oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project, &
   oft_h1_grad_zerop, oft_h1_rinterp
@@ -91,7 +91,7 @@ CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 !---Lagrange
 CALL oft_lag_setup(mg_mesh,order,minlev)
-CALL lag_setup_interp
+CALL lag_setup_interp(ML_oft_lagrange)
 !---H1(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,minlev)
 CALL hcurl_setup_interp
@@ -106,7 +106,7 @@ h1grad_zerop%ML_h1_rep=>ML_oft_h1
 ! Create H1 metric solver
 !---------------------------------------------------------------------------
 NULLIFY(mop)
-CALL h1_getmop(mop,"none")
+CALL h1_getmop(oft_h1,mop,"none")
 CALL create_cg_solver(minv)
 minv%A=>mop
 minv%its=-3
@@ -123,7 +123,7 @@ CALL oft_h1_create(bi)
 ! Set uniform B0 = zhat
 !---------------------------------------------------------------------------
 z_field%val=(/0.d0,0.d0,1.d0/)
-CALL oft_h1_project(z_field,v)
+CALL oft_h1_project(oft_h1,z_field,v)
 CALL h1grad_zerop%apply(v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
@@ -133,7 +133,7 @@ CALL be%add(0.d0,1.d0,u)
 ! Set dB from alfven wave init
 !---------------------------------------------------------------------------
 alf_field%mesh=>mg_mesh%mesh
-CALL oft_h1_project(alf_field,v)
+CALL oft_h1_project(oft_h1,alf_field,v)
 CALL h1grad_zerop%apply(v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
@@ -159,7 +159,7 @@ CALL oft_lag_vcreate(vi)
 !---------------------------------------------------------------------------
 ! Set dB from alfven wave init
 !---------------------------------------------------------------------------
-CALL oft_lag_vproject(oft_vlagrange,alf_field,lag_v)
+CALL oft_lag_vproject(oft_lagrange,alf_field,lag_v)
 CALL lag_u%set(0.d0)
 CALL lag_minv%apply(lag_u,lag_v)
 CALL dvel%add(0.d0,delta,lag_u)
@@ -225,7 +225,7 @@ CALL b%scale(1.d0/B0)
 CALL b%add(-1.d0,1.d0,be)
 CALL b%scale(1.d0/delta)
 bfield%u=>b
-CALL bfield%setup(mg_mesh%mesh)
+CALL bfield%setup(oft_h1)
 berr=vec_energy(mg_mesh%mesh,err_field,order*2)
 !---Check velocity field waveform
 vierr=vec_energy(mg_mesh%mesh,alf_field,order*2)
@@ -234,7 +234,7 @@ err_field%a=>alf_field
 err_field%b=>vfield
 CALL vel%scale(-1.d0/(delta*v_alf))
 vfield%u=>vel
-CALL vfield%setup(mg_mesh%mesh)
+CALL vfield%setup(oft_lagrange)
 verr=vec_energy(mg_mesh%mesh,err_field,order*2)
 !---Output wave comparisons
 IF(oft_env%head_proc)THEN

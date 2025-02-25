@@ -38,10 +38,10 @@ USE oft_arpack, ONLY: oft_irlm_eigsolver
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_level, oft_lagrange_nlevels, oft_lag_set_level, &
+USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_level, oft_lag_set_level, &
 oft_lagrange_blevel, ML_oft_lagrange, oft_lagrange_ops, oft_lag_ops, ML_oft_lagrange_ops, &
 oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
-oft_lag_nodes, oft_lagrange_lev, ML_oft_vlagrange, oft_vlagrange, oft_blagrange, oft_blag_eval, &
+oft_lag_nodes, oft_lagrange_lev, ML_oft_vlagrange, oft_vlagrange, oft_blag_eval, &
 oft_blag_geval, oft_lagrange_minlev, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
 USE oft_lag_fields, ONLY: oft_lag_create, oft_blag_create, oft_lag_vcreate
 IMPLICIT NONE
@@ -71,21 +71,6 @@ contains
   !> Reconstruct field
   procedure :: interp => lag_ginterp_apply
 end type oft_lag_ginterp
-! !---------------------------------------------------------------------------
-! !> Interpolate a boundary Lagrange field
-! !---------------------------------------------------------------------------
-! type, extends(fem_interp) :: oft_lag_brinterp
-!   class(oft_vector), pointer :: u => NULL() !< Field for interpolation
-!   real(r8), pointer, dimension(:) :: vals => NULL() !< Local values
-!   class(oft_scalar_bfem), pointer :: lag_rep => NULL() !< Lagrange FE representation
-! contains
-!   !> Retrieve local values for interpolation
-!   procedure :: setup => lag_brinterp_setup
-!   !> Reconstruct field
-!   procedure :: interp => lag_brinterp
-!   !> Delete reconstruction object
-!   procedure :: delete => lag_brinterp_delete
-! end type oft_lag_brinterp
 !---------------------------------------------------------------------------
 !> Interpolate a Lagrange vector field
 !---------------------------------------------------------------------------
@@ -119,21 +104,6 @@ contains
   !> Reconstruct field
   procedure :: interp => lag_vdinterp
 end type oft_lag_vdinterp
-! !---------------------------------------------------------------------------
-! !> Interpolate a boundary Lagrange vector field
-! !---------------------------------------------------------------------------
-! type, extends(fem_interp) :: oft_lag_bvrinterp
-!   class(oft_vector), pointer :: u => NULL() !< Field for interpolation
-!   real(r8), pointer, dimension(:,:) :: vals => NULL() !< Local values
-!   class(oft_scalar_bfem), pointer :: lag_rep => NULL() !< Lagrange FE representation
-! contains
-!   !> Retrieve local values for interpolation
-!   procedure :: setup => lag_bvrinterp_setup
-!   !> Reconstruct field
-!   procedure :: interp => lag_bvrinterp
-!   !> Delete reconstruction object
-!   procedure :: delete => lag_bvrinterp_delete
-! end type oft_lag_bvrinterp
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
@@ -215,14 +185,15 @@ end subroutine lag_mloptions
 !!
 !! @note Should only be used via class \ref oft_lag_rinterp or children
 !---------------------------------------------------------------------------
-subroutine lag_rinterp_setup(self,mesh)
+subroutine lag_rinterp_setup(self,lag_rep)
 class(oft_lag_rinterp), intent(inout) :: self
-class(oft_mesh), target, intent(inout) :: mesh
+class(oft_scalar_fem), target, intent(inout) :: lag_rep
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
     CLASS IS(oft_lag_rinterp)
       self%vals=>this%vals
       self%lag_rep=>this%lag_rep
+      self%mesh=>this%mesh
       self%cache_cell=>this%cache_cell
       self%cache_vals=>this%cache_vals
     CLASS DEFAULT
@@ -231,7 +202,9 @@ IF(ASSOCIATED(self%parent))THEN
 ELSE
   !---Get local slice
   CALL self%u%get_local(self%vals)
-  self%lag_rep=>oft_lagrange
+  !
+  self%lag_rep=>lag_rep
+  self%mesh=>lag_rep%mesh
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
     ALLOCATE(self%cache_vals(self%lag_rep%nce,0:oft_env%nthreads-1))
@@ -239,8 +212,6 @@ ELSE
   self%cache_cell=-1
   self%cache_vals=0.d0
 END IF
-IF((mesh%np/=self%lag_rep%mesh%np))CALL oft_abort("Mesh mismatch","lag_rinterp_setup",__FILE__)
-self%mesh=>mesh
 end subroutine lag_rinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
@@ -304,64 +275,6 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine lag_rinterp
-! !---------------------------------------------------------------------------
-! !> Setup interpolator for boundary Lagrange scalar fields
-! !!
-! !! Fetches local representation used for interpolation from vector object
-! !!
-! !! @note Should only be used via class \ref oft_lag_brinterp or children
-! !---------------------------------------------------------------------------
-! subroutine lag_brinterp_setup(self)
-! class(oft_lag_brinterp), intent(inout) :: self
-! !---Get local slice
-! CALL self%u%get_local(self%vals)
-! IF(.NOT.ASSOCIATED(self%lag_rep))self%lag_rep=>oft_blagrange
-! end subroutine lag_brinterp_setup
-! !---------------------------------------------------------------------------
-! !> Destroy temporary internal storage
-! !!
-! !! @note Should only be used via class \ref oft_lag_brinterp or children
-! !---------------------------------------------------------------------------
-! subroutine lag_brinterp_delete(self)
-! class(oft_lag_brinterp), intent(inout) :: self
-! !---Destroy locals
-! IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
-! NULLIFY(self%lag_rep,self%u)
-! end subroutine lag_brinterp_delete
-! !---------------------------------------------------------------------------
-! !> Reconstruct a boundary Lagrange scalar field
-! !!
-! !! @note Should only be used via class \ref oft_lag_brinterp
-! !!
-! !! @param[in] cell Cell for interpolation
-! !! @param[in] f Possition in cell in logical coord [4]
-! !! @param[in] gop Logical gradient vectors at f [3,4]
-! !! @param[out] val Reconstructed field at f [1]
-! !---------------------------------------------------------------------------
-! subroutine lag_brinterp(self,cell,f,gop,val)
-! class(oft_lag_brinterp), intent(inout) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(:)
-! real(r8), intent(in) :: gop(3,4)
-! real(r8), intent(out) :: val(:)
-! integer(i4), allocatable :: j(:)
-! integer(i4) :: jc
-! real(r8) :: rop(1)
-! DEBUG_STACK_PUSH
-! !---
-! IF(.NOT.ASSOCIATED(self%vals))CALL oft_abort('Setup has not been called!','lag_brinterp',__FILE__)
-! !---Get dofs
-! allocate(j(self%lag_rep%nfe))
-! call self%lag_rep%nfdofs(cell,j) ! get DOFs
-! !---Reconstruct field
-! val=0.d0
-! do jc=1,self%lag_rep%nfe
-!   call oft_blag_eval(self%lag_rep,cell,jc,f,rop(1))
-!   val=val+self%vals(j(jc))*rop
-! end do
-! deallocate(j)
-! DEBUG_STACK_POP
-! end subroutine lag_brinterp
 !---------------------------------------------------------------------------
 !> Reconstruct the gradient of a Lagrange scalar field
 !!
@@ -413,15 +326,16 @@ end subroutine lag_ginterp_apply
 !!
 !! @note Should only be used via class \ref oft_lag_vrinterp or children
 !---------------------------------------------------------------------------
-subroutine lag_vrinterp_setup(self,mesh)
+subroutine lag_vrinterp_setup(self,lag_rep)
 class(oft_lag_vrinterp), intent(inout) :: self
-class(oft_mesh), target, intent(inout) :: mesh
+class(oft_scalar_fem), target, intent(inout) :: lag_rep
 real(r8), pointer, dimension(:) :: vtmp
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
     CLASS IS(oft_lag_vrinterp)
       self%vals=>this%vals
       self%lag_rep=>this%lag_rep
+      self%mesh=>self%mesh
       self%cache_cell=>this%cache_cell
       self%cache_vals=>this%cache_vals
     CLASS DEFAULT
@@ -429,14 +343,15 @@ IF(ASSOCIATED(self%parent))THEN
   END SELECT
 ELSE
   !---Get local slice
-  IF(.NOT.ASSOCIATED(self%vals))ALLOCATE(self%vals(3,oft_lagrange%ne))
+  IF(.NOT.ASSOCIATED(self%vals))ALLOCATE(self%vals(3,lag_rep%ne))
   vtmp=>self%vals(1,:)
   CALL self%u%get_local(vtmp,1)
   vtmp=>self%vals(2,:)
   CALL self%u%get_local(vtmp,2)
   vtmp=>self%vals(3,:)
   CALL self%u%get_local(vtmp,3)
-  self%lag_rep=>oft_lagrange
+  self%lag_rep=>lag_rep
+  self%mesh=>lag_rep%mesh
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
     ALLOCATE(self%cache_vals(3,self%lag_rep%nce,0:oft_env%nthreads-1))
@@ -444,8 +359,6 @@ ELSE
   self%cache_cell=-1
   self%cache_vals=0.d0
 END IF
-IF((mesh%np/=self%lag_rep%mesh%np))CALL oft_abort("Mesh mismatch","lag_vrinterp_setup",__FILE__)
-self%mesh=>mesh
 end subroutine lag_vrinterp_setup
 !---------------------------------------------------------------------------
 !> Setup interpolator for Lagrange vector fields
@@ -711,20 +624,25 @@ class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
 real(r8), pointer, dimension(:) :: x,y,z
 integer(i4) :: i,j
-CLASS(oft_afem_type), POINTER :: lag_rep
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+SELECT TYPE(this=>self%ML_vlag_rep%current_level%fields(1)%fe)
+  CLASS IS(oft_scalar_fem)
+    lag_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE object","vzeron_apply",__FILE__)
+END SELECT
 !---Cast to vector type
 NULLIFY(x,y,z)
 CALL a%get_local(x,1)
 CALL a%get_local(y,2)
 CALL a%get_local(z,3)
 !---Zero boundary values
-lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j,vec,nn)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
   if(lag_rep%global%gbe(j))then
-    CALL lag_vbc_tensor(j,1,nn)
+    CALL lag_vbc_tensor(lag_rep,j,1,nn)
     vec=(/x(j),y(j),z(j)/)
     vec=MATMUL(nn,vec)
     x(j)=vec(1)
@@ -748,20 +666,25 @@ class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
 real(r8), pointer, dimension(:) :: x,y,z
 integer(i4) :: i,j
-CLASS(oft_afem_type), POINTER :: lag_rep
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+SELECT TYPE(this=>self%ML_vlag_rep%current_level%fields(1)%fe)
+  CLASS IS(oft_scalar_fem)
+    lag_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE object","vzerot_apply",__FILE__)
+END SELECT
 !---Cast to vector type
 NULLIFY(x,y,z)
 CALL a%get_local(x,1)
 CALL a%get_local(y,2)
 CALL a%get_local(z,3)
 !---Zero boundary values
-lag_rep=>self%ML_vlag_rep%current_level%fields(1)%fe
 !$omp parallel do private(j,vec,nn)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
   if(lag_rep%global%gbe(j))then
-    CALL lag_vbc_tensor(j,2,nn)
+    CALL lag_vbc_tensor(lag_rep,j,2,nn)
     vec=(/x(j),y(j),z(j)/)
     vec=MATMUL(nn,vec)
     x(j)=vec(1)
@@ -779,34 +702,35 @@ end subroutine vzerot_apply
 !---------------------------------------------------------------------------
 !> Get boundary condition tensor for desired node in a Lagrange vector field
 !---------------------------------------------------------------------------
-subroutine lag_vbc_tensor(j_lag,bc_type,nn)
+subroutine lag_vbc_tensor(lag_rep,j_lag,bc_type,nn)
+class(oft_scalar_fem), target, intent(inout) :: lag_rep
 integer(i4), intent(in) :: j_lag !< Local index of Lagrange node
 integer(i4), intent(in) :: bc_type !< Desired BC (1 -> norm, 2-> tang)
 real(r8), intent(out) :: nn(3,3) !< BC tensor (3,3)
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
-IF(oft_lagrange%global%gbe(j_lag))THEN
+IF(lag_rep%global%gbe(j_lag))THEN
   SELECT CASE(bc_type)
     CASE(1) ! Zero normal component
-      IF(oft_lagrange%bc(j_lag)==3)THEN ! On face
+      IF(lag_rep%bc(j_lag)==3)THEN ! On face
         nn(:,1) = (/1.d0,0.d0,0.d0/) &
-        - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(1,j_lag)
+          - lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
         nn(:,2) = (/0.d0,1.d0,0.d0/) &
-        - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(2,j_lag)
+          - lag_rep%sn(:,j_lag)*lag_rep%sn(2,j_lag)
         nn(:,3) = (/0.d0,0.d0,1.d0/) &
-        - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(3,j_lag)
-      ELSE IF(oft_lagrange%bc(j_lag)==2)THEN ! On edge
-        nn(:,1) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(1,j_lag)
-        nn(:,2) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(2,j_lag)
-        nn(:,3) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(3,j_lag)
+          - lag_rep%sn(:,j_lag)*lag_rep%sn(3,j_lag)
+      ELSE IF(lag_rep%bc(j_lag)==2)THEN ! On edge
+        nn(:,1) = lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
+        nn(:,2) = lag_rep%sn(:,j_lag)*lag_rep%sn(2,j_lag)
+        nn(:,3) = lag_rep%sn(:,j_lag)*lag_rep%sn(3,j_lag)
       ELSE ! At vertex
         nn=0.d0
       END IF
     CASE(2) ! Zero tangential components
-      IF(oft_lagrange%bc(j_lag)==3)THEN ! On face
-        nn(:,1) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(1,j_lag)
-        nn(:,2) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(2,j_lag)
-        nn(:,3) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(3,j_lag)
+      IF(lag_rep%bc(j_lag)==3)THEN ! On face
+        nn(:,1) = lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
+        nn(:,2) = lag_rep%sn(:,j_lag)*lag_rep%sn(2,j_lag)
+        nn(:,3) = lag_rep%sn(:,j_lag)*lag_rep%sn(3,j_lag)
       ELSE ! At edge or vertex
         nn=0.d0
       END IF
@@ -822,7 +746,8 @@ end subroutine lag_vbc_tensor
 !> Get diagonal entries for a given boundary condition and desired node in a
 !! Lagrange vector field
 !---------------------------------------------------------------------------
-subroutine lag_vbc_diag(j_lag,bc_type,nn)
+subroutine lag_vbc_diag(lag_rep,j_lag,bc_type,nn)
+class(oft_scalar_fem), target, intent(inout) :: lag_rep
 integer(i4), intent(in) :: j_lag !< Local index of Lagrange node
 integer(i4), intent(in) :: bc_type !< Desired BC (1 -> norm, 2-> tang)
 real(r8), intent(out) :: nn(3,3) !< Diagonal entries (3,3)
@@ -831,30 +756,30 @@ DEBUG_STACK_PUSH
 SELECT CASE(bc_type)
   CASE(1) ! Get normal projections
     !---Set diagonal entries for boundary terms
-    IF(oft_lagrange%bc(j_lag)==3)THEN
-      nn(:,1) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(1,j_lag)
-      nn(:,2) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(2,j_lag)
-      nn(:,3) = oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(3,j_lag)
-    ELSE IF(oft_lagrange%bc(j_lag)==2)THEN
+    IF(lag_rep%bc(j_lag)==3)THEN
+      nn(:,1) = lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
+      nn(:,2) = lag_rep%sn(:,j_lag)*lag_rep%sn(2,j_lag)
+      nn(:,3) = lag_rep%sn(:,j_lag)*lag_rep%sn(3,j_lag)
+    ELSE IF(lag_rep%bc(j_lag)==2)THEN
       nn(:,1) = (/1.d0,0.d0,0.d0/) &
-      - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(1,j_lag)
+        - lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
       nn(:,2) = (/0.d0,1.d0,0.d0/) &
-      - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(2,j_lag)
+        - lag_rep%sn(:,j_lag)*lag_rep%sn(2,j_lag)
       nn(:,3) = (/0.d0,0.d0,1.d0/) &
-      - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(3,j_lag)
+        - lag_rep%sn(:,j_lag)*lag_rep%sn(3,j_lag)
     ELSE
       nn(:,1)=(/1.d0,0.d0,0.d0/)
       nn(:,2)=(/0.d0,1.d0,0.d0/)
       nn(:,3)=(/0.d0,0.d0,1.d0/)
     END IF
   CASE(2) ! Get tangential projections
-    IF(oft_lagrange%bc(j_lag)==3)THEN ! On face
+    IF(lag_rep%bc(j_lag)==3)THEN ! On face
       nn(:,1) = (/1.d0,0.d0,0.d0/) &
-      - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(1,j_lag)
+        - lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
       nn(:,2) = (/0.d0,1.d0,0.d0/) &
-      - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(2,j_lag)
+        - lag_rep%sn(:,j_lag)*lag_rep%sn(2,j_lag)
       nn(:,3) = (/0.d0,0.d0,1.d0/) &
-      - oft_lagrange%sn(:,j_lag)*oft_lagrange%sn(3,j_lag)
+        - lag_rep%sn(:,j_lag)*lag_rep%sn(3,j_lag)
     ELSE
       nn(:,1)=(/1.d0,0.d0,0.d0/)
       nn(:,2)=(/0.d0,1.d0,0.d0/)
@@ -1422,7 +1347,7 @@ DO i=1,lag_rep%mesh%nc
           DO jp=1,3
             mloc(jp,jp)=u
           END DO
-          CALL lag_vbc_tensor(j(jr),vbc_type,nn)
+          CALL lag_vbc_tensor(lag_rep,j(jr),vbc_type,nn)
           mloc=MATMUL(nn,mloc)
           DO jp=1,3
             DO jn=1,3
@@ -1471,7 +1396,7 @@ ELSE IF(vbc_type>0)THEN
     jr=lag_rep%lbe(i)
     IF(.NOT.lag_rep%global%gbe(jr))CYCLE
     j=jr
-    CALL lag_vbc_diag(jr,vbc_type,mloc)
+    CALL lag_vbc_diag(lag_rep,jr,vbc_type,mloc)
     DO jr=1,3
       DO jc=1,3
         call mat%add_values(j,j,mloc(jr,jc),1,1,jr,jc)
@@ -1480,7 +1405,7 @@ ELSE IF(vbc_type>0)THEN
   END DO
 END IF
 DEALLOCATE(j,rop)
-CALL oft_lag_vcreate(oft_lag_vec)
+CALL vlag_rep%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
@@ -1497,8 +1422,8 @@ end subroutine oft_lag_vgetmop
 !! test functions for a Lagrange basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of LAG::VMOP
 !---------------------------------------------------------------------------
-subroutine oft_lag_vproject(vlag_rep,field,x)
-type(oft_fem_comp_type), intent(inout) :: vlag_rep
+subroutine oft_lag_vproject(lag_rep,field,x)
+type(oft_scalar_fem), intent(inout) :: lag_rep
 class(fem_interp), intent(inout) :: field !< Vector field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
@@ -1508,15 +1433,7 @@ real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 logical :: curved
-class(oft_scalar_fem), pointer :: lag_rep
 DEBUG_STACK_PUSH
-!---
-SELECT TYPE(this=>vlag_rep%fields(1)%fe)
-  CLASS IS(oft_scalar_fem)
-    lag_rep=>this
-  CLASS DEFAULT
-    CALL oft_abort("Invalid FE object","oft_lag_vproject",__FILE__)
-END SELECT
 !---Initialize vectors to zero
 NULLIFY(xloc,yloc,zloc)
 call x%set(0.d0)
@@ -1557,8 +1474,8 @@ end subroutine oft_lag_vproject
 !---------------------------------------------------------------------------
 !> Compute the divergence of a Lagrange vector field
 !---------------------------------------------------------------------------
-subroutine lag_div(vlag_rep,a,reg)
-type(oft_fem_comp_type), intent(inout) :: vlag_rep
+subroutine lag_div(lag_rep,a,reg)
+type(oft_scalar_fem), intent(inout) :: lag_rep
 class(oft_vector), intent(inout) :: a !< Input field
 real(r8), intent(out) :: reg !< \f$ \int_v \nabla \cdot a \; dV \f$
 real(r8), pointer, dimension(:) :: x,y,z
@@ -1567,15 +1484,7 @@ integer(i4), allocatable :: j(:)
 real(r8) :: goptmp(3,4),vol,det,div
 real(r8), allocatable :: gop(:,:)
 logical :: curved
-class(oft_scalar_fem), pointer :: lag_rep
 DEBUG_STACK_PUSH
-!---
-SELECT TYPE(this=>vlag_rep%fields(1)%fe)
-  CLASS IS(oft_scalar_fem)
-    lag_rep=>this
-  CLASS DEFAULT
-    CALL oft_abort("Invalid FE object","oft_lag_vproject",__FILE__)
-END SELECT
 !---Cast to vector type
 NULLIFY(x,y,z)
 CALL a%get_local(x,1)
@@ -1610,7 +1519,8 @@ end subroutine lag_div
 !---------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
 !---------------------------------------------------------------------------
-SUBROUTINE lag_setup_interp(create_vec)
+SUBROUTINE lag_setup_interp(ML_lag_rep,create_vec)
+CLASS(oft_ml_fem_type), intent(inout) :: ML_lag_rep
 LOGICAL, OPTIONAL, INTENT(in) :: create_vec !< Needs docs
 !---
 class(oft_vector), pointer :: fvec,cvec
@@ -1622,30 +1532,30 @@ DEBUG_STACK_PUSH
 vec_interp=.FALSE.
 IF(PRESENT(create_vec))vec_interp=create_vec
 !---
-DO i=oft_lagrange_minlev+1,oft_lagrange_nlevels
-  CALL oft_lag_set_level(i)
+DO i=oft_lagrange_minlev+1,ML_lag_rep%nlevels
+  CALL ML_lag_rep%set_level(i)
   !---
-  if(oft_lagrange_level==oft_lagrange_blevel+1)then
+  if(ML_lag_rep%level==ML_lag_rep%blevel+1)then
     CYCLE
   end if
   !---Setup interpolation
-  if(oft_lagrange%order==1)then
-    CALL lag_ginterpmatrix(ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m)
-    oft_lagrange_ops%interp=>ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m
-    CALL oft_lagrange_ops%interp%assemble
+  if(ML_lag_rep%current_level%order==1)then
+    CALL lag_ginterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m)
+    oft_lagrange_ops%interp=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m
+    CALL ML_lag_rep%interp_matrices(ML_lag_rep%level)%m%assemble
   else
-    CALL lag_pinterpmatrix(ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m)
-    oft_lagrange_ops%interp=>ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m
-    CALL oft_lagrange_ops%interp%assemble
+    CALL lag_pinterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m)
+    oft_lagrange_ops%interp=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m
+    CALL ML_lag_rep%interp_matrices(ML_lag_rep%level)%m%assemble
   end if
 END DO
 !---Create vector interpolation operator
 IF(vec_interp)THEN
   CALL ML_oft_vlagrange%build_interp
-  DO i=oft_lagrange_minlev+1,oft_lagrange_nlevels
+  DO i=ML_oft_lagrange%minlev+1,ML_oft_lagrange%nlevels
     CALL oft_lag_set_level(i)
     !---
-    if(oft_lagrange_level==oft_lagrange_blevel+1)then
+    if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
       CYCLE
     end if
     oft_lagrange_ops%vinterp=>ML_oft_vlagrange%interp_matrices(i)%m
@@ -1668,24 +1578,31 @@ TYPE(oft_lag_ops), POINTER :: ops
 class(oft_mesh), pointer :: cmesh
 CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
+CLASS(oft_scalar_fem), POINTER :: lag_fine
 DEBUG_STACK_PUSH
 !---
-if(ML_oft_lagrange%ml_mesh%level<1)then
+if(ML_lag_rep%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','lag_ginterpmatrix',__FILE__)
 end if
-cmesh=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%level-1)
+cmesh=>ML_lag_rep%ml_mesh%meshes(ML_lag_rep%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "lag_ginterpmatrix", __FILE__)
-if(oft_lagrange%order/=1)then
+SELECT TYPE(this=>ML_lag_rep%current_level)
+  CLASS IS(oft_scalar_fem)
+    lag_fine=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE type","lag_ginterpmatrix",__FILE__)
+END SELECT
+if(lag_fine%order/=1)then
   call oft_abort('Attempted geometric interpolation for pd > 1','lag_ginterpmatrix',__FILE__)
 end if
 ops=>oft_lagrange_ops
-lag_cors=>ML_oft_lagrange%levels(oft_lagrange_level-1)%fe
-ALLOCATE(ML_oft_lagrange%interp_graphs(ML_oft_lagrange%level)%g)
-ops%interp_graph=>ML_oft_lagrange%interp_graphs(ML_oft_lagrange%level)%g
+lag_cors=>ML_lag_rep%levels(ML_lag_rep%level-1)%fe
+ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
+ops%interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
 !---Setup matrix sizes
-ops%interp_graph%nr=oft_lagrange%ne
-ops%interp_graph%nrg=oft_lagrange%global%ne
+ops%interp_graph%nr=lag_fine%ne
+ops%interp_graph%nrg=lag_fine%global%ne
 ops%interp_graph%nc=lag_cors%ne
 ops%interp_graph%ncg=lag_cors%global%ne
 !---Setup Matrix graph
@@ -1722,7 +1639,7 @@ END DO
 ! Construct matrix
 !---------------------------------------------------------------------------
 CALL oft_lag_create(lag_vec)
-CALL oft_lag_create(lag_vec_cors,oft_lagrange_level-1)
+CALL oft_lag_create(lag_vec_cors,ML_lag_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>ops%interp_graph
@@ -1785,40 +1702,47 @@ TYPE(oft_lag_ops), POINTER :: ops
 CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 class(oft_mesh), pointer :: mesh
+CLASS(oft_scalar_fem), POINTER :: lag_fine
 DEBUG_STACK_PUSH
-mesh=>oft_lagrange%mesh
+SELECT TYPE(this=>ML_lag_rep%current_level)
+  CLASS IS(oft_scalar_fem)
+    lag_fine=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE type","lag_pinterpmatrix",__FILE__)
+END SELECT
+mesh=>lag_fine%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
 !---
 ops=>oft_lagrange_ops
-SELECT TYPE(this=>ML_oft_lagrange%levels(oft_lagrange_level-1)%fe)
+SELECT TYPE(this=>ML_lag_rep%levels(ML_lag_rep%level-1)%fe)
   CLASS IS(oft_scalar_fem)
     lag_cors=>this
   CLASS DEFAULT
     CALL oft_abort("Error casting coarse level", "lag_pinterpmatrix", __FILE__)
 END SELECT
-! lag_cors=>ML_oft_lagrange%levels(oft_lagrange_level-1)%fe
+! lag_cors=>ML_lag_rep%levels(ML_lag_rep%level-1)%fe
 !WRITE(*,*)lag_cors%gstruct
-!WRITE(*,*)oft_lagrange%gstruct
-CALL oft_lag_nodes(oft_lagrange%order,ed_nodes,fc_nodes,c_nodes)
-ALLOCATE(ML_oft_lagrange%interp_graphs(ML_oft_lagrange%level)%g)
-ops%interp_graph=>ML_oft_lagrange%interp_graphs(ML_oft_lagrange%level)%g
+!WRITE(*,*)lag_fine%gstruct
+CALL oft_lag_nodes(lag_fine%order,ed_nodes,fc_nodes,c_nodes)
+ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
+ops%interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
 !---Setup matrix sizes
-ops%interp_graph%nr=oft_lagrange%ne
-ops%interp_graph%nrg=oft_lagrange%global%ne
+ops%interp_graph%nr=lag_fine%ne
+ops%interp_graph%nrg=lag_fine%global%ne
 ops%interp_graph%nc=lag_cors%ne
 ops%interp_graph%ncg=lag_cors%global%ne
 !---Setup Matrix graph
 ALLOCATE(ops%interp_graph%kr(ops%interp_graph%nr+1))
 ops%interp_graph%nnz=mesh%np
 ops%interp_graph%nnz=ops%interp_graph%nnz + &
-  (2+lag_cors%gstruct(2))*mesh%ne*oft_lagrange%gstruct(2)
+  (2+lag_cors%gstruct(2))*mesh%ne*lag_fine%gstruct(2)
 ops%interp_graph%nnz=ops%interp_graph%nnz + &
   (mesh%face_np+lag_cors%gstruct(2)*mesh%face_np &
-  + lag_cors%gstruct(3))*mesh%nf*oft_lagrange%gstruct(3)
+  + lag_cors%gstruct(3))*mesh%nf*lag_fine%gstruct(3)
 ops%interp_graph%nnz=ops%interp_graph%nnz + &
   (mesh%cell_np+lag_cors%gstruct(2)*mesh%cell_ne &
   + lag_cors%gstruct(3)*mesh%cell_nf &
-  + lag_cors%gstruct(4))*mesh%nc*oft_lagrange%gstruct(4)
+  + lag_cors%gstruct(4))*mesh%nc*lag_fine%gstruct(4)
 ALLOCATE(ops%interp_graph%lc(ops%interp_graph%nnz))
 ops%interp_graph%lc=0_i4
 !---Construct matrix
@@ -1827,25 +1751,25 @@ DO i=1,mesh%np
 END DO
 !---
 DO i=1,mesh%ne
-  DO j=1,oft_lagrange%gstruct(2)
-    ifine = mesh%np + (i-1)*oft_lagrange%gstruct(2) + j
+  DO j=1,lag_fine%gstruct(2)
+    ifine = mesh%np + (i-1)*lag_fine%gstruct(2) + j
     ops%interp_graph%kr(ifine)=2+lag_cors%gstruct(2)
   END DO
 END DO
 !---
 DO i=1,mesh%nf
-  DO j=1,oft_lagrange%gstruct(3)
-    ifine = mesh%np+oft_lagrange%gstruct(2)*mesh%ne &
-      + (i-1)*oft_lagrange%gstruct(3) + j
+  DO j=1,lag_fine%gstruct(3)
+    ifine = mesh%np+lag_fine%gstruct(2)*mesh%ne &
+      + (i-1)*lag_fine%gstruct(3) + j
     ops%interp_graph%kr(ifine)= mesh%face_np &
       + mesh%face_np*lag_cors%gstruct(2)+lag_cors%gstruct(3)
   END DO
 END DO
 !---
 DO i=1,mesh%nc
-  DO j=1,oft_lagrange%gstruct(4)
-    ifine = mesh%np + oft_lagrange%gstruct(2)*mesh%ne &
-      + oft_lagrange%gstruct(3)*mesh%nf + (i-1)*oft_lagrange%gstruct(4) + j
+  DO j=1,lag_fine%gstruct(4)
+    ifine = mesh%np + lag_fine%gstruct(2)*mesh%ne &
+      + lag_fine%gstruct(3)*mesh%nf + (i-1)*lag_fine%gstruct(4) + j
     ops%interp_graph%kr(ifine) = mesh%cell_np &
       + mesh%cell_ne*lag_cors%gstruct(2) &
       + mesh%cell_nf*lag_cors%gstruct(3) + lag_cors%gstruct(4)
@@ -1863,8 +1787,8 @@ END DO
 !---
 DO i=1,mesh%ne
   etmp=mesh%le(:,i)
-  DO j=1,oft_lagrange%gstruct(2)
-    ifine = mesh%np + (i-1)*oft_lagrange%gstruct(2) + j
+  DO j=1,lag_fine%gstruct(2)
+    ifine = mesh%np + (i-1)*lag_fine%gstruct(2) + j
     jb=ops%interp_graph%kr(ifine)-1
     DO k=1,2
       ops%interp_graph%lc(jb+k)=etmp(k)
@@ -1882,9 +1806,9 @@ END DO
 DO i=1,mesh%nf
   ftmp=mesh%lf(:,i)
   fetmp=mesh%lfe(:,i)
-  DO j=1,oft_lagrange%gstruct(3)
-    ifine = mesh%np+oft_lagrange%gstruct(2)*mesh%ne &
-      + (i-1)*oft_lagrange%gstruct(3) + j
+  DO j=1,lag_fine%gstruct(3)
+    ifine = mesh%np+lag_fine%gstruct(2)*mesh%ne &
+      + (i-1)*lag_fine%gstruct(3) + j
     jb=ops%interp_graph%kr(ifine)-1
     DO k=1,mesh%face_np
       ops%interp_graph%lc(jb+k)=ftmp(k)
@@ -1909,9 +1833,9 @@ END DO
 !---
 DO i=1,mesh%nc
   ctmp=mesh%lc(:,i)
-  DO j=1,oft_lagrange%gstruct(4)
-    ifine = mesh%np + oft_lagrange%gstruct(2)*mesh%ne &
-      + oft_lagrange%gstruct(3)*mesh%nf + (i-1)*oft_lagrange%gstruct(4) + j
+  DO j=1,lag_fine%gstruct(4)
+    ifine = mesh%np + lag_fine%gstruct(2)*mesh%ne &
+      + lag_fine%gstruct(3)*mesh%nf + (i-1)*lag_fine%gstruct(4) + j
     jb=ops%interp_graph%kr(ifine)-1
     DO k=1,mesh%cell_np
       ops%interp_graph%lc(jb+k)=ctmp(k)
@@ -1949,7 +1873,7 @@ END DO
 ! Construct matrix
 !---------------------------------------------------------------------------
 CALL oft_lag_create(lag_vec)
-CALL oft_lag_create(lag_vec_cors,oft_lagrange_level-1)
+CALL oft_lag_create(lag_vec_cors,ML_lag_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>ops%interp_graph
@@ -1987,10 +1911,10 @@ DO i=1,mesh%ne
     IF(ABS(mesh%lce(ed,cell))==i)EXIT
   END DO
   IF(ed>mesh%cell_ne)CALL oft_abort("Could not find edge", "", __FILE__)
-  DO j=1,oft_lagrange%gstruct(2)
-    ifine = mesh%np + (i-1)*oft_lagrange%gstruct(2) + j
-    dof = mesh%cell_np + (ed-1)*oft_lagrange%gstruct(2) + j
-    CALL oft_lag_npos(oft_lagrange,cell,dof,f)
+  DO j=1,lag_fine%gstruct(2)
+    ifine = mesh%np + (i-1)*lag_fine%gstruct(2) + j
+    dof = mesh%cell_np + (ed-1)*lag_fine%gstruct(2) + j
+    CALL oft_lag_npos(lag_fine,cell,dof,f)
     DO k=1,2
       dof=mesh%cell_ed(k,ed)
       CALL oft_lag_eval(lag_cors,cell,dof,f,val)
@@ -2023,12 +1947,12 @@ DO i=1,mesh%nf
     IF(ABS(mesh%lcf(fc,cell))==i)EXIT
   END DO
   IF(fc>mesh%cell_nf)CALL oft_abort("Could not find face", "", __FILE__)
-  DO j=1,oft_lagrange%gstruct(3)
-    ifine = mesh%np + oft_lagrange%gstruct(2)*mesh%ne &
-          + (i-1)*oft_lagrange%gstruct(3) + j
-    dof = mesh%cell_np + oft_lagrange%gstruct(2)*mesh%cell_ne &
-          + (fc-1)*oft_lagrange%gstruct(3) + j
-    CALL oft_lag_npos(oft_lagrange,cell,dof,f)
+  DO j=1,lag_fine%gstruct(3)
+    ifine = mesh%np + lag_fine%gstruct(2)*mesh%ne &
+          + (i-1)*lag_fine%gstruct(3) + j
+    dof = mesh%cell_np + lag_fine%gstruct(2)*mesh%cell_ne &
+          + (fc-1)*lag_fine%gstruct(3) + j
+    CALL oft_lag_npos(lag_fine,cell,dof,f)
     DO k=1,mesh%face_np
       dof=mesh%cell_fc(k,fc)
       CALL oft_lag_eval(lag_cors,cell,dof,f,val)
@@ -2062,13 +1986,13 @@ deallocate(fmap)
 allocate(jcors(lag_cors%nce))
 DO i=1,mesh%nc
   CALL lag_cors%ncdofs(i, jcors)
-  DO j=1,oft_lagrange%gstruct(4)
-    ifine = mesh%np + oft_lagrange%gstruct(2)*mesh%ne &
-          + oft_lagrange%gstruct(3)*mesh%nf + (i-1)*oft_lagrange%gstruct(4) + j
-    dof = mesh%cell_np + oft_lagrange%gstruct(2)*mesh%cell_ne &
-          + oft_lagrange%gstruct(3)*mesh%cell_nf &
+  DO j=1,lag_fine%gstruct(4)
+    ifine = mesh%np + lag_fine%gstruct(2)*mesh%ne &
+          + lag_fine%gstruct(3)*mesh%nf + (i-1)*lag_fine%gstruct(4) + j
+    dof = mesh%cell_np + lag_fine%gstruct(2)*mesh%cell_ne &
+          + lag_fine%gstruct(3)*mesh%cell_nf &
           + j
-    CALL oft_lag_npos(oft_lagrange,cell,dof,f)
+    CALL oft_lag_npos(lag_fine,cell,dof,f)
     DO k=1,lag_cors%nce
       CALL oft_lag_eval(lag_cors,i,k,f,val)
       i_ind=ifine
@@ -2335,7 +2259,7 @@ IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','lag_getlop_pre',__FILE__)
-IF(toplev>oft_lagrange_nlevels)CALL oft_abort('Maximum level is > lag_nlevels','lag_getlop_pre',__FILE__)
+IF(toplev>ML_oft_lagrange%nlevels)CALL oft_abort('Maximum level is > lag_nlevels','lag_getlop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------

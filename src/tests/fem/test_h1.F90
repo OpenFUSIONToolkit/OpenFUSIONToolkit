@@ -25,7 +25,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_native_gmres_solver
 USE oft_solver_utils, ONLY: create_native_mlpre, create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
@@ -36,7 +36,7 @@ USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_nlevels, oft_h1_set_level, oft_h1_ops, &
-  oft_h1_level, ML_oft_h1
+  oft_h1_level, ML_oft_h1, oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: h1_getmop, h1_setup_interp, h1_getmop_pre, h1_mloptions, &
   oft_h1_rinterp, oft_h1_grad_zerop
@@ -101,7 +101,7 @@ CALL oft_h1_set_level(oft_h1_nlevels)
 CALL oft_h1_create(u)
 CALL oft_h1_create(v)
 !---Get FE operators
-CALL h1_getmop(mop,'none')
+CALL h1_getmop(oft_h1,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(winv)
 winv%A=>mop

@@ -40,7 +40,7 @@ USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
   create_native_pre
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels
 USE fem_utils, ONLY: fem_interp
-USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type, oft_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lag_geval_all
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_h0_basis, ONLY: oft_h0, oft_h0_ops, ML_oft_h0_ops, oft_h0_geval_all, &
@@ -71,7 +71,9 @@ type, extends(fem_interp) :: oft_h1_rinterp
   class(oft_hcurl_fem), pointer :: hcurl_rep => NULL() !< H1(Curl) FE representation
 contains
   !> Retrieve local values for interpolation
-  procedure :: setup => h1_rinterp_setup
+  generic :: setup => setup1, setup2
+  procedure :: setup1 => h1_rinterp_setup1
+  procedure :: setup2 => h1_rinterp_setup2
   !> Reconstruct field
   procedure :: interp => h1_rinterp
   !> Destroy temporary internal storage
@@ -194,9 +196,9 @@ end subroutine h1_mloptions
 !!
 !! @note Should only be used via class \ref oft_h1_rinterp or children
 !---------------------------------------------------------------------------
-subroutine h1_rinterp_setup(self,mesh)
+subroutine h1_rinterp_setup1(self,h1_rep)
 class(oft_h1_rinterp), intent(inout) :: self
-class(oft_mesh), target, intent(inout) :: mesh
+class(oft_fem_comp_type), target, intent(inout) :: h1_rep
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
     CLASS IS(oft_h1_rinterp)
@@ -204,6 +206,7 @@ IF(ASSOCIATED(self%parent))THEN
       self%grad_vals=>this%grad_vals
       self%hgrad_rep=>this%hgrad_rep
       self%hcurl_rep=>this%hcurl_rep
+      self%mesh=>this%mesh
       self%cache_cell=>this%cache_cell
       self%cache_grad=>this%cache_grad
       self%cache_curl=>this%cache_curl
@@ -214,8 +217,19 @@ ELSE
   !---Get local slice
   CALL self%u%get_local(self%curl_vals,1)
   CALL self%u%get_local(self%grad_vals,2)
-  self%hgrad_rep=>oft_hgrad
-  self%hcurl_rep=>oft_hcurl
+  SELECT TYPE(this=>h1_rep%fields(1)%fe)
+    CLASS IS(oft_hcurl_fem)
+      self%hcurl_rep=>this
+      self%mesh=>this%mesh
+    CLASS DEFAULT
+      CALL oft_abort("Invalid HCurl space","h1_rinterp_setup",__FILE__)
+  END SELECT
+  SELECT TYPE(this=>h1_rep%fields(2)%fe)
+    CLASS IS(oft_h0_fem)
+      self%hgrad_rep=>this
+    CLASS DEFAULT
+      CALL oft_abort("Invalid HGrad space","h1_rinterp_setup",__FILE__)
+  END SELECT
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
     ALLOCATE(self%cache_grad(self%hgrad_rep%nce,0:oft_env%nthreads-1))
@@ -225,9 +239,49 @@ ELSE
   self%cache_grad=0.d0
   self%cache_curl=0.d0
 END IF
-IF((mesh%np/=self%hgrad_rep%mesh%np))CALL oft_abort("Mesh mismatch","h1_rinterp_setup",__FILE__)
-self%mesh=>mesh
-end subroutine h1_rinterp_setup
+end subroutine h1_rinterp_setup1
+!---------------------------------------------------------------------------
+!> Setup interpolator for H1 vector fields
+!!
+!! Fetches local representation used for interpolation from vector object
+!!
+!! @note Should only be used via class \ref oft_h1_rinterp or children
+!---------------------------------------------------------------------------
+subroutine h1_rinterp_setup2(self,hcurl_rep,hgrad_rep)
+class(oft_h1_rinterp), intent(inout) :: self
+class(oft_hcurl_fem), target, intent(inout) :: hcurl_rep
+class(oft_h0_fem), target, intent(inout) :: hgrad_rep
+IF(ASSOCIATED(self%parent))THEN
+  SELECT TYPE(this=>self%parent)
+    CLASS IS(oft_h1_rinterp)
+      self%curl_vals=>this%curl_vals
+      self%grad_vals=>this%grad_vals
+      self%hgrad_rep=>this%hgrad_rep
+      self%hcurl_rep=>this%hcurl_rep
+      self%mesh=>this%mesh
+      self%cache_cell=>this%cache_cell
+      self%cache_grad=>this%cache_grad
+      self%cache_curl=>this%cache_curl
+    CLASS DEFAULT
+      CALL oft_abort('Parent interpolator must be of same class','h1_rinterp_setup',__FILE__)
+  END SELECT
+ELSE
+  !---Get local slice
+  CALL self%u%get_local(self%curl_vals,1)
+  CALL self%u%get_local(self%grad_vals,2)
+  self%hcurl_rep=>hcurl_rep
+  self%hgrad_rep=>hgrad_rep
+  self%mesh=>self%hcurl_rep%mesh
+  IF(.NOT.ASSOCIATED(self%cache_cell))THEN
+    ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
+    ALLOCATE(self%cache_grad(self%hgrad_rep%nce,0:oft_env%nthreads-1))
+    ALLOCATE(self%cache_curl(self%hcurl_rep%nce,0:oft_env%nthreads-1))
+  END IF
+  self%cache_cell=-1
+  self%cache_grad=0.d0
+  self%cache_curl=0.d0
+END IF
+end subroutine h1_rinterp_setup2
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
 !!
@@ -874,7 +928,8 @@ end subroutine h1_curltp
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
-subroutine h1_getmop(mat,bc)
+subroutine h1_getmop(h1_rep,mat,bc)
+class(oft_fem_comp_type), intent(inout) :: h1_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
@@ -884,17 +939,32 @@ real(r8), allocatable, dimension(:,:) :: rop_curl,rop_grad
 real(r8), allocatable, dimension(:,:) :: mop11,mop12,mop21,mop22
 logical :: curved
 CLASS(oft_vector), POINTER :: oft_h1_vec
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+CLASS(oft_h0_fem), POINTER :: hgrad_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H1::MOP'
   CALL mytimer%tick()
 END IF
+!---
+SELECT TYPE(this=>h1_rep%fields(1)%fe)
+  CLASS IS(oft_hcurl_fem)
+    hcurl_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HCurl space","h1_getmop",__FILE__)
+END SELECT
+SELECT TYPE(this=>h1_rep%fields(2)%fe)
+  CLASS IS(oft_h0_fem)
+    hgrad_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HGrad space","h1_getmop",__FILE__)
+END SELECT
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL oft_h1%mat_create(mat)
+  CALL h1_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
@@ -903,60 +973,60 @@ END IF
 !---------------------------------------------------------------------------
 !$omp parallel private(j_curl,j_grad,rop_curl,rop_grad,det,mop11,mop12,mop21,mop22, &
 !$omp curved,goptmp,m,vol,jc,jr)
-allocate(j_curl(oft_hcurl%nce)) ! Local DOF and matrix indices
-allocate(j_grad(oft_hgrad%nce)) ! Local DOF and matrix indices
-allocate(rop_grad(3,oft_hgrad%nce)) ! Reconstructed gradient operator
-allocate(rop_curl(3,oft_hcurl%nce)) ! Reconstructed gradient operator
-allocate(mop11(oft_hcurl%nce,oft_hcurl%nce)) ! Local laplacian matrix
-allocate(mop12(oft_hcurl%nce,oft_hgrad%nce)) ! Local laplacian matrix
-allocate(mop21(oft_hgrad%nce,oft_hcurl%nce)) ! Local laplacian matrix
-allocate(mop22(oft_hgrad%nce,oft_hgrad%nce)) ! Local laplacian matrix
+allocate(j_curl(hcurl_rep%nce)) ! Local DOF and matrix indices
+allocate(j_grad(hgrad_rep%nce)) ! Local DOF and matrix indices
+allocate(rop_grad(3,hgrad_rep%nce)) ! Reconstructed gradient operator
+allocate(rop_curl(3,hcurl_rep%nce)) ! Reconstructed gradient operator
+allocate(mop11(hcurl_rep%nce,hcurl_rep%nce)) ! Local laplacian matrix
+allocate(mop12(hcurl_rep%nce,hgrad_rep%nce)) ! Local laplacian matrix
+allocate(mop21(hgrad_rep%nce,hcurl_rep%nce)) ! Local laplacian matrix
+allocate(mop22(hgrad_rep%nce,hgrad_rep%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,oft_hgrad%mesh%nc
-  curved=cell_is_curved(oft_hgrad%mesh,i) ! Straight cell test
+do i=1,hgrad_rep%mesh%nc
+  curved=cell_is_curved(hgrad_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   mop11=0.d0; mop12=0.d0
   mop21=0.d0; mop22=0.d0
-  do m=1,oft_hcurl%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call oft_hgrad%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_hcurl%quad%wts(m)
-    call oft_hcurl_eval_all(oft_hcurl,i,oft_hcurl%quad%pts(:,m),rop_curl,goptmp)
-    call oft_h0_geval_all(oft_hgrad,i,oft_hcurl%quad%pts(:,m),rop_grad,goptmp)
+  do m=1,hcurl_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call hgrad_rep%mesh%jacobian(i,hcurl_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*hcurl_rep%quad%wts(m)
+    call oft_hcurl_eval_all(hcurl_rep,i,hcurl_rep%quad%pts(:,m),rop_curl,goptmp)
+    call oft_h0_geval_all(hgrad_rep,i,hcurl_rep%quad%pts(:,m),rop_grad,goptmp)
     !---Compute local matrix contributions
-    do jr=1,oft_hcurl%nce
-      do jc=1,oft_hcurl%nce
+    do jr=1,hcurl_rep%nce
+      do jc=1,hcurl_rep%nce
         mop11(jr,jc) = mop11(jr,jc) + DOT_PRODUCT(rop_curl(:,jr),rop_curl(:,jc))*det
       end do
-      do jc=1,oft_hgrad%nce
+      do jc=1,hgrad_rep%nce
         mop12(jr,jc) = mop12(jr,jc) + DOT_PRODUCT(rop_curl(:,jr),rop_grad(:,jc))*det
       end do
     end do
-    do jr=1,oft_hgrad%nce
-      do jc=1,oft_hgrad%nce
+    do jr=1,hgrad_rep%nce
+      do jc=1,hgrad_rep%nce
         mop22(jr,jc) = mop22(jr,jc) + DOT_PRODUCT(rop_grad(:,jr),rop_grad(:,jc))*det
       end do
     end do
   end do
   !---Get local to global DOF mapping
-  call oft_hcurl%ncdofs(i,j_curl)
-  call oft_hgrad%ncdofs(i,j_grad)
+  call hcurl_rep%ncdofs(i,j_curl)
+  call hgrad_rep%ncdofs(i,j_grad)
   mop21=TRANSPOSE(mop12)
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("none")
-      mop21(1:oft_hgrad%mesh%cell_np,:)=0.d0
-      mop22(1:oft_hgrad%mesh%cell_np,:)=0.d0
+      mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
+      mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
     CASE("zerob")
-      DO jr=1,oft_hcurl%nce
-        IF(oft_hcurl%global%gbe(j_curl(jr)))THEN
+      DO jr=1,hcurl_rep%nce
+        IF(hcurl_rep%global%gbe(j_curl(jr)))THEN
           mop11(jr,:)=0.d0
           mop12(jr,:)=0.d0
         END IF
       END DO
-      mop21(1:oft_hgrad%mesh%cell_np,:)=0.d0
-      mop22(1:oft_hgrad%mesh%cell_np,:)=0.d0
-      DO jr=oft_hgrad%mesh%cell_np,oft_hgrad%nce
-        IF(oft_hgrad%global%gbe(j_grad(jr)))THEN
+      mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
+      mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
+      DO jr=hgrad_rep%mesh%cell_np,hgrad_rep%nce
+        IF(hgrad_rep%global%gbe(j_grad(jr)))THEN
           mop12(jr,:)=0.d0
           mop22(jr,:)=0.d0
         END IF
@@ -964,12 +1034,12 @@ do i=1,oft_hgrad%mesh%nc
   END SELECT
   !---Add local values to global matrix
   ! !$omp critical (h1_getmop_1)
-  call mat%atomic_add_values(j_curl,j_curl,mop11,oft_hcurl%nce,oft_hcurl%nce,1,1)
-  call mat%atomic_add_values(j_curl,j_grad,mop12,oft_hcurl%nce,oft_hgrad%nce,1,2)
+  call mat%atomic_add_values(j_curl,j_curl,mop11,hcurl_rep%nce,hcurl_rep%nce,1,1)
+  call mat%atomic_add_values(j_curl,j_grad,mop12,hcurl_rep%nce,hgrad_rep%nce,1,2)
   ! !$omp end critical (h1_getmop_1)
   ! !$omp critical (h1_getmop_2)
-  call mat%atomic_add_values(j_grad,j_curl,mop21,oft_hgrad%nce,oft_hcurl%nce,2,1)
-  call mat%atomic_add_values(j_grad,j_grad,mop22,oft_hgrad%nce,oft_hgrad%nce,2,2)
+  call mat%atomic_add_values(j_grad,j_curl,mop21,hgrad_rep%nce,hcurl_rep%nce,2,1)
+  call mat%atomic_add_values(j_grad,j_grad,mop22,hgrad_rep%nce,hgrad_rep%nce,2,2)
   ! !$omp end critical (h1_getmop_2)
 end do
 deallocate(j_curl,j_grad)
@@ -981,42 +1051,42 @@ ALLOCATE(mop11(1,1),j_curl(1))
 SELECT CASE(TRIM(bc))
   CASE("none")
     mop11(1,1)=1.d0
-    DO i=1,oft_hgrad%mesh%np
-      IF(oft_hgrad%mesh%bp(i))CYCLE
+    DO i=1,hgrad_rep%mesh%np
+      IF(hgrad_rep%mesh%bp(i))CYCLE
       j_curl=i
       call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
-    DO i=1,oft_hgrad%mesh%nbp
-      jr=oft_hgrad%mesh%lbp(i)
-      ! IF(.NOT.oft_hgrad%mesh%linkage%lpo(i))CYCLE
-      IF(.NOT.oft_hgrad%mesh%pstitch%leo(i))CYCLE
+    DO i=1,hgrad_rep%mesh%nbp
+      jr=hgrad_rep%mesh%lbp(i)
+      ! IF(.NOT.hgrad_rep%mesh%linkage%lpo(i))CYCLE
+      IF(.NOT.hgrad_rep%mesh%pstitch%leo(i))CYCLE
       j_curl=jr
       call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
   CASE("zerob")
     mop11(1,1)=1.d0
-    DO i=1,oft_hcurl%nbe
-      jr=oft_hcurl%lbe(i)
-      IF(.NOT.oft_hcurl%global%gbe(jr))CYCLE
-      IF(.NOT.oft_hcurl%linkage%leo(i))CYCLE
+    DO i=1,hcurl_rep%nbe
+      jr=hcurl_rep%lbe(i)
+      IF(.NOT.hcurl_rep%global%gbe(jr))CYCLE
+      IF(.NOT.hcurl_rep%linkage%leo(i))CYCLE
       j_curl=jr
       call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
     END DO
-    DO i=1,oft_hgrad%mesh%np
-      IF(.NOT.oft_hgrad%linkage%be(i))CYCLE
+    DO i=1,hgrad_rep%mesh%np
+      IF(.NOT.hgrad_rep%linkage%be(i))CYCLE
       j_curl=i
       call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
     END DO
-    DO i=1,oft_hgrad%nbe
-      jr=oft_hgrad%lbe(i)
-      IF(.NOT.oft_hgrad%global%gbe(jr))CYCLE
-      IF(.NOT.oft_hgrad%linkage%leo(i))CYCLE
+    DO i=1,hgrad_rep%nbe
+      jr=hgrad_rep%lbe(i)
+      IF(.NOT.hgrad_rep%global%gbe(jr))CYCLE
+      IF(.NOT.hgrad_rep%linkage%leo(i))CYCLE
       j_curl=jr
       call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
     END DO
 END SELECT
 DEALLOCATE(j_curl,mop11)
-CALL oft_h1_create(oft_h1_vec)
+CALL h1_rep%vec_create(oft_h1_vec)
 CALL mat%assemble(oft_h1_vec)
 CALL oft_h1_vec%delete
 DEALLOCATE(oft_h1_vec)
@@ -1033,7 +1103,8 @@ end subroutine h1_getmop
 !! test functions for a H1 basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of H1::MOP
 !---------------------------------------------------------------------------
-subroutine oft_h1_project(field,x)
+subroutine oft_h1_project(h1_rep,field,x)
+class(oft_fem_comp_type), intent(inout) :: h1_rep
 class(fem_interp), intent(inout) :: field !< Vector field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto H1 basis
 integer(i4) :: i,jc,m
@@ -1042,7 +1113,22 @@ real(r8) :: det,vol,bcc(3),goptmp(3,4)
 real(r8), pointer, dimension(:) :: xcurl,xgrad
 real(r8), allocatable, dimension(:,:) :: rop_curl,rop_grad
 logical :: curved
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+CLASS(oft_h0_fem), POINTER :: hgrad_rep
 DEBUG_STACK_PUSH
+!---
+SELECT TYPE(this=>h1_rep%fields(1)%fe)
+  CLASS IS(oft_hcurl_fem)
+    hcurl_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HCurl space","h1_getmop",__FILE__)
+END SELECT
+SELECT TYPE(this=>h1_rep%fields(2)%fe)
+  CLASS IS(oft_h0_fem)
+    hgrad_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HGrad space","h1_getmop",__FILE__)
+END SELECT
 !---Initialize vectors to zero
 NULLIFY(xcurl,xgrad)
 call x%set(0.d0)
@@ -1050,24 +1136,24 @@ call x%get_local(xcurl,1)
 call x%get_local(xgrad,2)
 !---Integerate over the volume
 !$omp parallel default(firstprivate) shared(xcurl,xgrad) private(curved,det)
-allocate(j_hcurl(oft_hcurl%nce),rop_curl(3,oft_hcurl%nce))
-allocate(j_hgrad(oft_hgrad%nce),rop_grad(3,oft_hgrad%nce))
+allocate(j_hcurl(hcurl_rep%nce),rop_curl(3,hcurl_rep%nce))
+allocate(j_hgrad(hgrad_rep%nce),rop_grad(3,hgrad_rep%nce))
 !$omp do schedule(guided)
-do i=1,oft_hgrad%mesh%nc ! Loop over cells
-  call oft_hcurl%ncdofs(i,j_hcurl) ! Get DOFs
-  call oft_hgrad%ncdofs(i,j_hgrad) ! Get DOFs
-  curved=cell_is_curved(oft_hgrad%mesh,i) ! Straight cell test
-  do m=1,oft_hcurl%quad%np
-    if(curved.OR.m==1)call oft_hgrad%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_hcurl%quad%wts(m)
-    call field%interp(i,oft_hcurl%quad%pts(:,m),goptmp,bcc)
-    call oft_hcurl_eval_all(oft_hcurl,i,oft_hcurl%quad%pts(:,m),rop_curl,goptmp)
-    call oft_h0_geval_all(oft_hgrad,i,oft_hcurl%quad%pts(:,m),rop_grad,goptmp)
-    do jc=1,oft_hcurl%nce
+do i=1,hgrad_rep%mesh%nc ! Loop over cells
+  call hcurl_rep%ncdofs(i,j_hcurl) ! Get DOFs
+  call hgrad_rep%ncdofs(i,j_hgrad) ! Get DOFs
+  curved=cell_is_curved(hgrad_rep%mesh,i) ! Straight cell test
+  do m=1,hcurl_rep%quad%np
+    if(curved.OR.m==1)call hgrad_rep%mesh%jacobian(i,hcurl_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*hcurl_rep%quad%wts(m)
+    call field%interp(i,hcurl_rep%quad%pts(:,m),goptmp,bcc)
+    call oft_hcurl_eval_all(hcurl_rep,i,hcurl_rep%quad%pts(:,m),rop_curl,goptmp)
+    call oft_h0_geval_all(hgrad_rep,i,hcurl_rep%quad%pts(:,m),rop_grad,goptmp)
+    do jc=1,hcurl_rep%nce
       !$omp atomic
       xcurl(j_hcurl(jc))=xcurl(j_hcurl(jc))+DOT_PRODUCT(rop_curl(:,jc),bcc)*det
     end do
-    do jc=1,oft_hgrad%nce
+    do jc=1,hgrad_rep%nce
       !$omp atomic
       xgrad(j_hgrad(jc))=xgrad(j_hgrad(jc))+DOT_PRODUCT(rop_grad(:,jc),bcc)*det
     end do
@@ -1086,7 +1172,8 @@ end subroutine oft_h1_project
 !! @note This subroutine only performs the integration of the field with
 !! boundary test functions for a H1 basis
 !------------------------------------------------------------------------------
-SUBROUTINE oft_h1_bproject(field,x)
+SUBROUTINE oft_h1_bproject(h1_rep,field,x)
+class(oft_fem_comp_type), intent(inout) :: h1_rep
 CLASS(fem_interp), INTENT(inout) :: field !< Vector field for projection
 CLASS(oft_vector), INTENT(inout) :: x !< Field projected onto H1 basis
 INTEGER(i4) :: i,m,jc,cf,face,cell,ptmap(3)
@@ -1094,11 +1181,26 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j_hcurl,j_hgrad
 REAL(r8) :: vol,det,f(4),norm(3),etmp(3),goptmp(3,3),gop(3,4)
 REAL(r8), POINTER, DIMENSION(:) :: xcurl,xgrad
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: rop_curl,rop_grad
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+CLASS(oft_h0_fem), POINTER :: hgrad_rep
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_bmesh), POINTER :: smesh
 DEBUG_STACK_PUSH
-mesh=>oft_hcurl%mesh
-smesh=>oft_hcurl%mesh%bmesh
+!---
+SELECT TYPE(this=>h1_rep%fields(1)%fe)
+  CLASS IS(oft_hcurl_fem)
+    hcurl_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HCurl space","h1_getmop",__FILE__)
+END SELECT
+SELECT TYPE(this=>h1_rep%fields(2)%fe)
+  CLASS IS(oft_h0_fem)
+    hgrad_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HGrad space","h1_getmop",__FILE__)
+END SELECT
+mesh=>hcurl_rep%mesh
+smesh=>hcurl_rep%mesh%bmesh
 !---Initialize vectors to zero
 NULLIFY(xcurl,xgrad)
 call x%set(0.d0)
@@ -1106,14 +1208,14 @@ call x%get_local(xcurl,1)
 call x%get_local(xgrad,2)
 !---Operator integration loop
 !$omp parallel default(firstprivate) shared(xcurl,xgrad) private(det)
-allocate(j_hcurl(oft_hcurl%nce),rop_curl(3,oft_hcurl%nce))
-allocate(j_hgrad(oft_hgrad%nce),rop_grad(3,oft_hgrad%nce))
+allocate(j_hcurl(hcurl_rep%nce),rop_curl(3,hcurl_rep%nce))
+allocate(j_hgrad(hgrad_rep%nce),rop_grad(3,hgrad_rep%nce))
 !$omp do schedule(guided)
 do i=1,smesh%nc
   CALL mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
   !---Get local to global DOF mapping
-  call oft_hcurl%ncdofs(cell,j_hcurl)
-  call oft_hgrad%ncdofs(cell,j_hgrad)
+  call hcurl_rep%ncdofs(cell,j_hcurl)
+  call hgrad_rep%ncdofs(cell,j_hgrad)
   !---Get local reconstructed operators
   do m=1,oft_bhcurl%quad%np ! Loop over quadrature points
     call smesh%jacobian(i,oft_bhcurl%quad%pts(:,m),goptmp,vol)
@@ -1123,14 +1225,14 @@ do i=1,smesh%nc
     CALL mesh%surf_to_vol(oft_bhcurl%quad%pts(:,m),ptmap,f)
     call mesh%jacobian(cell,f,gop,vol)
     call field%interp(cell,f,gop,etmp)
-    call oft_hcurl_eval_all(oft_hcurl,cell,f,rop_curl,gop)
-    call oft_h0_geval_all(oft_hgrad,cell,f,rop_grad,gop)
-    do jc=1,oft_hcurl%nce
+    call oft_hcurl_eval_all(hcurl_rep,cell,f,rop_curl,gop)
+    call oft_h0_geval_all(hgrad_rep,cell,f,rop_grad,gop)
+    do jc=1,hcurl_rep%nce
       !$omp atomic
       xcurl(j_hcurl(jc))=xcurl(j_hcurl(jc)) &
       + DOT_PRODUCT(cross_product(rop_curl(:,jc),etmp),norm)*det
     end do
-    do jc=1,oft_hgrad%nce
+    do jc=1,hgrad_rep%nce
       !$omp atomic
       xgrad(j_hgrad(jc))=xgrad(j_hgrad(jc)) &
       + DOT_PRODUCT(cross_product(rop_grad(:,jc),etmp),norm)*det
@@ -1704,7 +1806,7 @@ DO i=minlev,oft_h1_nlevels
   CALL oft_h1_create(u)
   !---Get Ev range
   NULLIFY(mop)
-  CALL h1_getmop(mop,'lop')
+  CALL h1_getmop(oft_h1,mop,'lop')
   CALL create_diagmatrix(md,mop%D)
   !---
   arsolver%A=>mop
@@ -1792,7 +1894,7 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL h1_getmop(mats(i)%M,'none')
+    CALL h1_getmop(oft_h1,mats(i)%M,'none')
   END IF
   IF(i>1)ml_int(i-1)%M=>oft_h1_ops%interp
 END DO

@@ -34,7 +34,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_mlpre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, &
+USE oft_lag_basis, ONLY: oft_lag_setup, &
   oft_lag_set_level, oft_lagrange_ops, oft_lagrange_blevel, oft_lagrange, &
   ML_oft_lagrange
 USE oft_lag_fields, ONLY: oft_lag_create
@@ -76,7 +76,7 @@ CALL plot_file%setup("Example2")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---Construct FE levels
 CALL oft_lag_setup(mg_mesh,order)
-CALL lag_setup_interp
+CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!\subsection doc_ex2_code_ml Construct ML structures
@@ -85,7 +85,7 @@ lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!constructed and passed to form the preconditioner. The transfer level is skipped by setting
 !!the level to the negative of the true FE level. This causes the preconditioner to skip smoothing
 !!and only interpolate/inject on this level.
-nlevels=oft_lagrange_nlevels
+nlevels=ML_oft_lagrange%nlevels
 ALLOCATE(ml_lop(nlevels),ml_int(nlevels-1))
 ALLOCATE(df(nlevels),nu(nlevels),levels(nlevels))
 DO i=1,nlevels
@@ -99,7 +99,7 @@ DO i=1,nlevels
   CALL oft_lag_getlop(oft_lagrange,ml_lop(i)%M,'zerob')
   IF(i>1)ml_int(i-1)%M=>oft_lagrange_ops%interp
 END DO
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !!\subsection doc_ex2_code_fields Setup solver fields
 !---Create solver fields
 CALL oft_lag_create(u)

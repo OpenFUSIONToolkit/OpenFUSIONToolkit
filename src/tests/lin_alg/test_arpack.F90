@@ -75,7 +75,7 @@ TYPE(oft_iram_eigsolver) :: arsolver2
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)OPEN(NEWUNIT=iounit,FILE='arpack.results')
-DO i=oft_lagrange_nlevels-order+1,oft_lagrange_nlevels
+DO i=ML_oft_lagrange%nlevels-order+1,ML_oft_lagrange%nlevels
   CALL oft_lag_set_level(i)
   !---Create fields
   CALL oft_lag_create(u)

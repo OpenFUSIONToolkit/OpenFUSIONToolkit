@@ -95,7 +95,7 @@ USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
-  oft_lagrange_nlevels, oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
+  oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
   oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
@@ -717,11 +717,11 @@ END IF
 IF(xmhd_monitor_div)THEN
   CALL oft_xmhd_pop(u,sub_fields)
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup(mesh)
+  CALL Bfield%setup(oft_hcurl,oft_hgrad)
   !---Compute jump error
   jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
   divfield%u=>sub_fields%B
-  CALL divfield%setup(mesh)
+  CALL divfield%setup(oft_hcurl,oft_hgrad)
   derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
 ELSE
   jump_error=-1.d0
@@ -983,11 +983,11 @@ DO i=1,nsteps
     IF(xmhd_monitor_div)THEN
       CALL oft_xmhd_pop(u,sub_fields)
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup(mesh)
+      CALL Bfield%setup(oft_hcurl,oft_hgrad)
       !---Compute jump error
       jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
       divfield%u=>sub_fields%B
-      CALL divfield%setup(mesh)
+      CALL divfield%setup(oft_hcurl,oft_hgrad)
       derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
     END IF
 !---------------------------------------------------------------------------
@@ -1261,11 +1261,11 @@ tempe_avg=mop%diag_vals(7)/mesh_vol
 IF(xmhd_monitor_div)THEN
   CALL oft_xmhd_pop(du,sub_fields)
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup(mesh)
+  CALL Bfield%setup(oft_hcurl,oft_hgrad)
   !---Compute jump error
   jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
   divfield%u=>sub_fields%B
-  CALL divfield%setup(mesh)
+  CALL divfield%setup(oft_hcurl,oft_hgrad)
   derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
 ELSE
   jump_error=-1.d0
@@ -1417,11 +1417,11 @@ DO i=1,nsteps
     IF(xmhd_monitor_div)THEN
       CALL oft_xmhd_pop(du,sub_fields)
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup(mesh)
+      CALL Bfield%setup(oft_hcurl,oft_hgrad)
       !---Compute jump error
       jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
       divfield%u=>sub_fields%B
-      CALL divfield%setup(mesh)
+      CALL divfield%setup(oft_hcurl,oft_hgrad)
       derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
     END IF
 !---------------------------------------------------------------------------
@@ -2310,7 +2310,7 @@ do ii=1,mesh%tloc_c(ip)%n
   IF(xmhd_vbcdir)THEN
     DO jr=1,oft_lagrange%nce
       IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(j_lag(jr),vbc_type,umat)
+        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),vbc_type,umat)
         DO m=1,xmhd_rep%nfields
           IF(ASSOCIATED(mtmp(3,m)%m))THEN
             DO jc=1,SIZE(mtmp(3,m)%m,2)
@@ -2372,7 +2372,7 @@ IF(xmhd_vbcdir)THEN
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
     jtmp=j
-    CALL lag_vbc_diag(j,vbc_type,umat)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,umat)
     DO jr=1,3
       DO jc=1,3
         CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr+2,jc+2)
@@ -3296,10 +3296,10 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=MATMUL(mloc,vout(j,:))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=vout(j,:)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3557,10 +3557,10 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=MATMUL(mloc,vout(j,:))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=vout(j,:)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -4719,8 +4719,8 @@ IF(linear)THEN
 ! Project magnetic field and plot
 !---------------------------------------------------------------------------
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup(mesh)
-  CALL oft_lag_vproject(oft_vlagrange,Bfield,bp)
+  CALL Bfield%setup(oft_hcurl,oft_hgrad)
+  CALL oft_lag_vproject(oft_lagrange,Bfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
   vals=>bvout(1,:)
@@ -4732,8 +4732,8 @@ IF(linear)THEN
   CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
-  CALL Jfield%setup(mesh)
-  CALL oft_lag_vproject(oft_vlagrange,Jfield,bp)
+  CALL Jfield%setup(oft_hcurl,oft_hgrad)
+  CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
   vals=>bvout(1,:)
@@ -4902,8 +4902,8 @@ DO
 ! Project magnetic field and plot
 !---------------------------------------------------------------------------
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup(mesh)
-      CALL oft_lag_vproject(oft_vlagrange,Bfield,bp)
+      CALL Bfield%setup(oft_hcurl,oft_hgrad)
+      CALL oft_lag_vproject(oft_lagrange,Bfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
       vals=>bvout(1,:)
@@ -4916,8 +4916,8 @@ DO
       !---Hyper-res aux field
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
-        CALL J2field%setup(mesh)
-        CALL oft_lag_vproject(oft_vlagrange,J2field,bp)
+        CALL J2field%setup(oft_hcurl)
+        CALL oft_lag_vproject(oft_lagrange,J2field,bp)
         CALL ap%set(0.d0)
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
@@ -4930,8 +4930,8 @@ DO
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
-      CALL Jfield%setup(mesh)
-      CALL oft_lag_vproject(oft_vlagrange,Jfield,bp)
+      CALL Jfield%setup(oft_hcurl,oft_hgrad)
+      CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
       vals=>bvout(1,:)

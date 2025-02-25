@@ -14,13 +14,10 @@
 MODULE oft_lag_fields
 USE oft_base
 USE oft_la_base, ONLY: oft_vector
-USE oft_lag_basis, ONLY: oft_lagrange, oft_vlagrange, oft_blagrange, ML_oft_lagrange, &
-  ML_oft_vlagrange, ML_oft_blagrange
+USE oft_lag_basis, ONLY: ML_oft_lagrange, ML_oft_vlagrange, ML_oft_blagrange
 IMPLICIT NONE
 #include "local.h"
 contains
-!---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_create
 !---------------------------------------------------------------------------
 !> Create a Lagrange scalar field
 !!
@@ -39,8 +36,6 @@ CALL ML_oft_lagrange%vec_create(new,level=level,cache=cache,native=native)
 DEBUG_STACK_POP
 end subroutine oft_lag_create
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_blag_create
-!---------------------------------------------------------------------------
 !> Create a boundary Lagrange scalar field
 !!
 !! @param[out] new field to create
@@ -57,8 +52,6 @@ DEBUG_STACK_PUSH
 CALL ML_oft_blagrange%vec_create(new,level=level,cache=cache,native=native)
 DEBUG_STACK_POP
 end subroutine oft_blag_create
-!---------------------------------------------------------------------------
-! SUBROUTINE: oft_lag_vcreate
 !---------------------------------------------------------------------------
 !> Create a Lagrange vector field
 !!

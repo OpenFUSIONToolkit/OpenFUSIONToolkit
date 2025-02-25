@@ -50,7 +50,7 @@ USE oft_h0_basis, ONLY: oft_h0, oft_h0_setup
 USE oft_h0_fields, ONLY: oft_h0_create!, oft_h0_load
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: oft_h1_rinterp
 !---Tracing
@@ -140,6 +140,7 @@ SELECT CASE(type)
     CALL u%scale(bscale)
     Bfield_lag%u=>u
     tracer%B=>Bfield_lag
+    CALL Bfield_lag%setup(oft_lagrange)
   CASE(2) !  Nedelec H1 field
     CALL oft_hcurl_setup(mg_mesh,order, -1)
     CALL oft_h0_setup(mg_mesh,order+1, -1)
@@ -160,6 +161,7 @@ SELECT CASE(type)
     CALL u%scale(bscale)
     Bfield_H1%u=>u
     tracer%B=>Bfield_H1
+    CALL Bfield_H1%setup(oft_h1)
   CASE(3) !  Nedelec HCurl field
     CALL oft_hcurl_setup(mg_mesh,order, -1)
     !---Create field structure
@@ -170,10 +172,10 @@ SELECT CASE(type)
     CALL u%scale(bscale)
     Bfield_HCurl%u=>u
     tracer%B=>Bfield_HCurl
+    CALL Bfield_HCurl%setup(oft_hcurl)
   CASE DEFAULT
     CALL oft_abort("Unknown field type", "oft_trace", __FILE__)
 END SELECT
-CALL tracer%B%setup(mg_mesh%mesh)
 !---Loop over launch points
 ind=0
 OPEN(newunit=pt_file_unit,FILE=TRIM(pt_file),IOSTAT=io_stat)
