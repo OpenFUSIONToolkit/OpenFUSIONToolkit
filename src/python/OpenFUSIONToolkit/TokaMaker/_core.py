@@ -1472,40 +1472,103 @@ class TokaMaker():
         tokamaker_step_td(ctypes.byref(time),ctypes.byref(dt),ctypes.byref(nl_its),ctypes.byref(lin_its),ctypes.byref(nretry))
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
-
-def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=[1.],max_iterations=6,initialize_eq=True):
-    '''! Self-consistently compute bootstrap contribution from H-mode profiles,
-    and iterate solution until all functions of Psi converge. 
+def solve_with_bootstrap(self,
+                       ne,
+                       Te,
+                       ni,
+                       Ti,
+                       Zeff,
+                       l_i=0.9,
+                       Zis=[1.],
+                       inductive_jtor=None,
+                       scale_jBS=1.0,
+                       heightp=None,
+                       inexp=None,
+                       outexp=None,
+                       max_iterations=6,
+                       initialize_eq=True):
+    '''! Self-consistently compute bootstrap contribution from H-mode profiles. 
+    If l_i is set, match to a user specified internal inductance by scanning a 
+    parametrized FF' profile, and iterate solution until all functions of Psi converge. 
+    If inductive_jtor is set, solve for FF' using Grad-Shafranov equation and 
+    iterate solution until all functions of Psi converge. 
 
     @note if using nis and Zis, dnis_dpsi must be specified in sauter_bootstrap() 
     as a list of impurity gradients over Psi. See 
     https://omfit.io/_modules/omfit_classes/utils_fusion.html for more 
-    detailed documentation 
+    detailed documentation
 
     @note if initialize_eq=True, cubic polynomials will be fit to the core of all 
     kinetic profiles in order to flatten the pedestal. This will initialize the G-S 
-    solution at an estimated L-mode pressure profile and using the L-mode bootstrap 
-    contribution. Initializing the solver in L-mode before raising the pedestal 
-    height increases the likelihood that the solver will converge in H-mode.
+    solution at an estimated L-mode pressure profile and using a generic current profile. 
 
     @param ne Electron density profile, sampled over psi_norm
     @param Te Electron temperature profile [eV], sampled over psi_norm
     @param ni Ion density profile, sampled over psi_norm
     @param Ti Ion temperature profile [eV], sampled over psi_norm
-    @param inductive_jtor Inductive toroidal current, sampled over psi_norm
     @param Zeff Effective Z profile, sampled over psi_norm
-    @param scale_jBS Scalar which can scale bootstrap current profile
-    @param nis List of impurity density profiles; NOT USED
-    @param Zis List of impurity profile atomic numbers; NOT USED. 
+    @param Zis List of impurity profile atomic numbers; currently set to 1. 
+    @param nis NOT USED: list of impurity density profiles, currently ni = nis
+    @param l_i Internal inductance
+    @param inductive_jtor Inductive toroidal current, sampled over psi_norm
+    @param scale_jBS Factor by which to scale bootstrap current fraction
+    @param heightp Height of parametrized FF' spike, dimensionless. Overrides Sauter 
+    matching procedure
+    @param inexp Inner core exponent of parametrized FF' profile, dimensionless. Overrides
+    l_i matching procedure
+    @param outexp Outer core exponent of parametrized FF' profile, dimensionless. Overrides
+    l_i matching procedure
     @param max_iterations Maximum number of H-mode mygs.solve() iterations
     @param initialize_eq Initialize equilibrium solve with flattened pedestal. 
-    @param return_jBS Return bootstrap profile alongside err_flag
     '''
     try:
         from omfit_classes.utils_fusion import sauter_bootstrap
     except:
         raise ImportError('omfit_classes.utils_fusion not installed')
-    
+
+    # Turn off solver iteration printout
+    self.settings.pm = False
+    self.update_settings()
+
+    def ffprime_profiles(core=1., rgrid=129, expin=1.5, expout=1.5, heightp=0.5, widthp=0.04, xped=0.96):
+        """
+        This function generates H-mode FF' profiles
+         
+        @param On-axis profile value
+        @param rgrid Number of radial grid points
+        @param expin Inner core exponent for FF' profile
+        @param expout Outer core exponent for FF' profile
+        @param heightp Height of parametrized FF' spike (dimensionless)
+        @param widthp Half-width of pedestal
+        @param xped Psi_n value of pedestal center
+        """
+        #w_E1 = 0.5 * widthp  # width as defined in eped
+        #if xphalf is None:
+        #    xphalf = 1.0 - w_E1
+        #xped = xphalf - w_E1
+        xpsi = np.linspace(0, 1, rgrid)
+        val = np.zeros(rgrid)
+        xtoped = xpsi / xped
+        for i in range(0, rgrid):
+            if xtoped[i] ** expin < 1.0:
+                val[i] = val[i] + core * (1.0 - xtoped[i] ** expin) ** expout
+
+        ped_spike = -heightp*np.exp( -((xpsi-xped)**2 / (2*(widthp/2)**2)) )
+        new_val = val + ped_spike
+
+        return new_val
+    def jtor_from_GS(ffprime, pprime, R_avg, one_over_R_avg):
+        r'''! Convert from J_toroidal to FF' using Grad-Shafranov equation
+
+        @param jtor Toroidal current profile
+        @param R_avg Flux averaged R, calculated by TokaMaker
+        @param one_over_R_avg Flux averaged 1/R, calculated by TokaMaker
+        @param pprime dP/dPsi profile
+        '''
+        mu0 = np.pi*4.E-7
+        jtor = 0.5*ffprime * (one_over_R_avg / mu0) + R_avg * pprime
+
+        return jtor
     def ffprime_from_jtor_pprime(jtor, pprime, R_avg, one_over_R_avg):
         r'''! Convert from J_toroidal to FF' using Grad-Shafranov equation
 
@@ -1516,20 +1579,49 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
         '''
         ffprime = 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
         return ffprime
+    def iterate_ffp(self,ffprime_temp,pp_prof,psi_norm):
+        ffp_prof = {
+            'type': 'linterp',
+            'x': psi_norm,
+            'y': ffprime_temp / ffprime_temp[0]
+        }
+        pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+        ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
 
-    kBoltz = eC
+        pp_prof['y'] = np.nan_to_num(pp_prof['y']) # Check for any nan's
+        ffp_prof['y'] = np.nan_to_num(ffp_prof['y']) # Check for any nan's
+
+        self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
+        flag = self.solve()
+
+        return flag
+    def update_jtor(self, expin, expout, heightp, widthp, xped, psi_norm, n_psi, pp_prof):
+        ffprime_temp = ffprime_profiles(rgrid=n_psi, expin=expin,expout=expout,heightp=heightp,widthp=widthp,xped=xped)
+        flag = iterate_ffp(self,ffprime_temp,pp_prof,psi_norm)
+
+        psi,f,fp,p,pp = self.get_profiles(npsi=n_psi)
+        _,qvals,ravgs,_,_,_ = self.get_q(npsi=n_psi)
+        R_avg = ravgs[0]
+        one_over_R_avg = ravgs[1]
+        ffprime = f*fp
+        jtor = jtor_from_GS(ffprime, pp, R_avg, one_over_R_avg)
+
+        return jtor, flag
+        
+    kBoltz = 1.602e-19
     pressure = (kBoltz * ne * Te) + (kBoltz * ni * Ti) # 1.602e-19 * [m^-3] * [eV] = [Pa]
 
+    ### Reconstruct psi_norm and n_psi from pressure
+    psi_norm = np.linspace(0.,1.,len(pressure))
+    n_psi = len(pressure)
+        
+    ################################ NEED TO PULL EXISTING MYGS IP TARGET
     ### Set new pax target
-    self.set_targets(pax=pressure[0])
+    self.set_targets(Ip=Ip_target,pax=pressure[0])
 
-    ### Reconstruct psi_norm and n_psi from input inductive_jtor
-    psi_norm = numpy.linspace(0.,1.,len(inductive_jtor))
-    n_psi = len(inductive_jtor)
+    def profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,scale_jBS,Zis,include_jBS=True):
 
-    def profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,Zis,include_jBS=True):
-
-        pprime = numpy.gradient(pressure) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+        pprime = np.gradient(pressure) / (np.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
 
         ### Get final remaining quantities for Sauter from TokaMaker
         psi,f,_,_,_ = self.get_profiles(npsi=n_psi)
@@ -1542,10 +1634,10 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
         
         if include_jBS:
             ### Calculate flux derivatives for Sauter
-            dn_e_dpsi = numpy.gradient(ne) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
-            dT_e_dpsi = numpy.gradient(Te) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
-            dn_i_dpsi = numpy.gradient(ni) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
-            dT_i_dpsi = numpy.gradient(Ti) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            dn_e_dpsi = np.gradient(ne) / (np.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            dT_e_dpsi = np.gradient(Te) / (np.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            dn_i_dpsi = np.gradient(ni) / (np.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            dT_i_dpsi = np.gradient(Ti) / (np.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
 
             ### Solve for bootstrap current profile. See https://omfit.io/_modules/omfit_classes/utils_fusion.html for more detailed documentation 
             j_BS_neo = sauter_bootstrap(
@@ -1580,33 +1672,51 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
                                     dnis_dpsi=[dn_i_dpsi,],
                                     )[0]
                 
-            inductive_jtor[-1] = 0. ### FORCING inductive_jtor TO BE ZERO AT THE EDGE
+            #inductive_jtor[-1] = 0. ### FORCING inductive_jtor TO BE ZERO AT THE EDGE
             j_BS = j_BS_neo*(R_avg / f) ### Convert into [A/m^2]
-            j_BS *= jBS_scale ### Scale j_BS by user specified scalar
-            j_BS[-1] = 0. ### FORCING j_BS TO BE ZERO AT THE EDGE
-            jtor_total = inductive_jtor + j_BS
+            j_BS *= scale_jBS ### Scale j_BS by user specified scalar
+            #j_BS[-1] = 0. ### FORCING j_BS TO BE ZERO AT THE EDGE
+            
         else:
             j_BS = None
-            inductive_jtor[-1] = 0. ### FORCING inductive_jtor TO BE ZERO AT THE EDGE
             jtor_total = inductive_jtor
         
-        ffprime = ffprime_from_jtor_pprime(jtor_total, pprime, R_avg, one_over_R_avg)
+        if (inductive_jtor is not None) and (l_i == None):
+            jtor_total = inductive_jtor + j_BS
 
-        ffp_prof = {
-            'type': 'linterp',
-            'x': psi_norm,
-            'y': ffprime / ffprime[0]
-        }
+            ffprime = ffprime_from_jtor_pprime(jtor_total, pprime, R_avg, one_over_R_avg)
 
-        pp_prof = {
-            'type': 'linterp',
-            'x': psi_norm,
-            'y': pprime / pprime[0]
-        }
+            ffp_prof = {
+                'type': 'linterp',
+                'x': psi_norm,
+                'y': ffprime / ffprime[0]
+            }
 
+            pp_prof = {
+                'type': 'linterp',
+                'x': psi_norm,
+                'y': pprime / pprime[0]
+            }
+
+        else:
+            ### Output generic FF' if l_i is specified
+            new_ffp_prof = create_power_flux_fun(n_psi,1.5,1.5)
+
+            ffp_prof = {
+                'type': 'linterp',
+                'x': psi_norm,
+                'y': new_ffp_prof['y'] / new_ffp_prof['y'][0]
+            }
+
+            pp_prof = {
+                'type': 'linterp',
+                'x': psi_norm,
+                'y': pprime / pprime[0]
+            }
         return pp_prof, ffp_prof, j_BS
 
-    if initialize_eq:
+    def flatten_pedestals(self,inductive_jtor,psi_norm,ne,Te,ni,Ti,kBoltz):
+
         x_trimmed = psi_norm.tolist().copy()
         ne_trimmed = ne.tolist().copy()
         Te_trimmed = Te.tolist().copy()
@@ -1623,10 +1733,10 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
         del Ti_trimmed[mid_index:end_index]
 
         ### Fit cubic polynomials through all core and one edge value
-        ne_model = numpy.poly1d(numpy.polyfit(x_trimmed, ne_trimmed, 3))
-        Te_model = numpy.poly1d(numpy.polyfit(x_trimmed, Te_trimmed, 3))
-        ni_model = numpy.poly1d(numpy.polyfit(x_trimmed, ni_trimmed, 3))
-        Ti_model = numpy.poly1d(numpy.polyfit(x_trimmed, Ti_trimmed, 3))
+        ne_model = np.poly1d(np.polyfit(x_trimmed, ne_trimmed, 3))
+        Te_model = np.poly1d(np.polyfit(x_trimmed, Te_trimmed, 3))
+        ni_model = np.poly1d(np.polyfit(x_trimmed, ni_trimmed, 3))
+        Ti_model = np.poly1d(np.polyfit(x_trimmed, Ti_trimmed, 3))
 
         init_ne = ne_model(psi_norm)
         init_Te = Te_model(psi_norm)
@@ -1634,46 +1744,337 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
         init_Ti = Ti_model(psi_norm)
 
         init_pressure = (kBoltz * init_ne * init_Te) + (kBoltz * init_ni * init_Ti)
+        
+        return init_pressure,init_ne,init_ni,init_Te,init_Ti
 
-        ### Initialize equilibirum on L-mode-like P' and inductive j_tor profiles
-        print('>>> Initializing equilibrium with pedestal removed:')
-
-        init_pp_prof, init_ffp_prof, j_BS = profile_iteration(self,init_pressure,init_ne,init_ni,init_Te,init_Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,Zis,include_jBS=False)
+    ### Initialize equilibirum on L-mode-like P' and inductive j_tor profiles
+    if initialize_eq:
+        print('>>> Initializing equilibrium with pedestal removed')
+        init_pressure,init_ne,init_ni,init_Te,init_Ti = flatten_pedestals(self,inductive_jtor,psi_norm,ne,Te,ni,Ti,kBoltz)
+        init_pp_prof, init_ffp_prof, j_BS = profile_iteration(self,init_pressure,init_ne,init_ni,init_Te,init_Ti,psi_norm,n_psi,Zeff,inductive_jtor,scale_jBS,Zis,include_jBS=False)
 
         init_pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
         init_ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
 
-        init_pp_prof['y'] = numpy.nan_to_num(init_pp_prof['y'])
-        init_ffp_prof['y'] = numpy.nan_to_num(init_ffp_prof['y'])
+        init_pp_prof['y'] = np.nan_to_num(init_pp_prof['y'])
+        init_ffp_prof['y'] = np.nan_to_num(init_ffp_prof['y'])
 
         self.set_profiles(ffp_prof=init_ffp_prof,pp_prof=init_pp_prof)
+        
+        flag = self.solve()
+        
+    ### This block solves for the complete current profile using a user-specified inductive j_tor profile
+    if inductive_jtor is not None:
+        ### Specify original H-mode profiles, iterate on bootstrap contribution until reasonably converged
+        n = 0
+        flag = -1
+        print('>>> Iterating on H-mode equilibrium solution')
+        while n < max_iterations:
+            print('> Iteration '+str(n)+':')
 
+            pp_prof, ffp_prof, j_BS = profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,scale_jBS,Zis)
+
+            pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+            ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+
+            pp_prof['y'] = np.nan_to_num(pp_prof['y']) # Check for any nan's
+            ffp_prof['y'] = np.nan_to_num(ffp_prof['y']) # Check for any nan's
+
+            self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
+
+            flag = self.solve()
+            print('Solve flag: ', flag)
+
+            n += 1
+            if (n > 2) and (flag >= 0):
+                break
+            elif n >= max_iterations:
+                raise TypeError('H-mode equilibrium solve did not converge')
+        
+        psi,f,fp,p,pp = self.get_profiles(npsi=n_psi)
+        _,qvals,ravgs,_,_,_ = self.get_q(npsi=n_psi)
+        R_avg = ravgs[0]
+        one_over_R_avg = ravgs[1]
+        ffprime = f*fp
+        final_jtor = jtor_from_GS(ffprime, pp, R_avg, one_over_R_avg)
+    
+    ### This block attempts to match a user-specified l_i
+    else:
+        ### Find FF' profile that yields l_i closest to user-specified l_i 
+        
+        def find_neighboring_indices(l_i_list, l_i_target):
+            """
+            Find indices of values immediately left and right of l_i_target in l_i_list
+            """
+
+            # Find min and max of list to check range
+            min_val = min(l_i_list)
+            max_val = max(l_i_list)
+
+            # Check if target is within range of list
+            if l_i_target < min_val or l_i_target > max_val:
+                return None
+
+            # Find all values less than and greater than target
+            less_than = [(i, val) for i, val in enumerate(l_i_list) if val < l_i_target]
+            greater_than = [(i, val) for i, val in enumerate(l_i_list) if val > l_i_target]
+
+            if not less_than or not greater_than:
+                return None
+
+            # Find closest values
+            left_idx = max(less_than, key=lambda x: x[1])[0]
+            right_idx = min(greater_than, key=lambda x: x[1])[0]
+
+            return (left_idx, right_idx)
+        
+        def match_jBS_height(self,
+                             widthp,
+                             xped,
+                             psi_norm,
+                             n_psi,
+                             pp_prof):
+            r'''! Find dimensionless scaling factor which matches parametrized FF' pedestal spike to Sauter
+            formula j_BS spike
+
+            @param self TokaMaker object
+            @param widthp Half-width of pedestal as calculated earlier
+            @param xped Psi_N value of pedestal center as calculated earlier
+            @param psi_norm Normalized psi profile (psi_N)
+            @param n_psi len(psi_norm)
+            @param pp_prof P' profile object
+            '''      
+            ### scan FF' peak heights
+            peak_heights = np.linspace(-0.1,0.5,7)
+
+            peak_diffs = []
+
+            ped_psi_mask = [psi_norm > (xped-(widthp/2))] # mask psi_n values smaller than pedestal base 
+
+            for i,h in enumerate(peak_heights):
+                jtor, flag = update_jtor(self, 1.5, 1.5, h, widthp, xped, psi_norm, n_psi, pp_prof)
+
+                tmp_peaks, _ = find_peaks(jtor)
+                tmp_results_full = peak_widths(jtor, tmp_peaks, rel_height=1)
+
+                peak_diffs.append(jtor[ped_psi_mask]-(j_BS[ped_psi_mask])*scale_jBS) # find match with j_BS*scale_jBS
+
+            closest_index = 0
+            closest_median = float('inf')
+            for i, arr in enumerate(peak_diffs):
+                median = np.median(arr)
+                if abs(median) < abs(closest_median):
+                    closest_median = median
+                    closest_index = i
+
+            if closest_index == 0: 
+                print("FF' spike must be positive?")
+            elif closest_index == (len(peak_heights)-1):
+                print("FF' spike is exceptionally negative")
+            else:
+                refined_heights = np.linspace(peak_heights[closest_index-1],peak_heights[closest_index+1],5)
+
+                peak_diffs = []
+                for h in refined_heights:
+                    jtor, flag = update_jtor(self, 1.5, 1.5, h, widthp, xped, psi_norm, n_psi, pp_prof)
+
+                    tmp_peaks, _ = find_peaks(jtor)
+                    tmp_results_full = peak_widths(jtor, tmp_peaks, rel_height=1)
+
+                    peak_diffs.append(jtor[ped_psi_mask]-(j_BS[ped_psi_mask])*scale_jBS) # find match with j_BS*scale_jBS
+
+                closest_index = 0
+                closest_median = float('inf')
+                for i, arr in enumerate(peak_diffs):
+                    median = np.median(arr)
+                    if abs(median) < abs(closest_median):
+                        closest_median = median
+                        closest_index = i
+            fitted_height = refined_heights[closest_index]
+            
+            return fitted_height
+                    
+        def match_li_exponents(self, 
+                           l_i_target, 
+                           fitted_height,
+                           widthp,
+                           xped,
+                           psi_norm,
+                           n_psi,
+                           pp_prof,
+                           max_outexp=4):
+            r'''! Find "inner" and "outer" exponent combination of parametrized FF' that matches l_i target
+
+            @param self TokaMaker object
+            @param l_i_target User-specified l_i target
+            @param fitted_height Height of parametrized FF' spike (dimensionless) as calculated earlier
+            @param widthp Half-width of pedestal as calculated earlier
+            @param xped Psi_N value of pedestal center as calculated earlier
+            @param psi_norm Normalized psi profile (psi_N)
+            @param n_psi len(psi_norm)
+            @param pp_prof P' profile object
+            '''
+            a_min = 0.9 # minimum value of inexp used in scan
+            
+            def iterate_ffp_prof(self, in_val, out_val, fitted_height, widthp, xped, psi_norm, n_psi, pp_prof):
+                try:
+                    jtor, flag = update_jtor(self, in_val, out_val, fitted_height, widthp, xped, psi_norm, n_psi, pp_prof)
+
+                    eq_stats = self.get_stats(lcfs_pad=0.01,li_normalization='std')
+                    tm_l_i = eq_stats['l_i']
+                    
+                    print('iteration l_i: '+str(tm_l_i))
+
+                except:
+                    print("FF' iteration failed")
+                    tm_l_i = 0
+                    
+                return tm_l_i
+
+            def grid_scan(outexp, l_i_target, l_i_min, l_i_max, a=a_min, b=4.0, max_iter=10):
+                
+                # Scan coarse grid of inner exponents
+                coarse_lis = []
+                fine_lis = []
+                l_i_diffs = []
+                
+                coarse_exps = np.linspace(a_min,b,8)
+                
+                for exp_tmp in coarse_exps:
+                    l_i_tmp = iterate_ffp_prof(self, exp_tmp, outexp, fitted_height, widthp, xped, psi_norm, n_psi, pp_prof)
+                    l_i_diffs.append(l_i_tmp - l_i_target)
+                    
+                    coarse_lis.append(l_i_tmp)
+                
+                # Find inexp values corresaponding to l_i values that are bisected by l_i target
+                left_idx, right_idx = find_neighboring_indices(coarse_lis, l_i_target)
+                
+                # Using these new scan bounds, scan fine grid of inner exponents
+                fine_exps = np.linspace(coarse_exps[left_idx],coarse_exps[right_idx],8)
+                
+                # Refined scan
+                l_i_diffs = []
+                                
+                for exp_tmp in fine_exps:
+                    l_i_tmp = iterate_ffp_prof(self, exp_tmp, outexp, fitted_height, widthp, xped, psi_norm, n_psi, pp_prof)
+                    l_i_diffs.append(l_i_tmp - l_i_target)
+                    
+                    # for testing
+                    fine_lis.append(l_i_tmp)
+                    
+                closest_index = 0
+                closest_l_i_diff = float('inf')  
+                for i, l_i_diff in enumerate(l_i_diffs):
+                    if abs(l_i_diff) < abs(closest_l_i_diff):
+                        closest_l_i_diff = l_i_diff
+                        closest_index = i
+      
+                return fine_exps[closest_index]
+
+            # INITIATE TASK: try increasing values of outexp
+            for outexp in range(1,max_outexp + 1):
+
+                # Check if target is between results for inexp=a_min and inexp=4
+                l_i_min = iterate_ffp_prof(self, 4.0, outexp, fitted_height, widthp, xped, psi_norm, n_psi, pp_prof)
+                l_i_max = iterate_ffp_prof(self, a_min, outexp, fitted_height, widthp, xped, psi_norm, n_psi, pp_prof)
+
+                # Make sure min and max are in correct order
+                if l_i_min > l_i_max:
+                    l_i_min, l_i_max = l_i_max, l_i_min
+
+                if l_i_min <= l_i_target <= l_i_max:
+                    # Try to find precise inexp using AMR
+                    inexp = grid_scan(outexp,l_i_target,l_i_min,l_i_max)
+                    if inexp is not None:
+                        return (inexp, outexp)
+
+            return None  # No solution found
+        
+        if (scale_jBS > 0.0) and (l_i):
+            if heightp:
+                print(">>> Using user-specified FF' spike height")
+
+                fitted_height = heightp
+        
+            else:
+                # Use Sauter formula to obtain current profile spike height, psi_N location and half width.
+                # Calculate height of FF' pedestal spike which matches j_BS pedestal spike using this information
+                
+                print('>>> Solving for correct bootstrap edge gradients')
+
+                pp_prof,_,j_BS = profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,None,1.0,Zis)
+
+                j_BS[-1] = 0.
+
+                jBS_peaks, _ = find_peaks(j_BS)
+                jBS_results_full = peak_widths(j_BS, jBS_peaks, rel_height=1)
+
+                ### Match j_BS peak
+                j_BS_peak = jBS_results_full[1][-1]
+
+                widthp = (jBS_results_full[0][-1]/n_psi)/2
+                xped = psi_norm[jBS_peaks][-1]
+
+                fitted_height = match_jBS_height(self,
+                                                 widthp,
+                                                 xped,
+                                                 psi_norm,
+                                                 n_psi,
+                                                 pp_prof)
+                
+            if (inexp) and (outexp):
+                print(">>> Using user-specified FF' profile parametrization")
+
+                fitted_inexp = inexp
+                fitted_outexp = outexp
+            else:
+                # Calculate inner and outer FF' exponents which match l_i 
+                # given a bootstrap spike height, width, and location
+                print(">>> Solving for FF' profile parametrization that matches l_i target")
+
+                fitted_inexp, fitted_outexp = match_li_exponents(self, 
+                                                                 l_i, 
+                                                                 fitted_height,
+                                                                 widthp,
+                                                                 xped,
+                                                                 psi_norm,
+                                                                 n_psi,
+                                                                 pp_prof,
+                                                                 max_outexp=4)
+    
+        else:
+            print('Error: l_i must be specified if inductive jtor is not provided')
+
+        ### Final fit
+        # Reset eq to L-mode
+        self.set_profiles(ffp_prof=init_ffp_prof,pp_prof=init_pp_prof)
         flag = self.solve()
 
-    ### Specify original H-mode profiles, iterate on bootstrap contribution until reasonably converged
-    n = 0
-    flag = -1
-    print('>>> Iterating on H-mode equilibrium solution:')
-    while n < max_iterations:
-        print('> Iteration '+str(n)+':')
+        ### Specify final profiles, iterate on bootstrap contribution until reasonably converged
+        n = 0
+        flag = -1
+        print('>>> Iterating on final H-mode equilibrium solution')
+        while n < max_iterations:
+            print('> Iteration '+str(n)+':')
 
-        pp_prof, ffp_prof, j_BS = profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,jBS_scale,Zis)
+            pprime = np.gradient(pressure) / (np.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            pp_prof = {
+                    'type': 'linterp',
+                    'x': psi_norm,
+                    'y': pprime / pprime[0]
+                }
 
-        pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
-        ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
-    
-        pp_prof['y'] = numpy.nan_to_num(pp_prof['y']) # Check for any nan's
-        ffp_prof['y'] = numpy.nan_to_num(ffp_prof['y']) # Check for any nan's
+            pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+            pp_prof['y'] = np.nan_to_num(pp_prof['y']) # Check for any nan's
 
-        self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
+            final_jtor, flag = update_jtor(self, fitted_inexp, fitted_outexp, fitted_height, widthp, xped, psi_norm, n_psi, pp_prof)
 
-        flag = self.solve()
-        print('Solve flag: ', flag)
+            print('Solve flag: ', flag)
 
-        n += 1
-        if (n > 2) and (flag >= 0):
-            break
-        elif n >= max_iterations:
-            raise TypeError('H-mode equilibrium solve did not converge')
-    
-    return flag, j_BS
+            n += 1
+            if (n > 2) and (flag >= 0):
+                break
+            elif n >= max_iterations:
+                raise TypeError('H-mode equilibrium solve did not converge')
+
+    return flag, final_jtor, j_BS
