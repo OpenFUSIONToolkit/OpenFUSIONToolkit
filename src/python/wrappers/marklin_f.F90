@@ -26,17 +26,16 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: fem_interp
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, &
-  oft_lagrange, ML_oft_lagrange
+  oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
     oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, oft_hcurl_level, &
-  oft_hcurl_minlev
+USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
     hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0
+USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, oft_h0_zerogrnd, &
   oft_h0_zerob
 !---H1 FE space
@@ -86,20 +85,20 @@ self%minlev=minlev
 CALL c_f_pointer(mesh_ptr,self%ml_mesh)
 !
 !---Lagrange
-CALL oft_lag_setup(self%ml_mesh,self%order,self%minlev)
+CALL oft_lag_setup(self%ml_mesh,self%order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,self%minlev)
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(self%ml_mesh,self%order,self%minlev)
+CALL oft_hcurl_setup(self%ml_mesh,self%order,ML_oft_hcurl,ML_oft_bhcurl,self%minlev)
 !---Compute modes
 IF(self%minlev<0)THEN
-  taylor_minlev=oft_hcurl_level
+  taylor_minlev=ML_oft_hcurl%level
 ELSE
   taylor_minlev=self%minlev
   IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,self%minlev)
 END IF
-IF(taylor_minlev<oft_hcurl_level)THEN
+IF(taylor_minlev<ML_oft_hcurl%level)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
-  CALL hcurl_setup_interp
+  CALL hcurl_setup_interp(ML_oft_hcurl)
   CALL hcurl_mloptions
 END IF
 !
@@ -142,12 +141,12 @@ END IF
 ! CALL oft_hcurl_setup(self%ml_mesh,order,minlev)
 ! !---Compute modes
 ! IF(minlev<0)THEN
-!   taylor_minlev=oft_hcurl_level
+!   taylor_minlev=ML_oft_hcurl%level
 ! ELSE
 !   taylor_minlev=minlev
 !   IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,minlev)
 ! END IF
-! IF(taylor_minlev<oft_hcurl_level)THEN
+! IF(taylor_minlev<ML_oft_hcurl%level)THEN
 !   CALL lag_setup_interp
 !   CALL lag_mloptions
 !   CALL hcurl_setup_interp
@@ -157,7 +156,7 @@ oft_env%pm=.TRUE.
 taylor_rst=save_rst
 CALL taylor_hmodes(nmodes)
 CALL c_f_pointer(eig_vals, vals_tmp, [nmodes])
-vals_tmp=taylor_hlam(:,oft_hcurl_level)
+vals_tmp=taylor_hlam(:,ML_oft_hcurl%level)
 END SUBROUTINE marklin_compute
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -278,10 +277,10 @@ END IF
 CALL c_f_pointer(marklin_ptr,self)
 IF(oft_h1_nlevels==0)THEN
   !---H1(Grad) subspace
-  CALL oft_h0_setup(self%ml_mesh,oft_hcurl%order+1,oft_hcurl_minlev+1)
-  CALL h0_setup_interp
+  CALL oft_h0_setup(self%ml_mesh,oft_hcurl%order+1,ML_oft_h0,ML_oft_bh0,ML_oft_hcurl%minlev+1)
+  CALL h0_setup_interp(ML_oft_h0)
   !---H1 full space
-  CALL oft_h1_setup(self%ml_mesh,oft_hcurl%order,oft_hcurl_minlev)
+  CALL oft_h1_setup(self%ml_mesh,oft_hcurl%order,ML_oft_hcurl%minlev)
   CALL h1_setup_interp
 END IF
 !---------------------------------------------------------------------------
@@ -311,7 +310,7 @@ END IF
 !---------------------------------------------------------------------------
 ALLOCATE(interp_obj)
 CALL oft_h1_create(interp_obj%u)
-CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
+CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL interp_obj%u%restore_local(tmp,1)
 IF(zero_norm)WRITE(*,*)'Setting gauge'
 divout%pm=.TRUE.
@@ -339,7 +338,7 @@ IF(.NOT.c_associated(marklin_ptr))THEN
 END IF
 CALL c_f_pointer(marklin_ptr,self)
 ALLOCATE(interp_obj)
-interp_obj%u=>taylor_hffa(imode,oft_hcurl_level)%f
+interp_obj%u=>taylor_hffa(imode,ML_oft_hcurl%level)%f
 CALL interp_obj%setup(oft_hcurl)
 int_obj=C_LOC(interp_obj)
 END SUBROUTINE marklin_get_bint

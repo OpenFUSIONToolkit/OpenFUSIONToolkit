@@ -16,9 +16,9 @@ USE oft_base
 USE oft_mesh_sphere, ONLY: mesh_sphere_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_nlevels
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hlam, &
@@ -44,13 +44,13 @@ ELSE
   taylor_minlev=mg_mesh%mgmax+order-1
 END IF
 !---
-CALL oft_hcurl_setup(mg_mesh,order,taylor_minlev)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,taylor_minlev)
 IF(mg_test)THEN
-  CALL hcurl_setup_interp
+  CALL hcurl_setup_interp(ML_oft_hcurl)
   CALL hcurl_mloptions
 END IF
 !---
-CALL oft_lag_setup(mg_mesh,order,taylor_minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
@@ -60,8 +60,8 @@ oft_env%pm=.FALSE.
 CALL taylor_hmodes(nm)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='taylor.results')
-  WRITE(io_unit,*)taylor_hlam(:,oft_hcurl_nlevels)
-  WRITE(io_unit,*)taylor_htor(:,oft_hcurl_nlevels)
+  WRITE(io_unit,*)taylor_hlam(:,ML_oft_hcurl%nlevels)
+  WRITE(io_unit,*)taylor_htor(:,ML_oft_hcurl%nlevels)
   CLOSE(io_unit)
 END IF
 !---Finalize enviroment

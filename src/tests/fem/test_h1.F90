@@ -25,18 +25,18 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_native_gmres_solver
 USE oft_solver_utils, ONLY: create_native_mlpre, create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level
-USE oft_lag_fields, ONLY: oft_lag_vcreate
-USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vgetmop, oft_lag_vproject
+! USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level
+! USE oft_lag_fields, ONLY: oft_lag_vcreate
+! USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
+USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_nlevels, oft_h1_set_level, oft_h1_ops, &
-  oft_h1_level, ML_oft_h1, oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_nlevels, oft_h1_set_level, &
+  ML_oft_h1, oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: h1_getmop, h1_setup_interp, h1_getmop_pre, h1_mloptions, &
   oft_h1_rinterp, oft_h1_grad_zerop
@@ -59,11 +59,11 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order)
-IF(mg_test)CALL hcurl_setup_interp
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl)
+IF(mg_test)CALL hcurl_setup_interp(ML_oft_hcurl)
 !---H1(Grad) subspace
-CALL oft_h0_setup(mg_mesh,order+1)
-IF(mg_test)CALL h0_setup_interp
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0)
+IF(mg_test)CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order)
 h1grad_zerop%ML_h1_rep=>ML_oft_h1

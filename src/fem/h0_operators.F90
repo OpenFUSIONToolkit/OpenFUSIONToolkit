@@ -20,7 +20,8 @@
 MODULE oft_h0_operators
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
-USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr
+USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr, &
+  oft_graph
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_matrix
@@ -30,9 +31,8 @@ USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
-USE oft_h0_basis, ONLY: oft_h0, ML_oft_h0, oft_h0_level, oft_h0_blevel, oft_h0_nlevels, &
-h0_ops, oft_h0_ops, ML_oft_h0_ops, oft_h0_eval_all, oft_h0_geval_all, oft_h0_set_level, &
-oft_h0_minlev, oft_h0_fem
+USE oft_h0_basis, ONLY: oft_h0, ML_oft_h0, oft_h0_eval_all, oft_h0_geval_all, &
+  oft_h0_set_level, oft_h0_fem
 USE oft_h0_fields, ONLY: oft_h0_create
 IMPLICIT NONE
 #include "local.h"
@@ -549,29 +549,28 @@ end subroutine oft_h0_project
 !> Construct interpolation matrices for transfer between H0 finite element
 !! spaces
 !---------------------------------------------------------------------------
-SUBROUTINE h0_setup_interp
+SUBROUTINE h0_setup_interp(ML_h0_rep)
+CLASS(oft_ml_fem_type), intent(inout) :: ML_h0_rep
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---
-DO i=oft_h0_minlev+1,oft_h0_nlevels
-  CALL oft_h0_set_level(i)
+DO i=ML_h0_rep%minlev+1,ML_h0_rep%nlevels
+  CALL ML_h0_rep%set_level(i)
   !---
-  if(oft_h0_level==oft_h0_blevel+1)CYCLE
+  if(ML_h0_rep%level==ML_h0_rep%blevel+1)CYCLE
   !---Setup interpolation
-  if(oft_h0%order==1)then
-    CALL h0_ginterpmatrix(ML_oft_h0%interp_matrices(ML_oft_h0%level)%m)
-    oft_h0_ops%interp=>ML_oft_h0%interp_matrices(ML_oft_h0%level)%m
-    CALL oft_h0_ops%interp%assemble
+  if(ML_h0_rep%current_level%order==1)then
+    CALL h0_ginterpmatrix(ML_h0_rep%interp_matrices(ML_h0_rep%level)%m)
+    ! oft_h0_ops%interp=>ML_oft_h0%interp_matrices(ML_oft_h0%level)%m
+    CALL ML_h0_rep%interp_matrices(ML_h0_rep%level)%m%assemble !oft_h0_ops%interp%assemble
   else
-    CALL h0_pinterpmatrix(ML_oft_h0%interp_matrices(ML_oft_h0%level)%m)
-    oft_h0_ops%interp=>ML_oft_h0%interp_matrices(ML_oft_h0%level)%m
-    CALL oft_h0_ops%interp%assemble
+    CALL h0_pinterpmatrix(ML_h0_rep%interp_matrices(ML_h0_rep%level)%m)
+    ! oft_h0_ops%interp=>ML_oft_h0%interp_matrices(ML_oft_h0%level)%m
+    CALL ML_h0_rep%interp_matrices(ML_h0_rep%level)%m%assemble !oft_h0_ops%interp%assemble
   end if
 END DO
 DEBUG_STACK_POP
-END SUBROUTINE h0_setup_interp
-!---------------------------------------------------------------------------
-! SUBROUTINE: h0_ginterpmatrix
+CONTAINS
 !---------------------------------------------------------------------------
 !> Construct interpolation matrix for transfer between geometric levels
 !! of H0 finite element space
@@ -582,73 +581,81 @@ INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 CLASS(oft_afem_type), POINTER :: h0_cors => NULL()
-TYPE(h0_ops), POINTER :: ops
+CLASS(oft_afem_type), POINTER :: h0_fine => NULL()
+! TYPE(h0_ops), POINTER :: ops
 class(oft_mesh), pointer :: cmesh
 CLASS(oft_vector), POINTER :: h0_vec,h0_vec_cors
 integer(i4) :: jfe(3),jce(6)
 integer(i4), pointer :: lfde(:,:),lede(:,:)
 real(r8) :: f(4),incr,val,d(3),h_rop(3),goptmp(3,4),v,mop(1)
 type(oft_graph_ptr), pointer :: graphs(:,:)
+type(oft_graph), POINTER :: interp_graph
 DEBUG_STACK_PUSH
 !---
-if(ML_oft_h0%ml_mesh%level<1)then
+if(ML_h0_rep%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','h0_ginterpmatrix',__FILE__)
 end if
-cmesh=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%level-1)
+cmesh=>ML_h0_rep%ml_mesh%meshes(ML_h0_rep%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "h0_ginterpmatrix", __FILE__)
-if(oft_h0%order/=1)then
+SELECT TYPE(this=>ML_h0_rep%levels(ML_h0_rep%level)%fe)
+  CLASS IS(oft_h0_fem)
+    h0_fine=>this
+  CLASS DEFAULT
+    CALL oft_abort("Error casting fine level", "hcurl_ginterpmatrix", __FILE__)
+END SELECT
+if(h0_fine%order/=1)then
   call oft_abort('Attempted geometric interpolation for pd > 1','h0_ginterpmatrix',__FILE__)
 end if
-ops=>oft_h0_ops
-h0_cors=>ML_oft_h0%levels(oft_h0_level-1)%fe
-lede=>ML_oft_h0%ml_mesh%inter(ML_oft_h0%ml_mesh%level-1)%lede
-lfde=>ML_oft_h0%ml_mesh%inter(ML_oft_h0%ml_mesh%level-1)%lfde
-ALLOCATE(ML_oft_h0%interp_graphs(ML_oft_h0%level)%g)
-ops%interp_graph=>ML_oft_h0%interp_graphs(ML_oft_h0%level)%g
+! ops=>oft_h0_ops
+h0_cors=>ML_h0_rep%levels(ML_h0_rep%level-1)%fe
+lede=>ML_h0_rep%ml_mesh%inter(ML_h0_rep%ml_mesh%level-1)%lede
+lfde=>ML_h0_rep%ml_mesh%inter(ML_h0_rep%ml_mesh%level-1)%lfde
+ALLOCATE(ML_h0_rep%interp_graphs(ML_h0_rep%level)%g)
+interp_graph=>ML_h0_rep%interp_graphs(ML_h0_rep%level)%g
 !---Setup matrix sizes
-ops%interp_graph%nr=oft_h0%ne
-ops%interp_graph%nrg=oft_h0%global%ne
-ops%interp_graph%nc=h0_cors%ne
-ops%interp_graph%ncg=h0_cors%global%ne
+interp_graph%nr=h0_fine%ne
+interp_graph%nrg=h0_fine%global%ne
+interp_graph%nc=h0_cors%ne
+interp_graph%ncg=h0_cors%global%ne
 !---Setup Matrix graph
-ALLOCATE(ops%interp_graph%kr(ops%interp_graph%nr+1))
-ops%interp_graph%nnz=cmesh%np+2*cmesh%ne
-ALLOCATE(ops%interp_graph%lc(ops%interp_graph%nnz))
-ops%interp_graph%lc=0_i4
+ALLOCATE(interp_graph%kr(interp_graph%nr+1))
+interp_graph%nnz=cmesh%np+2*cmesh%ne
+ALLOCATE(interp_graph%lc(interp_graph%nnz))
+interp_graph%lc=0_i4
 !---Construct linkage
 DO i=1,cmesh%np
-  ops%interp_graph%kr(i)=1
+  interp_graph%kr(i)=1
 END DO
 DO i=1,cmesh%ne
-  ops%interp_graph%kr(i+cmesh%np)=2
+  interp_graph%kr(i+cmesh%np)=2
 END DO
-ops%interp_graph%kr(ops%interp_graph%nr+1)=ops%interp_graph%nnz+1
-do i=ops%interp_graph%nr,1,-1 ! cumulative point to point count
-  ops%interp_graph%kr(i)=ops%interp_graph%kr(i+1)-ops%interp_graph%kr(i)
+interp_graph%kr(interp_graph%nr+1)=interp_graph%nnz+1
+do i=interp_graph%nr,1,-1 ! cumulative point to point count
+  interp_graph%kr(i)=interp_graph%kr(i+1)-interp_graph%kr(i)
 end do
-if(ops%interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_h0_ginterpmatrix',__FILE__)
+if(interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_h0_ginterpmatrix',__FILE__)
 DO i=1,cmesh%np
-  ops%interp_graph%lc(ops%interp_graph%kr(i))=i
+  interp_graph%lc(interp_graph%kr(i))=i
 END DO
 !---
 DO i=1,cmesh%ne
   etmp=cmesh%le(:,i)
   !---
   ifine = cmesh%np+i
-  jb=ops%interp_graph%kr(ifine)-1
+  jb=interp_graph%kr(ifine)-1
   DO k=1,2
-    ops%interp_graph%lc(jb+k)=etmp(k)
+    interp_graph%lc(jb+k)=etmp(k)
   END DO
 END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
 CALL oft_h0_create(h0_vec)
-CALL oft_h0_create(h0_vec_cors,oft_h0_level-1)
+CALL oft_h0_create(h0_vec_cors,ML_h0_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
-graphs(1,1)%g=>ops%interp_graph
+graphs(1,1)%g=>interp_graph
 !---
 CALL create_matrix(mat,graphs,h0_vec,h0_vec_cors)
 CALL h0_vec%delete
@@ -682,7 +689,7 @@ DO i=1,cmesh%ne
   etmp=cmesh%le(:,i)
   !---
   ifine = cmesh%np+i
-  jb=ops%interp_graph%kr(ifine)-1
+  jb=interp_graph%kr(ifine)-1
   DO k=1,2
     i_ind=ifine
     j_ind=etmp(k)
@@ -707,99 +714,108 @@ INTEGER(i4) :: offsetc,offsetf
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 REAL(r8) :: f(4),val,mop(1)
 CLASS(oft_fem_type), POINTER :: h0_cors => NULL()
-TYPE(h0_ops), POINTER :: ops
+CLASS(oft_fem_type), POINTER :: h0_fine => NULL()
+! TYPE(h0_ops), POINTER :: ops
 CLASS(oft_vector), POINTER :: h0_vec,h0_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 class(oft_mesh), pointer :: mesh
+type(oft_graph), POINTER :: interp_graph
 DEBUG_STACK_PUSH
 !---
-mesh=>oft_h0%mesh
-ops=>oft_h0_ops
-SELECT TYPE(this=>ML_oft_h0%levels(oft_h0_level-1)%fe)
+! mesh=>oft_h0%mesh
+! ops=>oft_h0_ops
+SELECT TYPE(this=>ML_h0_rep%levels(ML_h0_rep%level)%fe)
+  CLASS IS(oft_h0_fem)
+    h0_fine=>this
+    mesh=>this%mesh
+  CLASS DEFAULT
+    CALL oft_abort("Error casting fine level", "h0_pinterpmatrix", __FILE__)
+END SELECT
+SELECT TYPE(this=>ML_h0_rep%levels(ML_h0_rep%level-1)%fe)
 CLASS IS(oft_fem_type)
   h0_cors=>this
 CLASS DEFAULT
   CALL oft_abort("Error getting coarse FE object","h0_pinterpmatrix",__FILE__)
 END SELECT
-ALLOCATE(ML_oft_h0%interp_graphs(ML_oft_h0%level)%g)
-ops%interp_graph=>ML_oft_h0%interp_graphs(ML_oft_h0%level)%g
+ALLOCATE(ML_h0_rep%interp_graphs(ML_h0_rep%level)%g)
+interp_graph=>ML_h0_rep%interp_graphs(ML_h0_rep%level)%g
 !---Setup matrix sizes
-ops%interp_graph%nr=oft_h0%ne
-ops%interp_graph%nrg=oft_h0%global%ne
-ops%interp_graph%nc=h0_cors%ne
-ops%interp_graph%ncg=h0_cors%global%ne
+interp_graph%nr=h0_fine%ne
+interp_graph%nrg=h0_fine%global%ne
+interp_graph%nc=h0_cors%ne
+interp_graph%ncg=h0_cors%global%ne
 !---Setup Matrix graph
-ALLOCATE(ops%interp_graph%kr(ops%interp_graph%nr+1))
-ops%interp_graph%kr=0
-ops%interp_graph%nnz=h0_cors%ne
-ALLOCATE(ops%interp_graph%lc(ops%interp_graph%nnz))
-ops%interp_graph%lc=0_i4
+ALLOCATE(interp_graph%kr(interp_graph%nr+1))
+interp_graph%kr=0
+interp_graph%nnz=h0_cors%ne
+ALLOCATE(interp_graph%lc(interp_graph%nnz))
+interp_graph%lc=0_i4
 !---Construct matrix
 do i=1,mesh%np
-  ops%interp_graph%kr(i)=1
+  interp_graph%kr(i)=1
 end do
 !---
 do i=1,mesh%ne
   do j=1,h0_cors%gstruct(2)
-    offsetf=mesh%np+(i-1)*oft_h0%gstruct(2)
-    ops%interp_graph%kr(j+offsetf)=1
+    offsetf=mesh%np+(i-1)*h0_fine%gstruct(2)
+    interp_graph%kr(j+offsetf)=1
   end do
 end do
 !---
 do i=1,mesh%nf
   do j=1,h0_cors%gstruct(3)
-    offsetf=mesh%np+oft_h0%gstruct(2)*mesh%ne+(i-1)*oft_h0%gstruct(3)
-    ops%interp_graph%kr(j+offsetf)=1
+    offsetf=mesh%np+h0_fine%gstruct(2)*mesh%ne+(i-1)*h0_fine%gstruct(3)
+    interp_graph%kr(j+offsetf)=1
   end do
 end do
 !---
 do i=1,mesh%nc
   do j=1,h0_cors%gstruct(4)
-    offsetf=mesh%np+oft_h0%gstruct(2)*mesh%ne+oft_h0%gstruct(3)*mesh%nf+(i-1)*oft_h0%gstruct(4)
-    ops%interp_graph%kr(j+offsetf)=1
+    offsetf=mesh%np+h0_fine%gstruct(2)*mesh%ne+h0_fine%gstruct(3)*mesh%nf+(i-1)*h0_fine%gstruct(4)
+    interp_graph%kr(j+offsetf)=1
   end do
 end do
-ops%interp_graph%kr(ops%interp_graph%nr+1)=ops%interp_graph%nnz+1
-do i=ops%interp_graph%nr,1,-1 ! cumulative point to point count
-  ops%interp_graph%kr(i)=ops%interp_graph%kr(i+1)-ops%interp_graph%kr(i)
+interp_graph%kr(interp_graph%nr+1)=interp_graph%nnz+1
+do i=interp_graph%nr,1,-1 ! cumulative point to point count
+  interp_graph%kr(i)=interp_graph%kr(i+1)-interp_graph%kr(i)
 end do
-if(ops%interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_h0_pinterpmatrix',__FILE__)
+if(interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_h0_pinterpmatrix',__FILE__)
 !---Construct matrix
 do i=1,mesh%np
-  ops%interp_graph%lc(ops%interp_graph%kr(i))=i
+  interp_graph%lc(interp_graph%kr(i))=i
 end do
 !---
 do i=1,mesh%ne
   do j=1,h0_cors%gstruct(2)
-    offsetf=mesh%np+(i-1)*oft_h0%gstruct(2)
+    offsetf=mesh%np+(i-1)*h0_fine%gstruct(2)
     offsetc=mesh%np+(i-1)*h0_cors%gstruct(2)
-    ops%interp_graph%lc(ops%interp_graph%kr(j+offsetf))=j+offsetc
+    interp_graph%lc(interp_graph%kr(j+offsetf))=j+offsetc
   end do
 end do
 !---
 do i=1,mesh%nf
   do j=1,h0_cors%gstruct(3)
-    offsetf=mesh%np+oft_h0%gstruct(2)*mesh%ne+(i-1)*oft_h0%gstruct(3)
+    offsetf=mesh%np+h0_fine%gstruct(2)*mesh%ne+(i-1)*h0_fine%gstruct(3)
     offsetc=mesh%np+h0_cors%gstruct(2)*mesh%ne+(i-1)*h0_cors%gstruct(3)
-    ops%interp_graph%lc(ops%interp_graph%kr(j+offsetf))=j+offsetc
+    interp_graph%lc(interp_graph%kr(j+offsetf))=j+offsetc
   end do
 end do
 !---
 do i=1,mesh%nc
   do j=1,h0_cors%gstruct(4)
-    offsetf=mesh%np+oft_h0%gstruct(2)*mesh%ne+oft_h0%gstruct(3)*mesh%nf+(i-1)*oft_h0%gstruct(4)
+    offsetf=mesh%np+h0_fine%gstruct(2)*mesh%ne+h0_fine%gstruct(3)*mesh%nf+(i-1)*h0_fine%gstruct(4)
     offsetc=mesh%np+h0_cors%gstruct(2)*mesh%ne+h0_cors%gstruct(3)*mesh%nf+(i-1)*h0_cors%gstruct(4)
-    ops%interp_graph%lc(ops%interp_graph%kr(j+offsetf))=j+offsetc
+    interp_graph%lc(interp_graph%kr(j+offsetf))=j+offsetc
   end do
 end do
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
 CALL oft_h0_create(h0_vec)
-CALL oft_h0_create(h0_vec_cors,oft_h0_level-1)
+CALL oft_h0_create(h0_vec_cors,ML_h0_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
-graphs(1,1)%g=>ops%interp_graph
+graphs(1,1)%g=>interp_graph
 !---
 CALL create_matrix(mat,graphs,h0_vec,h0_vec_cors)
 CALL h0_vec%delete
@@ -831,7 +847,7 @@ DO i=1,mesh%ne
     IF(.NOT.mesh%estitch%leo(emap(i)))CYCLE
   END IF
   DO j=1,h0_cors%gstruct(2)
-    i_ind=j+mesh%np+(i-1)*oft_h0%gstruct(2)
+    i_ind=j+mesh%np+(i-1)*h0_fine%gstruct(2)
     j_ind=j+mesh%np+(i-1)*h0_cors%gstruct(2)
     mop=1.d0
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
@@ -847,7 +863,7 @@ DO i=1,mesh%nf
     IF(.NOT.mesh%fstitch%leo(fmap(i)))CYCLE
   END IF
   DO j=1,h0_cors%gstruct(3)
-    i_ind=j+mesh%np+oft_h0%gstruct(2)*mesh%ne+(i-1)*oft_h0%gstruct(3)
+    i_ind=j+mesh%np+h0_fine%gstruct(2)*mesh%ne+(i-1)*h0_fine%gstruct(3)
     j_ind=j+mesh%np+h0_cors%gstruct(2)*mesh%ne+(i-1)*h0_cors%gstruct(3)
     mop=1.d0
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
@@ -857,7 +873,7 @@ deallocate(fmap)
 !---
 DO i=1,mesh%nc
   DO j=1,h0_cors%gstruct(4)
-    i_ind=j+mesh%np+oft_h0%gstruct(2)*mesh%ne+oft_h0%gstruct(3)*mesh%nf+(i-1)*oft_h0%gstruct(4)
+    i_ind=j+mesh%np+h0_fine%gstruct(2)*mesh%ne+h0_fine%gstruct(3)*mesh%nf+(i-1)*h0_fine%gstruct(4)
     j_ind=j+mesh%np+h0_cors%gstruct(2)*mesh%ne+h0_cors%gstruct(3)*mesh%nf+(i-1)*h0_cors%gstruct(4)
     mop=1.d0
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
@@ -865,6 +881,7 @@ DO i=1,mesh%nc
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE h0_pinterpmatrix
+END SUBROUTINE h0_setup_interp
 !---------------------------------------------------------------------------
 ! SUBROUTINE: h0_interp
 !---------------------------------------------------------------------------
@@ -880,15 +897,16 @@ class(oft_vector), intent(inout) :: acors
 class(oft_vector), intent(inout) :: afine
 DEBUG_STACK_PUSH
 !---Step one level up
-call oft_h0_set_level(oft_h0_level+1)
+call oft_h0_set_level(ML_oft_h0%level+1)
 call afine%set(0.d0)
 !---
-if(oft_h0_level==oft_h0_blevel+1)then
+if(ML_oft_h0%level==ML_oft_h0%blevel+1)then
   call h0_base_pop(acors,afine)
   DEBUG_STACK_POP
   return
 end if
-CALL oft_h0_ops%interp%apply(acors,afine)
+! CALL oft_h0_ops%interp%apply(acors,afine)
+CALL ML_oft_h0%interp_matrices(ML_oft_h0%level)%m%apply(acors,afine)
 DEBUG_STACK_POP
 end subroutine h0_interp
 !---------------------------------------------------------------------------
@@ -935,15 +953,16 @@ logical :: gcheck
 DEBUG_STACK_PUSH
 gcheck=(oft_h0%order==1)
 ! Step down level up
-call oft_h0_set_level(oft_h0_level-1)
+call oft_h0_set_level(ML_oft_h0%level-1)
 ! Cast fine field
 call acors%set(0.d0)
-if(oft_h0_level==oft_h0_blevel)then
+if(ML_oft_h0%level==ML_oft_h0%blevel)then
   call h0_base_push(afine,acors)
   DEBUG_STACK_POP
   return
 end if
-CALL ML_oft_h0_ops(oft_h0_level+1)%interp%applyT(afine,acors)
+! CALL ML_oft_h0_ops(oft_h0_level+1)%interp%applyT(afine,acors)
+CALL ML_oft_h0%interp_matrices(ML_oft_h0%level+1)%m%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine h0_inject
 !---------------------------------------------------------------------------
@@ -966,7 +985,7 @@ DEBUG_STACK_PUSH
 lptmp=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
-h0_fine=>ML_oft_h0%levels(oft_h0_level+1)%fe
+h0_fine=>ML_oft_h0%levels(ML_oft_h0%level+1)%fe
 !---
 allocate(alias(acors%n))
 alias=0.d0
@@ -992,7 +1011,8 @@ end subroutine h0_base_push
 !---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H0::LOP
 !---------------------------------------------------------------------------
-SUBROUTINE h0_lop_eigs(minlev)
+SUBROUTINE h0_lop_eigs(ML_h0_rep,minlev)
+type(oft_ml_fem_type), target, intent(inout) :: ML_h0_rep
 INTEGER(i4), INTENT(in) :: minlev
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i
@@ -1004,20 +1024,26 @@ CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: lop => NULL()
 TYPE(oft_h0_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
-bc_tmp%ML_H0_rep=>ML_oft_h0
+bc_tmp%ML_H0_rep=>ML_h0_rep
 !---------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H0::LOP'
-ALLOCATE(df(oft_h0_nlevels))
+ALLOCATE(df(ML_h0_rep%nlevels))
 df=0.d0
-DO i=minlev,oft_h0_nlevels
-  CALL oft_h0_set_level(i)
+DO i=minlev,ML_h0_rep%nlevels
+  CALL ML_h0_rep%set_level(i)
   !---Create fields
-  CALL oft_h0_create(u)
+  CALL ML_h0_rep%vec_create(u)
   !---Get Ev range
   NULLIFY(lop)
-  CALL oft_h0_getlop(oft_h0,lop,'grnd')
+  SELECT TYPE(this=>ML_h0_rep%current_level)
+  CLASS IS(oft_h0_fem)
+    CALL oft_h0_getlop(this,lop,'grnd')
+  CLASS DEFAULT
+    CALL oft_abort("Error getting current FE rep","h0_lop_eigs",__FILE__)
+  END SELECT
+  ! CALL oft_h0_getlop(oft_h0,lop,'grnd')
   CALL create_diagmatrix(md,lop%D)
   !---
   arsolver%A=>lop
@@ -1039,10 +1065,10 @@ END DO
 !---Output
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A)',ADVANCE='NO')' df_lop = '
-  DO i=1,oft_h0_nlevels-1
+  DO i=1,ML_h0_rep%nlevels-1
     WRITE(*,'(F5.3,A)',ADVANCE='NO')df(i),', '
   END DO
-  WRITE(*,'(F5.3,A)')df(oft_h0_nlevels)
+  WRITE(*,'(F5.3,A)')df(ML_h0_rep%nlevels)
 END IF
 DEALLOCATE(df)
 DEBUG_STACK_POP
@@ -1080,14 +1106,14 @@ TYPE(xml_node), POINTER :: h0_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=oft_h0_level
-levin=oft_h0_level
+toplev=ML_oft_h0%level
+levin=ML_oft_h0%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','h0_getlop_pre',__FILE__)
-IF(toplev>oft_h0_nlevels)CALL oft_abort('Maximum level is > h0_nlevels','h0_getlop_pre',__FILE__)
+IF(toplev>ML_oft_h0%nlevels)CALL oft_abort('Maximum level is > h0_nlevels','h0_getlop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -1112,7 +1138,7 @@ DO i=1,nl
     NULLIFY(mats(i)%M)
     CALL oft_h0_getlop(oft_h0,mats(i)%M,'grnd')
   END IF
-  IF(i>1)ml_int(i-1)%M=>oft_h0_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_oft_h0%interp_matrices(ML_oft_h0%level)%m !oft_h0_ops%interp
 END DO
 CALL oft_h0_set_level(levin)
 !---------------------------------------------------------------------------

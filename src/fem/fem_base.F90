@@ -1699,13 +1699,16 @@ subroutine ml_fem_set_level(self,level)
 class(oft_ml_fem_type), intent(inout) :: self
 integer(i4), intent(in) :: level
 DEBUG_STACK_PUSH
-IF(level>self%nlevels.OR.level<=0)CALL oft_abort('Invalid FE level change requested', &
+IF(level>self%nlevels.OR.level<=0)THEN
+  WRITE(*,*)level,self%nlevels
+  CALL oft_abort('Invalid FE level change requested', &
   'ml_fem_set_level',__FILE__)
+END IF
 !---Update level
 self%level=level
 self%current_level=>self%levels(self%level)%fe
 self%abs_level=self%level
-IF(self%level>self%blevel.AND.self%blevel>0)self%abs_level=self%level-1
+IF((self%level>self%blevel).AND.(self%blevel>0))self%abs_level=self%level-1
 !---Set grid level
 if(level<self%ml_mesh%mgdim)then
   call multigrid_level(self%ml_mesh,level)

@@ -19,8 +19,8 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, oft_hcurl_nlevels, &
-  oft_hcurl, oft_bhcurl, oft_hcurl_eval_all, oft_hcurl
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, &
+  oft_hcurl, oft_bhcurl, oft_hcurl_eval_all, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, &
   oft_hcurl_cinterp, oft_hcurl_bcurl
@@ -43,7 +43,7 @@ CLOSE(io_unit)
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
-CALL oft_hcurl_setup(mg_mesh,order)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl)
 !---Run tests
 oft_env%pm=.FALSE.
 CALL test_wop
@@ -67,7 +67,7 @@ CLASS(oft_matrix), POINTER :: wop => NULL()
 TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(uniform_field) :: xfield
 !---Set FE level
-CALL oft_hcurl_set_level(oft_hcurl_nlevels)
+CALL oft_hcurl_set_level(ML_oft_hcurl%nlevels)
 !---Create solver fields
 CALL oft_hcurl_create(u)
 CALL oft_hcurl_create(v)

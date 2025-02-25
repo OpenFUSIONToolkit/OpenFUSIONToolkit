@@ -36,16 +36,16 @@ USE oft_io, ONLY: oft_file_exist
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lagrange ,oft_lag_setup
+USE oft_lag_basis, ONLY: oft_lagrange ,oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate!, oft_lag_load
 USE oft_lag_operators, ONLY: oft_lag_vrinterp
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create!, oft_hcurl_load
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0, oft_h0_setup
+USE oft_h0_basis, ONLY: oft_h0, oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_fields, ONLY: oft_h0_create!, oft_h0_load
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
@@ -111,7 +111,7 @@ tracer%maxtrans=INT(tracer_maxtrans)
 !---Setup necessary FE space
 SELECT CASE(type)
   CASE(1) ! Vector Lagrange field
-    CALL oft_lag_setup(mg_mesh,order, -1)
+    CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
     !---Create field structure
     CALL oft_lag_create(x1)
     CALL oft_lag_vcreate(u)
@@ -119,8 +119,8 @@ SELECT CASE(type)
     tracer%B=>Bfield_lag
     CALL Bfield_lag%setup(oft_lagrange)
   CASE(2) !  Nedelec H1 field
-    CALL oft_hcurl_setup(mg_mesh,order, -1)
-    CALL oft_h0_setup(mg_mesh,order+1, -1)
+    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
+    CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
     CALL oft_h1_setup(mg_mesh,order, -1)
     !---Create field structure
     CALL oft_hcurl_create(x1)
@@ -130,7 +130,7 @@ SELECT CASE(type)
     tracer%B=>Bfield_H1
     CALL Bfield_H1%setup(oft_h1)
   CASE(3) !  Nedelec HCurl field
-    CALL oft_hcurl_setup(mg_mesh,order, -1)
+    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
     !---Create field structure
     CALL oft_hcurl_create(u)
     Bfield_HCurl%u=>u

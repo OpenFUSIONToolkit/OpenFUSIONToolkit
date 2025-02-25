@@ -35,8 +35,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_mlpre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, &
-  oft_lag_set_level, oft_lagrange_ops, oft_lagrange_blevel, oft_lagrange, &
-  ML_oft_lagrange
+  oft_lag_set_level, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
   oft_lag_getmop, oft_lag_getlop, df_lop, nu_lop, oft_lag_zerob, &
@@ -75,7 +74,7 @@ CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Example2")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---Construct FE levels
-CALL oft_lag_setup(mg_mesh,order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
@@ -91,13 +90,13 @@ ALLOCATE(df(nlevels),nu(nlevels),levels(nlevels))
 DO i=1,nlevels
   CALL oft_lag_set_level(i)
   levels(i)=i
-  IF(i==oft_lagrange_blevel+1)levels(i)=-levels(i)
+  IF(i==ML_oft_lagrange%blevel+1)levels(i)=-levels(i)
   df(i)=df_lop(i)
   nu(i)=nu_lop(i)
   !---
   NULLIFY(ml_lop(i)%M)
   CALL oft_lag_getlop(oft_lagrange,ml_lop(i)%M,'zerob')
-  IF(i>1)ml_int(i-1)%M=>oft_lagrange_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_oft_lagrange%interp_matrices(i)%m !oft_lagrange_ops%interp
 END DO
 CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !!\subsection doc_ex2_code_fields Setup solver fields

@@ -41,19 +41,17 @@ USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_ml_fem_comp_type, oft_fem_comp_type
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lag_geval_all
+USE oft_lag_basis, ONLY: oft_lag_geval_all
 USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_h0_basis, ONLY: oft_h0, oft_h0_ops, ML_oft_h0_ops, oft_h0_geval_all, &
-  oft_h0_d2eval, oft_h0_fem
+USE oft_h0_basis, ONLY: oft_h0, oft_h0_geval_all, oft_h0_d2eval, oft_h0_fem, ML_oft_h0
 USE oft_h0_fields, ONLY: oft_h0_create
 USE oft_h0_operators, ONLY: oft_h0_zerob, oft_h0_zerogrnd, oft_h0_getlop, oft_h0_gop
 USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, oft_bhcurl, oft_hcurl_eval_all, &
-oft_hcurl_ceval_all, oft_hcurl_level, oft_hcurl_blevel, oft_hcurl_get_cgops, &
-oft_hcurl_fem
-USE oft_hcurl_operators, ONLY: oft_hcurl_ops, oft_hcurl_rop, oft_hcurl_cop
+  oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem
+USE oft_hcurl_operators, ONLY: oft_hcurl_rop, oft_hcurl_cop
 USE oft_h1_basis, ONLY: oft_hgrad, ML_oft_hgrad, h1_ops, oft_h1_ops, ML_oft_h1_ops, &
-oft_h1_level, oft_h1_blevel, oft_h1_nlevels, oft_h1_set_level, ML_oft_h1, oft_h1, &
-oft_h1_minlev
+  oft_h1_level, oft_h1_blevel, oft_h1_nlevels, oft_h1_set_level, ML_oft_h1, oft_h1, &
+  oft_h1_minlev
 USE oft_h1_fields, ONLY: oft_h1_create, oft_hgrad_create
 IMPLICIT NONE
 #include "local.h"
@@ -1399,10 +1397,10 @@ DO i=oft_h1_minlev+1,oft_h1_nlevels
     oft_h1_ops%hgrad_interp=>ML_oft_hgrad%interp_matrices(ML_oft_hgrad%level)%m
     CALL oft_h1_ops%hgrad_interp%assemble
   ELSE
-    ML_oft_hgrad%interp_graphs(ML_oft_hgrad%level)%g=>ML_oft_h0_ops(oft_h1_level+1)%interp_graph
-    ML_oft_hgrad%interp_matrices(ML_oft_hgrad%level)%m=>ML_oft_h0_ops(oft_h1_level+1)%interp
-    oft_h1_ops%hgrad_interp_graph=>ML_oft_h0_ops(oft_h1_level+1)%interp_graph
-    oft_h1_ops%hgrad_interp=>ML_oft_h0_ops(oft_h1_level+1)%interp
+    ML_oft_hgrad%interp_graphs(ML_oft_hgrad%level)%g=>ML_oft_h0%interp_graphs(oft_h1_level+1)%g !ML_oft_h0_ops(oft_h1_level+1)%interp_graph
+    ML_oft_hgrad%interp_matrices(ML_oft_hgrad%level)%m=>ML_oft_h0%interp_matrices(oft_h1_level+1)%m
+    oft_h1_ops%hgrad_interp_graph=>ML_oft_h0%interp_graphs(oft_h1_level+1)%g
+    oft_h1_ops%hgrad_interp=>ML_oft_h0%interp_matrices(oft_h1_level+1)%m
   END IF
 END DO
 !---Create full H1 interpolation operator
@@ -1638,7 +1636,7 @@ DEBUG_STACK_PUSH
 call oft_h1_set_level(oft_h1_level+1)
 call afine%set(0.d0)
 !---
-if(oft_hcurl_level==oft_hcurl_blevel+1)then
+if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)then
   call h1_base_pop(acors,afine)
   DEBUG_STACK_POP
   return
@@ -1722,7 +1720,7 @@ gcheck=(oft_hcurl%order==1)
 call oft_h1_set_level(oft_h1_level-1)
 ! Cast fine field
 call acors%set(0.d0)
-if(oft_hcurl_level==oft_hcurl_blevel)then
+if(ML_oft_hcurl%level==ML_oft_hcurl%blevel)then
   call h1_base_push(afine,acors)
   DEBUG_STACK_POP
   return

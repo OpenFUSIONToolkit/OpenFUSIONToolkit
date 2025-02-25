@@ -32,7 +32,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
 USE oft_solver_utils, ONLY: create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, ML_oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob
 IMPLICIT NONE
@@ -85,7 +85,7 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!and polynomial level. This create element interaction lists as well as boundary and seam information.
 !!All FE index fields are encapsulated in the \ref fem_base::oft_fem_type "oft_fem_type" structure,
 !!see \ref fem_base::fem_setup "fem_setup".
-CALL oft_lag_setup(mg_mesh,order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!\subsection doc_ex1_code_ops Setup linear system
 !!

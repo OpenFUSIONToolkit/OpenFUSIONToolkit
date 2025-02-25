@@ -19,7 +19,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  oft_lagrange, oft_lagrange_ops, oft_vlagrange, ML_oft_vlagrange, ML_oft_lagrange
+  oft_lagrange, oft_vlagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, lag_vinterp, lag_vinject, oft_vlag_zerob, &
   df_lop, nu_lop, lag_setup_interp, lag_mloptions, oft_lag_getlop
@@ -44,7 +44,7 @@ CLOSE(io_unit)
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
-CALL oft_lag_setup(mg_mesh,order,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
 vlag_zerob%ML_vlag_rep=>ML_oft_vlagrange
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange,.TRUE.)
@@ -182,7 +182,7 @@ DO i=1,nlevels
   CALL fvec%delete
   DEALLOCATE(cvec,fvec)
   !---
-  IF(i>1)ml_int(i-1)%M=>oft_lagrange_ops%vinterp
+  IF(i>1)ml_int(i-1)%M=>ML_oft_vlagrange%interp_matrices(i)%m !oft_lagrange_ops%vinterp
 END DO
 CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields

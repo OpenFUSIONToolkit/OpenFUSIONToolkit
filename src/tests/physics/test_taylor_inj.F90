@@ -19,14 +19,14 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, ML_oft_lagrange, &
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange, &
   oft_lagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, oft_lag_vgetmop, &
   oft_lag_vproject
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_nlevels
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
-USE oft_h0_basis, ONLY: oft_h0_setup
+USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_level
 USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
@@ -60,16 +60,16 @@ ELSE
   taylor_minlev=mg_mesh%mgmax+order-1
 END IF
 !---
-CALL oft_lag_setup(mg_mesh,order,taylor_minlev)
-CALL oft_hcurl_setup(mg_mesh,order,taylor_minlev)
-CALL oft_h0_setup(mg_mesh,order+1,taylor_minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,taylor_minlev)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,taylor_minlev)
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,taylor_minlev)
 CALL oft_h1_setup(mg_mesh,order,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
-  CALL hcurl_setup_interp
+  CALL hcurl_setup_interp(ML_oft_hcurl)
   CALL hcurl_mloptions
-  CALL h0_setup_interp
+  CALL h0_setup_interp(ML_oft_h0)
   CALL h0_mloptions
 END IF
 !---Define jumps

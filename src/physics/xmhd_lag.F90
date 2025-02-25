@@ -92,9 +92,8 @@ USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
-  oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
-  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, oft_lagrange_lev, &
+USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lag_eval_all, &
+  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, &
   oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
@@ -339,7 +338,7 @@ INTEGER(i4) :: xmhd_taxis = 3 !< Axis for toroidal flux and current
 PROCEDURE(oft_1d_func), PUBLIC, POINTER :: res_profile => NULL()
 !---Multi-level environment
 INTEGER(i4) :: xmhd_blevel = 0 !< Highest level on base meshes
-INTEGER(i4) :: xmhd_lev = 1 !< Active FE level
+! INTEGER(i4) :: xmhd_lev = 1 !< Active FE level
 INTEGER(i4) :: xmhd_level = 1 !< Active FE level
 INTEGER(i4) :: xmhd_lin_level = 1 !< Highest linear element level
 INTEGER(i4) :: xmhd_nlevels = 1 !< Number of total levels
@@ -3700,7 +3699,7 @@ END IF
 call ML_xmhd_rep%setup
 xmhd_rep=>ML_xmhd_rep%current_level
 !---Declare legacy variables
-xmhd_blevel=oft_lagrange_blevel
+xmhd_blevel=ML_oft_lagrange%blevel
 xmhd_nlevels=ML_oft_lagrange%nlevels
 xmhd_level=ML_oft_lagrange%level
 end subroutine xmhd_setup_rep
@@ -3723,7 +3722,7 @@ xmhd_rep=>ML_xmhd_rep%current_level
 CALL oft_lag_set_level(level)
 IF(j2_ind>0)CALL oft_hcurl_set_level(level)
 xmhd_level=level
-xmhd_lev=oft_lagrange_lev
+! xmhd_lev=oft_lagrange_lev
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)
 end subroutine xmhd_set_level
 !---------------------------------------------------------------------------
@@ -4022,7 +4021,7 @@ do i=levelin,minlev,-1
     if(ASSOCIATED(fullcctmp))DEALLOCATE(fullcctmp)
     allocate(fullcctmp(26,mesh%nc))
     !---Transfer from distributed to local grid
-    if(oft_lagrange_level==oft_lagrange_blevel)then
+    if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
       call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,26)
     !---Average values to over child cells
     else

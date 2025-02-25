@@ -22,9 +22,9 @@ USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_fem_ptr, oft_ml_fem_type, oft_bfem_type!, &
 ! oft_ml_bfem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
-USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, oft_hcurl_nlevels, &
+USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, &
 oft_hcurl_set_level
-USE oft_h0_basis, ONLY: ML_oft_h0, oft_h0_nlevels, oft_h0_fem
+USE oft_h0_basis, ONLY: ML_oft_h0, oft_h0_fem
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ integer(i4) :: oft_h1_lin_level = 0 !< Highest linear element level
 integer(i4) :: oft_h1_minlev = 0 !<
 integer(i4) :: oft_h1_nlevels = 0 !< Number of total levels
 type(h1_ops), pointer :: oft_h1_ops !< Active operators
-type(h1_ops), pointer :: oft_h1_ops_lin !< Highest linear element operators
+! type(h1_ops), pointer :: oft_h1_ops_lin !< Highest linear element operators
 type(h1_ops), pointer :: ML_oft_h1_ops(:) !< ML container for all operators
 !---
 class(oft_h0_fem), pointer :: oft_hgrad !< Active FE representation
@@ -53,14 +53,10 @@ type(oft_fem_comp_type), pointer :: oft_h1 !< Active H1 representation
 type(oft_ml_fem_comp_type), TARGET :: ML_oft_h1 !< ML container for H1 representations
 contains
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h1_set_level
-!---------------------------------------------------------------------------
 !> Set the current level for Nedelec H1 finite elements
-!!
-!! @param[in] level Desired level
 !---------------------------------------------------------------------------
 subroutine oft_h1_set_level(level)
-integer(i4), intent(in) :: level
+integer(i4), intent(in) :: level !< Desired level
 DEBUG_STACK_PUSH
 if(level>oft_h1_nlevels.OR.level<=0)then
   write(*,*)level
@@ -88,17 +84,13 @@ call oft_hcurl_set_level(level)
 DEBUG_STACK_POP
 end subroutine oft_h1_set_level
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_h1_setup
-!---------------------------------------------------------------------------
 !> Construct Nedelec H1 vector FE on each mesh level
 !!
-!! @note Highest supported representation is quadratic.
-!!
-!! @param[in] order Order of representation desired
+!! @note Highest supported representation is quadratic
 !---------------------------------------------------------------------------
 subroutine oft_h1_setup(mg_mesh,order,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
-integer(i4), intent(in) :: order
+integer(i4), intent(in) :: order !< Order of representation desired
 integer(i4), optional, intent(in) :: minlev
 integer(i4) :: i
 DEBUG_STACK_PUSH
@@ -139,7 +131,7 @@ do i=1,order
   IF(mg_mesh%mgdim+i-1<oft_h1_minlev)CYCLE
   ALLOCATE(oft_h0_fem::ML_oft_hgrad%levels(mg_mesh%mgdim+i-1)%fe)
   call oft_h1_set_level(mg_mesh%mgdim+i-1)
-  IF(oft_h0_nlevels>=mg_mesh%mgdim+i)THEN
+  IF(ML_oft_h0%nlevels>=mg_mesh%mgdim+i)THEN
     DEALLOCATE(ML_oft_hgrad%levels(oft_h1_level)%fe)
     ML_oft_hgrad%levels(oft_h1_level)%fe=>ML_oft_h0%levels(oft_h1_level+1)%fe
     SELECT TYPE(this=>ML_oft_hgrad%levels(oft_h1_level)%fe)
@@ -171,7 +163,7 @@ do i=1,order
 end do
 IF(mg_mesh%mgdim>=oft_h1_minlev)THEN
   oft_h1_lin_level=mg_mesh%mgdim
-  oft_h1_ops_lin=>ML_oft_h1_ops(mg_mesh%mgdim)
+  ! oft_h1_ops_lin=>ML_oft_h1_ops(mg_mesh%mgdim)
 ELSE
   oft_h1_lin_level=-1
 END IF

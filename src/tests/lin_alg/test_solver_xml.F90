@@ -24,7 +24,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_solver_xml
 !
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, oft_lagrange, ML_oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, lag_inject, &
   lag_interp, oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
@@ -40,7 +40,7 @@ CALL oft_init
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
-CALL oft_lag_setup(mg_mesh,order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---Run tests
 oft_env%pm=.FALSE.

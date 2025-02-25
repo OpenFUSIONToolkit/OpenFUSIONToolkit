@@ -38,11 +38,10 @@ USE oft_arpack, ONLY: oft_irlm_eigsolver
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_level, oft_lag_set_level, &
-oft_lagrange_blevel, ML_oft_lagrange, oft_lagrange_ops, oft_lag_ops, ML_oft_lagrange_ops, &
-oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
-oft_lag_nodes, oft_lagrange_lev, ML_oft_vlagrange, oft_vlagrange, oft_blag_eval, &
-oft_blag_geval, oft_lagrange_minlev, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
+USE oft_lag_basis, ONLY: oft_lagrange, oft_lag_set_level, ML_oft_lagrange, &
+  oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
+  oft_lag_nodes, ML_oft_vlagrange, oft_vlagrange, oft_blag_eval, &
+  oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
 USE oft_lag_fields, ONLY: oft_lag_create, oft_blag_create, oft_lag_vcreate
 IMPLICIT NONE
 #include "local.h"
@@ -1532,7 +1531,7 @@ DEBUG_STACK_PUSH
 vec_interp=.FALSE.
 IF(PRESENT(create_vec))vec_interp=create_vec
 !---
-DO i=oft_lagrange_minlev+1,ML_lag_rep%nlevels
+DO i=ML_oft_lagrange%minlev+1,ML_lag_rep%nlevels
   CALL ML_lag_rep%set_level(i)
   !---
   if(ML_lag_rep%level==ML_lag_rep%blevel+1)then
@@ -1541,11 +1540,11 @@ DO i=oft_lagrange_minlev+1,ML_lag_rep%nlevels
   !---Setup interpolation
   if(ML_lag_rep%current_level%order==1)then
     CALL lag_ginterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m)
-    oft_lagrange_ops%interp=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m
+    ! oft_lagrange_ops%interp=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m
     CALL ML_lag_rep%interp_matrices(ML_lag_rep%level)%m%assemble
   else
     CALL lag_pinterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m)
-    oft_lagrange_ops%interp=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m
+    ! oft_lagrange_ops%interp=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m
     CALL ML_lag_rep%interp_matrices(ML_lag_rep%level)%m%assemble
   end if
 END DO
@@ -1558,7 +1557,7 @@ IF(vec_interp)THEN
     if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
       CYCLE
     end if
-    oft_lagrange_ops%vinterp=>ML_oft_vlagrange%interp_matrices(i)%m
+    ! oft_lagrange_ops%vinterp=>ML_oft_vlagrange%interp_matrices(i)%m
   END DO
 END IF
 DEBUG_STACK_POP
@@ -1574,10 +1573,11 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 REAL(r8) :: f(4),val,mop(1)
 REAL(r8), POINTER, DIMENSION(:,:) :: ed_nodes,fc_nodes,c_nodes
 CLASS(oft_afem_type), POINTER :: lag_cors => NULL()
-TYPE(oft_lag_ops), POINTER :: ops
+! TYPE(oft_lag_ops), POINTER :: ops
 class(oft_mesh), pointer :: cmesh
 CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
+type(oft_graph), POINTER :: interp_graph
 CLASS(oft_scalar_fem), POINTER :: lag_fine
 DEBUG_STACK_PUSH
 !---
@@ -1596,43 +1596,43 @@ END SELECT
 if(lag_fine%order/=1)then
   call oft_abort('Attempted geometric interpolation for pd > 1','lag_ginterpmatrix',__FILE__)
 end if
-ops=>oft_lagrange_ops
+! ops=>oft_lagrange_ops
 lag_cors=>ML_lag_rep%levels(ML_lag_rep%level-1)%fe
 ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
-ops%interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
+interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
 !---Setup matrix sizes
-ops%interp_graph%nr=lag_fine%ne
-ops%interp_graph%nrg=lag_fine%global%ne
-ops%interp_graph%nc=lag_cors%ne
-ops%interp_graph%ncg=lag_cors%global%ne
+interp_graph%nr=lag_fine%ne
+interp_graph%nrg=lag_fine%global%ne
+interp_graph%nc=lag_cors%ne
+interp_graph%ncg=lag_cors%global%ne
 !---Setup Matrix graph
-ALLOCATE(ops%interp_graph%kr(ops%interp_graph%nr+1))
-ops%interp_graph%nnz=cmesh%np+2*cmesh%ne
-ALLOCATE(ops%interp_graph%lc(ops%interp_graph%nnz))
-ops%interp_graph%lc=0_i4
+ALLOCATE(interp_graph%kr(interp_graph%nr+1))
+interp_graph%nnz=cmesh%np+2*cmesh%ne
+ALLOCATE(interp_graph%lc(interp_graph%nnz))
+interp_graph%lc=0_i4
 !---Construct linkage
 DO i=1,cmesh%np
-  ops%interp_graph%kr(i)=1
+  interp_graph%kr(i)=1
 END DO
 DO i=1,cmesh%ne
-  ops%interp_graph%kr(i+cmesh%np)=2
+  interp_graph%kr(i+cmesh%np)=2
 END DO
-ops%interp_graph%kr(ops%interp_graph%nr+1)=ops%interp_graph%nnz+1
-do i=ops%interp_graph%nr,1,-1 ! cumulative point to point count
-  ops%interp_graph%kr(i)=ops%interp_graph%kr(i+1)-ops%interp_graph%kr(i)
+interp_graph%kr(interp_graph%nr+1)=interp_graph%nnz+1
+do i=interp_graph%nr,1,-1 ! cumulative point to point count
+  interp_graph%kr(i)=interp_graph%kr(i+1)-interp_graph%kr(i)
 end do
-if(ops%interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_lag_ginterpmatrix',__FILE__)
+if(interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_lag_ginterpmatrix',__FILE__)
 DO i=1,cmesh%np
-  ops%interp_graph%lc(ops%interp_graph%kr(i))=i
+  interp_graph%lc(interp_graph%kr(i))=i
 END DO
 !---
 DO i=1,cmesh%ne
   etmp=cmesh%le(:,i)
   !---
   ifine = cmesh%np+i
-  jb=ops%interp_graph%kr(ifine)-1
+  jb=interp_graph%kr(ifine)-1
   DO k=1,2
-    ops%interp_graph%lc(jb+k)=etmp(k)
+    interp_graph%lc(jb+k)=etmp(k)
   END DO
 END DO
 !---------------------------------------------------------------------------
@@ -1642,7 +1642,7 @@ CALL oft_lag_create(lag_vec)
 CALL oft_lag_create(lag_vec_cors,ML_lag_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
-graphs(1,1)%g=>ops%interp_graph
+graphs(1,1)%g=>interp_graph
 !---
 CALL create_matrix(mat,graphs,lag_vec,lag_vec_cors)
 CALL lag_vec%delete
@@ -1676,7 +1676,7 @@ DO i=1,cmesh%ne
   etmp=cmesh%le(:,i)
   !---
   ifine = cmesh%np+i
-  jb=ops%interp_graph%kr(ifine)-1
+  jb=interp_graph%kr(ifine)-1
   DO k=1,2
     i_ind=ifine
     j_ind=etmp(k)
@@ -1698,9 +1698,10 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap,jcors,ftmp,fetmp,ctmp
 REAL(r8) :: f(4),val,mop(1)
 REAL(r8), POINTER, DIMENSION(:,:) :: ed_nodes,fc_nodes,c_nodes
 CLASS(oft_scalar_fem), POINTER :: lag_cors => NULL()
-TYPE(oft_lag_ops), POINTER :: ops
+! TYPE(oft_lag_ops), POINTER :: ops
 CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
+type(oft_graph), POINTER :: interp_graph
 class(oft_mesh), pointer :: mesh
 CLASS(oft_scalar_fem), POINTER :: lag_fine
 DEBUG_STACK_PUSH
@@ -1713,7 +1714,7 @@ END SELECT
 mesh=>lag_fine%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
 !---
-ops=>oft_lagrange_ops
+! ops=>oft_lagrange_ops
 SELECT TYPE(this=>ML_lag_rep%levels(ML_lag_rep%level-1)%fe)
   CLASS IS(oft_scalar_fem)
     lag_cors=>this
@@ -1725,35 +1726,35 @@ END SELECT
 !WRITE(*,*)lag_fine%gstruct
 CALL oft_lag_nodes(lag_fine%order,ed_nodes,fc_nodes,c_nodes)
 ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
-ops%interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
+interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
 !---Setup matrix sizes
-ops%interp_graph%nr=lag_fine%ne
-ops%interp_graph%nrg=lag_fine%global%ne
-ops%interp_graph%nc=lag_cors%ne
-ops%interp_graph%ncg=lag_cors%global%ne
+interp_graph%nr=lag_fine%ne
+interp_graph%nrg=lag_fine%global%ne
+interp_graph%nc=lag_cors%ne
+interp_graph%ncg=lag_cors%global%ne
 !---Setup Matrix graph
-ALLOCATE(ops%interp_graph%kr(ops%interp_graph%nr+1))
-ops%interp_graph%nnz=mesh%np
-ops%interp_graph%nnz=ops%interp_graph%nnz + &
+ALLOCATE(interp_graph%kr(interp_graph%nr+1))
+interp_graph%nnz=mesh%np
+interp_graph%nnz=interp_graph%nnz + &
   (2+lag_cors%gstruct(2))*mesh%ne*lag_fine%gstruct(2)
-ops%interp_graph%nnz=ops%interp_graph%nnz + &
+interp_graph%nnz=interp_graph%nnz + &
   (mesh%face_np+lag_cors%gstruct(2)*mesh%face_np &
   + lag_cors%gstruct(3))*mesh%nf*lag_fine%gstruct(3)
-ops%interp_graph%nnz=ops%interp_graph%nnz + &
+interp_graph%nnz=interp_graph%nnz + &
   (mesh%cell_np+lag_cors%gstruct(2)*mesh%cell_ne &
   + lag_cors%gstruct(3)*mesh%cell_nf &
   + lag_cors%gstruct(4))*mesh%nc*lag_fine%gstruct(4)
-ALLOCATE(ops%interp_graph%lc(ops%interp_graph%nnz))
-ops%interp_graph%lc=0_i4
+ALLOCATE(interp_graph%lc(interp_graph%nnz))
+interp_graph%lc=0_i4
 !---Construct matrix
 DO i=1,mesh%np
-  ops%interp_graph%kr(i)=1
+  interp_graph%kr(i)=1
 END DO
 !---
 DO i=1,mesh%ne
   DO j=1,lag_fine%gstruct(2)
     ifine = mesh%np + (i-1)*lag_fine%gstruct(2) + j
-    ops%interp_graph%kr(ifine)=2+lag_cors%gstruct(2)
+    interp_graph%kr(ifine)=2+lag_cors%gstruct(2)
   END DO
 END DO
 !---
@@ -1761,7 +1762,7 @@ DO i=1,mesh%nf
   DO j=1,lag_fine%gstruct(3)
     ifine = mesh%np+lag_fine%gstruct(2)*mesh%ne &
       + (i-1)*lag_fine%gstruct(3) + j
-    ops%interp_graph%kr(ifine)= mesh%face_np &
+    interp_graph%kr(ifine)= mesh%face_np &
       + mesh%face_np*lag_cors%gstruct(2)+lag_cors%gstruct(3)
   END DO
 END DO
@@ -1770,36 +1771,36 @@ DO i=1,mesh%nc
   DO j=1,lag_fine%gstruct(4)
     ifine = mesh%np + lag_fine%gstruct(2)*mesh%ne &
       + lag_fine%gstruct(3)*mesh%nf + (i-1)*lag_fine%gstruct(4) + j
-    ops%interp_graph%kr(ifine) = mesh%cell_np &
+    interp_graph%kr(ifine) = mesh%cell_np &
       + mesh%cell_ne*lag_cors%gstruct(2) &
       + mesh%cell_nf*lag_cors%gstruct(3) + lag_cors%gstruct(4)
   END DO
 END DO
-ops%interp_graph%kr(ops%interp_graph%nr+1)=ops%interp_graph%nnz+1
-do i=ops%interp_graph%nr,1,-1 ! cumulative point to point count
-  ops%interp_graph%kr(i)=ops%interp_graph%kr(i+1)-ops%interp_graph%kr(i)
+interp_graph%kr(interp_graph%nr+1)=interp_graph%nnz+1
+do i=interp_graph%nr,1,-1 ! cumulative point to point count
+  interp_graph%kr(i)=interp_graph%kr(i+1)-interp_graph%kr(i)
 end do
-if(ops%interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_lag_interpmatrix',__FILE__)
+if(interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_lag_interpmatrix',__FILE__)
 !---Construct matrix
 DO i=1,mesh%np
-  ops%interp_graph%lc(ops%interp_graph%kr(i))=i
+  interp_graph%lc(interp_graph%kr(i))=i
 END DO
 !---
 DO i=1,mesh%ne
   etmp=mesh%le(:,i)
   DO j=1,lag_fine%gstruct(2)
     ifine = mesh%np + (i-1)*lag_fine%gstruct(2) + j
-    jb=ops%interp_graph%kr(ifine)-1
+    jb=interp_graph%kr(ifine)-1
     DO k=1,2
-      ops%interp_graph%lc(jb+k)=etmp(k)
+      interp_graph%lc(jb+k)=etmp(k)
     END DO
     DO k=1,lag_cors%gstruct(2)
-      ops%interp_graph%lc(jb+2+k)=mesh%np + (i-1)*lag_cors%gstruct(2) + k
+      interp_graph%lc(jb+2+k)=mesh%np + (i-1)*lag_cors%gstruct(2) + k
     END DO
     !---
-    js=ops%interp_graph%kr(ifine)
-    jn=ops%interp_graph%kr(ifine+1)-1
-    CALL sort_array(ops%interp_graph%lc(js:jn),jn-js+1)
+    js=interp_graph%kr(ifine)
+    jn=interp_graph%kr(ifine+1)-1
+    CALL sort_array(interp_graph%lc(js:jn),jn-js+1)
   END DO
 END DO
 !---
@@ -1809,25 +1810,25 @@ DO i=1,mesh%nf
   DO j=1,lag_fine%gstruct(3)
     ifine = mesh%np+lag_fine%gstruct(2)*mesh%ne &
       + (i-1)*lag_fine%gstruct(3) + j
-    jb=ops%interp_graph%kr(ifine)-1
+    jb=interp_graph%kr(ifine)-1
     DO k=1,mesh%face_np
-      ops%interp_graph%lc(jb+k)=ftmp(k)
+      interp_graph%lc(jb+k)=ftmp(k)
       ! etmp=mesh%bmesh%face_ed(:,k)
       ed=fetmp(k)
       DO m=1,lag_cors%gstruct(2)
-        ops%interp_graph%lc(jb+mesh%face_np+(m-1)*mesh%face_np+k)= &
+        interp_graph%lc(jb+mesh%face_np+(m-1)*mesh%face_np+k)= &
           mesh%np + (ABS(ed)-1)*lag_cors%gstruct(2) + m
       END DO
     END DO
     offset=jb+mesh%face_np+mesh%face_np*lag_cors%gstruct(2)
     DO m=1,lag_cors%gstruct(3)
-      ops%interp_graph%lc(offset+m)= &
+      interp_graph%lc(offset+m)= &
         mesh%np + lag_cors%gstruct(2)*mesh%ne + (i-1)*lag_cors%gstruct(3) + m
     END DO
     !---
-    js=ops%interp_graph%kr(ifine)
-    jn=ops%interp_graph%kr(ifine+1)-1
-    CALL sort_array(ops%interp_graph%lc(js:jn),jn-js+1)
+    js=interp_graph%kr(ifine)
+    jn=interp_graph%kr(ifine+1)-1
+    CALL sort_array(interp_graph%lc(js:jn),jn-js+1)
   END DO
 END DO
 !---
@@ -1836,16 +1837,16 @@ DO i=1,mesh%nc
   DO j=1,lag_fine%gstruct(4)
     ifine = mesh%np + lag_fine%gstruct(2)*mesh%ne &
       + lag_fine%gstruct(3)*mesh%nf + (i-1)*lag_fine%gstruct(4) + j
-    jb=ops%interp_graph%kr(ifine)-1
+    jb=interp_graph%kr(ifine)-1
     DO k=1,mesh%cell_np
-      ops%interp_graph%lc(jb+k)=ctmp(k)
+      interp_graph%lc(jb+k)=ctmp(k)
     END DO
     offset=jb+mesh%cell_np
     DO k=1,mesh%cell_ne
       etmp=mesh%cell_ed(:,k)
       ed=mesh%lce(k,i)
       DO m=1,lag_cors%gstruct(2)
-        ops%interp_graph%lc(offset+(m-1)*mesh%cell_ne+k)= &
+        interp_graph%lc(offset+(m-1)*mesh%cell_ne+k)= &
           mesh%np + (ABS(ed)-1)*lag_cors%gstruct(2) + m
       END DO
     END DO
@@ -1853,20 +1854,20 @@ DO i=1,mesh%nc
     DO k=1,mesh%cell_nf
       ftmp=mesh%cell_fc(:,k)
       DO m=1,lag_cors%gstruct(3)
-        ops%interp_graph%lc(offset+(m-1)*mesh%cell_nf+k)=mesh%np &
+        interp_graph%lc(offset+(m-1)*mesh%cell_nf+k)=mesh%np &
         + lag_cors%gstruct(2)*mesh%ne + (ABS(mesh%lcf(k,i))-1)*lag_cors%gstruct(3) + m
       END DO
     END DO
     offset=jb+mesh%cell_np+mesh%cell_ne*lag_cors%gstruct(2)+mesh%cell_nf*lag_cors%gstruct(3)
     DO m=1,lag_cors%gstruct(4)
-      ops%interp_graph%lc(offset+m)=mesh%np &
+      interp_graph%lc(offset+m)=mesh%np &
       + lag_cors%gstruct(2)*mesh%ne+lag_cors%gstruct(3)*mesh%nf &
       + (i-1)*lag_cors%gstruct(4) + m
     END DO
     !---
-    js=ops%interp_graph%kr(ifine)
-    jn=ops%interp_graph%kr(ifine+1)-1
-    CALL sort_array(ops%interp_graph%lc(js:jn),jn-js+1)
+    js=interp_graph%kr(ifine)
+    jn=interp_graph%kr(ifine+1)-1
+    CALL sort_array(interp_graph%lc(js:jn),jn-js+1)
   END DO
 END DO
 !---------------------------------------------------------------------------
@@ -1876,7 +1877,7 @@ CALL oft_lag_create(lag_vec)
 CALL oft_lag_create(lag_vec_cors,ML_lag_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
-graphs(1,1)%g=>ops%interp_graph
+graphs(1,1)%g=>interp_graph
 !---
 CALL create_matrix(mat,graphs,lag_vec,lag_vec_cors)
 CALL lag_vec%delete
@@ -2018,15 +2019,16 @@ class(oft_vector), intent(inout) :: acors !< Vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 DEBUG_STACK_PUSH
 !---Step one level up
-call oft_lag_set_level(oft_lagrange_level+1)
+call oft_lag_set_level(ML_oft_lagrange%level+1)
 call afine%set(0.d0)
 !---
-if(oft_lagrange_level==oft_lagrange_blevel+1)then
+if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
   call lag_base_pop(acors,afine)
   DEBUG_STACK_POP
   return
 end if
-CALL oft_lagrange_ops%interp%apply(acors,afine)
+! CALL oft_lagrange_ops%interp%apply(acors,afine)
+CALL ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m%apply(acors,afine)
 DEBUG_STACK_POP
 end subroutine lag_interp
 !---------------------------------------------------------------------------
@@ -2039,15 +2041,16 @@ class(oft_vector), intent(inout) :: acors !< Vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 DEBUG_STACK_PUSH
 !---Step one level up
-call oft_lag_set_level(oft_lagrange_level+1)
+call oft_lag_set_level(ML_oft_lagrange%level+1)
 !---
-if(oft_lagrange_level==oft_lagrange_blevel+1)then
+if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
   CALL oft_abort('MPI-Base transfer not supported','lag_vinterp',__FILE__)
 !  call lag_base_pop(acors,afine)
   DEBUG_STACK_POP
   return
 end if
-CALL oft_lagrange_ops%vinterp%apply(acors,afine)
+! CALL oft_lagrange_ops%vinterp%apply(acors,afine)
+CALL ML_oft_vlagrange%interp_matrices(ML_oft_vlagrange%level)%m%apply(acors,afine)
 DEBUG_STACK_POP
 end subroutine lag_vinterp
 !---------------------------------------------------------------------------
@@ -2084,15 +2087,16 @@ logical :: gcheck
 DEBUG_STACK_PUSH
 gcheck=(oft_lagrange%order==1)
 ! Step down level up
-call oft_lag_set_level(oft_lagrange_level-1)
+call oft_lag_set_level(ML_oft_lagrange%level-1)
 ! Cast fine field
 call acors%set(0.d0)
-if(oft_lagrange_level==oft_lagrange_blevel)then
+if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
   call lag_base_push(afine,acors)
   DEBUG_STACK_POP
   return
 end if
-CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%interp%applyT(afine,acors)
+! CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%interp%applyT(afine,acors)
+CALL ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level+1)%m%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine lag_inject
 !---------------------------------------------------------------------------
@@ -2108,15 +2112,16 @@ logical :: gcheck
 DEBUG_STACK_PUSH
 gcheck=(oft_lagrange%order==1)
 ! Step down level up
-call oft_lag_set_level(oft_lagrange_level-1)
+call oft_lag_set_level(ML_oft_lagrange%level-1)
 ! Cast fine field
-if(oft_lagrange_level==oft_lagrange_blevel)then
+if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
 !  call lag_base_push(afine,acors)
   CALL oft_abort('MPI-Base transfer not supported','lag_vinterp',__FILE__)
   DEBUG_STACK_POP
   return
 end if
-CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%vinterp%applyT(afine,acors)
+! CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%vinterp%applyT(afine,acors)
+CALL ML_oft_vlagrange%interp_matrices(ML_oft_vlagrange%level+1)%m%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine lag_vinject
 !---------------------------------------------------------------------------
@@ -2134,7 +2139,7 @@ DEBUG_STACK_PUSH
 lptmp=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
-lag_fine=>ML_oft_lagrange%levels(oft_lagrange_level+1)%fe
+lag_fine=>ML_oft_lagrange%levels(ML_oft_lagrange%level+1)%fe
 !---
 allocate(alias(acors%n))
 alias=0.d0
@@ -2159,7 +2164,7 @@ end subroutine lag_base_push
 !> Compute eigenvalues and smoothing coefficients for the operator LAG::LOP
 !---------------------------------------------------------------------------
 SUBROUTINE lag_lop_eigs(ML_lag_rep,minlev)
-type(oft_ml_fem_type), intent(inout) :: ML_lag_rep
+type(oft_ml_fem_type), target, intent(inout) :: ML_lag_rep
 INTEGER(i4), INTENT(in) :: minlev !< Needs docs
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i
@@ -2169,10 +2174,9 @@ CLASS(oft_vector), POINTER :: u
 TYPE(oft_irlm_eigsolver) :: arsolver
 CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: lop => NULL()
-CLASS(oft_scalar_fem), pointer :: lag_rep
 TYPE(oft_lag_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
-bc_tmp%ML_lag_rep=>ML_oft_lagrange
+bc_tmp%ML_lag_rep=>ML_lag_rep
 !---------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
@@ -2183,15 +2187,15 @@ DO i=minlev,ML_lag_rep%nlevels
   CALL ML_lag_rep%set_level(i)
   !---Create fields
   CALL ML_lag_rep%vec_create(u)
+  !---Get Ev range
+  NULLIFY(lop)
   SELECT TYPE(this=>ML_lag_rep%current_level)
   CLASS IS(oft_scalar_fem)
-    lag_rep=>this
+    CALL oft_lag_getlop(this,lop,'zerob')
   CLASS DEFAULT
     CALL oft_abort("Error getting current FE rep","lag_lop_eigs",__FILE__)
   END SELECT
-  !---Get Ev range
-  NULLIFY(lop)
-  CALL oft_lag_getlop(lag_rep,lop,'zerob')
+  ! CALL oft_lag_getlop(lag_rep,lop,'zerob')
   CALL create_diagmatrix(md,lop%D)
   !---
   arsolver%A=>lop
@@ -2252,8 +2256,8 @@ TYPE(xml_node), POINTER :: lag_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=oft_lagrange_level
-levin=oft_lagrange_level
+toplev=ML_oft_lagrange%level
+levin=ML_oft_lagrange%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
@@ -2284,7 +2288,7 @@ DO i=1,nl
     NULLIFY(mats(i)%M)
     CALL oft_lag_getlop(oft_lagrange,mats(i)%M,'zerob')
   END IF
-  IF(i>1)ml_int(i-1)%M=>oft_lagrange_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m !oft_lagrange_ops%interp
 END DO
 CALL oft_lag_set_level(levin)
 !---------------------------------------------------------------------------

@@ -20,7 +20,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  oft_blagrange, ML_oft_blagrange
+  oft_blagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_blag_create
 USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zerob
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -49,7 +49,7 @@ IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test fo
 CALL plot_file%setup("Test")
 CALL mg_mesh%smesh%setup_io(plot_file,order)
 !---
-CALL oft_lag_setup(mg_mesh,order,-1)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
 blag_zerob%ML_lag_rep=>ML_oft_blagrange
 !---Run tests
 ! oft_env%pm=.FALSE.

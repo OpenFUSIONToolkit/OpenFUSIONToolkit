@@ -18,8 +18,8 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, oft_hcurl_nlevels, &
-  ML_oft_hcurl, oft_hcurl
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, &
+  oft_hcurl, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, oft_hcurl_zerob, &
   hcurl_setup_interp, hcurl_mloptions, hcurl_getwop_pre
@@ -45,10 +45,10 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 !---
 minlev=2
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
-CALL oft_hcurl_setup(mg_mesh,order,minlev)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,minlev)
 hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
 IF(mg_test)THEN
-  CALL hcurl_setup_interp
+  CALL hcurl_setup_interp(ML_oft_hcurl)
   CALL hcurl_mloptions
 END IF
 !---Run tests
@@ -75,7 +75,7 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: wop => NULL()
 CLASS(oft_matrix), POINTER :: kop => NULL()
 !---Set FE level
-CALL oft_hcurl_set_level(oft_hcurl_nlevels)
+CALL oft_hcurl_set_level(ML_oft_hcurl%nlevels)
 !---Create solver fields
 CALL oft_hcurl_create(u)
 CALL oft_hcurl_create(v)
@@ -130,7 +130,8 @@ TYPE(oft_matrix_ptr), POINTER :: ml_wop(:) => NULL()
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
-nlevels=oft_hcurl_nlevels-minlev+1
+nlevels=ML_oft_hcurl%nlevels-minlev+1
+CALL oft_hcurl_set_level(ML_oft_hcurl%nlevels)
 !---Create solver fields
 CALL oft_hcurl_create(u)
 CALL oft_hcurl_create(v)

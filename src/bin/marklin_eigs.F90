@@ -29,12 +29,12 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, &
-  ML_oft_lagrange, oft_lagrange
+  ML_oft_lagrange, oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, oft_hcurl_level
+USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
@@ -74,18 +74,18 @@ CALL plot_file%setup("marklin_eigs")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !
 IF(minlev<0)THEN
-  taylor_minlev=oft_hcurl_level
+  taylor_minlev=ML_oft_hcurl%level
 ELSE
   taylor_minlev=minlev
   IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,minlev)
 END IF
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order, taylor_minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,taylor_minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order, taylor_minlev)
-CALL hcurl_setup_interp
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,taylor_minlev)
+CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL hcurl_mloptions
 oft_env%pm=.TRUE.
 CALL taylor_hmodes(nmodes)
@@ -104,10 +104,10 @@ ALLOCATE(bvout(3,u%n/3))
 !---Save modes
 DO i=1,nmodes
   WRITE(pltnum,'(I3.3)')i
-  CALL oft_hcurl%vec_save(taylor_hffa(i,oft_hcurl_level)%f, &
+  CALL oft_hcurl%vec_save(taylor_hffa(i,ML_oft_hcurl%level)%f, &
                           'marklin_eigs.rst','A_'//pltnum, append=(i/=1))
   !---Setup field interpolation
-  Bfield%u=>taylor_hffa(i,oft_hcurl_level)%f
+  Bfield%u=>taylor_hffa(i,ML_oft_hcurl%level)%f
   CALL Bfield%setup(oft_hcurl)
   !---Project field
   CALL oft_lag_vproject(oft_lagrange,Bfield,v)

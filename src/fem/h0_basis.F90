@@ -21,55 +21,44 @@ MODULE oft_h0_basis
 ! USE timer
 USE oft_base
 USE oft_lag_poly
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
 USE oft_mesh_local_util, ONLY: mesh_local_orient, oriented_cell, &
   oriented_edges, oriented_faces
 USE oft_hexmesh_type, ONLY: hex_get_bary, hex_get_bary_gop, &
   hex_bary_pfcoords, hex_bary_efcoords, hex_bary_ecoords, hex_bary_fcoords
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_utils, ONLY: oft_matrix, oft_graph
-USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type
+USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
-!> Needs docs
-!---------------------------------------------------------------------------
-type :: h0_ops
-  type(oft_graph), pointer :: interp_graph => NULL() !< Interpolation graph
-  class(oft_matrix), pointer :: interp => NULL() !< Interpolation matrix
-end type h0_ops
+! !---------------------------------------------------------------------------
+! !> Needs docs
+! !---------------------------------------------------------------------------
+! type :: h0_ops
+!   type(oft_graph), pointer :: interp_graph => NULL() !< Interpolation graph
+!   class(oft_matrix), pointer :: interp => NULL() !< Interpolation matrix
+! end type h0_ops
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
 type, extends(oft_fem_type) :: oft_h0_fem
-  INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL()
-  INTEGER(i4), POINTER, DIMENSION(:,:) :: indsc => NULL()
+  INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL() !< Needs docs
+  INTEGER(i4), POINTER, DIMENSION(:,:) :: indsc => NULL() !< Needs docs
 end type oft_h0_fem
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
 type, extends(oft_bfem_type) :: oft_h0_bfem
-  INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL()
+  INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL() !< Needs docs
 end type oft_h0_bfem
 !---Global Variables
 integer(i4), parameter :: oft_h0_id = 2 !< FE type ID
-integer(i4) :: oft_h0_blevel=0 !< Highest level on base meshes
-integer(i4) :: oft_h0_lev = 0 !< Active FE level
-integer(i4) :: oft_h0_level = 0 !< Active FE level
-integer(i4) :: oft_h0_lin_level = 0 !< Highest linear element level
-integer(i4) :: oft_h0_minlev = 0 !< Lowest level for multilevel runs
-integer(i4) :: oft_h0_nlevels = 0 !< Number of total levels
 !
 type(oft_h0_bfem), pointer :: oft_bh0 !< Active FE representation
-type(oft_h0_bfem), pointer :: oft_bh0_lin !< Highest linear element representation
 type(oft_ml_fem_type), TARGET :: ML_oft_bh0 !< ML container for all FE representations
 !
 class(oft_h0_fem), pointer :: oft_h0 !< Active FE representation
-class(oft_h0_fem), pointer :: oft_h0_lin !< Highest linear element representation
 type(oft_ml_fem_type), TARGET :: ML_oft_h0 !< ML container for all FE representations
-!
-type(h0_ops), pointer :: oft_h0_ops !< Active operators
-type(h0_ops), pointer :: oft_h0_ops_lin !< Highest linear element operators
-type(h0_ops), pointer :: ML_oft_h0_ops(:) !< ML container for all operators
 !
 logical, private :: hex_mesh = .FALSE.
 contains
@@ -79,34 +68,44 @@ contains
 subroutine oft_h0_set_level(level)
 integer(i4), intent(in) :: level !< Desired level
 DEBUG_STACK_PUSH
-if(level>oft_h0_nlevels.OR.level<=0)then
-  call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
-end if
+! if(level>oft_h0_nlevels.OR.level<=0)then
+!   call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
+! end if
 ! if(level<mg_mesh%mgdim)then
 !   call multigrid_level(level)
 ! else
 !   call multigrid_level(mg_mesh%mgdim)
 ! end if
-CALL ML_oft_h0%set_level(level)
-SELECT TYPE(this=>ML_oft_h0%current_level)
-  CLASS IS(oft_h0_fem)
-    oft_h0=>this
-  CLASS DEFAULT
-    CALL oft_abort("Error setting H0 level", "oft_h0_set_level", __FILE__)
-END SELECT
+IF(ML_oft_h0%nlevels>0)THEN
+  if(level>ML_oft_h0%nlevels.OR.level<=0)then
+    call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
+  end if
+  CALL ML_oft_h0%set_level(level)
+  SELECT TYPE(this=>ML_oft_h0%current_level)
+    CLASS IS(oft_h0_fem)
+      oft_h0=>this
+    CLASS DEFAULT
+      CALL oft_abort("Error setting H0 level", "oft_h0_set_level", __FILE__)
+  END SELECT
+END IF
 ! oft_h0=>ML_oft_h0%current_level
-CALL ML_oft_bh0%set_level(level)
-SELECT TYPE(this=>ML_oft_bh0%current_level)
-  CLASS IS(oft_h0_bfem)
-    oft_bh0=>this
-  CLASS DEFAULT
-    CALL oft_abort("Error setting boundary H0 level", "oft_h0_set_level", __FILE__)
-END SELECT
+IF(ML_oft_bh0%nlevels>0)THEN
+  if(level>ML_oft_bh0%nlevels.OR.level<=0)then
+    call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
+  end if
+  CALL ML_oft_bh0%set_level(level)
+  SELECT TYPE(this=>ML_oft_bh0%current_level)
+    CLASS IS(oft_h0_bfem)
+      oft_bh0=>this
+    CLASS DEFAULT
+      CALL oft_abort("Error setting boundary H0 level", "oft_h0_set_level", __FILE__)
+  END SELECT
+END IF
 !---
-oft_h0_level=level
-oft_h0_lev=level
-if(oft_h0_level>oft_h0_blevel.AND.oft_h0_blevel>0)oft_h0_lev=level-1
-oft_h0_ops=>ML_oft_h0_ops(level)
+! oft_h0_level=level
+! oft_h0_lev=level
+! if(oft_h0_level>oft_h0_blevel.AND.oft_h0_blevel>0)oft_h0_lev=level-1
+! oft_h0_ops=>ML_oft_h0_ops(level)
 DEBUG_STACK_POP
 end subroutine oft_h0_set_level
 !---------------------------------------------------------------------------
@@ -114,157 +113,304 @@ end subroutine oft_h0_set_level
 !!
 !! @note Highest supported representation is Quartic
 !---------------------------------------------------------------------------
-subroutine oft_h0_setup(mg_mesh,order,minlev)
+subroutine oft_h0_setup(mg_mesh,order,ML_h0_obj,ML_bh0_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
+TYPE(oft_ml_fem_type), TARGET, INTENT(inout) :: ML_h0_obj
+TYPE(oft_ml_fem_type), INTENT(inout) :: ML_bh0_obj
 integer(i4), optional, intent(in) :: minlev !< Lowest level to construct
-integer(i4) :: i,j,k
+integer(i4) :: i,j,k,nlevels,minlev_out
 REAL(r8), POINTER, DIMENSION(:) :: xnodes
 DEBUG_STACK_PUSH
-oft_h0_minlev=1
-IF(PRESENT(minlev))oft_h0_minlev=minlev
+minlev_out=1
+IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
   WRITE(*,'(A)')'**** Creating Nedelec H0 FE space'
   WRITE(*,'(2X,A,I4)')'Order  = ',order
-  WRITE(*,'(2X,A,I4)')'Minlev = ',oft_h0_minlev
+  WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
 END IF
-IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
-ML_oft_h0%ml_mesh=>mg_mesh
-ML_oft_bh0%ml_mesh=>mg_mesh
-! Allocate multigrid operators
-oft_h0_nlevels=mg_mesh%mgdim+(order-1)
-IF(oft_h0_minlev<0)oft_h0_minlev=oft_h0_nlevels
-ML_oft_h0%nlevels=oft_h0_nlevels
-ML_oft_bh0%nlevels=oft_h0_nlevels
-allocate(ML_oft_h0_ops(oft_h0_nlevels))
+!---Allocate multigrid operators
+nlevels=mg_mesh%mgdim+(order-1)
+IF(minlev_out<0)minlev_out=nlevels
+IF(ASSOCIATED(mg_mesh%meshes))THEN
+  ML_h0_obj%nlevels=nlevels
+  ML_h0_obj%minlev=minlev_out
+  ML_h0_obj%ml_mesh=>mg_mesh
+  IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
+ELSE
+  ML_h0_obj%nlevels=0
+  IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
+END IF
+ML_bh0_obj%nlevels=nlevels
+ML_bh0_obj%minlev=minlev_out
+ML_bh0_obj%ml_mesh=>mg_mesh
+! allocate(ML_oft_h0_ops(ML_h0_obj%nlevels))
 ! Set linear elements
 do i=1,mg_mesh%mgdim-1
-  IF(i<oft_h0_minlev)CYCLE
-  ALLOCATE(oft_h0_fem::ML_oft_h0%levels(i)%fe)
-  ALLOCATE(oft_h0_bfem::ML_oft_bh0%levels(i)%fe)
-  call oft_h0_set_level(i)
-  if(mg_mesh%level==mg_mesh%nbase)THEN
-    ML_oft_h0%blevel=i
-    ML_oft_bh0%blevel=i
-    oft_h0_blevel=i
+  IF(i<ML_h0_obj%minlev)CYCLE
+  CALL multigrid_level(mg_mesh,i)
+  IF(ML_h0_obj%nlevels>0)THEN
+    CALL oft_h0_setup_vol(ML_h0_obj%levels(i)%fe,mg_mesh%mesh,1)
+    IF(mg_mesh%level==mg_mesh%nbase)ML_h0_obj%blevel=i
+    CALL ML_h0_obj%set_level(i)
   END IF
-  !---
-  oft_h0%mesh=>mg_mesh%mesh
-  oft_h0%order=1
-  oft_h0%dim=1
-  oft_h0%type=oft_h0_id
-  oft_h0%gstruct=(/1,0,0,0/)
-  call oft_h0%setup(3)
-  !---
-  oft_bh0%mesh=>mg_mesh%smesh
-  oft_bh0%order=1
-  oft_bh0%dim=1
-  oft_bh0%type=oft_h0_id
-  oft_bh0%gstruct=(/1,0,0/)
-  call oft_bh0%setup(3)
+  IF(ML_bh0_obj%nlevels>0)THEN
+    CALL oft_h0_setup_surf(ML_bh0_obj%levels(i)%fe,mg_mesh%smesh,1)
+    IF(mg_mesh%level==mg_mesh%nbase)ML_bh0_obj%blevel=i
+  END IF
+  IF(mg_mesh%level==mg_mesh%nbase)ML_h0_obj%blevel=i
+  ! ALLOCATE(oft_h0_fem::ML_oft_h0%levels(i)%fe)
+  ! ALLOCATE(oft_h0_bfem::ML_oft_bh0%levels(i)%fe)
+  ! call oft_h0_set_level(i)
+  ! if(mg_mesh%level==mg_mesh%nbase)THEN
+  !   ML_oft_h0%blevel=i
+  !   ML_oft_bh0%blevel=i
+  !   oft_h0_blevel=i
+  ! END IF
+  ! !---
+  ! oft_h0%mesh=>mg_mesh%mesh
+  ! oft_h0%order=1
+  ! oft_h0%dim=1
+  ! oft_h0%type=oft_h0_id
+  ! oft_h0%gstruct=(/1,0,0,0/)
+  ! call oft_h0%setup(3)
+  ! !---
+  ! oft_bh0%mesh=>mg_mesh%smesh
+  ! oft_bh0%order=1
+  ! oft_bh0%dim=1
+  ! oft_bh0%type=oft_h0_id
+  ! oft_bh0%gstruct=(/1,0,0/)
+  ! call oft_bh0%setup(3)
 end do
 call multigrid_level(mg_mesh,mg_mesh%mgdim)
 ! Set high order elements
 do i=1,order
-  IF(mg_mesh%mgdim+i-1<oft_h0_minlev)CYCLE
-  ALLOCATE(oft_h0_fem::ML_oft_h0%levels(mg_mesh%mgdim+i-1)%fe)
-  ALLOCATE(oft_h0_bfem::ML_oft_bh0%levels(mg_mesh%mgdim+i-1)%fe)
-  call oft_h0_set_level(mg_mesh%mgdim+i-1)
-  !---
-  oft_h0%mesh=>mg_mesh%mesh
-  oft_h0%order=i
-  oft_h0%dim=1
-  oft_h0%type=oft_h0_id
-  IF(hex_mesh)THEN
-    CALL hpoly_2d_grid(oft_h0%order-1, oft_h0%indsf)
-    CALL hpoly_3d_grid(oft_h0%order-1, oft_h0%indsc)
-    select case(oft_h0%order)
-      case(1)
-        oft_h0%gstruct=(/1,0,0,0/)
-      case(2)
-        oft_h0%gstruct=(/1,1,1,1/)
-      case(3)
-        oft_h0%gstruct=(/1,2,4,8/)
-      case(4)
-        oft_h0%gstruct=(/1,3,9,27/)
-      case(5)
-        oft_h0%gstruct=(/1,4,16,64/)
-      case default
-        call oft_abort('Invalid polynomial degree (npmax=4 for hex grids)','oft_h0_setup',__FILE__)
-    end select
-  ELSE
-    select case(oft_h0%order)
-      case(1)
-        oft_h0%gstruct=(/1,0,0,0/)
-      case(2)
-        oft_h0%gstruct=(/1,1,0,0/)
-      case(3)
-        oft_h0%gstruct=(/1,2,1,0/)
-      case(4)
-        oft_h0%gstruct=(/1,3,3,1/)
-      case(5)
-        oft_h0%gstruct=(/1,4,6,4/)
-      case default
-        call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup',__FILE__)
-    end select
+  IF(mg_mesh%mgdim+i-1<ML_oft_h0%minlev)CYCLE
+  IF(ML_h0_obj%nlevels>0)THEN
+    CALL oft_h0_setup_vol(ML_h0_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
+    CALL ML_h0_obj%set_level(mg_mesh%mgdim+i-1)
   END IF
-  call oft_h0%setup(i*2+1)
-  !---
-  oft_bh0%mesh=>mg_mesh%smesh
-  oft_bh0%order=i
-  oft_bh0%dim=1
-  oft_bh0%type=oft_h0_id
-  IF(hex_mesh)THEN
-    select case(oft_bh0%order)
-      case(1)
-        oft_bh0%gstruct=(/1,0,0/)
-      case(2)
-        oft_bh0%gstruct=(/1,1,1/)
-      case(3)
-        oft_bh0%gstruct=(/1,2,4/)
-      case(4)
-        oft_bh0%gstruct=(/1,3,9/)
-      case(5)
-        oft_bh0%gstruct=(/1,4,16/)
-      case default
-        call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup',__FILE__)
-    end select
-  ELSE
-    select case(oft_bh0%order)
-      case(1)
-        oft_bh0%gstruct=(/1,0,0/)
-      case(2)
-        oft_bh0%gstruct=(/1,1,0/)
-      case(3)
-        oft_bh0%gstruct=(/1,2,1/)
-      case(4)
-        oft_bh0%gstruct=(/1,3,3/)
-      case(5)
-        oft_bh0%gstruct=(/1,4,6/)
-      case default
-        call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup',__FILE__)
-    end select
+  IF(ML_bh0_obj%nlevels>0)THEN
+    CALL oft_h0_setup_surf(ML_bh0_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i)
   END IF
-  call oft_bh0%setup(i*2+1)
+  ! ALLOCATE(oft_h0_fem::ML_oft_h0%levels(mg_mesh%mgdim+i-1)%fe)
+  ! ALLOCATE(oft_h0_bfem::ML_oft_bh0%levels(mg_mesh%mgdim+i-1)%fe)
+  ! call oft_h0_set_level(mg_mesh%mgdim+i-1)
+  ! !---
+  ! oft_h0%mesh=>mg_mesh%mesh
+  ! oft_h0%order=i
+  ! oft_h0%dim=1
+  ! oft_h0%type=oft_h0_id
+  ! IF(hex_mesh)THEN
+  !   CALL hpoly_2d_grid(oft_h0%order-1, oft_h0%indsf)
+  !   CALL hpoly_3d_grid(oft_h0%order-1, oft_h0%indsc)
+  !   select case(oft_h0%order)
+  !     case(1)
+  !       oft_h0%gstruct=(/1,0,0,0/)
+  !     case(2)
+  !       oft_h0%gstruct=(/1,1,1,1/)
+  !     case(3)
+  !       oft_h0%gstruct=(/1,2,4,8/)
+  !     case(4)
+  !       oft_h0%gstruct=(/1,3,9,27/)
+  !     case(5)
+  !       oft_h0%gstruct=(/1,4,16,64/)
+  !     case default
+  !       call oft_abort('Invalid polynomial degree (npmax=4 for hex grids)','oft_h0_setup',__FILE__)
+  !   end select
+  ! ELSE
+  !   select case(oft_h0%order)
+  !     case(1)
+  !       oft_h0%gstruct=(/1,0,0,0/)
+  !     case(2)
+  !       oft_h0%gstruct=(/1,1,0,0/)
+  !     case(3)
+  !       oft_h0%gstruct=(/1,2,1,0/)
+  !     case(4)
+  !       oft_h0%gstruct=(/1,3,3,1/)
+  !     case(5)
+  !       oft_h0%gstruct=(/1,4,6,4/)
+  !     case default
+  !       call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup',__FILE__)
+  !   end select
+  ! END IF
+  ! call oft_h0%setup(i*2+1)
+  ! !---
+  ! oft_bh0%mesh=>mg_mesh%smesh
+  ! oft_bh0%order=i
+  ! oft_bh0%dim=1
+  ! oft_bh0%type=oft_h0_id
+  ! IF(hex_mesh)THEN
+  !   select case(oft_bh0%order)
+  !     case(1)
+  !       oft_bh0%gstruct=(/1,0,0/)
+  !     case(2)
+  !       oft_bh0%gstruct=(/1,1,1/)
+  !     case(3)
+  !       oft_bh0%gstruct=(/1,2,4/)
+  !     case(4)
+  !       oft_bh0%gstruct=(/1,3,9/)
+  !     case(5)
+  !       oft_bh0%gstruct=(/1,4,16/)
+  !     case default
+  !       call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup',__FILE__)
+  !   end select
+  ! ELSE
+  !   select case(oft_bh0%order)
+  !     case(1)
+  !       oft_bh0%gstruct=(/1,0,0/)
+  !     case(2)
+  !       oft_bh0%gstruct=(/1,1,0/)
+  !     case(3)
+  !       oft_bh0%gstruct=(/1,2,1/)
+  !     case(4)
+  !       oft_bh0%gstruct=(/1,3,3/)
+  !     case(5)
+  !       oft_bh0%gstruct=(/1,4,6/)
+  !     case default
+  !       call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup',__FILE__)
+  !   end select
+  ! END IF
+  ! call oft_bh0%setup(i*2+1)
 end do
-IF(mg_mesh%mgdim>=oft_h0_minlev)THEN
-  oft_h0_lin_level=mg_mesh%mgdim
-  SELECT TYPE(this=>ML_oft_h0%levels(mg_mesh%mgdim)%fe)
-    CLASS IS(oft_h0_fem)
-      oft_h0_lin=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error casting H0 object", "oft_h0_setup", __FILE__)
-  END SELECT
-  ! oft_h0_lin=>ML_oft_h0%levels(mg_mesh%mgdim)%fe
-  oft_h0_ops_lin=>ML_oft_h0_ops(mg_mesh%mgdim)
-ELSE
-  oft_h0_lin_level=-1
-END IF
-CALL oft_h0_set_level(oft_h0_nlevels)
+! IF(mg_mesh%mgdim>=oft_h0_minlev)THEN
+!   oft_h0_lin_level=mg_mesh%mgdim
+!   SELECT TYPE(this=>ML_oft_h0%levels(mg_mesh%mgdim)%fe)
+!     CLASS IS(oft_h0_fem)
+!       oft_h0_lin=>this
+!     CLASS DEFAULT
+!       CALL oft_abort("Error casting H0 object", "oft_h0_setup", __FILE__)
+!   END SELECT
+!   ! oft_h0_lin=>ML_oft_h0%levels(mg_mesh%mgdim)%fe
+!   oft_h0_ops_lin=>ML_oft_h0_ops(mg_mesh%mgdim)
+! ELSE
+!   oft_h0_lin_level=-1
+! END IF
+CALL oft_h0_set_level(max(ML_h0_obj%nlevels,ML_bh0_obj%nlevels))
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_h0_setup
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine oft_h0_setup_vol(self,tmesh,order)
+class(oft_afem_type), pointer, intent(out) :: self !< Needs docs
+class(oft_mesh), target, intent(in) :: tmesh !< Needs docs
+integer(i4), intent(in) :: order !< Order of representation desired
+DEBUG_STACK_PUSH
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(2A)')oft_indent,'Creating 3D H0 FE space'
+  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
+END IF
+CALL oft_increase_indent
+!---
+ALLOCATE(oft_h0_fem::self)
+SELECT TYPE(self)
+CLASS IS(oft_h0_fem)
+  self%mesh=>tmesh
+  self%order=order
+  self%dim=1
+  self%type=oft_h0_id
+  IF(hex_mesh)THEN
+    CALL hpoly_2d_grid(self%order-1, self%indsf)
+    CALL hpoly_3d_grid(self%order-1, self%indsc)
+    select case(self%order)
+      case(1)
+        self%gstruct=(/1,0,0,0/)
+      case(2)
+        self%gstruct=(/1,1,1,1/)
+      case(3)
+        self%gstruct=(/1,2,4,8/)
+      case(4)
+        self%gstruct=(/1,3,9,27/)
+      case(5)
+        self%gstruct=(/1,4,16,64/)
+      case default
+        call oft_abort('Invalid polynomial degree (npmax=4 for hex grids)','oft_h0_setup_vol',__FILE__)
+    end select
+  ELSE
+    select case(self%order)
+      case(1)
+        self%gstruct=(/1,0,0,0/)
+      case(2)
+        self%gstruct=(/1,1,0,0/)
+      case(3)
+        self%gstruct=(/1,2,1,0/)
+      case(4)
+        self%gstruct=(/1,3,3,1/)
+      case(5)
+        self%gstruct=(/1,4,6,4/)
+      case default
+        call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup_vol',__FILE__)
+    end select
+  END IF
+CLASS DEFAULT
+  CALL oft_abort("Error allocate Lagrange FE object","oft_h0_setup_vol",__FILE__)
+END SELECT
+call self%setup(self%order*2+1)
+CALL oft_decrease_indent
+DEBUG_STACK_POP
+end subroutine oft_h0_setup_vol
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine oft_h0_setup_surf(self,tmesh,order)
+class(oft_afem_type), pointer, intent(out) :: self !< Needs docs
+class(oft_bmesh), target, intent(in) :: tmesh !< Needs docs
+integer(i4), intent(in) :: order !< Order of representation desired
+DEBUG_STACK_PUSH
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(2A)')oft_indent,'Creating 2D H(Curl) FE space'
+  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
+END IF
+CALL oft_increase_indent
+!---
+ALLOCATE(oft_h0_bfem::self)
+SELECT TYPE(self)
+CLASS IS(oft_h0_bfem)
+  self%mesh=>tmesh
+  self%order=order
+  self%dim=1
+  self%type=oft_h0_id
+  IF(hex_mesh)THEN
+    select case(self%order)
+      case(1)
+        self%gstruct=(/1,0,0/)
+      case(2)
+        self%gstruct=(/1,1,1/)
+      case(3)
+        self%gstruct=(/1,2,4/)
+      case(4)
+        self%gstruct=(/1,3,9/)
+      case(5)
+        self%gstruct=(/1,4,16/)
+      case default
+        call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup',__FILE__)
+    end select
+  ELSE
+    select case(self%order)
+      case(1)
+        self%gstruct=(/1,0,0/)
+      case(2)
+        self%gstruct=(/1,1,0/)
+      case(3)
+        self%gstruct=(/1,2,1/)
+      case(4)
+        self%gstruct=(/1,3,3/)
+      case(5)
+        self%gstruct=(/1,4,6/)
+      case default
+        call oft_abort('Invalid polynomial degree (npmax=5)','oft_h0_setup',__FILE__)
+    end select
+  END IF
+CLASS DEFAULT
+  CALL oft_abort("Error allocate Lagrange FE object","oft_h0_setup_surf",__FILE__)
+END SELECT
+call self%setup(self%order*2+1)
+CALL oft_decrease_indent
+DEBUG_STACK_POP
+end subroutine oft_h0_setup_surf
 !---------------------------------------------------------------------------
 !> Evaluate Nedelec H0 interpolation function
 !!

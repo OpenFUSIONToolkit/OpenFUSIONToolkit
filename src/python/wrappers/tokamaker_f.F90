@@ -20,7 +20,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !
 USE fem_base, ONLY: oft_afem_type
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
-  oft_lag_setup
+  oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
@@ -258,7 +258,7 @@ END IF
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
 mg_mesh%smesh%tess_order=order
-CALL oft_lag_setup(mg_mesh,order,-1)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
 !---------------------------------------------------------------------------
 ! Setup experimental geometry
 !---------------------------------------------------------------------------

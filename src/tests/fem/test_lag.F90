@@ -21,7 +21,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_lag_basis, ONLY: oft_lag_setup, &
-  oft_lag_set_level, oft_lagrange, ML_oft_lagrange
+  oft_lag_set_level, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, lag_inject, &
   lag_interp, oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
@@ -48,7 +48,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 !---
 minlev=2
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
-CALL oft_lag_setup(mg_mesh,order,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
@@ -66,8 +66,6 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE: test_lap
 !------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
@@ -123,8 +121,6 @@ CALL linv%pre%delete
 CALL linv%delete
 END SUBROUTINE test_lap
 !------------------------------------------------------------------------------
-! SUBROUTINE: test_lapmg
-!------------------------------------------------------------------------------
 !> Same as \ref test_lag::test_lap "test_lap" but use MG preconditioning.
 !------------------------------------------------------------------------------
 SUBROUTINE test_lapmg
@@ -141,6 +137,7 @@ TYPE(oft_matrix_ptr), POINTER :: ml_lop(:) => NULL()
 ! Create ML Matrices
 !---------------------------------------------------------------------------
 nlevels=ML_oft_lagrange%nlevels-minlev+1
+CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)

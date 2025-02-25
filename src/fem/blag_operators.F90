@@ -32,11 +32,10 @@ USE oft_arpack, ONLY: oft_irlm_eigsolver
 !---
 USE fem_base, ONLY: oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp, bfem_interp
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_level, oft_lag_set_level, &
-oft_lagrange_blevel, ML_oft_lagrange, oft_lagrange_ops, oft_lag_ops, ML_oft_lagrange_ops, &
-oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, oft_blag_d2eval, &
-oft_lag_nodes, oft_lagrange_lev, ML_oft_vlagrange, oft_vlagrange, oft_blagrange, oft_blag_eval, &
-oft_blag_geval, oft_lagrange_minlev, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
+USE oft_lag_basis, ONLY: oft_lagrange, ML_oft_lagrange, &
+  oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, oft_blag_d2eval, &
+  oft_lag_nodes, ML_oft_vlagrange, oft_vlagrange, oft_blagrange, oft_blag_eval, &
+  oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
 USE oft_lag_fields, ONLY: oft_lag_create, oft_blag_create, oft_lag_vcreate
 IMPLICIT NONE
 #include "local.h"

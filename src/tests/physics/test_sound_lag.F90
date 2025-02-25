@@ -23,7 +23,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  oft_lagrange, oft_vlagrange, ML_oft_lagrange
+  oft_lagrange, oft_vlagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop, &
   oft_lag_getmop, oft_lag_project, oft_lag_rinterp, oft_lag_vrinterp
@@ -77,7 +77,7 @@ CALL multigrid_construct(mg_mesh)
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 !---------------------------------------------------------------------------
 ! Create Lagrange metric solver

@@ -21,7 +21,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, oft_lag_npos, oft_lag_geval, &
-oft_lag_d2eval
+  oft_lag_d2eval, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange, oft_lag_set_level
 IMPLICIT NONE
 INTEGER(i4) :: xi,xj,ierr,nfail,i,ntests,io_unit
 REAL(r8) :: check_vec(6),tol=1.d-6
@@ -39,7 +39,7 @@ CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_sphere_id)CALL oft_abort('Wrong mesh type, test for SPHERE only.','main',__FILE__)
 IF(oft_env%nprocs>1)CALL oft_abort('Test is for serial meshes only.','main',__FILE__)
 !---Setup FEM
-CALL oft_lag_setup(mg_mesh,order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
 !---Run test cases
 nfail=0
 OPEN(NEWUNIT=io_unit,FILE='mapping_jac.tests')

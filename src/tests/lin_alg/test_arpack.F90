@@ -26,8 +26,8 @@ USE oft_deriv_matrices, ONLY: create_diagmatrix
 USE oft_solver_utils, ONLY: create_native_pre
 USE oft_arpack, ONLY: oft_irlm_eigsolver, oft_iram_eigsolver
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, oft_lagrange_nlevels, &
-  oft_lagrange, ML_oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
+  oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, oft_lag_zerob
 IMPLICIT NONE
@@ -52,7 +52,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 ! Run tests
 !---------------------------------------------------------------------------
 oft_env%pm=.FALSE.
-CALL oft_lag_setup(mg_mesh,order,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 CALL test_lop_eig()
 !---Finalize enviroment

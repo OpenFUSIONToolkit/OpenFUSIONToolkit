@@ -36,12 +36,12 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
   create_ilu_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, ML_oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0
+USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad
@@ -90,11 +90,11 @@ CALL multigrid_construct(mg_mesh)
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,-1)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,-1)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
 !---H1(Grad) subspace
-CALL oft_h0_setup(mg_mesh,order+1,-1)
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order,-1)
 h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
@@ -159,12 +159,12 @@ divout%pm=.TRUE.
 !---------------------------------------------------------------------------
 !---Apply to equilibrium field
 CALL oft_h1_create(ic_fields%B)
-CALL taylor_hffa(3,oft_hcurl_level)%f%get_local(tmp)
+CALL taylor_hffa(3,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
 !---Apply to perturbation field
 CALL oft_h1_create(pert_fields%B)
-CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
+CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL pert_fields%B%restore_local(tmp,1)
 CALL divout%apply(pert_fields%B)
 !---Clean up solver
@@ -183,8 +183,8 @@ DEALLOCATE(linv)
 !! density fields are also created. The velocity field is initialized to zero everywhere,
 !! while the temperature and density fields, which are not evolved in this case, are set to
 !! uniform values for the equilibrium and zero for the perturbation.
-CALL ic_fields%B%scale(b0_scale*taylor_hlam(3,oft_hcurl_level))
-CALL pert_fields%B%scale(b1_scale*taylor_hlam(1,oft_hcurl_level))
+CALL ic_fields%B%scale(b0_scale*taylor_hlam(3,ML_oft_hcurl%level))
+CALL pert_fields%B%scale(b1_scale*taylor_hlam(1,ML_oft_hcurl%level))
 IF(.NOT.linear)THEN
   CALL ic_fields%B%add(1.d0,1.d0,pert_fields%B)
   CALL pert_fields%B%delete

@@ -27,17 +27,17 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, &
-  oft_lagrange, ML_oft_lagrange
+  oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
+USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_level
@@ -86,16 +86,16 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order)
-CALL hcurl_setup_interp
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl)
+CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL hcurl_mloptions
 !---H1(Grad) subspace
-CALL oft_h0_setup(mg_mesh,order+1)
-CALL h0_setup_interp
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0)
+CALL h0_setup_interp(ML_oft_h0)
 CALL h0_mloptions
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order)
@@ -139,7 +139,7 @@ htags(2)='Yinj'
 !!interpolation object \ref taylor::oft_taylor_rinterp "oft_taylor_rinterp" is designed to support this type of field
 !!and is populated once the subfields are computed.
 CALL taylor_vacuum(nh,hcpc,hcpv,htags)
-CALL taylor_injectors(taylor_hlam(1,oft_hcurl_level))
+CALL taylor_injectors(taylor_hlam(1,ML_oft_hcurl%level))
 !---Setup field interpolation object
 fluxes=(/1.d0,0.d0/)
 CALL oft_h1_create(Bfield%uvac)
@@ -147,7 +147,7 @@ DO i=1,nh
   CALL Bfield%uvac%add(1.d0,fluxes(i),taylor_hvac(i,oft_h1_level)%f)
 END DO
 CALL oft_hcurl_create(Bfield%ua)
-CALL Bfield%ua%add(0.d0,fr/taylor_htor(1,oft_hcurl_level),taylor_hffa(1,oft_hcurl_level)%f)
+CALL Bfield%ua%add(0.d0,fr/taylor_htor(1,ML_oft_hcurl%level),taylor_hffa(1,ML_oft_hcurl%level)%f)
 DO i=1,nh
   CALL Bfield%ua%add(1.d0,fluxes(i),taylor_gffa(i,oft_h1_level)%f)
 END DO

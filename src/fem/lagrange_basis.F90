@@ -36,23 +36,23 @@ USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_ml_fem_type, oft_bfem_type,
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
-!> Lagrange operator container
-!---------------------------------------------------------------------------
-type :: oft_lag_ops
-  type(oft_graph), pointer :: interp_graph => NULL() !< Interpolation graph
-  class(oft_matrix), pointer :: interp => NULL() !< Interpolation matrix
-  class(oft_matrix), pointer :: vinterp => NULL() !< Vector interpolation matrix
-end type oft_lag_ops
+! !---------------------------------------------------------------------------
+! !> Lagrange operator container
+! !---------------------------------------------------------------------------
+! type :: oft_lag_ops
+!   type(oft_graph), pointer :: interp_graph => NULL() !< Interpolation graph
+!   class(oft_matrix), pointer :: interp => NULL() !< Interpolation matrix
+!   class(oft_matrix), pointer :: vinterp => NULL() !< Vector interpolation matrix
+! end type oft_lag_ops
 !---------------------------------------------------------------------------
 !> Lagrange operator container
 !---------------------------------------------------------------------------
 type, extends(oft_fem_type) :: oft_scalar_fem
-  INTEGER(i4) :: inodesp(3,8)
-  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodese => NULL()
-  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodesf => NULL()
-  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: inodesc => NULL()
-  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: xnodes => NULL()
+  INTEGER(i4) :: inodesp(3,8) !< Needs docs
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodese => NULL() !< Needs docs
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodesf => NULL() !< Needs docs
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: inodesc => NULL() !< Needs docs
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: xnodes => NULL() !< Needs docs
   REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: sn => NULL() !< Surface normal vector
   ! REAL(r8), POINTER, DIMENSION(:,:) :: ct => NULL() !< Curve tangent vector
   TYPE(oft_graph), POINTER :: interp_graph => NULL() !< Interpolation graph
@@ -66,25 +66,19 @@ end type oft_scalar_fem
 !> Lagrange operator container
 !---------------------------------------------------------------------------
 type, extends(oft_bfem_type) :: oft_scalar_bfem
-  INTEGER(i4) :: inodesp(2,4)
-  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodese => NULL()
-  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: inodesf => NULL()
-  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: xnodes => NULL()
+  INTEGER(i4) :: inodesp(2,4) !< Needs docs
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodese => NULL() !< Needs docs
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: inodesf => NULL() !< Needs docs
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: xnodes => NULL() !< Needs docs
 contains
   !> Destory FE type
   PROCEDURE :: delete => scalar_bfem_delete
 end type oft_scalar_bfem
 !---Global Variables
 integer(i4), parameter :: oft_lagrange_id = 1 !< FE type ID
-integer(i4) :: oft_lagrange_blevel = 0 !< Highest level on base meshes
-integer(i4) :: oft_lagrange_lev = 0 !< Active FE level
-integer(i4) :: oft_lagrange_level = 0 !< Active FE level
 integer(i4) :: oft_lagrange_lin_level = 0 !< Highest linear element level
-integer(i4) :: oft_lagrange_minlev = 0 !< Lowest constructed level
-integer(i4) :: oft_lagrange_nlevels = 0 !< Number of total levels
 !
 type(oft_scalar_bfem), pointer :: oft_blagrange !< Active FE representation
-! type(oft_scalar_bfem), pointer :: oft_blagrange_lin !< Highest linear element representation
 type(oft_ml_fem_type), TARGET :: ML_oft_blagrange !< ML container for all FE representations
 !
 TYPE(oft_scalar_fem), POINTER :: oft_lagrange !< Active FE representation
@@ -93,10 +87,6 @@ TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange !< ML container for all FE repr
 !
 TYPE(oft_fem_comp_type), POINTER :: oft_vlagrange !< Active vector representation
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange !< ML container for vector representation
-!
-type(oft_lag_ops), pointer :: oft_lagrange_ops !< Active operators
-type(oft_lag_ops), pointer :: oft_lagrange_ops_lin !< Highest linear element operators
-type(oft_lag_ops), pointer :: ML_oft_lagrange_ops(:) !< ML container for all operators
 !
 logical, private :: hex_mesh = .FALSE.
 contains
@@ -301,9 +291,9 @@ END SUBROUTINE oft_lag_boundary
 subroutine oft_lag_set_level(level)
 integer(i4), intent(in) :: level !< Desired level
 DEBUG_STACK_PUSH
-if(level>ML_oft_lagrange%nlevels.OR.level<=0)then
-  call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
-end if
+! if((level>ML_oft_lagrange%nlevels).OR.(level<=0))then
+!   call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
+! end if
 ! if(level<mg_mesh%mgdim)then
 !   call multigrid_level(level)
 ! else
@@ -311,6 +301,9 @@ end if
 ! end if
 !---Volume FEs
 IF(ML_oft_lagrange%nlevels>0)THEN
+  if((level>ML_oft_lagrange%nlevels).OR.(level<=0))then
+    call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
+  end if
   CALL ML_oft_lagrange%set_level(level)
   SELECT TYPE(this=>ML_oft_lagrange%current_level)
     CLASS IS(oft_scalar_fem)
@@ -323,6 +316,9 @@ IF(ML_oft_lagrange%nlevels>0)THEN
 END IF
 !---Surface FEs
 IF(ML_oft_blagrange%nlevels>0)THEN
+  if((level>ML_oft_blagrange%nlevels).OR.(level<=0))then
+    call oft_abort('Invalid boundary FE level','oft_lag_set_level',__FILE__)
+  end if
   CALL ML_oft_blagrange%set_level(level)
   SELECT TYPE(this=>ML_oft_blagrange%current_level)
     CLASS IS(oft_scalar_bfem)
@@ -331,12 +327,12 @@ IF(ML_oft_blagrange%nlevels>0)THEN
       CALL oft_abort("Error setting 2D Lagrange level", "oft_lag_set_level", __FILE__)
   END SELECT
 END IF
-!---Operators
-oft_lagrange_ops=>ML_oft_lagrange_ops(level)
+! !---Operators
+! oft_lagrange_ops=>ML_oft_lagrange_ops(level)
 !---
-oft_lagrange_level=level
-oft_lagrange_lev=level
-if(oft_lagrange_level>oft_lagrange_blevel.AND.oft_lagrange_blevel>0)oft_lagrange_lev=level-1
+! oft_lagrange_level=level
+! oft_lagrange_lev=level
+! if(oft_lagrange_level>oft_lagrange_blevel.AND.oft_lagrange_blevel>0)oft_lagrange_lev=level-1
 DEBUG_STACK_POP
 end subroutine oft_lag_set_level
 !---------------------------------------------------------------------------
@@ -344,72 +340,84 @@ end subroutine oft_lag_set_level
 !!
 !! @note Highest supported representation is quartic
 !---------------------------------------------------------------------------
-subroutine  oft_lag_setup(mg_mesh,order,minlev)
+subroutine  oft_lag_setup(mg_mesh,order,ML_lag_obj,ML_blag_obj,ML_vlag_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
+TYPE(oft_ml_fem_type), TARGET, INTENT(inout) :: ML_lag_obj
+TYPE(oft_ml_fem_type), INTENT(inout) :: ML_blag_obj
+TYPE(oft_ml_fem_comp_type), INTENT(inout) :: ML_vlag_obj
 integer(i4), optional, intent(in) :: minlev !< Lowest level to construct
-integer(i4) :: i
+integer(i4) :: i,nlevels,minlev_out
 DEBUG_STACK_PUSH
-ML_oft_lagrange%minlev=1
-IF(PRESENT(minlev))ML_oft_lagrange%minlev=minlev
+minlev_out=1
+IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'**** Creating Lagrange FE space'
   WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Minlev = ',ML_oft_lagrange%minlev
+  WRITE(*,'(A,2X,A,I4)')oft_indent,'Minlev = ',minlev_out
 END IF
 CALL oft_increase_indent
 !---Allocate multigrid operators
-ML_oft_lagrange%nlevels=mg_mesh%mgdim+(order-1)
-IF(ML_oft_lagrange%minlev<0)ML_oft_lagrange%minlev=ML_oft_lagrange%nlevels
+nlevels=mg_mesh%mgdim+(order-1)
+IF(minlev_out<0)minlev_out=nlevels
 IF(ASSOCIATED(mg_mesh%meshes))THEN
-  ML_oft_vlagrange%nlevels=ML_oft_lagrange%nlevels
-  ML_oft_lagrange%ml_mesh=>mg_mesh
+  ML_lag_obj%nlevels=nlevels
+  ML_lag_obj%minlev=minlev_out
+  ML_vlag_obj%nlevels=ML_lag_obj%nlevels
+  ML_lag_obj%ml_mesh=>mg_mesh
   IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
 ELSE
+  ML_lag_obj%nlevels=0
+  ML_vlag_obj%nlevels=0
   IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
 END IF
-ML_oft_blagrange%ml_mesh=>mg_mesh
-ML_oft_blagrange%nlevels=ML_oft_lagrange%nlevels
-ALLOCATE(ML_oft_lagrange_ops(ML_oft_lagrange%nlevels))
+ML_blag_obj%ml_mesh=>mg_mesh
+ML_blag_obj%nlevels=nlevels
+ML_blag_obj%minlev=minlev_out
 !---Set linear elements
 do i=1,mg_mesh%mgdim-1
-  IF(i<ML_oft_lagrange%minlev)CYCLE
+  IF(i<ML_lag_obj%minlev)CYCLE
   CALL multigrid_level(mg_mesh,i)
-  IF(ML_oft_lagrange%nlevels>0)THEN
-    CALL oft_lag_setup_vol(ML_oft_lagrange%levels(i)%fe,mg_mesh%mesh,1)
-    IF(mg_mesh%level==mg_mesh%nbase)ML_oft_lagrange%blevel=i
+  IF(ML_lag_obj%nlevels>0)THEN
+    CALL oft_lag_setup_vol(ML_lag_obj%levels(i)%fe,mg_mesh%mesh,1)
+    IF(mg_mesh%level==mg_mesh%nbase)ML_lag_obj%blevel=i
+    CALL ML_lag_obj%set_level(i)
+    SELECT TYPE(this=>ML_lag_obj%current_level)
+      CLASS IS(oft_scalar_fem)
+        CALL oft_lag_boundary(this)
+      CLASS DEFAULT
+        CALL oft_abort("Error casting FE obj","oft_lag_setup",__FILE__)
+    END SELECT
   END IF
-  IF(ML_oft_blagrange%nlevels>0)THEN
-    CALL oft_lag_setup_bmesh(ML_oft_blagrange%levels(i)%fe,mg_mesh%smesh,1)
-    IF(mg_mesh%level==mg_mesh%nbase)ML_oft_blagrange%blevel=i
+  IF(ML_blag_obj%nlevels>0)THEN
+    CALL oft_lag_setup_bmesh(ML_blag_obj%levels(i)%fe,mg_mesh%smesh,1)
+    IF(mg_mesh%level==mg_mesh%nbase)ML_blag_obj%blevel=i
   END IF
-  IF(ML_oft_lagrange%nlevels>0)THEN
-    CALL oft_lag_set_level(i)
-    CALL oft_lag_boundary(oft_lagrange)
-  END IF
-  IF(mg_mesh%level==mg_mesh%nbase)ML_oft_lagrange%blevel=i
+  IF(mg_mesh%level==mg_mesh%nbase)ML_lag_obj%blevel=i
 end do
 call multigrid_level(mg_mesh,mg_mesh%mgdim)
 !---Set high order elements
 do i=1,order
-  IF(i>1.AND.mg_mesh%mgdim+i-1<ML_oft_lagrange%minlev)CYCLE
-  IF(ML_oft_lagrange%nlevels>0)THEN
-    CALL oft_lag_setup_vol(ML_oft_lagrange%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
+  IF(i>1.AND.mg_mesh%mgdim+i-1<ML_lag_obj%minlev)CYCLE
+  IF(ML_lag_obj%nlevels>0)THEN
+    CALL oft_lag_setup_vol(ML_lag_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
+    CALL ML_lag_obj%set_level(mg_mesh%mgdim+i-1)
+    SELECT TYPE(this=>ML_lag_obj%current_level)
+      CLASS IS(oft_scalar_fem)
+        CALL oft_lag_boundary(this)
+      CLASS DEFAULT
+        CALL oft_abort("Error casting FE obj","oft_lag_setup",__FILE__)
+    END SELECT
   END IF
-  IF(ML_oft_blagrange%nlevels>0)THEN
-    CALL oft_lag_setup_bmesh(ML_oft_blagrange%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i)
-  END IF
-  IF(ML_oft_lagrange%nlevels>0)THEN
-    CALL oft_lag_set_level(mg_mesh%mgdim+i-1)
-    CALL oft_lag_boundary(oft_lagrange)
+  IF(ML_blag_obj%nlevels>0)THEN
+    CALL oft_lag_setup_bmesh(ML_blag_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i)
   END IF
 end do
 !---Set linear level for finest-mesh
 oft_lagrange_lin_level=mg_mesh%mgdim
-oft_lagrange_ops_lin=>ML_oft_lagrange_ops(mg_mesh%mgdim)
-IF(ML_oft_lagrange%nlevels>0)THEN
-  SELECT TYPE(this=>ML_oft_lagrange%levels(mg_mesh%mgdim)%fe)
+IF(ML_lag_obj%nlevels>0)THEN
+  SELECT TYPE(this=>ML_lag_obj%levels(mg_mesh%mgdim)%fe)
     CLASS IS(oft_scalar_fem)
       oft_lagrange_lin=>this
     CLASS DEFAULT
@@ -417,21 +425,22 @@ IF(ML_oft_lagrange%nlevels>0)THEN
   END SELECT
 END IF
 !---Setup vector rep
-IF(ML_oft_lagrange%nlevels>0)THEN
-  ML_oft_vlagrange%nlevels=ML_oft_lagrange%nlevels
-  ML_oft_vlagrange%nfields=3
-  ALLOCATE(ML_oft_vlagrange%ml_fields(ML_oft_vlagrange%nfields))
-  ALLOCATE(ML_oft_vlagrange%field_tags(ML_oft_vlagrange%nfields))
-  ML_oft_vlagrange%ml_fields(1)%ml=>ML_oft_lagrange
-  ML_oft_vlagrange%field_tags(1)='x'
-  ML_oft_vlagrange%ml_fields(2)%ml=>ML_oft_lagrange
-  ML_oft_vlagrange%field_tags(2)='y'
-  ML_oft_vlagrange%ml_fields(3)%ml=>ML_oft_lagrange
-  ML_oft_vlagrange%field_tags(3)='z'
-  CALL ML_oft_vlagrange%setup
+IF(ML_lag_obj%nlevels>0)THEN
+  ML_vlag_obj%nlevels=ML_lag_obj%nlevels
+  ML_vlag_obj%nfields=3
+  ALLOCATE(ML_vlag_obj%ml_fields(ML_vlag_obj%nfields))
+  ALLOCATE(ML_vlag_obj%field_tags(ML_vlag_obj%nfields))
+  ML_vlag_obj%ml_fields(1)%ml=>ML_lag_obj
+  ML_vlag_obj%field_tags(1)='x'
+  ML_vlag_obj%ml_fields(2)%ml=>ML_lag_obj
+  ML_vlag_obj%field_tags(2)='y'
+  ML_vlag_obj%ml_fields(3)%ml=>ML_lag_obj
+  ML_vlag_obj%field_tags(3)='z'
+  CALL ML_vlag_obj%setup
 END IF
 !---Set to highest level when done
-call oft_lag_set_level(ML_oft_lagrange%nlevels)
+! call oft_lag_set_level(ML_lag_obj%nlevels)
+CALL oft_lag_set_level(max(ML_lag_obj%nlevels,ML_blag_obj%nlevels))
 IF(oft_env%head_proc)WRITE(*,*)
 CALL oft_decrease_indent
 DEBUG_STACK_POP

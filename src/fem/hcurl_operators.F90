@@ -30,7 +30,7 @@ USE oft_sort, ONLY: sort_array
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
-  oft_graph_ptr
+  oft_graph_ptr, oft_graph
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 #ifdef HAVE_ARPACK
@@ -45,9 +45,8 @@ USE fem_utils, ONLY: fem_interp
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lag_geval_all, ML_oft_lagrange, oft_scalar_fem
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_zerob, oft_lag_zerogrnd
-USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, oft_bhcurl, oft_hcurl_level, oft_hcurl_blevel, &
-oft_hcurl_nlevels, oft_nedelec_ops, oft_hcurl_ops, ML_oft_hcurl_ops, oft_hcurl_eval_all, &
-oft_hcurl_ceval_all, oft_hcurl_set_level, oft_hcurl_lev, oft_hcurl_minlev, oft_hcurl_get_cgops, &
+USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, oft_bhcurl, &
+oft_hcurl_eval_all, oft_hcurl_ceval_all, oft_hcurl_set_level, oft_hcurl_get_cgops, &
 oft_hcurl_fem, oft_hcurl_bfem
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 IMPLICIT NONE
@@ -153,7 +152,7 @@ IF(df_wop(1)<-1.d90)THEN
     WRITE(*,*)'No H(Curl) MG smoother settings found:'
     WRITE(*,*)'  Using default values, which may result in convergence failure.'
   END IF
-  DO i=oft_hcurl_minlev,oft_hcurl_nlevels
+  DO i=ML_oft_hcurl%minlev,ML_oft_hcurl%nlevels
     CALL oft_hcurl_set_level(i)
     SELECT CASE(oft_hcurl%order)
     CASE(1)
@@ -165,10 +164,10 @@ IF(df_wop(1)<-1.d90)THEN
     CASE DEFAULT
       df_wop(i)=0.2d0
     END SELECT
-    nu_wop(i)=MIN(64,2**(oft_hcurl_nlevels-i))
+    nu_wop(i)=MIN(64,2**(ML_oft_hcurl%nlevels-i))
   END DO
-  nu_wop(oft_hcurl_minlev)=64
-  nu_wop(oft_hcurl_nlevels)=1
+  nu_wop(ML_oft_hcurl%minlev)=64
+  nu_wop(ML_oft_hcurl%nlevels)=1
 END IF
 DEBUG_STACK_POP
 end subroutine hcurl_mloptions
@@ -1032,10 +1031,10 @@ DEBUG_STACK_PUSH
 call a%new(b)
 do i=1,self%nm
   !---Compute coupling
-  call self%wop%apply(self%orthog(i,oft_hcurl_level)%f,b)
+  call self%wop%apply(self%orthog(i,ML_oft_hcurl%level)%f,b)
   c=a%dot(b)
   !---Remove coupling
-  call a%add(1.d0,-c,self%orthog(i,oft_hcurl_level)%f)
+  call a%add(1.d0,-c,self%orthog(i,ML_oft_hcurl%level)%f)
 end do
 !---Delete temporary variable
 call b%delete
@@ -1053,29 +1052,30 @@ end subroutine hcurl_orthog_delete
 !---------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
 !---------------------------------------------------------------------------
-SUBROUTINE hcurl_setup_interp
+SUBROUTINE hcurl_setup_interp(ML_hcurl_rep)
+CLASS(oft_ml_fem_type), intent(inout) :: ML_hcurl_rep
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---
-DO i=oft_hcurl_minlev+1,oft_hcurl_nlevels
-  CALL oft_hcurl_set_level(i)
+DO i=ML_hcurl_rep%minlev+1,ML_hcurl_rep%nlevels
+  CALL ML_hcurl_rep%set_level(i)
   !---
-  if(oft_hcurl_level==oft_hcurl_blevel+1)then
+  if(ML_hcurl_rep%level==ML_hcurl_rep%blevel+1)then
     CYCLE
   end if
   !---Setup interpolation
-  if(oft_hcurl%order==1)then
-    CALL hcurl_ginterpmatrix(ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m)
-    oft_hcurl_ops%interp=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m
-    CALL oft_hcurl_ops%interp%assemble
+  if(ML_hcurl_rep%current_level%order==1)then
+    CALL hcurl_ginterpmatrix(ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m)
+    ! oft_hcurl_ops%interp=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m
+    CALL ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m%assemble !oft_hcurl_ops%interp%assemble
   else
-    CALL hcurl_pinterpmatrix(ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m)
-    oft_hcurl_ops%interp=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m
-    CALL oft_hcurl_ops%interp%assemble
+    CALL hcurl_pinterpmatrix(ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m)
+    ! oft_hcurl_ops%interp=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m
+    CALL ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m%assemble !oft_hcurl_ops%interp%assemble
   end if
 END DO
 DEBUG_STACK_POP
-END SUBROUTINE hcurl_setup_interp
+CONTAINS
 !---------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
 !---------------------------------------------------------------------------
@@ -1085,105 +1085,112 @@ INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 CLASS(oft_hcurl_fem), POINTER :: hcurl_cors => NULL()
-! TYPE(oft_fem_type), POINTER :: hcurl_cors => NULL()
-TYPE(oft_nedelec_ops), POINTER :: ops
+CLASS(oft_hcurl_fem), POINTER :: hcurl_fine => NULL()
+! TYPE(oft_nedelec_ops), POINTER :: ops
 class(oft_mesh), pointer :: cmesh
 CLASS(oft_vector), POINTER :: hcurl_vec,hcurl_vec_cors
 integer(i4) :: jfe(3),jce(6)
 integer(i4), pointer :: lcdg(:),lfde(:,:),lede(:,:),lcde(:,:)
 real(r8) :: f(4),incr,val,d(3),goptmp(3,4),v,mop(1),h_rop(3,6)
 type(oft_graph_ptr), pointer :: graphs(:,:)
+type(oft_graph), POINTER :: interp_graph
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---
-if(ML_oft_hcurl%ml_mesh%level<1)then
+if(ML_hcurl_rep%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','hcurl_ginterpmatrix',__FILE__)
 end if
-mesh=>ML_oft_hcurl%ml_mesh%mesh
-cmesh=>ML_oft_hcurl%ml_mesh%meshes(ML_oft_hcurl%ml_mesh%level-1)
+mesh=>ML_hcurl_rep%ml_mesh%mesh
+cmesh=>ML_hcurl_rep%ml_mesh%meshes(ML_hcurl_rep%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "hcurl_ginterpmatrix", __FILE__)
-if(oft_hcurl%order/=1)then
+! ops=>oft_hcurl_ops
+SELECT TYPE(this=>ML_hcurl_rep%levels(ML_hcurl_rep%level)%fe)
+  CLASS IS(oft_hcurl_fem)
+    hcurl_fine=>this
+  CLASS DEFAULT
+    CALL oft_abort("Error casting fine level", "hcurl_ginterpmatrix", __FILE__)
+END SELECT
+if(hcurl_fine%order/=1)then
   call oft_abort('Attempted geometric interpolation for pd > 1', &
     'hcurl_ginterpmatrix',__FILE__)
 end if
-ops=>oft_hcurl_ops
-SELECT TYPE(this=>ML_oft_hcurl%levels(oft_hcurl_level-1)%fe)
+SELECT TYPE(this=>ML_hcurl_rep%levels(ML_hcurl_rep%level-1)%fe)
   CLASS IS(oft_hcurl_fem)
     hcurl_cors=>this
   CLASS DEFAULT
     CALL oft_abort("Error casting coarse level", "hcurl_ginterpmatrix", __FILE__)
 END SELECT
-! hcurl_cors=>ML_oft_hcurl%levels(oft_hcurl_level-1)%fe
-lede=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%level-1)%lede
-lfde=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%level-1)%lfde
-lcdg=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%level-1)%lcdg
-lcde=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%level-1)%lcde
-ALLOCATE(ML_oft_hcurl%interp_graphs(ML_oft_hcurl%level)%g)
-ops%interp_graph=>ML_oft_hcurl%interp_graphs(ML_oft_hcurl%level)%g
+! hcurl_fine=>ML_hcurl_rep%levels(ML_hcurl_rep%level-1)%fe
+lede=>ML_hcurl_rep%ml_mesh%inter(ML_hcurl_rep%ml_mesh%level-1)%lede
+lfde=>ML_hcurl_rep%ml_mesh%inter(ML_hcurl_rep%ml_mesh%level-1)%lfde
+lcdg=>ML_hcurl_rep%ml_mesh%inter(ML_hcurl_rep%ml_mesh%level-1)%lcdg
+lcde=>ML_hcurl_rep%ml_mesh%inter(ML_hcurl_rep%ml_mesh%level-1)%lcde
+ALLOCATE(ML_hcurl_rep%interp_graphs(ML_hcurl_rep%level)%g)
+interp_graph=>ML_hcurl_rep%interp_graphs(ML_hcurl_rep%level)%g
 !---Setup matrix sizes
-ops%interp_graph%nr=oft_hcurl%ne
-ops%interp_graph%nrg=oft_hcurl%global%ne
-ops%interp_graph%nc=hcurl_cors%ne
-ops%interp_graph%ncg=hcurl_cors%global%ne
+interp_graph%nr=hcurl_fine%ne
+interp_graph%nrg=hcurl_fine%global%ne
+interp_graph%nc=hcurl_cors%ne
+interp_graph%ncg=hcurl_cors%global%ne
 !---Setup Matrix graph
-ALLOCATE(ops%interp_graph%kr(ops%interp_graph%nr+1))
-ops%interp_graph%nnz=2*cmesh%ne+9*cmesh%nf+6*cmesh%nc
-ALLOCATE(ops%interp_graph%lc(ops%interp_graph%nnz))
-ops%interp_graph%lc=0_i4
+ALLOCATE(interp_graph%kr(interp_graph%nr+1))
+interp_graph%nnz=2*cmesh%ne+9*cmesh%nf+6*cmesh%nc
+ALLOCATE(interp_graph%lc(interp_graph%nnz))
+interp_graph%lc=0_i4
 !---Construct linkage
 DO i=1,cmesh%ne
-  ops%interp_graph%kr(lede(1,i))=1
-  ops%interp_graph%kr(lede(2,i))=1
+  interp_graph%kr(lede(1,i))=1
+  interp_graph%kr(lede(2,i))=1
 END DO
 DO i=1,cmesh%nf
   jfe=ABS(cmesh%lfe(:,i)) ! face edges
-  ops%interp_graph%kr(ABS(lfde(1,i)))=3
-  ops%interp_graph%kr(ABS(lfde(2,i)))=3
-  ops%interp_graph%kr(ABS(lfde(3,i)))=3
+  interp_graph%kr(ABS(lfde(1,i)))=3
+  interp_graph%kr(ABS(lfde(2,i)))=3
+  interp_graph%kr(ABS(lfde(3,i)))=3
 END DO
 DO i=1,cmesh%nc
-  ops%interp_graph%kr(ABS(lcde(1,i)))=6
+  interp_graph%kr(ABS(lcde(1,i)))=6
 END DO
-ops%interp_graph%kr(ops%interp_graph%nr+1)=ops%interp_graph%nnz+1
-do i=ops%interp_graph%nr,1,-1 ! cumulative point to point count
-  ops%interp_graph%kr(i)=ops%interp_graph%kr(i+1)-ops%interp_graph%kr(i)
+interp_graph%kr(interp_graph%nr+1)=interp_graph%nnz+1
+do i=interp_graph%nr,1,-1 ! cumulative point to point count
+  interp_graph%kr(i)=interp_graph%kr(i+1)-interp_graph%kr(i)
 end do
-if(ops%interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_hcurl_ginterpmatrix',__FILE__)
+if(interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_hcurl_ginterpmatrix',__FILE__)
 DO i=1,cmesh%ne
-  k=ops%interp_graph%kr(lede(1,i))
-  ops%interp_graph%lc(k)=i
-  k=ops%interp_graph%kr(lede(2,i))
-  ops%interp_graph%lc(k)=i
+  k=interp_graph%kr(lede(1,i))
+  interp_graph%lc(k)=i
+  k=interp_graph%kr(lede(2,i))
+  interp_graph%lc(k)=i
 END DO
 DO i=1,cmesh%nf
   jfe=ABS(cmesh%lfe(:,i)) ! face edges
   CALL sort_array(jfe,3)
   !---
   DO j=1,3
-    k=ops%interp_graph%kr(ABS(lfde(j,i)))
-    ops%interp_graph%lc(k)=jfe(1)
-    ops%interp_graph%lc(k+1)=jfe(2)
-    ops%interp_graph%lc(k+2)=jfe(3)
+    k=interp_graph%kr(ABS(lfde(j,i)))
+    interp_graph%lc(k)=jfe(1)
+    interp_graph%lc(k+1)=jfe(2)
+    interp_graph%lc(k+2)=jfe(3)
   END DO
 END DO
 DO i=1,cmesh%nc
   jce=ABS(cmesh%lce(:,i)) ! face edges
   CALL sort_array(jce,6)
   !---
-  k=ops%interp_graph%kr(ABS(lcde(1,i)))
+  k=interp_graph%kr(ABS(lcde(1,i)))
   DO j=0,5
-    ops%interp_graph%lc(k+j)=jce(1+j)
+    interp_graph%lc(k+j)=jce(1+j)
   END DO
 END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
 CALL oft_hcurl_create(hcurl_vec)
-CALL oft_hcurl_create(hcurl_vec_cors,oft_hcurl_level-1)
+CALL oft_hcurl_create(hcurl_vec_cors,ML_hcurl_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
-graphs(1,1)%g=>ops%interp_graph
+graphs(1,1)%g=>interp_graph
 !---
 CALL create_matrix(mat,graphs,hcurl_vec,hcurl_vec_cors)
 CALL hcurl_vec%delete
@@ -1285,91 +1292,100 @@ INTEGER(i4) :: offsetc,offsetf
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 REAL(r8) :: f(4),val,mop(1)
 TYPE(oft_fem_type), POINTER :: hcurl_cors => NULL()
-TYPE(oft_nedelec_ops), POINTER :: ops
+CLASS(oft_hcurl_fem), POINTER :: hcurl_fine => NULL()
+! TYPE(oft_nedelec_ops), POINTER :: ops
 CLASS(oft_vector), POINTER :: hcurl_vec,hcurl_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
+type(oft_graph), POINTER :: interp_graph
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 !---
-mesh=>oft_hcurl%mesh
-ops=>oft_hcurl_ops
-SELECT TYPE(this=>ML_oft_hcurl%levels(oft_hcurl_level-1)%fe)
+! mesh=>oft_hcurl%mesh
+! ops=>oft_hcurl_ops
+SELECT TYPE(this=>ML_hcurl_rep%levels(ML_hcurl_rep%level)%fe)
+CLASS IS(oft_hcurl_fem)
+  hcurl_fine=>this
+  mesh=>this%mesh
+CLASS DEFAULT
+  CALL oft_abort("Error getting coarse FE object","hcurl_pinterpmatrix",__FILE__)
+END SELECT
+SELECT TYPE(this=>ML_hcurl_rep%levels(ML_hcurl_rep%level-1)%fe)
 CLASS IS(oft_fem_type)
   hcurl_cors=>this
 CLASS DEFAULT
   CALL oft_abort("Error getting coarse FE object","hcurl_pinterpmatrix",__FILE__)
 END SELECT
-ALLOCATE(ML_oft_hcurl%interp_graphs(ML_oft_hcurl%level)%g)
-ops%interp_graph=>ML_oft_hcurl%interp_graphs(ML_oft_hcurl%level)%g
+ALLOCATE(ML_hcurl_rep%interp_graphs(ML_hcurl_rep%level)%g)
+interp_graph=>ML_hcurl_rep%interp_graphs(ML_hcurl_rep%level)%g
 !---Setup matrix sizes
-ops%interp_graph%nr=oft_hcurl%ne
-ops%interp_graph%nrg=oft_hcurl%global%ne
-ops%interp_graph%nc=hcurl_cors%ne
-ops%interp_graph%ncg=hcurl_cors%global%ne
+interp_graph%nr=hcurl_fine%ne
+interp_graph%nrg=hcurl_fine%global%ne
+interp_graph%nc=hcurl_cors%ne
+interp_graph%ncg=hcurl_cors%global%ne
 !---Setup Matrix graph
-ALLOCATE(ops%interp_graph%kr(ops%interp_graph%nr+1))
-ops%interp_graph%kr=0
-ops%interp_graph%nnz=hcurl_cors%ne
-ALLOCATE(ops%interp_graph%lc(ops%interp_graph%nnz))
-ops%interp_graph%lc=0_i4
+ALLOCATE(interp_graph%kr(interp_graph%nr+1))
+interp_graph%kr=0
+interp_graph%nnz=hcurl_cors%ne
+ALLOCATE(interp_graph%lc(interp_graph%nnz))
+interp_graph%lc=0_i4
 !---Construct matrix
 do i=1,mesh%ne
   do j=1,hcurl_cors%gstruct(2)
-    offsetf=(i-1)*oft_hcurl%gstruct(2)
-    ops%interp_graph%kr(j+offsetf)=1
+    offsetf=(i-1)*hcurl_fine%gstruct(2)
+    interp_graph%kr(j+offsetf)=1
   end do
 end do
 !---
 do i=1,mesh%nf
   do j=1,hcurl_cors%gstruct(3)
-    offsetf=mesh%ne*oft_hcurl%gstruct(2)+(i-1)*oft_hcurl%gstruct(3)
-    ops%interp_graph%kr(j+offsetf)=1
+    offsetf=mesh%ne*hcurl_fine%gstruct(2)+(i-1)*hcurl_fine%gstruct(3)
+    interp_graph%kr(j+offsetf)=1
   end do
 end do
 !---
 do i=1,mesh%nc
   do j=1,hcurl_cors%gstruct(4)
-    offsetf=mesh%ne*oft_hcurl%gstruct(2)+oft_hcurl%gstruct(3)*mesh%nf+(i-1)*oft_hcurl%gstruct(4)
-    ops%interp_graph%kr(j+offsetf)=1
+    offsetf=mesh%ne*hcurl_fine%gstruct(2)+hcurl_fine%gstruct(3)*mesh%nf+(i-1)*hcurl_fine%gstruct(4)
+    interp_graph%kr(j+offsetf)=1
   end do
 end do
-ops%interp_graph%kr(ops%interp_graph%nr+1)=ops%interp_graph%nnz+1
-do i=ops%interp_graph%nr,1,-1 ! cumulative point to point count
-  ops%interp_graph%kr(i)=ops%interp_graph%kr(i+1)-ops%interp_graph%kr(i)
+interp_graph%kr(interp_graph%nr+1)=interp_graph%nnz+1
+do i=interp_graph%nr,1,-1 ! cumulative point to point count
+  interp_graph%kr(i)=interp_graph%kr(i+1)-interp_graph%kr(i)
 end do
-if(ops%interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','oft_hcurl_pinterpmatrix',__FILE__)
+if(interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','hcurl_fine_pinterpmatrix',__FILE__)
 !---Construct matrix
 do i=1,mesh%ne
   do j=1,hcurl_cors%gstruct(2)
-    offsetf=(i-1)*oft_hcurl%gstruct(2)
+    offsetf=(i-1)*hcurl_fine%gstruct(2)
     offsetc=(i-1)*hcurl_cors%gstruct(2)
-    ops%interp_graph%lc(ops%interp_graph%kr(j+offsetf))=j+offsetc
+    interp_graph%lc(interp_graph%kr(j+offsetf))=j+offsetc
   end do
 end do
 !---
 do i=1,mesh%nf
   do j=1,hcurl_cors%gstruct(3)
-    offsetf=mesh%ne*oft_hcurl%gstruct(2)+(i-1)*oft_hcurl%gstruct(3)
+    offsetf=mesh%ne*hcurl_fine%gstruct(2)+(i-1)*hcurl_fine%gstruct(3)
     offsetc=mesh%ne*hcurl_cors%gstruct(2)+(i-1)*hcurl_cors%gstruct(3)
-    ops%interp_graph%lc(ops%interp_graph%kr(j+offsetf))=j+offsetc
+    interp_graph%lc(interp_graph%kr(j+offsetf))=j+offsetc
   end do
 end do
 !---
 do i=1,mesh%nc
   do j=1,hcurl_cors%gstruct(4)
-    offsetf=mesh%ne*oft_hcurl%gstruct(2)+oft_hcurl%gstruct(3)*mesh%nf+(i-1)*oft_hcurl%gstruct(4)
+    offsetf=mesh%ne*hcurl_fine%gstruct(2)+hcurl_fine%gstruct(3)*mesh%nf+(i-1)*hcurl_fine%gstruct(4)
     offsetc=mesh%ne*hcurl_cors%gstruct(2)+hcurl_cors%gstruct(3)*mesh%nf+(i-1)*hcurl_cors%gstruct(4)
-    ops%interp_graph%lc(ops%interp_graph%kr(j+offsetf))=j+offsetc
+    interp_graph%lc(interp_graph%kr(j+offsetf))=j+offsetc
   end do
 end do
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
 CALL oft_hcurl_create(hcurl_vec)
-CALL oft_hcurl_create(hcurl_vec_cors,oft_hcurl_level-1)
+CALL oft_hcurl_create(hcurl_vec_cors,ML_hcurl_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
-graphs(1,1)%g=>ops%interp_graph
+graphs(1,1)%g=>interp_graph
 !---
 CALL create_matrix(mat,graphs,hcurl_vec,hcurl_vec_cors)
 CALL hcurl_vec%delete
@@ -1387,7 +1403,7 @@ DO i=1,mesh%ne
     IF(.NOT.mesh%estitch%leo(emap(i)))CYCLE
   END IF
   DO j=1,hcurl_cors%gstruct(2)
-    i_ind=j+(i-1)*oft_hcurl%gstruct(2)
+    i_ind=j+(i-1)*hcurl_fine%gstruct(2)
     j_ind=j+(i-1)*hcurl_cors%gstruct(2)
     mop=1.d0
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
@@ -1403,7 +1419,7 @@ DO i=1,mesh%nf
     IF(.NOT.mesh%fstitch%leo(fmap(i)))CYCLE
   END IF
   DO j=1,hcurl_cors%gstruct(3)
-    i_ind=j+mesh%ne*oft_hcurl%gstruct(2)+(i-1)*oft_hcurl%gstruct(3)
+    i_ind=j+mesh%ne*hcurl_fine%gstruct(2)+(i-1)*hcurl_fine%gstruct(3)
     j_ind=j+mesh%ne*hcurl_cors%gstruct(2)+(i-1)*hcurl_cors%gstruct(3)
     mop=1.d0
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
@@ -1413,7 +1429,7 @@ deallocate(fmap)
 !---
 DO i=1,mesh%nc
   DO j=1,hcurl_cors%gstruct(4)
-    i_ind=j+mesh%ne*oft_hcurl%gstruct(2)+oft_hcurl%gstruct(3)*mesh%nf+(i-1)*oft_hcurl%gstruct(4)
+    i_ind=j+mesh%ne*hcurl_fine%gstruct(2)+hcurl_fine%gstruct(3)*mesh%nf+(i-1)*hcurl_fine%gstruct(4)
     j_ind=j+mesh%ne*hcurl_cors%gstruct(2)+hcurl_cors%gstruct(3)*mesh%nf+(i-1)*hcurl_cors%gstruct(4)
     mop=1.d0
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
@@ -1421,6 +1437,7 @@ DO i=1,mesh%nc
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_pinterpmatrix
+END SUBROUTINE hcurl_setup_interp
 !---------------------------------------------------------------------------
 !> Interpolate a coarse level H1(Curl) vector field to the next finest level
 !!
@@ -1431,15 +1448,16 @@ class(oft_vector), intent(inout) :: acors !< Vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 DEBUG_STACK_PUSH
 !---Step one level up
-call oft_hcurl_set_level(oft_hcurl_level+1)
+call oft_hcurl_set_level(ML_oft_hcurl%level+1)
 call afine%set(0.d0)
 !---
-if(oft_hcurl_level==oft_hcurl_blevel+1)then
+if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)then
   call hcurl_base_pop(acors,afine)
   DEBUG_STACK_POP
   return
 end if
-CALL oft_hcurl_ops%interp%apply(acors,afine)
+! CALL oft_hcurl_ops%interp%apply(acors,afine)
+CALL ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m%apply(acors,afine)
 DEBUG_STACK_POP
 end subroutine hcurl_interp
 !---------------------------------------------------------------------------
@@ -1476,15 +1494,16 @@ logical :: gcheck
 DEBUG_STACK_PUSH
 gcheck=(oft_hcurl%order==1)
 ! Step down level up
-call oft_hcurl_set_level(oft_hcurl_level-1)
+call oft_hcurl_set_level(ML_oft_hcurl%level-1)
 ! Cast fine field
 call acors%set(0.d0)
-if(oft_hcurl_level==oft_hcurl_blevel)then
+if(ML_oft_hcurl%level==ML_oft_hcurl%blevel)then
   call hcurl_base_push(afine,acors)
   DEBUG_STACK_POP
   return
 end if
-CALL ML_oft_hcurl_ops(oft_hcurl_level+1)%interp%applyT(afine,acors)
+! CALL ML_oft_hcurl_ops(ML_oft_hcurl%level+1)%interp%applyT(afine,acors)
+CALL ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level+1)%m%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine hcurl_inject
 !---------------------------------------------------------------------------
@@ -1502,7 +1521,7 @@ DEBUG_STACK_PUSH
 lbege=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%nbase)%lbege
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
-hcurl_fine=>ML_oft_hcurl%levels(oft_hcurl_level+1)%fe
+hcurl_fine=>ML_oft_hcurl%levels(ML_oft_hcurl%level+1)%fe
 !---
 allocate(alias(acors%n))
 alias=0.d0
@@ -1526,7 +1545,8 @@ end subroutine hcurl_base_push
 !---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H1(Curl)::WOP
 !---------------------------------------------------------------------------
-SUBROUTINE hcurl_wop_eigs(minlev)
+SUBROUTINE hcurl_wop_eigs(ML_hcurl_rep,minlev)
+type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_rep
 INTEGER(i4), INTENT(in) :: minlev !< Needs docs
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i
@@ -1542,16 +1562,22 @@ DEBUG_STACK_PUSH
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H1(Curl)::WOP'
-bc_tmp%ML_hcurl_rep=>ML_oft_hcurl
-ALLOCATE(df(oft_hcurl_nlevels))
+bc_tmp%ML_hcurl_rep=>ML_hcurl_rep
+ALLOCATE(df(ML_hcurl_rep%nlevels))
 df=0.d0
-DO i=minlev,oft_hcurl_nlevels
-  CALL oft_hcurl_set_level(i)
+DO i=minlev,ML_hcurl_rep%nlevels
+  CALL ML_hcurl_rep%set_level(i)
   !---Create fields
-  CALL oft_hcurl_create(u)
+  CALL ML_hcurl_rep%vec_create(u)
   !---Get Ev range
   NULLIFY(wop)
-  CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
+  SELECT TYPE(this=>ML_hcurl_rep%current_level)
+  CLASS IS(oft_hcurl_fem)
+    CALL oft_hcurl_getwop(this,wop,'zerob')
+  CLASS DEFAULT
+    CALL oft_abort("Error getting current FE rep","hcurl_wop_eigs",__FILE__)
+  END SELECT
+  ! CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
   CALL create_diagmatrix(md,wop%D)
   !---
   arsolver%A=>wop
@@ -1573,10 +1599,10 @@ END DO
 !---Output
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A)',ADVANCE='NO')' df_wop = '
-  DO i=1,oft_hcurl_nlevels-1
+  DO i=1,ML_hcurl_rep%nlevels-1
     WRITE(*,'(F5.3,A)',ADVANCE='NO')df(i),', '
   END DO
-  WRITE(*,'(F5.3,A)')df(oft_hcurl_nlevels)
+  WRITE(*,'(F5.3,A)')df(ML_hcurl_rep%nlevels)
 END IF
 DEALLOCATE(df)
 DEBUG_STACK_POP
@@ -1612,14 +1638,14 @@ TYPE(xml_node), POINTER :: hcurl_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=oft_hcurl_level
-levin=oft_hcurl_level
+toplev=ML_oft_hcurl%level
+levin=ML_oft_hcurl%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','hcurl_getwop_pre',__FILE__)
-IF(toplev>oft_hcurl_nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getwop_pre',__FILE__)
+IF(toplev>ML_oft_hcurl%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getwop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -1644,7 +1670,7 @@ DO i=1,nl
     NULLIFY(mats(i)%M)
     CALL oft_hcurl_getwop(oft_hcurl,mats(i)%M,'zerob')
   END IF
-  IF(i>1)ml_int(i-1)%M=>oft_hcurl_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m !oft_hcurl_ops%interp
 END DO
 CALL oft_hcurl_set_level(levin)
 !---------------------------------------------------------------------------
@@ -1700,14 +1726,14 @@ TYPE(xml_node), POINTER :: hcurl_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=oft_hcurl_level
-levin=oft_hcurl_level
+toplev=ML_oft_hcurl%level
+levin=ML_oft_hcurl%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','hcurl_getjmlb_pre',__FILE__)
-IF(toplev>oft_hcurl_nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getjmlb_pre',__FILE__)
+IF(toplev>ML_oft_hcurl%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getjmlb_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -1726,7 +1752,7 @@ DO i=1,nl
     NULLIFY(mats(i)%M)
     CALL oft_hcurl_getjmlb(oft_hcurl,mats(i)%M,alam,'zerob')
   END IF
-  IF(i>1)ml_int(i-1)%M=>oft_hcurl_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m !oft_hcurl_ops%interp
 END DO
 CALL oft_hcurl_set_level(levin)
 !---------------------------------------------------------------------------

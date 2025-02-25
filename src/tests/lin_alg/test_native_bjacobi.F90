@@ -25,7 +25,7 @@ USE oft_native_solvers, ONLY: oft_bjprecond, oft_native_gmres_solver
 USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 !---FE imports
 USE fem_utils, ONLY: fem_partition
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, ML_oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
@@ -82,7 +82,7 @@ END IF
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
-CALL oft_lag_setup(mg_mesh,order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---Run tests
 oft_env%pm=.FALSE.

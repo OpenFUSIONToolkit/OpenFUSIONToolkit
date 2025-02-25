@@ -94,22 +94,20 @@ USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
-  oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
+USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lag_eval_all, &
   oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_ops, oft_hcurl_level, &
-  oft_hcurl_nlevels, oft_hcurl_lev, oft_hcurl_blevel, oft_hcurl_eval_all, &
+USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_eval_all, &
   oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
-USE oft_h0_basis, ONLY: oft_h0_ops, oft_h0_geval_all, oft_h0_fem
+USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_fem
 USE oft_h0_fields, ONLY: oft_h0_create
 USE oft_h0_operators, ONLY: oft_h0_zeroi
-USE oft_h1_basis, ONLY: oft_hgrad, oft_h1_ops, oft_h1_set_level, ML_oft_hgrad
+USE oft_h1_basis, ONLY: oft_hgrad, oft_h1_set_level, ML_oft_hgrad
 USE oft_h1_fields, ONLY: oft_h1_create, oft_hgrad_create
 USE oft_h1_operators, ONLY: oft_h1_rinterp, oft_h1_cinterp, oft_h1_dinterp, &
   oft_h1_divout, h1_jump_error, h1_div
@@ -2407,11 +2405,11 @@ DEBUG_STACK_PUSH
 !---------------------------------------------------------------------------
 ! Setup Operators and ML environment
 !---------------------------------------------------------------------------
-allocate(ml_J(oft_hcurl_nlevels-xmhd_minlev+1),ml_int(oft_hcurl_nlevels-xmhd_minlev))
-allocate(oft_xmhd_ops_ML(oft_hcurl_nlevels))
-xmhd_blevel=oft_hcurl_blevel
-xmhd_nlevels=oft_hcurl_nlevels
-xmhd_level=oft_hcurl_level
+allocate(ml_J(ML_oft_hcurl%nlevels-xmhd_minlev+1),ml_int(ML_oft_hcurl%nlevels-xmhd_minlev))
+allocate(oft_xmhd_ops_ML(ML_oft_hcurl%nlevels))
+xmhd_blevel=ML_oft_hcurl%blevel
+xmhd_nlevels=ML_oft_hcurl%nlevels
+xmhd_level=ML_oft_hcurl%level
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Allocating xMHD structures'
 !---------------------------------------------------------------------------
 ! Setup matrix mask based on included physics
@@ -3733,7 +3731,7 @@ end subroutine xmhd_diag
 subroutine xmhd_setup_rep
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating xMHD FE type'
 !---Create FE representation
-ML_xmhd_rep%nlevels=oft_hcurl_nlevels
+ML_xmhd_rep%nlevels=ML_oft_hcurl%nlevels
 ML_xmhd_rep%nfields=7
 IF(xmhd_two_temp)THEN
   ML_xmhd_rep%nfields=ML_xmhd_rep%nfields+1
@@ -3778,9 +3776,9 @@ END IF
 call ML_xmhd_rep%setup()
 xmhd_rep=>ML_xmhd_rep%current_level
 !---Declare legacy variables
-xmhd_blevel=oft_hcurl_blevel
-xmhd_nlevels=oft_hcurl_nlevels
-xmhd_level=oft_hcurl_level
+xmhd_blevel=ML_oft_hcurl%blevel
+xmhd_nlevels=ML_oft_hcurl%nlevels
+xmhd_level=ML_oft_hcurl%level
 IF(xmhd_minlev<0)xmhd_minlev=xmhd_nlevels
 end subroutine xmhd_setup_rep
 !---------------------------------------------------------------------------
@@ -3788,7 +3786,7 @@ end subroutine xmhd_setup_rep
 !---------------------------------------------------------------------------
 subroutine xmhd_set_level(level)
 integer(i4), intent(in) :: level !< Desired level
-if(level>oft_hcurl_nlevels.OR.level<=0)then
+if(level>ML_oft_hcurl%nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','xmhd_set_level',__FILE__)
 end if
 ! if(level<mg_mesh%mgdim)then
@@ -3802,7 +3800,7 @@ xmhd_rep=>ML_xmhd_rep%current_level
 CALL oft_lag_set_level(level)
 CALL oft_h1_set_level(level)
 xmhd_level=level
-xmhd_lev=oft_hcurl_lev
+! xmhd_lev=oft_hcurl_lev
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)
 end subroutine xmhd_set_level
 !---------------------------------------------------------------------------
@@ -4154,7 +4152,7 @@ do i=levelin,minlev,-1
     if(ASSOCIATED(fullcctmp))DEALLOCATE(fullcctmp)
     allocate(fullcctmp(nfields,mesh%nc))
     !---Transfer from distributed to local grid
-    if(oft_lagrange_level==oft_lagrange_blevel)then
+    if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
       call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,nfields)
     !---Average values to over child cells
     else
@@ -4642,7 +4640,7 @@ nsteps=rst_end
 !---Build composite representation if necessary
 IF(ML_xmhd_rep%nlevels==0)THEN
   CALL xmhd_setup_rep
-  ALLOCATE(oft_xmhd_ops_ML(oft_hcurl_nlevels))
+  ALLOCATE(oft_xmhd_ops_ML(ML_oft_hcurl%nlevels))
 END IF
 !---------------------------------------------------------------------------
 ! Create solver fields

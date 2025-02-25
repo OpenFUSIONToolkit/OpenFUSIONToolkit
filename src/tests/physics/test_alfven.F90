@@ -23,15 +23,15 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  oft_vlagrange, ML_oft_lagrange, oft_lagrange
+  oft_vlagrange, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, &
   oft_lag_vgetmop, oft_lag_vrinterp
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
+USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1, oft_h1
@@ -90,14 +90,14 @@ CALL multigrid_construct(mg_mesh)
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,minlev)
-CALL hcurl_setup_interp
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,minlev)
+CALL hcurl_setup_interp(ML_oft_hcurl)
 !---H1(Grad) subspace
-CALL oft_h0_setup(mg_mesh,order+1,minlev)
-CALL h0_setup_interp
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
+CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order,minlev)
 CALL h1_setup_interp

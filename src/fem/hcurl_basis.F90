@@ -21,22 +21,16 @@ MODULE oft_hcurl_basis
 ! USE timer
 USE oft_base
 USE oft_lag_poly
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
 USE oft_mesh_local_util, ONLY: mesh_local_orient, oriented_cell, &
   oriented_edges, oriented_faces
 USE oft_hexmesh_type, ONLY: hex_bary_ecoords, hex_bary_efcoords, hex_bary_fcoords, &
   hex_get_bary, hex_get_bary_gop, hex_get_bary_cgop
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
-USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type
+USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
-!> Needs docs
-!---------------------------------------------------------------------------
-type :: oft_nedelec_ops
-  type(oft_graph), pointer :: interp_graph => NULL() !< Interpolation graph
-  class(oft_matrix), pointer :: interp => NULL() !< Interpolation graph
-end type oft_nedelec_ops
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
@@ -53,70 +47,62 @@ end type oft_hcurl_bfem
 !---Global Variables
 integer(i4), parameter :: cgop_map(4,4) = RESHAPE((/0,-1,-2,-3,1,0,-4,-5,2,4,0,-6,3,5,6,0/),(/4,4/))
 integer(i4), parameter :: oft_hcurl_id = 3 !< FE type ID
-integer(i4) :: oft_hcurl_blevel = 0 !< Highest level on base meshes
-integer(i4) :: oft_hcurl_lev = 0 !< Active FE level
-integer(i4) :: oft_hcurl_level = 0 !< Active FE level
-integer(i4) :: oft_hcurl_lin_level = 0 !< Highest linear element level
-integer(i4) :: oft_hcurl_minlev = 0 !<
-integer(i4) :: oft_hcurl_nlevels = 0 !< Number of total levels
 !
 type(oft_hcurl_bfem), pointer :: oft_bhcurl !< Active FE representation
-type(oft_hcurl_bfem), pointer :: oft_bhcurl_lin !< Highest linear element representation
 type(oft_ml_fem_type), TARGET :: ML_oft_bhcurl !< ML container for all FE representations
 !
 class(oft_hcurl_fem), pointer :: oft_hcurl !< Active FE representation
-class(oft_hcurl_fem), pointer :: oft_hcurl_lin !< Highest linear element representation
 type(oft_ml_fem_type), TARGET :: ML_oft_hcurl !< ML container for all FE representations
-!
-type(oft_nedelec_ops), pointer :: oft_hcurl_ops !< Active operators
-type(oft_nedelec_ops), pointer :: oft_hcurl_ops_lin !< Highest linear element operators
-type(oft_nedelec_ops), pointer :: ML_oft_hcurl_ops(:) !< ML container for all operators
 !
 logical, private :: hex_mesh = .FALSE.
 contains
 !---------------------------------------------------------------------------
-! SUBROUTINE: oft_hcurl_set_level
-!---------------------------------------------------------------------------
 !> Set the current level for Nedelec H1(Curl) FE
-!!
-!! @param[in] level Desired level
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_set_level(level)
-integer(i4), intent(in) :: level
+integer(i4), intent(in) :: level !< Desired level
 DEBUG_STACK_PUSH
-if(level>oft_hcurl_nlevels.OR.level<=0)then
-  write(*,*)level
-  call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
-end if
+! if(level>oft_hcurl_nlevels.OR.level<=0)then
+!   write(*,*)level
+!   call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
+! end if
 ! if(level<mg_mesh%mgdim)then
 !   call multigrid_level(level)
 ! else
 !   call multigrid_level(mg_mesh%mgdim)
 ! end if
-CALL ML_oft_hcurl%set_level(level)
-SELECT TYPE(this=>ML_oft_hcurl%current_level)
-  CLASS IS(oft_hcurl_fem)
-    oft_hcurl=>this
-  CLASS DEFAULT
-    CALL oft_abort("Error setting HCurl level", "oft_hcurl_set_level", __FILE__)
-END SELECT
+IF(ML_oft_hcurl%nlevels>0)THEN
+  if(level>ML_oft_hcurl%nlevels.OR.level<=0)then
+    call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
+  end if
+  CALL ML_oft_hcurl%set_level(level)
+  SELECT TYPE(this=>ML_oft_hcurl%current_level)
+    CLASS IS(oft_hcurl_fem)
+      oft_hcurl=>this
+    CLASS DEFAULT
+      CALL oft_abort("Error setting HCurl level", "oft_hcurl_set_level", __FILE__)
+  END SELECT
+END IF
 ! oft_hcurl=>ML_oft_hcurl%current_level
-CALL ML_oft_bhcurl%set_level(level)
-SELECT TYPE(this=>ML_oft_bhcurl%current_level)
-  CLASS IS(oft_hcurl_bfem)
-    oft_bhcurl=>this
-  CLASS DEFAULT
-    CALL oft_abort("Error setting boundary HCurl level", "oft_hcurl_set_level", __FILE__)
-END SELECT
+IF(ML_oft_bhcurl%nlevels>0)THEN
+  if(level>ML_oft_bhcurl%nlevels.OR.level<=0)then
+    call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
+  end if
+  CALL ML_oft_bhcurl%set_level(level)
+  SELECT TYPE(this=>ML_oft_bhcurl%current_level)
+    CLASS IS(oft_hcurl_bfem)
+      oft_bhcurl=>this
+    CLASS DEFAULT
+      CALL oft_abort("Error setting boundary HCurl level", "oft_hcurl_set_level", __FILE__)
+  END SELECT
+END IF
 !---
-oft_hcurl_level=level
-oft_hcurl_lev=level
-if(oft_hcurl_level>oft_hcurl_blevel.AND.oft_hcurl_blevel>0)oft_hcurl_lev=level-1
-oft_hcurl_ops=>ML_oft_hcurl_ops(level)
+! oft_hcurl_level=level
+! oft_hcurl_lev=level
+! if(oft_hcurl_level>oft_hcurl_blevel.AND.oft_hcurl_blevel>0)oft_hcurl_lev=level-1
+! oft_hcurl_ops=>ML_oft_hcurl_ops(level)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_set_level
-!---------------------------------------------------------------------------
-! SUBROUTINE: oft_hcurl_setup
 !---------------------------------------------------------------------------
 !> Construct Nedelec H1(Curl) FE on each mesh level
 !!
@@ -124,138 +110,266 @@ end subroutine oft_hcurl_set_level
 !!
 !! @param[in] order Order of representation desired
 !---------------------------------------------------------------------------
-subroutine oft_hcurl_setup(mg_mesh,order,minlev)
+subroutine oft_hcurl_setup(mg_mesh,order,ML_hcurl_obj,ML_bhcurl_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order
+type(oft_ml_fem_type), intent(inout) :: ML_hcurl_obj
+type(oft_ml_fem_type), intent(inout) :: ML_bhcurl_obj
 integer(i4), optional, intent(in) :: minlev
-integer(i4) :: i,j
+integer(i4) :: i,j,nlevels,minlev_out
 DEBUG_STACK_PUSH
-oft_hcurl_minlev=1
-IF(PRESENT(minlev))oft_hcurl_minlev=minlev
+minlev_out=1
+IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
   WRITE(*,'(A)')'**** Creating Nedelec H1(Curl) FE space'
   WRITE(*,'(2X,A,I4)')'Order  = ',order
-  WRITE(*,'(2X,A,I4)')'Minlev = ',oft_hcurl_minlev
+  WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
 END IF
-IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
-ML_oft_hcurl%ml_mesh=>mg_mesh
-ML_oft_bhcurl%ml_mesh=>mg_mesh
 !---Allocate multigrid operators
-oft_hcurl_nlevels=mg_mesh%mgdim+(order-1)
-IF(oft_hcurl_minlev<0)oft_hcurl_minlev=oft_hcurl_nlevels
-ML_oft_hcurl%nlevels=oft_hcurl_nlevels
-ML_oft_bhcurl%nlevels=oft_hcurl_nlevels
-allocate(ML_oft_hcurl_ops(oft_hcurl_nlevels))
+nlevels=mg_mesh%mgdim+(order-1)
+IF(minlev_out<0)minlev_out=nlevels
+IF(ASSOCIATED(mg_mesh%meshes))THEN
+  ML_hcurl_obj%nlevels=nlevels
+  ML_hcurl_obj%minlev=minlev_out
+  ML_hcurl_obj%ml_mesh=>mg_mesh
+  IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
+ELSE
+  ML_hcurl_obj%nlevels=0
+  IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
+END IF
+ML_bhcurl_obj%nlevels=nlevels
+ML_bhcurl_obj%minlev=minlev_out
+ML_bhcurl_obj%ml_mesh=>mg_mesh
+! allocate(ML_oft_hcurl_ops(ML_hcurl_obj%nlevels))
 !---Set linear elements
 do i=1,mg_mesh%mgdim-1
-  IF(i<oft_hcurl_minlev)CYCLE
-  ALLOCATE(oft_hcurl_fem::ML_oft_hcurl%levels(i)%fe)
-  ALLOCATE(oft_hcurl_bfem::ML_oft_bhcurl%levels(i)%fe)
-  call oft_hcurl_set_level(i)
-  if(mg_mesh%level==mg_mesh%nbase)THEN
-    ML_oft_hcurl%blevel=i
-    ML_oft_bhcurl%blevel=i
-    oft_hcurl_blevel=i
+  IF(i<ML_hcurl_obj%minlev)CYCLE
+  CALL multigrid_level(mg_mesh,i)
+  IF(ML_hcurl_obj%nlevels>0)THEN
+    CALL oft_hcurl_setup_vol(ML_hcurl_obj%levels(i)%fe,mg_mesh%mesh,1)
+    IF(mg_mesh%level==mg_mesh%nbase)ML_hcurl_obj%blevel=i
+    CALL ML_hcurl_obj%set_level(i)
   END IF
-  !---
-  oft_hcurl%mesh=>mg_mesh%mesh
-  oft_hcurl%order=1
-  oft_hcurl%dim=1
-  oft_hcurl%type=oft_hcurl_id
-  oft_hcurl%gstruct=(/0,1,0,0/)
-  call oft_hcurl%setup(3)
-  !---
-  oft_bhcurl%mesh=>mg_mesh%smesh
-  oft_bhcurl%order=1
-  oft_bhcurl%dim=1
-  oft_bhcurl%type=oft_hcurl_id
-  oft_bhcurl%gstruct=(/0,1,0/)
-  call oft_bhcurl%setup(3)
+  IF(ML_bhcurl_obj%nlevels>0)THEN
+    CALL oft_hcurl_setup_surf(ML_bhcurl_obj%levels(i)%fe,mg_mesh%smesh,1)
+    IF(mg_mesh%level==mg_mesh%nbase)ML_bhcurl_obj%blevel=i
+  END IF
+  IF(mg_mesh%level==mg_mesh%nbase)ML_hcurl_obj%blevel=i
+  ! ALLOCATE(oft_hcurl_fem::ML_oft_hcurl%levels(i)%fe)
+  ! ALLOCATE(oft_hcurl_bfem::ML_oft_bhcurl%levels(i)%fe)
+  ! call oft_hcurl_set_level(i)
+  ! if(mg_mesh%level==mg_mesh%nbase)THEN
+  !   ML_oft_hcurl%blevel=i
+  !   ML_oft_bhcurl%blevel=i
+  !   oft_hcurl_blevel=i
+  ! END IF
+  ! !---
+  ! oft_hcurl%mesh=>mg_mesh%mesh
+  ! oft_hcurl%order=1
+  ! oft_hcurl%dim=1
+  ! oft_hcurl%type=oft_hcurl_id
+  ! oft_hcurl%gstruct=(/0,1,0,0/)
+  ! call oft_hcurl%setup(3)
+  ! !---
+  ! oft_bhcurl%mesh=>mg_mesh%smesh
+  ! oft_bhcurl%order=1
+  ! oft_bhcurl%dim=1
+  ! oft_bhcurl%type=oft_hcurl_id
+  ! oft_bhcurl%gstruct=(/0,1,0/)
+  ! call oft_bhcurl%setup(3)
 end do
 call multigrid_level(mg_mesh,mg_mesh%mgdim)
 !---Set high order elements
 do i=1,order
-  IF(mg_mesh%mgdim+i-1<oft_hcurl_minlev)CYCLE
-  ALLOCATE(oft_hcurl_fem::ML_oft_hcurl%levels(mg_mesh%mgdim+i-1)%fe)
-  ALLOCATE(oft_hcurl_bfem::ML_oft_bhcurl%levels(mg_mesh%mgdim+i-1)%fe)
-  call oft_hcurl_set_level(mg_mesh%mgdim+i-1)
-  !---
-  oft_hcurl%mesh=>mg_mesh%mesh
-  oft_hcurl%order=i
-  oft_hcurl%dim=1
-  oft_hcurl%type=oft_hcurl_id
-  IF(hex_mesh)THEN
-    CALL hcurl_2d_grid(oft_hcurl%order-1, oft_hcurl%indsf)
-    CALL hcurl_3d_grid(oft_hcurl%order-1, oft_hcurl%indsc)
-    select case(oft_hcurl%order)
-      case(1)
-        oft_hcurl%gstruct=(/0,1,0,0/)
-      case(2)
-        oft_hcurl%gstruct=(/0,1,(oft_hcurl%order-1)**2 + 2*(oft_hcurl%order-1), &
-                                2*(oft_hcurl%order-1)**3 + 3*(oft_hcurl%order-1)**2/)
-      case(3)
-        oft_hcurl%gstruct=(/0,1,(oft_hcurl%order-1)**2 + 2*(oft_hcurl%order-1), &
-                                2*(oft_hcurl%order-1)**3 + 3*(oft_hcurl%order-1)**2/)
-      case(4)
-        oft_hcurl%gstruct=(/0,1,(oft_hcurl%order-1)**2 + 2*(oft_hcurl%order-1), &
-                                2*(oft_hcurl%order-1)**3 + 3*(oft_hcurl%order-1)**2/)
-      case default
-        call oft_abort('Invalid polynomial degree (npmax=1 for hex grids)','oft_hcurl_setup',__FILE__)
-    end select
-  ELSE
-    select case(oft_hcurl%order)
-      case(1)
-        oft_hcurl%gstruct=(/0,1,0,0/)
-      case(2)
-        oft_hcurl%gstruct=(/0,1,2,0/)
-      case(3)
-        oft_hcurl%gstruct=(/0,1,5,3/)
-      case(4)
-        oft_hcurl%gstruct=(/0,1,9,11/)
-      case default
-        call oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup',__FILE__)
-    end select
+  IF(i>1.AND.mg_mesh%mgdim+i-1<ML_hcurl_obj%minlev)CYCLE
+  IF(ML_hcurl_obj%nlevels>0)THEN
+    CALL oft_hcurl_setup_vol(ML_hcurl_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
+    CALL ML_hcurl_obj%set_level(mg_mesh%mgdim+i-1)
   END IF
-  call oft_hcurl%setup(i*2+1)
-  !---
-  oft_bhcurl%mesh=>mg_mesh%smesh
-  oft_bhcurl%order=i
-  oft_bhcurl%dim=1
-  oft_bhcurl%type=oft_hcurl_id
-  select case(oft_bhcurl%order)
-    case(1)
-      oft_bhcurl%gstruct=(/0,1,0/)
-    case(2)
-      oft_bhcurl%gstruct=(/0,1,2/)
-    case(3)
-      oft_bhcurl%gstruct=(/0,1,5/)
-    case(4)
-      oft_bhcurl%gstruct=(/0,1,9/)
-    case default
-      call oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup',__FILE__)
-  end select
-  call oft_bhcurl%setup(i*2+1)
+  IF(ML_bhcurl_obj%nlevels>0)THEN
+    CALL oft_hcurl_setup_surf(ML_bhcurl_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i)
+  END IF
+  ! ALLOCATE(oft_hcurl_fem::ML_oft_hcurl%levels(mg_mesh%mgdim+i-1)%fe)
+  ! ALLOCATE(oft_hcurl_bfem::ML_oft_bhcurl%levels(mg_mesh%mgdim+i-1)%fe)
+  ! call oft_hcurl_set_level(mg_mesh%mgdim+i-1)
+  ! !---
+  ! oft_hcurl%mesh=>mg_mesh%mesh
+  ! oft_hcurl%order=i
+  ! oft_hcurl%dim=1
+  ! oft_hcurl%type=oft_hcurl_id
+  ! IF(hex_mesh)THEN
+  !   CALL hcurl_2d_grid(oft_hcurl%order-1, oft_hcurl%indsf)
+  !   CALL hcurl_3d_grid(oft_hcurl%order-1, oft_hcurl%indsc)
+  !   select case(oft_hcurl%order)
+  !     case(1)
+  !       oft_hcurl%gstruct=(/0,1,0,0/)
+  !     case(2)
+  !       oft_hcurl%gstruct=(/0,1,(oft_hcurl%order-1)**2 + 2*(oft_hcurl%order-1), &
+  !                               2*(oft_hcurl%order-1)**3 + 3*(oft_hcurl%order-1)**2/)
+  !     case(3)
+  !       oft_hcurl%gstruct=(/0,1,(oft_hcurl%order-1)**2 + 2*(oft_hcurl%order-1), &
+  !                               2*(oft_hcurl%order-1)**3 + 3*(oft_hcurl%order-1)**2/)
+  !     case(4)
+  !       oft_hcurl%gstruct=(/0,1,(oft_hcurl%order-1)**2 + 2*(oft_hcurl%order-1), &
+  !                               2*(oft_hcurl%order-1)**3 + 3*(oft_hcurl%order-1)**2/)
+  !     case default
+  !       call oft_abort('Invalid polynomial degree (npmax=1 for hex grids)','oft_hcurl_setup',__FILE__)
+  !   end select
+  ! ELSE
+  !   select case(oft_hcurl%order)
+  !     case(1)
+  !       oft_hcurl%gstruct=(/0,1,0,0/)
+  !     case(2)
+  !       oft_hcurl%gstruct=(/0,1,2,0/)
+  !     case(3)
+  !       oft_hcurl%gstruct=(/0,1,5,3/)
+  !     case(4)
+  !       oft_hcurl%gstruct=(/0,1,9,11/)
+  !     case default
+  !       call oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup',__FILE__)
+  !   end select
+  ! END IF
+  ! call oft_hcurl%setup(i*2+1)
+  ! !---
+  ! oft_bhcurl%mesh=>mg_mesh%smesh
+  ! oft_bhcurl%order=i
+  ! oft_bhcurl%dim=1
+  ! oft_bhcurl%type=oft_hcurl_id
+  ! select case(oft_bhcurl%order)
+  !   case(1)
+  !     oft_bhcurl%gstruct=(/0,1,0/)
+  !   case(2)
+  !     oft_bhcurl%gstruct=(/0,1,2/)
+  !   case(3)
+  !     oft_bhcurl%gstruct=(/0,1,5/)
+  !   case(4)
+  !     oft_bhcurl%gstruct=(/0,1,9/)
+  !   case default
+  !     call oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup',__FILE__)
+  ! end select
+  ! call oft_bhcurl%setup(i*2+1)
 end do
-IF(mg_mesh%mgdim>=oft_hcurl_minlev)THEN
-  oft_hcurl_lin_level=mg_mesh%mgdim
-  SELECT TYPE(this=>ML_oft_hcurl%levels(mg_mesh%mgdim)%fe)
-    CLASS IS(oft_hcurl_fem)
-      oft_hcurl_lin=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error casting HCurl object", "oft_hcurl_setup", __FILE__)
-  END SELECT
-  ! oft_hcurl_lin=>ML_oft_hcurl%levels(mg_mesh%mgdim)%fe
-  oft_hcurl_ops_lin=>ML_oft_hcurl_ops(mg_mesh%mgdim)
-ELSE
-  oft_hcurl_lin_level=-1
-END IF
-CALL oft_hcurl_set_level(oft_hcurl_nlevels)
+! IF(mg_mesh%mgdim>=ML_hcurl_obj%minlev)THEN
+!   oft_hcurl_lin_level=mg_mesh%mgdim
+!   ! SELECT TYPE(this=>ML_oft_hcurl%levels(mg_mesh%mgdim)%fe)
+!   !   CLASS IS(oft_hcurl_fem)
+!   !     oft_hcurl_lin=>this
+!   !   CLASS DEFAULT
+!   !     CALL oft_abort("Error casting HCurl object", "oft_hcurl_setup", __FILE__)
+!   ! END SELECT
+!   ! ! oft_hcurl_lin=>ML_oft_hcurl%levels(mg_mesh%mgdim)%fe
+!   ! oft_hcurl_ops_lin=>ML_oft_hcurl_ops(mg_mesh%mgdim)
+! ELSE
+!   oft_hcurl_lin_level=-1
+! END IF
+! CALL oft_hcurl_set_level(oft_hcurl_nlevels)
+CALL oft_hcurl_set_level(max(ML_hcurl_obj%nlevels,ML_bhcurl_obj%nlevels))
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_setup
-!------------------------------------------------------------------------------
-! SUBROUTINE: hcurl_2d_grid
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine oft_hcurl_setup_vol(self,tmesh,order)
+class(oft_afem_type), pointer, intent(out) :: self !< Needs docs
+class(oft_mesh), target, intent(in) :: tmesh !< Needs docs
+integer(i4), intent(in) :: order !< Order of representation desired
+DEBUG_STACK_PUSH
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(2A)')oft_indent,'Creating 3D H(Curl) FE space'
+  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
+END IF
+CALL oft_increase_indent
+!---
+ALLOCATE(oft_hcurl_fem::self)
+SELECT TYPE(self)
+CLASS IS(oft_hcurl_fem)
+  IF(tmesh%type==3)hex_mesh=.TRUE.
+  self%mesh=>tmesh
+  self%order=order
+  self%dim=1
+  self%type=oft_hcurl_id
+  IF(hex_mesh)THEN
+    CALL hcurl_2d_grid(self%order-1, self%indsf)
+    CALL hcurl_3d_grid(self%order-1, self%indsc)
+    select case(self%order)
+      case(1)
+        self%gstruct=(/0,1,0,0/)
+      case(2)
+        self%gstruct=(/0,1,(self%order-1)**2 + 2*(self%order-1), &
+                                2*(self%order-1)**3 + 3*(self%order-1)**2/)
+      case(3)
+        self%gstruct=(/0,1,(self%order-1)**2 + 2*(self%order-1), &
+                                2*(self%order-1)**3 + 3*(self%order-1)**2/)
+      case(4)
+        self%gstruct=(/0,1,(self%order-1)**2 + 2*(self%order-1), &
+                                2*(self%order-1)**3 + 3*(self%order-1)**2/)
+      case default
+        call oft_abort('Invalid polynomial degree (npmax=1 for hex grids)','oft_hcurl_setup_vol',__FILE__)
+    end select
+  ELSE
+    select case(self%order)
+      case(1)
+        self%gstruct=(/0,1,0,0/)
+      case(2)
+        self%gstruct=(/0,1,2,0/)
+      case(3)
+        self%gstruct=(/0,1,5,3/)
+      case(4)
+        self%gstruct=(/0,1,9,11/)
+      case default
+        call oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup_vol',__FILE__)
+    end select
+  END IF
+CLASS DEFAULT
+  CALL oft_abort("Error allocate Lagrange FE object","oft_hcurl_setup_vol",__FILE__)
+END SELECT
+call self%setup(self%order*2+1)
+CALL oft_decrease_indent
+DEBUG_STACK_POP
+end subroutine oft_hcurl_setup_vol
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine oft_hcurl_setup_surf(self,tmesh,order)
+class(oft_afem_type), pointer, intent(out) :: self !< Needs docs
+class(oft_bmesh), target, intent(in) :: tmesh !< Needs docs
+integer(i4), intent(in) :: order !< Order of representation desired
+DEBUG_STACK_PUSH
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(2A)')oft_indent,'Creating 2D H(Curl) FE space'
+  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
+END IF
+CALL oft_increase_indent
+!---
+ALLOCATE(oft_hcurl_bfem::self)
+SELECT TYPE(self)
+CLASS IS(oft_hcurl_bfem)
+  !---
+  self%mesh=>tmesh
+  self%order=order
+  self%dim=1
+  self%type=oft_hcurl_id
+  select case(self%order)
+    case(1)
+      self%gstruct=(/0,1,0/)
+    case(2)
+      self%gstruct=(/0,1,2/)
+    case(3)
+      self%gstruct=(/0,1,5/)
+    case(4)
+      self%gstruct=(/0,1,9/)
+    case default
+      call oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup_surf',__FILE__)
+  end select
+CLASS DEFAULT
+  CALL oft_abort("Error allocate Lagrange FE object","oft_hcurl_setup_surf",__FILE__)
+END SELECT
+call self%setup(self%order*2+1)
+CALL oft_decrease_indent
+DEBUG_STACK_POP
+end subroutine oft_hcurl_setup_surf
 !------------------------------------------------------------------------------
 !> Need docs
 !------------------------------------------------------------------------------
