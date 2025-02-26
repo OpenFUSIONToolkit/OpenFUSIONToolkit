@@ -18,7 +18,6 @@
 !! @ingroup doxy_oft_h0
 !---------------------------------------------------------------------------
 MODULE oft_h0_basis
-! USE timer
 USE oft_base
 USE oft_lag_poly
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
@@ -31,13 +30,6 @@ USE oft_la_utils, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type
 IMPLICIT NONE
 #include "local.h"
-! !---------------------------------------------------------------------------
-! !> Needs docs
-! !---------------------------------------------------------------------------
-! type :: h0_ops
-!   type(oft_graph), pointer :: interp_graph => NULL() !< Interpolation graph
-!   class(oft_matrix), pointer :: interp => NULL() !< Interpolation matrix
-! end type h0_ops
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
@@ -54,7 +46,7 @@ end type oft_h0_bfem
 !---Global Variables
 integer(i4), parameter :: oft_h0_id = 2 !< FE type ID
 !
-type(oft_h0_bfem), pointer :: oft_bh0 !< Active FE representation
+! type(oft_h0_bfem), pointer :: oft_bh0 !< Active FE representation
 type(oft_ml_fem_type), TARGET :: ML_oft_bh0 !< ML container for all FE representations
 !
 class(oft_h0_fem), pointer :: oft_h0 !< Active FE representation
@@ -94,12 +86,12 @@ IF(ML_oft_bh0%nlevels>0)THEN
     call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
   end if
   CALL ML_oft_bh0%set_level(level)
-  SELECT TYPE(this=>ML_oft_bh0%current_level)
-    CLASS IS(oft_h0_bfem)
-      oft_bh0=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error setting boundary H0 level", "oft_h0_set_level", __FILE__)
-  END SELECT
+  ! SELECT TYPE(this=>ML_oft_bh0%current_level)
+  !   CLASS IS(oft_h0_bfem)
+  !     oft_bh0=>this
+  !   CLASS DEFAULT
+  !     CALL oft_abort("Error setting boundary H0 level", "oft_h0_set_level", __FILE__)
+  ! END SELECT
 END IF
 !---
 ! oft_h0_level=level

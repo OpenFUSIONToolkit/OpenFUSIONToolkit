@@ -247,8 +247,8 @@ end subroutine h1_rinterp_setup1
 !---------------------------------------------------------------------------
 subroutine h1_rinterp_setup2(self,hcurl_rep,hgrad_rep)
 class(oft_h1_rinterp), intent(inout) :: self
-class(oft_hcurl_fem), target, intent(inout) :: hcurl_rep
-class(oft_h0_fem), target, intent(inout) :: hgrad_rep
+class(oft_afem_type), target, intent(inout) :: hcurl_rep
+class(oft_afem_type), target, intent(inout) :: hgrad_rep
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
     CLASS IS(oft_h1_rinterp)
@@ -267,9 +267,19 @@ ELSE
   !---Get local slice
   CALL self%u%get_local(self%curl_vals,1)
   CALL self%u%get_local(self%grad_vals,2)
-  self%hcurl_rep=>hcurl_rep
-  self%hgrad_rep=>hgrad_rep
-  self%mesh=>self%hcurl_rep%mesh
+  SELECT TYPE(hcurl_rep)
+    CLASS IS(oft_hcurl_fem)
+      self%hcurl_rep=>hcurl_rep
+      self%mesh=>hcurl_rep%mesh
+    CLASS DEFAULT
+      CALL oft_abort("Invalid HCurl space","h1_rinterp_setup",__FILE__)
+  END SELECT
+  SELECT TYPE(hgrad_rep)
+    CLASS IS(oft_h0_fem)
+      self%hgrad_rep=>hgrad_rep
+    CLASS DEFAULT
+      CALL oft_abort("Invalid HGrad space","h1_rinterp_setup",__FILE__)
+  END SELECT
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
     ALLOCATE(self%cache_grad(self%hgrad_rep%nce,0:oft_env%nthreads-1))

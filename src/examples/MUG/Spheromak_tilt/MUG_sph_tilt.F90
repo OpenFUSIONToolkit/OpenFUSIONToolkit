@@ -41,7 +41,7 @@ USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad
@@ -144,7 +144,7 @@ CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
 NULLIFY(lop)
-CALL oft_h0_getlop(oft_h0,lop,"grnd")
+CALL oft_h0_getlop(ML_oft_h0%current_level,lop,"grnd")
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2

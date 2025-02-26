@@ -14,7 +14,7 @@
 MODULE oft_h0_fields
 USE oft_base
 USE oft_la_base, ONLY: oft_vector
-USE oft_h0_basis, ONLY: oft_h0, ML_oft_h0
+USE oft_h0_basis, ONLY: ML_oft_h0
 IMPLICIT NONE
 #include "local.h"
 contains

@@ -27,8 +27,9 @@ USE oft_native_solvers, ONLY: oft_native_cg_solver, oft_native_cg_eigsolver, &
   oft_native_gmres_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
-USE fem_base, ONLY: oft_fem_type
+USE fem_base, ONLY: oft_fem_type, oft_afem_type
 USE fem_utils, ONLY: fem_interp
+USE fem_composite, ONLY: oft_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lagrange_lin_level, &
   oft_lag_set_level, oft_lagrange, ML_oft_lagrange
 USE oft_lag_operators, ONLY: oft_lag_zerob, lag_getlop_pre, oft_lag_getlop
@@ -66,7 +67,9 @@ type, extends(fem_interp) :: oft_taylor_rinterp
   class(oft_hcurl_fem), pointer :: hcurl_rep => NULL() !< H1(Curl) FE representation
 contains
   !> Retrieve local values for interpolation
-  procedure :: setup => taylor_rinterp_setup
+  generic :: setup => setup1, setup2
+  procedure :: setup1 => taylor_rinterp_setup1
+  procedure :: setup2 => taylor_rinterp_setup2
   !> Reconstruct field
   procedure :: interp => taylor_rinterp
 end type oft_taylor_rinterp
@@ -399,7 +402,7 @@ IF(.NOT.rst)THEN
 ! Setup H0::LOP preconditioner
 !---------------------------------------------------------------------------
   if(taylor_minlev==ML_oft_h0%nlevels-1)then ! Lowest level uses diag precond
-    CALL oft_h0_getlop(oft_h0,lop,'grnd')
+    CALL oft_h0_getlop(ML_oft_h0%current_level,lop,'grnd')
     CALL create_cg_solver(linv)
     CALL create_diag_pre(linv%pre)
   else ! Nested levels use MG
@@ -941,21 +944,64 @@ end subroutine taylor_injector_single
 !!
 !! @note Should only be used via class \ref oft_taylor_rinterp or children
 !---------------------------------------------------------------------------
-subroutine taylor_rinterp_setup(self,mesh)
+subroutine taylor_rinterp_setup1(self,h1_rep)
 class(oft_taylor_rinterp), intent(inout) :: self
-class(oft_mesh), target, intent(inout) :: mesh
+class(oft_fem_comp_type), target, intent(inout) :: h1_rep
 DEBUG_STACK_PUSH
-self%mesh=>mesh
 !---Get local slice
 CALL self%ua%get_local(self%acurl)
 CALL self%uvac%get_local(self%vac_curl,1)
 CALL self%uvac%get_local(self%vac_grad,2)
-self%hgrad_rep=>oft_h0
-self%hcurl_rep=>oft_hcurl
+SELECT TYPE(this=>h1_rep%fields(1)%fe)
+  CLASS IS(oft_hcurl_fem)
+    self%hcurl_rep=>this
+    self%mesh=>this%mesh
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HCurl space","taylor_rinterp_setup1",__FILE__)
+END SELECT
+SELECT TYPE(this=>h1_rep%fields(2)%fe)
+  CLASS IS(oft_h0_fem)
+    self%hgrad_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup1",__FILE__)
+END SELECT
+! self%hgrad_rep=>oft_h0
+! self%hcurl_rep=>oft_hcurl
 DEBUG_STACK_POP
-end subroutine taylor_rinterp_setup
+end subroutine taylor_rinterp_setup1
 !---------------------------------------------------------------------------
-! SUBROUTINE: taylor_rinterp
+!> Setup interpolator for composite Taylor state fields
+!!
+!! Fetches local representation used for interpolation from vector object
+!!
+!! @note Should only be used via class \ref oft_taylor_rinterp or children
+!---------------------------------------------------------------------------
+subroutine taylor_rinterp_setup2(self,hcurl_rep,hgrad_rep)
+class(oft_taylor_rinterp), intent(inout) :: self
+class(oft_afem_type), target, intent(inout) :: hcurl_rep
+class(oft_afem_type), target, intent(inout) :: hgrad_rep
+DEBUG_STACK_PUSH
+!---Get local slice
+CALL self%ua%get_local(self%acurl)
+CALL self%uvac%get_local(self%vac_curl,1)
+CALL self%uvac%get_local(self%vac_grad,2)
+SELECT TYPE(hcurl_rep)
+  CLASS IS(oft_hcurl_fem)
+    self%hcurl_rep=>hcurl_rep
+    self%mesh=>hcurl_rep%mesh
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HCurl space","taylor_rinterp_setup2",__FILE__)
+END SELECT
+SELECT TYPE(hgrad_rep)
+  CLASS IS(oft_h0_fem)
+    self%hgrad_rep=>hgrad_rep
+  CLASS DEFAULT
+    CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup2",__FILE__)
+END SELECT
+! self%hgrad_rep=>oft_h0
+! self%hcurl_rep=>oft_hcurl
+DEBUG_STACK_POP
+end subroutine taylor_rinterp_setup2
 !---------------------------------------------------------------------------
 !> Reconstruct a composite Taylor state field
 !!

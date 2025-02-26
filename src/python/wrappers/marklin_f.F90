@@ -35,7 +35,7 @@ USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcu
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
     hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, oft_h0_zerogrnd, &
   oft_h0_zerob
 !---H1 FE space
@@ -288,9 +288,9 @@ END IF
 !---------------------------------------------------------------------------
 NULLIFY(lop,tmp)
 IF(zero_norm)THEN
-  CALL oft_h0_getlop(oft_h0,lop,"grnd")
+  CALL oft_h0_getlop(ML_oft_h0%current_level,lop,"grnd")
 ELSE
-  CALL oft_h0_getlop(oft_h0,lop,"zerob")
+  CALL oft_h0_getlop(ML_oft_h0%current_level,lop,"zerob")
 END IF
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -315,7 +315,7 @@ CALL interp_obj%u%restore_local(tmp,1)
 IF(zero_norm)WRITE(*,*)'Setting gauge'
 divout%pm=.TRUE.
 CALL divout%apply(interp_obj%u)
-CALL interp_obj%setup(oft_hcurl,oft_h0)
+CALL interp_obj%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
 int_obj=C_LOC(interp_obj)
 !---Cleanup
 CALL divout%delete()

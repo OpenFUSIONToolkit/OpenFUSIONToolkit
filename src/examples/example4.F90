@@ -167,7 +167,7 @@ CALL create_diag_pre(lminv%pre) ! Setup Preconditioner
 CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)
 !---Setup field interpolation
-CALL Bfield%setup(mg_mesh%mesh)
+CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
 !---Project field
 CALL oft_lag_vproject(oft_lagrange,Bfield,v)
 CALL u%set(0.d0)

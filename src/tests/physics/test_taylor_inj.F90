@@ -119,7 +119,7 @@ CALL oft_vlagrange%vec_create(v)
 !---Plot solution
 Bfield%uvac=>taylor_hvac(1,oft_h1_level)%f
 Bfield%ua=>taylor_gffa(1,oft_h1_level)%f
-CALL Bfield%setup(mg_mesh%mesh)
+CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
 !---Project field
 CALL oft_lag_vproject(oft_lagrange,Bfield,v)
 CALL u%set(0.d0)

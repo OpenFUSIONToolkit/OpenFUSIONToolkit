@@ -31,7 +31,7 @@ USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
-USE oft_h0_basis, ONLY: oft_h0, ML_oft_h0, oft_h0_eval_all, oft_h0_geval_all, &
+USE oft_h0_basis, ONLY: ML_oft_h0, oft_h0_eval_all, oft_h0_geval_all, &
   oft_h0_set_level, oft_h0_fem
 USE oft_h0_fields, ONLY: oft_h0_create
 IMPLICIT NONE
@@ -122,10 +122,15 @@ end subroutine h0_mloptions
 !---------------------------------------------------------------------------
 subroutine h0_rinterp_setup(self,h0_rep)
 class(oft_h0_rinterp), intent(inout) :: self
-class(oft_h0_fem), target, intent(inout) :: h0_rep
+class(oft_afem_type), target, intent(inout) :: h0_rep
 !---
-self%h0_rep=>h0_rep
-self%mesh=>h0_rep%mesh
+SELECT TYPE(h0_rep)
+CLASS IS(oft_h0_fem)
+  self%h0_rep=>h0_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","h0_rinterp_setup",__FILE__)
+END SELECT
+self%mesh=>self%h0_rep%mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
 end subroutine h0_rinterp_setup
@@ -278,7 +283,7 @@ end subroutine zeroi_apply
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine oft_h0_getmop(fe_rep,mat,bc)
-class(oft_h0_fem), intent(inout) :: fe_rep
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
@@ -287,17 +292,24 @@ real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable :: rop(:),mop(:,:)
 logical :: curved
 CLASS(oft_vector), POINTER :: oft_h0_vec
+CLASS(oft_h0_fem), POINTER :: h0_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H0::MOP'
   CALL mytimer%tick()
 END IF
+SELECT TYPE(fe_rep)
+CLASS IS(oft_h0_fem)
+  h0_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_h0_getmop",__FILE__)
+END SELECT
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL fe_rep%mat_create(mat)
+  CALL h0_rep%mat_create(mat)
 ELSE
   CALL mat%zero()
 END IF
@@ -306,43 +318,43 @@ END IF
 !---------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,det,mop,curved,goptmp,m,vol,jc,jr)
-allocate(j(fe_rep%nce)) ! Local DOF and matrix indices
-allocate(rop(fe_rep%nce)) ! Reconstructed gradient operator
-allocate(mop(fe_rep%nce,fe_rep%nce)) ! Local laplacian matrix
+allocate(j(h0_rep%nce)) ! Local DOF and matrix indices
+allocate(rop(h0_rep%nce)) ! Reconstructed gradient operator
+allocate(mop(h0_rep%nce,h0_rep%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,fe_rep%mesh%nc
-  curved=cell_is_curved(fe_rep%mesh,i) ! Straight cell test
+do i=1,h0_rep%mesh%nc
+  curved=cell_is_curved(h0_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   mop=0.d0
-  do m=1,fe_rep%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call fe_rep%mesh%jacobian(i,fe_rep%quad%pts(:,m),goptmp,vol)
-    det=vol*fe_rep%quad%wts(m)
-    CALL oft_h0_eval_all(fe_rep,i,fe_rep%quad%pts(:,m),rop)
+  do m=1,h0_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call h0_rep%mesh%jacobian(i,h0_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*h0_rep%quad%wts(m)
+    CALL oft_h0_eval_all(h0_rep,i,h0_rep%quad%pts(:,m),rop)
     !---Compute local matrix contributions
-    do jr=1,fe_rep%nce
-      do jc=1,fe_rep%nce
+    do jr=1,h0_rep%nce
+      do jc=1,h0_rep%nce
         mop(jr,jc) = mop(jr,jc) + rop(jr)*rop(jc)*det
       end do
     end do
   end do
   !---Get local to global DOF mapping
-  call fe_rep%ncdofs(i,j)
+  call h0_rep%ncdofs(i,j)
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("zerob")
-      DO jr=1,fe_rep%nce
-        IF(fe_rep%global%gbe(j(jr)))mop(jr,:)=0.d0
+      DO jr=1,h0_rep%nce
+        IF(h0_rep%global%gbe(j(jr)))mop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(fe_rep%mesh%igrnd>0))THEN
-        DO jr=1,fe_rep%nce
-          IF(ANY(fe_rep%mesh%igrnd==j(jr)))mop(jr,:)=0.d0
+      IF(ANY(h0_rep%mesh%igrnd>0))THEN
+        DO jr=1,h0_rep%nce
+          IF(ANY(h0_rep%mesh%igrnd==j(jr)))mop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
   !---Add local values to global matrix
   ! !$omp critical
-  call mat%atomic_add_values(j,j,mop,fe_rep%nce,fe_rep%nce)
+  call mat%atomic_add_values(j,j,mop,h0_rep%nce,h0_rep%nce)
   ! !$omp end critical
 end do
 deallocate(j,rop,mop)
@@ -352,18 +364,18 @@ ALLOCATE(mop(1,1),j(1))
 mop(1,1)=1.d0
 SELECT CASE(TRIM(bc))
   CASE("zerob")
-    DO i=1,fe_rep%nbe
-      jr=fe_rep%lbe(i)
-      IF(fe_rep%linkage%leo(i).AND.fe_rep%global%gbe(jr))THEN
+    DO i=1,h0_rep%nbe
+      jr=h0_rep%lbe(i)
+      IF(h0_rep%linkage%leo(i).AND.h0_rep%global%gbe(jr))THEN
         j=jr
         call mat%add_values(j,j,mop,1,1)
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(fe_rep%mesh%igrnd>0))THEN
-      DO i=1,fe_rep%nbe
-        jr=fe_rep%lbe(i)
-        IF(fe_rep%linkage%leo(i).AND.ANY(jr==fe_rep%mesh%igrnd))THEN
+    IF(ANY(h0_rep%mesh%igrnd>0))THEN
+      DO i=1,h0_rep%nbe
+        jr=h0_rep%lbe(i)
+        IF(h0_rep%linkage%leo(i).AND.ANY(jr==h0_rep%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,mop,1,1)
         END IF
@@ -371,7 +383,7 @@ SELECT CASE(TRIM(bc))
     END IF
 END SELECT
 DEALLOCATE(j,mop)
-CALL fe_rep%vec_create(oft_h0_vec)
+CALL h0_rep%vec_create(oft_h0_vec)
 CALL mat%assemble(oft_h0_vec)
 CALL oft_h0_vec%delete
 DEALLOCATE(oft_h0_vec)
@@ -390,7 +402,7 @@ end subroutine oft_h0_getmop
 !! - \c 'grnd'  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
 subroutine oft_h0_getlop(fe_rep,mat,bc)
-class(oft_h0_fem), intent(inout) :: fe_rep
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
@@ -399,17 +411,24 @@ real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable :: gop(:,:),lop(:,:)
 logical :: curved
 CLASS(oft_vector), POINTER :: oft_h0_vec
+CLASS(oft_h0_fem), POINTER :: h0_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H0::LOP'
   CALL mytimer%tick()
 END IF
+SELECT TYPE(fe_rep)
+CLASS IS(oft_h0_fem)
+  h0_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_h0_getlop",__FILE__)
+END SELECT
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL fe_rep%mat_create(mat)
+  CALL h0_rep%mat_create(mat)
 ELSE
   CALL mat%zero()
 END IF
@@ -418,43 +437,43 @@ END IF
 !---------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,gop,det,lop,curved,goptmp,m,vol,jc,jr)
-allocate(j(fe_rep%nce)) ! Local DOF and matrix indices
-allocate(gop(3,fe_rep%nce)) ! Reconstructed gradient operator
-allocate(lop(fe_rep%nce,fe_rep%nce)) ! Local laplacian matrix
+allocate(j(h0_rep%nce)) ! Local DOF and matrix indices
+allocate(gop(3,h0_rep%nce)) ! Reconstructed gradient operator
+allocate(lop(h0_rep%nce,h0_rep%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,fe_rep%mesh%nc
-  curved=cell_is_curved(fe_rep%mesh,i) ! Straight cell test
+do i=1,h0_rep%mesh%nc
+  curved=cell_is_curved(h0_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   lop=0.d0
-  do m=1,fe_rep%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call fe_rep%mesh%jacobian(i,fe_rep%quad%pts(:,m),goptmp,vol)
-    det=vol*fe_rep%quad%wts(m)
-    CALL oft_h0_geval_all(fe_rep,i,fe_rep%quad%pts(:,m),gop,goptmp)
+  do m=1,h0_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call h0_rep%mesh%jacobian(i,h0_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*h0_rep%quad%wts(m)
+    CALL oft_h0_geval_all(h0_rep,i,h0_rep%quad%pts(:,m),gop,goptmp)
     !---Compute local matrix contributions
-    do jr=1,fe_rep%nce
-      do jc=1,fe_rep%nce
+    do jr=1,h0_rep%nce
+      do jc=1,h0_rep%nce
         lop(jr,jc) = lop(jr,jc) + DOT_PRODUCT(gop(:,jr),gop(:,jc))*det
       end do
     end do
   end do
   !---Get local to global DOF mapping
-  call fe_rep%ncdofs(i,j)
+  call h0_rep%ncdofs(i,j)
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("zerob")
-      DO jr=1,fe_rep%nce
-        IF(fe_rep%global%gbe(j(jr)))lop(jr,:)=0.d0
+      DO jr=1,h0_rep%nce
+        IF(h0_rep%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
     CASE("grnd")
-      IF(ANY(fe_rep%mesh%igrnd>0))THEN
-        DO jr=1,fe_rep%nce
-          IF(ANY(fe_rep%mesh%igrnd==j(jr)))lop(jr,:)=0.d0
+      IF(ANY(h0_rep%mesh%igrnd>0))THEN
+        DO jr=1,h0_rep%nce
+          IF(ANY(h0_rep%mesh%igrnd==j(jr)))lop(jr,:)=0.d0
         END DO
       END IF
   END SELECT
   !---Add local values to global matrix
   ! !$omp critical
-  call mat%atomic_add_values(j,j,lop,fe_rep%nce,fe_rep%nce)
+  call mat%atomic_add_values(j,j,lop,h0_rep%nce,h0_rep%nce)
   ! !$omp end critical
 end do
 deallocate(j,gop,lop)
@@ -464,18 +483,18 @@ ALLOCATE(lop(1,1),j(1))
 lop(1,1)=1.d0
 SELECT CASE(TRIM(bc))
   CASE("zerob")
-    DO i=1,fe_rep%nbe
-      jr=fe_rep%lbe(i)
-      IF(fe_rep%linkage%leo(i).AND.fe_rep%global%gbe(jr))THEN
+    DO i=1,h0_rep%nbe
+      jr=h0_rep%lbe(i)
+      IF(h0_rep%linkage%leo(i).AND.h0_rep%global%gbe(jr))THEN
         j=jr
         call mat%add_values(j,j,lop,1,1)
       END IF
     END DO
   CASE("grnd")
-    IF(ANY(fe_rep%mesh%igrnd>0))THEN
-      DO i=1,fe_rep%nbe
-        jr=fe_rep%lbe(i)
-        IF(fe_rep%linkage%leo(i).AND.ANY(jr==fe_rep%mesh%igrnd))THEN
+    IF(ANY(h0_rep%mesh%igrnd>0))THEN
+      DO i=1,h0_rep%nbe
+        jr=h0_rep%lbe(i)
+        IF(h0_rep%linkage%leo(i).AND.ANY(jr==h0_rep%mesh%igrnd))THEN
           j=jr
           call mat%add_values(j,j,lop,1,1)
         END IF
@@ -483,7 +502,7 @@ SELECT CASE(TRIM(bc))
     END IF
 END SELECT
 DEALLOCATE(j,lop)
-CALL fe_rep%vec_create(oft_h0_vec)
+CALL h0_rep%vec_create(oft_h0_vec)
 CALL mat%assemble(oft_h0_vec)
 CALL oft_h0_vec%delete
 DEALLOCATE(oft_h0_vec)
@@ -504,7 +523,7 @@ end subroutine oft_h0_getlop
 !! @param[in,out] x Field projected onto H0 basis
 !---------------------------------------------------------------------------
 subroutine oft_h0_project(fe_rep,field,x)
-class(oft_h0_fem), intent(inout) :: fe_rep
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(fem_interp), intent(inout) :: field
 class(oft_vector), intent(inout) :: x
 !---
@@ -514,24 +533,31 @@ real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 logical :: curved
+CLASS(oft_h0_fem), POINTER :: h0_rep
 DEBUG_STACK_PUSH
+SELECT TYPE(fe_rep)
+CLASS IS(oft_h0_fem)
+  h0_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_h0_project",__FILE__)
+END SELECT
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
-allocate(j(fe_rep%nce),rop(fe_rep%nce))
+allocate(j(h0_rep%nce),rop(h0_rep%nce))
 !$omp do schedule(guided)
-do i=1,fe_rep%mesh%nc ! Loop over cells
-  call fe_rep%ncdofs(i,j) ! Get DOFs
-  curved=cell_is_curved(fe_rep%mesh,i) ! Straight cell test
-  do m=1,fe_rep%quad%np
-    if(curved.OR.m==1)call fe_rep%mesh%jacobian(i,fe_rep%quad%pts(:,m),goptmp,vol)
-    det=vol*fe_rep%quad%wts(m)
-    call field%interp(i,fe_rep%quad%pts(:,m),goptmp,bcc)
-    CALL oft_h0_eval_all(fe_rep,i,fe_rep%quad%pts(:,m),rop)
-    do jc=1,fe_rep%nce
+do i=1,h0_rep%mesh%nc ! Loop over cells
+  call h0_rep%ncdofs(i,j) ! Get DOFs
+  curved=cell_is_curved(h0_rep%mesh,i) ! Straight cell test
+  do m=1,h0_rep%quad%np
+    if(curved.OR.m==1)call h0_rep%mesh%jacobian(i,h0_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*h0_rep%quad%wts(m)
+    call field%interp(i,h0_rep%quad%pts(:,m),goptmp,bcc)
+    CALL oft_h0_eval_all(h0_rep,i,h0_rep%quad%pts(:,m),rop)
+    do jc=1,h0_rep%nce
       !$omp atomic
       xloc(j(jc))=xloc(j(jc))+rop(jc)*bcc(1)*det
     end do
@@ -936,8 +962,6 @@ DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine h0_base_pop
 !---------------------------------------------------------------------------
-! SUBROUTINE: h0_inject
-!---------------------------------------------------------------------------
 !> Inject a fine level H0 scalar field to the next coarsest level
 !!
 !! @note The global H0 level in decremented by one in this subroutine
@@ -951,7 +975,7 @@ class(oft_vector), intent(inout) :: acors
 integer(i4) :: i,j,k
 logical :: gcheck
 DEBUG_STACK_PUSH
-gcheck=(oft_h0%order==1)
+gcheck=(ML_oft_h0%current_level%order==1)
 ! Step down level up
 call oft_h0_set_level(ML_oft_h0%level-1)
 ! Cast fine field
@@ -1136,7 +1160,7 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_h0_getlop(oft_h0,mats(i)%M,'grnd')
+    CALL oft_h0_getlop(ML_oft_h0%current_level,mats(i)%M,'grnd')
   END IF
   IF(i>1)ml_int(i-1)%M=>ML_oft_h0%interp_matrices(ML_oft_h0%level)%m !oft_h0_ops%interp
 END DO

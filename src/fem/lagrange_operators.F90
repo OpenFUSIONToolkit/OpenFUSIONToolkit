@@ -186,7 +186,7 @@ end subroutine lag_mloptions
 !---------------------------------------------------------------------------
 subroutine lag_rinterp_setup(self,lag_rep)
 class(oft_lag_rinterp), intent(inout) :: self
-class(oft_scalar_fem), target, intent(inout) :: lag_rep
+class(oft_afem_type), target, intent(inout) :: lag_rep
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
     CLASS IS(oft_lag_rinterp)
@@ -202,8 +202,13 @@ ELSE
   !---Get local slice
   CALL self%u%get_local(self%vals)
   !
-  self%lag_rep=>lag_rep
-  self%mesh=>lag_rep%mesh
+  SELECT TYPE(lag_rep)
+  CLASS IS(oft_scalar_fem)
+    self%lag_rep=>lag_rep
+  CLASS DEFAULT
+    CALL oft_abort("Incorrect FE type","lag_rinterp_setup",__FILE__)
+  END SELECT
+  self%mesh=>self%lag_rep%mesh
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
     ALLOCATE(self%cache_vals(self%lag_rep%nce,0:oft_env%nthreads-1))
@@ -327,7 +332,7 @@ end subroutine lag_ginterp_apply
 !---------------------------------------------------------------------------
 subroutine lag_vrinterp_setup(self,lag_rep)
 class(oft_lag_vrinterp), intent(inout) :: self
-class(oft_scalar_fem), target, intent(inout) :: lag_rep
+class(oft_afem_type), target, intent(inout) :: lag_rep
 real(r8), pointer, dimension(:) :: vtmp
 IF(ASSOCIATED(self%parent))THEN
   SELECT TYPE(this=>self%parent)
@@ -349,8 +354,13 @@ ELSE
   CALL self%u%get_local(vtmp,2)
   vtmp=>self%vals(3,:)
   CALL self%u%get_local(vtmp,3)
-  self%lag_rep=>lag_rep
-  self%mesh=>lag_rep%mesh
+  SELECT TYPE(lag_rep)
+  CLASS IS(oft_scalar_fem)
+    self%lag_rep=>lag_rep
+  CLASS DEFAULT
+    CALL oft_abort("Incorrect FE type","lag_vrinterp_setup",__FILE__)
+  END SELECT
+  self%mesh=>self%lag_rep%mesh
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
     ALLOCATE(self%cache_vals(3,self%lag_rep%nce,0:oft_env%nthreads-1))
@@ -794,8 +804,8 @@ end subroutine lag_vbc_diag
 !! - \c 'none' Full matrix
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
-subroutine oft_lag_getmop(lag_rep,mat,bc)
-type(oft_scalar_fem), intent(inout) :: lag_rep
+subroutine oft_lag_getmop(fe_rep,mat,bc)
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
@@ -805,11 +815,18 @@ real(r8), allocatable :: rop(:),mop(:,:)
 logical :: curved
 CLASS(oft_vector), POINTER :: oft_lag_vec
 type(oft_timer) :: mytimer
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing LAG::MOP'
   CALL mytimer%tick()
 END IF
+SELECT TYPE(fe_rep)
+CLASS IS(oft_scalar_fem)
+  lag_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_lag_getmop",__FILE__)
+END SELECT
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -906,8 +923,8 @@ end subroutine oft_lag_getmop
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !! - \c 'grnd'  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
-subroutine oft_lag_getlop(lag_rep,mat,bc)
-type(oft_scalar_fem), intent(inout) :: lag_rep
+subroutine oft_lag_getlop(fe_rep,mat,bc)
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 integer(i4) :: i,m,jr,jc
@@ -917,11 +934,18 @@ real(r8), allocatable :: gop(:,:),lop(:,:)
 logical :: curved
 CLASS(oft_vector), POINTER :: oft_lag_vec
 type(oft_timer) :: mytimer
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing LAG::LOP'
   CALL mytimer%tick()
 END IF
+SELECT TYPE(fe_rep)
+CLASS IS(oft_scalar_fem)
+  lag_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_lag_getlop",__FILE__)
+END SELECT
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -1017,8 +1041,8 @@ end subroutine oft_lag_getlop
 !! - \c 'zerob' Dirichlet for all boundary DOF
 !! - \c 'grnd'  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
-subroutine oft_lag_getpdop(lag_rep,mat,field,bc,perp,be_flag)
-type(oft_scalar_fem), intent(inout) :: lag_rep
+subroutine oft_lag_getpdop(fe_rep,mat,field,bc,perp,be_flag)
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 class(fem_interp), intent(inout) :: field !< Vector field defining \f$ \hat{b} \f$
 character(LEN=*), intent(in) :: bc !< Boundary condition
@@ -1030,12 +1054,19 @@ real(r8) :: vol,det,goptmp(3,4),B_nodal(3),par_diff,perp_diff,elapsed_time
 real(r8), allocatable :: gop(:,:),pdop(:,:)
 logical :: curved
 CLASS(oft_vector), POINTER :: oft_lag_vec
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing LAG::PDOP'
   CALL mytimer%tick()
 END IF
+SELECT TYPE(fe_rep)
+CLASS IS(oft_scalar_fem)
+  lag_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_lag_getpdop",__FILE__)
+END SELECT
 !---
 perp_diff=0.d0
 if(present(perp))perp_diff=perp
@@ -1145,8 +1176,8 @@ end subroutine oft_lag_getpdop
 !! test functions for a Lagrange basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of LAG::MOP
 !---------------------------------------------------------------------------
-subroutine oft_lag_project(lag_rep,field,x)
-type(oft_scalar_fem), intent(inout) :: lag_rep
+subroutine oft_lag_project(fe_rep,field,x)
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(fem_interp), intent(inout) :: field !< Scalar field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
@@ -1156,7 +1187,14 @@ real(r8) :: bcc(1),vol,det,goptmp(3,4)
 real(r8), pointer :: xloc(:)
 real(r8), allocatable :: rop(:)
 logical :: curved
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+SELECT TYPE(fe_rep)
+CLASS IS(oft_scalar_fem)
+  lag_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_lag_project",__FILE__)
+END SELECT
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -1193,8 +1231,8 @@ end subroutine oft_lag_project
 !! test functions for a Lagrange basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of LAG::MOP
 !---------------------------------------------------------------------------
-subroutine oft_lag_project_div(lag_rep,field,x)
-type(oft_scalar_fem), intent(inout) :: lag_rep
+subroutine oft_lag_project_div(fe_rep,field,x)
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(fem_interp), intent(inout) :: field !< Scalar field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
@@ -1204,7 +1242,14 @@ real(r8), allocatable :: gop(:,:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 logical :: curved
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+SELECT TYPE(fe_rep)
+CLASS IS(oft_scalar_fem)
+  lag_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_lag_project_div",__FILE__)
+END SELECT
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -1244,7 +1289,7 @@ end subroutine oft_lag_project_div
 !! - \c 'tang' Dirichlet for tangential component at boundary
 !---------------------------------------------------------------------------
 subroutine oft_lag_vgetmop(vlag_rep,mat,bc)
-type(oft_fem_comp_type), intent(inout) :: vlag_rep
+class(oft_fem_comp_type), target, intent(inout) :: vlag_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 type :: block_mat
@@ -1421,8 +1466,8 @@ end subroutine oft_lag_vgetmop
 !! test functions for a Lagrange basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of LAG::VMOP
 !---------------------------------------------------------------------------
-subroutine oft_lag_vproject(lag_rep,field,x)
-type(oft_scalar_fem), intent(inout) :: lag_rep
+subroutine oft_lag_vproject(fe_rep,field,x)
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(fem_interp), intent(inout) :: field !< Vector field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
@@ -1432,7 +1477,14 @@ real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
 logical :: curved
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+SELECT TYPE(fe_rep)
+CLASS IS(oft_scalar_fem)
+  lag_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","oft_lag_vproject",__FILE__)
+END SELECT
 !---Initialize vectors to zero
 NULLIFY(xloc,yloc,zloc)
 call x%set(0.d0)
@@ -1473,8 +1525,8 @@ end subroutine oft_lag_vproject
 !---------------------------------------------------------------------------
 !> Compute the divergence of a Lagrange vector field
 !---------------------------------------------------------------------------
-subroutine lag_div(lag_rep,a,reg)
-type(oft_scalar_fem), intent(inout) :: lag_rep
+subroutine lag_div(fe_rep,a,reg)
+class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_vector), intent(inout) :: a !< Input field
 real(r8), intent(out) :: reg !< \f$ \int_v \nabla \cdot a \; dV \f$
 real(r8), pointer, dimension(:) :: x,y,z
@@ -1483,7 +1535,14 @@ integer(i4), allocatable :: j(:)
 real(r8) :: goptmp(3,4),vol,det,div
 real(r8), allocatable :: gop(:,:)
 logical :: curved
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+SELECT TYPE(fe_rep)
+CLASS IS(oft_scalar_fem)
+  lag_rep=>fe_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","lag_div",__FILE__)
+END SELECT
 !---Cast to vector type
 NULLIFY(x,y,z)
 CALL a%get_local(x,1)

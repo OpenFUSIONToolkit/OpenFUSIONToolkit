@@ -25,7 +25,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
 USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0_set_level, ML_oft_h0, &
-  oft_h0, ML_oft_h0, ML_oft_bh0
+  ML_oft_h0, ML_oft_bh0
 USE oft_h0_fields, ONLY: oft_h0_create
 USE oft_h0_operators, ONLY: h0_setup_interp, h0_mloptions, h0_inject, &
   h0_interp, oft_h0_zerob, df_lop, nu_lop, oft_h0_getlop, oft_h0_getmop, h0_getlop_pre
@@ -84,8 +84,8 @@ CALL oft_h0_set_level(ML_oft_h0%nlevels)
 CALL oft_h0_create(u)
 CALL oft_h0_create(v)
 !---Get FE operators
-CALL oft_h0_getlop(oft_h0,lop,'zerob')
-CALL oft_h0_getmop(oft_h0,mop,'none')
+CALL oft_h0_getlop(ML_oft_h0%current_level,lop,'zerob')
+CALL oft_h0_getmop(ML_oft_h0%current_level,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -140,7 +140,7 @@ nlevels=ML_oft_h0%nlevels-minlev+1
 CALL oft_h0_create(u)
 CALL oft_h0_create(v)
 !---Get FE operators
-CALL oft_h0_getmop(oft_h0,mop,'none')
+CALL oft_h0_getmop(ML_oft_h0%current_level,mop,'none')
 !---------------------------------------------------------------------------
 ! Setup matrix solver
 !---------------------------------------------------------------------------

@@ -36,17 +36,14 @@ USE oft_io, ONLY: oft_file_exist
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lagrange ,oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate!, oft_lag_load
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: oft_lag_vrinterp
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
-USE oft_hcurl_fields, ONLY: oft_hcurl_create!, oft_hcurl_load
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0, oft_h0_setup, ML_oft_h0, ML_oft_bh0
-USE oft_h0_fields, ONLY: oft_h0_create!, oft_h0_load
+USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1
@@ -113,18 +110,18 @@ SELECT CASE(type)
   CASE(1) ! Vector Lagrange field
     CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
     !---Create field structure
-    CALL oft_lag_create(x1)
-    CALL oft_lag_vcreate(u)
+    CALL ML_oft_lagrange%vec_create(x1)
+    CALL ML_oft_lagrange%vec_create(u)
     Bfield_lag%u=>u
     tracer%B=>Bfield_lag
-    CALL Bfield_lag%setup(oft_lagrange)
+    CALL Bfield_lag%setup(ML_oft_lagrange%current_level)
   CASE(2) !  Nedelec H1 field
     CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
     CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
-    CALL oft_h1_setup(mg_mesh,order, -1)
+    CALL oft_h1_setup(mg_mesh,order,-1)
     !---Create field structure
-    CALL oft_hcurl_create(x1)
-    CALL oft_h0_create(x2)
+    CALL ML_oft_hcurl%vec_create(x1)
+    CALL ML_oft_h0%vec_create(x2)
     CALL oft_h1_create(u)
     Bfield_H1%u=>u
     tracer%B=>Bfield_H1
@@ -132,10 +129,10 @@ SELECT CASE(type)
   CASE(3) !  Nedelec HCurl field
     CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
     !---Create field structure
-    CALL oft_hcurl_create(u)
+    CALL ML_oft_hcurl%vec_create(u)
     Bfield_HCurl%u=>u
     tracer%B=>Bfield_HCurl
-    CALL Bfield_HCurl%setup(oft_hcurl)
+    CALL Bfield_HCurl%setup(ML_oft_hcurl%current_level)
   CASE DEFAULT
     CALL oft_abort("Unknown field type", "poincare_trace", __FILE__)
 END SELECT
@@ -197,24 +194,24 @@ DO
     CASE(1) ! Vector Lagrange field
       !---Extract field components
       DO i=1,3
-        CALL oft_lagrange%vec_load(x1,filename,fields(i))
+        CALL ML_oft_lagrange%current_level%vec_load(x1,filename,fields(i))
         CALL x1%get_local(valtmp)
         CALL u%restore_local(valtmp,i)
       END DO
-      CALL Bfield_lag%setup(oft_lagrange)
+      CALL Bfield_lag%setup(ML_oft_lagrange%current_level)
     CASE(2) !  Nedelec H1 field
       !---Extract H1(Curl) component
-      CALL oft_hcurl%vec_load(x1,filename,fields(1))
+      CALL ML_oft_hcurl%current_level%vec_load(x1,filename,fields(1))
       CALL x1%get_local(valtmp)
       CALL u%restore_local(valtmp,1)
       !---Extract H1(Grad) component
-      CALL oft_h0%vec_load(x2,filename,fields(2))
+      CALL ML_oft_h0%current_level%vec_load(x2,filename,fields(2))
       CALL x2%get_local(valtmp)
       CALL u%restore_local(valtmp,2)
       CALL Bfield_H1%setup(oft_h1)
     CASE(3) !  Nedelec HCurl field
-      CALL oft_hcurl%vec_load(u,filename,fields(1))
-      CALL Bfield_HCurl%setup(oft_hcurl)
+      CALL ML_oft_hcurl%current_level%vec_load(u,filename,fields(1))
+      CALL Bfield_HCurl%setup(ML_oft_lagrange%current_level)
   END SELECT
   !---Perform tracing
   ind=ind+1
