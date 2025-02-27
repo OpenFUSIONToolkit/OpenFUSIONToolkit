@@ -32,7 +32,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
 USE oft_solver_utils, ONLY: create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob
 IMPLICIT NONE
@@ -99,8 +99,8 @@ lag_zerob%ML_lag_rep=>ML_oft_lagrange
 CALL oft_lag_create(u)
 !---Create Operators
 NULLIFY(lop,mop)
-CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
-CALL oft_lag_getmop(oft_lagrange,mop,'zerob')
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'zerob')
 !!\subsection doc_ex1_code_solver Setup solver
 !!
 !!This section assembles the solver object by fill the required references. The solver object used here

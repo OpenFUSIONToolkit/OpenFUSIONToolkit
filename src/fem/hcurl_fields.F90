@@ -14,7 +14,7 @@
 MODULE oft_hcurl_fields
 USE oft_base
 USE oft_la_base, ONLY: oft_vector
-USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl
+USE oft_hcurl_basis, ONLY: ML_oft_hcurl
 IMPLICIT NONE
 #include "local.h"
 contains

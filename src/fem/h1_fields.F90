@@ -16,7 +16,7 @@
 MODULE oft_h1_fields
 USE oft_base
 USE oft_la_base, ONLY: oft_vector
-USE oft_h1_basis, ONLY: oft_h1, ML_oft_h1, ML_oft_hgrad
+USE oft_h1_basis, ONLY: ML_oft_h1, ML_oft_hgrad
 IMPLICIT NONE
 #include "local.h"
 contains

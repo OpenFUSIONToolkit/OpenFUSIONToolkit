@@ -20,7 +20,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, &
-  oft_hcurl, oft_bhcurl, oft_hcurl_eval_all, ML_oft_hcurl, ML_oft_bhcurl
+  oft_hcurl_eval_all, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, &
   oft_hcurl_cinterp, oft_hcurl_bcurl
@@ -72,9 +72,9 @@ CALL oft_hcurl_set_level(ML_oft_hcurl%nlevels)
 CALL oft_hcurl_create(u)
 CALL oft_hcurl_create(v)
 !---Get FE operators
-CALL oft_hcurl_getwop(oft_hcurl,wop,'none')
+CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,wop,'none')
 !---Compute RHS
-CALL oft_hcurl_bcurl(oft_hcurl,oft_bhcurl,xfield,v)
+CALL oft_hcurl_bcurl(ML_oft_hcurl%current_level,ML_oft_bhcurl%current_level,xfield,v)
 !---Setup matrix solver
 CALL create_cg_solver(winv)
 winv%A=>wop
@@ -85,8 +85,8 @@ CALL u%set(0.d0)
 CALL winv%apply(u,v)
 !---Check results
 Bfield%u=>u
-CALL Bfield%setup(oft_hcurl)
-uu=vec_energy(oft_hcurl%mesh,Bfield,oft_hcurl%quad%order)
+CALL Bfield%setup(ML_oft_hcurl%current_level)
+uu=vec_energy(mg_mesh%mesh,Bfield,ML_oft_hcurl%current_level%quad%order)
 !---Report results
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='hcurl.results')

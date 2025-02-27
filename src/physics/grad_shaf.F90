@@ -28,10 +28,10 @@ USE oft_solver_utils, ONLY: create_diag_pre, create_cg_solver
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv
 !
-USE fem_base, ONLY: oft_ml_fem_type
+USE fem_base, ONLY: oft_ml_fem_type, oft_afem_type
 USE fem_utils, ONLY: bfem_interp, bfem_map_flag
-USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_eval, oft_blag_geval, &
-  oft_blag_npos, oft_blag_d2eval, oft_scalar_bfem, ML_oft_blagrange
+USE oft_lag_basis, ONLY: oft_blag_eval, oft_blag_geval, &
+  oft_blag_npos, oft_blag_d2eval, oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp, &
   oft_lag_bg2interp, oft_blag_zerob, oft_blag_zerogrnd, oft_blag_getmop, &
   oft_blag_vproject
@@ -278,6 +278,7 @@ TYPE :: gs_eq
   CLASS(flux_func), POINTER :: P => NULL() !< Pressure flux function
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
+  CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
   CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL()
   TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL()
   TYPE(oft_blag_zerob), POINTER :: zerob_bc => NULL()
@@ -285,6 +286,8 @@ TYPE :: gs_eq
   TYPE(oft_gs_zerob), POINTER :: gs_zerob_bc => NULL()
   PROCEDURE(region_eta_set), NOPASS, POINTER :: set_eta => NULL()
 CONTAINS
+  !
+  PROCEDURE :: setup => gs_setup
   !
   PROCEDURE :: init => gs_init
   !
@@ -343,6 +346,7 @@ type, extends(cylinv_interp) :: gsinv_interp
   LOGICAL :: compute_geom = .FALSE.
   real(8), pointer, dimension(:) :: uvals => NULL()
   class(oft_vector), pointer :: u => NULL() !< Field for interpolation
+  class(oft_scalar_bfem), pointer :: lag_rep => NULL() !< Lagrange FE representation
 contains
   procedure :: setup => gsinv_setup
   !> Reconstruct the gradient of a Lagrange scalar field
@@ -427,6 +431,27 @@ real(r8), intent(in) :: psi
 real(r8) :: b
 b=0.d0
 end function dummy_fpp
+!---------------------------------------------------------------------------
+!> Needs Docs
+!!
+!! @param[in,out] self G-S object
+!---------------------------------------------------------------------------
+subroutine gs_setup(self,ML_lag_2d)
+class(gs_eq), intent(inout) :: self
+class(oft_ml_fem_type), target, intent(inout) :: ML_lag_2d
+SELECT TYPE(this=>ML_lag_2d%current_level)
+  CLASS IS(oft_scalar_bfem)
+    self%ML_fe_rep=>ML_lag_2d
+    self%fe_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE space","gs_setup",__FILE__)
+END SELECT
+self%mesh=>self%fe_rep%mesh
+ALLOCATE(self%zerob_bc)
+self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
+ALLOCATE(self%zerogrnd_bc)
+self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
+end subroutine gs_setup
 !---------------------------------------------------------------------------
 !> Needs Docs
 !!
@@ -1105,8 +1130,6 @@ end subroutine gs_setup_walls
 ! END IF
 ! end subroutine gs_setup_cflag
 !---------------------------------------------------------------------------
-! SUBROUTINE gs_init
-!---------------------------------------------------------------------------
 !> Initialize Grad-Shafranov solution with the Taylor state
 !!
 !! @param[in,out] self G-S object
@@ -1119,7 +1142,6 @@ type(oft_native_cg_eigsolver) :: eigsolver
 class(oft_vector), pointer :: tmp_vec,tmp_vec2
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
-type(circular_curr) :: circle_init
 type(oft_lag_brinterp) :: psi_eval 
 integer(4) :: i,j,k,mind,nCon,ierr
 integer(4), allocatable :: cells(:)
@@ -1131,13 +1153,13 @@ CLASS(oft_bmesh), POINTER :: smesh
 ! logical :: do_compute
 ! do_compute=.TRUE.
 ! IF(PRESENT(compute))do_compute=compute
-smesh=>oft_blagrange%mesh
-self%ML_fe_rep=>ML_oft_blagrange
-self%fe_rep=>oft_blagrange
-ALLOCATE(self%zerob_bc)
-self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
-ALLOCATE(self%zerogrnd_bc)
-self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
+smesh=>self%fe_rep%mesh
+! self%ML_fe_rep=>ML_oft_blagrange
+! self%fe_rep=>oft_blagrange
+! ALLOCATE(self%zerob_bc)
+! self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
+! ALLOCATE(self%zerogrnd_bc)
+! self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
 !---Get Vector
 call self%fe_rep%vec_create(self%psi)
 call self%psi%set(0.d0)
@@ -1411,6 +1433,7 @@ IF(PRESENT(r0))THEN
     circle_init%a=a
     circle_init%kappa=kappa
     circle_init%delta=delta
+    circle_init%mesh=>self%fe_rep%mesh
     CALL gs_gen_source(self,circle_init,tmp_vec)
   ELSE
     CALL self%psi%set(1.d0)
@@ -1543,8 +1566,6 @@ NULLIFY(self%fe_rep)
 IF(ASSOCIATED(self%node_flag))DEALLOCATE(self%node_flag)
 end subroutine zerob_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE torus_interp
-!---------------------------------------------------------------------------
 !> Evaluate torus source
 !!
 !! @param[in] cell Cell for interpolation
@@ -1568,7 +1589,7 @@ real(8), allocatable, dimension(:,:) :: fjac
 integer(4) :: maxfev,mode,nprint,info,nfev,ldfjac,ncons,ncofs
 integer(4), allocatable, dimension(:) :: ipvt
 !---Get coordinates
-pt=oft_blagrange%mesh%log2phys(cell,f)
+pt=self%mesh%log2phys(cell,f)
 r = pt(1:2) - self%x0
 
 ncons=2
@@ -1974,7 +1995,7 @@ type(oft_lag_brinterp), target :: psi_eval
 NULLIFY(btmp)
 CALL b%get_local(btmp)
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 !---
 mutual=0.d0
 itor=0.d0
@@ -2055,13 +2076,13 @@ err_mat=0.d0
 rhs=0.d0
 cells=-1
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
 ALLOCATE(wt_tmp(self%isoflux_ntargets))
 wt_tmp=1.d0
 IF(self%isoflux_grad_wt_lim>0.d0)THEN
   psi_geval2%u=>psi_full
-  CALL psi_geval2%setup(self%fe_rep%mesh)
+  CALL psi_geval2%setup(self%fe_rep)
 END IF
 !---Get RHS
 DO j=1,self%isoflux_ntargets
@@ -2098,9 +2119,9 @@ END DO
 !---Build L-S Matrix
 DO i=1,self%ncoils
   psi_eval%u=>self%psi_coil(i)%f
-  CALL psi_eval%setup(self%fe_rep%mesh)
+  CALL psi_eval%setup(self%fe_rep)
   psi_geval%u=>self%psi_coil(i)%f
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   DO j=1,self%isoflux_ntargets
     CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%isoflux_targets(1:2,j),f)
     ! CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
@@ -2214,7 +2235,7 @@ err_mat=0.d0
 rhs=0.d0
 cells=-1
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 ! CALL psi_geval%shared_setup(psi_eval)
 !---Get RHS
 DO j=1,self%flux_ntargets
@@ -2230,7 +2251,7 @@ DO i=1,self%ncond_regs
     kk=kk+1
     err_mat(self%flux_ntargets+kk,kk)=1.E-5 ! Coil regularization
     psi_eval%u=>self%cond_regions(i)%psi_eig(k)%f
-    CALL psi_eval%setup(self%fe_rep%mesh)
+    CALL psi_eval%setup(self%fe_rep)
     DO j=1,self%flux_ntargets
       CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%flux_targets(1:2,j),f)
       ! CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
@@ -2462,18 +2483,18 @@ DO i=1,self%maxits
   IF(self%R0_target>0.d0)THEN
     !
     psi_geval%u=>psi_vac
-    CALL psi_geval%setup(self%fe_rep%mesh)
+    CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi0)
     param_rhs(2)=-gpsi0(1)
     !
     psi_geval%u=>psi_vcont
-    CALL psi_geval%setup(self%fe_rep%mesh)
+    CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi0)
     psi_geval%u=>psi_alam
-    CALL psi_geval%setup(self%fe_rep%mesh)
+    CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi1)
     psi_geval%u=>psi_press
-    CALL psi_geval%setup(self%fe_rep%mesh)
+    CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi2)
     param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
   ELSE IF(self%estore_target>0.d0)THEN
@@ -2496,18 +2517,18 @@ DO i=1,self%maxits
     CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
     CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
     psi_geval%u=>psi_vac
-    CALL psi_geval%setup(self%fe_rep%mesh)
+    CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi0)
     param_rhs(3)=-gpsi0(2)
     ! 
     psi_geval%u=>psi_vcont
-    CALL psi_geval%setup(self%fe_rep%mesh)
+    CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi0)
     psi_geval%u=>psi_alam
-    CALL psi_geval%setup(self%fe_rep%mesh)
+    CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi1)
     psi_geval%u=>psi_press
-    CALL psi_geval%setup(self%fe_rep%mesh)
+    CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi2)
     param_mat(3,:)=[gpsi1(2),gpsi2(2),gpsi0(2)]
   ELSE
@@ -2859,18 +2880,18 @@ CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
 IF((self%R0_target>0.d0).AND.adjust_r0)THEN
   !
   psi_geval%u=>psi_vac
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
   param_rhs(2)=-gpsi0(1)
   !
   psi_geval%u=>psi_vcont
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
   psi_geval%u=>psi_alam
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi1)
   psi_geval%u=>psi_press
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi2)
   param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
 ELSE
@@ -2884,18 +2905,18 @@ IF((self%V0_target>-1.d98).AND.adjust_r0)THEN
   CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
   psi_geval%u=>psi_vac
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
   param_rhs(3)=-gpsi0(2)
   ! 
   psi_geval%u=>psi_vcont
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
   psi_geval%u=>psi_alam
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi1)
   psi_geval%u=>psi_press
-  CALL psi_geval%setup(self%fe_rep%mesh)
+  CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi2)
   param_mat(3,:)=[gpsi1(2),gpsi2(2),gpsi0(2)]
 ELSE
@@ -2962,10 +2983,10 @@ CALL self%psi%add(1.d0,self%vcontrol_val,psi_vcont)
 !       CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
 !       !
 !       psi_geval%u=>psi_alam
-!       CALL psi_geval%setup(self%fe_rep%mesh)
+!       CALL psi_geval%setup(self%fe_rep)
 !       CALL psi_geval%interp(cell,f,goptmp,gpsi1)
 !       psi_geval%u=>psi_press
-!       CALL psi_geval%setup(self%fe_rep%mesh)
+!       CALL psi_geval%setup(self%fe_rep)
 !       CALL psi_geval%interp(cell,f,goptmp,gpsi2)
 !       IF(gpsi2(1)/=0.d0)self%pnorm=-gpsi1(1)/gpsi2(1)
 !       opoint=pt
@@ -3252,7 +3273,7 @@ NULLIFY(vals_tmp)
 CALL psi_fixed%get_local(vals_tmp)
 ! OPEN(NEWUNIT=io_unit,FILE='fixed_vflux.dat')
 ALLOCATE(pts(2,self%fe_rep%mesh%nbp),fluxes(self%fe_rep%mesh%nbp))
-IF(.NOT.ASSOCIATED(self%olbp))CALL get_olbp(self%olbp)
+IF(.NOT.ASSOCIATED(self%olbp))CALL get_olbp(self%mesh,self%olbp)
 DO i=1,self%fe_rep%mesh%nbp
   pts(:,i)=self%fe_rep%mesh%r(1:2,self%olbp(i))
   fluxes(i)=-vals_tmp(self%olbp(i))*self%psiscale
@@ -3444,7 +3465,7 @@ call rhs%set(0.d0)
 CALL rhs%get_local(vals_tmp)
 !---
 psi_interp%u=>psihat
-CALL psi_interp%setup(self%fe_rep%mesh)
+CALL psi_interp%setup(self%fe_rep)
 !---
 !$omp parallel private(rhs_loc,j_lag,f,curved,goptmp,v,m,det,pt,psitmp,l,rop)
 allocate(rhs_loc(self%fe_rep%nce))
@@ -3552,7 +3573,7 @@ IF(.NOT.self%has_plasma)THEN
 END IF
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 !---
 itor=0.d0
 curr_cent=0.d0
@@ -3700,7 +3721,7 @@ IF(self%nx_points>0)THEN
 END IF
 
 psi_interp%u=>self%psi
-CALL psi_interp%setup(self%fe_rep%mesh)
+CALL psi_interp%setup(self%fe_rep)
 
 !---Get plasma boundary contour
 IF(self%plasma_bounds(1)>-1.d98)THEN
@@ -3805,7 +3826,7 @@ CLASS(oft_bmesh), POINTER :: smesh
 !
 psi_eval%u=>self%psi
 psi_eval_active=>psi_eval
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
 CALL psi_g2eval%shared_setup(psi_eval)
 psi_geval_active=>psi_geval
@@ -4016,7 +4037,7 @@ real(8) :: v,psitmp(1),gpsitmp(3),f(3),goptmp(3,3),B(5),pttmp(3)
 integer(4) :: i,cell,io_unit
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
 !---
 cell=0
@@ -4051,9 +4072,7 @@ END DO
 CLOSE(io_unit)
 end subroutine gs_save_fields
 !------------------------------------------------------------------------------
-! SUBROUTINE psi2pt_error
-!------------------------------------------------------------------------------
-!>
+!> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE psi2pt_error(m,n,cofs,err,iflag)
 integer(4), intent(in) :: m,n
@@ -4064,7 +4083,7 @@ real(8) :: f(3),goptmp(3,3),psitmp(1),pt(2)
 real(8), parameter :: tol=1.d-10
 !---
 pt=cofs(1)*vec_con_active + pt_con_active
-call bmesh_findcell(oft_blagrange%mesh,cell_active,pt,f)
+call bmesh_findcell(psi_eval_active%mesh,cell_active,pt,f)
 IF(cell_active==0)THEN
   err(1)=psi_target_active
   RETURN
@@ -4073,22 +4092,15 @@ call psi_eval_active%interp(cell_active,f,goptmp,psitmp)
 err(1)=psitmp(1)-psi_target_active
 end subroutine psi2pt_error
 !---------------------------------------------------------------------------
-! SUBROUTINE gs_psi2pt
-!---------------------------------------------------------------------------
-!> Find position of psi along a radial chord
-!!
-!! @param[in,out] self G-S object
-!! @param[in] psi_target
-!! @param[in,out] r
-!! @param[in] z
+!> Find position of psi along a vector search direction
 !---------------------------------------------------------------------------
 subroutine gs_psi2pt(self,psi_target,pt,pt_con,vec,psi_int)
 class(gs_eq), intent(inout) :: self
-real(8), intent(in) :: psi_target
-real(8), intent(inout) :: pt(2)
-real(8), intent(in) :: pt_con(2)
-real(8), intent(in) :: vec(2)
-type(oft_lag_brinterp), target, optional, intent(inout) :: psi_int
+real(8), intent(in) :: psi_target !< Target \f$ \psi \f$ value to find
+real(8), intent(inout) :: pt(2) !< Guess location (input); Closest point found (output) [2]
+real(8), intent(in) :: pt_con(2) !< Location defining origin of search path
+real(8), intent(in) :: vec(2) !< Vector defining direction of search path
+type(oft_lag_brinterp), target, optional, intent(inout) :: psi_int !< Interpolation object (created internally if not passed)
 type(oft_lag_brinterp), target :: psi_eval
 !---MINPACK variables
 real(8) :: ftol,xtol,gtol,epsfcn,factor,cofs(1),error(1)
@@ -4101,7 +4113,7 @@ IF(PRESENT(psi_int))THEN
   psi_eval_active=>psi_int
 ELSE
   psi_eval%u=>self%psi
-  CALL psi_eval%setup(self%fe_rep%mesh)
+  CALL psi_eval%setup(self%fe_rep)
   psi_eval_active=>psi_eval
 END IF
 psi_target_active=psi_target
@@ -4176,7 +4188,7 @@ CALL gs_itor_nl(self,Itor)
 Itor=Itor/self%psiscale
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 CALL gpsi_eval%shared_setup(psi_eval)
 !---
 Psq=0.d0
@@ -4245,7 +4257,7 @@ integer(4) :: i,m
 logical, parameter :: curved = .FALSE.
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 wstored=0.d0
 !$omp parallel do private(m,goptmp,v,psitmp,pt) reduction(+:wstored)
 do i=1,self%fe_rep%mesh%nc
@@ -4280,7 +4292,7 @@ real(8) :: Btor,dflux
 integer(4) :: i,m
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 dflux=0.d0
 !$omp parallel do private(m,pt,goptmp,v,psitmp,Btor) reduction(+:dflux)
 do i=1,self%fe_rep%mesh%nc
@@ -4321,7 +4333,7 @@ real(8) :: Btor,tflux
 integer(4) :: i,m
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 tflux=0.d0
 !$omp parallel do private(m,pt,goptmp,v,psitmp,Btor) reduction(+:tflux)
 do i=1,self%fe_rep%mesh%nc
@@ -4360,9 +4372,9 @@ real(8) :: goptmp(3,3),v,psitmp(1),gpsitmp(3),B(3),It,pt(3),Bmsq
 integer(4) :: i,m
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 gpsi_eval%u=>self%psi
-CALL gpsi_eval%setup(self%fe_rep%mesh)
+CALL gpsi_eval%setup(self%fe_rep)
 !---
 li=0.d0
 It=0.d0
@@ -4399,11 +4411,11 @@ real(8) :: goptmp(3,3),v,psitmp(1),gchitmp(3),gpsitmp(3),B(3),A(3),pt(3)
 integer(4) :: i,m
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 gpsi_eval%u=>self%psi
-CALL gpsi_eval%setup(self%fe_rep%mesh)
+CALL gpsi_eval%setup(self%fe_rep)
 gchi_eval%u=>self%chi
-CALL gchi_eval%setup(self%fe_rep%mesh)
+CALL gchi_eval%setup(self%fe_rep)
 !---
 epar=0.d0
 do i=1,self%fe_rep%mesh%nc
@@ -4453,11 +4465,11 @@ CALL self%get_chi
 oft_env%pm=pm_save
 !---
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 gpsi_eval%u=>self%psi
-CALL gpsi_eval%setup(self%fe_rep%mesh)
+CALL gpsi_eval%setup(self%fe_rep)
 gchi_eval%u=>self%chi
-CALL gchi_eval%setup(self%fe_rep%mesh)
+CALL gchi_eval%setup(self%fe_rep)
 !---
 ener=0.d0
 helic=0.d0
@@ -4495,12 +4507,12 @@ real(8), intent(out) :: err(m)
 integer(4), intent(inout) :: iflag
 real(8) :: f(3),goptmp(3,3),v,err_tmp(3)
 !---
-call bmesh_findcell(oft_blagrange%mesh,cell_active,cofs,f)
+call bmesh_findcell(psi_geval_active%mesh,cell_active,cofs,f)
 IF(cell_active==0)THEN
   err(1:2)=0.d0
   RETURN
 END IF
-call oft_blagrange%mesh%jacobian(cell_active,f,goptmp,v)
+call psi_geval_active%mesh%jacobian(cell_active,f,goptmp,v)
 call psi_geval_active%interp(cell_active,f,goptmp,err_tmp)
 err(1:2)=err_tmp(1:2)
 end subroutine psimax_error
@@ -4517,8 +4529,8 @@ integer(4), intent(in) :: iflag
 real(8) :: f(3),goptmp(3,3),v,d2_tmp(6),err_tmp(3)
 !---
 IF(iflag==1)THEN
-  call bmesh_findcell(oft_blagrange%mesh,cell_active,cofs,f)
-  call oft_blagrange%mesh%jacobian(cell_active,f,goptmp,v)
+  call bmesh_findcell(psi_geval_active%mesh,cell_active,cofs,f)
+  call psi_geval_active%mesh%jacobian(cell_active,f,goptmp,v)
   call psi_geval_active%interp(cell_active,f,goptmp,err_tmp)
   err(1:2)=err_tmp(1:2)
 ELSE
@@ -4554,7 +4566,7 @@ integer(4), allocatable, dimension(:) :: ipvt
 ! zb=self%spatial_bounds(:,2)
 !---Determine initial guess from cell search
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 f=1.d0/3.d0
 psi_max=-1.d99
 goptmp=1.d0
@@ -4577,10 +4589,10 @@ END IF
 !RETURN
 !---Setup gradient interpolation
 psi_geval%u=>self%psi
-CALL psi_geval%setup(self%fe_rep%mesh)
+CALL psi_geval%setup(self%fe_rep)
 psi_geval_active=>psi_geval
 psi_g2eval%u=>self%psi
-CALL psi_g2eval%setup(self%fe_rep%mesh)
+CALL psi_g2eval%setup(self%fe_rep)
 psi_g2eval_active=>psi_g2eval
 !---Use MINPACK to find maximum (zero gradient)
 ncons=2
@@ -4639,9 +4651,9 @@ integer(4) :: maxfev,mode,nprint,info,nfev,ldfjac,ncons,ncofs,njev
 integer(4), allocatable, dimension(:) :: ipvt
 !---Determine initial guess from cell search
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep%mesh)
+CALL psi_eval%setup(self%fe_rep)
 psi_geval%u=>self%psi
-CALL psi_geval%setup(self%fe_rep%mesh)
+CALL psi_geval%setup(self%fe_rep)
 f=1.d0/3.d0
 mag_min=1.d99
 psi_x=-1.d99
@@ -4663,7 +4675,7 @@ IF(cell_active==0)RETURN
 psi_geval%u=>self%psi
 psi_geval_active=>psi_geval
 psi_g2eval%u=>self%psi
-CALL psi_g2eval%setup(self%fe_rep%mesh)
+CALL psi_g2eval%setup(self%fe_rep)
 psi_g2eval_active=>psi_g2eval
 !---Use MINPACK to find maximum (zero gradient)
 ncons=2
@@ -4724,7 +4736,7 @@ IF(gseq%plasma_bounds(1)>-1.d98)THEN
 END IF
 ! IF(.NOT.gseq%free)x1 = x1 + (x2-x1)*2.d-2
 psi_int%u=>gseq%psi
-CALL psi_int%setup(gseq%fe_rep%mesh)
+CALL psi_int%setup(gseq%fe_rep)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
@@ -4750,7 +4762,7 @@ END IF
 call set_tracer(1)
 !$omp parallel private(psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
-CALL field%setup(gseq%fe_rep%mesh)
+CALL field%setup(gseq%fe_rep)
 IF(PRESENT(ravgs))THEN
   field%compute_geom=.TRUE.
   active_tracer%neq=5
@@ -4852,7 +4864,7 @@ IF(gseq%plasma_bounds(1)>-1.d98)THEN
 END IF
 psi_surf = x1 + (x2-x1)*psi_in
 psi_int%u=>gseq%psi
-CALL psi_int%setup(gseq%fe_rep%mesh)
+CALL psi_int%setup(gseq%fe_rep)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
@@ -4881,7 +4893,7 @@ pt_last=[rmax,zaxis,0.d0]
 call set_tracer(1)
 !!$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
-CALL field%setup(gseq%fe_rep%mesh)
+CALL field%setup(gseq%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -5004,14 +5016,15 @@ IF(PRESENT(lambda))lam=lambda
 eta = 1.65d-9*LOG(lam)/(T**1.5d0) ! Spitzer 1.65e-9 * Log(Lambda)/(T^3/2) [T in KeV]
 end function gs_eta_spitzer
 !
-subroutine gs_prof_interp_setup(self,mesh)
+subroutine gs_prof_interp_setup(self,gs)
 class(gs_prof_interp), intent(inout) :: self
-class(oft_bmesh), target, intent(inout) :: mesh
+class(gs_eq), target, intent(inout) :: gs
+self%gs=>gs
+self%mesh=>gs%mesh
 ALLOCATE(self%psi_eval,self%psi_geval)
 self%psi_eval%u=>self%gs%psi
-CALL self%psi_eval%setup(mesh)
+CALL self%psi_eval%setup(self%gs%fe_rep)
 CALL self%psi_geval%shared_setup(self%psi_eval)
-self%mesh=>mesh
 end subroutine gs_prof_interp_setup
 !
 subroutine gs_prof_interp_delete(self)
@@ -5019,6 +5032,7 @@ class(gs_prof_interp), intent(inout) :: self
 CALL self%psi_eval%delete()
 CALL self%psi_geval%delete()
 DEALLOCATE(self%psi_eval,self%psi_geval)
+NULLIFY(self%gs,self%mesh)
 end subroutine gs_prof_interp_delete
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_rinterp
@@ -5114,16 +5128,20 @@ ELSE
 END IF
 end subroutine gs_b_interp_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE gsinv_setup
-!---------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------
-subroutine gsinv_setup(self,mesh)
+subroutine gsinv_setup(self,lag_rep)
 class(gsinv_interp), intent(inout) :: self
-class(oft_bmesh), target, intent(inout) :: mesh
+class(oft_afem_type), target, intent(inout) :: lag_rep
+SELECT TYPE(lag_rep)
+CLASS IS(oft_scalar_bfem)
+  self%lag_rep=>lag_rep
+CLASS DEFAULT
+  CALL oft_abort("Incorrect FE type","gsinv_setup",__FILE__)
+END SELECT
+self%mesh=>self%lag_rep%mesh
 NULLIFY(self%uvals)
 CALL self%u%get_local(self%uvals)
-self%mesh=>mesh
 end subroutine gsinv_setup
 !---------------------------------------------------------------------------
 !> Needs Docs
@@ -5132,8 +5150,6 @@ subroutine gsinv_destroy(self)
 class(gsinv_interp), intent(inout) :: self
 IF(ASSOCIATED(self%uvals))DEALLOCATE(self%uvals)
 end subroutine gsinv_destroy
-!---------------------------------------------------------------------------
-! SUBROUTINE gsinv_apply
 !---------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------
@@ -5148,16 +5164,16 @@ integer(4) :: jc
 real(8) :: rop(3),d2op(6),pt(3),grad(3),tmp
 real(8) :: s,c
 !---Get dofs
-allocate(j(oft_blagrange%nce))
-call oft_blagrange%ncdofs(cell,j)
+allocate(j(self%lag_rep%nce))
+call self%lag_rep%ncdofs(cell,j)
 !---Reconstruct gradient
 grad=0.d0
-do jc=1,oft_blagrange%nce
-  call oft_blag_geval(oft_blagrange,cell,jc,f,rop,gop)
+do jc=1,self%lag_rep%nce
+  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
   grad=grad+self%uvals(j(jc))*rop
 end do
 !---Get radial position
-pt=oft_blagrange%mesh%log2phys(cell,f)
+pt=self%mesh%log2phys(cell,f)
 !---
 s=SIN(self%t)
 c=COS(self%t)
@@ -5173,7 +5189,6 @@ END IF
 ! val(3:8)=val(3:8)
 deallocate(j)
 end subroutine gsinv_apply
-
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_save_fgrid
 !---------------------------------------------------------------------------
@@ -5197,10 +5212,10 @@ CALL self%psi%new(a)
 CALL self%psi%new(br)
 CALL self%psi%new(bt)
 CALL self%psi%new(bz)
-Bfield%gs=>self
-field%gs=>self
-CALL Bfield%setup(self%fe_rep%mesh)
-CALL field%setup(self%fe_rep%mesh)
+! Bfield%gs=>self
+! field%gs=>self
+CALL Bfield%setup(self)
+CALL field%setup(self)
 !---Setup Solver
 CALL create_cg_solver(solver)
 solver%A=>self%mop
@@ -5792,7 +5807,7 @@ sing_quad%wts=[0.663266631902570511783904989051d-2,0.457997079784753341255767348
   0.118598665644451726132783641957d0]
 !
 allocate(self%olbp(smesh%nbp+1))
-CALL get_olbp(self%olbp)
+CALL get_olbp(self%mesh,self%olbp)
 !---Compute oriented edge list
 ALLOCATE(elist(2,smesh%nbe))
 DO i=1,smesh%nbe
@@ -6096,12 +6111,11 @@ itegrand=rop2(1)*val
 end function integrand2
 end subroutine compute_bcmat
 !
-subroutine get_olbp(olbp)
+subroutine get_olbp(smesh,olbp)
+class(oft_bmesh), intent(inout) :: smesh
 integer(4), intent(out) :: olbp(:)
 integer(4) :: i,ii,j,k,l
 real(8) :: val,orient(2)
-class(oft_bmesh), pointer :: smesh
-smesh=>oft_blagrange%mesh
 olbp=0
 j=0
 val=1.d99

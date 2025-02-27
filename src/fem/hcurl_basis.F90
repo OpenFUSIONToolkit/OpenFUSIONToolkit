@@ -48,14 +48,56 @@ end type oft_hcurl_bfem
 integer(i4), parameter :: cgop_map(4,4) = RESHAPE((/0,-1,-2,-3,1,0,-4,-5,2,4,0,-6,3,5,6,0/),(/4,4/))
 integer(i4), parameter :: oft_hcurl_id = 3 !< FE type ID
 !
-type(oft_hcurl_bfem), pointer :: oft_bhcurl !< Active FE representation
+! type(oft_hcurl_bfem), pointer :: oft_bhcurl !< Active FE representation
 type(oft_ml_fem_type), TARGET :: ML_oft_bhcurl !< ML container for all FE representations
 !
-class(oft_hcurl_fem), pointer :: oft_hcurl !< Active FE representation
+! class(oft_hcurl_fem), pointer :: oft_hcurl !< Active FE representation
 type(oft_ml_fem_type), TARGET :: ML_oft_hcurl !< ML container for all FE representations
 !
 logical, private :: hex_mesh = .FALSE.
 contains
+!------------------------------------------------------------------------------
+!> Cast abstract FE type to 3D H(Curl) finite element type
+!!
+!! @note If object is not of class @ref oft_hcurl_fem then self will be null
+!! and the result will be -1
+!------------------------------------------------------------------------------
+FUNCTION oft_3D_hcurl_cast(self,source) RESULT(ierr)
+CLASS(oft_hcurl_fem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
+CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+SELECT TYPE(source)
+  CLASS IS(oft_hcurl_fem)
+    self=>source
+    ierr=0
+  CLASS DEFAULT
+    NULLIFY(self)
+    ierr=-1
+END SELECT
+DEBUG_STACK_POP
+END FUNCTION oft_3D_hcurl_cast
+!------------------------------------------------------------------------------
+!> Cast abstract FE type to 2D H(Curl) finite element type
+!!
+!! @note If object is not of class @ref oft_hcurl_bfem then self will be null
+!! and the result will be -1
+!------------------------------------------------------------------------------
+FUNCTION oft_2D_hcurl_cast(self,source) RESULT(ierr)
+CLASS(oft_hcurl_bfem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
+CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+SELECT TYPE(source)
+  CLASS IS(oft_hcurl_bfem)
+    self=>source
+    ierr=0
+  CLASS DEFAULT
+    NULLIFY(self)
+    ierr=-1
+END SELECT
+DEBUG_STACK_POP
+END FUNCTION oft_2D_hcurl_cast
 !---------------------------------------------------------------------------
 !> Set the current level for Nedelec H1(Curl) FE
 !---------------------------------------------------------------------------
@@ -76,12 +118,12 @@ IF(ML_oft_hcurl%nlevels>0)THEN
     call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
   end if
   CALL ML_oft_hcurl%set_level(level)
-  SELECT TYPE(this=>ML_oft_hcurl%current_level)
-    CLASS IS(oft_hcurl_fem)
-      oft_hcurl=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error setting HCurl level", "oft_hcurl_set_level", __FILE__)
-  END SELECT
+  ! SELECT TYPE(this=>ML_oft_hcurl%current_level)
+  !   CLASS IS(oft_hcurl_fem)
+  !     oft_hcurl=>this
+  !   CLASS DEFAULT
+  !     CALL oft_abort("Error setting HCurl level", "oft_hcurl_set_level", __FILE__)
+  ! END SELECT
 END IF
 ! oft_hcurl=>ML_oft_hcurl%current_level
 IF(ML_oft_bhcurl%nlevels>0)THEN
@@ -89,12 +131,12 @@ IF(ML_oft_bhcurl%nlevels>0)THEN
     call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
   end if
   CALL ML_oft_bhcurl%set_level(level)
-  SELECT TYPE(this=>ML_oft_bhcurl%current_level)
-    CLASS IS(oft_hcurl_bfem)
-      oft_bhcurl=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error setting boundary HCurl level", "oft_hcurl_set_level", __FILE__)
-  END SELECT
+  ! SELECT TYPE(this=>ML_oft_bhcurl%current_level)
+  !   CLASS IS(oft_hcurl_bfem)
+  !     oft_bhcurl=>this
+  !   CLASS DEFAULT
+  !     CALL oft_abort("Error setting boundary HCurl level", "oft_hcurl_set_level", __FILE__)
+  ! END SELECT
 END IF
 !---
 ! oft_hcurl_level=level

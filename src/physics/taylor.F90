@@ -31,18 +31,18 @@ USE fem_base, ONLY: oft_fem_type, oft_afem_type
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lagrange_lin_level, &
-  oft_lag_set_level, oft_lagrange, ML_oft_lagrange
+  oft_lag_set_level, ML_oft_lagrange
 USE oft_lag_operators, ONLY: oft_lag_zerob, lag_getlop_pre, oft_lag_getlop
-USE oft_h0_basis, ONLY: oft_h0, oft_h0_geval_all, oft_h0_fem, &
+USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_fem, &
   ML_oft_h0
 USE oft_h0_operators, ONLY: oft_h0_zerogrnd, h0_getlop_pre, oft_h0_getlop
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_eval_all, oft_hcurl_ceval_all, &
+USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_hcurl_ceval_all, &
   oft_hcurl_set_level, oft_hcurl_get_cgops, oft_hcurl_fem, ML_oft_hcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, oft_hcurl_orthog, &
   oft_hcurl_divout, hcurl_getwop_pre, oft_hcurl_zerob, oft_hcurl_getmop, oft_hcurl_getkop, &
   oft_hcurl_getwop, hcurl_interp, oft_hcurl_getjmlb, hcurl_getjmlb_pre
-USE oft_h1_basis, ONLY: oft_h1, oft_h1_level, oft_h1_nlevels, oft_h1_set_level
+USE oft_h1_basis, ONLY: oft_h1_set_level, ML_oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create!, oft_h1_save
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_getmop, h1_mc
 !---
@@ -161,11 +161,11 @@ ALLOCATE(ml_wop(nlevels_wop),ml_lop(nlevels_lop))
 DO i=1,nlevels_wop
   CALL oft_hcurl_set_level(taylor_minlev+i-1)
   NULLIFY(ml_wop(i)%M)
-  CALL oft_hcurl_getwop(oft_hcurl,ml_wop(i)%M,'zerob')
+  CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,ml_wop(i)%M,'zerob')
   IF(ML_oft_hcurl%level<=oft_lagrange_lin_level)THEN
     CALL oft_lag_set_level(ML_oft_hcurl%level)
     NULLIFY(ml_lop(i)%M)
-    CALL oft_lag_getlop(oft_lagrange,ml_lop(i)%M,"zerob")
+    CALL oft_lag_getlop(ML_oft_lagrange%current_level,ml_lop(i)%M,"zerob")
   END IF
 END DO
 CALL oft_hcurl_set_level(ML_oft_hcurl%level)
@@ -194,11 +194,11 @@ do k=1,taylor_nm
       if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)cycle
     end if
     if(taylor_rst)then
-      write(pnum,'(I2.2)')oft_hcurl%order
+      write(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
       write(mnum,'(I2.2)')k
       filename='hffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_m'//mnum//'.rst'
       if(oft_file_exist(filename))then
-        CALL oft_hcurl%vec_load(u,filename,'hffa')
+        CALL ML_oft_hcurl%current_level%vec_load(u,filename,'hffa')
       end if
     end if
     !---Apply BC
@@ -207,7 +207,7 @@ do k=1,taylor_nm
     wop=>ml_wop(i-taylor_minlev+1)%M
     orthog%wop=>wop
     NULLIFY(kop)
-    CALL oft_hcurl_getkop(oft_hcurl,kop,"zerob")
+    CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,"zerob")
 !---------------------------------------------------------------------------
 ! Create eigenvalue solver
 !---------------------------------------------------------------------------
@@ -242,8 +242,8 @@ do k=1,taylor_nm
     DEALLOCATE(kop)
     !---
     Bfield%u=>u
-    CALL Bfield%setup(oft_hcurl)
-    taylor_htor(k,i) = tfluxfun(oft_hcurl%mesh,Bfield,oft_hcurl%quad%order)
+    CALL Bfield%setup(ML_oft_hcurl%current_level)
+    taylor_htor(k,i) = tfluxfun(Bfield%mesh,Bfield,ML_oft_hcurl%current_level%quad%order)
     CALL Bfield%delete
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
@@ -251,7 +251,7 @@ do k=1,taylor_nm
     CALL oft_lag_set_level(MIN(ML_oft_hcurl%level,oft_lagrange_lin_level))
     IF(nlevels_lop<=0)THEN
       NULLIFY(lop)
-      CALL oft_lag_getlop(oft_lagrange,lop,"zerob")
+      CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,"zerob")
     ELSE
       lop=>ml_lop(ML_oft_lagrange%level-taylor_minlev+1)%M
     END IF
@@ -277,12 +277,12 @@ do k=1,taylor_nm
 ! Write restart files
 !---------------------------------------------------------------------------
     if(taylor_rst)then
-      write(pnum,'(I2.2)')oft_hcurl%order
+      write(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
       write(mnum,'(I2.2)')k
       filename='hffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_m'//mnum//'.rst'
       if(.NOT.oft_file_exist(filename))then
         CALL oft_mpi_barrier(ierr)
-        CALL oft_hcurl%vec_save(u,filename,'hffa')
+        CALL ML_oft_hcurl%current_level%vec_save(u,filename,'hffa')
       end if
     end if
   end do ! End level loop
@@ -386,7 +386,7 @@ lag_zerob%ML_lag_rep=>ML_oft_lagrange
 IF(taylor_rst)THEN
   rst=.TRUE.
   DO i=1,taylor_nh
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     filename='hvac_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     rst=rst.AND.oft_file_exist(filename)
@@ -427,7 +427,7 @@ END IF
 CALL create_cg_solver(winv, force_native=.TRUE.)
 IF((taylor_minlev==ML_oft_hcurl%level).OR.rst)THEN ! Lowest level uses diag precond
   NULLIFY(wop)
-  CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
+  CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,wop,'zerob')
   CALL create_diag_pre(winv%pre)
 ELSE ! Nested levels use MG
   CALL hcurl_getwop_pre(winv%pre,ml_wop,nlevels=ML_oft_hcurl%level-taylor_minlev+1)
@@ -449,7 +449,7 @@ END SELECT
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL oft_lag_set_level(MIN(ML_oft_hcurl%level,oft_lagrange_lin_level))
-CALL oft_lag_getlop(oft_lagrange,lop_lag,"zerob")
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
 !linv_lag%its=-2
@@ -458,17 +458,17 @@ linv_lag%its=40
 hcurl_divout%solver=>linv_lag
 hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=2
-CALL oft_hcurl_getmop(oft_hcurl,mop_hcurl,'zerob')
+CALL oft_hcurl_getmop(ML_oft_hcurl%current_level,mop_hcurl,'zerob')
 hcurl_divout%mop=>mop_hcurl
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
 NULLIFY(tmp)
 !---Get H1 mass matrix
-CALL h1_getmop(oft_h1,mop,'none')
+CALL h1_getmop(ML_oft_h1%current_level,mop,'none')
 !---Allocate vacuum and current field containers
-ALLOCATE(taylor_hvac(taylor_nh,oft_h1_nlevels))
-ALLOCATE(taylor_hcur(taylor_nh,oft_h1_nlevels))
+ALLOCATE(taylor_hvac(taylor_nh,ML_oft_h1%nlevels))
+ALLOCATE(taylor_hcur(taylor_nh,ML_oft_h1%nlevels))
 !---Create temporary H1(Curl) vector
 CALL oft_hcurl_create(b)
 !---Loop over cut planes
@@ -477,22 +477,22 @@ DO i=1,taylor_nh
 ! Compute vacuum fields
 !---------------------------------------------------------------------------
   !---Setup level fields
-  CALL oft_h1_create(taylor_hvac(i,oft_h1_level)%f)
-  u=>taylor_hvac(i,oft_h1_level)%f
+  CALL oft_h1_create(taylor_hvac(i,ML_oft_h1%level)%f)
+  u=>taylor_hvac(i,ML_oft_h1%level)%f
   IF(.NOT.ASSOCIATED(tmp))CALL u%new(tmp)
   rst=.FALSE.
   IF(taylor_rst)THEN
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     filename='hvac_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(oft_file_exist(filename))THEN
-      CALL oft_h1%vec_load(u,filename,'hvac')
+      CALL ML_oft_h1%current_level%vec_load(u,filename,'hvac')
       rst=.TRUE.
     END IF
   END IF
   !---Compute jump and solve
   IF(.NOT.rst)THEN
-    CALL h1_mc(u,taylor_hcpc(:,i),taylor_hcpv(:,i),taylor_jtol)
+    CALL h1_mc(ML_oft_hcurl%ml_mesh%mesh,u,taylor_hcpc(:,i),taylor_hcpv(:,i),taylor_jtol)
     venergy=u%dot(u)
     IF(venergy<1.d-12)CALL oft_abort('Plane does not intersect mesh.','taylor_vacuum',__FILE__)
     divout%pm=oft_env%pm
@@ -502,12 +502,12 @@ DO i=1,taylor_nh
 ! Write restart file
 !---------------------------------------------------------------------------
   IF(taylor_rst)THEN
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     filename='hvac_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(.NOT.oft_file_exist(filename))THEN
       CALL oft_mpi_barrier(ierr)
-      CALL oft_h1%vec_save(u,filename,'hvac')
+      CALL ML_oft_h1%current_level%vec_save(u,filename,'hvac')
     END IF
   END IF
   !---Compute field energy
@@ -528,11 +528,11 @@ DO i=1,taylor_nh
   u=>taylor_hcur(i,ML_oft_hcurl%level)%f
   rst=.FALSE.
   IF(taylor_rst)THEN
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     filename='hcur_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(oft_file_exist(filename))THEN
-      CALL oft_hcurl%vec_load(u,filename,'hcur')
+      CALL ML_oft_hcurl%current_level%vec_load(u,filename,'hcur')
       rst=.TRUE.
     END IF
   END IF
@@ -563,12 +563,12 @@ DO i=1,taylor_nh
 ! Write restart file
 !---------------------------------------------------------------------------
   IF(taylor_rst)THEN
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     filename='hcur_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(.NOT.oft_file_exist(filename))THEN
       CALL oft_mpi_barrier(ierr)
-      CALL oft_hcurl%vec_save(u,filename,'hcur')
+      CALL ML_oft_hcurl%current_level%vec_save(u,filename,'hcur')
     END IF
   END IF
 END DO
@@ -650,7 +650,7 @@ IF(.NOT.ASSOCIATED(taylor_hcpc))CALL oft_abort("Vacuum fields not available", &
 IF(taylor_rst)THEN
   rst=.TRUE.
   DO i=1,taylor_nh
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     filename='gffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     rst=rst.AND.oft_file_exist(filename)
@@ -667,7 +667,7 @@ IF(.NOT.rst)THEN
   do_orthog=.FALSE.
   IF(taylor_nm>0)THEN
     IF(ABS((lambda-taylor_hlam(1,ML_oft_hcurl%level))/taylor_hlam(1,ML_oft_hcurl%level))<5.d-2)THEN
-      CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
+      CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,wop,'zerob')
       orthog%orthog=>taylor_hffa
       orthog%nm=1
       orthog%wop=>wop
@@ -678,7 +678,7 @@ IF(.NOT.rst)THEN
 ! Setup H1(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
   IF(taylor_minlev==ML_oft_hcurl%nlevels)THEN ! Lowest level uses diag precond
-    CALL oft_hcurl_getjmlb(oft_hcurl,jmlb_mat,lambda,'zerob')
+    CALL oft_hcurl_getjmlb(ML_oft_hcurl%current_level,jmlb_mat,lambda,'zerob')
     CALL create_diag_pre(jmlb_inv%pre)
   ELSE ! Nested levels use MG
     CALL hcurl_getjmlb_pre(jmlb_inv%pre,ml_jmlb,lambda,nlevels=ML_oft_hcurl%level-taylor_minlev+1)
@@ -698,7 +698,7 @@ END IF
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL oft_lag_set_level(MIN(ML_oft_hcurl%level,oft_lagrange_lin_level))
-CALL oft_lag_getlop(oft_lagrange,lop_lag,"zerob")
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
 linv_lag%its=-2
@@ -707,37 +707,37 @@ linv_lag%its=40
 hcurl_divout%solver=>linv_lag
 hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=10
-CALL oft_hcurl_getmop(oft_hcurl,mop,'zerob')
+CALL oft_hcurl_getmop(ML_oft_hcurl%current_level,mop,'zerob')
 hcurl_divout%mop=>mop
 !jmlb_inv%cleaner=>hcurl_divout
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
-call oft_h1_set_level(oft_h1_nlevels)
+call oft_h1_set_level(ML_oft_h1%nlevels)
 !---
 call oft_hcurl_create(tmp)
-allocate(taylor_gffa(taylor_nh,oft_h1_nlevels))
-IF(.NOT.rst)CALL oft_hcurl_getkop(oft_hcurl,kop,'zerob')
+allocate(taylor_gffa(taylor_nh,ML_oft_h1%nlevels))
+IF(.NOT.rst)CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'zerob')
 !---
 do i=1,taylor_nh
   !---
-  CALL oft_hcurl_create(taylor_gffa(i,oft_h1_level)%f)
-  u=>taylor_gffa(i,oft_h1_level)%f
+  CALL oft_hcurl_create(taylor_gffa(i,ML_oft_h1%level)%f)
+  u=>taylor_gffa(i,ML_oft_h1%level)%f
   rst=.FALSE.
   IF(taylor_rst)THEN
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     filename='gffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(oft_file_exist(filename))THEN
       CALL hdf5_read(lam_file,filename,'lambda')
       IF(ABS(lam_file-lambda)<1.d-5)THEN
-        CALL oft_hcurl%vec_load(u,filename,'gffa')
+        CALL ML_oft_hcurl%current_level%vec_load(u,filename,'gffa')
         rst=.TRUE.
       END IF
     END IF
   END IF
   IF(.NOT.rst)THEN
-    CALL u%add(0.d0,1.d0,taylor_hcur(i,oft_h1_level)%f)
+    CALL u%add(0.d0,1.d0,taylor_hcur(i,ML_oft_h1%level)%f)
     IF(do_orthog)CALL orthog%apply(u)
     CALL kop%apply(u,tmp)
     !---Solve
@@ -755,17 +755,17 @@ do i=1,taylor_nh
 ! Write restart file
 !---------------------------------------------------------------------------
   IF(taylor_rst)THEN
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     filename='gffa_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(.NOT.oft_file_exist(filename))THEN
       CALL oft_mpi_barrier(ierr)
-      CALL oft_hcurl%vec_save(u,filename,'gffa')
+      CALL ML_oft_hcurl%current_level%vec_save(u,filename,'gffa')
       IF(oft_env%head_proc)CALL hdf5_write(lambda,filename,'lambda')
     END IF
   END IF
   !---
-  CALL u%add(lambda**2,lambda,taylor_hcur(i,oft_h1_level)%f)
+  CALL u%add(lambda**2,lambda,taylor_hcur(i,ML_oft_h1%level)%f)
 end do
 !---
 CALL tmp%delete
@@ -841,7 +841,7 @@ IF(taylor_minlev<0)taylor_minlev=ML_oft_hcurl%nlevels
 ! Setup H1(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
 IF(taylor_minlev==ML_oft_hcurl%nlevels)THEN ! Lowest level uses diag precond
-  CALL oft_hcurl_getjmlb(oft_hcurl,jmlb_mat,lambda,'zerob')
+  CALL oft_hcurl_getjmlb(ML_oft_hcurl%current_level,jmlb_mat,lambda,'zerob')
   CALL create_diag_pre(jmlb_inv%pre)
 ELSE ! Nested levels use MG
   CALL hcurl_getjmlb_pre(jmlb_inv%pre,ml_jmlb,lambda,nlevels=1)
@@ -862,7 +862,7 @@ jmlb_inv%itplot=1
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL oft_lag_set_level(MIN(ML_oft_hcurl%level,oft_lagrange_lin_level))
-CALL oft_lag_getlop(oft_lagrange,lop_lag,"zerob")
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
 linv_lag%its=-2
@@ -871,25 +871,25 @@ linv_lag%its=40
 hcurl_divout%solver=>linv_lag
 hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=10
-CALL oft_hcurl_getmop(oft_hcurl,mop,'zerob')
+CALL oft_hcurl_getmop(ML_oft_hcurl%current_level,mop,'zerob')
 hcurl_divout%mop=>mop
 !jmlb_inv%cleaner=>hcurl_divout
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
-call oft_h1_set_level(oft_h1_nlevels)
+call oft_h1_set_level(ML_oft_h1%nlevels)
 !---
 call oft_hcurl_create(gffa)
 call oft_hcurl_create(tmp)
 !---
 CALL gffa%set(0.d0)
 do i=1,taylor_nh
-  CALL gffa%add(1.d0,fluxes(i),taylor_hcur(i,oft_h1_level)%f)
+  CALL gffa%add(1.d0,fluxes(i),taylor_hcur(i,ML_oft_h1%level)%f)
 end do
 !---Orthogonalize (if within 5% of Taylor state)
 IF(taylor_nm>0)THEN
   IF(ABS((lambda-taylor_hlam(1,ML_oft_hcurl%level))/taylor_hlam(1,ML_oft_hcurl%level))<5.d-2)THEN
-    CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
+    CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,wop,'zerob')
     orthog%orthog=>taylor_hffa
     orthog%nm=1
     orthog%wop=>wop
@@ -899,7 +899,7 @@ IF(taylor_nm>0)THEN
   END IF
 END IF
 !---Get H1(Curl) helicity matrix
-CALL oft_hcurl_getkop(oft_hcurl,kop,'zerob')
+CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'zerob')
 CALL kop%apply(gffa,tmp)
 CALL kop%delete
 DEALLOCATE(kop)
@@ -915,7 +915,7 @@ CALL hcurl_divout%apply(gffa)
 !---
 CALL gffa%scale(lambda**2)
 do i=1,taylor_nh
-  CALL gffa%add(1.d0,fluxes(i)*lambda,taylor_hcur(i,oft_h1_level)%f)
+  CALL gffa%add(1.d0,fluxes(i)*lambda,taylor_hcur(i,ML_oft_h1%level)%f)
 end do
 !---
 CALL tmp%delete

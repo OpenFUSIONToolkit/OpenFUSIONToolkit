@@ -19,8 +19,7 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange, &
-  oft_lagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, oft_lag_vgetmop, &
   oft_lag_vproject
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
@@ -28,7 +27,7 @@ USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
-USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_level
+USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
 USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
   taylor_minlev, taylor_jtol, taylor_tag_size, taylor_hvac, taylor_hcur, &
   taylor_gffa, oft_taylor_rinterp
@@ -63,7 +62,7 @@ END IF
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,taylor_minlev)
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,taylor_minlev)
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,taylor_minlev)
-CALL oft_h1_setup(mg_mesh,order,taylor_minlev)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
@@ -81,12 +80,12 @@ taylor_jtol=1.d-4
 oft_env%pm=.FALSE.
 CALL taylor_vacuum(nh,hcpc,hcpv,htags,energy)
 CALL taylor_injectors(5.d0)
-comps(1) = taylor_hvac(1,oft_h1_level)%f%dot(taylor_hvac(1,oft_h1_level)%f)
-comps(2) = taylor_hcur(1,oft_h1_level)%f%dot(taylor_hcur(1,oft_h1_level)%f)
-comps(3) = taylor_gffa(1,oft_h1_level)%f%dot(taylor_gffa(1,oft_h1_level)%f)
-CALL taylor_gffa(1,oft_h1_level)%f%new(gffa)
+comps(1) = taylor_hvac(1,ML_oft_h1%level)%f%dot(taylor_hvac(1,ML_oft_h1%level)%f)
+comps(2) = taylor_hcur(1,ML_oft_h1%level)%f%dot(taylor_hcur(1,ML_oft_h1%level)%f)
+comps(3) = taylor_gffa(1,ML_oft_h1%level)%f%dot(taylor_gffa(1,ML_oft_h1%level)%f)
+CALL taylor_gffa(1,ML_oft_h1%level)%f%new(gffa)
 CALL taylor_injector_single(5.d0,(/1.d0/),gffa)
-CALL gffa%add(1.d0,-1.d0,taylor_gffa(1,oft_h1_level)%f)
+CALL gffa%add(1.d0,-1.d0,taylor_gffa(1,ML_oft_h1%level)%f)
 diff_err = gffa%dot(gffa)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='taylor.results')
@@ -107,21 +106,21 @@ CLASS(oft_solver), POINTER :: lminv => NULL()
 TYPE(oft_taylor_rinterp), TARGET :: Bfield
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(oft_vlagrange,lmop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 CALL create_diag_pre(lminv%pre)
 lminv%A=>lmop
 lminv%its=-2
 !---Create solver fields
-CALL oft_vlagrange%vec_create(u)
-CALL oft_vlagrange%vec_create(v)
+CALL ML_oft_vlagrange%current_level%vec_create(u)
+CALL ML_oft_vlagrange%current_level%vec_create(v)
 !---Plot solution
-Bfield%uvac=>taylor_hvac(1,oft_h1_level)%f
-Bfield%ua=>taylor_gffa(1,oft_h1_level)%f
+Bfield%uvac=>taylor_hvac(1,ML_oft_h1%level)%f
+Bfield%ua=>taylor_gffa(1,ML_oft_h1%level)%f
 CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
 !---Project field
-CALL oft_lag_vproject(oft_lagrange,Bfield,v)
+CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save

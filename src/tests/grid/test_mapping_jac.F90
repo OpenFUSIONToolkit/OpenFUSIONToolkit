@@ -20,8 +20,9 @@ USE oft_mesh_sphere, ONLY: mesh_sphere_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, oft_lag_npos, oft_lag_geval, &
-  oft_lag_d2eval, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange, oft_lag_set_level
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_npos, oft_lag_geval, &
+  oft_lag_d2eval, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange, oft_lag_set_level, &
+  oft_scalar_fem, oft_3D_lagrange_cast
 IMPLICIT NONE
 INTEGER(i4) :: xi,xj,ierr,nfail,i,ntests,io_unit
 REAL(r8) :: check_vec(6),tol=1.d-6
@@ -70,14 +71,16 @@ REAL(r8), INTENT(in) :: check_vec(6),tol
 INTEGER(i4) :: i,j,k,fail_count
 REAL(r8) :: f(4),rop(3),gop(3,4),v,val(6),vloc(6)
 REAL(r8), ALLOCATABLE :: pt_loc(:,:),g2op(:,:),Kmat(:,:)
+CLASS(oft_scalar_fem), POINTER :: lag_rep
 TYPE(oft_quad_type), POINTER :: quad
 CHARACTER(LEN=1), PARAMETER :: coords(0:3)=(/'s','x','y','z'/)
 WRITE(*,*)'Testing ',coords(xi),coords(xj)
 !---
 fail_count=0
-quad=>oft_lagrange%quad
+IF(oft_3D_lagrange_cast(lag_rep,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid FE type","check_jac2",__FILE__)
+quad=>lag_rep%quad
 !$omp parallel private(k,j,f,pt_loc,v,vloc,val,rop,gop,g2op,Kmat) reduction(+:fail_count)
-ALLOCATE(pt_loc(0:3,oft_lagrange%nce))
+ALLOCATE(pt_loc(0:3,lag_rep%nce))
 IF(mg_mesh%mesh%type==3)THEN
   ALLOCATE(g2op(6,6),Kmat(6,3))
 ELSE
@@ -86,8 +89,8 @@ END IF
 pt_loc=1.d0
 !$omp do
 DO i=1,mg_mesh%mesh%nc
-  DO k=1,oft_lagrange%nce
-    CALL oft_lag_npos(oft_lagrange,i,k,f)
+  DO k=1,lag_rep%nce
+    CALL oft_lag_npos(lag_rep,i,k,f)
     pt_loc(1:3,k)=mg_mesh%mesh%log2phys(i,f)
   END DO
   !---
@@ -96,9 +99,9 @@ DO i=1,mg_mesh%mesh%nc
     CALL mg_mesh%mesh%jacobian(i,quad%pts(:,j),gop,v)
     CALL mg_mesh%mesh%hessian(i,quad%pts(:,j),g2op,Kmat)
     vloc=0.d0
-    DO k=1,oft_lagrange%nce
-      CALL oft_lag_geval(oft_lagrange,i,k,quad%pts(:,j),rop,gop)
-      CALL oft_lag_d2eval(oft_lagrange,i,k,quad%pts(:,j),val,g2op)
+    DO k=1,lag_rep%nce
+      CALL oft_lag_geval(lag_rep,i,k,quad%pts(:,j),rop,gop)
+      CALL oft_lag_d2eval(lag_rep,i,k,quad%pts(:,j),val,g2op)
       vloc=vloc+pt_loc(xi,k)*pt_loc(xj,k)*(val-MATMUL(g2op,MATMUL(Kmat,rop)))
     END DO
     IF(SQRT(SUM((vloc-check_vec)**2))>tol)fail_count=fail_count+1

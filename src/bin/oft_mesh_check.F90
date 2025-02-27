@@ -34,7 +34,7 @@ USE oft_hcurl_operators, ONLY: hcurl_wop_eigs
 USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_lop_eigs
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
 USE oft_h1_operators, ONLY: h1_mop_eigs
 IMPLICIT NONE
 INTEGER(i4) :: ierr,io_unit
@@ -71,7 +71,7 @@ IF(order>0)THEN
   !---H1(Grad) subspace
   CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
   !---H1 space
-  CALL oft_h1_setup(mg_mesh,order,minlev)
+  CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,minlev)
 !---------------------------------------------------------------------------
 ! Compute smoother coefficients
 !---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ IF(order>0)THEN
   CALL lag_lop_eigs(ML_oft_lagrange,minlev)
   CALL h0_lop_eigs(ML_oft_h0,minlev)
   CALL hcurl_wop_eigs(ML_oft_hcurl,minlev)
-  CALL h1_mop_eigs(minlev)
+  CALL h1_mop_eigs(ML_oft_h1,minlev)
 END IF
 !---Finalize enviroment
 CALL oft_finalize

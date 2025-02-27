@@ -19,7 +19,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  oft_lagrange, oft_vlagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, lag_vinterp, lag_vinject, oft_vlag_zerob, &
   df_lop, nu_lop, lag_setup_interp, lag_mloptions, oft_lag_getlop
@@ -78,7 +78,7 @@ CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)
 !---Get FE operators
-CALL oft_lag_vgetmop(oft_vlagrange,mop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(minv)
 minv%A=>mop
@@ -145,18 +145,18 @@ DO i=1,nlevels
   nu(i)=nu_lop(levels(i))
   !---
   NULLIFY(ml_lop(i)%M)
-  CALL oft_lag_getlop(oft_lagrange,ml_lop(i)%M,'zerob')
+  CALL oft_lag_getlop(ML_oft_lagrange%current_level,ml_lop(i)%M,'zerob')
 !---------------------------------------------------------------------------
 ! Create composite matrix
 !---------------------------------------------------------------------------
   ALLOCATE(graphs(1,1)%g)
-  graphs(1,1)%g%nr=oft_lagrange%ne
-  graphs(1,1)%g%nrg=oft_lagrange%global%ne
-  graphs(1,1)%g%nc=oft_lagrange%ne
-  graphs(1,1)%g%ncg=oft_lagrange%global%ne
-  graphs(1,1)%g%nnz=oft_lagrange%nee
-  graphs(1,1)%g%kr=>oft_lagrange%kee
-  graphs(1,1)%g%lc=>oft_lagrange%lee
+  graphs(1,1)%g%nr=ML_oft_lagrange%current_level%ne
+  graphs(1,1)%g%nrg=ML_oft_lagrange%current_level%global%ne
+  graphs(1,1)%g%nc=ML_oft_lagrange%current_level%ne
+  graphs(1,1)%g%ncg=ML_oft_lagrange%current_level%global%ne
+  graphs(1,1)%g%nnz=ML_oft_lagrange%current_level%nee
+  graphs(1,1)%g%kr=>ML_oft_lagrange%current_level%kee
+  graphs(1,1)%g%lc=>ML_oft_lagrange%current_level%lee
   !---
   graphs(2,2)%g=>graphs(1,1)%g
   graphs(3,3)%g=>graphs(1,1)%g
@@ -189,7 +189,7 @@ CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 CALL oft_lag_vcreate(u)
 CALL oft_lag_vcreate(v)
 !---Get FE operators
-CALL oft_lag_vgetmop(oft_vlagrange,mop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(linv,force_native=.TRUE.)
 linv%A=>ml_vlop(nlevels)%M

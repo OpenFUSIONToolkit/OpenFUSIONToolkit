@@ -49,11 +49,53 @@ integer(i4), parameter :: oft_h0_id = 2 !< FE type ID
 ! type(oft_h0_bfem), pointer :: oft_bh0 !< Active FE representation
 type(oft_ml_fem_type), TARGET :: ML_oft_bh0 !< ML container for all FE representations
 !
-class(oft_h0_fem), pointer :: oft_h0 !< Active FE representation
+! class(oft_h0_fem), pointer :: oft_h0 !< Active FE representation
 type(oft_ml_fem_type), TARGET :: ML_oft_h0 !< ML container for all FE representations
 !
 logical, private :: hex_mesh = .FALSE.
 contains
+!------------------------------------------------------------------------------
+!> Cast abstract FE type to 3D H^1 finite element type
+!!
+!! @note If object is not of class @ref oft_h0_fem then self will be null
+!! and the result will be -1
+!------------------------------------------------------------------------------
+FUNCTION oft_3D_h1_cast(self,source) RESULT(ierr)
+CLASS(oft_h0_fem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
+CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+SELECT TYPE(source)
+  CLASS IS(oft_h0_fem)
+    self=>source
+    ierr=0
+  CLASS DEFAULT
+    NULLIFY(self)
+    ierr=-1
+END SELECT
+DEBUG_STACK_POP
+END FUNCTION oft_3D_h1_cast
+!------------------------------------------------------------------------------
+!> Cast abstract FE type to 2D H^1 finite element type
+!!
+!! @note If object is not of class @ref oft_h0_bfem then self will be null
+!! and the result will be -1
+!------------------------------------------------------------------------------
+FUNCTION oft_2D_h1_cast(self,source) RESULT(ierr)
+CLASS(oft_h0_bfem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
+CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+SELECT TYPE(source)
+  CLASS IS(oft_h0_bfem)
+    self=>source
+    ierr=0
+  CLASS DEFAULT
+    NULLIFY(self)
+    ierr=-1
+END SELECT
+DEBUG_STACK_POP
+END FUNCTION oft_2D_h1_cast
 !---------------------------------------------------------------------------
 !> Set the current level for Nedelec H0 finite elements
 !---------------------------------------------------------------------------
@@ -73,12 +115,12 @@ IF(ML_oft_h0%nlevels>0)THEN
     call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
   end if
   CALL ML_oft_h0%set_level(level)
-  SELECT TYPE(this=>ML_oft_h0%current_level)
-    CLASS IS(oft_h0_fem)
-      oft_h0=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error setting H0 level", "oft_h0_set_level", __FILE__)
-  END SELECT
+  ! SELECT TYPE(this=>ML_oft_h0%current_level)
+  !   CLASS IS(oft_h0_fem)
+  !     oft_h0=>this
+  !   CLASS DEFAULT
+  !     CALL oft_abort("Error setting H0 level", "oft_h0_set_level", __FILE__)
+  ! END SELECT
 END IF
 ! oft_h0=>ML_oft_h0%current_level
 IF(ML_oft_bh0%nlevels>0)THEN

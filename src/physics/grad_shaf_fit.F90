@@ -17,8 +17,7 @@ USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 use oft_la_base, only: oft_vector
 use oft_lu, only: lapack_matinv
 !---
-use oft_lag_basis, only: oft_blagrange, oft_blag_d2eval, &
-  oft_blag_geval
+use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 use oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_eq, gs_dflux, gs_get_cond_weights, gs_itor_nl, gs_psi2r, &
   gs_psimax, gs_set_cond_weights, gs_err_reason, gs_test_bounds, gs_get_cond_scales, &
@@ -1398,7 +1397,7 @@ TYPE(oft_lag_bginterp), TARGET :: psi_geval
 REAL(8) :: goptmp(3,3),v,psi(1),gpsi(3),rmin,rdiff,btmp(3)
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
-smesh=>oft_blagrange%mesh
+smesh=>gs%mesh
 IF(self%cell==0)THEN
   call bmesh_findcell(smesh,self%cell,self%r,self%f)
   IF((minval(self%f)<-1.d-6).OR.(maxval(self%f)>1.d0+1.d-6))THEN
@@ -1419,9 +1418,9 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup(oft_blagrange%mesh)
+CALL psi_eval%setup(gs%fe_rep)
 psi_geval%u=>gs%psi
-CALL psi_geval%setup(oft_blagrange%mesh)
+CALL psi_geval%setup(gs%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 call psi_geval%interp(self%cell,self%f,goptmp,gpsi)
@@ -1472,7 +1471,7 @@ TYPE(oft_lag_brinterp), TARGET :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
-smesh=>oft_blagrange%mesh
+smesh=>gs%mesh
 IF(self%cell==0)THEN
   call bmesh_findcell(smesh,self%cell,self%r,self%f)
   IF((minval(self%f)<-1.d-6).OR.(maxval(self%f)>1.d0+1.d-6))THEN
@@ -1493,7 +1492,7 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup(oft_blagrange%mesh)
+CALL psi_eval%setup(gs%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 !---
@@ -1526,7 +1525,7 @@ REAL(8) :: goptmp(3,3),psi(1,2)
 INTEGER(4) :: i
 IF(self%cells(1)==0)THEN
   DO i=1,2
-    call bmesh_findcell(oft_blagrange%mesh,self%cells(i),self%r(:,i),self%f(:,i))
+    call bmesh_findcell(gs%mesh,self%cells(i),self%r(:,i),self%f(:,i))
     IF((MINVAL(self%f(:,i))<-1.d-6).OR.(MAXVAL(self%f(:,i))>1.d0+1.d-6))THEN
       CALL oft_abort("Saddle coil off mesh","fit_saddle_error",__FILE__)
     END IF
@@ -1534,7 +1533,7 @@ IF(self%cells(1)==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup(oft_blagrange%mesh)
+CALL psi_eval%setup(gs%fe_rep)
 DO i=1,2
   call psi_eval%interp(self%cells(i),self%f(:,i),goptmp,psi(:,i))
 END DO
@@ -1632,7 +1631,7 @@ press = self%eval(gs)
 !---Handle outside plasma guidance
 IF(self%r(1)>0.d0)THEN
   psi_eval%u=>gs%psi
-  CALL psi_eval%setup(oft_blagrange%mesh)
+  CALL psi_eval%setup(gs%fe_rep)
   call psi_eval%interp(self%cell,self%f,goptmp,psi)
   in_plasma=.TRUE.
   IF(gs_test_bounds(gs,self%r))THEN
@@ -1661,7 +1660,7 @@ TYPE(oft_lag_brinterp), TARGET :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
-smesh=>oft_blagrange%mesh
+smesh=>gs%mesh
 IF(self%r(1)<0.d0)THEN ! Magnetic axis pressure constraint
   val = gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(gs%plasma_bounds(2))/mu0
   RETURN
@@ -1686,7 +1685,7 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup(oft_blagrange%mesh)
+CALL psi_eval%setup(gs%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 !---

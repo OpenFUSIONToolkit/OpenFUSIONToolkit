@@ -114,3 +114,9 @@ def test_marklin_g2_p3():
 
 def test_marklin_g2_p4():
     marklin_quad_cell(4)
+
+# Example of how to run single test without pytest
+# if __name__ == '__main__':
+#     multiprocessing.freeze_support()
+#     mp_q = multiprocessing.Queue()
+#     run_marklin('cyl_Marklin.h5',1,order,1,mp_q)

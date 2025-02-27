@@ -21,7 +21,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_lag_basis, ONLY: oft_lag_setup, &
-  oft_lag_set_level, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  oft_lag_set_level, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, lag_inject, &
   lag_interp, oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
@@ -85,8 +85,8 @@ CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
-CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
-CALL oft_lag_getmop(oft_lagrange,mop,'none')
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -142,7 +142,7 @@ CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
-CALL oft_lag_getmop(oft_lagrange,mop,'none')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 !---------------------------------------------------------------------------
 ! Setup matrix solver
 !---------------------------------------------------------------------------

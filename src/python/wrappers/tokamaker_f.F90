@@ -19,7 +19,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !
 USE fem_base, ONLY: oft_afem_type
-USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
+USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
   oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE mhd_utils, ONLY: mu0
@@ -198,7 +198,7 @@ IF(ASSOCIATED(reg_plot))DEALLOCATE(reg_plot)
 !---Destroy objects
 CALL gs_global%delete()
 DEALLOCATE(gs_global)
-CALL oft_blagrange%delete()
+CALL ML_oft_blagrange%current_level%delete()
 IF(.NOT.c_associated(mesh_ptr))THEN
   CALL copy_string('Mesh object not associated',error_str)
   RETURN
@@ -259,6 +259,7 @@ END IF
 !---------------------------------------------------------------------------
 mg_mesh%smesh%tess_order=order
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
+CALL gs_global%setup(ML_oft_blagrange)
 !---------------------------------------------------------------------------
 ! Setup experimental geometry
 !---------------------------------------------------------------------------
@@ -344,7 +345,7 @@ IF(c_associated(rhs_source))THEN
   CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
   CALL rhs_vec%restore_local(rhs_tmp)
   source_field%u=>rhs_vec
-  CALL source_field%setup(oft_blagrange%mesh)
+  CALL source_field%setup(gs_global%fe_rep)
   CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=ierr)
   CALL source_field%delete()
   CALL rhs_vec%delete()
@@ -470,18 +471,18 @@ TYPE(c_ptr), INTENT(out) :: reg_loc !< Needs docs
 INTEGER(c_int), INTENT(out) :: np !< Needs docs
 INTEGER(c_int), INTENT(out) :: nc !< Needs docs
 INTEGER(4) :: i,j,k,id
-CALL oft_blagrange%mesh%tessellate(r_plot, lc_plot, oft_blagrange%mesh%tess_order)
+CALL gs_global%mesh%tessellate(r_plot, lc_plot, gs_global%mesh%tess_order)
 np=SIZE(r_plot,DIM=2,KIND=c_int)
 nc=SIZE(lc_plot,DIM=2,KIND=c_int)
 r_loc=c_loc(r_plot)
 lc_loc=c_loc(lc_plot)
 !
 ALLOCATE(reg_plot(nc))
-k=nc/oft_blagrange%mesh%nc
-IF(ASSOCIATED(oft_blagrange%mesh%reg))THEN
+k=nc/gs_global%mesh%nc
+IF(ASSOCIATED(gs_global%mesh%reg))THEN
   !$omp parallel do private(j,id)
-  DO i=1,oft_blagrange%mesh%nc
-    id=oft_blagrange%mesh%reg(i)
+  DO i=1,gs_global%mesh%nc
+    id=gs_global%mesh%reg(i)
     DO j=1,k
       reg_plot((i-1)*k+j)=id
     END DO
@@ -505,7 +506,7 @@ np=gs_global%nlim_con
 ALLOCATE(r_tmp(2,gs_global%nlim_con))
 r_loc=C_LOC(r_tmp)
 DO i=1,gs_global%nlim_con
-  r_tmp(:,i)=oft_blagrange%mesh%r(1:2,gs_global%lim_con(i))
+  r_tmp(:,i)=gs_global%mesh%r(1:2,gs_global%lim_con(i))
 END DO
 nloops=gs_global%lim_nloops
 loop_ptr=C_LOC(gs_global%lim_ptr)
@@ -570,11 +571,11 @@ NULLIFY(field%u)
 CALL gs_global%psi%new(field%u)
 CALL c_f_pointer(vec_vals, vals_tmp, [gs_global%psi%n])
 CALL field%u%restore_local(vals_tmp)
-CALL field%setup(oft_blagrange%mesh)
+CALL field%setup(gs_global%fe_rep)
 IF(reg_ind>0)THEN
-  result = bscal_surf_int(oft_blagrange%mesh,field,oft_blagrange%quad%order,reg_ind)
+  result = bscal_surf_int(gs_global%mesh,field,gs_global%fe_rep%quad%order,reg_ind)
 ELSE
-  result = bscal_surf_int(oft_blagrange%mesh,field,oft_blagrange%quad%order)
+  result = bscal_surf_int(gs_global%mesh,field,gs_global%fe_rep%quad%order)
 END IF
 CALL field%u%delete
 DEALLOCATE(field%u)
@@ -589,7 +590,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Needs docs
 INTEGER(4) :: i,j
 REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,coil_regs
-CALL c_f_pointer(reg_currents, coil_regs, [oft_blagrange%mesh%nreg])
+CALL c_f_pointer(reg_currents, coil_regs, [gs_global%mesh%nreg])
 CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoils])
 vals_tmp=(gs_global%coil_currs + gs_global%coil_vcont*gs_global%vcontrol_val)/mu0
 coil_regs = 0.d0
@@ -777,13 +778,13 @@ CALL copy_string('',error_str)
 IF(imode==1)THEN
   ALLOCATE(b_interp_obj)
   b_interp_obj%gs=>gs_global
-  CALL b_interp_obj%setup(oft_blagrange%mesh)
+  CALL b_interp_obj%setup(gs_global)
   int_obj=C_LOC(b_interp_obj)
 ELSE
   ALLOCATE(prof_interp_obj)
   prof_interp_obj%gs=>gs_global
   prof_interp_obj%mode=imode-1
-  CALL prof_interp_obj%setup(oft_blagrange%mesh)
+  CALL prof_interp_obj%setup(gs_global)
   int_obj=C_LOC(prof_interp_obj)
 END IF
 END SUBROUTINE tokamaker_get_field_eval
@@ -812,14 +813,14 @@ IF(int_type<0)THEN
   END IF
   RETURN
 END IF
-call bmesh_findcell(oft_blagrange%mesh,cell,pt,f)
+call bmesh_findcell(gs_global%mesh,cell,pt,f)
 IF(cell==0)RETURN
 fmin=MINVAL(f); fmax=MAXVAL(f)
 IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
   cell=-ABS(cell)
   RETURN
 END IF
-CALL oft_blagrange%mesh%jacobian(cell,f,goptmp,vol)
+CALL gs_global%mesh%jacobian(cell,f,goptmp,vol)
 IF(int_type==1)THEN
   CALL c_f_pointer(int_obj, b_interp_obj)
   CALL b_interp_obj%interp(cell,f,goptmp,field)

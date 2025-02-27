@@ -23,7 +23,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  oft_lagrange, oft_vlagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop, &
   oft_lag_getmop, oft_lag_project, oft_lag_rinterp, oft_lag_vrinterp
@@ -34,7 +34,7 @@ USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project
 !---Physics
@@ -96,13 +96,13 @@ CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
 CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,minlev)
-CALL h1_setup_interp
+CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,minlev)
+CALL h1_setup_interp(ML_oft_h1,ML_oft_h0)
 !---------------------------------------------------------------------------
 ! Create Lagrange metric solver
 !---------------------------------------------------------------------------
 NULLIFY(mop)
-CALL oft_lag_getmop(oft_lagrange,mop,"none")
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,"none")
 CALL create_cg_solver(minv)
 minv%A=>mop
 minv%its=-3
@@ -123,7 +123,7 @@ CALL oft_lag_create(ti)
 sound_field%mesh=>mg_mesh%mesh
 sound_field%delta=delta
 sound_field%field='n'
-CALL oft_lag_project(oft_lagrange,sound_field,v)
+CALL oft_lag_project(ML_oft_lagrange%current_level,sound_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL n%set(1.d0)
@@ -133,7 +133,7 @@ CALL ni%add(0.d0,1.d0,dn)
 ! Set dt from sound wave init
 !---------------------------------------------------------------------------
 sound_field%field='t'
-CALL oft_lag_project(oft_lagrange,sound_field,v)
+CALL oft_lag_project(ML_oft_lagrange%current_level,sound_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL temp%set(1.d0)
@@ -151,7 +151,7 @@ CALL minv%delete
 ! Create Lagrange vector metric solver
 !---------------------------------------------------------------------------
 NULLIFY(mop)
-CALL oft_lag_vgetmop(oft_vlagrange,mop,"none")
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,mop,"none")
 minv%A=>mop
 minv%its=-3
 minv%atol=1.d-10
@@ -166,7 +166,7 @@ CALL oft_lag_vcreate(vi)
 ! Set dV from sound wave init
 !---------------------------------------------------------------------------
 sound_field%field='v'
-CALL oft_lag_vproject(oft_lagrange,sound_field,v)
+CALL oft_lag_vproject(ML_oft_lagrange%current_level,sound_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 v_delta=T0*elec_charge/(proton_mass*v_sound)
@@ -244,7 +244,7 @@ err_field%b=>sfield
 CALL n%scale(1.d0/N0)
 CALL n%add(1.d0,-1.d0,u)
 sfield%u=>n
-CALL sfield%setup(oft_lagrange)
+CALL sfield%setup(ML_oft_lagrange%current_level)
 nerr=scal_energy(mg_mesh%mesh,err_field,order*2)
 !---Compare temperature waveform
 sound_field%field='t'
@@ -261,7 +261,7 @@ IF(two_temp)THEN
   CALL temp%add(5.d-1,5.d-1,tempe)
 END IF
 sfield%u=>temp
-CALL sfield%setup(oft_lagrange)
+CALL sfield%setup(ML_oft_lagrange%current_level)
 terr=scal_energy(mg_mesh%mesh,err_field,order*2)
 !---Compare velocity waveform
 sound_field%field='v'
@@ -272,7 +272,7 @@ err_field%a=>sound_field
 err_field%b=>vfield
 CALL vel%scale(1.d0/v_delta)
 vfield%u=>vel
-CALL vfield%setup(oft_lagrange)
+CALL vfield%setup(ML_oft_lagrange%current_level)
 verr=vec_energy(mg_mesh%mesh,err_field,order*2)
 !---Output wave comparisons
 IF(oft_env%head_proc)THEN

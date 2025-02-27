@@ -26,8 +26,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, &
-  oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
@@ -40,7 +39,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
 USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_level
+USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
@@ -98,7 +97,7 @@ CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0)
 CALL h0_setup_interp(ML_oft_h0)
 CALL h0_mloptions
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_h1)
 !!\subsection doc_ex4_code_taylor Compute Taylor state
 !!
 !!For composite Taylor states the lowest eigenmode is used used in addition to the injector fields. This
@@ -144,12 +143,12 @@ CALL taylor_injectors(taylor_hlam(1,ML_oft_hcurl%level))
 fluxes=(/1.d0,0.d0/)
 CALL oft_h1_create(Bfield%uvac)
 DO i=1,nh
-  CALL Bfield%uvac%add(1.d0,fluxes(i),taylor_hvac(i,oft_h1_level)%f)
+  CALL Bfield%uvac%add(1.d0,fluxes(i),taylor_hvac(i,ML_oft_h1%level)%f)
 END DO
 CALL oft_hcurl_create(Bfield%ua)
 CALL Bfield%ua%add(0.d0,fr/taylor_htor(1,ML_oft_hcurl%level),taylor_hffa(1,ML_oft_hcurl%level)%f)
 DO i=1,nh
-  CALL Bfield%ua%add(1.d0,fluxes(i),taylor_gffa(i,oft_h1_level)%f)
+  CALL Bfield%ua%add(1.d0,fluxes(i),taylor_gffa(i,ML_oft_h1%level)%f)
 END DO
 !!\subsection doc_ex4_code_project Project Solution for Plotting
 !!
@@ -157,7 +156,7 @@ END DO
 !!\ref ex3 "example 3".
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(oft_vlagrange,lmop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
@@ -169,7 +168,7 @@ CALL oft_lag_vcreate(v)
 !---Setup field interpolation
 CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
 !---Project field
-CALL oft_lag_vproject(oft_lagrange,Bfield,v)
+CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save

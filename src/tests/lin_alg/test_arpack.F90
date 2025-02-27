@@ -27,7 +27,7 @@ USE oft_solver_utils, ONLY: create_native_pre
 USE oft_arpack, ONLY: oft_irlm_eigsolver, oft_iram_eigsolver
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, oft_lag_zerob
 IMPLICIT NONE
@@ -80,7 +80,7 @@ DO i=ML_oft_lagrange%nlevels-order+1,ML_oft_lagrange%nlevels
   !---Create fields
   CALL oft_lag_create(u)
   !---Create matrices
-  CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
+  CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
   CALL create_diagmatrix(md,lop%D)
   !---Test Lanzcos solver
   arsolver1%A=>lop

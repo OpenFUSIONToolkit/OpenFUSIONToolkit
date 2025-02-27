@@ -28,13 +28,12 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_vlagrange, &
-  ML_oft_lagrange, oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
@@ -91,7 +90,7 @@ oft_env%pm=.TRUE.
 CALL taylor_hmodes(nmodes)
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(oft_vlagrange,lmop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 CALL create_diag_pre(lminv%pre)
@@ -104,13 +103,13 @@ ALLOCATE(bvout(3,u%n/3))
 !---Save modes
 DO i=1,nmodes
   WRITE(pltnum,'(I3.3)')i
-  CALL oft_hcurl%vec_save(taylor_hffa(i,ML_oft_hcurl%level)%f, &
+  CALL ML_oft_hcurl%current_level%vec_save(taylor_hffa(i,ML_oft_hcurl%level)%f, &
                           'marklin_eigs.rst','A_'//pltnum, append=(i/=1))
   !---Setup field interpolation
   Bfield%u=>taylor_hffa(i,ML_oft_hcurl%level)%f
-  CALL Bfield%setup(oft_hcurl)
+  CALL Bfield%setup(ML_oft_hcurl%current_level)
   !---Project field
-  CALL oft_lag_vproject(oft_lagrange,Bfield,v)
+  CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
   CALL u%set(0.d0)
   CALL lminv%apply(u,v)
   !---Retrieve local values and save

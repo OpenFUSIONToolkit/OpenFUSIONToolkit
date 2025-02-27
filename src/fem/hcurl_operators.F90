@@ -42,12 +42,13 @@ USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
 !---
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lag_geval_all, ML_oft_lagrange, oft_scalar_fem
+USE oft_lag_basis, ONLY: oft_lag_geval_all, ML_oft_lagrange, oft_scalar_fem, &
+  oft_3D_lagrange_cast
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_zerob, oft_lag_zerogrnd
-USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, oft_bhcurl, &
-oft_hcurl_eval_all, oft_hcurl_ceval_all, oft_hcurl_set_level, oft_hcurl_get_cgops, &
-oft_hcurl_fem, oft_hcurl_bfem
+USE oft_hcurl_basis, ONLY: ML_oft_hcurl, oft_hcurl_eval_all, &
+  oft_hcurl_ceval_all, oft_hcurl_set_level, oft_hcurl_get_cgops, &
+  oft_hcurl_fem, oft_hcurl_bfem, oft_3D_hcurl_cast, oft_2D_hcurl_cast
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 IMPLICIT NONE
 #include "local.h"
@@ -154,7 +155,7 @@ IF(df_wop(1)<-1.d90)THEN
   END IF
   DO i=ML_oft_hcurl%minlev,ML_oft_hcurl%nlevels
     CALL oft_hcurl_set_level(i)
-    SELECT CASE(oft_hcurl%order)
+    SELECT CASE(ML_oft_hcurl%current_level%order)
     CASE(1)
       df_wop(i)=0.6d0
     CASE(2)
@@ -265,9 +266,9 @@ end subroutine hcurl_cinterp
 !! @note This subroutine computes the divergence of a H1(Curl) field as
 !! projected on to a linear Lagrange scalar basis.
 !---------------------------------------------------------------------------
-subroutine hcurl_div(hcurl_rep,lag_rep,a,b)
-class(oft_hcurl_fem), intent(inout) :: hcurl_rep
-class(oft_scalar_fem), intent(inout) :: lag_rep
+subroutine hcurl_div(hcurl_fe,lag_fe,a,b)
+class(oft_afem_type), intent(inout) :: hcurl_fe
+class(oft_afem_type), intent(inout) :: lag_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
 class(oft_vector), intent(inout) :: b !< Needs docs
 real(r8), pointer, dimension(:) :: aloc
@@ -278,7 +279,11 @@ real(r8) :: goptmp(3,4)
 real(r8) :: v,f(4),det,vol
 logical :: curved
 real(r8), allocatable :: rop_curl(:,:),rop_grad(:,:),btmp(:)
+CLASS(oft_scalar_fem), POINTER :: lag_rep
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
+IF(oft_3D_lagrange_cast(lag_rep,lag_fe)/=0)CALL oft_abort("Incorrect Lagrange FE type","hcurl_div",__FILE__)
+IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_fe)/=0)CALL oft_abort("Incorrect HCurl FE type","hcurl_div",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate Laplacian Op
 !---------------------------------------------------------------------------
@@ -334,15 +339,17 @@ end subroutine hcurl_div
 !---------------------------------------------------------------------------
 !> Add the gradient of a linear Lagrange scalar field to a H1(Curl) field
 !---------------------------------------------------------------------------
-subroutine hcurl_grad(hcurl_rep,a,b)
-class(oft_hcurl_fem), intent(inout) :: hcurl_rep
+subroutine hcurl_grad(hcurl_fe,a,b)
+class(oft_afem_type), intent(inout) :: hcurl_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
 class(oft_vector), intent(inout) :: b !< Needs docs
 real(r8), pointer, dimension(:) :: aloc,bloc
 integer(i4), allocatable :: emap(:)
 integer :: i,j,k,l
 real(r8) :: reg
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
+IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_fe)/=0)CALL oft_abort("Incorrect HCurl FE type","hcurl_grad",__FILE__)
 !---Get local values
 NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
@@ -363,15 +370,17 @@ end subroutine hcurl_grad
 !! @note Only the 0th order component is computed from the discrete gradient
 !! operator
 !---------------------------------------------------------------------------
-subroutine hcurl_gradtp(hcurl_rep,a,b)
-class(oft_hcurl_fem), intent(inout) :: hcurl_rep
+subroutine hcurl_gradtp(hcurl_fe,a,b)
+class(oft_afem_type), intent(inout) :: hcurl_fe
 class(oft_vector), intent(inout) :: a !< Input field
 class(oft_vector), intent(inout) :: b !< \f$ G^{T} a \f$
 real(r8), pointer, dimension(:) :: aloc,bloc
 integer(i4), allocatable, dimension(:) :: emap
 integer :: i,j,k
 class(oft_mesh), pointer :: mesh
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
+IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_fe)/=0)CALL oft_abort("Incorrect HCurl FE type","hcurl_gradtp",__FILE__)
 !---Get local values
 NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
@@ -455,12 +464,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H1(Curl)::MOP'
   CALL mytimer%tick()
 END IF
-SELECT TYPE(fe_rep)
-CLASS IS(oft_hcurl_fem)
-  hcurl_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_hcurl_getmop",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_getmop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -559,12 +563,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H1(Curl)::KOP'
   CALL mytimer%tick()
 END IF
-SELECT TYPE(fe_rep)
-CLASS IS(oft_hcurl_fem)
-  hcurl_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_hcurl_getkop",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_getkop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -666,12 +665,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H1(Curl)::WOP'
   CALL mytimer%tick()
 END IF
-SELECT TYPE(fe_rep)
-CLASS IS(oft_hcurl_fem)
-  hcurl_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_hcurl_getwop",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_getwop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate Laplacian Op
 !---------------------------------------------------------------------------
@@ -772,12 +766,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H1(Curl)::JMLB'
   CALL mytimer%tick()
 END IF
-SELECT TYPE(fe_rep)
-CLASS IS(oft_hcurl_fem)
-  hcurl_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_hcurl_getjmlb",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_getjmlb",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate Laplacian Op
 !---------------------------------------------------------------------------
@@ -875,12 +864,7 @@ real(r8), allocatable, dimension(:,:) :: rop
 logical :: curved
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
-SELECT TYPE(fe_rep)
-CLASS IS(oft_hcurl_fem)
-  hcurl_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_hcurl_project",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_project",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -931,20 +915,10 @@ CLASS(oft_hcurl_bfem), POINTER :: bhcurl_rep
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_bmesh), POINTER :: smesh
 DEBUG_STACK_PUSH
-SELECT TYPE(fe_rep)
-CLASS IS(oft_hcurl_fem)
-  hcurl_rep=>fe_rep
-  mesh=>hcurl_rep%mesh
-CLASS DEFAULT
-  CALL oft_abort("Incorrect 3D FE type","oft_hcurl_bcurl",__FILE__)
-END SELECT
-SELECT TYPE(bfe_rep)
-CLASS IS(oft_hcurl_bfem)
-  bhcurl_rep=>bfe_rep
-  smesh=>bhcurl_rep%mesh
-CLASS DEFAULT
-  CALL oft_abort("Incorrect 2D FE type","oft_hcurl_bcurl",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect 3D FE type","oft_hcurl_project",__FILE__)
+IF(oft_2D_hcurl_cast(bhcurl_rep,bfe_rep)/=0)CALL oft_abort("Incorrect 2D FE type","oft_hcurl_project",__FILE__)
+mesh=>hcurl_rep%mesh
+smesh=>bhcurl_rep%mesh
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -993,7 +967,7 @@ TYPE(oft_lag_zerogrnd), POINTER :: bc_zerogrnd
 DEBUG_STACK_PUSH
 CALL create_cg_solver(self%solver)
 self%solver%its=-3
-CALL oft_lag_getlop(oft_lagrange,self%solver%A,bc)
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,self%solver%A,bc)
 CALL create_diag_pre(self%solver%pre)
 IF(TRIM(bc)=='grnd')THEN
   ALLOCATE(bc_zerogrnd)
@@ -1030,9 +1004,9 @@ call oft_lag_create(g)
 call oft_lag_create(u)
 !---
 IF(ASSOCIATED(self%mop))THEN
-  CALL hcurl_gradtp(oft_hcurl,a,g)
+  CALL hcurl_gradtp(ML_oft_hcurl%current_level,a,g)
 ELSE
-  CALL hcurl_div(oft_hcurl,oft_lagrange,a,g)
+  CALL hcurl_div(ML_oft_hcurl%current_level,ML_oft_lagrange%current_level,a,g)
 END IF
 uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
@@ -1045,7 +1019,7 @@ oft_env%pm=pm_save
 !---
 CALL u%scale(-1.d0)
 CALL a%new(tmp)
-CALL hcurl_grad(oft_hcurl,u,tmp)
+CALL hcurl_grad(ML_oft_hcurl%current_level,u,tmp)
 IF(ASSOCIATED(self%mop))THEN
   CALL a%new(tmp2)
   CALL self%mop%apply(tmp,tmp2)
@@ -1546,7 +1520,7 @@ class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
 integer(i4) :: i,j,k
 logical :: gcheck
 DEBUG_STACK_PUSH
-gcheck=(oft_hcurl%order==1)
+gcheck=(ML_oft_hcurl%current_level%order==1)
 ! Step down level up
 call oft_hcurl_set_level(ML_oft_hcurl%level-1)
 ! Cast fine field
@@ -1722,7 +1696,7 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_hcurl_getwop(oft_hcurl,mats(i)%M,'zerob')
+    CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,mats(i)%M,'zerob')
   END IF
   IF(i>1)ml_int(i-1)%M=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m !oft_hcurl_ops%interp
 END DO
@@ -1804,7 +1778,7 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_hcurl_getjmlb(oft_hcurl,mats(i)%M,alam,'zerob')
+    CALL oft_hcurl_getjmlb(ML_oft_hcurl%current_level,mats(i)%M,alam,'zerob')
   END IF
   IF(i>1)ml_int(i-1)%M=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m !oft_hcurl_ops%interp
 END DO

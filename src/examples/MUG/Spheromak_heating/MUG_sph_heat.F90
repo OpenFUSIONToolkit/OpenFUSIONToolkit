@@ -47,7 +47,7 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad
+USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad, ML_oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_mc
 !---Physics
@@ -98,7 +98,7 @@ CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
 !---H1(Grad) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,-1)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,-1)
 h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
 !!\subsection doc_mug_sph_ex2_code_plot Perform post-processing
 !!

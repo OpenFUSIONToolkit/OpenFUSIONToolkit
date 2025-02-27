@@ -649,3 +649,9 @@ def test_LTX_eq(order):
     }
     results = mp_run(run_LTX_case,(order,False,False))
     assert validate_dict(results,exp_dict)
+
+# Example of how to run single test without pytest
+# if __name__ == '__main__':
+#     multiprocessing.freeze_support()
+#     mp_q = multiprocessing.Queue()
+#     run_sph_case(0.05,2,mp_q)

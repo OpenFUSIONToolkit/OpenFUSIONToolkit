@@ -13,8 +13,6 @@ MODULE fem_composite
 USE oft_base
 USE oft_stitching, ONLY: oft_seam, seam_list
 USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
-! USE oft_io, ONLY: hdf5_rst, hdf5_rst_write, hdf5_rst_read, hdf5_rst_destroy, &
-!   hdf5_rst_read_version, hdf5_rst_write_version
 !---
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_graph_ptr, &
   oft_matrix, oft_matrix_ptr, oft_local_mat
@@ -27,8 +25,6 @@ USE fem_base, ONLY: oft_fem_ptr, oft_ml_fem_ptr, fem_max_levels, &
   fem_common_linkage, fem_gen_legacy, fem_idx_ver, fem_idx_path
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
-! TYPE oft_fem_type
 !---------------------------------------------------------------------------
 !> Composite FE type
 !---------------------------------------------------------------------------
@@ -61,17 +57,13 @@ CONTAINS
   PROCEDURE :: mat_add_local => fem_mat_add_local
 END TYPE oft_fem_comp_type
 !---------------------------------------------------------------------------
-! TYPE oft_fem_comp_ptr
-!---------------------------------------------------------------------------
-!> Base FE type
+!> Composite FE type pointer container
 !---------------------------------------------------------------------------
 TYPE, PUBLIC :: oft_fem_comp_ptr
-  TYPE(oft_fem_comp_type), POINTER :: fe => NULL() !< Finite element object
+  TYPE(oft_fem_comp_type), POINTER :: fe => NULL() !< Composite finite element object
 END TYPE oft_fem_comp_ptr
 !---------------------------------------------------------------------------
-! TYPE oft_ml_fem_comp_type
-!---------------------------------------------------------------------------
-!> Base FE type
+!> Multi-level composite FE type
 !---------------------------------------------------------------------------
 TYPE, PUBLIC :: oft_ml_fem_comp_type
   INTEGER(i4) :: nfields = 0 !< Number of fields in composite representation
@@ -79,9 +71,10 @@ TYPE, PUBLIC :: oft_ml_fem_comp_type
   INTEGER(i4) :: level = 0 !< Current FE level
   INTEGER(i4) :: abs_level = 0 !< Asoblute FE refinement level
   INTEGER(i4) :: blevel = 0 !< FE base level
-  TYPE(oft_fem_comp_ptr) :: levels(fem_max_levels)
-  TYPE(oft_fem_comp_type), POINTER :: current_level => NULL()
-  TYPE(oft_ml_fem_ptr), POINTER, DIMENSION(:) :: ml_fields => NULL()
+  INTEGER(i4) :: minlev = 1 !< Minimum level constructed
+  TYPE(oft_fem_comp_ptr) :: levels(fem_max_levels) !< Composite FE objects for each level
+  TYPE(oft_fem_comp_type), POINTER :: current_level => NULL() !< Composite FE object for current level
+  TYPE(oft_ml_fem_ptr), POINTER, DIMENSION(:) :: ml_fields => NULL() !< Individual ML FE objects for each field
   CHARACTER(LEN=4), POINTER, DIMENSION(:) :: field_tags => NULL() !< Character tags for fields
   TYPE(oft_matrix_ptr) :: interp_matrices(fem_max_levels)
 CONTAINS
@@ -96,20 +89,13 @@ CONTAINS
 END TYPE oft_ml_fem_comp_type
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_vec_create
-!---------------------------------------------------------------------------
 !> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
 !---------------------------------------------------------------------------
 subroutine fem_vec_create(self,new,cache,native)
 class(oft_fem_comp_type), intent(inout) :: self
-class(oft_vector), pointer, intent(out) :: new
-logical, optional, intent(in) :: cache
-logical, optional, intent(in) :: native
+class(oft_vector), pointer, intent(out) :: new !< Vector to create
+logical, optional, intent(in) :: cache !< Allow caching (optional)
+logical, optional, intent(in) :: native !< Force native representation (optional)
 INTEGER(i4) :: i
 TYPE(map_list), POINTER :: maps(:)
 TYPE(seam_list), POINTER :: stitches(:)
@@ -162,20 +148,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine fem_vec_create
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_vec_save
-!---------------------------------------------------------------------------
-!> Save a Lagrange scalar field to a HDF5 restart file.
-!!
-!! @param[in] source Source field
-!! @param[in] filen Name of destination file
-!! @param[in] tag Field label in file
+!> Save a Lagrange scalar field to a HDF5 restart file
 !---------------------------------------------------------------------------
 subroutine fem_vec_save(self,source,filename,path,append)
 class(oft_fem_comp_type), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: source
-character(LEN=*), intent(in) :: filename
-character(LEN=*), intent(in) :: path
-logical, optional, intent(in) :: append
+class(oft_vector), target, intent(inout) :: source !< Source field
+character(LEN=*), intent(in) :: filename !< Name of destination file
+character(LEN=*), intent(in) :: path !< Field label in file
+logical, optional, intent(in) :: append !< Append to file instead of creating?
 INTEGER(i4) :: i
 real(r8), pointer, dimension(:) :: valtmp
 class(oft_vector), pointer :: outfield
@@ -215,19 +195,13 @@ END DO
 DEBUG_STACK_POP
 end subroutine fem_vec_save
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_vec_load
-!---------------------------------------------------------------------------
-!> Load a Lagrange scalar field from a HDF5 restart file.
-!!
-!! @param[in,out] source Destination field
-!! @param[in] filen Name of source file
-!! @param[in] path Field path in file
+!> Load a Lagrange scalar field from a HDF5 restart file
 !---------------------------------------------------------------------------
 subroutine fem_vec_load(self,source,filename,path)
 class(oft_fem_comp_type), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: source
-character(LEN=*), intent(in) :: filename
-character(LEN=*), intent(in) :: path
+class(oft_vector), target, intent(inout) :: source !< Destination field
+character(LEN=*), intent(in) :: filename !< Name of source file
+character(LEN=*), intent(in) :: path !< ield path in file
 INTEGER(i4) :: i,version
 integer(i8), pointer, dimension(:) :: lge
 real(r8), pointer, dimension(:) :: valtmp
@@ -269,14 +243,7 @@ NULLIFY(lge)
 DEBUG_STACK_POP
 end subroutine fem_vec_load
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_mat_create
-!---------------------------------------------------------------------------
-!> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
+!> Needs docs
 !---------------------------------------------------------------------------
 subroutine fem_mat_create(self,new,mask)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
@@ -365,14 +332,7 @@ DEALLOCATE(graphs,known_graphs,mat_mask,graph_ids,tmp_vec)
 DEBUG_STACK_POP
 end subroutine fem_mat_create
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_mat_setup_local
-!---------------------------------------------------------------------------
-!> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
+!> Needs docs
 !---------------------------------------------------------------------------
 subroutine fem_mat_setup_local(self,mloc,mask)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
@@ -420,14 +380,7 @@ DEALLOCATE(mat_mask,known_graphs,graph_ids)
 DEBUG_STACK_POP
 end subroutine fem_mat_setup_local
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_mat_destroy_local
-!---------------------------------------------------------------------------
-!> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
+!> Needs docs
 !---------------------------------------------------------------------------
 subroutine fem_mat_destroy_local(self,mloc)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
@@ -444,14 +397,7 @@ END DO
 DEBUG_STACK_POP
 end subroutine fem_mat_destroy_local
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_mat_zero_local
-!---------------------------------------------------------------------------
-!> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
+!> Needs docs
 !---------------------------------------------------------------------------
 subroutine fem_mat_zero_local(self,mloc)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
@@ -468,14 +414,7 @@ END DO
 DEBUG_STACK_POP
 end subroutine fem_mat_zero_local
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_mat_zero_local_rows
-!---------------------------------------------------------------------------
-!> Zero local contributions
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
+!> Needs docs
 !---------------------------------------------------------------------------
 subroutine fem_mat_zero_local_rows(self,mloc,flag,irow)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
@@ -495,21 +434,14 @@ END DO
 DEBUG_STACK_POP
 end subroutine fem_mat_zero_local_rows
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_mat_add_local
-!---------------------------------------------------------------------------
-!> Add local contributions to full matrix
-!!
-!! @param[in,out] mat Full matrix
-!! @param[in] mloc Local matrix
-!! @param[in] iloc Local FE entries
-!! @param[in,out] tlocks OpenMP row thread locks
+!> Add local contributions to full matrix in a thread-safe way
 !---------------------------------------------------------------------------
 subroutine fem_mat_add_local(self,mat,mloc,iloc,tlocks)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
-CLASS(oft_matrix), INTENT(inout) :: mat
-TYPE(oft_local_mat), INTENT(in) :: mloc(:,:)
-TYPE(oft_1d_int), INTENT(IN) :: iloc(:)
-INTEGER(KIND=omp_lock_kind), INTENT(INOUT) :: tlocks(:)
+CLASS(oft_matrix), INTENT(inout) :: mat !< Full matrix
+TYPE(oft_local_mat), INTENT(in) :: mloc(:,:) !< Local matrix
+TYPE(oft_1d_int), INTENT(IN) :: iloc(:) !< Local FE entries
+INTEGER(KIND=omp_lock_kind), INTENT(INOUT) :: tlocks(:) !< OpenMP row thread locks
 INTEGER(i4) :: i,j
 DEBUG_STACK_PUSH
 !---Add matrix components
@@ -531,14 +463,7 @@ END DO
 DEBUG_STACK_POP
 end subroutine fem_mat_add_local
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_fem_setup
-!---------------------------------------------------------------------------
-!> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
+!> Needs docs
 !---------------------------------------------------------------------------
 subroutine ml_fem_setup(self)
 class(oft_ml_fem_comp_type), intent(inout) :: self
@@ -562,21 +487,14 @@ self%current_level=>self%levels(self%level)%fe
 DEBUG_STACK_POP
 end subroutine ml_fem_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_fem_vec_create
-!---------------------------------------------------------------------------
 !> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
 !---------------------------------------------------------------------------
 subroutine ml_fem_vec_create(self,new,level,cache,native)
 class(oft_ml_fem_comp_type), intent(inout) :: self
-class(oft_vector), pointer, intent(out) :: new
-integer(i4), optional, intent(in) :: level
-logical, optional, intent(in) :: cache
-logical, optional, intent(in) :: native
+class(oft_vector), pointer, intent(out) :: new !< Vector to create
+integer(i4), optional, intent(in) :: level !< FE level for init (optional)
+logical, optional, intent(in) :: cache !< Allow caching (optional)
+logical, optional, intent(in) :: native !< Force native representation (optional)
 logical :: do_cache,force_native
 DEBUG_STACK_PUSH
 do_cache=.TRUE.
@@ -594,31 +512,34 @@ END IF
 DEBUG_STACK_POP
 end subroutine ml_fem_vec_create
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_fem_set_level
-!---------------------------------------------------------------------------
 !> Set the current level for a ML Compsite-FE structure
-!!
-!! @param[in] level Desired level
 !---------------------------------------------------------------------------
-subroutine ml_fem_set_level(self,level)
+subroutine ml_fem_set_level(self,level,propogate)
 class(oft_ml_fem_comp_type), intent(inout) :: self
-integer(i4), intent(in) :: level
+integer(i4), intent(in) :: level !< Desired level
+logical, optional, intent(in) :: propogate
+INTEGER(i4) :: i
 DEBUG_STACK_PUSH
-IF(level>self%nlevels.OR.level<=0)CALL oft_abort('Invalid FE level change requested', &
-                                                 'ml_fem_set_level',__FILE__)
+IF(level>self%nlevels.OR.level<=0)THEN
+  CALL oft_abort('Invalid FE level change requested', &
+    'ml_fem_set_level',__FILE__)
+END IF
 !---Update level
 self%level=level
 self%current_level=>self%levels(self%level)%fe
 self%abs_level=self%level
 IF(self%level>self%blevel.AND.self%blevel>0)self%abs_level=self%level-1
+IF(PRESENT(propogate))THEN
+  IF(propogate)THEN
+    DO i=1,self%nfields
+      CALL self%ml_fields(i)%ml%set_level(level)
+    END DO
+  END IF
+END IF
 DEBUG_STACK_POP
 end subroutine ml_fem_set_level
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_fem_build_interp
-!---------------------------------------------------------------------------
-!> Set the current level for lagrange finite elements
-!!
-!! @param[in] level Desired level
+!> Needs docs
 !---------------------------------------------------------------------------
 subroutine ml_fem_build_interp(self,minlev)
 class(oft_ml_fem_comp_type), intent(inout) :: self

@@ -29,7 +29,7 @@ USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_matrix_ptr, &
-  oft_graph_ptr
+  oft_graph_ptr, oft_graph
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_deriv_matrices, ONLY: create_diagmatrix
 #ifdef HAVE_ARPACK
@@ -38,20 +38,19 @@ USE oft_arpack, ONLY: oft_irlm_eigsolver
 USE oft_la_utils, ONLY: create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
   create_native_pre
-USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels
+USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_ml_fem_comp_type, oft_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_geval_all
 USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_h0_basis, ONLY: oft_h0, oft_h0_geval_all, oft_h0_d2eval, oft_h0_fem, ML_oft_h0
+USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_d2eval, oft_h0_fem, ML_oft_h0, &
+  oft_3D_h1_cast
 USE oft_h0_fields, ONLY: oft_h0_create
 USE oft_h0_operators, ONLY: oft_h0_zerob, oft_h0_zerogrnd, oft_h0_getlop, oft_h0_gop
-USE oft_hcurl_basis, ONLY: oft_hcurl, ML_oft_hcurl, oft_bhcurl, oft_hcurl_eval_all, &
-  oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem
+USE oft_hcurl_basis, ONLY: ML_oft_hcurl, oft_hcurl_eval_all, &
+  oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem, oft_3D_hcurl_cast
 USE oft_hcurl_operators, ONLY: oft_hcurl_rop, oft_hcurl_cop
-USE oft_h1_basis, ONLY: oft_hgrad, ML_oft_hgrad, h1_ops, oft_h1_ops, ML_oft_h1_ops, &
-  oft_h1_level, oft_h1_blevel, oft_h1_nlevels, oft_h1_set_level, ML_oft_h1, oft_h1, &
-  oft_h1_minlev
+USE oft_h1_basis, ONLY: ML_oft_hgrad, oft_h1_set_level, ML_oft_h1
 USE oft_h1_fields, ONLY: oft_h1_create, oft_hgrad_create
 IMPLICIT NONE
 #include "local.h"
@@ -112,6 +111,9 @@ type, extends(oft_solver_bc) :: oft_h1_divout
   class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   class(oft_matrix), pointer :: mop => NULL() !< Mass matrix, applies divoutm if associated
   class(oft_vector), pointer :: bnorm => NULL() !< Normal field source on boundary
+  class(oft_ml_fem_comp_type), pointer :: ML_hcurl_full => NULL()
+  class(oft_ml_fem_type), pointer :: ML_grad => NULL()
+  class(oft_ml_fem_type), pointer :: ML_curl => NULL()
 contains
   !> Setup matrix and solver with default
   procedure :: setup => h1_divout_setup
@@ -591,7 +593,8 @@ end subroutine zeroi_apply
 !!
 !! @note The radius of the surface is represented by \f$ \left| hcpv \right| \f$
 !---------------------------------------------------------------------------
-subroutine h1_mc(a,hcpc,hcpv,new_tol)
+subroutine h1_mc(mesh,a,hcpc,hcpv,new_tol)
+class(oft_mesh), intent(inout) :: mesh
 class(oft_vector), intent(inout) :: a !< Jump field
 real(r8), intent(in) :: hcpc(3) !< Jump plane center possition [3]
 real(r8), intent(in) :: hcpv(3) !< Jump plane normal vector [3]
@@ -600,11 +603,9 @@ real(r8), pointer, dimension(:) :: acurl
 integer(i4) :: i,j,k,l
 real(r8) :: reg
 real(r8) :: r1(3),r2(3),r1dv,r2dv,r1cv,tol
-class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 tol=1.d-8
 IF(PRESENT(new_tol))tol=new_tol
-mesh=>oft_hcurl%mesh
 !---Get local values
 NULLIFY(acurl)
 CALL a%get_local(acurl,1)
@@ -634,7 +635,8 @@ end subroutine h1_mc
 !!
 !! @note The radius of the surface is represented by \f$ \left| hcpv \right| \f$
 !---------------------------------------------------------------------------
-subroutine h1_bmc(a,hcpc,hcpv,new_tol)
+subroutine h1_bmc(mesh,a,hcpc,hcpv,new_tol)
+class(oft_mesh), intent(inout) :: mesh
 class(oft_vector), intent(inout) :: a !< Jump field
 real(r8), intent(in) :: hcpc(3) !< Jump plane center possition [3]
 real(r8), intent(in) :: hcpv(3) !< Jump plane normal vector [3]
@@ -643,11 +645,9 @@ real(r8), pointer, dimension(:) :: acurl
 integer :: i,j,k,l,ed,mark
 real(r8) :: reg
 real(r8) :: r1(3),r2(3),r1dv,r2dv,r1cv,tol
-class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 tol=1.d-8
 IF(PRESENT(new_tol))tol=new_tol
-mesh=>oft_hcurl%mesh
 !---Get local values
 NULLIFY(acurl)
 CALL a%get_local(acurl,1)
@@ -676,7 +676,8 @@ end subroutine h1_bmc
 !! @note By default the 0-th order gradient subspace is represented on the
 !! H1(Curl) DOF, use the \c keep_boundary flag otherwise
 !---------------------------------------------------------------------------
-subroutine h1_grad(a,b,keep_boundary)
+subroutine h1_grad(h1_fe,a,b,keep_boundary)
+class(oft_fem_comp_type), intent(inout) :: h1_fe
 class(oft_vector), intent(inout) :: a !< Scalar field
 class(oft_vector), intent(inout) :: b !< Vector field for gradient
 logical, OPTIONAL, INTENT(in) :: keep_boundary !< Flag to keep 0-th order boundary component (optional)
@@ -687,11 +688,15 @@ integer(i4) :: i,j,k,l
 real(r8) :: reg
 LOGICAL :: zero_boundary
 class(oft_mesh), pointer :: mesh
+CLASS(oft_hcurl_fem), POINTER :: curl_rep
+CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
 NULLIFY(aloc,bcurl,bgrad)
 zero_boundary=.FALSE.
 IF(PRESENT(keep_boundary))zero_boundary=keep_boundary
-mesh=>oft_hcurl%mesh
+IF(oft_3D_hcurl_cast(curl_rep,h1_fe%fields(1)%fe)/=0)CALL oft_abort("Incorrect HCurl FE type","h1_grad",__FILE__)
+IF(oft_3D_h1_cast(grad_rep,h1_fe%fields(2)%fe)/=0)CALL oft_abort("Incorrect HCurl FE type","h1_grad",__FILE__)
+mesh=>curl_rep%mesh
 !---Cast to H1 type and get aliases
 CALL a%get_local(aloc)
 !---Zero output and get aliases
@@ -706,14 +711,14 @@ IF(zero_boundary)THEN
     END IF
   END DO
 END IF
-DO i=mesh%np+1,oft_hgrad%ne
+DO i=mesh%np+1,grad_rep%ne
   bgrad(i)=bgrad(i)+aloc(i)
 END DO
 !---Off-diagonal part
 DO i=1,mesh%ne
   ! bcurl(i)=bcurl(i) + &
   ! (aloc(mesh%le(2,i))-aloc(mesh%le(1,i)))*SIGN(1_i8,mesh%global%le(i))
-  bcurl((i-1)*oft_hcurl%gstruct(2)+1)=bcurl((i-1)*oft_hcurl%gstruct(2)+1) + &
+  bcurl((i-1)*curl_rep%gstruct(2)+1)=bcurl((i-1)*curl_rep%gstruct(2)+1) + &
     (aloc(mesh%le(2,i))-aloc(mesh%le(1,i)))*SIGN(1_i8,mesh%global%le(i))
 END DO
 !---
@@ -725,7 +730,8 @@ end subroutine h1_grad
 !---------------------------------------------------------------------------
 !> Apply the transposed gradient operator to a Nedelec H1 vector field
 !---------------------------------------------------------------------------
-subroutine h1_gradtp(a,b)
+subroutine h1_gradtp(h0_fe,a,b)
+class(oft_afem_type), intent(inout) :: h0_fe
 class(oft_vector), intent(inout) :: a !< Input field
 class(oft_vector), intent(inout) :: b !< \f$ G^{T} a \f$
 real(r8), pointer, dimension(:) :: agrad,acurl
@@ -733,10 +739,12 @@ real(r8), pointer, dimension(:) :: bloc
 integer(i4), allocatable, dimension(:) :: emap
 integer(i4) :: i,j,k,l
 real(r8) :: reg
-class(oft_mesh), pointer :: mesh
+CLASS(oft_h0_fem), POINTER :: grad_rep
+CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
+IF(oft_3D_h1_cast(grad_rep,h0_fe)/=0)CALL oft_abort("Incorrect Grad FE type","h1_gradtp",__FILE__)
+mesh=>grad_rep%mesh
 NULLIFY(acurl,agrad,bloc)
-mesh=>oft_hcurl%mesh
 !---Cast to H1 type and get aliases
 CALL a%get_local(acurl,1)
 CALL a%get_local(agrad,2)
@@ -768,7 +776,7 @@ enddo
 deallocate(emap)
 !---Add diagonal part of GT
 !$omp parallel do
-do i=1,oft_h0%ne
+do i=1,grad_rep%ne
   bloc(i)=bloc(i)+agrad(i)
 end do
 CALL b%restore_local(bloc,add=.TRUE.)
@@ -778,7 +786,8 @@ end subroutine h1_gradtp
 !---------------------------------------------------------------------------
 !> Apply the divergence operator to a H1 field
 !---------------------------------------------------------------------------
-subroutine h1_div(a,b)
+subroutine h1_div(h1_fe,a,b)
+class(oft_fem_comp_type), intent(inout) :: h1_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
 class(oft_vector), intent(inout) :: b !< Needs docs
 integer(i4) :: i,m,jr
@@ -788,7 +797,11 @@ real(r8), pointer, contiguous, dimension(:) :: ac_loc,ag_loc,bloc
 real(r8), allocatable, dimension(:) :: ac_tmp,ag_tmp,btmp
 real(r8), allocatable, dimension(:,:) :: rop_curl,rop_grad
 logical :: curved
+CLASS(oft_hcurl_fem), POINTER :: curl_rep
+CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
+IF(oft_3D_hcurl_cast(curl_rep,h1_fe%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","h1_div",__FILE__)
+IF(oft_3D_h1_cast(grad_rep,h1_fe%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","h1_div",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate Laplacian Op
 !---------------------------------------------------------------------------
@@ -805,43 +818,43 @@ CALL b%get_local(bloc)
 !---Operator integration loop
 !$omp parallel private(j_curl,j_grad,rop_curl,rop_grad,det,btmp,ac_tmp,ag_tmp, &
 !$omp aloc,curved,goptmp,vol,m,jr)
-allocate(j_curl(oft_hcurl%nce),j_grad(oft_hgrad%nce))
-allocate(rop_grad(3,oft_hgrad%nce),rop_curl(3,oft_hcurl%nce))
-allocate(ac_tmp(oft_hcurl%nce),ag_tmp(oft_hgrad%nce))
-allocate(btmp(oft_hgrad%nce))
+allocate(j_curl(curl_rep%nce),j_grad(grad_rep%nce))
+allocate(rop_grad(3,grad_rep%nce),rop_curl(3,curl_rep%nce))
+allocate(ac_tmp(curl_rep%nce),ag_tmp(grad_rep%nce))
+allocate(btmp(grad_rep%nce))
 !$omp do schedule(guided)
-do i=1,oft_hgrad%mesh%nc
+do i=1,grad_rep%mesh%nc
   !---Get local to global DOF mapping
-  call oft_hcurl%ncdofs(i,j_curl)
-  call oft_hgrad%ncdofs(i,j_grad)
-  curved=cell_is_curved(oft_hgrad%mesh,i) ! Straight cell test
+  call curl_rep%ncdofs(i,j_curl)
+  call grad_rep%ncdofs(i,j_grad)
+  curved=cell_is_curved(grad_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
-  do jr=1,oft_hcurl%nce
+  do jr=1,curl_rep%nce
     ac_tmp(jr)=ac_loc(j_curl(jr))
   end do
-  do jr=1,oft_hgrad%nce
+  do jr=1,grad_rep%nce
     ag_tmp(jr)=ag_loc(j_grad(jr))
   end do
   btmp=0.d0
-  do m=1,oft_hgrad%quad%np ! Loop over quadrature points
-    if(curved.OR.m==1)call oft_hgrad%mesh%jacobian(i,oft_hgrad%quad%pts(:,m),goptmp,vol)
-    det=vol*oft_hgrad%quad%wts(m)
-    call oft_hcurl_eval_all(oft_hcurl,i,oft_hgrad%quad%pts(:,m),rop_curl,goptmp)
-    call oft_h0_geval_all(oft_hgrad,i,oft_hgrad%quad%pts(:,m),rop_grad,goptmp)
+  do m=1,grad_rep%quad%np ! Loop over quadrature points
+    if(curved.OR.m==1)call grad_rep%mesh%jacobian(i,grad_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*grad_rep%quad%wts(m)
+    call oft_hcurl_eval_all(curl_rep,i,grad_rep%quad%pts(:,m),rop_curl,goptmp)
+    call oft_h0_geval_all(grad_rep,i,grad_rep%quad%pts(:,m),rop_grad,goptmp)
     !---Compute local operator contribution
     aloc = 0.d0
-    do jr=1,oft_hcurl%nce
+    do jr=1,curl_rep%nce
       aloc = aloc + rop_curl(:,jr)*ac_tmp(jr)
     end do
-    do jr=1,oft_hgrad%nce
+    do jr=1,grad_rep%nce
       aloc = aloc + rop_grad(:,jr)*ag_tmp(jr)
     end do
-    do jr=1,oft_hgrad%nce
+    do jr=1,grad_rep%nce
       btmp(jr)=btmp(jr)+DOT_PRODUCT(rop_grad(:,jr),aloc)*det
     end do
   end do
   !---Add local values to global vector
-  do jr=1,oft_hgrad%nce
+  do jr=1,grad_rep%nce
     !$omp atomic
     bloc(j_grad(jr))=bloc(j_grad(jr))+btmp(jr)
   end do
@@ -856,7 +869,8 @@ end subroutine h1_div
 !---------------------------------------------------------------------------
 !> Apply the curl transpose operator to a H1 field
 !---------------------------------------------------------------------------
-subroutine h1_curltp(a,b)
+subroutine h1_curltp(h1_fe,a,b)
+class(oft_fem_comp_type), intent(inout) :: h1_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
 class(oft_vector), intent(inout) :: b !< Needs docs
 real(r8), pointer, dimension(:) :: agrad,acurl
@@ -867,7 +881,11 @@ real(r8) :: goptmp(3,4),cgop(3,6)
 real(r8) :: v,f(4),det,vol
 logical :: curved
 real(r8), allocatable :: rop_curl(:,:),cop_curl(:,:),rop_grad(:,:),btmp(:)
+CLASS(oft_hcurl_fem), POINTER :: curl_rep
+CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
+IF(oft_3D_hcurl_cast(curl_rep,h1_fe%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","h1_curltp",__FILE__)
+IF(oft_3D_h1_cast(grad_rep,h1_fe%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","h1_curltp",__FILE__)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
@@ -883,41 +901,41 @@ CALL b%get_local(bcurl,1)
 !---------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j_curl,j_grad,rop_curl,cop_curl,rop_grad,det,btmp,curved,goptmp,cgop,m,v,jc,jr,f)
-allocate(j_curl(oft_hcurl%nce)) ! Local DOF and matrix indices
-allocate(j_grad(oft_hgrad%nce)) ! Local DOF and matrix indices
-allocate(rop_grad(3,oft_hgrad%nce)) ! Reconstructed gradient operator
-allocate(rop_curl(3,oft_hcurl%nce)) ! Reconstructed gradient operator
-allocate(cop_curl(3,oft_hcurl%nce)) ! Reconstructed gradient operator
-allocate(btmp(oft_hcurl%nce)) ! Local laplacian matrix
+allocate(j_curl(curl_rep%nce)) ! Local DOF and matrix indices
+allocate(j_grad(grad_rep%nce)) ! Local DOF and matrix indices
+allocate(rop_grad(3,grad_rep%nce)) ! Reconstructed gradient operator
+allocate(rop_curl(3,curl_rep%nce)) ! Reconstructed gradient operator
+allocate(cop_curl(3,curl_rep%nce)) ! Reconstructed gradient operator
+allocate(btmp(curl_rep%nce)) ! Local laplacian matrix
 !$omp do schedule(guided)
-do i=1,oft_hgrad%mesh%nc
+do i=1,grad_rep%mesh%nc
   !---Get local to global DOF mapping
-  call oft_hcurl%ncdofs(i,j_curl)
-  call oft_hgrad%ncdofs(i,j_grad)
-  curved=cell_is_curved(oft_hgrad%mesh,i) ! Straight cell test
+  call curl_rep%ncdofs(i,j_curl)
+  call grad_rep%ncdofs(i,j_grad)
+  curved=cell_is_curved(grad_rep%mesh,i) ! Straight cell test
   !---Get local reconstructed operators
   btmp=0.d0
-  do m=1,oft_hcurl%quad%np ! Loop over quadrature points
+  do m=1,curl_rep%quad%np ! Loop over quadrature points
     if(curved.OR.m==1)then
-      call oft_hgrad%mesh%jacobian(i,oft_hcurl%quad%pts(:,m),goptmp,v)
+      call grad_rep%mesh%jacobian(i,curl_rep%quad%pts(:,m),goptmp,v)
       CALL oft_hcurl_get_cgops(goptmp,cgop)
     end if
-    det=v*oft_hcurl%quad%wts(m)
-    call oft_hcurl_eval_all(oft_hcurl,i,oft_hcurl%quad%pts(:,m),rop_curl,goptmp)
-    call oft_hcurl_ceval_all(oft_hcurl,i,oft_hcurl%quad%pts(:,m),cop_curl,cgop)
-    call oft_h0_geval_all(oft_hgrad,i,oft_hcurl%quad%pts(:,m),rop_grad,goptmp)
+    det=v*curl_rep%quad%wts(m)
+    call oft_hcurl_eval_all(curl_rep,i,curl_rep%quad%pts(:,m),rop_curl,goptmp)
+    call oft_hcurl_ceval_all(curl_rep,i,curl_rep%quad%pts(:,m),cop_curl,cgop)
+    call oft_h0_geval_all(grad_rep,i,curl_rep%quad%pts(:,m),rop_grad,goptmp)
     !---Compute local operator contribution
-    do jr=1,oft_hcurl%nce
-      do jc=1,oft_hcurl%nce
+    do jr=1,curl_rep%nce
+      do jc=1,curl_rep%nce
         btmp(jr)=btmp(jr)+DOT_PRODUCT(cop_curl(:,jr),rop_curl(:,jc))*acurl(j_curl(jc))*det
       end do
-      do jc=1,oft_hgrad%nce
+      do jc=1,grad_rep%nce
         btmp(jr)=btmp(jr)+DOT_PRODUCT(cop_curl(:,jr),rop_grad(:,jc))*agrad(j_grad(jc))*det
       end do
     end do
   end do
   !---Add local values to global vector
-  do jr=1,oft_hcurl%nce
+  do jr=1,curl_rep%nce
     !$omp atomic
     bcurl(j_curl(jr))=bcurl(j_curl(jr))+btmp(jr)
   end do
@@ -956,18 +974,8 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 !---
-SELECT TYPE(this=>h1_rep%fields(1)%fe)
-  CLASS IS(oft_hcurl_fem)
-    hcurl_rep=>this
-  CLASS DEFAULT
-    CALL oft_abort("Invalid HCurl space","h1_getmop",__FILE__)
-END SELECT
-SELECT TYPE(this=>h1_rep%fields(2)%fe)
-  CLASS IS(oft_h0_fem)
-    hgrad_rep=>this
-  CLASS DEFAULT
-    CALL oft_abort("Invalid HGrad space","h1_getmop",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,h1_rep%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","h1_getmop",__FILE__)
+IF(oft_3D_h1_cast(hgrad_rep,h1_rep%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","h1_getmop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -1125,18 +1133,8 @@ CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 CLASS(oft_h0_fem), POINTER :: hgrad_rep
 DEBUG_STACK_PUSH
 !---
-SELECT TYPE(this=>h1_rep%fields(1)%fe)
-  CLASS IS(oft_hcurl_fem)
-    hcurl_rep=>this
-  CLASS DEFAULT
-    CALL oft_abort("Invalid HCurl space","h1_getmop",__FILE__)
-END SELECT
-SELECT TYPE(this=>h1_rep%fields(2)%fe)
-  CLASS IS(oft_h0_fem)
-    hgrad_rep=>this
-  CLASS DEFAULT
-    CALL oft_abort("Invalid HGrad space","h1_getmop",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,h1_rep%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","h1_getmop",__FILE__)
+IF(oft_3D_h1_cast(hgrad_rep,h1_rep%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","h1_getmop",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xcurl,xgrad)
 call x%set(0.d0)
@@ -1193,22 +1191,14 @@ CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 CLASS(oft_h0_fem), POINTER :: hgrad_rep
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_bmesh), POINTER :: smesh
+TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---
-SELECT TYPE(this=>h1_rep%fields(1)%fe)
-  CLASS IS(oft_hcurl_fem)
-    hcurl_rep=>this
-  CLASS DEFAULT
-    CALL oft_abort("Invalid HCurl space","h1_getmop",__FILE__)
-END SELECT
-SELECT TYPE(this=>h1_rep%fields(2)%fe)
-  CLASS IS(oft_h0_fem)
-    hgrad_rep=>this
-  CLASS DEFAULT
-    CALL oft_abort("Invalid HGrad space","h1_getmop",__FILE__)
-END SELECT
+IF(oft_3D_hcurl_cast(hcurl_rep,h1_rep%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","oft_h1_bproject",__FILE__)
+IF(oft_3D_h1_cast(hgrad_rep,h1_rep%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","oft_h1_bproject",__FILE__)
 mesh=>hcurl_rep%mesh
 smesh=>hcurl_rep%mesh%bmesh
+CALL smesh%quad_rule(hcurl_rep%order*2+1,quad)
 !---Initialize vectors to zero
 NULLIFY(xcurl,xgrad)
 call x%set(0.d0)
@@ -1225,12 +1215,12 @@ do i=1,smesh%nc
   call hcurl_rep%ncdofs(cell,j_hcurl)
   call hgrad_rep%ncdofs(cell,j_hgrad)
   !---Get local reconstructed operators
-  do m=1,oft_bhcurl%quad%np ! Loop over quadrature points
-    call smesh%jacobian(i,oft_bhcurl%quad%pts(:,m),goptmp,vol)
-    call smesh%norm(i,oft_bhcurl%quad%pts(:,m),norm)
-    det=vol*oft_bhcurl%quad%wts(m)
+  do m=1,quad%np ! Loop over quadrature points
+    call smesh%jacobian(i,quad%pts(:,m),goptmp,vol)
+    call smesh%norm(i,quad%pts(:,m),norm)
+    det=vol*quad%wts(m)
     !---
-    CALL mesh%surf_to_vol(oft_bhcurl%quad%pts(:,m),ptmap,f)
+    CALL mesh%surf_to_vol(quad%pts(:,m),ptmap,f)
     call mesh%jacobian(cell,f,gop,vol)
     call field%interp(cell,f,gop,etmp)
     call oft_hcurl_eval_all(hcurl_rep,cell,f,rop_curl,gop)
@@ -1259,8 +1249,9 @@ END SUBROUTINE oft_h1_bproject
 !!
 !! @note Should only be used via class \ref oft_h1_divout
 !---------------------------------------------------------------------------
-subroutine h1_divout_setup(self,bc)
+subroutine h1_divout_setup(self,ML_h1_rep,bc)
 class(oft_h1_divout), intent(inout) :: self
+CLASS(oft_ml_fem_comp_type), target, intent(inout) :: ML_h1_rep
 character(LEN=*), intent(in) :: bc !< Boundary condition
 !---
 CLASS(oft_matrix), POINTER :: lop
@@ -1268,8 +1259,11 @@ CLASS(oft_solver), POINTER :: linv
 TYPE(oft_h0_zerob), POINTER :: bc_zerob
 TYPE(oft_h0_zerogrnd), POINTER :: bc_zerogrnd
 DEBUG_STACK_PUSH
+self%ML_hcurl_full=>ML_h1_rep
+self%ML_curl=>ML_h1_rep%ml_fields(1)%ml
+self%ML_grad=>ML_h1_rep%ml_fields(2)%ml
 NULLIFY(lop)
-CALL oft_h0_getlop(oft_hgrad,lop,bc)
+CALL oft_h0_getlop(self%ML_grad%current_level,lop,bc)
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-3
@@ -1277,11 +1271,11 @@ CALL create_diag_pre(linv%pre)
 self%solver=>linv
 IF(TRIM(bc)=='grnd')THEN
   ALLOCATE(bc_zerogrnd)
-  bc_zerogrnd%ML_H0_rep=>ML_oft_hgrad
+  bc_zerogrnd%ML_H0_rep=>self%ML_grad
   self%bc=>bc_zerogrnd
 ELSE
   ALLOCATE(bc_zerob)
-  bc_zerob%ML_H0_rep=>ML_oft_hgrad
+  bc_zerob%ML_H0_rep=>self%ML_grad
   self%bc=>bc_zerob
 END IF
 DEBUG_STACK_POP
@@ -1306,13 +1300,13 @@ IF(mod(self%count,self%app_freq)/=0)THEN
   RETURN
 END IF
 !---
-call oft_h0_create(g)
-call oft_h0_create(u)
+call self%ML_grad%vec_create(g)
+call self%ML_grad%vec_create(u)
 !---
 IF(ASSOCIATED(self%mop))THEN
-  CALL h1_gradtp(a,g)
+  CALL h1_gradtp(self%ML_grad%current_level,a,g)
 ELSE
-  CALL h1_div(a,g)
+  CALL h1_div(self%ML_hcurl_full%current_level,a,g)
 END IF
 uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
@@ -1326,7 +1320,7 @@ oft_env%pm=pm_save
 !---
 CALL u%scale(-1.d0)
 CALL a%new(tmp)
-CALL h1_grad(u,tmp,self%keep_boundary)
+CALL h1_grad(self%ML_hcurl_full%current_level,u,tmp,self%keep_boundary)
 IF(ASSOCIATED(self%mop))THEN
   CALL a%new(tmp2)
   CALL self%mop%apply(tmp,tmp2)
@@ -1384,49 +1378,52 @@ end subroutine h1_zerograd_delete
 !---------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
 !---------------------------------------------------------------------------
-SUBROUTINE h1_setup_interp(create_full)
+SUBROUTINE h1_setup_interp(ML_hcurl_aug_rep,ML_h0_rep,create_full)
+CLASS(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_aug_rep
+CLASS(oft_ml_fem_type), intent(inout) :: ML_h0_rep
 LOGICAL, OPTIONAL, INTENT(in) :: create_full
 TYPE(oft_graph_ptr) :: graphs(2,2)
 TYPE(oft_matrix_ptr) :: mats(2,2)
 CLASS(oft_vector), POINTER :: fvec,cvec
 INTEGER(i4) :: i
 LOGICAL :: full_interp
+CLASS(oft_ml_fem_type), POINTER :: ML_grad,ML_curl
 DEBUG_STACK_PUSH
 full_interp=.FALSE.
 IF(PRESENT(create_full))full_interp=create_full
 !---
-DO i=oft_h1_minlev+1,oft_h1_nlevels
-  CALL oft_h1_set_level(i)
+ML_curl=>ML_hcurl_aug_rep%ml_fields(1)%ml
+ML_grad=>ML_hcurl_aug_rep%ml_fields(2)%ml
+DO i=ML_hcurl_aug_rep%minlev+1,ML_hcurl_aug_rep%nlevels
+  ! CALL oft_h1_set_level(i)
+  CALL ML_hcurl_aug_rep%set_level(i,propogate=.TRUE.)
   !---
-  IF(oft_h1_level==oft_h1_blevel+1)THEN
-    CYCLE
-  END IF
+  IF(ML_hcurl_aug_rep%level==ML_hcurl_aug_rep%blevel+1)CYCLE
   !---Setup interpolation operators for H1(Grad) space
-  IF(oft_hcurl%order==1)THEN
-    CALL hgrad_ginterpmatrix(ML_oft_hgrad%interp_matrices(ML_oft_hgrad%level)%m)
-    oft_h1_ops%hgrad_interp=>ML_oft_hgrad%interp_matrices(ML_oft_hgrad%level)%m
-    CALL oft_h1_ops%hgrad_interp%assemble
+  IF(ML_curl%current_level%order==1)THEN
+    CALL hgrad_ginterpmatrix(ML_grad%interp_matrices(ML_grad%level)%m)
+    ! oft_h1_ops%hgrad_interp=>ML_oft_hgrad%interp_matrices(ML_oft_hgrad%level)%m
+    CALL ML_grad%interp_matrices(ML_grad%level)%m%assemble
   ELSE
-    ML_oft_hgrad%interp_graphs(ML_oft_hgrad%level)%g=>ML_oft_h0%interp_graphs(oft_h1_level+1)%g !ML_oft_h0_ops(oft_h1_level+1)%interp_graph
-    ML_oft_hgrad%interp_matrices(ML_oft_hgrad%level)%m=>ML_oft_h0%interp_matrices(oft_h1_level+1)%m
-    oft_h1_ops%hgrad_interp_graph=>ML_oft_h0%interp_graphs(oft_h1_level+1)%g
-    oft_h1_ops%hgrad_interp=>ML_oft_h0%interp_matrices(oft_h1_level+1)%m
+    CALL ML_h0_rep%set_level(ML_oft_h1%level+1)
+    ML_grad%interp_graphs(ML_grad%level)%g=>ML_h0_rep%interp_graphs(ML_oft_h1%level+1)%g !ML_oft_h0_ops(oft_h1_level+1)%interp_graph
+    ML_grad%interp_matrices(ML_grad%level)%m=>ML_h0_rep%interp_matrices(ML_oft_h1%level+1)%m
+    ! oft_h1_ops%hgrad_interp_graph=>ML_oft_h0%interp_graphs(oft_h1_level+1)%g
+    ! oft_h1_ops%hgrad_interp=>ML_oft_h0%interp_matrices(oft_h1_level+1)%m
   END IF
 END DO
 !---Create full H1 interpolation operator
 IF(full_interp)THEN
-  CALL ML_oft_h1%build_interp
-  DO i=oft_h1_minlev+1,oft_h1_nlevels
-    CALL oft_h1_set_level(i)
-    !---
-    if(oft_h1_level==oft_h1_blevel+1)then
-      CYCLE
-    end if
-    oft_h1_ops%interp=>ML_oft_h1%interp_matrices(i)%m
-  END DO
+  CALL ML_hcurl_aug_rep%build_interp
+  ! DO i=ML_hcurl_aug_rep%minlev+1,ML_hcurl_aug_rep%nlevels
+  !   CALL ML_hcurl_aug_rep%set_level(i,propogate=.TRUE.)
+  !   !---
+  !   if(ML_hcurl_aug_rep%level==ML_hcurl_aug_rep%blevel+1)CYCLE
+  !   oft_h1_ops%interp=>ML_oft_h1%interp_matrices(i)%m
+  ! END DO
 END IF
 DEBUG_STACK_POP
-END SUBROUTINE h1_setup_interp
+CONTAINS
 !---------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
 !---------------------------------------------------------------------------
@@ -1435,98 +1432,100 @@ class(oft_matrix), pointer, intent(inout) :: mat !< Interpolation matrix
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
-CLASS(oft_afem_type), POINTER :: hgrad_cors => NULL()
-TYPE(h1_ops), POINTER :: ops
+CLASS(oft_afem_type), POINTER :: hgrad_cors,hgrad_fine
+! TYPE(h1_ops), POINTER :: ops
 class(oft_mesh), pointer :: cmesh,mesh
 CLASS(oft_vector), POINTER :: hgrad_vec,hgrad_vec_cors
 integer(i4) :: jcp(4),jfe(3),jce(6)
 integer(i4), pointer :: lcdg(:),lfde(:,:),lede(:,:),lcde(:,:)
 real(r8) :: f(4),incr,val,d(3),h_rop(3),goptmp(3,4),v,mop(1)
 type(oft_graph_ptr), pointer :: graphs(:,:)
+type(oft_graph), pointer :: interp_graph
 DEBUG_STACK_PUSH
 !---
-if(ML_oft_hgrad%ml_mesh%level<1)then
+if(ML_grad%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','hgrad_ginterpmatrix',__FILE__)
 end if
-mesh=>ML_oft_hgrad%ml_mesh%mesh
-cmesh=>ML_oft_hgrad%ml_mesh%meshes(ML_oft_hgrad%ml_mesh%level-1)
+mesh=>ML_grad%ml_mesh%mesh
+cmesh=>ML_grad%ml_mesh%meshes(ML_grad%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "hgrad_ginterpmatrix", __FILE__)
-if(oft_hgrad%order/=2)then
+hgrad_fine=>ML_grad%levels(ML_grad%level)%fe
+if(hgrad_fine%order/=2)then
   call oft_abort('Attempted geometric interpolation for pd /= 2','hgrad_ginterpmatrix',__FILE__)
 end if
 !---
-ops=>oft_h1_ops
-hgrad_cors=>ML_oft_hgrad%levels(oft_h1_level-1)%fe
-lede=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%level-1)%lede
-lfde=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%level-1)%lfde
-lcdg=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%level-1)%lcdg
-lcde=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%level-1)%lcde
-ALLOCATE(ML_oft_hgrad%interp_graphs(ML_oft_hgrad%level)%g)
-ops%hgrad_interp_graph=>ML_oft_hgrad%interp_graphs(ML_oft_hgrad%level)%g
+! ops=>oft_h1_ops
+hgrad_cors=>ML_grad%levels(ML_grad%level-1)%fe
+lede=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%level-1)%lede
+lfde=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%level-1)%lfde
+lcdg=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%level-1)%lcdg
+lcde=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%level-1)%lcde
+ALLOCATE(ML_grad%interp_graphs(ML_grad%level)%g)
+interp_graph=>ML_grad%interp_graphs(ML_grad%level)%g
 !---Setup matrix sizes
-ops%hgrad_interp_graph%nr=oft_hgrad%ne
-ops%hgrad_interp_graph%nrg=oft_hgrad%global%ne
-ops%hgrad_interp_graph%nc=hgrad_cors%ne
-ops%hgrad_interp_graph%ncg=hgrad_cors%global%ne
+interp_graph%nr=hgrad_fine%ne
+interp_graph%nrg=hgrad_fine%global%ne
+interp_graph%nc=hgrad_cors%ne
+interp_graph%ncg=hgrad_cors%global%ne
 !---Setup Matrix graph
-ALLOCATE(ops%hgrad_interp_graph%kr(ops%hgrad_interp_graph%nr+1))
-ops%hgrad_interp_graph%kr=0
-ops%hgrad_interp_graph%nnz=cmesh%np+5*cmesh%ne+3*cmesh%nf+6*cmesh%nc
-ALLOCATE(ops%hgrad_interp_graph%lc(ops%hgrad_interp_graph%nnz))
-ops%hgrad_interp_graph%lc=0_i4
+ALLOCATE(interp_graph%kr(interp_graph%nr+1))
+interp_graph%kr=0
+interp_graph%nnz=cmesh%np+5*cmesh%ne+3*cmesh%nf+6*cmesh%nc
+ALLOCATE(interp_graph%lc(interp_graph%nnz))
+interp_graph%lc=0_i4
 !---Construct linkage
 !$omp parallel do
 DO i=1,cmesh%np
-  ops%hgrad_interp_graph%kr(i)=1
+  interp_graph%kr(i)=1
 END DO
 !$omp parallel do
 DO i=1,cmesh%ne
-  ops%hgrad_interp_graph%kr(cmesh%np+i)=3
-  ops%hgrad_interp_graph%kr(mesh%np+lede(1,i))=1
-  ops%hgrad_interp_graph%kr(mesh%np+lede(2,i))=1
+  interp_graph%kr(cmesh%np+i)=3
+  interp_graph%kr(mesh%np+lede(1,i))=1
+  interp_graph%kr(mesh%np+lede(2,i))=1
 END DO
 !$omp parallel do
 DO i=1,cmesh%nf
-  ops%hgrad_interp_graph%kr(mesh%np+lfde(1,i))=1
-  ops%hgrad_interp_graph%kr(mesh%np+lfde(2,i))=1
-  ops%hgrad_interp_graph%kr(mesh%np+lfde(3,i))=1
+  interp_graph%kr(mesh%np+lfde(1,i))=1
+  interp_graph%kr(mesh%np+lfde(2,i))=1
+  interp_graph%kr(mesh%np+lfde(3,i))=1
 END DO
 !$omp parallel do
 DO i=1,cmesh%nc
-  ops%hgrad_interp_graph%kr(mesh%np+ABS(lcde(1,i)))=6
+  interp_graph%kr(mesh%np+ABS(lcde(1,i)))=6
 END DO
-ops%hgrad_interp_graph%kr(ops%hgrad_interp_graph%nr+1)=ops%hgrad_interp_graph%nnz+1
-do i=ops%hgrad_interp_graph%nr,1,-1 ! cumulative point to point count
-  ops%hgrad_interp_graph%kr(i)=ops%hgrad_interp_graph%kr(i+1)-ops%hgrad_interp_graph%kr(i)
+interp_graph%kr(interp_graph%nr+1)=interp_graph%nnz+1
+do i=interp_graph%nr,1,-1 ! cumulative point to point count
+  interp_graph%kr(i)=interp_graph%kr(i+1)-interp_graph%kr(i)
 end do
-if(ops%hgrad_interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','hgrad_ginterpmatrix',__FILE__)
+if(interp_graph%kr(1)/=1)call oft_abort('Bad element to element count','hgrad_ginterpmatrix',__FILE__)
 !$omp parallel do private(k)
 DO i=1,cmesh%np
-  k=ops%hgrad_interp_graph%kr(i)
-  ops%hgrad_interp_graph%lc(k)=i
+  k=interp_graph%kr(i)
+  interp_graph%lc(k)=i
 END DO
 !$omp parallel do private(k)
 DO i=1,cmesh%ne
   !---Daughter point
-  k=ops%hgrad_interp_graph%kr(cmesh%np+i)
-  ops%hgrad_interp_graph%lc(k)=cmesh%le(1,i)
-  ops%hgrad_interp_graph%lc(k+1)=cmesh%le(2,i)
-  ops%hgrad_interp_graph%lc(k+2)=cmesh%np+i
+  k=interp_graph%kr(cmesh%np+i)
+  interp_graph%lc(k)=cmesh%le(1,i)
+  interp_graph%lc(k+1)=cmesh%le(2,i)
+  interp_graph%lc(k+2)=cmesh%np+i
   !---Daughter edge 1
-  k=ops%hgrad_interp_graph%kr(mesh%np+lede(1,i))
-  ops%hgrad_interp_graph%lc(k)=cmesh%np+i
+  k=interp_graph%kr(mesh%np+lede(1,i))
+  interp_graph%lc(k)=cmesh%np+i
   !---Daughter edge 2
-  k=ops%hgrad_interp_graph%kr(mesh%np+lede(2,i))
-  ops%hgrad_interp_graph%lc(k)=cmesh%np+i
+  k=interp_graph%kr(mesh%np+lede(2,i))
+  interp_graph%lc(k)=cmesh%np+i
 END DO
 !$omp parallel do private(k,j,jfe)
 DO i=1,cmesh%nf
   jfe=ABS(cmesh%lfe(:,i)) ! face edges
   !---
   DO j=1,3
-    k=ops%hgrad_interp_graph%kr(mesh%np+lfde(j,i))
-    ops%hgrad_interp_graph%lc(k)=cmesh%np+jfe(j)
+    k=interp_graph%kr(mesh%np+lfde(j,i))
+    interp_graph%lc(k)=cmesh%np+jfe(j)
   END DO
 END DO
 !$omp parallel do private(k,j,jce)
@@ -1534,19 +1533,19 @@ DO i=1,cmesh%nc
   jce=ABS(cmesh%lce(:,i)) ! face edges
   CALL sort_array(jce,6)
   !---
-  k=ops%hgrad_interp_graph%kr(mesh%np+ABS(lcde(1,i)))
+  k=interp_graph%kr(mesh%np+ABS(lcde(1,i)))
   DO j=0,5
-    ops%hgrad_interp_graph%lc(k+j)=cmesh%np+jce(1+j)
+    interp_graph%lc(k+j)=cmesh%np+jce(1+j)
   END DO
 END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
 CALL oft_hgrad_create(hgrad_vec)
-CALL oft_hgrad_create(hgrad_vec_cors,oft_h1_level-1)
+CALL oft_hgrad_create(hgrad_vec_cors,ML_oft_h1%level-1)
 !---
 ALLOCATE(graphs(1,1))
-graphs(1,1)%g=>ops%hgrad_interp_graph
+graphs(1,1)%g=>interp_graph
 !---
 CALL create_matrix(mat,graphs,hgrad_vec,hgrad_vec_cors)
 !---------------------------------------------------------------------------
@@ -1630,6 +1629,7 @@ DO i=1,cmesh%nc ! loop over coarse cells
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE hgrad_ginterpmatrix
+END SUBROUTINE h1_setup_interp
 !---------------------------------------------------------------------------
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
@@ -1640,10 +1640,10 @@ class(oft_vector), intent(inout) :: acors !< Vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: agrad,acurl,tmp
-class(oft_mesh), pointer :: cmesh
+class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 !---Step one level up
-call oft_h1_set_level(oft_h1_level+1)
+call oft_h1_set_level(ML_oft_h1%level+1)
 call afine%set(0.d0)
 !---
 if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)then
@@ -1651,24 +1651,31 @@ if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)then
   DEBUG_STACK_POP
   return
 end if
-CALL oft_h1_ops%interp%apply(acors,afine)
+! CALL oft_h1_ops%interp%apply(acors,afine)
+CALL ML_oft_h1%interp_matrices(ML_oft_h1%level)%m%apply(acors,afine)
 !---Correct gradient subspace following geometric interpolation
-IF(oft_hcurl%order==1)THEN
+IF(ML_oft_hcurl%current_level%order==1)THEN
+  SELECT TYPE(this=>ML_oft_hcurl%current_level)
+    CLASS IS(oft_fem_type)
+      mesh=>this%mesh
+    CLASS DEFAULT
+      CALL oft_abort("Invalid FE type","h1_interp",__FILE__)
+  END SELECT
   NULLIFY(agrad,acurl)
   CALL afine%get_local(acurl,1)
   CALL afine%get_local(agrad,2)
-  ALLOCATE(tmp(oft_hcurl%mesh%np))
+  ALLOCATE(tmp(mesh%np))
   !---
-  !$omp parallel if(oft_hcurl%mesh%np>OFT_OMP_VTHRESH)
+  !$omp parallel if(mesh%np>OFT_OMP_VTHRESH)
   !$omp do
-  DO i=1,oft_hcurl%mesh%np
+  DO i=1,mesh%np
     tmp(i)=agrad(i)
     agrad(i)=0.d0
   END DO
   !$omp do
-  DO i=1,oft_hcurl%mesh%ne
+  DO i=1,mesh%ne
    acurl(i) = acurl(i) + &
-    (tmp(oft_hcurl%mesh%le(2,i))-tmp(oft_hcurl%mesh%le(1,i)))*SIGN(1_i8,oft_hcurl%mesh%global%le(i))
+    (tmp(mesh%le(2,i))-tmp(mesh%le(1,i)))*SIGN(1_i8,mesh%global%le(i))
   END DO
   !$omp end parallel
   !---
@@ -1725,9 +1732,9 @@ class(oft_vector), pointer :: tmp
 integer(i4) :: i,j,k
 logical :: gcheck
 DEBUG_STACK_PUSH
-gcheck=(oft_hcurl%order==1)
+gcheck=(ML_oft_hcurl%current_level%order==1)
 ! Step down level up
-call oft_h1_set_level(oft_h1_level-1)
+call oft_h1_set_level(ML_oft_h1%level-1)
 ! Cast fine field
 call acors%set(0.d0)
 if(ML_oft_hcurl%level==ML_oft_hcurl%blevel)then
@@ -1735,7 +1742,8 @@ if(ML_oft_hcurl%level==ML_oft_hcurl%blevel)then
   DEBUG_STACK_POP
   return
 end if
-CALL ML_oft_h1_ops(oft_h1_level+1)%interp%applyT(afine,acors)
+! CALL ML_oft_h1_ops(ML_oft_h1%level+1)%interp%applyT(afine,acors)
+CALL ML_oft_h1%interp_matrices(ML_oft_h1%level+1)%m%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine h1_inject
 !---------------------------------------------------------------------------
@@ -1748,7 +1756,11 @@ integer(i4), pointer, dimension(:) :: lptmp
 integer(i4), pointer, dimension(:) :: lbege
 integer(i4) :: i,j,ierr
 real(r8), pointer, dimension(:) :: alias,array_c,array_f
+CLASS(oft_hcurl_fem), POINTER :: curl_rep
+CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
+IF(oft_3D_hcurl_cast(curl_rep,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Incorrect Curl FE type","h1_base_push",__FILE__)
+IF(oft_3D_h1_cast(grad_rep,ML_oft_hgrad%current_level)/=0)CALL oft_abort("Incorrect Grad FE type","h1_base_push",__FILE__)
 !---
 NULLIFY(array_c,array_f)
 lbege=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%nbase)%lbege
@@ -1759,26 +1771,26 @@ CALL afine%get_local(array_f)
 allocate(alias(acors%n))
 alias=0.d0
 !$omp parallel do
-do i=1,oft_hcurl%ne
-  if(oft_hcurl%linkage%be(i))cycle
+do i=1,curl_rep%ne
+  if(curl_rep%linkage%be(i))cycle
   alias(ABS(lbege(i)))=array_f(i)
 end do
 !$omp parallel do private(j)
-do i=1,oft_hcurl%linkage%nbe
-  j=oft_hcurl%linkage%lbe(i)
-  if(.NOT.oft_hcurl%linkage%leo(i))cycle
+do i=1,curl_rep%linkage%nbe
+  j=curl_rep%linkage%lbe(i)
+  if(.NOT.curl_rep%linkage%leo(i))cycle
   alias(ABS(lbege(j)))=array_f(j)
 end do
 !$omp parallel do
-do i=1,oft_hgrad%ne
-  if(oft_hgrad%linkage%be(i))cycle
-  alias(ML_oft_hcurl%levels(oft_h1_level-1)%fe%ne+lptmp(i))=array_f(oft_hcurl%ne+i)
+do i=1,grad_rep%ne
+  if(grad_rep%linkage%be(i))cycle
+  alias(ML_oft_hcurl%levels(ML_oft_h1%level-1)%fe%ne+lptmp(i))=array_f(curl_rep%ne+i)
 end do
 !$omp parallel do private(j)
-do i=1,oft_hgrad%linkage%nbe
-  j=oft_hgrad%linkage%lbe(i)
-  if(.NOT.oft_hgrad%linkage%leo(i))cycle
-  alias(ML_oft_hcurl%levels(oft_h1_level-1)%fe%ne+lptmp(j))=array_f(oft_hcurl%ne+j)
+do i=1,grad_rep%linkage%nbe
+  j=grad_rep%linkage%lbe(i)
+  if(.NOT.grad_rep%linkage%leo(i))cycle
+  alias(ML_oft_hcurl%levels(ML_oft_h1%level-1)%fe%ne+lptmp(j))=array_f(curl_rep%ne+j)
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
@@ -1789,7 +1801,8 @@ end subroutine h1_base_push
 !---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H1::MOP
 !---------------------------------------------------------------------------
-SUBROUTINE h1_mop_eigs(minlev)
+SUBROUTINE h1_mop_eigs(ML_hcurl_aug_obj,minlev)
+type(oft_ml_fem_comp_type), target, intent(inout) :: ML_hcurl_aug_obj
 INTEGER(i4), INTENT(in) :: minlev
 #ifdef HAVE_ARPACK
 INTEGER(i4) :: i
@@ -1805,16 +1818,16 @@ DEBUG_STACK_PUSH
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H1::MOP'
-bc_tmp%ML_h1_rep=>ML_oft_h1
-ALLOCATE(df(oft_h1_nlevels))
+bc_tmp%ML_h1_rep=>ML_hcurl_aug_obj
+ALLOCATE(df(ML_hcurl_aug_obj%nlevels))
 df=0.d0
-DO i=minlev,oft_h1_nlevels
+DO i=minlev,ML_hcurl_aug_obj%nlevels
   CALL oft_h1_set_level(i)
   !---Create fields
   CALL oft_h1_create(u)
   !---Get Ev range
   NULLIFY(mop)
-  CALL h1_getmop(oft_h1,mop,'lop')
+  CALL h1_getmop(ML_hcurl_aug_obj%current_level,mop,'lop')
   CALL create_diagmatrix(md,mop%D)
   !---
   arsolver%A=>mop
@@ -1836,10 +1849,10 @@ END DO
 !---Output
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A)',ADVANCE='NO')' df_mop = '
-  DO i=1,oft_h1_nlevels-1
+  DO i=1,ML_hcurl_aug_obj%nlevels-1
     WRITE(*,'(F5.3,A)',ADVANCE='NO')df(i),', '
   END DO
-  WRITE(*,'(F5.3,A)')df(oft_h1_nlevels)
+  WRITE(*,'(F5.3,A)')df(ML_hcurl_aug_obj%nlevels)
 END IF
 DEALLOCATE(df)
 DEBUG_STACK_POP
@@ -1850,7 +1863,8 @@ END SUBROUTINE h1_mop_eigs
 !---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H1::MOP
 !---------------------------------------------------------------------------
-SUBROUTINE h1_getmop_pre(pre,mats,level,nlevels)
+SUBROUTINE h1_getmop_pre(ML_hcurl_aug_obj,pre,mats,level,nlevels)
+type(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_aug_obj
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:)
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
@@ -1872,14 +1886,14 @@ TYPE(xml_node), POINTER :: h1_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=oft_h1_level
-levin=oft_h1_level
+toplev=ML_hcurl_aug_obj%level
+levin=ML_hcurl_aug_obj%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','h1_getmop_pre',__FILE__)
-IF(toplev>oft_h1_nlevels)CALL oft_abort('Maximum level is > h1_nlevels','h1_getmop_pre',__FILE__)
+IF(toplev>ML_oft_h1%nlevels)CALL oft_abort('Maximum level is > h1_nlevels','h1_getmop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -1891,7 +1905,7 @@ END IF
 ALLOCATE(ml_int(nl-1),levels(nl))
 ALLOCATE(df(nl),nu(nl))
 DO i=1,nl
-  CALL oft_h1_set_level(minlev+(i-1))
+  CALL ML_hcurl_aug_obj%set_level(minlev+(i-1))
   levels(i)=minlev+(i-1)
   df(i)=df_mop(levels(i))
   nu(i)=nu_mop(levels(i))
@@ -1902,9 +1916,9 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL h1_getmop(oft_h1,mats(i)%M,'none')
+    CALL h1_getmop(ML_hcurl_aug_obj%current_level,mats(i)%M,'none')
   END IF
-  IF(i>1)ml_int(i-1)%M=>oft_h1_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_hcurl_aug_obj%interp_matrices(ML_hcurl_aug_obj%level)%m !oft_h1_ops%interp
 END DO
 CALL oft_h1_set_level(levin)
 !---------------------------------------------------------------------------
@@ -1937,7 +1951,8 @@ END SUBROUTINE h1_getmop_pre
 !!
 !! @return Jump error metric
 !---------------------------------------------------------------------------
-FUNCTION h1_jump_error(u,quad_order) RESULT(error)
+FUNCTION h1_jump_error(h1_fe,u,quad_order) RESULT(error)
+CLASS(oft_fem_comp_type), INTENT(inout) :: h1_fe
 CLASS(oft_vector), INTENT(inout) :: u !< H1 vector field to evaluate
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order for integration
 REAL(r8) :: error,reg_jump,reg_energy,goptmp(3,3)
@@ -1950,7 +1965,11 @@ INTEGER(i4), ALLOCATABLE :: j_hcurl(:),j_hgrad(:)
 TYPE(oft_quad_type) :: quad
 CLASS(oft_bmesh), POINTER :: mesh_tmp
 CLASS(oft_mesh), POINTER :: mesh
+CLASS(oft_hcurl_fem), POINTER :: curl_rep
+CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
+IF(oft_3D_hcurl_cast(curl_rep,h1_fe%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","h1_jump_error",__FILE__)
+IF(oft_3D_h1_cast(grad_rep,h1_fe%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","h1_jump_error",__FILE__)
 !---Set quadrature order
 ALLOCATE(oft_trimesh::mesh_tmp)
 CALL mesh_tmp%quad_rule(quad_order, quad)
@@ -1962,10 +1981,10 @@ CALL u%get_local(grad_vals,2)
 reg_jump=0.d0; reg_energy=0.d0
 !!$omp parallel do private(curved,goptmp,v,pt,det,bcc) reduction(+:reg_jump) reduction(+:reg_energy)
 ALLOCATE(Bn(2,quad%np))
-ALLOCATE(j_hcurl(oft_hcurl%nce),j_hgrad(oft_hgrad%nce))
-ALLOCATE(rop_curl(3,oft_hcurl%nce),rop_grad(3,oft_hgrad%nce))
+ALLOCATE(j_hcurl(curl_rep%nce),j_hgrad(grad_rep%nce))
+ALLOCATE(rop_curl(3,curl_rep%nce),rop_grad(3,grad_rep%nce))
 !---
-mesh=>oft_hcurl%mesh
+mesh=>curl_rep%mesh
 mesh_tmp%np=3
 mesh_tmp%nc=1
 ALLOCATE(mesh_tmp%lc(3,1),mesh_tmp%r(3,3))
@@ -1992,8 +2011,8 @@ DO i=1,mesh%nf
     ptmap=(/1,2,3/)
     CALL orient_listn_inv(mesh%lcfo(cf,cell(j)),ptmap,3_i4)
     !---Get curl dofs
-    call oft_hcurl%ncdofs(cell(j),j_hcurl) ! get curl DOFs
-    call oft_hgrad%ncdofs(cell(j),j_hgrad) ! get grad DOFs
+    call curl_rep%ncdofs(cell(j),j_hcurl) ! get curl DOFs
+    call grad_rep%ncdofs(cell(j),j_hgrad) ! get grad DOFs
     !---Get local reconstructed operators
     DO m=1,quad%np ! Loop over quadrature points
       !---
@@ -2001,12 +2020,12 @@ DO i=1,mesh%nf
       CALL mesh%jacobian(cell(j),f,gop,vol)
       !---
       val=0.d0
-      CALL oft_hcurl_eval_all(oft_hcurl,cell(j),f,rop_curl,gop)
-      CALL oft_h0_geval_all(oft_hgrad,cell(j),f,rop_grad,gop)
-      DO jc=1,oft_hcurl%nce
+      CALL oft_hcurl_eval_all(curl_rep,cell(j),f,rop_curl,gop)
+      CALL oft_h0_geval_all(grad_rep,cell(j),f,rop_grad,gop)
+      DO jc=1,curl_rep%nce
         val=val+curl_vals(j_hcurl(jc))*rop_curl(:,jc)
       END DO
-      DO jc=1,oft_hgrad%nce
+      DO jc=1,grad_rep%nce
         val=val+grad_vals(j_hgrad(jc))*rop_grad(:,jc)
       END DO
       !---

@@ -14,7 +14,7 @@ USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
-USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_eval, oft_blag_geval
+USE oft_lag_basis, ONLY: oft_blag_eval, oft_blag_geval
 implicit none
 !------------------------------------------------------------------------------
 !> Abstract tracer class for 2D grids

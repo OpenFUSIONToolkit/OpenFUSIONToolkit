@@ -323,8 +323,6 @@ public native_vector_slice_push, native_vector_slice_pop
 ! public native_matrix_cast, partition_graph, native_matrix_setup_full
 contains
 !------------------------------------------------------------------------------
-! FUNCTION: native_vector_cast
-!------------------------------------------------------------------------------
 !> Cast a matrix object to a oft_native_matrix
 !!
 !! The source matrix must be oft_native_matrix or a child class, otherwise an error will be thrown.

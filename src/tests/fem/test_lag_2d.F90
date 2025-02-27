@@ -20,7 +20,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  oft_blagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_blag_create
 USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zerob
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -79,8 +79,8 @@ CALL oft_lag_set_level(ML_oft_blagrange%nlevels)
 CALL oft_blag_create(u)
 CALL oft_blag_create(v)
 !---Get FE operators
-CALL oft_blag_getlop(oft_blagrange,lop,'zerob')
-CALL oft_blag_getmop(oft_blagrange,mop,'none')
+CALL oft_blag_getlop(ML_oft_blagrange%current_level,lop,'zerob')
+CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(linv)
 linv%A=>lop

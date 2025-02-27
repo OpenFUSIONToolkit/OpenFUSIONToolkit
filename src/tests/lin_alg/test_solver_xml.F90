@@ -24,7 +24,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_solver_xml
 !
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, lag_inject, &
   lag_interp, oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
@@ -76,8 +76,8 @@ CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
 CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
-CALL oft_lag_getlop(oft_lagrange,lop,'zerob')
-CALL oft_lag_getmop(oft_lagrange,mop,'none')
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 !---Setup matrix solver
 #ifdef HAVE_XML
 CALL xml_get_element(oft_env%xml,"solver",solver_node,ierr)

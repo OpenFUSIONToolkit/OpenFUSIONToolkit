@@ -78,18 +78,60 @@ end type oft_scalar_bfem
 integer(i4), parameter :: oft_lagrange_id = 1 !< FE type ID
 integer(i4) :: oft_lagrange_lin_level = 0 !< Highest linear element level
 !
-type(oft_scalar_bfem), pointer :: oft_blagrange !< Active FE representation
+! type(oft_scalar_bfem), pointer :: oft_blagrange !< Active FE representation
 type(oft_ml_fem_type), TARGET :: ML_oft_blagrange !< ML container for all FE representations
 !
-TYPE(oft_scalar_fem), POINTER :: oft_lagrange !< Active FE representation
+! TYPE(oft_scalar_fem), POINTER :: oft_lagrange !< Active FE representation
 TYPE(oft_scalar_fem), POINTER :: oft_lagrange_lin !< Highest linear element representation
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange !< ML container for all FE representations
 !
-TYPE(oft_fem_comp_type), POINTER :: oft_vlagrange !< Active vector representation
+! TYPE(oft_fem_comp_type), POINTER :: oft_vlagrange !< Active vector representation
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange !< ML container for vector representation
 !
 logical, private :: hex_mesh = .FALSE.
 contains
+!------------------------------------------------------------------------------
+!> Cast abstract FE type to 3D lagrange finite element type
+!!
+!! @note If object is not of class @ref oft_scalar_fem then self will be null
+!! and the result will be -1
+!------------------------------------------------------------------------------
+FUNCTION oft_3D_lagrange_cast(self,source) RESULT(ierr)
+CLASS(oft_scalar_fem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
+CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+SELECT TYPE(source)
+  CLASS IS(oft_scalar_fem)
+    self=>source
+    ierr=0
+  CLASS DEFAULT
+    NULLIFY(self)
+    ierr=-1
+END SELECT
+DEBUG_STACK_POP
+END FUNCTION oft_3D_lagrange_cast
+!------------------------------------------------------------------------------
+!> Cast abstract FE type to 2D lagrange finite element type
+!!
+!! @note If object is not of class @ref oft_scalar_bfem then self will be null
+!! and the result will be -1
+!------------------------------------------------------------------------------
+FUNCTION oft_2D_lagrange_cast(self,source) RESULT(ierr)
+CLASS(oft_scalar_bfem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
+CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+SELECT TYPE(source)
+  CLASS IS(oft_scalar_bfem)
+    self=>source
+    ierr=0
+  CLASS DEFAULT
+    NULLIFY(self)
+    ierr=-1
+END SELECT
+DEBUG_STACK_POP
+END FUNCTION oft_2D_lagrange_cast
 !---------------------------------------------------------------------------
 !> Compute surface normals for use in boundary conditions
 !---------------------------------------------------------------------------
@@ -305,14 +347,14 @@ IF(ML_oft_lagrange%nlevels>0)THEN
     call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
   end if
   CALL ML_oft_lagrange%set_level(level)
-  SELECT TYPE(this=>ML_oft_lagrange%current_level)
-    CLASS IS(oft_scalar_fem)
-      oft_lagrange=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error setting 3D Lagrange level", "oft_lag_set_level", __FILE__)
-  END SELECT
+  ! SELECT TYPE(this=>ML_oft_lagrange%current_level)
+  !   CLASS IS(oft_scalar_fem)
+  !     oft_lagrange=>this
+  !   CLASS DEFAULT
+  !     CALL oft_abort("Error setting 3D Lagrange level", "oft_lag_set_level", __FILE__)
+  ! END SELECT
   CALL ML_oft_vlagrange%set_level(level)
-  oft_vlagrange=>ML_oft_vlagrange%current_level
+  ! oft_vlagrange=>ML_oft_vlagrange%current_level
 END IF
 !---Surface FEs
 IF(ML_oft_blagrange%nlevels>0)THEN
@@ -320,12 +362,12 @@ IF(ML_oft_blagrange%nlevels>0)THEN
     call oft_abort('Invalid boundary FE level','oft_lag_set_level',__FILE__)
   end if
   CALL ML_oft_blagrange%set_level(level)
-  SELECT TYPE(this=>ML_oft_blagrange%current_level)
-    CLASS IS(oft_scalar_bfem)
-      oft_blagrange=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error setting 2D Lagrange level", "oft_lag_set_level", __FILE__)
-  END SELECT
+  ! SELECT TYPE(this=>ML_oft_blagrange%current_level)
+  !   CLASS IS(oft_scalar_bfem)
+  !     oft_blagrange=>this
+  !   CLASS DEFAULT
+  !     CALL oft_abort("Error setting 2D Lagrange level", "oft_lag_set_level", __FILE__)
+  ! END SELECT
 END IF
 ! !---Operators
 ! oft_lagrange_ops=>ML_oft_lagrange_ops(level)

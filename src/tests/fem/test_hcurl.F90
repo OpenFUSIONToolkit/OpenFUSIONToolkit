@@ -19,7 +19,7 @@ USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, &
-  oft_hcurl, ML_oft_hcurl, ML_oft_bhcurl
+  ML_oft_hcurl, ML_oft_bhcurl
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, oft_hcurl_zerob, &
   hcurl_setup_interp, hcurl_mloptions, hcurl_getwop_pre
@@ -80,8 +80,8 @@ CALL oft_hcurl_set_level(ML_oft_hcurl%nlevels)
 CALL oft_hcurl_create(u)
 CALL oft_hcurl_create(v)
 !---Get FE operators
-CALL oft_hcurl_getwop(oft_hcurl,wop,'zerob')
-CALL oft_hcurl_getkop(oft_hcurl,kop,'none')
+CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,wop,'zerob')
+CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(winv)
 winv%A=>wop
@@ -136,7 +136,7 @@ CALL oft_hcurl_set_level(ML_oft_hcurl%nlevels)
 CALL oft_hcurl_create(u)
 CALL oft_hcurl_create(v)
 !---Get FE operators
-CALL oft_hcurl_getkop(oft_hcurl,kop,'none')
+CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'none')
 !---------------------------------------------------------------------------
 ! Setup matrix solver
 !---------------------------------------------------------------------------

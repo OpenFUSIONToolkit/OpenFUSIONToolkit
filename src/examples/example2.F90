@@ -35,7 +35,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_mlpre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, &
-  oft_lag_set_level, oft_lagrange, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  oft_lag_set_level, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
   oft_lag_getmop, oft_lag_getlop, df_lop, nu_lop, oft_lag_zerob, &
@@ -95,7 +95,7 @@ DO i=1,nlevels
   nu(i)=nu_lop(i)
   !---
   NULLIFY(ml_lop(i)%M)
-  CALL oft_lag_getlop(oft_lagrange,ml_lop(i)%M,'zerob')
+  CALL oft_lag_getlop(ML_oft_lagrange%current_level,ml_lop(i)%M,'zerob')
   IF(i>1)ml_int(i-1)%M=>ML_oft_lagrange%interp_matrices(i)%m !oft_lagrange_ops%interp
 END DO
 CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
@@ -105,7 +105,7 @@ CALL oft_lag_create(u)
 CALL oft_lag_create(v)
 !---Get FE operators
 lop=>ml_lop(nlevels)%M
-CALL oft_lag_getmop(oft_lagrange,mop,'none')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 !!\subsection doc_ex2_code_solver Setup linear solver
 CALL create_cg_solver(linv)
 linv%its=-3

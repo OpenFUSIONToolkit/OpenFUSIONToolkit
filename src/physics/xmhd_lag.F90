@@ -92,15 +92,16 @@ USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lag_eval_all, &
+USE oft_lag_basis, ONLY: oft_lagrange_lin, oft_lag_eval_all, &
   oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, &
-  oft_vlagrange
+  ML_oft_vlagrange, oft_3D_lagrange_cast
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag, oft_lag_vcinterp
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_eval_all, oft_hcurl_set_level, &
-  oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem
+USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_hcurl_set_level, &
+  oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem, &
+  oft_3D_hcurl_cast
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
 !---
@@ -367,6 +368,8 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_cop => NULL()
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
 CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
+CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
+CLASS(oft_hcurl_fem), POINTER :: oft_hcurl => NULL()
 !---------------------------------------------------------------------------
 ! Exported interfaces
 !---------------------------------------------------------------------------
@@ -551,6 +554,8 @@ real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
 mg_mesh=>ML_oft_lagrange%ml_mesh
+IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid lagrange FE object","xmhd_run",__FILE__)
+IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid HCurl FE object","xmhd_run",__FILE__)
 mesh=>oft_lagrange%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
@@ -3720,7 +3725,11 @@ CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
 CALL oft_lag_set_level(level)
-IF(j2_ind>0)CALL oft_hcurl_set_level(level)
+IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid lagrange FE object","xmhd_set_level",__FILE__)
+IF(j2_ind>0)THEN
+  CALL oft_hcurl_set_level(level)
+  IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid HCurl FE object","xmhd_set_level",__FILE__)
+END IF
 xmhd_level=level
 ! xmhd_lev=oft_lagrange_lev
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)
@@ -4581,7 +4590,7 @@ IF(j2_ind>0)call oft_hcurl_create(sub_fields%J2)
 ! Setup Lagrange mass solver
 !---------------------------------------------------------------------------
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(oft_vlagrange,lmop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
