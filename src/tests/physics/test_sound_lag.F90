@@ -22,9 +22,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop, &
   oft_lag_getmop, oft_lag_project, oft_lag_rinterp, oft_lag_vrinterp
 !---Physics
@@ -90,14 +88,14 @@ minv%its=-3
 minv%atol=1.d-10
 CALL create_diag_pre(minv%pre)
 !---
-CALL oft_lag_create(u)
-CALL oft_lag_create(v)
-CALL oft_lag_create(n)
-CALL oft_lag_create(dn)
-CALL oft_lag_create(ni)
-CALL oft_lag_create(temp)
-CALL oft_lag_create(dtemp)
-CALL oft_lag_create(ti)
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(v)
+CALL ML_oft_lagrange%vec_create(n)
+CALL ML_oft_lagrange%vec_create(dn)
+CALL ML_oft_lagrange%vec_create(ni)
+CALL ML_oft_lagrange%vec_create(temp)
+CALL ML_oft_lagrange%vec_create(dtemp)
+CALL ML_oft_lagrange%vec_create(ti)
 !---------------------------------------------------------------------------
 ! Set dn from sound wave init
 !---------------------------------------------------------------------------
@@ -138,11 +136,11 @@ minv%its=-3
 minv%atol=1.d-10
 CALL create_diag_pre(minv%pre)
 !---
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
-CALL oft_lag_vcreate(vel)
-CALL oft_lag_vcreate(dvel)
-CALL oft_lag_vcreate(vi)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
+CALL ML_oft_vlagrange%vec_create(vel)
+CALL ML_oft_vlagrange%vec_create(dvel)
+CALL ML_oft_vlagrange%vec_create(vi)
 !---------------------------------------------------------------------------
 ! Set dV from sound wave init
 !---------------------------------------------------------------------------
@@ -161,8 +159,8 @@ DEALLOCATE(u,v,mop)
 !---------------------------------------------------------------------------
 ! Run simulation and test result
 !---------------------------------------------------------------------------
-CALL oft_lag_vcreate(b)
-CALL oft_lag_vcreate(db)
+CALL ML_oft_vlagrange%vec_create(b)
+CALL ML_oft_vlagrange%vec_create(db)
 xmhd_minlev=minlev
 xmhd_taxis=2
 xmhd_adv_b=.FALSE.
@@ -174,9 +172,9 @@ IF(linear)THEN
   CALL temp%scale(T0)
   CALL dtemp%scale(T0)
   IF(two_temp)THEN
-    CALL oft_lag_create(tempe)
+    CALL ML_oft_lagrange%vec_create(tempe)
     CALL tempe%add(0.d0,1.d0,temp)
-    CALL oft_lag_create(dtempe)
+    CALL ML_oft_lagrange%vec_create(dtempe)
     CALL dtempe%add(0.d0,1.d0,dtemp)
     equil_fields%Te=>tempe
     pert_fields%Te=>dtempe
@@ -203,7 +201,7 @@ ELSE
   CALL temp%add(1.d0,1.d0,dtemp)
   CALL temp%scale(T0)
   IF(two_temp)THEN
-    CALL oft_lag_create(tempe)
+    CALL ML_oft_lagrange%vec_create(tempe)
     CALL tempe%add(0.d0,1.d0,temp)
     equil_fields%Te=>tempe
   END IF
@@ -213,7 +211,7 @@ ELSE
   equil_fields%Ti=>temp
   CALL xmhd_run(equil_fields)
 END IF
-CALL oft_lag_create(u)
+CALL ML_oft_lagrange%vec_create(u)
 CALL u%set(1.d0)
 !---Compare density waveform
 sound_field%field='n'

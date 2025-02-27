@@ -178,7 +178,6 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
@@ -269,8 +268,8 @@ lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre) ! Setup Preconditioner
 !---Create solver fields
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
 !---Setup field interpolation
 Bfield%u=>taylor_hffa(1,ML_oft_hcurl%level)%f
 CALL Bfield%setup(ML_oft_hcurl%current_level)

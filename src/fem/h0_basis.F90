@@ -96,52 +96,52 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_h1_cast
-!---------------------------------------------------------------------------
-!> Set the current level for Nedelec H0 finite elements
-!---------------------------------------------------------------------------
-subroutine oft_h0_set_level(level)
-integer(i4), intent(in) :: level !< Desired level
-DEBUG_STACK_PUSH
-! if(level>oft_h0_nlevels.OR.level<=0)then
-!   call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
-! end if
-! if(level<mg_mesh%mgdim)then
-!   call multigrid_level(level)
-! else
-!   call multigrid_level(mg_mesh%mgdim)
-! end if
-IF(ML_oft_h0%nlevels>0)THEN
-  if(level>ML_oft_h0%nlevels.OR.level<=0)then
-    call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
-  end if
-  CALL ML_oft_h0%set_level(level)
-  ! SELECT TYPE(this=>ML_oft_h0%current_level)
-  !   CLASS IS(oft_h0_fem)
-  !     oft_h0=>this
-  !   CLASS DEFAULT
-  !     CALL oft_abort("Error setting H0 level", "oft_h0_set_level", __FILE__)
-  ! END SELECT
-END IF
-! oft_h0=>ML_oft_h0%current_level
-IF(ML_oft_bh0%nlevels>0)THEN
-  if(level>ML_oft_bh0%nlevels.OR.level<=0)then
-    call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
-  end if
-  CALL ML_oft_bh0%set_level(level)
-  ! SELECT TYPE(this=>ML_oft_bh0%current_level)
-  !   CLASS IS(oft_h0_bfem)
-  !     oft_bh0=>this
-  !   CLASS DEFAULT
-  !     CALL oft_abort("Error setting boundary H0 level", "oft_h0_set_level", __FILE__)
-  ! END SELECT
-END IF
-!---
-! oft_h0_level=level
-! oft_h0_lev=level
-! if(oft_h0_level>oft_h0_blevel.AND.oft_h0_blevel>0)oft_h0_lev=level-1
-! oft_h0_ops=>ML_oft_h0_ops(level)
-DEBUG_STACK_POP
-end subroutine oft_h0_set_level
+! !---------------------------------------------------------------------------
+! !> Set the current level for Nedelec H0 finite elements
+! !---------------------------------------------------------------------------
+! subroutine oft_h0_set_level(level)
+! integer(i4), intent(in) :: level !< Desired level
+! DEBUG_STACK_PUSH
+! ! if(level>oft_h0_nlevels.OR.level<=0)then
+! !   call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
+! ! end if
+! ! if(level<mg_mesh%mgdim)then
+! !   call multigrid_level(level)
+! ! else
+! !   call multigrid_level(mg_mesh%mgdim)
+! ! end if
+! IF(ML_oft_h0%nlevels>0)THEN
+!   if(level>ML_oft_h0%nlevels.OR.level<=0)then
+!     call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
+!   end if
+!   CALL ML_oft_h0%set_level(level)
+!   ! SELECT TYPE(this=>ML_oft_h0%current_level)
+!   !   CLASS IS(oft_h0_fem)
+!   !     oft_h0=>this
+!   !   CLASS DEFAULT
+!   !     CALL oft_abort("Error setting H0 level", "oft_h0_set_level", __FILE__)
+!   ! END SELECT
+! END IF
+! ! oft_h0=>ML_oft_h0%current_level
+! IF(ML_oft_bh0%nlevels>0)THEN
+!   if(level>ML_oft_bh0%nlevels.OR.level<=0)then
+!     call oft_abort('Invalid FE level','oft_h0_set_level',__FILE__)
+!   end if
+!   CALL ML_oft_bh0%set_level(level)
+!   ! SELECT TYPE(this=>ML_oft_bh0%current_level)
+!   !   CLASS IS(oft_h0_bfem)
+!   !     oft_bh0=>this
+!   !   CLASS DEFAULT
+!   !     CALL oft_abort("Error setting boundary H0 level", "oft_h0_set_level", __FILE__)
+!   ! END SELECT
+! END IF
+! !---
+! ! oft_h0_level=level
+! ! oft_h0_lev=level
+! ! if(oft_h0_level>oft_h0_blevel.AND.oft_h0_blevel>0)oft_h0_lev=level-1
+! ! oft_h0_ops=>ML_oft_h0_ops(level)
+! DEBUG_STACK_POP
+! end subroutine oft_h0_set_level
 !---------------------------------------------------------------------------
 !> Construct Nedelec H0 scalar FE on each mesh level
 !!
@@ -321,7 +321,9 @@ end do
 ! ELSE
 !   oft_h0_lin_level=-1
 ! END IF
-CALL oft_h0_set_level(max(ML_h0_obj%nlevels,ML_bh0_obj%nlevels))
+IF(ML_h0_obj%nlevels>0)CALL ML_h0_obj%set_level(ML_h0_obj%nlevels)
+CALL ML_bh0_obj%set_level(ML_bh0_obj%nlevels)
+! CALL oft_h0_set_level(max(ML_h0_obj%nlevels,ML_bh0_obj%nlevels))
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_h0_setup

@@ -26,9 +26,7 @@ USE oft_deriv_matrices, ONLY: create_diagmatrix
 USE oft_solver_utils, ONLY: create_native_pre
 USE oft_arpack, ONLY: oft_irlm_eigsolver, oft_iram_eigsolver
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_create
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, oft_lag_zerob
 IMPLICIT NONE
 INTEGER(i4) :: iounit,ierr
@@ -76,9 +74,9 @@ TYPE(oft_iram_eigsolver) :: arsolver2
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)OPEN(NEWUNIT=iounit,FILE='arpack.results')
 DO i=ML_oft_lagrange%nlevels-order+1,ML_oft_lagrange%nlevels
-  CALL oft_lag_set_level(i)
+  CALL ML_oft_lagrange%set_level(i)
   !---Create fields
-  CALL oft_lag_create(u)
+  CALL ML_oft_lagrange%vec_create(u)
   !---Create matrices
   CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
   CALL create_diagmatrix(md,lop%D)

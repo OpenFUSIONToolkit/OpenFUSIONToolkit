@@ -23,7 +23,6 @@ USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_of
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, oft_lag_vgetmop, &
   oft_lag_vproject
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
-USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
@@ -62,7 +61,7 @@ END IF
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,taylor_minlev)
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,taylor_minlev)
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,taylor_minlev)
-CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,taylor_minlev)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions

@@ -98,53 +98,53 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_hcurl_cast
-!---------------------------------------------------------------------------
-!> Set the current level for Nedelec H1(Curl) FE
-!---------------------------------------------------------------------------
-subroutine oft_hcurl_set_level(level)
-integer(i4), intent(in) :: level !< Desired level
-DEBUG_STACK_PUSH
-! if(level>oft_hcurl_nlevels.OR.level<=0)then
-!   write(*,*)level
-!   call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
-! end if
-! if(level<mg_mesh%mgdim)then
-!   call multigrid_level(level)
-! else
-!   call multigrid_level(mg_mesh%mgdim)
-! end if
-IF(ML_oft_hcurl%nlevels>0)THEN
-  if(level>ML_oft_hcurl%nlevels.OR.level<=0)then
-    call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
-  end if
-  CALL ML_oft_hcurl%set_level(level)
-  ! SELECT TYPE(this=>ML_oft_hcurl%current_level)
-  !   CLASS IS(oft_hcurl_fem)
-  !     oft_hcurl=>this
-  !   CLASS DEFAULT
-  !     CALL oft_abort("Error setting HCurl level", "oft_hcurl_set_level", __FILE__)
-  ! END SELECT
-END IF
-! oft_hcurl=>ML_oft_hcurl%current_level
-IF(ML_oft_bhcurl%nlevels>0)THEN
-  if(level>ML_oft_bhcurl%nlevels.OR.level<=0)then
-    call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
-  end if
-  CALL ML_oft_bhcurl%set_level(level)
-  ! SELECT TYPE(this=>ML_oft_bhcurl%current_level)
-  !   CLASS IS(oft_hcurl_bfem)
-  !     oft_bhcurl=>this
-  !   CLASS DEFAULT
-  !     CALL oft_abort("Error setting boundary HCurl level", "oft_hcurl_set_level", __FILE__)
-  ! END SELECT
-END IF
-!---
-! oft_hcurl_level=level
-! oft_hcurl_lev=level
-! if(oft_hcurl_level>oft_hcurl_blevel.AND.oft_hcurl_blevel>0)oft_hcurl_lev=level-1
-! oft_hcurl_ops=>ML_oft_hcurl_ops(level)
-DEBUG_STACK_POP
-end subroutine oft_hcurl_set_level
+! !---------------------------------------------------------------------------
+! !> Set the current level for Nedelec H1(Curl) FE
+! !---------------------------------------------------------------------------
+! subroutine oft_hcurl_set_level(level)
+! integer(i4), intent(in) :: level !< Desired level
+! DEBUG_STACK_PUSH
+! ! if(level>oft_hcurl_nlevels.OR.level<=0)then
+! !   write(*,*)level
+! !   call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
+! ! end if
+! ! if(level<mg_mesh%mgdim)then
+! !   call multigrid_level(level)
+! ! else
+! !   call multigrid_level(mg_mesh%mgdim)
+! ! end if
+! IF(ML_oft_hcurl%nlevels>0)THEN
+!   if(level>ML_oft_hcurl%nlevels.OR.level<=0)then
+!     call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
+!   end if
+!   CALL ML_oft_hcurl%set_level(level)
+!   ! SELECT TYPE(this=>ML_oft_hcurl%current_level)
+!   !   CLASS IS(oft_hcurl_fem)
+!   !     oft_hcurl=>this
+!   !   CLASS DEFAULT
+!   !     CALL oft_abort("Error setting HCurl level", "oft_hcurl_set_level", __FILE__)
+!   ! END SELECT
+! END IF
+! ! oft_hcurl=>ML_oft_hcurl%current_level
+! IF(ML_oft_bhcurl%nlevels>0)THEN
+!   if(level>ML_oft_bhcurl%nlevels.OR.level<=0)then
+!     call oft_abort('Invalid FE level','oft_hcurl_set_level',__FILE__)
+!   end if
+!   CALL ML_oft_bhcurl%set_level(level)
+!   ! SELECT TYPE(this=>ML_oft_bhcurl%current_level)
+!   !   CLASS IS(oft_hcurl_bfem)
+!   !     oft_bhcurl=>this
+!   !   CLASS DEFAULT
+!   !     CALL oft_abort("Error setting boundary HCurl level", "oft_hcurl_set_level", __FILE__)
+!   ! END SELECT
+! END IF
+! !---
+! ! oft_hcurl_level=level
+! ! oft_hcurl_lev=level
+! ! if(oft_hcurl_level>oft_hcurl_blevel.AND.oft_hcurl_blevel>0)oft_hcurl_lev=level-1
+! ! oft_hcurl_ops=>ML_oft_hcurl_ops(level)
+! DEBUG_STACK_POP
+! end subroutine oft_hcurl_set_level
 !---------------------------------------------------------------------------
 !> Construct Nedelec H1(Curl) FE on each mesh level
 !!
@@ -306,7 +306,8 @@ end do
 !   oft_hcurl_lin_level=-1
 ! END IF
 ! CALL oft_hcurl_set_level(oft_hcurl_nlevels)
-CALL oft_hcurl_set_level(max(ML_hcurl_obj%nlevels,ML_bhcurl_obj%nlevels))
+IF(ML_hcurl_obj%nlevels>0)CALL ML_hcurl_obj%set_level(ML_hcurl_obj%nlevels)
+CALL ML_bhcurl_obj%set_level(ML_bhcurl_obj%nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_setup

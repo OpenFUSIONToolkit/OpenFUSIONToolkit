@@ -39,8 +39,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
   create_ilu_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 !---H1(Grad) FE space
@@ -48,7 +47,6 @@ USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad, ML_oft_h1
-USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_mc
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
@@ -98,7 +96,7 @@ CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
 !---H1(Grad) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,-1)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,-1)
 h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
 !!\subsection doc_mug_sph_ex2_code_plot Perform post-processing
 !!
@@ -119,7 +117,7 @@ END IF
 !! force-free eignstate in this geometry. As a result the initial condition
 !! is stable to all types of mode activity.
 CALL taylor_hmodes(1)
-CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
+CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !! As in \ref doc_mug_sph_ex1 we must transform the gauge of the Taylor
 !! state solution to the appropriate magnetic field BCs. For more information
 !! on this see the description in \ref doc_mug_sph_ex1_ic of that example.
@@ -141,7 +139,7 @@ divout%keep_boundary=.TRUE.
 !---------------------------------------------------------------------------
 ! Setup initial conditions
 !---------------------------------------------------------------------------
-CALL oft_h1_create(ic_fields%B)
+CALL ML_oft_h1%vec_create(ic_fields%B)
 CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
@@ -170,15 +168,15 @@ CALL ic_fields%B%scale(b0_scale*taylor_hlam(1,ML_oft_hcurl%level))
 CALL lop%delete
 DEALLOCATE(tmp,lop)
 !---Create velocity field
-CALL oft_lag_vcreate(ic_fields%V)
+CALL ML_oft_vlagrange%vec_create(ic_fields%V)
 vel_scale = 1.d3
 !---Create density field
-CALL oft_lag_create(ic_fields%Ne)
+CALL ML_oft_lagrange%vec_create(ic_fields%Ne)
 CALL ic_fields%Ne%set(n0)
 den_scale = n0
 den_floor = n0*1.d-2
 !---Create temperature field
-CALL oft_lag_create(ic_fields%Ti)
+CALL ML_oft_lagrange%vec_create(ic_fields%Ti)
 CALL ic_fields%Ti%set(t0)
 temp_floor = t0*1.d-2
 !!\subsection doc_mug_sph_ex2_code_run Run Simulation

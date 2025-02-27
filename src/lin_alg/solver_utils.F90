@@ -14,7 +14,7 @@ USE oft_base
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_global_stitch, &
   oft_stitch_check
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_matrix, oft_matrix_ptr, &
-  oft_graph, oft_graph_ptr, oft_matrix_map
+  oft_graph, oft_graph_ptr, oft_matrix_map, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, oft_native_matrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_native_solvers, ONLY: oft_native_cg_solver, native_cg_solver_cast, &
@@ -39,14 +39,15 @@ CONTAINS
 !! from an XML specification or standard native/PETSc preconditioners
 !---------------------------------------------------------------------------
 subroutine create_mlpre(pre,Mats,levels,nlevels,create_vec,interp, &
-  inject,bc,stype,df,nu,xml_root)
+  inject,ml_vecspace,bc,stype,df,nu,xml_root)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
-procedure(oft_veccreate_proto) :: create_vec !< Vector creation subroutine
-procedure(oft_interp_proto) :: interp !< Interpolation subroutine
-procedure(oft_interp_proto) :: inject !< Restriction subroutine
+procedure(oft_veccreate_proto), optional :: create_vec !< Vector creation subroutine
+procedure(oft_interp_proto), optional :: interp !< Interpolation subroutine
+procedure(oft_interp_proto), optional :: inject !< Restriction subroutine
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< 
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition subroutine (optional)
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
@@ -60,7 +61,7 @@ IF(ASSOCIATED(oft_env%xml).AND.PRESENT(xml_root))THEN
     !---Create preconditioner
     CALL create_ml_xml(pre,Mats,levels,nlevels=nlevels, &
       create_vec=create_vec,interp=interp,inject=inject,&
-      pre_node=xml_root,bc=bc)
+      ml_vecspace=ml_vecspace,pre_node=xml_root,bc=bc)
   END IF
 END IF
 #endif
@@ -68,25 +69,26 @@ IF(.NOT.ASSOCIATED(pre))THEN
   IF(use_petsc)THEN
     CALL create_petsc_mlpre(pre,Mats,levels,nlevels=nlevels, &
       create_vec=create_vec,interp=interp,inject=inject, &
-      bc=bc,stype=stype,nu=nu,df=df)
+      bc=bc,ml_vecspace=ml_vecspace,stype=stype,nu=nu,df=df)
   ELSE
     CALL create_native_mlpre(pre,Mats,levels,nlevels=nlevels, &
       create_vec=create_vec,interp=interp,inject=inject, &
-      bc=bc,stype=stype,nu=nu,df=df)
+      bc=bc,ml_vecspace=ml_vecspace,stype=stype,nu=nu,df=df)
   END IF
 END IF
 end subroutine create_mlpre
 !---------------------------------------------------------------------------
 !> Construct native Multi-Grid preconditioner
 !---------------------------------------------------------------------------
-subroutine create_native_mlpre(pre,Mats,levels,nlevels,create_vec,interp,inject,bc,stype,df,nu)
+subroutine create_native_mlpre(pre,Mats,levels,nlevels,create_vec,interp,inject,ml_vecspace,bc,stype,df,nu)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
-procedure(oft_veccreate_proto) :: create_vec !< Vector creation subroutine
-procedure(oft_interp_proto) :: interp !< Interpolation subroutine
-procedure(oft_interp_proto) :: inject !< Restriction subroutine
+procedure(oft_veccreate_proto), optional :: create_vec !< Vector creation subroutine
+procedure(oft_interp_proto), optional :: interp !< Interpolation subroutine
+procedure(oft_interp_proto), optional :: inject !< Restriction subroutine
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< 
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition subroutine (optional)
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
@@ -129,9 +131,13 @@ SELECT TYPE(pre)
     CALL oft_abort('Error in precon allocation!','create_native_mlpre',__FILE__)
 END SELECT
 !---Setup MG smoother
-this_ml%interp=>interp
-this_ml%inject=>inject
-this_ml%vec_create=>create_vec
+IF(PRESENT(ml_vecspace))THEN
+  this_ml%ml_vecspace=>ml_vecspace
+ELSE
+  this_ml%interp=>interp
+  this_ml%inject=>inject
+  this_ml%vec_create=>create_vec
+END IF
 this_ml%level=ABS(levels(nlevels))
 !---Allocate top-level smoother
 SELECT CASE(smoother)
@@ -176,9 +182,13 @@ DO i=nlevels-1,1,-1
   IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
     CALL oft_abort('Failed to allocate "this_ml".','create_native_mlpre',__FILE__)
   !---Setup MG smoother
-  this_ml%interp=>interp
-  this_ml%inject=>inject
-  this_ml%vec_create=>create_vec
+  IF(PRESENT(ml_vecspace))THEN
+    this_ml%ml_vecspace=>ml_vecspace
+  ELSE
+    this_ml%interp=>interp
+    this_ml%inject=>inject
+    this_ml%vec_create=>create_vec
+  END IF
   this_ml%level=ABS(levels(i))
   IF(levels(i)<0)CYCLE
   !---Allocate level smoother
@@ -231,14 +241,15 @@ end subroutine create_native_mlpre
 !---------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
 !---------------------------------------------------------------------------
-subroutine create_petsc_mlpre(pre,Mats,levels,nlevels,create_vec,interp,inject,bc,stype,df,nu)
+subroutine create_petsc_mlpre(pre,Mats,levels,nlevels,create_vec,interp,inject,ml_vecspace,bc,stype,df,nu)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
-procedure(oft_veccreate_proto) :: create_vec !< Vector creation subroutine
-procedure(oft_interp_proto) :: interp !< Interpolation subroutine
-procedure(oft_interp_proto) :: inject !< Restriction subroutine
+procedure(oft_veccreate_proto), optional :: create_vec !< Vector creation subroutine
+procedure(oft_interp_proto), optional :: interp !< Interpolation subroutine
+procedure(oft_interp_proto), optional :: inject !< Restriction subroutine
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !<
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition subroutine (optional)
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
@@ -285,9 +296,13 @@ SELECT TYPE(pre)
     CALL oft_abort('Error in precon allocation!','create_petsc_mlpre',__FILE__)
 END SELECT
 !---Setup MG smoother
-this_ml%interp=>interp
-this_ml%inject=>inject
-this_ml%vec_create=>create_vec
+IF(PRESENT(ml_vecspace))THEN
+  this_ml%ml_vecspace=>ml_vecspace
+ELSE
+  this_ml%interp=>interp
+  this_ml%inject=>inject
+  this_ml%vec_create=>create_vec
+END IF
 this_ml%level=ABS(levels(nlevels))
 IF(PRESENT(bc))this_ml%bc=>bc
 !---Allocate top-level smoother
@@ -332,9 +347,13 @@ DO i=nlevels-1,1,-1
   IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
     CALL oft_abort('Failed to allocate "this_ml".','create_petsc_mlpre',__FILE__)
   !---Setup MG smoother
-  this_ml%interp=>interp
-  this_ml%inject=>inject
-  this_ml%vec_create=>create_vec
+  IF(PRESENT(ml_vecspace))THEN
+    this_ml%ml_vecspace=>ml_vecspace
+  ELSE
+    this_ml%interp=>interp
+    this_ml%inject=>inject
+    this_ml%vec_create=>create_vec
+  END IF
   this_ml%level=ABS(levels(i))
   IF(levels(i)<0)CYCLE
   IF(PRESENT(bc))this_ml%bc=>bc
@@ -760,14 +779,15 @@ end subroutine create_pre_xml
 !---------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
 !---------------------------------------------------------------------------
-subroutine create_ml_xml(pre,Mats,levels,nlevels,create_vec,interp,inject,pre_node,bc)
+subroutine create_ml_xml(pre,Mats,levels,nlevels,create_vec,interp,inject,ml_vecspace,pre_node,bc)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
-procedure(oft_veccreate_proto) :: create_vec !< Vector creation subroutine
-procedure(oft_interp_proto) :: interp !< Interpolation subroutine
-procedure(oft_interp_proto) :: inject !< Restriction subroutine
+procedure(oft_veccreate_proto), optional :: create_vec !< Vector creation subroutine
+procedure(oft_interp_proto), optional :: interp !< Interpolation subroutine
+procedure(oft_interp_proto), optional :: inject !< Restriction subroutine
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< 
 TYPE(xml_node), POINTER, INTENT(in) :: pre_node !< Preconditioner XML element
 class(oft_solver_bc), target, optional, intent(in) :: bc
 #ifdef HAVE_XML
@@ -825,9 +845,13 @@ SELECT TYPE(pre)
     CALL oft_abort('Error in precon allocation!','create_petsc_mlpre',__FILE__)
 END SELECT
 !---Setup MG smoother
-this_ml%interp=>interp
-this_ml%inject=>inject
-this_ml%vec_create=>create_vec
+IF(PRESENT(ml_vecspace))THEN
+  this_ml%ml_vecspace=>ml_vecspace
+ELSE
+  this_ml%interp=>interp
+  this_ml%inject=>inject
+  this_ml%vec_create=>create_vec
+END IF
 this_ml%level=ABS(levels(nlevels))
 IF(PRESENT(bc))this_ml%bc=>bc
 !---Allocate top-level smoother
@@ -854,9 +878,13 @@ DO i=nlevels-1,1,-1
   IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
     CALL oft_abort('Failed to allocate "this_ml".','create_petsc_mlpre',__FILE__)
   !---Setup MG smoother
-  this_ml%interp=>interp
-  this_ml%inject=>inject
-  this_ml%vec_create=>create_vec
+  IF(PRESENT(ml_vecspace))THEN
+    this_ml%ml_vecspace=>ml_vecspace
+  ELSE
+    this_ml%interp=>interp
+    this_ml%inject=>inject
+    this_ml%vec_create=>create_vec
+  END IF
   this_ml%level=ABS(levels(i))
   IF(levels(i)<0)CYCLE
   IF(i==1.AND.coarse_present)THEN

@@ -27,7 +27,6 @@ USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 USE fem_base, ONLY: oft_fem_type
 USE fem_utils, ONLY: fem_partition
 USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
@@ -113,8 +112,8 @@ CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 CLASS(oft_fem_type), POINTER :: lag_rep
 !---Create solver fields
-CALL oft_lag_create(u)
-CALL oft_lag_create(v)
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(v)
 !---Get FE operators
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
 CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')

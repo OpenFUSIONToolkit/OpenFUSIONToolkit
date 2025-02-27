@@ -22,9 +22,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, &
   oft_lag_vgetmop, oft_lag_vrinterp
 !---Physics
@@ -87,15 +85,15 @@ minv%its=-3
 minv%atol=1.d-10
 CALL create_diag_pre(minv%pre)
 !---
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
-CALL oft_lag_vcreate(b)
-CALL oft_lag_vcreate(db)
-CALL oft_lag_vcreate(be)
-CALL oft_lag_vcreate(bi)
-CALL oft_lag_vcreate(vel)
-CALL oft_lag_vcreate(dvel)
-CALL oft_lag_vcreate(vi)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
+CALL ML_oft_vlagrange%vec_create(b)
+CALL ML_oft_vlagrange%vec_create(db)
+CALL ML_oft_vlagrange%vec_create(be)
+CALL ML_oft_vlagrange%vec_create(bi)
+CALL ML_oft_vlagrange%vec_create(vel)
+CALL ML_oft_vlagrange%vec_create(dvel)
+CALL ML_oft_vlagrange%vec_create(vi)
 !---------------------------------------------------------------------------
 ! Set uniform B0 = zhat
 !---------------------------------------------------------------------------
@@ -133,10 +131,10 @@ IF(linear)THEN
   CALL b%scale(B0)
   CALL db%scale(B0)
   CALL dvel%scale(v_alf)
-  CALL oft_lag_create(den)
-  CALL oft_lag_create(temp)
-  CALL oft_lag_create(dden)
-  CALL oft_lag_create(dtemp)
+  CALL ML_oft_lagrange%vec_create(den)
+  CALL ML_oft_lagrange%vec_create(temp)
+  CALL ML_oft_lagrange%vec_create(dden)
+  CALL ML_oft_lagrange%vec_create(dtemp)
   CALL den%set(1.d19)
   CALL temp%set(1.d1)
   equil_fields%B=>b
@@ -160,8 +158,8 @@ ELSE
   CALL b%scale(B0)
   CALL vel%add(0.d0,1.d0,dvel)
   CALL vel%scale(v_alf)
-  CALL oft_lag_create(den)
-  CALL oft_lag_create(temp)
+  CALL ML_oft_lagrange%vec_create(den)
+  CALL ML_oft_lagrange%vec_create(temp)
   CALL den%set(1.d19)
   CALL temp%set(1.d1)
   equil_fields%B=>b

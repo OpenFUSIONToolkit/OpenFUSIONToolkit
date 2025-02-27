@@ -35,15 +35,15 @@ USE oft_solver_utils, ONLY: create_mlpre, create_native_pre
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
 !---
-USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type
+USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type, &
+  oft_ml_fe_vecspace
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
-USE oft_lag_basis, ONLY: oft_lag_set_level, ML_oft_lagrange, &
+USE oft_lag_basis, ONLY: ML_oft_lagrange, &
   oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
   oft_lag_nodes, ML_oft_vlagrange, oft_blag_eval, &
   oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem, &
   oft_3D_lagrange_cast
-USE oft_lag_fields, ONLY: oft_lag_create, oft_blag_create, oft_lag_vcreate
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -878,7 +878,7 @@ SELECT CASE(TRIM(bc))
     END IF
 END SELECT
 DEALLOCATE(j,mop)
-CALL oft_lag_create(oft_lag_vec)
+CALL lag_rep%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
@@ -991,7 +991,7 @@ SELECT CASE(TRIM(bc))
     END IF
 END SELECT
 DEALLOCATE(j,lop)
-CALL oft_lag_create(oft_lag_vec)
+CALL lag_rep%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
@@ -1122,7 +1122,7 @@ SELECT CASE(TRIM(bc))
     END DO
 END SELECT
 DEALLOCATE(j,pdop)
-CALL oft_lag_create(oft_lag_vec)
+CALL lag_rep%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
@@ -1548,14 +1548,14 @@ END DO
 !---Create vector interpolation operator
 IF(vec_interp)THEN
   CALL ML_oft_vlagrange%build_interp
-  DO i=ML_oft_lagrange%minlev+1,ML_oft_lagrange%nlevels
-    CALL oft_lag_set_level(i)
-    !---
-    if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
-      CYCLE
-    end if
-    ! oft_lagrange_ops%vinterp=>ML_oft_vlagrange%interp_matrices(i)%m
-  END DO
+  ! DO i=ML_oft_lagrange%minlev+1,ML_oft_lagrange%nlevels
+  !   CALL oft_lag_set_level(i)
+  !   !---
+  !   if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
+  !     CYCLE
+  !   end if
+  !   ! oft_lagrange_ops%vinterp=>ML_oft_vlagrange%interp_matrices(i)%m
+  ! END DO
 END IF
 DEBUG_STACK_POP
 CONTAINS
@@ -1630,8 +1630,8 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL oft_lag_create(lag_vec)
-CALL oft_lag_create(lag_vec_cors,ML_lag_rep%level-1)
+CALL ML_lag_rep%vec_create(lag_vec)
+CALL ML_lag_rep%vec_create(lag_vec_cors,ML_lag_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
@@ -1855,8 +1855,8 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL oft_lag_create(lag_vec)
-CALL oft_lag_create(lag_vec_cors,ML_lag_rep%level-1)
+CALL ML_lag_rep%vec_create(lag_vec)
+CALL ML_lag_rep%vec_create(lag_vec_cors,ML_lag_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
@@ -1991,61 +1991,83 @@ DEALLOCATE(ftmp,fetmp,ctmp)
 DEBUG_STACK_POP
 END SUBROUTINE lag_pinterpmatrix
 END SUBROUTINE lag_setup_interp
-!---------------------------------------------------------------------------
-!> Interpolate a coarse level Lagrange scalar field to the next finest level
-!!
-!! @note The global Lagrange level in incremented by one in this subroutine
-!---------------------------------------------------------------------------
-subroutine lag_interp(acors,afine)
-class(oft_vector), intent(inout) :: acors !< Vector to interpolate
-class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
-DEBUG_STACK_PUSH
-!---Step one level up
-call oft_lag_set_level(ML_oft_lagrange%level+1)
-call afine%set(0.d0)
-!---
-if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
-  call lag_base_pop(acors,afine)
-  DEBUG_STACK_POP
-  return
-end if
-! CALL oft_lagrange_ops%interp%apply(acors,afine)
-CALL ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m%apply(acors,afine)
-DEBUG_STACK_POP
-end subroutine lag_interp
-!---------------------------------------------------------------------------
-!> Interpolate a coarse level Lagrange scalar field to the next finest level
-!!
-!! @note The global Lagrange level in incremented by one in this subroutine
-!---------------------------------------------------------------------------
-subroutine lag_vinterp(acors,afine)
-class(oft_vector), intent(inout) :: acors !< Vector to interpolate
-class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
-DEBUG_STACK_PUSH
-!---Step one level up
-call oft_lag_set_level(ML_oft_lagrange%level+1)
-!---
-if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
-  CALL oft_abort('MPI-Base transfer not supported','lag_vinterp',__FILE__)
-!  call lag_base_pop(acors,afine)
-  DEBUG_STACK_POP
-  return
-end if
-! CALL oft_lagrange_ops%vinterp%apply(acors,afine)
-CALL ML_oft_vlagrange%interp_matrices(ML_oft_vlagrange%level)%m%apply(acors,afine)
-DEBUG_STACK_POP
-end subroutine lag_vinterp
+! !---------------------------------------------------------------------------
+! !> Interpolate a coarse level Lagrange scalar field to the next finest level
+! !!
+! !! @note The global Lagrange level in incremented by one in this subroutine
+! !---------------------------------------------------------------------------
+! subroutine lag_interp(acors,afine)
+! class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+! class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
+! DEBUG_STACK_PUSH
+! !---Step one level up
+! call oft_lag_set_level(ML_oft_lagrange%level+1)
+! call afine%set(0.d0)
+! !---
+! if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
+!   call lag_base_pop(acors,afine)
+!   DEBUG_STACK_POP
+!   return
+! end if
+! ! CALL oft_lagrange_ops%interp%apply(acors,afine)
+! CALL ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m%apply(acors,afine)
+! DEBUG_STACK_POP
+! end subroutine lag_interp
+! !---------------------------------------------------------------------------
+! !> Interpolate a coarse level Lagrange scalar field to the next finest level
+! !!
+! !! @note The global Lagrange level in incremented by one in this subroutine
+! !---------------------------------------------------------------------------
+! subroutine lag_vinterp(acors,afine)
+! class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+! class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
+! DEBUG_STACK_PUSH
+! !---Step one level up
+! call oft_lag_set_level(ML_oft_lagrange%level+1)
+! !---
+! if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
+!   CALL oft_abort('MPI-Base transfer not supported','lag_vinterp',__FILE__)
+! !  call lag_base_pop(acors,afine)
+!   DEBUG_STACK_POP
+!   return
+! end if
+! ! CALL oft_lagrange_ops%vinterp%apply(acors,afine)
+! CALL ML_oft_vlagrange%interp_matrices(ML_oft_vlagrange%level)%m%apply(acors,afine)
+! DEBUG_STACK_POP
+! end subroutine lag_vinterp
+! !---------------------------------------------------------------------------
+! !> Transfer a base level Lagrange scalar field to the next MPI level
+! !---------------------------------------------------------------------------
+! subroutine lag_base_pop(acors,afine)
+! class(oft_vector), intent(inout) :: acors !< Vector to transfer
+! class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
+! integer(i4), pointer, dimension(:) :: lptmp
+! integer(i4) :: i
+! real(r8), pointer, dimension(:) :: array_c,array_f
+! DEBUG_STACK_PUSH
+! lptmp=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%nbase+1)%base%lp
+! CALL acors%get_local(array_c)
+! CALL afine%get_local(array_f)
+! !$omp parallel do
+! do i=1,afine%n
+!   array_f(i)=array_c(lptmp(i))
+! end do
+! CALL afine%restore_local(array_f)
+! DEALLOCATE(array_c,array_f)
+! DEBUG_STACK_POP
+! end subroutine lag_base_pop
 !---------------------------------------------------------------------------
 !> Transfer a base level Lagrange scalar field to the next MPI level
 !---------------------------------------------------------------------------
-subroutine lag_base_pop(acors,afine)
+subroutine lag_base_pop(self,acors,afine)
+class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: array_c,array_f
 DEBUG_STACK_PUSH
-lptmp=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%nbase+1)%base%lp
+lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 !$omp parallel do
@@ -2056,60 +2078,97 @@ CALL afine%restore_local(array_f)
 DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine lag_base_pop
-!---------------------------------------------------------------------------
-!> Inject a fine level Lagrange scalar field to the next coarsest level
-!!
-!! @note The global Lagrange level in decremented by one in this subroutine
-!---------------------------------------------------------------------------
-subroutine lag_inject(afine,acors)
-class(oft_vector), intent(inout) :: afine !< Vector to inject
-class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
-integer(i4) :: i,j,k
-logical :: gcheck
-DEBUG_STACK_PUSH
-gcheck=(ML_oft_lagrange%current_level%order==1)
-! Step down level up
-call oft_lag_set_level(ML_oft_lagrange%level-1)
-! Cast fine field
-call acors%set(0.d0)
-if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
-  call lag_base_push(afine,acors)
-  DEBUG_STACK_POP
-  return
-end if
-! CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%interp%applyT(afine,acors)
-CALL ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level+1)%m%applyT(afine,acors)
-DEBUG_STACK_POP
-end subroutine lag_inject
-!---------------------------------------------------------------------------
-!> Inject a fine level Lagrange scalar field to the next coarsest level
-!!
-!! @note The global Lagrange level in decremented by one in this subroutine
-!---------------------------------------------------------------------------
-subroutine lag_vinject(afine,acors)
-class(oft_vector), intent(inout) :: afine !< Vector to inject
-class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
-integer(i4) :: i,j,k
-logical :: gcheck
-DEBUG_STACK_PUSH
-gcheck=(ML_oft_lagrange%current_level%order==1)
-! Step down level up
-call oft_lag_set_level(ML_oft_lagrange%level-1)
-! Cast fine field
-if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
-!  call lag_base_push(afine,acors)
-  CALL oft_abort('MPI-Base transfer not supported','lag_vinterp',__FILE__)
-  DEBUG_STACK_POP
-  return
-end if
-! CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%vinterp%applyT(afine,acors)
-CALL ML_oft_vlagrange%interp_matrices(ML_oft_vlagrange%level+1)%m%applyT(afine,acors)
-DEBUG_STACK_POP
-end subroutine lag_vinject
+! !---------------------------------------------------------------------------
+! !> Inject a fine level Lagrange scalar field to the next coarsest level
+! !!
+! !! @note The global Lagrange level in decremented by one in this subroutine
+! !---------------------------------------------------------------------------
+! subroutine lag_inject(afine,acors)
+! class(oft_vector), intent(inout) :: afine !< Vector to inject
+! class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
+! integer(i4) :: i,j,k
+! logical :: gcheck
+! DEBUG_STACK_PUSH
+! gcheck=(ML_oft_lagrange%current_level%order==1)
+! ! Step down level up
+! call oft_lag_set_level(ML_oft_lagrange%level-1)
+! ! Cast fine field
+! call acors%set(0.d0)
+! if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
+!   call lag_base_push(afine,acors)
+!   DEBUG_STACK_POP
+!   return
+! end if
+! ! CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%interp%applyT(afine,acors)
+! CALL ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level+1)%m%applyT(afine,acors)
+! DEBUG_STACK_POP
+! end subroutine lag_inject
+! !---------------------------------------------------------------------------
+! !> Inject a fine level Lagrange scalar field to the next coarsest level
+! !!
+! !! @note The global Lagrange level in decremented by one in this subroutine
+! !---------------------------------------------------------------------------
+! subroutine lag_vinject(afine,acors)
+! class(oft_vector), intent(inout) :: afine !< Vector to inject
+! class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
+! integer(i4) :: i,j,k
+! logical :: gcheck
+! DEBUG_STACK_PUSH
+! gcheck=(ML_oft_lagrange%current_level%order==1)
+! ! Step down level up
+! call oft_lag_set_level(ML_oft_lagrange%level-1)
+! ! Cast fine field
+! if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
+! !  call lag_base_push(afine,acors)
+!   CALL oft_abort('MPI-Base transfer not supported','lag_vinterp',__FILE__)
+!   DEBUG_STACK_POP
+!   return
+! end if
+! ! CALL ML_oft_lagrange_ops(oft_lagrange_level+1)%vinterp%applyT(afine,acors)
+! CALL ML_oft_vlagrange%interp_matrices(ML_oft_vlagrange%level+1)%m%applyT(afine,acors)
+! DEBUG_STACK_POP
+! end subroutine lag_vinject
+! !---------------------------------------------------------------------------
+! !> Transfer a MPI level Lagrange scalar field to the base level
+! !---------------------------------------------------------------------------
+! subroutine lag_base_push(afine,acors)
+! class(oft_vector), intent(inout) :: afine !< Needs docs
+! class(oft_vector), intent(inout) :: acors !< Needs docs
+! integer(i4), pointer :: lptmp(:)
+! integer(i4) :: i,j,ierr
+! real(r8), pointer, dimension(:) :: alias,array_c,array_f
+! CLASS(oft_afem_type), POINTER :: lag_fine => NULL()
+! DEBUG_STACK_PUSH
+! !---
+! lptmp=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%nbase+1)%base%lp
+! CALL acors%get_local(array_c)
+! CALL afine%get_local(array_f)
+! lag_fine=>ML_oft_lagrange%levels(ML_oft_lagrange%level+1)%fe
+! !---
+! allocate(alias(acors%n))
+! alias=0.d0
+! !$omp parallel do
+! do i=1,afine%n
+!   if(lag_fine%linkage%be(i))cycle
+!   alias(lptmp(i))=array_f(i)
+! end do
+! !$omp parallel do private(j)
+! do i=1,lag_fine%linkage%nbe
+!   j=lag_fine%linkage%lbe(i)
+!   if(.NOT.lag_fine%linkage%leo(i))cycle
+!   alias(lptmp(j))=array_f(j)
+! end do
+! !---Global reduction over all processors
+! array_c=oft_mpi_sum(alias,acors%n)
+! call acors%restore_local(array_c)
+! deallocate(alias,array_c,array_f)
+! DEBUG_STACK_POP
+! end subroutine lag_base_push
 !---------------------------------------------------------------------------
 !> Transfer a MPI level Lagrange scalar field to the base level
 !---------------------------------------------------------------------------
-subroutine lag_base_push(afine,acors)
+subroutine lag_base_push(self,afine,acors)
+class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Needs docs
 class(oft_vector), intent(inout) :: acors !< Needs docs
 integer(i4), pointer :: lptmp(:)
@@ -2118,10 +2177,10 @@ real(r8), pointer, dimension(:) :: alias,array_c,array_f
 CLASS(oft_afem_type), POINTER :: lag_fine => NULL()
 DEBUG_STACK_PUSH
 !---
-lptmp=>ML_oft_lagrange%ml_mesh%meshes(ML_oft_lagrange%ml_mesh%nbase+1)%base%lp
+lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
-lag_fine=>ML_oft_lagrange%levels(ML_oft_lagrange%level+1)%fe
+lag_fine=>self%ML_FE_rep%levels(self%ML_FE_rep%level+1)%fe
 !---
 allocate(alias(acors%n))
 alias=0.d0
@@ -2229,6 +2288,7 @@ INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 TYPE(oft_lag_zerob), POINTER :: bc_tmp
+TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
 TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
@@ -2257,7 +2317,7 @@ END IF
 ALLOCATE(ml_int(nl-1),levels(nl))
 ALLOCATE(df(nl),nu(nl))
 DO i=1,nl
-  CALL oft_lag_set_level(minlev+(i-1))
+  CALL ML_oft_lagrange%set_level(minlev+(i-1))
   levels(i)=minlev+(i-1)
   df(i)=df_lop(levels(i))
   nu(i)=nu_lop(levels(i))
@@ -2272,7 +2332,7 @@ DO i=1,nl
   END IF
   IF(i>1)ml_int(i-1)%M=>ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m !oft_lagrange_ops%interp
 END DO
-CALL oft_lag_set_level(levin)
+CALL ML_oft_lagrange%set_level(levin)
 !---------------------------------------------------------------------------
 ! Search for XML-spec
 !---------------------------------------------------------------------------
@@ -2289,8 +2349,12 @@ END IF
 ALLOCATE(bc_tmp)
 bc_tmp%ML_lag_rep=>ML_oft_lagrange
 NULLIFY(pre)
-CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_lag_create,interp=lag_interp, &
-     inject=lag_inject,bc=bc_tmp,stype=1,df=df,nu=nu,xml_root=pre_node)
+ALLOCATE(tmp_vecspace)
+tmp_vecspace%ML_FE_rep=>ML_oft_lagrange
+tmp_vecspace%base_pop=>lag_base_pop
+tmp_vecspace%base_push=>lag_base_push
+CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
+       bc=bc_tmp,stype=1,df=df,nu=nu,xml_root=pre_node)
 !---------------------------------------------------------------------------
 ! Cleanup
 !---------------------------------------------------------------------------

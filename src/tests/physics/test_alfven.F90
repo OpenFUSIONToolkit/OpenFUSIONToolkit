@@ -22,9 +22,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
-  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, &
   oft_lag_vgetmop, oft_lag_vrinterp
 !---H1(Curl) FE space
@@ -35,7 +33,6 @@ USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
-USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project, &
   oft_h1_grad_zerop, oft_h1_rinterp
 !---Physics
@@ -99,7 +96,7 @@ CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
 CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,minlev)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,minlev)
 CALL h1_setup_interp(ML_oft_h1,ML_oft_h0)
 h1grad_zerop%ML_h1_rep=>ML_oft_h1
 !---------------------------------------------------------------------------
@@ -113,12 +110,12 @@ minv%its=-3
 minv%atol=1.d-10
 CALL create_diag_pre(minv%pre)
 !---
-CALL oft_h1_create(u)
-CALL oft_h1_create(v)
-CALL oft_h1_create(b)
-CALL oft_h1_create(db)
-CALL oft_h1_create(be)
-CALL oft_h1_create(bi)
+CALL ML_oft_h1%vec_create(u)
+CALL ML_oft_h1%vec_create(v)
+CALL ML_oft_h1%vec_create(b)
+CALL ML_oft_h1%vec_create(db)
+CALL ML_oft_h1%vec_create(be)
+CALL ML_oft_h1%vec_create(bi)
 !---------------------------------------------------------------------------
 ! Set uniform B0 = zhat
 !---------------------------------------------------------------------------
@@ -151,11 +148,11 @@ lag_minv%its=-3
 lag_minv%atol=1.d-10
 CALL create_diag_pre(lag_minv%pre)
 !---
-CALL oft_lag_vcreate(lag_u)
-CALL oft_lag_vcreate(lag_v)
-CALL oft_lag_vcreate(vel)
-CALL oft_lag_vcreate(dvel)
-CALL oft_lag_vcreate(vi)
+CALL ML_oft_vlagrange%vec_create(lag_u)
+CALL ML_oft_vlagrange%vec_create(lag_v)
+CALL ML_oft_vlagrange%vec_create(vel)
+CALL ML_oft_vlagrange%vec_create(dvel)
+CALL ML_oft_vlagrange%vec_create(vi)
 !---------------------------------------------------------------------------
 ! Set dB from alfven wave init
 !---------------------------------------------------------------------------
@@ -175,10 +172,10 @@ IF(linear)THEN
   CALL db%scale(B0)
   CALL dvel%scale(v_alf)
   !
-  CALL oft_lag_create(den)
-  CALL oft_lag_create(temp)
-  CALL oft_lag_create(dden)
-  CALL oft_lag_create(dtemp)
+  CALL ML_oft_lagrange%vec_create(den)
+  CALL ML_oft_lagrange%vec_create(temp)
+  CALL ML_oft_lagrange%vec_create(dden)
+  CALL ML_oft_lagrange%vec_create(dtemp)
   CALL den%set(1.d19)
   CALL temp%set(1.d1)
   equil_fields%B=>b
@@ -203,8 +200,8 @@ ELSE
   CALL vel%add(0.d0,1.d0,dvel)
   CALL vel%scale(v_alf)
   !
-  CALL oft_lag_create(den)
-  CALL oft_lag_create(temp)
+  CALL ML_oft_lagrange%vec_create(den)
+  CALL ML_oft_lagrange%vec_create(temp)
   CALL den%set(1.d19)
   CALL temp%set(1.d1)
   equil_fields%B=>b

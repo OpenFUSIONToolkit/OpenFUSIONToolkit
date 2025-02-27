@@ -40,18 +40,15 @@ USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
   create_native_pre
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
-USE fem_composite, ONLY: oft_ml_fem_comp_type, oft_fem_comp_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type, oft_fem_comp_type, oft_ml_fe_comp_vecspace
 USE oft_lag_basis, ONLY: oft_lag_geval_all
-USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_d2eval, oft_h0_fem, ML_oft_h0, &
+USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_d2eval, oft_h0_fem, &
   oft_3D_h1_cast
-USE oft_h0_fields, ONLY: oft_h0_create
 USE oft_h0_operators, ONLY: oft_h0_zerob, oft_h0_zerogrnd, oft_h0_getlop, oft_h0_gop
 USE oft_hcurl_basis, ONLY: ML_oft_hcurl, oft_hcurl_eval_all, &
   oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem, oft_3D_hcurl_cast
 USE oft_hcurl_operators, ONLY: oft_hcurl_rop, oft_hcurl_cop
-USE oft_h1_basis, ONLY: ML_oft_hgrad, oft_h1_set_level, ML_oft_h1
-USE oft_h1_fields, ONLY: oft_h1_create, oft_hgrad_create
+USE oft_h1_basis, ONLY: ML_oft_hgrad, ML_oft_h1
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -162,6 +159,16 @@ type, extends(oft_h1_zerob) :: oft_h1_zeroi
 contains
   procedure :: apply => zeroi_apply
 end type oft_h1_zeroi
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, PUBLIC, extends(oft_ml_fe_comp_vecspace) :: oft_ml_h1_vecspace
+contains
+  !> Needs docs
+  PROCEDURE :: interp => ml_vecspace_interp
+  !> Needs docs
+  PROCEDURE :: inject => ml_vecspace_inject
+end type oft_ml_h1_vecspace
 !---Pre options
 integer(i4), private :: nu_mop(fem_max_levels)=0 !< Needs Docs
 real(r8), private :: df_mop(fem_max_levels)=-1.d99 !< Needs Docs
@@ -1541,8 +1548,8 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL oft_hgrad_create(hgrad_vec)
-CALL oft_hgrad_create(hgrad_vec_cors,ML_oft_h1%level-1)
+CALL ML_grad%vec_create(hgrad_vec)
+CALL ML_grad%vec_create(hgrad_vec_cors,ML_oft_h1%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
@@ -1635,31 +1642,33 @@ END SUBROUTINE h1_setup_interp
 !!
 !! @note The global Lagrange level in incremented by one in this subroutine
 !---------------------------------------------------------------------------
-subroutine h1_interp(acors,afine)
+subroutine ml_vecspace_interp(self,acors,afine)
+class(oft_ml_h1_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: agrad,acurl,tmp
 class(oft_mesh), pointer :: mesh
+CLASS(oft_ml_fem_type), POINTER :: ML_curl
 DEBUG_STACK_PUSH
 !---Step one level up
-call oft_h1_set_level(ML_oft_h1%level+1)
+call self%ML_FE_rep%set_level(self%ML_FE_rep%level+1,propogate=.TRUE.)
 call afine%set(0.d0)
-!---
-if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)then
-  call h1_base_pop(acors,afine)
+if(self%ML_FE_rep%level==self%ML_FE_rep%blevel+1)then
+  IF(.NOT.ASSOCIATED(self%base_pop))CALL oft_abort("Base transfer not defined","ml_vecspace_interp",__FILE__)
+  call self%base_pop(acors,afine)
   DEBUG_STACK_POP
   return
 end if
-! CALL oft_h1_ops%interp%apply(acors,afine)
-CALL ML_oft_h1%interp_matrices(ML_oft_h1%level)%m%apply(acors,afine)
+CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level)%m%apply(acors,afine)
 !---Correct gradient subspace following geometric interpolation
-IF(ML_oft_hcurl%current_level%order==1)THEN
-  SELECT TYPE(this=>ML_oft_hcurl%current_level)
+ML_curl=>self%ML_FE_rep%ml_fields(1)%ml
+IF(ML_curl%current_level%order==1)THEN
+  SELECT TYPE(this=>ML_curl%current_level)
     CLASS IS(oft_fem_type)
       mesh=>this%mesh
     CLASS DEFAULT
-      CALL oft_abort("Invalid FE type","h1_interp",__FILE__)
+      CALL oft_abort("Invalid FE type","ml_vecspace_interp",__FILE__)
   END SELECT
   NULLIFY(agrad,acurl)
   CALL afine%get_local(acurl,1)
@@ -1684,21 +1693,24 @@ IF(ML_oft_hcurl%current_level%order==1)THEN
   DEALLOCATE(acurl,agrad,tmp)
 END IF
 DEBUG_STACK_POP
-end subroutine h1_interp
+end subroutine ml_vecspace_interp
 !---------------------------------------------------------------------------
 !> Transfer a base level Lagrange scalar field to the next MPI level
 !---------------------------------------------------------------------------
-subroutine h1_base_pop(acors,afine)
+subroutine h1_base_pop(self,acors,afine)
+class(oft_ml_fe_comp_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to transfer
 class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4), pointer, dimension(:) :: lbege
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: array_c,array_f
+CLASS(oft_ml_fem_type), POINTER :: ML_grad
 DEBUG_STACK_PUSH
 !---
+ML_grad=>self%ML_FE_rep%ml_fields(2)%ml
 NULLIFY(array_c,array_f)
-lbege=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%nbase)%lbege
+lbege=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%nbase)%lbege
 CALL acors%get_local(array_c,1)
 CALL afine%get_local(array_f,1)
 !$omp parallel do
@@ -1708,7 +1720,7 @@ end do
 CALL afine%restore_local(array_f,1)
 DEALLOCATE(array_c,array_f)
 !---
-lptmp=>ML_oft_hgrad%ml_mesh%meshes(ML_oft_hgrad%ml_mesh%nbase+1)%base%lp
+lptmp=>ML_grad%ml_mesh%meshes(ML_grad%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c,2)
 CALL afine%get_local(array_f,2)
 !$omp parallel do
@@ -1720,51 +1732,50 @@ DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine h1_base_pop
 !---------------------------------------------------------------------------
-!> Inject a fine level Lagrange scalar field to the next coarsest level
+!> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
-!! @note The global Lagrange level in decremented by one in this subroutine
+!! @note The global Lagrange level in incremented by one in this subroutine
 !---------------------------------------------------------------------------
-subroutine h1_inject(afine,acors)
-class(oft_vector), intent(inout) :: afine !< Vector to inject
-class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
-real(r8), pointer, dimension(:) :: agrad,acurl
-class(oft_vector), pointer :: tmp
-integer(i4) :: i,j,k
-logical :: gcheck
+subroutine ml_vecspace_inject(self,afine,acors)
+class(oft_ml_h1_vecspace), intent(inout) :: self
+class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
+class(oft_vector), intent(inout) :: acors !< Vector to interpolate
 DEBUG_STACK_PUSH
-gcheck=(ML_oft_hcurl%current_level%order==1)
-! Step down level up
-call oft_h1_set_level(ML_oft_h1%level-1)
-! Cast fine field
+! Step down level down
+call self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
 call acors%set(0.d0)
-if(ML_oft_hcurl%level==ML_oft_hcurl%blevel)then
-  call h1_base_push(afine,acors)
+if(self%ML_FE_rep%level==self%ML_FE_rep%blevel)then
+  IF(.NOT.ASSOCIATED(self%base_push))CALL oft_abort("Base transfer not defined","ml_vecspace_inject",__FILE__)
+  call self%base_push(afine,acors)
   DEBUG_STACK_POP
   return
 end if
-! CALL ML_oft_h1_ops(ML_oft_h1%level+1)%interp%applyT(afine,acors)
-CALL ML_oft_h1%interp_matrices(ML_oft_h1%level+1)%m%applyT(afine,acors)
+CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
 DEBUG_STACK_POP
-end subroutine h1_inject
+end subroutine ml_vecspace_inject
 !---------------------------------------------------------------------------
 !> Transfer a MPI level Lagrange scalar field to the base level
 !---------------------------------------------------------------------------
-subroutine h1_base_push(afine,acors)
+subroutine h1_base_push(self,afine,acors)
+class(oft_ml_fe_comp_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Vector to transfer
 class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4), pointer, dimension(:) :: lbege
 integer(i4) :: i,j,ierr
 real(r8), pointer, dimension(:) :: alias,array_c,array_f
+CLASS(oft_ml_fem_type), POINTER :: Ml_curl,ML_grad
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
 CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(curl_rep,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Incorrect Curl FE type","h1_base_push",__FILE__)
-IF(oft_3D_h1_cast(grad_rep,ML_oft_hgrad%current_level)/=0)CALL oft_abort("Incorrect Grad FE type","h1_base_push",__FILE__)
+IF(oft_3D_hcurl_cast(curl_rep,self%ML_FE_rep%ml_fields(1)%ml%current_level)/=0)CALL oft_abort("Incorrect Curl FE type","h1_base_push",__FILE__)
+IF(oft_3D_h1_cast(grad_rep,self%ML_FE_rep%ml_fields(2)%ml%current_level)/=0)CALL oft_abort("Incorrect Grad FE type","h1_base_push",__FILE__)
 !---
 NULLIFY(array_c,array_f)
-lbege=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%nbase)%lbege
-lptmp=>ML_oft_hgrad%ml_mesh%meshes(ML_oft_hgrad%ml_mesh%nbase+1)%base%lp
+Ml_curl=>self%ML_FE_rep%ml_fields(1)%ml
+ML_grad=>self%ML_FE_rep%ml_fields(2)%ml
+lbege=>ML_grad%ml_mesh%inter(ML_grad%ml_mesh%nbase)%lbege
+lptmp=>ML_grad%ml_mesh%meshes(ML_grad%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 !---
@@ -1784,13 +1795,13 @@ end do
 !$omp parallel do
 do i=1,grad_rep%ne
   if(grad_rep%linkage%be(i))cycle
-  alias(ML_oft_hcurl%levels(ML_oft_h1%level-1)%fe%ne+lptmp(i))=array_f(curl_rep%ne+i)
+  alias(Ml_curl%levels(self%ML_FE_rep%level-1)%fe%ne+lptmp(i))=array_f(curl_rep%ne+i)
 end do
 !$omp parallel do private(j)
 do i=1,grad_rep%linkage%nbe
   j=grad_rep%linkage%lbe(i)
   if(.NOT.grad_rep%linkage%leo(i))cycle
-  alias(ML_oft_hcurl%levels(ML_oft_h1%level-1)%fe%ne+lptmp(j))=array_f(curl_rep%ne+j)
+  alias(Ml_curl%levels(self%ML_FE_rep%level-1)%fe%ne+lptmp(j))=array_f(curl_rep%ne+j)
 end do
 !---Global reduction over all processors
 array_c=oft_mpi_sum(alias,acors%n)
@@ -1798,6 +1809,174 @@ call acors%restore_local(array_c)
 deallocate(alias,array_c,array_f)
 DEBUG_STACK_POP
 end subroutine h1_base_push
+! !---------------------------------------------------------------------------
+! !> Interpolate a coarse level Lagrange scalar field to the next finest level
+! !!
+! !! @note The global Lagrange level in incremented by one in this subroutine
+! !---------------------------------------------------------------------------
+! subroutine h1_interp(acors,afine)
+! class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+! class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
+! integer(i4) :: i
+! real(r8), pointer, dimension(:) :: agrad,acurl,tmp
+! class(oft_mesh), pointer :: mesh
+! DEBUG_STACK_PUSH
+! !---Step one level up
+! call oft_h1_set_level(ML_oft_h1%level+1)
+! call afine%set(0.d0)
+! !---
+! if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)then
+!   call h1_base_pop(acors,afine)
+!   DEBUG_STACK_POP
+!   return
+! end if
+! ! CALL oft_h1_ops%interp%apply(acors,afine)
+! CALL ML_oft_h1%interp_matrices(ML_oft_h1%level)%m%apply(acors,afine)
+! !---Correct gradient subspace following geometric interpolation
+! IF(ML_oft_hcurl%current_level%order==1)THEN
+!   SELECT TYPE(this=>ML_oft_hcurl%current_level)
+!     CLASS IS(oft_fem_type)
+!       mesh=>this%mesh
+!     CLASS DEFAULT
+!       CALL oft_abort("Invalid FE type","h1_interp",__FILE__)
+!   END SELECT
+!   NULLIFY(agrad,acurl)
+!   CALL afine%get_local(acurl,1)
+!   CALL afine%get_local(agrad,2)
+!   ALLOCATE(tmp(mesh%np))
+!   !---
+!   !$omp parallel if(mesh%np>OFT_OMP_VTHRESH)
+!   !$omp do
+!   DO i=1,mesh%np
+!     tmp(i)=agrad(i)
+!     agrad(i)=0.d0
+!   END DO
+!   !$omp do
+!   DO i=1,mesh%ne
+!    acurl(i) = acurl(i) + &
+!     (tmp(mesh%le(2,i))-tmp(mesh%le(1,i)))*SIGN(1_i8,mesh%global%le(i))
+!   END DO
+!   !$omp end parallel
+!   !---
+!   CALL afine%restore_local(acurl,1,wait=.TRUE.)
+!   CALL afine%restore_local(agrad,2)
+!   DEALLOCATE(acurl,agrad,tmp)
+! END IF
+! DEBUG_STACK_POP
+! end subroutine h1_interp
+! !---------------------------------------------------------------------------
+! !> Transfer a base level Lagrange scalar field to the next MPI level
+! !---------------------------------------------------------------------------
+! subroutine h1_base_pop(acors,afine)
+! class(oft_vector), intent(inout) :: acors !< Vector to transfer
+! class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
+! integer(i4), pointer, dimension(:) :: lptmp
+! integer(i4), pointer, dimension(:) :: lbege
+! integer(i4) :: i
+! real(r8), pointer, dimension(:) :: array_c,array_f
+! DEBUG_STACK_PUSH
+! !---
+! NULLIFY(array_c,array_f)
+! lbege=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%nbase)%lbege
+! CALL acors%get_local(array_c,1)
+! CALL afine%get_local(array_f,1)
+! !$omp parallel do
+! do i=1,afine%n
+!   array_f(i)=array_c(ABS(lbege(i)))
+! end do
+! CALL afine%restore_local(array_f,1)
+! DEALLOCATE(array_c,array_f)
+! !---
+! lptmp=>ML_oft_hgrad%ml_mesh%meshes(ML_oft_hgrad%ml_mesh%nbase+1)%base%lp
+! CALL acors%get_local(array_c,2)
+! CALL afine%get_local(array_f,2)
+! !$omp parallel do
+! do i=1,afine%n
+!   array_f(i)=array_c(lptmp(i))
+! end do
+! CALL afine%restore_local(array_f,2)
+! DEALLOCATE(array_c,array_f)
+! DEBUG_STACK_POP
+! end subroutine h1_base_pop
+! !---------------------------------------------------------------------------
+! !> Inject a fine level Lagrange scalar field to the next coarsest level
+! !!
+! !! @note The global Lagrange level in decremented by one in this subroutine
+! !---------------------------------------------------------------------------
+! subroutine h1_inject(afine,acors)
+! class(oft_vector), intent(inout) :: afine !< Vector to inject
+! class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
+! real(r8), pointer, dimension(:) :: agrad,acurl
+! class(oft_vector), pointer :: tmp
+! integer(i4) :: i,j,k
+! logical :: gcheck
+! DEBUG_STACK_PUSH
+! gcheck=(ML_oft_hcurl%current_level%order==1)
+! ! Step down level up
+! call oft_h1_set_level(ML_oft_h1%level-1)
+! ! Cast fine field
+! call acors%set(0.d0)
+! if(ML_oft_hcurl%level==ML_oft_hcurl%blevel)then
+!   call h1_base_push(afine,acors)
+!   DEBUG_STACK_POP
+!   return
+! end if
+! ! CALL ML_oft_h1_ops(ML_oft_h1%level+1)%interp%applyT(afine,acors)
+! CALL ML_oft_h1%interp_matrices(ML_oft_h1%level+1)%m%applyT(afine,acors)
+! DEBUG_STACK_POP
+! end subroutine h1_inject
+! !---------------------------------------------------------------------------
+! !> Transfer a MPI level Lagrange scalar field to the base level
+! !---------------------------------------------------------------------------
+! subroutine h1_base_push(afine,acors)
+! class(oft_vector), intent(inout) :: afine !< Vector to transfer
+! class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
+! integer(i4), pointer, dimension(:) :: lptmp
+! integer(i4), pointer, dimension(:) :: lbege
+! integer(i4) :: i,j,ierr
+! real(r8), pointer, dimension(:) :: alias,array_c,array_f
+! CLASS(oft_hcurl_fem), POINTER :: curl_rep
+! CLASS(oft_h0_fem), POINTER :: grad_rep
+! DEBUG_STACK_PUSH
+! IF(oft_3D_hcurl_cast(curl_rep,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Incorrect Curl FE type","h1_base_push",__FILE__)
+! IF(oft_3D_h1_cast(grad_rep,ML_oft_hgrad%current_level)/=0)CALL oft_abort("Incorrect Grad FE type","h1_base_push",__FILE__)
+! !---
+! NULLIFY(array_c,array_f)
+! lbege=>ML_oft_hgrad%ml_mesh%inter(ML_oft_hgrad%ml_mesh%nbase)%lbege
+! lptmp=>ML_oft_hgrad%ml_mesh%meshes(ML_oft_hgrad%ml_mesh%nbase+1)%base%lp
+! CALL acors%get_local(array_c)
+! CALL afine%get_local(array_f)
+! !---
+! allocate(alias(acors%n))
+! alias=0.d0
+! !$omp parallel do
+! do i=1,curl_rep%ne
+!   if(curl_rep%linkage%be(i))cycle
+!   alias(ABS(lbege(i)))=array_f(i)
+! end do
+! !$omp parallel do private(j)
+! do i=1,curl_rep%linkage%nbe
+!   j=curl_rep%linkage%lbe(i)
+!   if(.NOT.curl_rep%linkage%leo(i))cycle
+!   alias(ABS(lbege(j)))=array_f(j)
+! end do
+! !$omp parallel do
+! do i=1,grad_rep%ne
+!   if(grad_rep%linkage%be(i))cycle
+!   alias(ML_oft_hcurl%levels(ML_oft_h1%level-1)%fe%ne+lptmp(i))=array_f(curl_rep%ne+i)
+! end do
+! !$omp parallel do private(j)
+! do i=1,grad_rep%linkage%nbe
+!   j=grad_rep%linkage%lbe(i)
+!   if(.NOT.grad_rep%linkage%leo(i))cycle
+!   alias(ML_oft_hcurl%levels(ML_oft_h1%level-1)%fe%ne+lptmp(j))=array_f(curl_rep%ne+j)
+! end do
+! !---Global reduction over all processors
+! array_c=oft_mpi_sum(alias,acors%n)
+! call acors%restore_local(array_c)
+! deallocate(alias,array_c,array_f)
+! DEBUG_STACK_POP
+! end subroutine h1_base_push
 !---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H1::MOP
 !---------------------------------------------------------------------------
@@ -1822,9 +2001,9 @@ bc_tmp%ML_h1_rep=>ML_hcurl_aug_obj
 ALLOCATE(df(ML_hcurl_aug_obj%nlevels))
 df=0.d0
 DO i=minlev,ML_hcurl_aug_obj%nlevels
-  CALL oft_h1_set_level(i)
+  CALL ML_hcurl_aug_obj%set_level(i,propogate=.TRUE.)
   !---Create fields
-  CALL oft_h1_create(u)
+  CALL ML_oft_h1%vec_create(u)
   !---Get Ev range
   NULLIFY(mop)
   CALL h1_getmop(ML_hcurl_aug_obj%current_level,mop,'lop')
@@ -1879,6 +2058,7 @@ INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 TYPE(xml_node), POINTER :: pre_node
+TYPE(oft_ml_h1_vecspace), POINTER :: tmp_vecspace
 #ifdef HAVE_XML
 integer(i4) :: nnodes
 TYPE(xml_node), POINTER :: h1_node
@@ -1920,7 +2100,7 @@ DO i=1,nl
   END IF
   IF(i>1)ml_int(i-1)%M=>ML_hcurl_aug_obj%interp_matrices(ML_hcurl_aug_obj%level)%m !oft_h1_ops%interp
 END DO
-CALL oft_h1_set_level(levin)
+CALL ML_hcurl_aug_obj%set_level(levin,propogate=.TRUE.)
 !---------------------------------------------------------------------------
 ! Search for XML-spec
 !---------------------------------------------------------------------------
@@ -1935,8 +2115,12 @@ END IF
 ! Setup preconditioner
 !---------------------------------------------------------------------------
 NULLIFY(pre)
-CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_h1_create,interp=h1_interp, &
-     inject=h1_inject,stype=1,df=df,nu=nu,xml_root=pre_node)
+ALLOCATE(tmp_vecspace)
+tmp_vecspace%ML_FE_rep=>ML_oft_h1
+tmp_vecspace%base_pop=>h1_base_pop
+tmp_vecspace%base_push=>h1_base_push
+CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
+  stype=1,df=df,nu=nu,xml_root=pre_node)
 !---------------------------------------------------------------------------
 ! Cleanup
 !---------------------------------------------------------------------------

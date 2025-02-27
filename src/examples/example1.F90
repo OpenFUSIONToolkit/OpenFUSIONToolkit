@@ -33,7 +33,6 @@ USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
 USE oft_solver_utils, ONLY: create_diag_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_create
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob
 IMPLICIT NONE
 !!The first two modules import runtime and helper functions. The \ref tetmesh_local module contains
@@ -96,7 +95,7 @@ lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!respectively. A vector defining the solution space is also required, to store the solution and to
 !!create worker vectors. In this case a dirichlet boundary condition is used where \c u is 0 everywhere
 !!on the boundary, denoted by the BC flag `'zerob'` used in matrix construction.
-CALL oft_lag_create(u)
+CALL ML_oft_lagrange%vec_create(u)
 !---Create Operators
 NULLIFY(lop,mop)
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')

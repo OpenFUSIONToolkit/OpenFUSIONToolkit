@@ -15,7 +15,7 @@ USE oft_stitching, ONLY: oft_seam, seam_list
 USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
 !---
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_graph_ptr, &
-  oft_matrix, oft_matrix_ptr, oft_local_mat
+  oft_matrix, oft_matrix_ptr, oft_local_mat, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   native_vector_slice_push, native_vector_slice_pop
 USE oft_la_utils, ONLY: create_vector, combine_matrices, create_matrix, &
@@ -87,6 +87,43 @@ CONTAINS
   !> Set level in ML framework if available
   PROCEDURE :: set_level => ml_fem_set_level
 END TYPE oft_ml_fem_comp_type
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, PUBLIC, extends(oft_ml_vecspace) :: oft_ml_fe_comp_vecspace
+  class(oft_ml_fem_comp_type), pointer :: ML_FE_rep => NULL() !< ML FE representation
+  !> Needs docs
+  PROCEDURE(ml_fe_base_pop), POINTER :: base_pop => NULL()
+  !> Needs docs
+  PROCEDURE(ml_fe_base_push), POINTER :: base_push => NULL()
+contains
+  !> Needs docs
+  PROCEDURE :: vec_create => ml_fe_vecspace_create
+  !> Needs docs
+  PROCEDURE :: interp => ml_fe_vecspace_interp
+  !> Needs docs
+  PROCEDURE :: inject => ml_fe_vecspace_inject
+end type oft_ml_fe_comp_vecspace
+ABSTRACT INTERFACE
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+  SUBROUTINE ml_fe_base_push(self,afine,acors)
+    IMPORT oft_ml_fe_comp_vecspace, oft_vector
+    CLASS(oft_ml_fe_comp_vecspace), INTENT(inout) :: self
+    CLASS(oft_vector), INTENT(inout) :: afine
+    CLASS(oft_vector), INTENT(inout) :: acors
+  END SUBROUTINE ml_fe_base_push
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+  SUBROUTINE ml_fe_base_pop(self,acors,afine)
+    IMPORT oft_ml_fe_comp_vecspace, oft_vector
+    CLASS(oft_ml_fe_comp_vecspace), INTENT(inout) :: self
+    CLASS(oft_vector), INTENT(inout) :: acors
+    CLASS(oft_vector), INTENT(inout) :: afine
+  END SUBROUTINE ml_fe_base_pop
+END INTERFACE
 CONTAINS
 !---------------------------------------------------------------------------
 !> Create weight vector for FE representation
@@ -593,4 +630,61 @@ OUTER: DO j=levmin,self%nlevels
 END DO OUTER
 DEBUG_STACK_POP
 end subroutine ml_fem_build_interp
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine ml_fe_vecspace_create(self,new,level,cache,native)
+class(oft_ml_fe_comp_vecspace), intent(inout) :: self
+class(oft_vector), pointer, intent(out) :: new
+integer(i4), optional, intent(in) :: level
+logical, optional, intent(in) :: cache
+logical, optional, intent(in) :: native
+DEBUG_STACK_PUSH
+CALL self%ML_FE_rep%vec_create(new,level=level,cache=cache,native=native)
+DEBUG_STACK_POP
+end subroutine ml_fe_vecspace_create
+!---------------------------------------------------------------------------
+!> Interpolate a coarse level Lagrange scalar field to the next finest level
+!!
+!! @note The global Lagrange level in incremented by one in this subroutine
+!---------------------------------------------------------------------------
+subroutine ml_fe_vecspace_interp(self,acors,afine)
+class(oft_ml_fe_comp_vecspace), intent(inout) :: self
+class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
+DEBUG_STACK_PUSH
+!---Step one level up
+call self%ML_FE_rep%set_level(self%ML_FE_rep%level+1)
+call afine%set(0.d0)
+if(self%ML_FE_rep%level==self%ML_FE_rep%blevel+1)then
+  IF(.NOT.ASSOCIATED(self%base_pop))CALL oft_abort("Base transfer not defined","ml_fe_vecspace_interp",__FILE__)
+  call self%base_pop(acors,afine)
+  DEBUG_STACK_POP
+  return
+end if
+CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level)%m%apply(acors,afine)
+DEBUG_STACK_POP
+end subroutine ml_fe_vecspace_interp
+!---------------------------------------------------------------------------
+!> Interpolate a coarse level Lagrange scalar field to the next finest level
+!!
+!! @note The global Lagrange level in incremented by one in this subroutine
+!---------------------------------------------------------------------------
+subroutine ml_fe_vecspace_inject(self,afine,acors)
+class(oft_ml_fe_comp_vecspace), intent(inout) :: self
+class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
+class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+DEBUG_STACK_PUSH
+! Step down level down
+call self%ML_FE_rep%set_level(self%ML_FE_rep%level-1)
+call acors%set(0.d0)
+if(self%ML_FE_rep%level==self%ML_FE_rep%blevel)then
+  IF(.NOT.ASSOCIATED(self%base_push))CALL oft_abort("Base transfer not defined","ml_fe_vecspace_inject",__FILE__)
+  call self%base_push(afine,acors)
+  DEBUG_STACK_POP
+  return
+end if
+CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
+DEBUG_STACK_POP
+end subroutine ml_fe_vecspace_inject
 END MODULE fem_composite

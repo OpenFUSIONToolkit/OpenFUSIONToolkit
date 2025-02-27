@@ -27,12 +27,10 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
-USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---H1(Grad) FE space
@@ -40,7 +38,6 @@ USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
-USE oft_h1_fields, ONLY: oft_h1_create
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
   taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, taylor_htor, &
@@ -97,7 +94,7 @@ CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0)
 CALL h0_setup_interp(ML_oft_h0)
 CALL h0_mloptions
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_h1)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1)
 !!\subsection doc_ex4_code_taylor Compute Taylor state
 !!
 !!For composite Taylor states the lowest eigenmode is used used in addition to the injector fields. This
@@ -141,11 +138,11 @@ CALL taylor_vacuum(nh,hcpc,hcpv,htags)
 CALL taylor_injectors(taylor_hlam(1,ML_oft_hcurl%level))
 !---Setup field interpolation object
 fluxes=(/1.d0,0.d0/)
-CALL oft_h1_create(Bfield%uvac)
+CALL ML_oft_h1%vec_create(Bfield%uvac)
 DO i=1,nh
   CALL Bfield%uvac%add(1.d0,fluxes(i),taylor_hvac(i,ML_oft_h1%level)%f)
 END DO
-CALL oft_hcurl_create(Bfield%ua)
+CALL ML_oft_hcurl%vec_create(Bfield%ua)
 CALL Bfield%ua%add(0.d0,fr/taylor_htor(1,ML_oft_hcurl%level),taylor_hffa(1,ML_oft_hcurl%level)%f)
 DO i=1,nh
   CALL Bfield%ua%add(1.d0,fluxes(i),taylor_gffa(i,ML_oft_h1%level)%f)
@@ -163,8 +160,8 @@ lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre) ! Setup Preconditioner
 !---Create solver fields
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
 !---Setup field interpolation
 CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
 !---Project field

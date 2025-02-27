@@ -19,7 +19,6 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
-USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hlam, &
   taylor_htor

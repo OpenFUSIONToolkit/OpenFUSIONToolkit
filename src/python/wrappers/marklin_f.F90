@@ -26,7 +26,6 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: fem_interp
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_vcreate
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
     oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
@@ -39,7 +38,6 @@ USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, oft_h0_zerogrnd, &
   oft_h0_zerob
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad, ML_oft_h1
-USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: oft_h1_divout, oft_h1_zeroi, h1_mc, oft_h1_curl_zerob, &
   h1_setup_interp, oft_h1_rinterp
 !---Taylor state
@@ -220,8 +218,8 @@ CALL create_diag_pre(lminv%pre)
 lminv%A=>lmop
 lminv%its=-2
 !---Create solver fields
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
 ALLOCATE(bvout(3,u%n/3))
 !---Project field onto plotting mesh
 SELECT CASE(int_type)
@@ -279,7 +277,7 @@ IF(ML_oft_h1%nlevels==0)THEN
   CALL oft_h0_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h0,ML_oft_bh0,ML_oft_hcurl%minlev+1)
   CALL h0_setup_interp(ML_oft_h0)
   !---H1 full space
-  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order,ML_oft_h1,ML_oft_hcurl%minlev)
+  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hcurl%minlev)
   CALL h1_setup_interp(ML_oft_h1,ML_oft_bh0)
 END IF
 !---------------------------------------------------------------------------
@@ -308,7 +306,7 @@ END IF
 ! Setup initial conditions
 !---------------------------------------------------------------------------
 ALLOCATE(interp_obj)
-CALL oft_h1_create(interp_obj%u)
+CALL ML_oft_h1%vec_create(interp_obj%u)
 CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL interp_obj%u%restore_local(tmp,1)
 IF(zero_norm)WRITE(*,*)'Setting gauge'

@@ -22,8 +22,8 @@ USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_fem_ptr, oft_ml_fem_type, oft_bfem_type!, &
 ! oft_ml_bfem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
-USE oft_hcurl_basis, ONLY: ML_oft_hcurl, oft_hcurl_set_level
-USE oft_h0_basis, ONLY: ML_oft_h0, oft_h0_fem, oft_h0_setup_vol
+USE oft_hcurl_basis, ONLY: ML_oft_hcurl
+USE oft_h0_basis, ONLY: oft_h0_fem, oft_h0_setup_vol
 IMPLICIT NONE
 #include "local.h"
 ! !---------------------------------------------------------------------------
@@ -51,45 +51,48 @@ type(oft_ml_fem_type), TARGET :: ML_oft_hgrad !< ML container for all FE represe
 ! type(oft_fem_comp_type), pointer :: oft_h1 !< Active H1 representation
 type(oft_ml_fem_comp_type), TARGET :: ML_oft_h1 !< ML container for H1 representations
 contains
-!---------------------------------------------------------------------------
-!> Set the current level for Nedelec H1 finite elements
-!---------------------------------------------------------------------------
-subroutine oft_h1_set_level(level)
-integer(i4), intent(in) :: level !< Desired level
-DEBUG_STACK_PUSH
-! if(level>oft_h1_nlevels.OR.level<=0)then
-!   write(*,*)level
-!   call oft_abort('Invalid FE level','oft_h1_set_level',__FILE__)
-! end if
-! if(level<mg_mesh%mgdim)then
-!   call multigrid_level(level)
-! else
-!   call multigrid_level(mg_mesh%mgdim)
-! end if
-CALL ML_oft_h1%set_level(level)
-! oft_h1=>ML_oft_h1%current_level
-CALL ML_oft_hgrad%set_level(level)
-! SELECT TYPE(this=>ML_oft_hgrad%current_level)
-!   CLASS IS(oft_h0_fem)
-!     oft_hgrad=>this
-!   CLASS DEFAULT
-!     CALL oft_abort("Error casting H0 object", "oft_h1_set_level", __FILE__)
-! END SELECT
-! oft_hgrad=>ML_oft_hgrad%current_level
-!---
-! oft_h1_level=level
-! oft_h1_ops=>ML_oft_h1_ops(level)
-call oft_hcurl_set_level(level)
-DEBUG_STACK_POP
-end subroutine oft_h1_set_level
+! !---------------------------------------------------------------------------
+! !> Set the current level for Nedelec H1 finite elements
+! !---------------------------------------------------------------------------
+! subroutine oft_h1_set_level(level)
+! integer(i4), intent(in) :: level !< Desired level
+! DEBUG_STACK_PUSH
+! ! if(level>oft_h1_nlevels.OR.level<=0)then
+! !   write(*,*)level
+! !   call oft_abort('Invalid FE level','oft_h1_set_level',__FILE__)
+! ! end if
+! ! if(level<mg_mesh%mgdim)then
+! !   call multigrid_level(level)
+! ! else
+! !   call multigrid_level(mg_mesh%mgdim)
+! ! end if
+! CALL ML_oft_h1%set_level(level)
+! ! oft_h1=>ML_oft_h1%current_level
+! CALL ML_oft_hgrad%set_level(level)
+! ! SELECT TYPE(this=>ML_oft_hgrad%current_level)
+! !   CLASS IS(oft_h0_fem)
+! !     oft_hgrad=>this
+! !   CLASS DEFAULT
+! !     CALL oft_abort("Error casting H0 object", "oft_h1_set_level", __FILE__)
+! ! END SELECT
+! ! oft_hgrad=>ML_oft_hgrad%current_level
+! !---
+! ! oft_h1_level=level
+! ! oft_h1_ops=>ML_oft_h1_ops(level)
+! ! call oft_hcurl_set_level(level)
+! CALL ML_oft_hcurl%set_level(level)
+! DEBUG_STACK_POP
+! end subroutine oft_h1_set_level
 !---------------------------------------------------------------------------
 !> Construct Nedelec H1 vector FE on each mesh level
 !!
 !! @note Highest supported representation is quadratic
 !---------------------------------------------------------------------------
-subroutine oft_h1_setup(mg_mesh,order,ML_hcurl_aug_obj,minlev)
+subroutine oft_h1_setup(mg_mesh,order,ML_hcurl_obj,ML_h0_obj,ML_hcurl_aug_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
+type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_obj
+type(oft_ml_fem_type), intent(inout) :: ML_h0_obj
 type(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_aug_obj
 integer(i4), optional, intent(in) :: minlev
 integer(i4) :: i,nlevels,minlev_out
@@ -107,9 +110,9 @@ ML_oft_hgrad%ml_mesh=>mg_mesh
 nlevels=mg_mesh%mgdim+(order-1)
 IF(minlev_out<0)minlev_out=nlevels
 ! allocate(ML_oft_h1_ops(nlevels))
-ML_oft_hgrad%minlev=minlev
+ML_oft_hgrad%minlev=minlev_out
 ML_oft_hgrad%nlevels=nlevels
-ML_hcurl_aug_obj%minlev=minlev
+ML_hcurl_aug_obj%minlev=minlev_out
 ML_hcurl_aug_obj%nlevels=nlevels
 
 ! oft_h1_minlev=minlev
@@ -137,10 +140,10 @@ do i=1,order
   IF(mg_mesh%mgdim+i-1<ML_hcurl_aug_obj%minlev)CYCLE
   ! ALLOCATE(oft_h0_fem::ML_oft_hgrad%levels(mg_mesh%mgdim+i-1)%fe)
   ! call oft_h1_set_level(mg_mesh%mgdim+i-1)
-  IF(ML_oft_h0%nlevels>=mg_mesh%mgdim+i)THEN
+  IF(ML_h0_obj%nlevels>=mg_mesh%mgdim+i)THEN
     ! DEALLOCATE(ML_oft_hgrad%levels(oft_h1_level)%fe)
     ! ML_oft_hgrad%levels(mg_mesh%mgdim+i-1)%fe=>ML_oft_h0%levels(mg_mesh%mgdim+i)%fe
-    SELECT TYPE(this=>ML_oft_h0%levels(mg_mesh%mgdim+i)%fe)
+    SELECT TYPE(this=>ML_h0_obj%levels(mg_mesh%mgdim+i)%fe)
       CLASS IS(oft_h0_fem)
         ML_oft_hgrad%levels(mg_mesh%mgdim+i-1)%fe=>this
       CLASS DEFAULT
@@ -148,7 +151,7 @@ do i=1,order
     END SELECT
     ! oft_hgrad=>ML_oft_hgrad%levels(oft_h1_level)%fe
   ELSE
-    CALL oft_h0_setup_vol(ML_oft_h0%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
+    CALL oft_h0_setup_vol(ML_oft_hgrad%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
     ! !---
     ! oft_hgrad%mesh=>mg_mesh%mesh
     ! oft_hgrad%order=i+1
@@ -179,12 +182,12 @@ end do
 ML_hcurl_aug_obj%nfields=2
 ALLOCATE(ML_hcurl_aug_obj%ml_fields(ML_hcurl_aug_obj%nfields))
 ALLOCATE(ML_hcurl_aug_obj%field_tags(ML_hcurl_aug_obj%nfields))
-ML_hcurl_aug_obj%ml_fields(1)%ml=>ML_oft_hcurl
+ML_hcurl_aug_obj%ml_fields(1)%ml=>ML_hcurl_obj
 ML_hcurl_aug_obj%field_tags(1)='c'
 ML_hcurl_aug_obj%ml_fields(2)%ml=>ML_oft_hgrad
 ML_hcurl_aug_obj%field_tags(2)='g'
 call ML_hcurl_aug_obj%setup
-CALL oft_h1_set_level(ML_hcurl_aug_obj%nlevels)
+CALL ML_hcurl_aug_obj%set_level(ML_hcurl_aug_obj%nlevels,propogate=.TRUE.)
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_h1_setup

@@ -76,13 +76,13 @@ contains
 end type oft_scalar_bfem
 !---Global Variables
 integer(i4), parameter :: oft_lagrange_id = 1 !< FE type ID
-integer(i4) :: oft_lagrange_lin_level = 0 !< Highest linear element level
+! integer(i4) :: oft_lagrange_lin_level = 0 !< Highest linear element level
 !
 ! type(oft_scalar_bfem), pointer :: oft_blagrange !< Active FE representation
 type(oft_ml_fem_type), TARGET :: ML_oft_blagrange !< ML container for all FE representations
 !
 ! TYPE(oft_scalar_fem), POINTER :: oft_lagrange !< Active FE representation
-TYPE(oft_scalar_fem), POINTER :: oft_lagrange_lin !< Highest linear element representation
+! TYPE(oft_scalar_fem), POINTER :: oft_lagrange_lin !< Highest linear element representation
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange !< ML container for all FE representations
 !
 ! TYPE(oft_fem_comp_type), POINTER :: oft_vlagrange !< Active vector representation
@@ -327,56 +327,56 @@ DO i=1,mesh%np
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE oft_lag_boundary
-!---------------------------------------------------------------------------
-!> Set the current level for lagrange finite elements
-!---------------------------------------------------------------------------
-subroutine oft_lag_set_level(level)
-integer(i4), intent(in) :: level !< Desired level
-DEBUG_STACK_PUSH
-! if((level>ML_oft_lagrange%nlevels).OR.(level<=0))then
-!   call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
-! end if
-! if(level<mg_mesh%mgdim)then
-!   call multigrid_level(level)
-! else
-!   call multigrid_level(mg_mesh%mgdim)
-! end if
-!---Volume FEs
-IF(ML_oft_lagrange%nlevels>0)THEN
-  if((level>ML_oft_lagrange%nlevels).OR.(level<=0))then
-    call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
-  end if
-  CALL ML_oft_lagrange%set_level(level)
-  ! SELECT TYPE(this=>ML_oft_lagrange%current_level)
-  !   CLASS IS(oft_scalar_fem)
-  !     oft_lagrange=>this
-  !   CLASS DEFAULT
-  !     CALL oft_abort("Error setting 3D Lagrange level", "oft_lag_set_level", __FILE__)
-  ! END SELECT
-  CALL ML_oft_vlagrange%set_level(level)
-  ! oft_vlagrange=>ML_oft_vlagrange%current_level
-END IF
-!---Surface FEs
-IF(ML_oft_blagrange%nlevels>0)THEN
-  if((level>ML_oft_blagrange%nlevels).OR.(level<=0))then
-    call oft_abort('Invalid boundary FE level','oft_lag_set_level',__FILE__)
-  end if
-  CALL ML_oft_blagrange%set_level(level)
-  ! SELECT TYPE(this=>ML_oft_blagrange%current_level)
-  !   CLASS IS(oft_scalar_bfem)
-  !     oft_blagrange=>this
-  !   CLASS DEFAULT
-  !     CALL oft_abort("Error setting 2D Lagrange level", "oft_lag_set_level", __FILE__)
-  ! END SELECT
-END IF
-! !---Operators
-! oft_lagrange_ops=>ML_oft_lagrange_ops(level)
-!---
-! oft_lagrange_level=level
-! oft_lagrange_lev=level
-! if(oft_lagrange_level>oft_lagrange_blevel.AND.oft_lagrange_blevel>0)oft_lagrange_lev=level-1
-DEBUG_STACK_POP
-end subroutine oft_lag_set_level
+! !---------------------------------------------------------------------------
+! !> Set the current level for lagrange finite elements
+! !---------------------------------------------------------------------------
+! subroutine oft_lag_set_level(level)
+! integer(i4), intent(in) :: level !< Desired level
+! DEBUG_STACK_PUSH
+! ! if((level>ML_oft_lagrange%nlevels).OR.(level<=0))then
+! !   call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
+! ! end if
+! ! if(level<mg_mesh%mgdim)then
+! !   call multigrid_level(level)
+! ! else
+! !   call multigrid_level(mg_mesh%mgdim)
+! ! end if
+! !---Volume FEs
+! IF(ML_oft_lagrange%nlevels>0)THEN
+!   if((level>ML_oft_lagrange%nlevels).OR.(level<=0))then
+!     call oft_abort('Invalid FE level','oft_lag_set_level',__FILE__)
+!   end if
+!   CALL ML_oft_lagrange%set_level(level)
+!   ! SELECT TYPE(this=>ML_oft_lagrange%current_level)
+!   !   CLASS IS(oft_scalar_fem)
+!   !     oft_lagrange=>this
+!   !   CLASS DEFAULT
+!   !     CALL oft_abort("Error setting 3D Lagrange level", "oft_lag_set_level", __FILE__)
+!   ! END SELECT
+!   CALL ML_oft_vlagrange%set_level(level)
+!   ! oft_vlagrange=>ML_oft_vlagrange%current_level
+! END IF
+! !---Surface FEs
+! IF(ML_oft_blagrange%nlevels>0)THEN
+!   if((level>ML_oft_blagrange%nlevels).OR.(level<=0))then
+!     call oft_abort('Invalid boundary FE level','oft_lag_set_level',__FILE__)
+!   end if
+!   CALL ML_oft_blagrange%set_level(level)
+!   ! SELECT TYPE(this=>ML_oft_blagrange%current_level)
+!   !   CLASS IS(oft_scalar_bfem)
+!   !     oft_blagrange=>this
+!   !   CLASS DEFAULT
+!   !     CALL oft_abort("Error setting 2D Lagrange level", "oft_lag_set_level", __FILE__)
+!   ! END SELECT
+! END IF
+! ! !---Operators
+! ! oft_lagrange_ops=>ML_oft_lagrange_ops(level)
+! !---
+! ! oft_lagrange_level=level
+! ! oft_lagrange_lev=level
+! ! if(oft_lagrange_level>oft_lagrange_blevel.AND.oft_lagrange_blevel>0)oft_lagrange_lev=level-1
+! DEBUG_STACK_POP
+! end subroutine oft_lag_set_level
 !---------------------------------------------------------------------------
 !> Construct lagrange scalar FE on each mesh level
 !!
@@ -457,15 +457,15 @@ do i=1,order
   END IF
 end do
 !---Set linear level for finest-mesh
-oft_lagrange_lin_level=mg_mesh%mgdim
-IF(ML_lag_obj%nlevels>0)THEN
-  SELECT TYPE(this=>ML_lag_obj%levels(mg_mesh%mgdim)%fe)
-    CLASS IS(oft_scalar_fem)
-      oft_lagrange_lin=>this
-    CLASS DEFAULT
-      CALL oft_abort("Error setting linear level", "oft_lag_setup", __FILE__)
-  END SELECT
-END IF
+! oft_lagrange_lin_level=mg_mesh%mgdim
+! IF(ML_lag_obj%nlevels>0)THEN
+!   SELECT TYPE(this=>ML_lag_obj%levels(mg_mesh%mgdim)%fe)
+!     CLASS IS(oft_scalar_fem)
+!       oft_lagrange_lin=>this
+!     CLASS DEFAULT
+!       CALL oft_abort("Error setting linear level", "oft_lag_setup", __FILE__)
+!   END SELECT
+! END IF
 !---Setup vector rep
 IF(ML_lag_obj%nlevels>0)THEN
   ML_vlag_obj%nlevels=ML_lag_obj%nlevels
@@ -482,7 +482,12 @@ IF(ML_lag_obj%nlevels>0)THEN
 END IF
 !---Set to highest level when done
 ! call oft_lag_set_level(ML_lag_obj%nlevels)
-CALL oft_lag_set_level(max(ML_lag_obj%nlevels,ML_blag_obj%nlevels))
+! CALL oft_lag_set_level(max(ML_lag_obj%nlevels,ML_blag_obj%nlevels))
+IF(ML_lag_obj%nlevels>0)THEN
+  CALL ML_lag_obj%set_level(ML_lag_obj%nlevels)
+  CALL ML_vlag_obj%set_level(ML_lag_obj%nlevels)
+END IF
+CALL ML_blag_obj%set_level(ML_blag_obj%nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 CALL oft_decrease_indent
 DEBUG_STACK_POP

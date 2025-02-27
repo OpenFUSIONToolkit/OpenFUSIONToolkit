@@ -25,7 +25,6 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
-USE oft_solver_utils, ONLY: create_mlpre, create_native_pre
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
@@ -37,7 +36,6 @@ USE oft_lag_basis, ONLY: ML_oft_lagrange, &
   oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, oft_blag_d2eval, &
   oft_lag_nodes, ML_oft_vlagrange, oft_blag_eval, &
   oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
-USE oft_lag_fields, ONLY: oft_lag_create, oft_blag_create, oft_lag_vcreate
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------

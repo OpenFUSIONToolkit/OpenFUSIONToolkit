@@ -24,11 +24,10 @@ USE oft_la_base, ONLY: oft_vector,oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
-USE oft_h0_basis, ONLY: oft_h0_setup, oft_h0_set_level, ML_oft_h0, &
+USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, &
   ML_oft_h0, ML_oft_bh0
-USE oft_h0_fields, ONLY: oft_h0_create
-USE oft_h0_operators, ONLY: h0_setup_interp, h0_mloptions, h0_inject, &
-  h0_interp, oft_h0_zerob, df_lop, nu_lop, oft_h0_getlop, oft_h0_getmop, h0_getlop_pre
+USE oft_h0_operators, ONLY: h0_setup_interp, h0_mloptions, &
+  oft_h0_zerob, df_lop, nu_lop, oft_h0_getlop, oft_h0_getmop, h0_getlop_pre
 IMPLICIT NONE
 INTEGER(i4) :: minlev
 TYPE(multigrid_mesh) :: mg_mesh
@@ -79,10 +78,10 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Set FE level
-CALL oft_h0_set_level(ML_oft_h0%nlevels)
+CALL ML_oft_h0%set_level(ML_oft_h0%nlevels)
 !---Create solver fields
-CALL oft_h0_create(u)
-CALL oft_h0_create(v)
+CALL ML_oft_h0%vec_create(u)
+CALL ML_oft_h0%vec_create(v)
 !---Get FE operators
 CALL oft_h0_getlop(ML_oft_h0%current_level,lop,'zerob')
 CALL oft_h0_getmop(ML_oft_h0%current_level,mop,'none')
@@ -137,8 +136,8 @@ TYPE(oft_matrix_ptr), POINTER :: ml_lop(:) => NULL()
 !---------------------------------------------------------------------------
 nlevels=ML_oft_h0%nlevels-minlev+1
 !---Create solver fields
-CALL oft_h0_create(u)
-CALL oft_h0_create(v)
+CALL ML_oft_h0%vec_create(u)
+CALL ML_oft_h0%vec_create(v)
 !---Get FE operators
 CALL oft_h0_getmop(ML_oft_h0%current_level,mop,'none')
 !---------------------------------------------------------------------------

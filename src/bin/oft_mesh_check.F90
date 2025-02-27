@@ -71,7 +71,7 @@ IF(order>0)THEN
   !---H1(Grad) subspace
   CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
   !---H1 space
-  CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,minlev)
+  CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,minlev)
 !---------------------------------------------------------------------------
 ! Compute smoother coefficients
 !---------------------------------------------------------------------------

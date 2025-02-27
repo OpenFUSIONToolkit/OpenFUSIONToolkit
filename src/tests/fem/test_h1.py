@@ -10,7 +10,7 @@ from oft_testing import run_OFT
 oft_in_template = """
 &runtime_options
  ppn=1
- debug=0
+ debug=3
  test_run=T
  use_petsc={7}
 /

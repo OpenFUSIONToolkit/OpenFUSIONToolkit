@@ -1020,6 +1020,50 @@ ABSTRACT INTERFACE
   logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
   end subroutine cmat_zero_rows
 END INTERFACE
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+TYPE, ABSTRACT, PUBLIC :: oft_ml_vecspace
+CONTAINS
+  !> Needs docs
+  PROCEDURE(oft_veccreate_proto), DEFERRED :: vec_create
+  !> Needs docs
+  PROCEDURE(oft_interp_proto), DEFERRED :: interp
+  !> Needs docs
+  PROCEDURE(oft_inject_proto), DEFERRED :: inject
+END TYPE oft_ml_vecspace
+!---Interfaces
+ABSTRACT INTERFACE
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+  SUBROUTINE oft_inject_proto(self,afine,acors)
+    IMPORT oft_ml_vecspace, oft_vector
+    CLASS(oft_ml_vecspace), INTENT(inout) :: self
+    CLASS(oft_vector), INTENT(inout) :: afine
+    CLASS(oft_vector), INTENT(inout) :: acors
+  END SUBROUTINE oft_inject_proto
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+  SUBROUTINE oft_interp_proto(self,acors,afine)
+    IMPORT oft_ml_vecspace, oft_vector
+    CLASS(oft_ml_vecspace), INTENT(inout) :: self
+    CLASS(oft_vector), INTENT(inout) :: acors
+    CLASS(oft_vector), INTENT(inout) :: afine
+  END SUBROUTINE oft_interp_proto
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+  SUBROUTINE oft_veccreate_proto(self,new,level,cache,native)
+    IMPORT oft_ml_vecspace, oft_vector, i4
+    CLASS(oft_ml_vecspace), INTENT(inout) :: self
+    CLASS(oft_vector), POINTER, INTENT(out) :: new
+    INTEGER(i4), OPTIONAL, INTENT(in) :: level
+    LOGICAL, OPTIONAL, INTENT(in) :: cache
+    LOGICAL, OPTIONAL, INTENT(in) :: native
+  END SUBROUTINE oft_veccreate_proto
+END INTERFACE
 !---Declare public entities
 public vector_extrapolate
 contains

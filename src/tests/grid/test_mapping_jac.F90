@@ -21,7 +21,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_npos, oft_lag_geval, &
-  oft_lag_d2eval, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange, oft_lag_set_level, &
+  oft_lag_d2eval, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange, &
   oft_scalar_fem, oft_3D_lagrange_cast
 IMPLICIT NONE
 INTEGER(i4) :: xi,xj,ierr,nfail,i,ntests,io_unit

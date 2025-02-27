@@ -29,11 +29,11 @@ USE oft_solver_utils, ONLY: create_mlpre, create_native_pre
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
-USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
+USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type, &
+  oft_ml_fe_vecspace
 USE fem_utils, ONLY: fem_interp
 USE oft_h0_basis, ONLY: ML_oft_h0, oft_h0_eval_all, oft_h0_geval_all, &
-  oft_h0_set_level, oft_h0_fem
-USE oft_h0_fields, ONLY: oft_h0_create
+  oft_h0_fem
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -677,8 +677,8 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL oft_h0_create(h0_vec)
-CALL oft_h0_create(h0_vec_cors,ML_h0_rep%level-1)
+CALL ML_h0_rep%vec_create(h0_vec)
+CALL ML_h0_rep%vec_create(h0_vec_cors,ML_h0_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
@@ -837,8 +837,8 @@ end do
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL oft_h0_create(h0_vec)
-CALL oft_h0_create(h0_vec_cors,ML_h0_rep%level-1)
+CALL ML_h0_rep%vec_create(h0_vec)
+CALL ML_h0_rep%vec_create(h0_vec_cors,ML_h0_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
@@ -908,49 +908,74 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE h0_pinterpmatrix
 END SUBROUTINE h0_setup_interp
-!---------------------------------------------------------------------------
-! SUBROUTINE: h0_interp
-!---------------------------------------------------------------------------
-!> Interpolate a coarse level H0 scalar field to the next finest level
-!!
-!! @note The global H0 level in incremented by one in this subroutine
-!!
-!! @param[in] acors Vector to interpolate
-!! @param[in,out] afine Fine vector from interpolation
-!---------------------------------------------------------------------------
-subroutine h0_interp(acors,afine)
-class(oft_vector), intent(inout) :: acors
-class(oft_vector), intent(inout) :: afine
-DEBUG_STACK_PUSH
-!---Step one level up
-call oft_h0_set_level(ML_oft_h0%level+1)
-call afine%set(0.d0)
-!---
-if(ML_oft_h0%level==ML_oft_h0%blevel+1)then
-  call h0_base_pop(acors,afine)
-  DEBUG_STACK_POP
-  return
-end if
-! CALL oft_h0_ops%interp%apply(acors,afine)
-CALL ML_oft_h0%interp_matrices(ML_oft_h0%level)%m%apply(acors,afine)
-DEBUG_STACK_POP
-end subroutine h0_interp
-!---------------------------------------------------------------------------
-! SUBROUTINE: h0_base_pop
+! !---------------------------------------------------------------------------
+! ! SUBROUTINE: h0_interp
+! !---------------------------------------------------------------------------
+! !> Interpolate a coarse level H0 scalar field to the next finest level
+! !!
+! !! @note The global H0 level in incremented by one in this subroutine
+! !!
+! !! @param[in] acors Vector to interpolate
+! !! @param[in,out] afine Fine vector from interpolation
+! !---------------------------------------------------------------------------
+! subroutine h0_interp(acors,afine)
+! class(oft_vector), intent(inout) :: acors
+! class(oft_vector), intent(inout) :: afine
+! DEBUG_STACK_PUSH
+! !---Step one level up
+! call oft_h0_set_level(ML_oft_h0%level+1)
+! call afine%set(0.d0)
+! !---
+! if(ML_oft_h0%level==ML_oft_h0%blevel+1)then
+!   call h0_base_pop(acors,afine)
+!   DEBUG_STACK_POP
+!   return
+! end if
+! ! CALL oft_h0_ops%interp%apply(acors,afine)
+! CALL ML_oft_h0%interp_matrices(ML_oft_h0%level)%m%apply(acors,afine)
+! DEBUG_STACK_POP
+! end subroutine h0_interp
+! !---------------------------------------------------------------------------
+! ! SUBROUTINE: h0_base_pop
+! !---------------------------------------------------------------------------
+! !> Transfer a base level H0 scalar field to the next MPI level
+! !!
+! !! @param[in] acors Vector to transfer
+! !! @param[in,out] afine Fine vector from transfer
+! !---------------------------------------------------------------------------
+! subroutine h0_base_pop(acors,afine)
+! class(oft_vector), intent(inout) :: acors
+! class(oft_vector), intent(inout) :: afine
+! integer(i4), pointer, dimension(:) :: lptmp
+! integer(i4) :: i
+! real(r8), pointer, dimension(:) :: array_c,array_f
+! DEBUG_STACK_PUSH
+! lptmp=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%nbase+1)%base%lp
+! CALL acors%get_local(array_c)
+! CALL afine%get_local(array_f)
+! !$omp parallel do
+! do i=1,afine%n
+!   array_f(i)=array_c(lptmp(i))
+! end do
+! CALL afine%restore_local(array_f)
+! DEALLOCATE(array_c,array_f)
+! DEBUG_STACK_POP
+! end subroutine h0_base_pop
 !---------------------------------------------------------------------------
 !> Transfer a base level H0 scalar field to the next MPI level
 !!
 !! @param[in] acors Vector to transfer
 !! @param[in,out] afine Fine vector from transfer
 !---------------------------------------------------------------------------
-subroutine h0_base_pop(acors,afine)
+subroutine h0_base_pop(self,acors,afine)
+class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors
 class(oft_vector), intent(inout) :: afine
 integer(i4), pointer, dimension(:) :: lptmp
 integer(i4) :: i
 real(r8), pointer, dimension(:) :: array_c,array_f
 DEBUG_STACK_PUSH
-lptmp=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%nbase+1)%base%lp
+lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
 !$omp parallel do
@@ -961,43 +986,83 @@ CALL afine%restore_local(array_f)
 DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine h0_base_pop
-!---------------------------------------------------------------------------
-!> Inject a fine level H0 scalar field to the next coarsest level
-!!
-!! @note The global H0 level in decremented by one in this subroutine
-!!
-!! @param[in] afine Vector to inject
-!! @param[in,out] acors Coarse vector from injection
-!---------------------------------------------------------------------------
-subroutine h0_inject(afine,acors)
-class(oft_vector), intent(inout) :: afine
-class(oft_vector), intent(inout) :: acors
-integer(i4) :: i,j,k
-logical :: gcheck
-DEBUG_STACK_PUSH
-gcheck=(ML_oft_h0%current_level%order==1)
-! Step down level up
-call oft_h0_set_level(ML_oft_h0%level-1)
-! Cast fine field
-call acors%set(0.d0)
-if(ML_oft_h0%level==ML_oft_h0%blevel)then
-  call h0_base_push(afine,acors)
-  DEBUG_STACK_POP
-  return
-end if
-! CALL ML_oft_h0_ops(oft_h0_level+1)%interp%applyT(afine,acors)
-CALL ML_oft_h0%interp_matrices(ML_oft_h0%level+1)%m%applyT(afine,acors)
-DEBUG_STACK_POP
-end subroutine h0_inject
-!---------------------------------------------------------------------------
-! SUBROUTINE: h0_base_push
+! !---------------------------------------------------------------------------
+! !> Inject a fine level H0 scalar field to the next coarsest level
+! !!
+! !! @note The global H0 level in decremented by one in this subroutine
+! !!
+! !! @param[in] afine Vector to inject
+! !! @param[in,out] acors Coarse vector from injection
+! !---------------------------------------------------------------------------
+! subroutine h0_inject(afine,acors)
+! class(oft_vector), intent(inout) :: afine
+! class(oft_vector), intent(inout) :: acors
+! integer(i4) :: i,j,k
+! logical :: gcheck
+! DEBUG_STACK_PUSH
+! gcheck=(ML_oft_h0%current_level%order==1)
+! ! Step down level up
+! call oft_h0_set_level(ML_oft_h0%level-1)
+! ! Cast fine field
+! call acors%set(0.d0)
+! if(ML_oft_h0%level==ML_oft_h0%blevel)then
+!   call h0_base_push(afine,acors)
+!   DEBUG_STACK_POP
+!   return
+! end if
+! ! CALL ML_oft_h0_ops(oft_h0_level+1)%interp%applyT(afine,acors)
+! CALL ML_oft_h0%interp_matrices(ML_oft_h0%level+1)%m%applyT(afine,acors)
+! DEBUG_STACK_POP
+! end subroutine h0_inject
+! !---------------------------------------------------------------------------
+! ! SUBROUTINE: h0_base_push
+! !---------------------------------------------------------------------------
+! !> Transfer a MPI level H0 scalar field to the base level
+! !!
+! !! @param[in] afine Vector to transfer
+! !! @param[in,out] acors Fine vector from transfer
+! !---------------------------------------------------------------------------
+! subroutine h0_base_push(afine,acors)
+! class(oft_vector), intent(inout) :: afine
+! class(oft_vector), intent(inout) :: acors
+! integer(i4), pointer :: lptmp(:)
+! integer(i4) :: i,j,ierr
+! real(r8), pointer, dimension(:) :: alias,array_c,array_f
+! CLASS(oft_afem_type), POINTER :: h0_fine => NULL()
+! DEBUG_STACK_PUSH
+! !---
+! lptmp=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%nbase+1)%base%lp
+! CALL acors%get_local(array_c)
+! CALL afine%get_local(array_f)
+! h0_fine=>ML_oft_h0%levels(ML_oft_h0%level+1)%fe
+! !---
+! allocate(alias(acors%n))
+! alias=0.d0
+! !$omp parallel do
+! do i=1,afine%n
+!   if(h0_fine%linkage%be(i))cycle
+!   alias(lptmp(i))=array_f(i)
+! end do
+! !$omp parallel do private(j)
+! do i=1,h0_fine%linkage%nbe
+!   j=h0_fine%linkage%lbe(i)
+!   if(.NOT.h0_fine%linkage%leo(i))cycle
+!   alias(lptmp(j))=array_f(j)
+! end do
+! !---Global reduction over all processors
+! array_c=oft_mpi_sum(alias,acors%n)
+! call acors%restore_local(array_c)
+! deallocate(alias,array_c,array_f)
+! DEBUG_STACK_POP
+! end subroutine h0_base_push
 !---------------------------------------------------------------------------
 !> Transfer a MPI level H0 scalar field to the base level
 !!
 !! @param[in] afine Vector to transfer
 !! @param[in,out] acors Fine vector from transfer
 !---------------------------------------------------------------------------
-subroutine h0_base_push(afine,acors)
+subroutine h0_base_push(self,afine,acors)
+class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine
 class(oft_vector), intent(inout) :: acors
 integer(i4), pointer :: lptmp(:)
@@ -1006,10 +1071,10 @@ real(r8), pointer, dimension(:) :: alias,array_c,array_f
 CLASS(oft_afem_type), POINTER :: h0_fine => NULL()
 DEBUG_STACK_PUSH
 !---
-lptmp=>ML_oft_h0%ml_mesh%meshes(ML_oft_h0%ml_mesh%nbase+1)%base%lp
+lptmp=>self%ML_FE_rep%ml_mesh%meshes(self%ML_FE_rep%ml_mesh%nbase+1)%base%lp
 CALL acors%get_local(array_c)
 CALL afine%get_local(array_f)
-h0_fine=>ML_oft_h0%levels(ML_oft_h0%level+1)%fe
+h0_fine=>self%ML_FE_rep%levels(self%ML_FE_rep%level+1)%fe
 !---
 allocate(alias(acors%n))
 alias=0.d0
@@ -1121,6 +1186,7 @@ LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
 TYPE(oft_h0_zerob), POINTER :: zerob_bc
 TYPE(oft_h0_zerogrnd), POINTER :: zerogrnd_bc
+TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
 TYPE(xml_node), POINTER :: pre_node
 #ifdef HAVE_XML
@@ -1149,7 +1215,7 @@ END IF
 ALLOCATE(ml_int(nl-1),levels(nl))
 ALLOCATE(df(nl),nu(nl))
 DO i=1,nl
-  CALL oft_h0_set_level(minlev+(i-1))
+  CALL ML_oft_h0%set_level(minlev+(i-1))
   levels(i)=minlev+(i-1)
   df(i)=df_lop(levels(i))
   nu(i)=nu_lop(levels(i))
@@ -1164,7 +1230,7 @@ DO i=1,nl
   END IF
   IF(i>1)ml_int(i-1)%M=>ML_oft_h0%interp_matrices(ML_oft_h0%level)%m !oft_h0_ops%interp
 END DO
-CALL oft_h0_set_level(levin)
+CALL ML_oft_h0%set_level(levin)
 !---------------------------------------------------------------------------
 ! Search for XML-spec
 !---------------------------------------------------------------------------
@@ -1180,17 +1246,21 @@ END IF
 ! Setup preconditioner
 !---------------------------------------------------------------------------
 NULLIFY(pre)
+ALLOCATE(tmp_vecspace)
+tmp_vecspace%ML_FE_rep=>ML_oft_h0
+tmp_vecspace%base_pop=>h0_base_pop
+tmp_vecspace%base_push=>h0_base_push
 SELECT CASE(TRIM(bc_type))
   CASE("zerob")
     ALLOCATE(zerob_bc)
     zerob_bc%ML_H0_rep=>ML_oft_h0
-    CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_h0_create,interp=h0_interp, &
-      inject=h0_inject,bc=zerob_bc,stype=1,df=df,nu=nu,xml_root=pre_node)
+    CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
+      bc=zerob_bc,stype=1,df=df,nu=nu,xml_root=pre_node)
   CASE("grnd")
     ALLOCATE(zerogrnd_bc)
     zerogrnd_bc%ML_H0_rep=>ML_oft_h0
-    CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,create_vec=oft_h0_create,interp=h0_interp, &
-      inject=h0_inject,bc=zerogrnd_bc,stype=1,df=df,nu=nu,xml_root=pre_node)
+    CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
+      bc=zerogrnd_bc,stype=1,df=df,nu=nu,xml_root=pre_node)
   CASE DEFAULT
     CALL oft_abort("Unknown BC type","h0_getlop_pre",__FILE__)
 END SELECT

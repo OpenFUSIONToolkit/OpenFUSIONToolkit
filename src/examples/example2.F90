@@ -34,12 +34,11 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_mlpre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, &
-  oft_lag_set_level, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_create
+USE fem_base, ONLY: oft_ml_fe_vecspace
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
   oft_lag_getmop, oft_lag_getlop, df_lop, nu_lop, oft_lag_zerob, &
-  lag_interp, lag_inject
+  lag_base_pop, lag_base_push
 IMPLICIT NONE
 !!\subsection ex2_code_vars Variable Definitions
 !---Solver objects
@@ -61,6 +60,7 @@ INTEGER(i4), PARAMETER :: order = 3
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_lag_zerob) :: lag_zerob
+TYPE(oft_ml_fe_vecspace) :: ml_vecspace
 !!\subsection doc_ex2_code_fem Setup Lagrange FE
 !!
 !!When MG is used it is also desirable to construct field caches for each FE representation to be used. This is done with
@@ -88,7 +88,7 @@ nlevels=ML_oft_lagrange%nlevels
 ALLOCATE(ml_lop(nlevels),ml_int(nlevels-1))
 ALLOCATE(df(nlevels),nu(nlevels),levels(nlevels))
 DO i=1,nlevels
-  CALL oft_lag_set_level(i)
+  CALL ML_oft_lagrange%set_level(i)
   levels(i)=i
   IF(i==ML_oft_lagrange%blevel+1)levels(i)=-levels(i)
   df(i)=df_lop(i)
@@ -98,11 +98,11 @@ DO i=1,nlevels
   CALL oft_lag_getlop(ML_oft_lagrange%current_level,ml_lop(i)%M,'zerob')
   IF(i>1)ml_int(i-1)%M=>ML_oft_lagrange%interp_matrices(i)%m !oft_lagrange_ops%interp
 END DO
-CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
+CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !!\subsection doc_ex2_code_fields Setup solver fields
 !---Create solver fields
-CALL oft_lag_create(u)
-CALL oft_lag_create(v)
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(v)
 !---Get FE operators
 lop=>ml_lop(nlevels)%M
 CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
@@ -111,9 +111,11 @@ CALL create_cg_solver(linv)
 linv%its=-3
 linv%A=>lop
 !---Setup MG preconditioner
-CALL create_mlpre(linv%pre,ml_lop,levels, &
-  nlevels=nlevels,create_vec=oft_lag_create,interp=lag_interp,inject=lag_inject, &
-  bc=lag_zerob,stype=1,df=df,nu=nu)
+ml_vecspace%ML_FE_rep=>ML_oft_lagrange
+ml_vecspace%base_pop=>lag_base_pop
+ml_vecspace%base_push=>lag_base_push
+CALL create_mlpre(linv%pre,ml_lop,levels,nlevels=nlevels,ml_vecspace=ml_vecspace, &
+       bc=lag_zerob,stype=1,df=df,nu=nu)
 !!\subsection doc_ex2_code_compute Solve linear system
 CALL u%set(1.d0)
 CALL mop%apply(u,v)

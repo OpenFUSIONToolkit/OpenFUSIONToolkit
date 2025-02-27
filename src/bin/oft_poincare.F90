@@ -47,7 +47,6 @@ USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
-USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: oft_h1_rinterp
 !---Tracing
 USE tracing, ONLY: oft_tracer, create_tracer, tracing_poincare, set_timeout
@@ -118,11 +117,11 @@ SELECT CASE(type)
   CASE(2) !  Nedelec H1 field
     CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
     CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
-    CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,-1)
+    CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(x1)
     CALL ML_oft_h0%vec_create(x2)
-    CALL oft_h1_create(u)
+    CALL ML_oft_h1%vec_create(u)
     Bfield_H1%u=>u
     tracer%B=>Bfield_H1
     CALL Bfield_H1%setup(ML_oft_h1%current_level)

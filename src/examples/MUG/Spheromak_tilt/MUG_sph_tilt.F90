@@ -36,8 +36,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
   create_ilu_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
+USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 !---H1(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
 !---H1(Grad) FE space
@@ -45,7 +44,6 @@ USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
 !---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad, ML_oft_h1
-USE oft_h1_fields, ONLY: oft_h1_create
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_mc
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
@@ -96,7 +94,7 @@ CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
 !---H1(Grad) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,-1)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,-1)
 h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
@@ -124,7 +122,7 @@ END IF
 !! This also leads us to our choice of an intial perturbation to the equilibrium,
 !! which we will chose to match field of the lowest eigenstate.
 CALL taylor_hmodes(3)
-CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
+CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" subroutine computes the vector
 !! potential for each of the requested eignestates. However, the MHD
 !! solver uses magnetic field as the primary variable. With force-free eigenstate
@@ -158,12 +156,12 @@ divout%pm=.TRUE.
 ! Setup initial conditions
 !---------------------------------------------------------------------------
 !---Apply to equilibrium field
-CALL oft_h1_create(ic_fields%B)
+CALL ML_oft_h1%vec_create(ic_fields%B)
 CALL taylor_hffa(3,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
 !---Apply to perturbation field
-CALL oft_h1_create(pert_fields%B)
+CALL ML_oft_h1%vec_create(pert_fields%B)
 CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL pert_fields%B%restore_local(tmp,1)
 CALL divout%apply(pert_fields%B)
@@ -191,16 +189,16 @@ IF(.NOT.linear)THEN
   DEALLOCATE(pert_fields%B)
 END IF
 !---Create velocity field
-CALL oft_lag_vcreate(ic_fields%V)
-IF(linear)CALL oft_lag_vcreate(pert_fields%V)
+CALL ML_oft_vlagrange%vec_create(ic_fields%V)
+IF(linear)CALL ML_oft_vlagrange%vec_create(pert_fields%V)
 !---Create static density/temperature
-CALL oft_lag_create(ic_fields%Ne)
-CALL oft_lag_create(ic_fields%Ti)
+CALL ML_oft_lagrange%vec_create(ic_fields%Ne)
+CALL ML_oft_lagrange%vec_create(ic_fields%Ti)
 CALL ic_fields%Ne%set(n0)
 CALL ic_fields%Ti%set(t0)
 IF(linear)THEN
-  CALL oft_lag_create(pert_fields%Ne)
-  CALL oft_lag_create(pert_fields%Ti)
+  CALL ML_oft_lagrange%vec_create(pert_fields%Ne)
+  CALL ML_oft_lagrange%vec_create(pert_fields%Ti)
 END IF
 !---Clean up temporary matrices and fields
 CALL lop%delete

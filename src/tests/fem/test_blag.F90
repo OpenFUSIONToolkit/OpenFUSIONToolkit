@@ -19,9 +19,8 @@ USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
+USE oft_lag_basis, ONLY: oft_lag_setup, &
   ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_blag_create
 USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zeroe
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -75,10 +74,10 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Set FE level
-CALL oft_lag_set_level(ML_oft_blagrange%nlevels)
+CALL ML_oft_lagrange%set_level(ML_oft_blagrange%nlevels)
 !---Create solver fields
-CALL oft_blag_create(u)
-CALL oft_blag_create(v)
+CALL ML_oft_blagrange%vec_create(u)
+CALL ML_oft_blagrange%vec_create(v)
 !---Get FE operators
 CALL oft_blag_getlop(ML_oft_blagrange%current_level,lop,'edges',ML_oft_lagrange%current_level%bc)
 CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,'none')

@@ -18,10 +18,10 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, &
+USE fem_composite, ONLY: oft_ml_fe_comp_vecspace
+USE oft_lag_basis, ONLY: oft_lag_setup, &
   ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
-USE oft_lag_fields, ONLY: oft_lag_vcreate
-USE oft_lag_operators, ONLY: oft_lag_vgetmop, lag_vinterp, lag_vinject, oft_vlag_zerob, &
+USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_vlag_zerob, &
   df_lop, nu_lop, lag_setup_interp, lag_mloptions, oft_lag_getlop
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -73,10 +73,10 @@ REAL(r8) :: uu
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Set FE level
-CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
+CALL ML_oft_vlagrange%set_level(ML_oft_lagrange%nlevels,propogate=.TRUE.)
 !---Create solver fields
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
 !---Get FE operators
 CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,mop,'none')
 !---Setup matrix solver
@@ -129,6 +129,7 @@ TYPE(oft_graph_ptr) :: graphs(3,3)
 TYPE(oft_matrix_ptr) :: mats(3,3)
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: mop => NULL()
+TYPE(oft_ml_fe_comp_vecspace) :: ml_vecspace
 REAL(r8) :: uu
 INTEGER(i4) :: i,nlevels
 !---------------------------------------------------------------------------
@@ -139,7 +140,7 @@ nlevels=ML_oft_lagrange%nlevels-minlev+1
 ALLOCATE(ml_int(nlevels-1),ml_vlop(nlevels),ml_lop(nlevels))
 ALLOCATE(levels(nlevels),df(nlevels),nu(nlevels))
 DO i=1,nlevels
-  CALL oft_lag_set_level(minlev+i-1)
+  CALL ML_oft_vlagrange%set_level(minlev+i-1,propogate=.TRUE.)
   levels(i)=minlev+(i-1)
   df(i)=df_lop(levels(i))
   nu(i)=nu_lop(levels(i))
@@ -161,8 +162,8 @@ DO i=1,nlevels
   graphs(2,2)%g=>graphs(1,1)%g
   graphs(3,3)%g=>graphs(1,1)%g
   !---Get coarse and fine vectors
-  CALL oft_lag_vcreate(cvec)
-  CALL oft_lag_vcreate(fvec)
+  CALL ML_oft_vlagrange%vec_create(cvec)
+  CALL ML_oft_vlagrange%vec_create(fvec)
   NULLIFY(ml_vlop(i)%M)
   !---Construct matrix
   CALL create_matrix(ml_vlop(i)%M,graphs,fvec,cvec)
@@ -184,10 +185,10 @@ DO i=1,nlevels
   !---
   IF(i>1)ml_int(i-1)%M=>ML_oft_vlagrange%interp_matrices(i)%m !oft_lagrange_ops%vinterp
 END DO
-CALL oft_lag_set_level(ML_oft_lagrange%nlevels)
+CALL ML_oft_vlagrange%set_level(ML_oft_lagrange%nlevels,propogate=.TRUE.)
 !---Create solver fields
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
 !---Get FE operators
 CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,mop,'none')
 !---Setup matrix solver
@@ -195,9 +196,9 @@ CALL create_cg_solver(linv,force_native=.TRUE.)
 linv%A=>ml_vlop(nlevels)%M
 linv%its=-3
 linv%itplot=1
+ml_vecspace%ML_FE_rep=>ML_oft_vlagrange
 CALL create_mlpre(linv%pre,ml_vlop(1:nlevels),levels, &
-  nlevels=nlevels,create_vec=oft_lag_vcreate, &
-  interp=lag_vinterp,inject=lag_vinject, &
+  nlevels=nlevels,ml_vecspace=ml_vecspace, &
   bc=vlag_zerob,stype=1,df=df,nu=nu)
 !---Solve
 CALL u%set(1.d0)

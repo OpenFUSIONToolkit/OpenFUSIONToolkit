@@ -18,9 +18,8 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_set_level, &
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, &
   ML_oft_hcurl, ML_oft_bhcurl
-USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, oft_hcurl_zerob, &
   hcurl_setup_interp, hcurl_mloptions, hcurl_getwop_pre
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -75,10 +74,10 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: wop => NULL()
 CLASS(oft_matrix), POINTER :: kop => NULL()
 !---Set FE level
-CALL oft_hcurl_set_level(ML_oft_hcurl%nlevels)
+CALL ML_oft_hcurl%set_level(ML_oft_hcurl%nlevels)
 !---Create solver fields
-CALL oft_hcurl_create(u)
-CALL oft_hcurl_create(v)
+CALL ML_oft_hcurl%vec_create(u)
+CALL ML_oft_hcurl%vec_create(v)
 !---Get FE operators
 CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,wop,'zerob')
 CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'none')
@@ -131,10 +130,10 @@ TYPE(oft_matrix_ptr), POINTER :: ml_wop(:) => NULL()
 ! Create ML Matrices
 !---------------------------------------------------------------------------
 nlevels=ML_oft_hcurl%nlevels-minlev+1
-CALL oft_hcurl_set_level(ML_oft_hcurl%nlevels)
+CALL ML_oft_hcurl%set_level(ML_oft_hcurl%nlevels)
 !---Create solver fields
-CALL oft_hcurl_create(u)
-CALL oft_hcurl_create(v)
+CALL ML_oft_hcurl%vec_create(u)
+CALL ML_oft_hcurl%vec_create(v)
 !---Get FE operators
 CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'none')
 !---------------------------------------------------------------------------

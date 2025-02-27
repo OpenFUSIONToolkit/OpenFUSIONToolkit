@@ -92,17 +92,14 @@ USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lagrange_lin, oft_lag_eval_all, &
-  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, &
-  ML_oft_vlagrange, oft_3D_lagrange_cast
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, &
+  ML_oft_lagrange, oft_scalar_fem, ML_oft_vlagrange, oft_3D_lagrange_cast
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag, oft_lag_vcinterp
-USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_hcurl_set_level, &
+USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, &
   oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem, &
   oft_3D_hcurl_cast
-USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
 !---
 USE diagnostic, ONLY: tfluxfun, vec_energy, weighted_vec_energy
@@ -2412,7 +2409,7 @@ DO level=levelin,xmhd_minlev,-1
   !
   ALLOCATE(oft_xmhd_ops%solid_node(oft_lagrange%ne))
   oft_xmhd_ops%solid_node=.FALSE.
-  CALL oft_lag_create(vectmp)
+  CALL ML_oft_lagrange%vec_create(vectmp)
   CALL vectmp%set(0.d0)
   CALL vectmp%get_local(node_flag)
   !
@@ -3724,10 +3721,10 @@ end if
 CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
-CALL oft_lag_set_level(level)
+CALL ML_oft_lagrange%set_level(level)
 IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid lagrange FE object","xmhd_set_level",__FILE__)
 IF(j2_ind>0)THEN
-  CALL oft_hcurl_set_level(level)
+  CALL ML_oft_hcurl%set_level(level)
   IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid HCurl FE object","xmhd_set_level",__FILE__)
 END IF
 xmhd_level=level
@@ -4014,7 +4011,7 @@ do i=levelin,minlev,-1
 !---------------------------------------------------------------------------
 ! Level is on finest mesh, use full field representations
 !---------------------------------------------------------------------------
-  if(oft_lagrange%mesh%nc==oft_lagrange_lin%mesh%nc)then
+  if(oft_lagrange%mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc)then
     !---Construct Jacobian
     call xmhd_build_ops(full_interp)
     !---Average on lowest level to cell centers
@@ -4574,18 +4571,18 @@ call oft_xmhd_create(up)
 ! Create plotting fields
 !---------------------------------------------------------------------------
 NULLIFY(hcvals)
-call oft_lag_create(x)
-call oft_lag_vcreate(ap)
-call oft_lag_vcreate(bp)
+call ML_oft_lagrange%vec_create(x)
+call ML_oft_vlagrange%vec_create(ap)
+call ML_oft_vlagrange%vec_create(bp)
 allocate(bvout(3,x%n))
 !---Allocate sub-fields
-call oft_lag_vcreate(sub_fields%B)
-call oft_lag_vcreate(sub_fields%V)
-call oft_lag_create(sub_fields%Ne)
-call oft_lag_create(sub_fields%Ti)
-IF(xmhd_two_temp)call oft_lag_create(sub_fields%Te)
-IF(n2_ind>0)call oft_lag_create(sub_fields%N2)
-IF(j2_ind>0)call oft_hcurl_create(sub_fields%J2)
+call ML_oft_vlagrange%vec_create(sub_fields%B)
+call ML_oft_vlagrange%vec_create(sub_fields%V)
+call ML_oft_lagrange%vec_create(sub_fields%Ne)
+call ML_oft_lagrange%vec_create(sub_fields%Ti)
+IF(xmhd_two_temp)call ML_oft_lagrange%vec_create(sub_fields%Te)
+IF(n2_ind>0)call ML_oft_lagrange%vec_create(sub_fields%N2)
+IF(j2_ind>0)call ML_oft_hcurl%vec_create(sub_fields%J2)
 !---------------------------------------------------------------------------
 ! Setup Lagrange mass solver
 !---------------------------------------------------------------------------
