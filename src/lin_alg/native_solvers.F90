@@ -231,12 +231,12 @@ type, public, extends(oft_solver) :: oft_ml_precond
   class(oft_vector), pointer :: ucors => NULL() !< Temporary coarse vector
   class(oft_vector), pointer :: gcors => NULL() !< Temporary coarse vector
   class(oft_ml_vecspace), pointer :: ml_vecspace => NULL() !< Multi-level vector space 
-  !> Interpolate field to high level
-  procedure(oft_interp_proto), pointer, nopass :: interp => NULL()
-  !> Inject field to lower level
-  procedure(oft_interp_proto), pointer, nopass :: inject => NULL()
-  !> Create a new field on a specified level
-  procedure(oft_veccreate_proto), pointer, nopass :: vec_create => NULL()
+  ! !> Interpolate field to high level
+  ! procedure(oft_interp_proto), pointer, nopass :: interp => NULL()
+  ! !> Inject field to lower level
+  ! procedure(oft_interp_proto), pointer, nopass :: inject => NULL()
+  ! !> Create a new field on a specified level
+  ! procedure(oft_veccreate_proto), pointer, nopass :: vec_create => NULL()
 contains
   !> Apply smoother
   procedure :: apply => ml_precond_apply
@@ -296,45 +296,45 @@ END TYPE oft_bjprecond
 ! end type oft_bc_ptr
 !---Interfaces
 ABSTRACT INTERFACE
-!---------------------------------------------------------------------------
-! INTERFACE oft_interp_proto
-!---------------------------------------------------------------------------
-!> Abstract interpolation prototype
-!!
-!! @param[in] a Temp doc
-!! @param[in,out] b Temp doc
-!---------------------------------------------------------------------------
-  SUBROUTINE oft_interp_proto(a,b)
-    IMPORT oft_vector
-    CLASS(oft_vector), INTENT(inout) :: a
-    CLASS(oft_vector), INTENT(inout) :: b
-  END SUBROUTINE oft_interp_proto
 ! !---------------------------------------------------------------------------
-! ! INTERFACE oft_getop_proto
+! ! INTERFACE oft_interp_proto
 ! !---------------------------------------------------------------------------
-! !> Abstract operator retrieval prototype
+! !> Abstract interpolation prototype
 ! !!
 ! !! @param[in] a Temp doc
+! !! @param[in,out] b Temp doc
 ! !---------------------------------------------------------------------------
-!   SUBROUTINE oft_getop_proto(a)
-!     IMPORT oft_matrix
-!     CLASS(oft_matrix), INTENT(in) :: a
-!   END SUBROUTINE oft_getop_proto
-!---------------------------------------------------------------------------
-! INTERFACE oft_veccreate_proto
-!---------------------------------------------------------------------------
-!> Abstract field creation prototype
-!!
-!! @param[out] new Temp doc
-!! @param[in] level Temp doc
-!---------------------------------------------------------------------------
-  SUBROUTINE oft_veccreate_proto(new,level,cache,native)
-    IMPORT oft_vector, i4
-    CLASS(oft_vector), POINTER, INTENT(out) :: new
-    INTEGER(i4), OPTIONAL, INTENT(in) :: level
-    LOGICAL, OPTIONAL, INTENT(in) :: cache
-    LOGICAL, OPTIONAL, INTENT(in) :: native
-  END SUBROUTINE oft_veccreate_proto
+!   SUBROUTINE oft_interp_proto(a,b)
+!     IMPORT oft_vector
+!     CLASS(oft_vector), INTENT(inout) :: a
+!     CLASS(oft_vector), INTENT(inout) :: b
+!   END SUBROUTINE oft_interp_proto
+! ! !---------------------------------------------------------------------------
+! ! ! INTERFACE oft_getop_proto
+! ! !---------------------------------------------------------------------------
+! ! !> Abstract operator retrieval prototype
+! ! !!
+! ! !! @param[in] a Temp doc
+! ! !---------------------------------------------------------------------------
+! !   SUBROUTINE oft_getop_proto(a)
+! !     IMPORT oft_matrix
+! !     CLASS(oft_matrix), INTENT(in) :: a
+! !   END SUBROUTINE oft_getop_proto
+! !---------------------------------------------------------------------------
+! ! INTERFACE oft_veccreate_proto
+! !---------------------------------------------------------------------------
+! !> Abstract field creation prototype
+! !!
+! !! @param[out] new Temp doc
+! !! @param[in] level Temp doc
+! !---------------------------------------------------------------------------
+!   SUBROUTINE oft_veccreate_proto(new,level,cache,native)
+!     IMPORT oft_vector, i4
+!     CLASS(oft_vector), POINTER, INTENT(out) :: new
+!     INTEGER(i4), OPTIONAL, INTENT(in) :: level
+!     LOGICAL, OPTIONAL, INTENT(in) :: cache
+!     LOGICAL, OPTIONAL, INTENT(in) :: native
+!   END SUBROUTINE oft_veccreate_proto
 !---------------------------------------------------------------------------
 ! INTERFACE oft_update_jacobian
 !---------------------------------------------------------------------------
@@ -350,7 +350,7 @@ END INTERFACE
 !---Make classes and prototypes public
 PUBLIC native_cg_solver_cast, native_gmres_solver_cast
 PUBLIC jblock_precond_cast, ml_precond_cast
-PUBLIC ml_trans_cast, diag_scale_cast, oft_veccreate_proto, oft_interp_proto
+PUBLIC ml_trans_cast, diag_scale_cast!, oft_veccreate_proto, oft_interp_proto
 CONTAINS
 !---------------------------------------------------------------------------
 ! FUNCTION: native_cg_solver_cast
@@ -1782,13 +1782,8 @@ IF(.NOT.self%initialized)THEN
   CALL u%new(self%r)
   IF(ASSOCIATED(self%base_solve))THEN
     CALL u%new(self%p)
-    IF(ASSOCIATED(self%ml_vecspace))THEN
-      CALL self%ml_vecspace%vec_create(self%ucors,self%level-1)
-      CALL self%ml_vecspace%vec_create(self%gcors,self%level-1)
-    ELSE
-      CALL self%vec_create(self%ucors,self%level-1)
-      CALL self%vec_create(self%gcors,self%level-1)
-    END IF
+    CALL self%ml_vecspace%vec_create(self%ucors,self%level-1)
+    CALL self%ml_vecspace%vec_create(self%gcors,self%level-1)
   END IF
   CALL solver_setup(self)
 END IF
@@ -1803,11 +1798,7 @@ if(associated(self%base_solve))then
   CALL mytimer%tick
   !---Inject RHS
   call self%ucors%set(0.d0)
-  IF(ASSOCIATED(self%ml_vecspace))THEN
-    CALL self%ml_vecspace%inject(g,self%gcors)
-  ELSE
-    call self%inject(g,self%gcors)
-  END IF
+  CALL self%ml_vecspace%inject(g,self%gcors)
   self%timings(2)=self%timings(2)+mytimer%tock()
   CALL mytimer%tick
   !---Apply lower level smoother
@@ -1817,11 +1808,7 @@ if(associated(self%base_solve))then
   self%timings(3)=self%timings(3)+mytimer%tock()
   CALL mytimer%tick
   !---Interpolate Solution
-  IF(ASSOCIATED(self%ml_vecspace))THEN
-    CALL self%ml_vecspace%interp(self%ucors,self%p)
-  ELSE
-    call self%interp(self%ucors,self%p)
-  END IF
+  CALL self%ml_vecspace%interp(self%ucors,self%p)
   if(associated(self%bc))call self%bc%apply(self%p)
   !---Add coarse correction
   call u%add(1.d0,1.d0,self%p)
@@ -1877,9 +1864,9 @@ if(associated(self%base_solve))then
   call self%base_solve%delete
   DEALLOCATE(self%base_solve)
 end if
-IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
-IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
-IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
+! IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
+! IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
+! IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
 IF(ASSOCIATED(self%ml_vecspace))NULLIFY(self%ml_vecspace)
 IF(ASSOCIATED(self%bc))NULLIFY(self%bc)
 IF(self%initialized)THEN
@@ -1934,27 +1921,15 @@ class(oft_vector), intent(inout) :: u
 class(oft_vector), intent(inout) :: g
 class(oft_vector), pointer :: ucors,gcors
 DEBUG_STACK_PUSH
-IF(ASSOCIATED(self%ml_vecspace))THEN
-  !---Create base level fields
-  CALL self%ml_vecspace%vec_create(ucors,self%level-1)
-  CALL self%ml_vecspace%vec_create(gcors,self%level-1)
-  !---Push RHS to base level
-  call self%ml_vecspace%inject(g,gcors)
-ELSE
-  !---Create base level fields
-  call self%vec_create(ucors,self%level-1)
-  call self%vec_create(gcors,self%level-1)
-  !---Push RHS to base level
-  call self%inject(g,gcors)
-END IF
+!---Create base level fields
+CALL self%ml_vecspace%vec_create(ucors,self%level-1)
+CALL self%ml_vecspace%vec_create(gcors,self%level-1)
+!---Push RHS to base level
+call self%ml_vecspace%inject(g,gcors)
 !---Solve on base levels
 call self%base_solve%apply(ucors,gcors)
 !---Pop solution from base level
-IF(ASSOCIATED(self%ml_vecspace))THEN
-  call self%ml_vecspace%interp(ucors,u)
-ELSE
-  call self%interp(ucors,u)
-END IF
+call self%ml_vecspace%interp(ucors,u)
 !---Delete base level fields
 call ucors%delete()
 call gcors%delete()
@@ -1981,9 +1956,9 @@ if(associated(self%base_solve))then
   call self%base_solve%delete
   nullify(self%base_solve)
 end if
-IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
-IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
-IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
+! IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
+! IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
+! IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
 IF(ASSOCIATED(self%ml_vecspace))NULLIFY(self%ml_vecspace)
 IF(ASSOCIATED(self%bc))NULLIFY(self%bc)
 DEBUG_STACK_POP

@@ -73,7 +73,7 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Set FE level
-CALL ML_oft_lagrange%set_level(ML_oft_blagrange%nlevels)
+CALL ML_oft_blagrange%set_level(ML_oft_blagrange%nlevels)
 !---Create solver fields
 CALL ML_oft_blagrange%vec_create(u)
 CALL ML_oft_blagrange%vec_create(v)

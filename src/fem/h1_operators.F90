@@ -1256,10 +1256,11 @@ END SUBROUTINE oft_h1_bproject
 !!
 !! @note Should only be used via class \ref oft_h1_divout
 !---------------------------------------------------------------------------
-subroutine h1_divout_setup(self,ML_h1_rep,bc)
+subroutine h1_divout_setup(self,ML_h1_rep,bc,solver)
 class(oft_h1_divout), intent(inout) :: self
 CLASS(oft_ml_fem_comp_type), target, intent(inout) :: ML_h1_rep
 character(LEN=*), intent(in) :: bc !< Boundary condition
+class(oft_solver), target, optional, intent(in) :: solver
 !---
 CLASS(oft_matrix), POINTER :: lop
 CLASS(oft_solver), POINTER :: linv
@@ -1269,13 +1270,17 @@ DEBUG_STACK_PUSH
 self%ML_hcurl_full=>ML_h1_rep
 self%ML_curl=>ML_h1_rep%ml_fields(1)%ml
 self%ML_grad=>ML_h1_rep%ml_fields(2)%ml
-NULLIFY(lop)
-CALL oft_h0_getlop(self%ML_grad%current_level,lop,bc)
-CALL create_cg_solver(linv)
-linv%A=>lop
-linv%its=-3
-CALL create_diag_pre(linv%pre)
-self%solver=>linv
+IF(PRESENT(solver))THEN
+  self%solver=>solver
+ELSE
+  NULLIFY(lop)
+  CALL oft_h0_getlop(self%ML_grad%current_level,lop,bc)
+  CALL create_cg_solver(linv)
+  linv%A=>lop
+  linv%its=-3
+  CALL create_diag_pre(linv%pre)
+  self%solver=>linv
+END IF
 IF(TRIM(bc)=='grnd')THEN
   ALLOCATE(bc_zerogrnd)
   bc_zerogrnd%ML_H0_rep=>self%ML_grad

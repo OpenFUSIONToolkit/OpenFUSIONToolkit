@@ -91,7 +91,7 @@ USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
   create_cg_solver, create_diag_pre
 !---
 USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
-USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
+USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_3D_lagrange_cast, &
@@ -275,6 +275,16 @@ abstract interface
   end subroutine xmhd_probe_apply
 end interface
 !---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, PUBLIC, extends(oft_ml_fe_comp_vecspace) :: ml_xmhd_vecspace
+contains
+  !> Needs docs
+  PROCEDURE :: interp => oft_xmhd_interp
+  !> Needs docs
+  PROCEDURE :: inject => oft_xmhd_inject
+end type ml_xmhd_vecspace
+!---------------------------------------------------------------------------
 ! Global variables
 !---------------------------------------------------------------------------
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
@@ -353,7 +363,8 @@ INTEGER(i4) :: xmhd_minlev = -1 !< Lowest MG level
 INTEGER(i4), DIMENSION(fem_max_levels) :: nu_xmhd = 1 !< Number of smoother iterations
 !---Operators and preconditioning
 TYPE(oft_fem_comp_type), POINTER :: xmhd_rep => NULL() !< Active field representation
-TYPE(oft_ml_fem_comp_type) :: ML_xmhd_rep !< ML container for field representation
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_xmhd_rep !< ML container for field representation
+TYPE(ml_xmhd_vecspace), TARGET :: xmhd_ml_vecspace
 TYPE(oft_mf_matrix), TARGET :: mfmat !< Matrix free operator
 TYPE(xmhd_ops), POINTER :: oft_xmhd_ops => NULL() !< Operator container
 TYPE(xmhd_ops), POINTER, DIMENSION(:) :: oft_xmhd_ops_ML => NULL() !< MG operator container
@@ -824,8 +835,9 @@ IF(nlevels==1)THEN
 ELSE
   ALLOCATE(levels(nlevels))
   levels=(/(i,i=xmhd_minlev,xmhd_nlevels)/)
+  xmhd_ml_vecspace%ML_FE_rep=>ML_xmhd_rep
   CALL create_mlpre(solver%pre,ml_J,levels,nlevels=nlevels, &
-    create_vec=oft_xmhd_create,interp=oft_xmhd_interp,inject=oft_xmhd_inject, &
+    ml_vecspace=xmhd_ml_vecspace, &
     stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels),xml_root=xmhd_pre_node)
   DEALLOCATE(levels)
 END IF
@@ -1342,8 +1354,9 @@ IF(nlevels==1)THEN
 ELSE
   ALLOCATE(levels(nlevels))
   levels=(/(i,i=xmhd_minlev,xmhd_nlevels)/)
+  xmhd_ml_vecspace%ML_FE_rep=>ML_xmhd_rep
   CALL create_mlpre(solver%pre,ml_J,levels,nlevels=nlevels, &
-    create_vec=oft_xmhd_create,interp=oft_xmhd_interp,inject=oft_xmhd_inject, &
+    ml_vecspace=xmhd_ml_vecspace, &
     stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels),xml_root=xmhd_pre_node)
   DEALLOCATE(levels)
 END IF
@@ -4399,7 +4412,8 @@ end subroutine oft_xmhd_pop
 !!
 !! @note The global \ref xmhd_level is incremented by one in this subroutine
 !---------------------------------------------------------------------------
-subroutine oft_xmhd_interp(acors,afine)
+subroutine oft_xmhd_interp(self,acors,afine)
+class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Coarse level vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Interpolated solution on fine level
 INTEGER(i4) :: i
@@ -4452,7 +4466,8 @@ end subroutine oft_xmhd_interp
 !!
 !! @note The global \ref xmhd_level is decremented by one in this subroutine
 !---------------------------------------------------------------------------
-subroutine oft_xmhd_inject(afine,acors)
+subroutine oft_xmhd_inject(self,afine,acors)
+class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine level vector to inject
 class(oft_vector), intent(inout) :: acors !< Injected solution on coarse level
 real(r8), pointer, dimension(:) :: vtmp

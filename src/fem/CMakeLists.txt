@@ -10,7 +10,6 @@ set( FEM_OBJS
   h0_basis.F90
   h0_operators.F90
   h1_basis.F90
-  h1_fields.F90
   h1_operators.F90
 )
 

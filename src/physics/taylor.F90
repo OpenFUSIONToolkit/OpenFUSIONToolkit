@@ -153,13 +153,13 @@ orthog%orthog=>taylor_hffa
 ! Create ML Matrices
 !---------------------------------------------------------------------------
 nlevels_wop=ML_oft_hcurl%nlevels-taylor_minlev+1
-nlevels_lop=ML_oft_lagrange%blevel+1-taylor_minlev+1
+nlevels_lop=ML_oft_lagrange%ml_mesh%mgdim-taylor_minlev+1
 ALLOCATE(ml_wop(nlevels_wop),ml_lop(nlevels_lop))
 DO i=1,nlevels_wop
   CALL ML_oft_hcurl%set_level(taylor_minlev+i-1)
   NULLIFY(ml_wop(i)%M)
   CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,ml_wop(i)%M,'zerob')
-  IF(ML_oft_hcurl%level<=ML_oft_lagrange%blevel+1)THEN
+  IF(ML_oft_hcurl%level<=ML_oft_lagrange%ml_mesh%mgdim)THEN
     CALL ML_oft_lagrange%set_level(ML_oft_hcurl%level)
     NULLIFY(ml_lop(i)%M)
     CALL oft_lag_getlop(ML_oft_lagrange%current_level,ml_lop(i)%M,"zerob")
@@ -177,12 +177,11 @@ do k=1,taylor_nm
   !---Loop over levels for each mode
   do i=taylor_minlev,ML_oft_hcurl%nlevels
     !---Build level field
+    call ML_oft_hcurl%set_level(i)
     call ML_oft_hcurl%vec_create(taylor_hffa(k,i)%f,i)
     !---Alias to general field
     u=>taylor_hffa(k,i)%f
-    if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)cycle
-    !---Apply BC
-    CALL hcurl_zerob%apply(u)
+    if((i>taylor_minlev).AND.(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1))cycle
     !---Setup Solver
     wop=>ml_wop(i-taylor_minlev+1)%M
     orthog%wop=>wop
@@ -215,6 +214,7 @@ do k=1,taylor_nm
       CALL hcurl_getwop_pre(eigsolver%pre,ml_wop,nlevels=i-taylor_minlev+1)
       SELECT TYPE(this=>eigsolver%pre)
         CLASS IS(oft_ml_precond)
+          call ML_oft_hcurl%set_level(i-1)
           call this%ml_vecspace%interp(taylor_hffa(k,i-1)%f,u)
         CLASS DEFAULT
           CALL oft_abort("Invalid ML preconditioner","taylor_hmodes",__FILE__)
@@ -243,6 +243,7 @@ do k=1,taylor_nm
 !---------------------------------------------------------------------------
 ! Solve
 !---------------------------------------------------------------------------
+    CALL hcurl_zerob%apply(u) ! Apply BC
     CALL eigsolver%apply(u,taylor_hlam(k,i))
     CALL eigsolver%pre%delete
     DEALLOCATE(eigsolver%pre)
@@ -257,7 +258,7 @@ do k=1,taylor_nm
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
-    CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%blevel+1))
+    CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%ml_mesh%mgdim))
     IF(nlevels_lop<=0)THEN
       NULLIFY(lop)
       CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,"zerob")
@@ -370,7 +371,6 @@ logical :: rst=.FALSE.
 character(2) :: pnum,mnum
 character(40) :: filename
 type(oft_hcurl_zerob), target :: hcurl_zerob
-type(oft_h0_zerogrnd), target :: h0_zerogrnd
 type(oft_lag_zerob), target :: lag_zerob
 DEBUG_STACK_PUSH
 NULLIFY(lop,lop_lag,mop,mop_hcurl,wop)
@@ -389,7 +389,6 @@ ELSE
   END DO
 END IF
 hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
-h0_zerogrnd%ML_H0_rep=>ML_oft_h0
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---Loop over cut planes
 IF(taylor_rst)THEN
@@ -424,8 +423,8 @@ IF(.NOT.rst)THEN
 !---------------------------------------------------------------------------
   linv%A=>lop
   linv%its=-2
-  divout%solver=>linv
-  divout%bc=>h0_zerogrnd
+  ! divout%solver=>linv
+  CALL divout%setup(ML_oft_h1,'grnd',solver=linv)
 ELSE
   CALL create_cg_solver(linv)
   CALL create_diag_pre(linv%pre)
@@ -457,7 +456,7 @@ END SELECT
 !---------------------------------------------------------------------------
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
-CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%blevel+1))
+CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%ml_mesh%mgdim))
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
@@ -706,7 +705,7 @@ END IF
 !---------------------------------------------------------------------------
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
-CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%blevel+1))
+CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%ml_mesh%mgdim))
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
@@ -870,7 +869,7 @@ jmlb_inv%itplot=1
 !---------------------------------------------------------------------------
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
-CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%blevel+1))
+CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%ml_mesh%mgdim))
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
