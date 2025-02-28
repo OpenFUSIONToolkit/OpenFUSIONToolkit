@@ -1680,16 +1680,12 @@ end subroutine gs_gen_source
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_coil_source
 !---------------------------------------------------------------------------
-!> Needs Docs
-!!
-!! @param[in,out] self G-S object
-!! @param[in,out] a Psi field
-!! @param[in,out] b Source field
+!> Calculates field contribution due to coil
 !---------------------------------------------------------------------------
 subroutine gs_coil_source(self,iCoil,b)
-class(gs_eq), intent(inout) :: self
-integer(4), intent(in) :: iCoil
-CLASS(oft_vector), intent(inout) :: b
+class(gs_eq), intent(inout) :: self !< G-S Object
+integer(4), intent(in) :: iCoil !< Coil index
+CLASS(oft_vector), intent(inout) :: b !< Coil field
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,nturns
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
@@ -1742,16 +1738,18 @@ end subroutine gs_coil_source
 !---------------------------------------------------------------------------
 !> Calculates field contribution due to coil with non-uniform conductivity
 !---------------------------------------------------------------------------
-subroutine gs_coil_source_distributed(self,iCoil,a,b)
+subroutine gs_coil_source_distributed(self,iCoil,b,a)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
-REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Normalized local conductivity
 CLASS(oft_vector), intent(inout) :: b !< Coil field
+REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Normalized local conductivity
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns
 real(8), allocatable :: rhs_loc(:),rop(:)
 integer(4) :: j,m,l,k
 integer(4), allocatable :: j_lag(:)
+! t1=omp_get_wtime()
+!---
 
 NULLIFY(btmp)
 CALL b%set(0.d0)
@@ -1761,6 +1759,7 @@ CALL b%get_local(btmp)
 allocate(rhs_loc(oft_blagrange%nce))
 allocate(rop(oft_blagrange%nce))
 allocate(j_lag(oft_blagrange%nce))
+!$omp do schedule(static,1)
 DO j=1,smesh%nc !For each cell
   nturns=self%coil_nturns(smesh%reg(j),iCoil) !Read number of iCoil's turns associated with this cell
   IF(ABS(nturns)<1.d-10)CYCLE !Only execute for nonzero turns
@@ -1932,9 +1931,10 @@ end subroutine gs_wall_source
 !> Compute inductance between coil and given poloidal flux
 !---------------------------------------------------------------------------
 subroutine gs_coil_mutual(self,iCoil,b,mutual)
-class(gs_eq), intent(inout) :: self !< G-S solver object
-integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
+class(gs_eq), intent(inout) :: self !< G-S object
+integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
+
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns
@@ -1984,7 +1984,7 @@ CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
 REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Normalized local conductivity
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: goptmp(3,3),det,pt(3),v,t1,psi_tmp,nturns,j_phi
+real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns,j_phi
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
 integer(4) :: j,m,l,k
 integer(4), allocatable :: j_lag(:)
@@ -1995,7 +1995,7 @@ NULLIFY(btmp)
 CALL b%get_local(btmp)
 !---
 mutual=0.d0
-!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,pt,l,rop,nturns) reduction(+:mutual)
+!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,l,rop,nturns,j_phi,psi_tmp) reduction(+:mutual)
 allocate(rop(oft_blagrange%nce))
 allocate(j_lag(oft_blagrange%nce))
 !$omp do schedule(static,1)
@@ -2003,9 +2003,9 @@ DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
   call oft_blagrange%ncdofs(j,j_lag) !Load map onto j_lag
+
   do m=1,oft_blagrange%quad%np
     call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
-    pt=smesh%log2phys(j,oft_blagrange%quad%pts(:,m))
     det=v*oft_blagrange%quad%wts(m)
     psi_tmp=0.d0
     j_phi=0.d0

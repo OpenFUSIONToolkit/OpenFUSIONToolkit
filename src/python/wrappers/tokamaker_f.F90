@@ -1037,7 +1037,9 @@ CALL c_f_pointer(curr_vals, vals_tmp, [gs_global%psi%n]) ! Maps curr_vals from C
 ! Update coil flux to overwrite old uniform distribution
 NULLIFY(tmp_vec)
 call gs_global%psi%new(tmp_vec)
-CALL gs_coil_source_distributed(gs_global,iCoil,vals_tmp,tmp_vec)
+
+CALL gs_coil_source_distributed(gs_global,iCoil,tmp_vec,vals_tmp)
+
 CALL blag_zerob(tmp_vec)
 CALL gs_vacuum_solve(gs_global,gs_global%psi_coil(iCoil)%f,tmp_vec)
 ! Update coil mutual inductances
