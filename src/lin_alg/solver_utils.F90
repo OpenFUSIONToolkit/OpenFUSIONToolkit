@@ -43,10 +43,7 @@ class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
-! procedure(oft_veccreate_proto), optional :: create_vec !< Vector creation subroutine
-! procedure(oft_interp_proto), optional :: interp !< Interpolation subroutine
-! procedure(oft_interp_proto), optional :: inject !< Restriction subroutine
-class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< 
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition subroutine (optional)
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
@@ -81,11 +78,8 @@ class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
-! procedure(oft_veccreate_proto), optional :: create_vec !< Vector creation subroutine
-! procedure(oft_interp_proto), optional :: interp !< Interpolation subroutine
-! procedure(oft_interp_proto), optional :: inject !< Restriction subroutine
-class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< 
-class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition subroutine (optional)
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition (optional)
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
 integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
@@ -230,11 +224,8 @@ class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
-! procedure(oft_veccreate_proto), optional :: create_vec !< Vector creation subroutine
-! procedure(oft_interp_proto), optional :: interp !< Interpolation subroutine
-! procedure(oft_interp_proto), optional :: inject !< Restriction subroutine
-class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !<
-class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition subroutine (optional)
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition (optional)
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
 integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
@@ -756,12 +747,9 @@ class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
-! procedure(oft_veccreate_proto), optional :: create_vec !< Vector creation subroutine
-! procedure(oft_interp_proto), optional :: interp !< Interpolation subroutine
-! procedure(oft_interp_proto), optional :: inject !< Restriction subroutine
-class(oft_ml_vecspace), target, intent(in) :: ml_vecspace !< 
+class(oft_ml_vecspace), target, intent(in) :: ml_vecspace !< Multi-level vectorspace
 TYPE(xml_node), POINTER, INTENT(in) :: pre_node !< Preconditioner XML element
-class(oft_solver_bc), target, optional, intent(in) :: bc
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
 #ifdef HAVE_XML
 !---
 integer(i4) :: i,ierr,nnodes

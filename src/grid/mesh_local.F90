@@ -20,31 +20,20 @@ IMPLICIT NONE
 #include "local.h"
 INTERFACE
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_metis_partmesh
-!---------------------------------------------------------------------------
 !> Parition a tetrahedral mesh using METIS
-!!
-!! @param[in] nc Number of cells
-!! @param[in] np Number of vertices
-!! @param[in,out] lc Cell list [4,nc]
-!! @param[in] npart Number of partitions
-!! @param[in,out] cpart Partition for each cell [nc]
-!! @param[in,out] info Parition return status
 !---------------------------------------------------------------------------
   SUBROUTINE oft_metis_partmesh(nc,np,ncp,lc,npart,cpart,info) BIND(C,NAME="oft_metis_partMesh")
   IMPORT c_int
-  INTEGER(c_int), INTENT(in) :: nc
-  INTEGER(c_int), INTENT(in) :: np
-  INTEGER(c_int), INTENT(in) :: ncp
-  INTEGER(c_int), DIMENSION(ncp,nc), INTENT(inout) :: lc
-  INTEGER(c_int), INTENT(in) :: npart
-  INTEGER(c_int), DIMENSION(npart), INTENT(inout) :: cpart
-  INTEGER(c_int), INTENT(inout) :: info
+  INTEGER(c_int), INTENT(in) :: nc !< Number of cells
+  INTEGER(c_int), INTENT(in) :: np !< Number of vertices
+  INTEGER(c_int), INTENT(in) :: ncp !< Number of points per cell
+  INTEGER(c_int), DIMENSION(ncp,nc), INTENT(inout) :: lc !< Cell list [ncp,nc]
+  INTEGER(c_int), INTENT(in) :: npart !< Number of partitions
+  INTEGER(c_int), DIMENSION(npart), INTENT(inout) :: cpart !< Partition for each cell [nc]
+  INTEGER(c_int), INTENT(inout) :: info !< Parition return status
   END SUBROUTINE oft_metis_partmesh
 END INTERFACE
 contains
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_local_init
 !------------------------------------------------------------------------------
 !> Driver for grid construction
 !------------------------------------------------------------------------------
@@ -70,8 +59,6 @@ IF(.NOT.ASSOCIATED(self%tloc_c))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine mesh_local_init
-! !------------------------------------------------------------------------------
-! ! SUBROUTINE: mesh_resolution
 ! !------------------------------------------------------------------------------
 ! !> Compute mesh resolution statistics.
 ! !! - hmin Minimum edge length
@@ -111,8 +98,6 @@ end subroutine mesh_local_init
 ! DEBUG_STACK_POP
 ! end subroutine mesh_resolution
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_volumes
-!------------------------------------------------------------------------------
 !> Compute cell and vertex volumes, rectifying negative volume cells.
 !!
 !! Zero volume cells or vertices are also caught for mesh validation.
@@ -147,8 +132,6 @@ if(any(self%vv==0))call oft_abort('Floating vertex detected','mesh_volumes',__FI
 CALL bmesh_areas(self%bmesh)
 DEBUG_STACK_POP
 end subroutine mesh_volumes
-!------------------------------------------------------------------------------
-! SUBROUTINE: amesh_edges
 !------------------------------------------------------------------------------
 !> Identify global edges and link to points and cells.
 !! - le List construction
@@ -257,8 +240,6 @@ enddo
 DEBUG_STACK_POP
 end subroutine amesh_edges
 !------------------------------------------------------------------------------
-! SUBROUTINE: amesh_to_cell
-!------------------------------------------------------------------------------
 !> Locate point, edge, face and cell neighbor cells.
 !! - lfc List construction
 !! - lcc List construction
@@ -320,8 +301,6 @@ enddo
 deallocate(nr)
 DEBUG_STACK_POP
 end subroutine amesh_to_cell
-!------------------------------------------------------------------------------
-! SUBROUTINE: amesh_interactions
 !------------------------------------------------------------------------------
 !> Index point to point, point to edge and edge to edge interactions.
 !! - kpp, lpp Linkage construction
@@ -494,8 +473,6 @@ deallocate(nr,lcx)
 DEBUG_STACK_POP
 end subroutine amesh_interactions
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_faces
-!------------------------------------------------------------------------------
 !> Identify global faces and link to points, edges and cells.
 !! - lf List construction
 !! - lcf List construction
@@ -618,8 +595,6 @@ enddo
 DEBUG_STACK_POP
 end subroutine mesh_faces
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_neighbors
-!------------------------------------------------------------------------------
 !> Locate point, edge, face and cell neighbor cells.
 !! - lfc List construction
 !! - lcc List construction
@@ -653,8 +628,6 @@ do i=1,self%nc ! loop over cells & locate neighbors
 enddo
 DEBUG_STACK_POP
 end subroutine mesh_neighbors
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_boundary
 !------------------------------------------------------------------------------
 !> Locate and index boundary points, edges, faces and cells.
 !! - nbp, nbe, nbf, nbc Counts
@@ -723,21 +696,15 @@ enddo
 DEBUG_STACK_POP
 end subroutine mesh_boundary
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_local_partition
-!------------------------------------------------------------------------------
 !> Perform local mesh decomposition (METIS)
-!!
-!! @param[in,out] self Mesh structure
-!! @param[in,out] tloc_p Point partitioning [self%np]
-!! @param[in,out] tloc_e Edge partitioning [self%ne]
-!! @param[in,out] tloc_f Face partitioning [self%nf]
-!! @param[in,out] tloc_c Cell partitioning [self%nc]
-!! @param[in] nparts Number of partitions
 !------------------------------------------------------------------------------
 SUBROUTINE mesh_local_partition(self,tloc_p,tloc_e,tloc_f,tloc_c,nparts)
-CLASS(oft_mesh), INTENT(inout) :: self
-TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_p,tloc_e,tloc_f,tloc_c
-INTEGER(i4), INTENT(in) :: nparts
+CLASS(oft_mesh), INTENT(inout) :: self !< Mesh to partition
+TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_p !< Point partitioning [self%np]
+TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_e !< Edge partitioning [self%ne]
+TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_f !< Face partitioning [self%nf]
+TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_c !< Cell partitioning [self%nc]
+INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
 INTEGER(i4) :: i,j,k,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cpart,ppart,epart,fpart
 LOGICAL, ALLOCATABLE, DIMENSION(:,:) :: town
@@ -873,8 +840,6 @@ DEALLOCATE(ppart,fpart,cpart,trand,own_tmp)
 DEBUG_STACK_POP
 END SUBROUTINE mesh_local_partition
 !------------------------------------------------------------------------------
-! SUBROUTINE: bmesh_local_init
-!------------------------------------------------------------------------------
 !> Driver for grid construction
 !------------------------------------------------------------------------------
 subroutine bmesh_local_init(self,parent,sync_normals)
@@ -982,8 +947,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine bmesh_local_init
 !------------------------------------------------------------------------------
-! SUBROUTINE: bmesh_areas
-!------------------------------------------------------------------------------
 !> Compute cell and vertex volumes, rectifying negative volume cells.
 !!
 !! Zero volume cells or vertices are also caught for mesh validation.
@@ -1028,8 +991,6 @@ if(.NOT.ASSOCIATED(self%parent).AND.ANY(self%va==0))THEN
 endif
 DEBUG_STACK_POP
 end subroutine bmesh_areas
-!------------------------------------------------------------------------------
-! SUBROUTINE: sync_face_normals
 !------------------------------------------------------------------------------
 !> Compute cell and vertex volumes, rectifying negative volume cells.
 !!
@@ -1088,8 +1049,6 @@ END DO
 end subroutine orient_neighbors
 end subroutine sync_face_normals
 !------------------------------------------------------------------------------
-! SUBROUTINE: bmesh_neighbors
-!------------------------------------------------------------------------------
 !> Locate point, edge, face and cell neighbor cells.
 !! - lfc List construction
 !! - lcc List construction
@@ -1112,8 +1071,6 @@ do i=1,self%nc ! loop over faces & locate neighbors
 enddo
 DEBUG_STACK_POP
 end subroutine bmesh_neighbors
-!------------------------------------------------------------------------------
-! SUBROUTINE: bmesh_boundary
 !------------------------------------------------------------------------------
 !> Locate and index boundary points, edges, faces and cells.
 !! - nbp, nbe, nbf, nbc Counts

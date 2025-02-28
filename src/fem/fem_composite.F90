@@ -76,7 +76,7 @@ TYPE, PUBLIC :: oft_ml_fem_comp_type
   TYPE(oft_fem_comp_type), POINTER :: current_level => NULL() !< Composite FE object for current level
   TYPE(oft_ml_fem_ptr), POINTER, DIMENSION(:) :: ml_fields => NULL() !< Individual ML FE objects for each field
   CHARACTER(LEN=4), POINTER, DIMENSION(:) :: field_tags => NULL() !< Character tags for fields
-  TYPE(oft_matrix_ptr) :: interp_matrices(fem_max_levels)
+  TYPE(oft_matrix_ptr) :: interp_matrices(fem_max_levels) !< Level-to-level interpolation matrices
 CONTAINS
   !> Setup composite FE structure from sub-field FE definitions
   PROCEDURE :: setup => ml_fem_setup

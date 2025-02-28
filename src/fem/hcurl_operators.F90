@@ -1494,49 +1494,6 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_pinterpmatrix
 END SUBROUTINE hcurl_setup_interp
-! !---------------------------------------------------------------------------
-! !> Interpolate a coarse level H1(Curl) vector field to the next finest level
-! !!
-! !! @note The global H1(Curl) level in incremented by one in this subroutine
-! !---------------------------------------------------------------------------
-! subroutine hcurl_interp(acors,afine)
-! class(oft_vector), intent(inout) :: acors !< Vector to interpolate
-! class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
-! DEBUG_STACK_PUSH
-! !---Step one level up
-! call oft_hcurl_set_level(ML_oft_hcurl%level+1)
-! call afine%set(0.d0)
-! !---
-! if(ML_oft_hcurl%level==ML_oft_hcurl%blevel+1)then
-!   call hcurl_base_pop(acors,afine)
-!   DEBUG_STACK_POP
-!   return
-! end if
-! ! CALL oft_hcurl_ops%interp%apply(acors,afine)
-! CALL ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m%apply(acors,afine)
-! DEBUG_STACK_POP
-! end subroutine hcurl_interp
-! !---------------------------------------------------------------------------
-! !> Transfer a base level H1(Curl) vector field to the next MPI level
-! !---------------------------------------------------------------------------
-! subroutine hcurl_base_pop(acors,afine)
-! class(oft_vector), intent(inout) :: acors !< Vector to transfer
-! class(oft_vector), intent(inout) :: afine !< Fine vector from transfer
-! integer(i4), pointer :: lbege(:)
-! integer(i4) :: i
-! real(r8), pointer, dimension(:) :: array_c,array_f
-! DEBUG_STACK_PUSH
-! lbege=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%nbase)%lbege
-! CALL acors%get_local(array_c)
-! CALL afine%get_local(array_f)
-! !$omp parallel do
-! do i=1,afine%n
-!   array_f(i)=array_c(ABS(lbege(i)))
-! end do
-! CALL afine%restore_local(array_f)
-! DEALLOCATE(array_c,array_f)
-! DEBUG_STACK_POP
-! end subroutine hcurl_base_pop
 !---------------------------------------------------------------------------
 !> Transfer a base level H1(Curl) vector field to the next MPI level
 !---------------------------------------------------------------------------
@@ -1559,67 +1516,6 @@ CALL afine%restore_local(array_f)
 DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine hcurl_base_pop
-! !---------------------------------------------------------------------------
-! !> Inject a fine level H1(Curl) vector field to the next coarsest level
-! !!
-! !! @note The global H1(Curl) level in decremented by one in this subroutine
-! !---------------------------------------------------------------------------
-! subroutine hcurl_inject(afine,acors)
-! class(oft_vector), intent(inout) :: afine !< Vector to inject
-! class(oft_vector), intent(inout) :: acors !< Coarse vector from injection
-! integer(i4) :: i,j,k
-! logical :: gcheck
-! DEBUG_STACK_PUSH
-! gcheck=(ML_oft_hcurl%current_level%order==1)
-! ! Step down level up
-! call oft_hcurl_set_level(ML_oft_hcurl%level-1)
-! ! Cast fine field
-! call acors%set(0.d0)
-! if(ML_oft_hcurl%level==ML_oft_hcurl%blevel)then
-!   call hcurl_base_push(afine,acors)
-!   DEBUG_STACK_POP
-!   return
-! end if
-! ! CALL ML_oft_hcurl_ops(ML_oft_hcurl%level+1)%interp%applyT(afine,acors)
-! CALL ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level+1)%m%applyT(afine,acors)
-! DEBUG_STACK_POP
-! end subroutine hcurl_inject
-! !---------------------------------------------------------------------------
-! !> Transfer a MPI level H1(Curl) vector field to the base level
-! !---------------------------------------------------------------------------
-! subroutine hcurl_base_push(afine,acors)
-! class(oft_vector), intent(inout) :: afine !< Vector to transfer
-! class(oft_vector), intent(inout) :: acors !< Fine vector from transfer
-! integer(i4), pointer :: lbege(:)
-! integer(i4) :: i,j,ierr
-! real(r8), pointer, dimension(:) :: alias,array_c,array_f
-! CLASS(oft_afem_type), POINTER :: hcurl_fine => NULL()
-! DEBUG_STACK_PUSH
-! !---
-! lbege=>ML_oft_hcurl%ml_mesh%inter(ML_oft_hcurl%ml_mesh%nbase)%lbege
-! CALL acors%get_local(array_c)
-! CALL afine%get_local(array_f)
-! hcurl_fine=>ML_oft_hcurl%levels(ML_oft_hcurl%level+1)%fe
-! !---
-! allocate(alias(acors%n))
-! alias=0.d0
-! !$omp parallel do
-! do i=1,afine%n
-!   if(hcurl_fine%linkage%be(i))cycle
-!   alias(ABS(lbege(i)))=array_f(i)
-! end do
-! !$omp parallel do private(j)
-! do i=1,hcurl_fine%linkage%nbe
-!   j=hcurl_fine%linkage%lbe(i)
-!   if(.NOT.hcurl_fine%linkage%leo(i))cycle
-!   alias(ABS(lbege(j)))=array_f(j)
-! end do
-! !---Global reduction over all processors
-! array_c=oft_mpi_sum(alias,acors%n)
-! call acors%restore_local(array_c)
-! deallocate(alias,array_c,array_f)
-! DEBUG_STACK_POP
-! end subroutine hcurl_base_push
 !---------------------------------------------------------------------------
 !> Transfer a MPI level H1(Curl) vector field to the base level
 !---------------------------------------------------------------------------
