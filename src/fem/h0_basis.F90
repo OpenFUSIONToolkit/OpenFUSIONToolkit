@@ -47,12 +47,12 @@ end type oft_h0_bfem
 integer(i4), parameter :: oft_h0_id = 2 !< FE type ID
 !
 ! type(oft_h0_bfem), pointer :: oft_bh0 !< Active FE representation
-type(oft_ml_fem_type), TARGET :: ML_oft_bh0 !< ML container for all FE representations
+! type(oft_ml_fem_type), TARGET :: ML_oft_bh0 !< ML container for all FE representations
 !
 ! class(oft_h0_fem), pointer :: oft_h0 !< Active FE representation
-type(oft_ml_fem_type), TARGET :: ML_oft_h0 !< ML container for all FE representations
+! type(oft_ml_fem_type), TARGET :: ML_oft_h0 !< ML container for all FE representations
 !
-logical, private :: hex_mesh = .FALSE.
+! logical, private :: hex_mesh = .FALSE.
 contains
 !------------------------------------------------------------------------------
 !> Cast abstract FE type to 3D H^1 finite element type
@@ -171,10 +171,10 @@ IF(ASSOCIATED(mg_mesh%meshes))THEN
   ML_h0_obj%nlevels=nlevels
   ML_h0_obj%minlev=minlev_out
   ML_h0_obj%ml_mesh=>mg_mesh
-  IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
+  ! IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
 ELSE
   ML_h0_obj%nlevels=0
-  IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
+  ! IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
 END IF
 ML_bh0_obj%nlevels=nlevels
 ML_bh0_obj%minlev=minlev_out
@@ -220,7 +220,7 @@ end do
 call multigrid_level(mg_mesh,mg_mesh%mgdim)
 ! Set high order elements
 do i=1,order
-  IF(mg_mesh%mgdim+i-1<ML_oft_h0%minlev)CYCLE
+  IF(mg_mesh%mgdim+i-1<ML_h0_obj%minlev)CYCLE
   IF(ML_h0_obj%nlevels>0)THEN
     CALL oft_h0_setup_vol(ML_h0_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
     CALL ML_h0_obj%set_level(mg_mesh%mgdim+i-1)
@@ -348,7 +348,7 @@ CLASS IS(oft_h0_fem)
   self%order=order
   self%dim=1
   self%type=oft_h0_id
-  IF(hex_mesh)THEN
+  IF(self%mesh%type==3)THEN
     CALL hpoly_2d_grid(self%order-1, self%indsf)
     CALL hpoly_3d_grid(self%order-1, self%indsc)
     select case(self%order)
@@ -409,7 +409,7 @@ CLASS IS(oft_h0_bfem)
   self%order=order
   self%dim=1
   self%type=oft_h0_id
-  IF(hex_mesh)THEN
+  IF(self%mesh%type==3)THEN
     select case(self%order)
       case(1)
         self%gstruct=(/1,0,0/)
@@ -462,7 +462,7 @@ real(r8), intent(out) :: val !< Value of interpolation function (dof) at point (
 integer(i4) :: i,ed,etmp(2),fc,ftmp(3),finds(9),ind,fhtmp(4),inds(4)
 real(r8) :: fhex(6)
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   fhex=hex_get_bary(f)
   select case(self%cmap(dof)%type)
     case(1)
@@ -646,7 +646,7 @@ real(r8), contiguous, intent(out) :: rop(:) !< Value of interpolation functions 
 integer(i4) :: i,j,etmp(2),fhtmp(4),offset
 real(r8) :: fhex(6),vtmp
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   ! DO i=1,self%nce
   !   call oft_h0_eval(self,cell,i,f,rop(i))
   ! END DO
@@ -846,7 +846,7 @@ real(r8), intent(in) :: gop(:,:) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i,j,ind,finds(9),fhtmp(4)
 real(r8) :: cofs(4),fhex(6),gbary(3,6),dtmp,vtmp(4)
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   val=0.d0
   fhex=hex_get_bary(f)
   gbary=hex_get_bary_gop(gop)
@@ -1106,7 +1106,7 @@ real(r8), intent(in) :: gop(:,:) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: i,j,k,etmp(2),fhtmp(4),offset
 real(r8) :: fhex(6),gbary(3,6),val(3),cords(4),dtmp,vtmp(4)
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   fhex=hex_get_bary(f)
   gbary=hex_get_bary_gop(gop)
   DO i=1,8

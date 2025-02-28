@@ -19,8 +19,10 @@ USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_lag_basis, ONLY: oft_lag_setup, &
-  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_lag_basis, ONLY: oft_lag_setup!, &
+  ! ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zeroe
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -30,6 +32,8 @@ INTEGER(i4), PARAMETER :: minlev=2
 INTEGER(i4) :: ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_blag_zeroe), TARGET :: blag_zeroe
 INTEGER(i4) :: order
 NAMELIST/test_blag_options/order

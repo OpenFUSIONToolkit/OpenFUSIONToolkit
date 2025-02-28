@@ -727,10 +727,10 @@ USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: hdf5_create_file, hdf5_write, hdf5_create_group
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
-USE fem_base, ONLY: oft_afem_type
+USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_la_base, ONLY: oft_vector
-USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
-  oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE oft_gs_profiles, ONLY: zero_flux_func
 USE oft_gs, ONLY: gs_eq, gs_setup_walls, gs_cond_source, gs_vacuum_solve
 USE oft_gs_fit, ONLY: fit_load, fit_constraint_ptr, gs_active
@@ -742,6 +742,8 @@ IMPLICIT NONE
 INTEGER(4) :: i,ierr,io_unit
 TYPE(gs_eq) :: mygs
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 !---GS input options
 INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30

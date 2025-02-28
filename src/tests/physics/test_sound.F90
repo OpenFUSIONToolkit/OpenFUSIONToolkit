@@ -22,23 +22,24 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop, &
   oft_lag_getmop, oft_lag_project, oft_lag_rinterp, oft_lag_vrinterp
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project
 !---Physics
 USE diagnostic, ONLY: scal_energy, vec_energy
 USE mhd_utils, ONLY: elec_charge, proton_mass
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, temp_floor, &
-  xmhd_lin_run, xmhd_adv_b, xmhd_sub_fields
+  xmhd_lin_run, xmhd_adv_b, xmhd_sub_fields, ML_oft_hcurl, ML_oft_bhcurl, ML_oft_h0, &
+  ML_oft_bh0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE test_phys_helpers, ONLY: sound_eig
 IMPLICIT NONE
 !---Lagrange Metric solver
@@ -93,7 +94,7 @@ CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
 CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,minlev)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,minlev)
 CALL h1_setup_interp(ML_oft_h1,ML_oft_h0)
 !---------------------------------------------------------------------------
 ! Create Lagrange metric solver

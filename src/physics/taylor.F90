@@ -27,20 +27,17 @@ USE oft_native_solvers, ONLY: oft_native_cg_solver, oft_native_cg_eigsolver, &
   oft_native_gmres_solver, oft_ml_precond
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
-USE fem_base, ONLY: oft_fem_type, oft_afem_type
+USE fem_base, ONLY: oft_fem_type, oft_afem_type, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
-USE fem_composite, ONLY: oft_fem_comp_type
-USE oft_lag_basis, ONLY: ML_oft_lagrange
+USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE oft_lag_operators, ONLY: oft_lag_zerob, lag_getlop_pre, oft_lag_getlop
-USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_fem, &
-  ML_oft_h0
+USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_fem
 USE oft_h0_operators, ONLY: oft_h0_zerogrnd, h0_getlop_pre, oft_h0_getlop
 USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_hcurl_ceval_all, &
-  oft_hcurl_get_cgops, oft_hcurl_fem, ML_oft_hcurl
+  oft_hcurl_get_cgops, oft_hcurl_fem
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, oft_hcurl_orthog, &
   oft_hcurl_divout, hcurl_getwop_pre, oft_hcurl_zerob, oft_hcurl_getmop, oft_hcurl_getkop, &
   oft_hcurl_getwop, oft_hcurl_getjmlb, hcurl_getjmlb_pre
-USE oft_h1_basis, ONLY: ML_oft_h1
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_getmop, h1_mc
 !---
 USE diagnostic, ONLY: tfluxfun
@@ -86,6 +83,11 @@ character(LEN=taylor_tag_size), pointer, dimension(:) :: taylor_htag => NULL() !
 type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_hvac => NULL() !< Vacuum magnetic fields
 type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_hcur => NULL() !< Inhomogeneous source fields
 type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_gffa => NULL() !< Inhomogeneous force-free fields
+!---
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_h1,ML_oft_vlagrange
 !---General
 logical :: taylor_rst=.TRUE. !< Save solutions to data files
 contains
@@ -148,6 +150,7 @@ ALLOCATE(taylor_hffa(taylor_nm,ML_oft_hcurl%level))
 ALLOCATE(taylor_hlam(taylor_nm,ML_oft_hcurl%level))
 ALLOCATE(taylor_htor(taylor_nm,ML_oft_hcurl%level))
 !---Setup orthogonalization
+orthog%ML_hcurl_rep=>ML_oft_hcurl
 orthog%orthog=>taylor_hffa
 !---------------------------------------------------------------------------
 ! Create ML Matrices
@@ -211,7 +214,7 @@ do k=1,taylor_nm
       CALL create_diag_pre(eigsolver%pre)
       call u%set(1.d0,random=.TRUE.) ! Initialize guess
     else ! Higher levels use MG
-      CALL hcurl_getwop_pre(eigsolver%pre,ml_wop,nlevels=i-taylor_minlev+1)
+      CALL hcurl_getwop_pre(ML_oft_hcurl,eigsolver%pre,ml_wop,nlevels=i-taylor_minlev+1)
       SELECT TYPE(this=>eigsolver%pre)
         CLASS IS(oft_ml_precond)
           call ML_oft_hcurl%set_level(i-1)
@@ -270,12 +273,15 @@ do k=1,taylor_nm
       CALL create_diag_pre(linv%pre)
     else ! Higher levels use MG
       CALL create_cg_solver(linv, force_native=.TRUE.)
-      CALL lag_getlop_pre(linv%pre,ml_lop,nlevels=ML_oft_lagrange%level-taylor_minlev+1)
+      CALL lag_getlop_pre(ML_oft_lagrange,linv%pre,ml_lop,nlevels=ML_oft_lagrange%level-taylor_minlev+1)
     end if
     linv%A=>lop
     linv%its=-2
-    divout%solver=>linv
-    divout%bc=>lag_zerob
+    CALL divout%setup(ML_oft_hcurl,ML_oft_lagrange,bc='zero',solver=linv)
+    ! divout%ML_hcurl_rep=>ML_oft_hcurl
+    ! divout%ML_lag_rep=>ML_oft_lagrange
+    ! divout%solver=>linv
+    ! divout%bc=>lag_zerob
     divout%pm=oft_env%pm
     CALL divout%apply(u)
     CALL linv%pre%delete
@@ -415,7 +421,7 @@ IF(.NOT.rst)THEN
     CALL create_diag_pre(linv%pre)
   else ! Nested levels use MG
     CALL create_cg_solver(linv, force_native=.TRUE.)
-    CALL h0_getlop_pre(linv%pre,ml_lop,'grnd',nlevels=ML_oft_h0%nlevels-taylor_minlev+1)
+    CALL h0_getlop_pre(ML_oft_h0,linv%pre,ml_lop,'grnd',nlevels=ML_oft_h0%nlevels-taylor_minlev+1)
       lop=>ml_lop(ML_oft_h0%nlevels-taylor_minlev+1)%M
   end if
 !---------------------------------------------------------------------------
@@ -438,7 +444,7 @@ IF((taylor_minlev==ML_oft_hcurl%level).OR.rst)THEN ! Lowest level uses diag prec
   CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,wop,'zerob')
   CALL create_diag_pre(winv%pre)
 ELSE ! Nested levels use MG
-  CALL hcurl_getwop_pre(winv%pre,ml_wop,nlevels=ML_oft_hcurl%level-taylor_minlev+1)
+  CALL hcurl_getwop_pre(ML_oft_hcurl,winv%pre,ml_wop,nlevels=ML_oft_hcurl%level-taylor_minlev+1)
   wop=>ml_wop(ML_oft_hcurl%level-taylor_minlev+1)%M
 END IF
 !---------------------------------------------------------------------------
@@ -464,7 +470,8 @@ linv_lag%A=>lop_lag
 CALL create_diag_pre(linv_lag%pre)
 linv_lag%its=40
 hcurl_divout%solver=>linv_lag
-hcurl_divout%bc=>lag_zerob
+! hcurl_divout%bc=>lag_zerob
+CALL hcurl_divout%setup(ML_oft_hcurl,ML_oft_lagrange,bc='zero',solver=linv_lag)
 hcurl_divout%app_freq=2
 CALL oft_hcurl_getmop(ML_oft_hcurl%current_level,mop_hcurl,'zerob')
 hcurl_divout%mop=>mop_hcurl
@@ -689,7 +696,7 @@ IF(.NOT.rst)THEN
     CALL oft_hcurl_getjmlb(ML_oft_hcurl%current_level,jmlb_mat,lambda,'zerob')
     CALL create_diag_pre(jmlb_inv%pre)
   ELSE ! Nested levels use MG
-    CALL hcurl_getjmlb_pre(jmlb_inv%pre,ml_jmlb,lambda,nlevels=ML_oft_hcurl%level-taylor_minlev+1)
+    CALL hcurl_getjmlb_pre(ML_oft_hcurl,jmlb_inv%pre,ml_jmlb,lambda,nlevels=ML_oft_hcurl%level-taylor_minlev+1)
     jmlb_mat=>ml_jmlb(ML_oft_hcurl%level-taylor_minlev+1)%M
   END IF
 !---------------------------------------------------------------------------
@@ -713,7 +720,8 @@ linv_lag%its=-2
 CALL create_diag_pre(linv_lag%pre)
 linv_lag%its=40
 hcurl_divout%solver=>linv_lag
-hcurl_divout%bc=>lag_zerob
+CALL hcurl_divout%setup(ML_oft_hcurl,ML_oft_lagrange,bc='zero',solver=linv_lag)
+! hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=10
 CALL oft_hcurl_getmop(ML_oft_hcurl%current_level,mop,'zerob')
 hcurl_divout%mop=>mop
@@ -852,7 +860,7 @@ IF(taylor_minlev==ML_oft_hcurl%nlevels)THEN ! Lowest level uses diag precond
   CALL oft_hcurl_getjmlb(ML_oft_hcurl%current_level,jmlb_mat,lambda,'zerob')
   CALL create_diag_pre(jmlb_inv%pre)
 ELSE ! Nested levels use MG
-  CALL hcurl_getjmlb_pre(jmlb_inv%pre,ml_jmlb,lambda,nlevels=1)
+  CALL hcurl_getjmlb_pre(ML_oft_hcurl,jmlb_inv%pre,ml_jmlb,lambda,nlevels=1)
   jmlb_mat=>ml_jmlb(1)%M
 END IF
 hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
@@ -877,7 +885,8 @@ linv_lag%its=-2
 CALL create_diag_pre(linv_lag%pre)
 linv_lag%its=40
 hcurl_divout%solver=>linv_lag
-hcurl_divout%bc=>lag_zerob
+CALL hcurl_divout%setup(ML_oft_hcurl,ML_oft_lagrange,bc='zero',solver=linv_lag)
+! hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=10
 CALL oft_hcurl_getmop(ML_oft_hcurl%current_level,mop,'zerob')
 hcurl_divout%mop=>mop

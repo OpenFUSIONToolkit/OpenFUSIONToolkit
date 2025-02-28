@@ -18,9 +18,10 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE fem_composite, ONLY: oft_ml_fe_comp_vecspace
-USE oft_lag_basis, ONLY: oft_lag_setup, &
-  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
+USE oft_lag_basis, ONLY: oft_lag_setup!, &
+  ! ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_vlag_zerob, &
   df_lop, nu_lop, lag_setup_interp, lag_mloptions, oft_lag_getlop
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr
@@ -31,6 +32,8 @@ IMPLICIT NONE
 INTEGER(i4), PARAMETER :: minlev=2
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_vlag_zerob), TARGET :: vlag_zerob
 LOGICAL :: mg_test=.FALSE.
 NAMELIST/test_lag_options/order,mg_test
@@ -47,7 +50,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
 vlag_zerob%ML_vlag_rep=>ML_oft_vlagrange
 IF(mg_test)THEN
-  CALL lag_setup_interp(ML_oft_lagrange,.TRUE.)
+  CALL lag_setup_interp(ML_oft_lagrange,ML_oft_vlagrange)
   CALL lag_mloptions
 END IF
 !---Run tests

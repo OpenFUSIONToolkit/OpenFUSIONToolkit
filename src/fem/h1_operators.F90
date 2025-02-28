@@ -45,10 +45,9 @@ USE oft_lag_basis, ONLY: oft_lag_geval_all
 USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_d2eval, oft_h0_fem, &
   oft_3D_h1_cast
 USE oft_h0_operators, ONLY: oft_h0_zerob, oft_h0_zerogrnd, oft_h0_getlop, oft_h0_gop
-USE oft_hcurl_basis, ONLY: ML_oft_hcurl, oft_hcurl_eval_all, &
+USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, &
   oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem, oft_3D_hcurl_cast
 USE oft_hcurl_operators, ONLY: oft_hcurl_rop, oft_hcurl_cop
-USE oft_h1_basis, ONLY: ML_oft_hgrad, ML_oft_h1
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -104,6 +103,7 @@ type, extends(oft_solver_bc) :: oft_h1_divout
   integer(i4) :: app_freq = 1 !< Frequency to apply solver
   logical :: keep_boundary = .FALSE. !< Flag for keeping boundary gradients
   logical :: pm = .FALSE. !< Flag for solver convergence monitor
+  logical :: internal_solver = .FALSE. !< Solver was constructed internally?
   class(oft_solver), pointer :: solver => NULL() !< Solver object for H0::LOP operator
   class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   class(oft_matrix), pointer :: mop => NULL() !< Mass matrix, applies divoutm if associated
@@ -1272,6 +1272,7 @@ self%ML_curl=>ML_h1_rep%ml_fields(1)%ml
 self%ML_grad=>ML_h1_rep%ml_fields(2)%ml
 IF(PRESENT(solver))THEN
   self%solver=>solver
+  self%internal_solver=.FALSE.
 ELSE
   NULLIFY(lop)
   CALL oft_h0_getlop(self%ML_grad%current_level,lop,bc)
@@ -1280,6 +1281,7 @@ ELSE
   linv%its=-3
   CALL create_diag_pre(linv%pre)
   self%solver=>linv
+  self%internal_solver=.TRUE.
 END IF
 IF(TRIM(bc)=='grnd')THEN
   ALLOCATE(bc_zerogrnd)
@@ -1355,7 +1357,7 @@ end subroutine h1_divout_apply
 !---------------------------------------------------------------------------
 subroutine h1_divout_delete(self)
 class(oft_h1_divout), intent(inout) :: self
-IF(ASSOCIATED(self%solver))THEN
+IF(ASSOCIATED(self%solver).AND.self%internal_solver)THEN
   call self%solver%A%delete
   deallocate(self%solver%A)
   call self%solver%pre%delete
@@ -1363,6 +1365,11 @@ IF(ASSOCIATED(self%solver))THEN
   call self%solver%delete
   deallocate(self%solver)
 END IF
+IF(ASSOCIATED(self%bc))THEN
+  CALL self%bc%delete()
+  DEALLOCATE(self%bc)
+END IF
+NULLIFY(self%ML_hcurl_full,self%ML_curl,self%ML_grad)
 end subroutine h1_divout_delete
 !---------------------------------------------------------------------------
 !> Needs docs
@@ -1417,9 +1424,9 @@ DO i=ML_hcurl_aug_rep%minlev+1,ML_hcurl_aug_rep%nlevels
     ! oft_h1_ops%hgrad_interp=>ML_oft_hgrad%interp_matrices(ML_oft_hgrad%level)%m
     CALL ML_grad%interp_matrices(ML_grad%level)%m%assemble
   ELSE
-    CALL ML_h0_rep%set_level(ML_oft_h1%level+1)
-    ML_grad%interp_graphs(ML_grad%level)%g=>ML_h0_rep%interp_graphs(ML_oft_h1%level+1)%g !ML_oft_h0_ops(oft_h1_level+1)%interp_graph
-    ML_grad%interp_matrices(ML_grad%level)%m=>ML_h0_rep%interp_matrices(ML_oft_h1%level+1)%m
+    CALL ML_h0_rep%set_level(ML_hcurl_aug_rep%level+1)
+    ML_grad%interp_graphs(ML_grad%level)%g=>ML_h0_rep%interp_graphs(ML_hcurl_aug_rep%level+1)%g !ML_oft_h0_ops(oft_h1_level+1)%interp_graph
+    ML_grad%interp_matrices(ML_grad%level)%m=>ML_h0_rep%interp_matrices(ML_hcurl_aug_rep%level+1)%m
     ! oft_h1_ops%hgrad_interp_graph=>ML_oft_h0%interp_graphs(oft_h1_level+1)%g
     ! oft_h1_ops%hgrad_interp=>ML_oft_h0%interp_matrices(oft_h1_level+1)%m
   END IF
@@ -1554,7 +1561,7 @@ END DO
 ! Construct matrix
 !---------------------------------------------------------------------------
 CALL ML_grad%vec_create(hgrad_vec)
-CALL ML_grad%vec_create(hgrad_vec_cors,ML_oft_h1%level-1)
+CALL ML_grad%vec_create(hgrad_vec_cors,ML_hcurl_aug_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
@@ -2008,7 +2015,7 @@ df=0.d0
 DO i=minlev,ML_hcurl_aug_obj%nlevels
   CALL ML_hcurl_aug_obj%set_level(i,propogate=.TRUE.)
   !---Create fields
-  CALL ML_oft_h1%vec_create(u)
+  CALL ML_hcurl_aug_obj%vec_create(u)
   !---Get Ev range
   NULLIFY(mop)
   CALL h1_getmop(ML_hcurl_aug_obj%current_level,mop,'lop')
@@ -2048,7 +2055,7 @@ END SUBROUTINE h1_mop_eigs
 !> Compute eigenvalues and smoothing coefficients for the operator H1::MOP
 !---------------------------------------------------------------------------
 SUBROUTINE h1_getmop_pre(ML_hcurl_aug_obj,pre,mats,level,nlevels)
-type(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_aug_obj
+type(oft_ml_fem_comp_type), target, intent(inout) :: ML_hcurl_aug_obj
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:)
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
@@ -2078,7 +2085,7 @@ IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','h1_getmop_pre',__FILE__)
-IF(toplev>ML_oft_h1%nlevels)CALL oft_abort('Maximum level is > h1_nlevels','h1_getmop_pre',__FILE__)
+IF(toplev>ML_hcurl_aug_obj%nlevels)CALL oft_abort('Maximum level is > h1_nlevels','h1_getmop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -2121,7 +2128,7 @@ END IF
 !---------------------------------------------------------------------------
 NULLIFY(pre)
 ALLOCATE(tmp_vecspace)
-tmp_vecspace%ML_FE_rep=>ML_oft_h1
+tmp_vecspace%ML_FE_rep=>ML_hcurl_aug_obj
 tmp_vecspace%base_pop=>h1_base_pop
 tmp_vecspace%base_push=>h1_base_push
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &

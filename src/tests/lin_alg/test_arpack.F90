@@ -26,11 +26,15 @@ USE oft_deriv_matrices, ONLY: create_diagmatrix
 USE oft_solver_utils, ONLY: create_native_pre
 USE oft_arpack, ONLY: oft_irlm_eigsolver, oft_iram_eigsolver
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, oft_lag_zerob
 IMPLICIT NONE
 INTEGER(i4) :: iounit,ierr
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: order=1
 INTEGER(i4) :: minlev=1

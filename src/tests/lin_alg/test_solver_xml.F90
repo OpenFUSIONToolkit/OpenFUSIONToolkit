@@ -24,13 +24,17 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_solver_xml
 !
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
   oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
 IMPLICIT NONE
 INTEGER(i4), PARAMETER :: order=4
 INTEGER(i4) :: io_unit,ierr
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 #if defined(HAVE_XML)
 !---Initialize enviroment

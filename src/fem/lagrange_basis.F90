@@ -79,16 +79,16 @@ integer(i4), parameter :: oft_lagrange_id = 1 !< FE type ID
 ! integer(i4) :: oft_lagrange_lin_level = 0 !< Highest linear element level
 !
 ! type(oft_scalar_bfem), pointer :: oft_blagrange !< Active FE representation
-type(oft_ml_fem_type), TARGET :: ML_oft_blagrange !< ML container for all FE representations
+! type(oft_ml_fem_type), TARGET :: ML_oft_blagrange !< ML container for all FE representations
 !
 ! TYPE(oft_scalar_fem), POINTER :: oft_lagrange !< Active FE representation
 ! TYPE(oft_scalar_fem), POINTER :: oft_lagrange_lin !< Highest linear element representation
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange !< ML container for all FE representations
+! TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange !< ML container for all FE representations
 !
 ! TYPE(oft_fem_comp_type), POINTER :: oft_vlagrange !< Active vector representation
-TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange !< ML container for vector representation
+! TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange !< ML container for vector representation
 !
-logical, private :: hex_mesh = .FALSE.
+! logical, private :: hex_mesh = .FALSE.
 contains
 !------------------------------------------------------------------------------
 !> Cast abstract FE type to 3D lagrange finite element type
@@ -408,11 +408,11 @@ IF(ASSOCIATED(mg_mesh%meshes))THEN
   ML_lag_obj%minlev=minlev_out
   ML_vlag_obj%nlevels=ML_lag_obj%nlevels
   ML_lag_obj%ml_mesh=>mg_mesh
-  IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
+  ! IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
 ELSE
   ML_lag_obj%nlevels=0
   ML_vlag_obj%nlevels=0
-  IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
+  ! IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
 END IF
 ML_blag_obj%ml_mesh=>mg_mesh
 ML_blag_obj%nlevels=nlevels
@@ -511,12 +511,12 @@ CALL oft_increase_indent
 ALLOCATE(oft_scalar_fem::self)
 SELECT TYPE(self)
 CLASS IS(oft_scalar_fem)
-  IF(tmesh%type==3)hex_mesh=.TRUE.
+  ! IF(tmesh%type==3)hex_mesh=.TRUE.
   self%mesh=>tmesh
   self%order=order
   self%dim=1
   self%type=oft_lagrange_id
-  IF(hex_mesh)THEN
+  IF(self%mesh%type==3)THEN
     CALL hex_3d_grid(self%order,self%xnodes,self%inodesp, &
       self%inodese,self%inodesf,self%inodesc)
     select case(self%order)
@@ -574,12 +574,12 @@ CALL oft_increase_indent
 ALLOCATE(oft_scalar_bfem::self)
 SELECT TYPE(self)
 CLASS IS(oft_scalar_bfem)
-  IF(tmesh%type==3)hex_mesh=.TRUE.
+  ! IF(tmesh%type==3)hex_mesh=.TRUE.
   self%mesh=>tmesh
   self%order=order
   self%dim=1
   self%type=oft_lagrange_id
-  IF(hex_mesh)THEN
+  IF(self%mesh%type==3)THEN
     CALL quad_2d_grid(order,self%xnodes,self%inodesp,self%inodese,self%inodesf)
     select case(self%order)
       case(1)
@@ -628,7 +628,7 @@ real(r8), intent(in) :: f(:) !< Position in cell in logical space
 real(r8), intent(out) :: val !< Value of interpolation function (dof) at point (f)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),ind,finds(16)
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   select case(self%cmap(dof)%type)
     case(1)
       val=lag_3d(self%inodesp(:,self%cmap(dof)%el),f, &
@@ -680,7 +680,7 @@ real(r8), intent(in) :: f(:) !< Position in cell in logical space
 real(r8), intent(out) :: val !< Value of interpolation function (dof) at point (f)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),finds(16),ind
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   select case(self%cmap(dof)%type)
     case(1)
       val=lag_2d(self%inodesp(:,self%cmap(dof)%el),f, &
@@ -731,7 +731,7 @@ integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
 real(r8) :: pnorm
 real(r8), ALLOCATABLE, DIMENSION(:,:) :: grid_1d
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   ALLOCATE(grid_1d(self%order+1,3))
   DO i=1,self%order+1
     grid_1d(i,1) = lag_1d(i,f(1),self%xnodes,self%order+1)
@@ -943,7 +943,7 @@ real(r8), intent(out) :: val(3) !< Cell Jacobian matrix at point (f) [3,4]
 real(r8) :: cofs(4),vtmp(3)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i,ind,finds(16)
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   val=0.d0
   select case(self%cmap(dof)%type)
     case(1)
@@ -1019,7 +1019,7 @@ integer(i4) :: ed,etmp(2),fc,ftmp(3),i,finds(16),ind
 DEBUG_STACK_PUSH
 grads=1.d0
 if(present(gop))grads=gop
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   val=0.d0
   select case(self%cmap(dof)%type)
     case(1)
@@ -1084,7 +1084,7 @@ integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
 real(r8) :: cofs(4),val(3),vtmp(3),pnorm
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: grid_1d,dgrid_1d
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   ALLOCATE(grid_1d(self%order+1,3),dgrid_1d(self%order+1,3))
   DO i=1,self%order+1
     grid_1d(i,1) = lag_1d(i,f(1),self%xnodes,self%order+1)
@@ -1363,7 +1363,7 @@ integer(i4), parameter :: pmap(4)=(/1,5,8,10/)
 integer(i4), parameter :: emap(6)=(/4,7,9,6,3,2/)
 integer(i4), parameter :: fmap(4,4)=RESHAPE((/1,2,3,4,2,5,6,7,3,6,8,9,4,7,9,10/),(/4,4/))
 cofs=0.d0
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   val=0.d0
   select case(self%cmap(dof)%type)
     case(1)
@@ -1461,7 +1461,7 @@ integer(i4) :: ed,etmp(2),fc,ftmp(3),i,j,k,ind,finds(16)
 integer(i4), parameter :: pmap(3)=(/1,4,6/)
 integer(i4), parameter :: emap(3)=(/5,3,2/)
 integer(i4), parameter :: fmap(3,3)=RESHAPE((/1,2,3,2,4,5,3,4,6/),(/3,3/))
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   val=0.d0
   select case(self%cmap(dof)%type)
     case(1)
@@ -1541,7 +1541,7 @@ real(r8), intent(out) :: f(:) !< Position of node in logical space
 integer(i4) :: i,ed,etmp(2),fc,ftmp(3),ind,finds(16)
 DEBUG_STACK_PUSH
 !---
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   select case(self%cmap(dof)%type)
     case(1)
       f(1:3)=self%xnodes(self%inodesp(:,self%cmap(dof)%el))
@@ -1670,7 +1670,7 @@ real(r8), intent(out) :: f(:) !< Position of node in logical space
 integer(i4) :: i,ed,etmp(2),fc,ftmp(3),ind,finds(16)
 DEBUG_STACK_PUSH
 !---
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   select case(self%cmap(dof)%type)
     case(1)
       f(1:2)=self%xnodes(self%inodesp(1:2,self%cmap(dof)%el))

@@ -20,8 +20,9 @@ USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_lag_basis, ONLY: oft_lag_setup, &
-  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
   oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -31,6 +32,8 @@ IMPLICIT NONE
 INTEGER(i4) :: minlev,ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: order
 LOGICAL :: mg_test
@@ -148,7 +151,7 @@ CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 CALL create_cg_solver(linv,force_native=.TRUE.)
 linv%its=-3
 !---Setup MG preconditioner
-CALL lag_getlop_pre(linv%pre,ml_lop,nlevels=nlevels)
+CALL lag_getlop_pre(ML_oft_lagrange,linv%pre,ml_lop,nlevels=nlevels)
 lop=>ml_lop(nlevels)%M
 linv%A=>lop
 linv%bc=>lag_zerob

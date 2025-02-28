@@ -32,7 +32,7 @@ USE oft_arpack, ONLY: oft_irlm_eigsolver
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type, &
   oft_ml_fe_vecspace
 USE fem_utils, ONLY: fem_interp
-USE oft_h0_basis, ONLY: ML_oft_h0, oft_h0_eval_all, oft_h0_geval_all, &
+USE oft_h0_basis, ONLY: oft_h0_eval_all, oft_h0_geval_all, &
   oft_h0_fem
 IMPLICIT NONE
 #include "local.h"
@@ -1168,7 +1168,8 @@ END SUBROUTINE h0_lop_eigs
 !---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H0::LOP
 !---------------------------------------------------------------------------
-SUBROUTINE h0_getlop_pre(pre,mats,bc_type,level,nlevels)
+SUBROUTINE h0_getlop_pre(ML_h0_rep,pre,mats,bc_type,level,nlevels)
+type(oft_ml_fem_type), target, intent(inout) :: ML_h0_rep
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:)
 CHARACTER(LEN=*), INTENT(in) :: bc_type !< Boundary condition
@@ -1196,14 +1197,14 @@ TYPE(xml_node), POINTER :: h0_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=ML_oft_h0%level
-levin=ML_oft_h0%level
+toplev=ML_h0_rep%level
+levin=ML_h0_rep%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','h0_getlop_pre',__FILE__)
-IF(toplev>ML_oft_h0%nlevels)CALL oft_abort('Maximum level is > h0_nlevels','h0_getlop_pre',__FILE__)
+IF(toplev>ML_h0_rep%nlevels)CALL oft_abort('Maximum level is > h0_nlevels','h0_getlop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -1215,7 +1216,7 @@ END IF
 ALLOCATE(ml_int(nl-1),levels(nl))
 ALLOCATE(df(nl),nu(nl))
 DO i=1,nl
-  CALL ML_oft_h0%set_level(minlev+(i-1))
+  CALL ML_h0_rep%set_level(minlev+(i-1))
   levels(i)=minlev+(i-1)
   df(i)=df_lop(levels(i))
   nu(i)=nu_lop(levels(i))
@@ -1226,11 +1227,11 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_h0_getlop(ML_oft_h0%current_level,mats(i)%M,'grnd')
+    CALL oft_h0_getlop(ML_h0_rep%current_level,mats(i)%M,'grnd')
   END IF
-  IF(i>1)ml_int(i-1)%M=>ML_oft_h0%interp_matrices(ML_oft_h0%level)%m !oft_h0_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_h0_rep%interp_matrices(ML_h0_rep%level)%m !oft_h0_ops%interp
 END DO
-CALL ML_oft_h0%set_level(levin)
+CALL ML_h0_rep%set_level(levin)
 !---------------------------------------------------------------------------
 ! Search for XML-spec
 !---------------------------------------------------------------------------
@@ -1247,18 +1248,18 @@ END IF
 !---------------------------------------------------------------------------
 NULLIFY(pre)
 ALLOCATE(tmp_vecspace)
-tmp_vecspace%ML_FE_rep=>ML_oft_h0
+tmp_vecspace%ML_FE_rep=>ML_h0_rep
 tmp_vecspace%base_pop=>h0_base_pop
 tmp_vecspace%base_push=>h0_base_push
 SELECT CASE(TRIM(bc_type))
   CASE("zerob")
     ALLOCATE(zerob_bc)
-    zerob_bc%ML_H0_rep=>ML_oft_h0
+    zerob_bc%ML_H0_rep=>ML_h0_rep
     CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
       bc=zerob_bc,stype=1,df=df,nu=nu,xml_root=pre_node)
   CASE("grnd")
     ALLOCATE(zerogrnd_bc)
-    zerogrnd_bc%ML_H0_rep=>ML_oft_h0
+    zerogrnd_bc%ML_H0_rep=>ML_h0_rep
     CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
       bc=zerogrnd_bc,stype=1,df=df,nu=nu,xml_root=pre_node)
   CASE DEFAULT

@@ -39,19 +39,21 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
   create_ilu_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad, ML_oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_mc
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, &
-  den_floor, temp_floor, xmhd_sub_fields
+  den_floor, temp_floor, xmhd_sub_fields, ML_oft_hcurl, ML_oft_bhcurl, &
+  ML_oft_h0, ML_oft_bh0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, &
+  ML_oft_blagrange, ML_oft_vlagrange
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex2_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
@@ -96,7 +98,7 @@ CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
 !---H1(Grad) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,-1)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,-1)
 h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
 !!\subsection doc_mug_sph_ex2_code_plot Perform post-processing
 !!

@@ -12,10 +12,10 @@
 PROGRAM tokamaker_fit
 USE oft_base
 USE multigrid_build, ONLY: multigrid_mesh, multigrid_construct_surf
-USE fem_base, ONLY: oft_afem_type
+USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_la_base, ONLY: oft_vector
-USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
-  oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
   gs_fixed_vflux, gs_load_regions, oft_indent
@@ -30,6 +30,8 @@ REAL(8), ALLOCATABLE :: pts(:,:)
 TYPE(gs_eq) :: mygs
 CLASS(oft_vector), POINTER :: xv
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 !---GS input options
 INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30

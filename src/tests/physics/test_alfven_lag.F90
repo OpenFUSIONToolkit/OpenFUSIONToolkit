@@ -22,7 +22,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, &
   oft_lag_vgetmop, oft_lag_vrinterp
 !---Physics
@@ -30,7 +30,7 @@ USE oft_vector_inits, ONLY: uniform_field
 USE diagnostic, ONLY: vec_energy
 USE mhd_utils, ONLY: mu0, proton_mass
 USE xmhd_lag, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, xmhd_lin_run, &
-  xmhd_sub_fields
+  xmhd_sub_fields, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE test_phys_helpers, ONLY: alfven_eig
 IMPLICIT NONE
 !---H1 metric solver

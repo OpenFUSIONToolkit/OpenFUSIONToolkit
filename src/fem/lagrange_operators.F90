@@ -39,9 +39,8 @@ USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type, fem_max_levels, 
   oft_ml_fe_vecspace
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
-USE oft_lag_basis, ONLY: ML_oft_lagrange, &
-  oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
-  oft_lag_nodes, ML_oft_vlagrange, oft_blag_eval, &
+USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
+  oft_lag_nodes, oft_blag_eval, &
   oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem, &
   oft_3D_lagrange_cast
 IMPLICIT NONE
@@ -1515,20 +1514,20 @@ end subroutine lag_div
 !---------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
 !---------------------------------------------------------------------------
-SUBROUTINE lag_setup_interp(ML_lag_rep,create_vec)
+SUBROUTINE lag_setup_interp(ML_lag_rep,ML_vlag_rep)
 CLASS(oft_ml_fem_type), intent(inout) :: ML_lag_rep
-LOGICAL, OPTIONAL, INTENT(in) :: create_vec !< Needs docs
+CLASS(oft_ml_fem_comp_type), optional, intent(inout) :: ML_vlag_rep
 !---
 class(oft_vector), pointer :: fvec,cvec
 type(oft_graph_ptr) :: graphs(3,3)
 type(oft_matrix_ptr) :: mats(3,3)
 INTEGER(i4) :: i
-LOGICAL :: vec_interp
+! LOGICAL :: vec_interp
 DEBUG_STACK_PUSH
-vec_interp=.FALSE.
-IF(PRESENT(create_vec))vec_interp=create_vec
+! vec_interp=.FALSE.
+! IF(PRESENT(create_vec))vec_interp=create_vec
 !---
-DO i=ML_oft_lagrange%minlev+1,ML_lag_rep%nlevels
+DO i=ML_lag_rep%minlev+1,ML_lag_rep%nlevels
   CALL ML_lag_rep%set_level(i)
   !---
   if(ML_lag_rep%level==ML_lag_rep%blevel+1)then
@@ -1546,8 +1545,8 @@ DO i=ML_oft_lagrange%minlev+1,ML_lag_rep%nlevels
   end if
 END DO
 !---Create vector interpolation operator
-IF(vec_interp)THEN
-  CALL ML_oft_vlagrange%build_interp
+IF(PRESENT(ML_vlag_rep))THEN
+  CALL ML_vlag_rep%build_interp
   ! DO i=ML_oft_lagrange%minlev+1,ML_oft_lagrange%nlevels
   !   CALL oft_lag_set_level(i)
   !   !---
@@ -2272,7 +2271,8 @@ END SUBROUTINE lag_lop_eigs
 !---------------------------------------------------------------------------
 !> Construct default MG preconditioner for LAG::LOP
 !---------------------------------------------------------------------------
-SUBROUTINE lag_getlop_pre(pre,mats,level,nlevels)
+SUBROUTINE lag_getlop_pre(ML_lag_rep,pre,mats,level,nlevels)
+type(oft_ml_fem_type), target, intent(inout) :: ML_lag_rep
 CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Needs docs
 TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:) !< Needs docs
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Needs docs
@@ -2298,14 +2298,14 @@ TYPE(xml_node), POINTER :: lag_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=ML_oft_lagrange%level
-levin=ML_oft_lagrange%level
+toplev=ML_lag_rep%level
+levin=ML_lag_rep%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','lag_getlop_pre',__FILE__)
-IF(toplev>ML_oft_lagrange%nlevels)CALL oft_abort('Maximum level is > lag_nlevels','lag_getlop_pre',__FILE__)
+IF(toplev>ML_lag_rep%nlevels)CALL oft_abort('Maximum level is > lag_nlevels','lag_getlop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -2317,7 +2317,7 @@ END IF
 ALLOCATE(ml_int(nl-1),levels(nl))
 ALLOCATE(df(nl),nu(nl))
 DO i=1,nl
-  CALL ML_oft_lagrange%set_level(minlev+(i-1))
+  CALL ML_lag_rep%set_level(minlev+(i-1))
   levels(i)=minlev+(i-1)
   df(i)=df_lop(levels(i))
   nu(i)=nu_lop(levels(i))
@@ -2328,11 +2328,11 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_lag_getlop(ML_oft_lagrange%current_level,mats(i)%M,'zerob')
+    CALL oft_lag_getlop(ML_lag_rep%current_level,mats(i)%M,'zerob')
   END IF
-  IF(i>1)ml_int(i-1)%M=>ML_oft_lagrange%interp_matrices(ML_oft_lagrange%level)%m !oft_lagrange_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m !oft_lagrange_ops%interp
 END DO
-CALL ML_oft_lagrange%set_level(levin)
+CALL ML_lag_rep%set_level(levin)
 !---------------------------------------------------------------------------
 ! Search for XML-spec
 !---------------------------------------------------------------------------
@@ -2347,10 +2347,10 @@ END IF
 ! Setup preconditioner
 !---------------------------------------------------------------------------
 ALLOCATE(bc_tmp)
-bc_tmp%ML_lag_rep=>ML_oft_lagrange
+bc_tmp%ML_lag_rep=>ML_lag_rep
 NULLIFY(pre)
 ALLOCATE(tmp_vecspace)
-tmp_vecspace%ML_FE_rep=>ML_oft_lagrange
+tmp_vecspace%ML_FE_rep=>ML_lag_rep
 tmp_vecspace%base_pop=>lag_base_pop
 tmp_vecspace%base_push=>lag_base_push
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &

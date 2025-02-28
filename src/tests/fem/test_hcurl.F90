@@ -18,8 +18,8 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, &
-  ML_oft_hcurl, ML_oft_bhcurl
+USE fem_base, ONLY: oft_ml_fem_type
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, oft_hcurl_zerob, &
   hcurl_setup_interp, hcurl_mloptions, hcurl_getwop_pre
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -29,6 +29,7 @@ IMPLICIT NONE
 INTEGER(i4) :: minlev
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
 TYPE(oft_hcurl_zerob), TARGET :: hcurl_zerob
 LOGICAL :: mg_test
 NAMELIST/test_hcurl_options/order,mg_test
@@ -48,7 +49,7 @@ CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,minlev)
 hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
 IF(mg_test)THEN
   CALL hcurl_setup_interp(ML_oft_hcurl)
-  CALL hcurl_mloptions
+  CALL hcurl_mloptions(ML_oft_hcurl)
 END IF
 !---Run tests
 oft_env%pm=.FALSE.
@@ -142,7 +143,7 @@ CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'none')
 CALL create_cg_solver(winv,force_native=.TRUE.)
 winv%its=-3
 !---Setup MG preconditioner
-CALL hcurl_getwop_pre(winv%pre,ml_wop,nlevels=nlevels)
+CALL hcurl_getwop_pre(ML_oft_hcurl,winv%pre,ml_wop,nlevels=nlevels)
 wop=>ml_wop(nlevels)%M
 winv%A=>wop
 !---------------------------------------------------------------------------

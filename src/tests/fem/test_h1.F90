@@ -24,19 +24,25 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_native_gmres_solver
 USE oft_solver_utils, ONLY: create_native_mlpre, create_cg_solver, create_diag_pre
+!---
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_getmop, h1_setup_interp, h1_getmop_pre, h1_mloptions, &
   oft_h1_rinterp, oft_h1_grad_zerop
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_h1
 TYPE(oft_h1_grad_zerop), TARGET :: h1grad_zerop
 LOGICAL :: mg_test
 NAMELIST/test_h1_options/order,mg_test
@@ -60,7 +66,7 @@ CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0)
 IF(mg_test)CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
 WRITE(*,*)'Setup In'
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad)
 h1grad_zerop%ML_h1_rep=>ML_oft_h1
 WRITE(*,*)'Setup Done'
 IF(mg_test)THEN

@@ -24,22 +24,30 @@ USE oft_io, ONLY: xdmf_plot_file
 !--Grid
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
+!---
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: hcurl_wop_eigs
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_lop_eigs
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_mop_eigs
 IMPLICIT NONE
 INTEGER(i4) :: ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_h1
 INTEGER(i4) :: order=1
 INTEGER(i4) :: minlev=1
 NAMELIST/oft_mesh_check_options/order,minlev
@@ -71,7 +79,7 @@ IF(order>0)THEN
   !---H1(Grad) subspace
   CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
   !---H1 space
-  CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,minlev)
+  CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,minlev)
 !---------------------------------------------------------------------------
 ! Compute smoother coefficients
 !---------------------------------------------------------------------------

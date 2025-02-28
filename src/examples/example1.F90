@@ -32,7 +32,9 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
 USE oft_solver_utils, ONLY: create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob
 IMPLICIT NONE
 !!The first two modules import runtime and helper functions. The \ref tetmesh_local module contains
@@ -59,6 +61,8 @@ REAL(r8) :: lambda
 REAL(r8), POINTER, DIMENSION(:) :: vtmp => NULL()
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_lag_zerob) :: lag_zerob
 !!\subsection doc_ex1_code_init Initialize Enviroment
 !!

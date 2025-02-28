@@ -34,8 +34,9 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_mlpre
 !---Lagrange FE space
-USE fem_base, ONLY: oft_ml_fe_vecspace
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE fem_base, ONLY: oft_ml_fem_type, oft_ml_fe_vecspace
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
   oft_lag_getmop, oft_lag_getlop, df_lop, nu_lop, oft_lag_zerob, &
   lag_base_pop, lag_base_push
@@ -59,6 +60,8 @@ INTEGER(i4) :: i,nlevels
 INTEGER(i4), PARAMETER :: order = 3
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_lag_zerob) :: lag_zerob
 TYPE(oft_ml_fe_vecspace) :: ml_vecspace
 !!\subsection doc_ex2_code_fem Setup Lagrange FE

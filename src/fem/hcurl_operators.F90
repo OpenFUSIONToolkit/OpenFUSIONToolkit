@@ -43,10 +43,10 @@ USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type, &
   oft_ml_fe_vecspace
 USE fem_utils, ONLY: fem_interp
-USE oft_lag_basis, ONLY: oft_lag_geval_all, ML_oft_lagrange, oft_scalar_fem, &
+USE oft_lag_basis, ONLY: oft_lag_geval_all, oft_scalar_fem, &
   oft_3D_lagrange_cast
 USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_zerob, oft_lag_zerogrnd
-USE oft_hcurl_basis, ONLY: ML_oft_hcurl, oft_hcurl_eval_all, &
+USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, &
   oft_hcurl_ceval_all, oft_hcurl_get_cgops, &
   oft_hcurl_fem, oft_hcurl_bfem, oft_3D_hcurl_cast, oft_2D_hcurl_cast
 IMPLICIT NONE
@@ -58,6 +58,7 @@ type, extends(oft_solver_bc) :: oft_hcurl_orthog
   integer(i4) :: nm = 0 !< Number of modes to orthogonalize against
   type(oft_vector_ptr), pointer, dimension(:,:) :: orthog => NULL() !< Library of modes
   class(oft_matrix), pointer :: wop => NULL() !< H1(Curl)::WOP, used as metric
+  class(oft_ml_fem_type), pointer :: ML_hcurl_rep => NULL()
 contains
   !> Perform orthoganlization
   procedure :: apply => hcurl_orthog_apply
@@ -105,9 +106,12 @@ type, extends(oft_solver_bc) :: oft_hcurl_divout
   integer(i4) :: count=0 !< Number of times apply has been called
   integer(i4) :: app_freq=1 !< Frequency to apply solver
   logical :: pm = .FALSE. !< Flag for solver convergence monitor
+  logical :: internal_solver = .FALSE. !< Solver was constructed internally?
   class(oft_solver), pointer :: solver => NULL() !< Solver object for LAG::LOP operator
   class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   class(oft_matrix), pointer :: mop => NULL() !< Mass matrix, applies divoutm if associated
+  class(oft_ml_fem_type), pointer :: ML_hcurl_rep => NULL() !< Lagrange FE space
+  class(oft_ml_fem_type), pointer :: ML_lag_rep => NULL() !< Lagrange FE space
 contains
   !> Setup matrix and solver with default
   procedure :: setup => hcurl_divout_setup
@@ -137,7 +141,8 @@ contains
 !---------------------------------------------------------------------------
 !> Read-in options for the basic Nedelec H1(Curl) ML preconditioners
 !---------------------------------------------------------------------------
-subroutine hcurl_mloptions
+subroutine hcurl_mloptions(ML_hcurl_obj)
+class(oft_ml_fem_type), intent(inout) :: ML_hcurl_obj
 integer(i4) :: i,ierr,io_unit
 namelist/hcurl_op_options/df_wop,nu_wop,nu_jmlb
 DEBUG_STACK_PUSH
@@ -152,9 +157,9 @@ IF(df_wop(1)<-1.d90)THEN
     WRITE(*,*)'No H(Curl) MG smoother settings found:'
     WRITE(*,*)'  Using default values, which may result in convergence failure.'
   END IF
-  DO i=ML_oft_hcurl%minlev,ML_oft_hcurl%nlevels
-    CALL ML_oft_hcurl%set_level(i)
-    SELECT CASE(ML_oft_hcurl%current_level%order)
+  DO i=ML_hcurl_obj%minlev,ML_hcurl_obj%nlevels
+    CALL ML_hcurl_obj%set_level(i)
+    SELECT CASE(ML_hcurl_obj%current_level%order)
     CASE(1)
       df_wop(i)=0.6d0
     CASE(2)
@@ -164,10 +169,10 @@ IF(df_wop(1)<-1.d90)THEN
     CASE DEFAULT
       df_wop(i)=0.2d0
     END SELECT
-    nu_wop(i)=MIN(64,2**(ML_oft_hcurl%nlevels-i))
+    nu_wop(i)=MIN(64,2**(ML_hcurl_obj%nlevels-i))
   END DO
-  nu_wop(ML_oft_hcurl%minlev)=64
-  nu_wop(ML_oft_hcurl%nlevels)=1
+  nu_wop(ML_hcurl_obj%minlev)=64
+  nu_wop(ML_hcurl_obj%nlevels)=1
 END IF
 DEBUG_STACK_POP
 end subroutine hcurl_mloptions
@@ -958,23 +963,34 @@ END SUBROUTINE oft_hcurl_bcurl
 !!
 !! @note Should only be used via class \ref oft_hcurl_divout
 !---------------------------------------------------------------------------
-subroutine hcurl_divout_setup(self,bc)
+subroutine hcurl_divout_setup(self,ML_hcurl_rep,ML_lag_rep,bc,solver)
 class(oft_hcurl_divout), intent(inout) :: self
+class(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_rep
+CLASS(oft_ml_fem_type), target, intent(inout) :: ML_lag_rep
 character(LEN=*), intent(in) :: bc !< Boundary condition
+class(oft_solver), target, optional, intent(in) :: solver
 TYPE(oft_lag_zerob), POINTER :: bc_zerob
 TYPE(oft_lag_zerogrnd), POINTER :: bc_zerogrnd
 DEBUG_STACK_PUSH
-CALL create_cg_solver(self%solver)
-self%solver%its=-3
-CALL oft_lag_getlop(ML_oft_lagrange%current_level,self%solver%A,bc)
-CALL create_diag_pre(self%solver%pre)
+self%ML_hcurl_rep=>ML_hcurl_rep
+self%ML_lag_rep=>ML_lag_rep
+IF(PRESENT(solver))THEN
+  self%solver=>solver
+  self%internal_solver=.FALSE.
+ELSE
+  CALL create_cg_solver(self%solver)
+  self%solver%its=-3
+  CALL oft_lag_getlop(ML_lag_rep%current_level,self%solver%A,bc)
+  CALL create_diag_pre(self%solver%pre)
+  self%internal_solver=.TRUE.
+END IF
 IF(TRIM(bc)=='grnd')THEN
   ALLOCATE(bc_zerogrnd)
-  bc_zerogrnd%ML_lag_rep=>ML_oft_lagrange
+  bc_zerogrnd%ML_lag_rep=>ML_lag_rep
   self%bc=>bc_zerogrnd
 ELSE
   ALLOCATE(bc_zerob)
-  bc_zerob%ML_lag_rep=>ML_oft_lagrange
+  bc_zerob%ML_lag_rep=>ML_lag_rep
   self%bc=>bc_zerob
 END IF
 DEBUG_STACK_POP
@@ -999,13 +1015,13 @@ IF(mod(self%count,self%app_freq)/=0)THEN
   RETURN
 END IF
 !---
-call ML_oft_lagrange%vec_create(g)
-call ML_oft_lagrange%vec_create(u)
+call self%ML_lag_rep%vec_create(g)
+call self%ML_lag_rep%vec_create(u)
 !---
 IF(ASSOCIATED(self%mop))THEN
-  CALL hcurl_gradtp(ML_oft_hcurl%current_level,a,g)
+  CALL hcurl_gradtp(self%ML_hcurl_rep%current_level,a,g)
 ELSE
-  CALL hcurl_div(ML_oft_hcurl%current_level,ML_oft_lagrange%current_level,a,g)
+  CALL hcurl_div(self%ML_hcurl_rep%current_level,self%ML_lag_rep%current_level,a,g)
 END IF
 uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
@@ -1018,7 +1034,7 @@ oft_env%pm=pm_save
 !---
 CALL u%scale(-1.d0)
 CALL a%new(tmp)
-CALL hcurl_grad(ML_oft_hcurl%current_level,u,tmp)
+CALL hcurl_grad(self%ML_hcurl_rep%current_level,u,tmp)
 IF(ASSOCIATED(self%mop))THEN
   CALL a%new(tmp2)
   CALL self%mop%apply(tmp,tmp2)
@@ -1041,6 +1057,19 @@ end subroutine hcurl_divout_apply
 !---------------------------------------------------------------------------
 subroutine hcurl_divout_delete(self)
 class(oft_hcurl_divout), intent(inout) :: self
+IF(ASSOCIATED(self%solver).AND.self%internal_solver)THEN
+  call self%solver%A%delete
+  deallocate(self%solver%A)
+  call self%solver%pre%delete
+  deallocate(self%solver%pre)
+  call self%solver%delete
+  deallocate(self%solver)
+END IF
+IF(ASSOCIATED(self%bc))THEN
+  CALL self%bc%delete()
+  DEALLOCATE(self%bc)
+END IF
+NULLIFY(self%ML_hcurl_rep,self%ML_lag_rep)
 end subroutine hcurl_divout_delete
 !---------------------------------------------------------------------------
 !> Orthogonalize a H1(Curl) vector against a library of given modes.
@@ -1058,10 +1087,10 @@ DEBUG_STACK_PUSH
 call a%new(b)
 do i=1,self%nm
   !---Compute coupling
-  call self%wop%apply(self%orthog(i,ML_oft_hcurl%level)%f,b)
+  call self%wop%apply(self%orthog(i,self%ML_hcurl_rep%level)%f,b)
   c=a%dot(b)
   !---Remove coupling
-  call a%add(1.d0,-c,self%orthog(i,ML_oft_hcurl%level)%f)
+  call a%add(1.d0,-c,self%orthog(i,self%ML_hcurl_rep%level)%f)
 end do
 !---Delete temporary variable
 call b%delete
@@ -1699,7 +1728,8 @@ END SUBROUTINE hcurl_wop_eigs
 !---------------------------------------------------------------------------
 !> Construct default MG preconditioner for H1(Curl)::WOP
 !---------------------------------------------------------------------------
-SUBROUTINE hcurl_getwop_pre(pre,mats,level,nlevels)
+SUBROUTINE hcurl_getwop_pre(ML_hcurl_rep,pre,mats,level,nlevels)
+type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_rep
 CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Needs docs
 TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:) !< Needs docs
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Needs docs
@@ -1725,14 +1755,14 @@ TYPE(xml_node), POINTER :: hcurl_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=ML_oft_hcurl%level
-levin=ML_oft_hcurl%level
+toplev=ML_hcurl_rep%level
+levin=ML_hcurl_rep%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','hcurl_getwop_pre',__FILE__)
-IF(toplev>ML_oft_hcurl%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getwop_pre',__FILE__)
+IF(toplev>ML_hcurl_rep%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getwop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -1744,7 +1774,7 @@ END IF
 ALLOCATE(ml_int(nl-1),levels(nl))
 ALLOCATE(df(nl),nu(nl))
 DO i=1,nl
-  CALL ML_oft_hcurl%set_level(minlev+(i-1))
+  CALL ML_hcurl_rep%set_level(minlev+(i-1))
   levels(i)=minlev+(i-1)
   df(i)=df_wop(levels(i))
   nu(i)=nu_wop(levels(i))
@@ -1755,11 +1785,11 @@ DO i=1,nl
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,mats(i)%M,'zerob')
+    CALL oft_hcurl_getwop(ML_hcurl_rep%current_level,mats(i)%M,'zerob')
   END IF
-  IF(i>1)ml_int(i-1)%M=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m !oft_hcurl_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m !oft_hcurl_ops%interp
 END DO
-CALL ML_oft_hcurl%set_level(levin)
+CALL ML_hcurl_rep%set_level(levin)
 !---------------------------------------------------------------------------
 ! Search for XML-spec
 !---------------------------------------------------------------------------
@@ -1774,10 +1804,10 @@ END IF
 ! Setup preconditioner
 !---------------------------------------------------------------------------
 ALLOCATE(bc_tmp)
-bc_tmp%ML_hcurl_rep=>ML_oft_hcurl
+bc_tmp%ML_hcurl_rep=>ML_hcurl_rep
 NULLIFY(pre)
 ALLOCATE(tmp_vecspace)
-tmp_vecspace%ML_FE_rep=>ML_oft_hcurl
+tmp_vecspace%ML_FE_rep=>ML_hcurl_rep
 tmp_vecspace%base_pop=>hcurl_base_pop
 tmp_vecspace%base_push=>hcurl_base_push
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
@@ -1791,7 +1821,8 @@ END SUBROUTINE hcurl_getwop_pre
 !---------------------------------------------------------------------------
 !> Construct default MG preconditioner for H1(Curl)::JMLB
 !---------------------------------------------------------------------------
-SUBROUTINE hcurl_getjmlb_pre(pre,mats,alam,level,nlevels)
+SUBROUTINE hcurl_getjmlb_pre(ML_hcurl_rep,pre,mats,alam,level,nlevels)
+type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_rep
 CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Needs docs
 TYPE(oft_matrix_ptr), POINTER, INTENT(inout) :: mats(:) !< Needs docs
 REAL(r8), INTENT(in) :: alam !< Needs docs
@@ -1818,14 +1849,14 @@ TYPE(xml_node), POINTER :: hcurl_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
-toplev=ML_oft_hcurl%level
-levin=ML_oft_hcurl%level
+toplev=ML_hcurl_rep%level
+levin=ML_hcurl_rep%level
 IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
 IF(minlev<1)CALL oft_abort('Minimum level is < 0','hcurl_getjmlb_pre',__FILE__)
-IF(toplev>ML_oft_hcurl%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getjmlb_pre',__FILE__)
+IF(toplev>ML_hcurl_rep%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getjmlb_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
@@ -1836,17 +1867,17 @@ IF(.NOT.ASSOCIATED(mats))THEN
 END IF
 ALLOCATE(ml_int(nl-1),levels(nl),nu(nl))
 DO i=1,nl
-  CALL ML_oft_hcurl%set_level(minlev+(i-1))
+  CALL ML_hcurl_rep%set_level(minlev+(i-1))
   levels(i)=minlev+(i-1)
   nu(i)=nu_jmlb(levels(i))
   !---
   IF(create_mats)THEN
     NULLIFY(mats(i)%M)
-    CALL oft_hcurl_getjmlb(ML_oft_hcurl%current_level,mats(i)%M,alam,'zerob')
+    CALL oft_hcurl_getjmlb(ML_hcurl_rep%current_level,mats(i)%M,alam,'zerob')
   END IF
-  IF(i>1)ml_int(i-1)%M=>ML_oft_hcurl%interp_matrices(ML_oft_hcurl%level)%m !oft_hcurl_ops%interp
+  IF(i>1)ml_int(i-1)%M=>ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m !oft_hcurl_ops%interp
 END DO
-CALL ML_oft_hcurl%set_level(levin)
+CALL ML_hcurl_rep%set_level(levin)
 !---------------------------------------------------------------------------
 ! Search for XML-spec
 !---------------------------------------------------------------------------
@@ -1861,10 +1892,10 @@ END IF
 ! Setup preconditioner
 !---------------------------------------------------------------------------
 ALLOCATE(bc_tmp)
-bc_tmp%ML_hcurl_rep=>ML_oft_hcurl
+bc_tmp%ML_hcurl_rep=>ML_hcurl_rep
 NULLIFY(pre)
 ALLOCATE(tmp_vecspace)
-tmp_vecspace%ML_FE_rep=>ML_oft_hcurl
+tmp_vecspace%ML_FE_rep=>ML_hcurl_rep
 tmp_vecspace%base_pop=>hcurl_base_pop
 tmp_vecspace%base_push=>hcurl_base_push
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &

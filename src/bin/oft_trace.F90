@@ -36,18 +36,20 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_io, ONLY: oft_file_exist
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector
+!---
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_vrinterp
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
-USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
-  hcurl_mloptions
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: oft_h1_rinterp
 !---Tracing
 USE mhd_utils, ONLY: elec_charge, proton_mass
@@ -69,6 +71,11 @@ TYPE(oft_h1_rinterp), TARGET :: Bfield_H1
 TYPE(oft_hcurl_cinterp), TARGET :: Bfield_HCurl
 CLASS(oft_tracer), POINTER :: tracer
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_h1
 REAL(r8), PARAMETER :: vel_scale = 1.d3
 !---Input options
 INTEGER(i4) :: order = 2
@@ -140,7 +147,7 @@ SELECT CASE(type)
   CASE(2) !  Nedelec H1 field
     CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
     CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
-    CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,-1)
+    CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(x1)
     CALL ML_oft_h0%vec_create(x2)

@@ -90,21 +90,21 @@ USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
   create_cg_solver, create_diag_pre
 !---
-USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
+USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_3D_lagrange_cast, &
-  oft_lag_geval_all, ML_oft_lagrange, oft_scalar_fem, ML_oft_vlagrange
+  oft_lag_geval_all, oft_scalar_fem
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag
 USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_3D_hcurl_cast, &
-  oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem
+  oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
-USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_fem, oft_3D_h1_cast
+USE oft_h0_basis, ONLY: oft_h0_fem, oft_h0_geval_all, oft_3D_h1_cast
 USE oft_h0_operators, ONLY: oft_h0_zeroi
-USE oft_h1_basis, ONLY: ML_oft_hgrad, ML_oft_h1
+! USE oft_h1_basis, ONLY: ML_oft_hgrad, ML_oft_h1
 USE oft_h1_operators, ONLY: oft_h1_rinterp, oft_h1_cinterp, oft_h1_dinterp, &
   oft_h1_divout, h1_jump_error, h1_div
 !---
@@ -386,6 +386,12 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_cop => NULL()
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
 CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
+!
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_h0,ML_oft_bh0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_oft_h1,ML_oft_vlagrange
+!
 CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
 CLASS(oft_hcurl_fem), POINTER :: oft_hcurl => NULL()
 CLASS(oft_h0_fem), POINTER :: oft_hgrad => NULL()

@@ -23,26 +23,29 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
     oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
     hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, oft_h0_zerogrnd, &
   oft_h0_zerob
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_hgrad, ML_oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: oft_h1_divout, oft_h1_zeroi, h1_mc, oft_h1_curl_zerob, &
   h1_setup_interp, oft_h1_rinterp
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
-  taylor_rst, taylor_hlam
+  taylor_rst, taylor_hlam, ML_oft_hcurl, ML_oft_bhcurl, ML_oft_h0, &
+  ML_oft_bh0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -56,6 +59,15 @@ TYPE :: marklin_obj
   REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Needs docs
   TYPE(xdmf_plot_file) :: xdmf_plot
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL()
+  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_lagrange => NULL()
+  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_blagrange => NULL()
+  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_h0 => NULL()
+  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_bh0 => NULL()
+  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_hgrad => NULL()
+  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_hcurl => NULL()
+  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_bhcurl => NULL()
+  ! TYPE(oft_ml_fem_comp_type), POINTER :: ML_oft_h1 => NULL()
+  ! TYPE(oft_ml_fem_comp_type), POINTER :: ML_oft_vlagrange => NULL()
 END TYPE marklin_obj
 CONTAINS
 !------------------------------------------------------------------------------
@@ -96,7 +108,7 @@ IF(taylor_minlev<ML_oft_hcurl%level)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
   CALL hcurl_setup_interp(ML_oft_hcurl)
-  CALL hcurl_mloptions
+  CALL hcurl_mloptions(ML_oft_hcurl)
 END IF
 !
 marklin_ptr=C_LOC(self)
@@ -277,7 +289,7 @@ IF(ML_oft_h1%nlevels==0)THEN
   CALL oft_h0_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h0,ML_oft_bh0,ML_oft_hcurl%minlev+1)
   CALL h0_setup_interp(ML_oft_h0)
   !---H1 full space
-  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hcurl%minlev)
+  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,ML_oft_hcurl%minlev)
   CALL h1_setup_interp(ML_oft_h1,ML_oft_bh0)
 END IF
 !---------------------------------------------------------------------------

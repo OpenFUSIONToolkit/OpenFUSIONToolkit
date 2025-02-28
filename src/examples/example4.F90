@@ -26,22 +26,23 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, ML_oft_h1
+USE oft_h1_basis, ONLY: oft_h1_setup
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
   taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, taylor_htor, &
-  taylor_tag_size
+  taylor_tag_size, ML_oft_hcurl, ML_oft_bhcurl, ML_oft_h0, &
+  ML_oft_bh0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 !---Tracing
 USE tracing, ONLY: oft_tracer, create_tracer, tracing_poincare
 IMPLICIT NONE
@@ -88,13 +89,13 @@ CALL lag_mloptions
 !---H1(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl)
 CALL hcurl_setup_interp(ML_oft_hcurl)
-CALL hcurl_mloptions
+CALL hcurl_mloptions(ML_oft_hcurl)
 !---H1(Grad) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0)
 CALL h0_setup_interp(ML_oft_h0)
 CALL h0_mloptions
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1)
+CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad)
 !!\subsection doc_ex4_code_taylor Compute Taylor state
 !!
 !!For composite Taylor states the lowest eigenmode is used used in addition to the injector fields. This

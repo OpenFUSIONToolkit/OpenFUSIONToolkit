@@ -18,9 +18,10 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !
-USE fem_base, ONLY: oft_afem_type
+USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
-  oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  oft_lag_setup
 USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
@@ -69,6 +70,8 @@ TYPE, BIND(C) :: tokamaker_recon_settings_type
   TYPE(c_ptr) :: outfile !< Needs docs
 END TYPE tokamaker_recon_settings_type
 !
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(gs_eq), POINTER :: gs_global => NULL() !< Global G-S object
 TYPE(oft_tmaker_td), POINTER :: gs_td_global => NULL() !< Global time-dependent object
 integer(i4), POINTER :: lc_plot(:,:) => NULL() !< Needs docs

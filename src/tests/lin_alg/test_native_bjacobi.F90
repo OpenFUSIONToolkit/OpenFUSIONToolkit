@@ -24,14 +24,17 @@ USE oft_native_la, ONLY: oft_native_matrix
 USE oft_native_solvers, ONLY: oft_bjprecond, oft_native_gmres_solver
 USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 !---FE imports
-USE fem_base, ONLY: oft_fem_type
+USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_partition
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 INTEGER(i4), PARAMETER :: order=3
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: nlocal = 1
 INTEGER(i4) :: sol_type = 1

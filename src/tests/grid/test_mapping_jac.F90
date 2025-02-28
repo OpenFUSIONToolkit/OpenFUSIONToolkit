@@ -20,13 +20,16 @@ USE oft_mesh_sphere, ONLY: mesh_sphere_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_npos, oft_lag_geval, &
-  oft_lag_d2eval, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange, &
-  oft_scalar_fem, oft_3D_lagrange_cast
+  oft_lag_d2eval, oft_scalar_fem, oft_3D_lagrange_cast
 IMPLICIT NONE
 INTEGER(i4) :: xi,xj,ierr,nfail,i,ntests,io_unit
 REAL(r8) :: check_vec(6),tol=1.d-6
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 INTEGER(i4) :: order
 NAMELIST/test_mapping_options/order
 !---Initialize enviroment

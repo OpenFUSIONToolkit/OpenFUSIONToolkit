@@ -177,15 +177,16 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, ML_oft_hcurl, ML_oft_bhcurl
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
-USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa
+USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, ML_oft_hcurl, ML_oft_bhcurl, &
+  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
 IMPLICIT NONE
 #include "local.h"
 !!\subsection ex3_code_vars Variable Definitions
@@ -229,7 +230,7 @@ CALL lag_mloptions
 !---H1(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl)
 CALL hcurl_setup_interp(ML_oft_hcurl)
-CALL hcurl_mloptions
+CALL hcurl_mloptions(ML_oft_hcurl)
 !!\subsection doc_ex3_code_taylor Compute Taylor state
 !!
 !!The eigenstate is now computed using the \ref taylor::taylor_hmodes "taylor_hmodes" subroutine. The

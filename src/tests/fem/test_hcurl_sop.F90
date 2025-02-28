@@ -19,8 +19,8 @@ USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, &
-  oft_hcurl_eval_all, ML_oft_hcurl, ML_oft_bhcurl
+USE fem_base, ONLY: oft_ml_fem_type
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_getkop, oft_hcurl_getwop, &
   oft_hcurl_cinterp, oft_hcurl_bcurl
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -31,6 +31,7 @@ USE diagnostic, ONLY: vec_energy
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
 NAMELIST/test_hcurl_options/order
 !---Initialize enviroment
 CALL oft_init

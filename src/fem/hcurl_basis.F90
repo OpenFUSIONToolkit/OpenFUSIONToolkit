@@ -49,12 +49,12 @@ integer(i4), parameter :: cgop_map(4,4) = RESHAPE((/0,-1,-2,-3,1,0,-4,-5,2,4,0,-
 integer(i4), parameter :: oft_hcurl_id = 3 !< FE type ID
 !
 ! type(oft_hcurl_bfem), pointer :: oft_bhcurl !< Active FE representation
-type(oft_ml_fem_type), TARGET :: ML_oft_bhcurl !< ML container for all FE representations
+! type(oft_ml_fem_type), TARGET :: ML_oft_bhcurl !< ML container for all FE representations
 !
 ! class(oft_hcurl_fem), pointer :: oft_hcurl !< Active FE representation
-type(oft_ml_fem_type), TARGET :: ML_oft_hcurl !< ML container for all FE representations
+! type(oft_ml_fem_type), TARGET :: ML_oft_hcurl !< ML container for all FE representations
 !
-logical, private :: hex_mesh = .FALSE.
+! logical, private :: hex_mesh = .FALSE.
 contains
 !------------------------------------------------------------------------------
 !> Cast abstract FE type to 3D H(Curl) finite element type
@@ -175,10 +175,10 @@ IF(ASSOCIATED(mg_mesh%meshes))THEN
   ML_hcurl_obj%nlevels=nlevels
   ML_hcurl_obj%minlev=minlev_out
   ML_hcurl_obj%ml_mesh=>mg_mesh
-  IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
+  ! IF(mg_mesh%mesh%type==3)hex_mesh=.TRUE.
 ELSE
   ML_hcurl_obj%nlevels=0
-  IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
+  ! IF(mg_mesh%smesh%type==3)hex_mesh=.TRUE.
 END IF
 ML_bhcurl_obj%nlevels=nlevels
 ML_bhcurl_obj%minlev=minlev_out
@@ -328,12 +328,12 @@ CALL oft_increase_indent
 ALLOCATE(oft_hcurl_fem::self)
 SELECT TYPE(self)
 CLASS IS(oft_hcurl_fem)
-  IF(tmesh%type==3)hex_mesh=.TRUE.
+  ! IF(tmesh%type==3)hex_mesh=.TRUE.
   self%mesh=>tmesh
   self%order=order
   self%dim=1
   self%type=oft_hcurl_id
-  IF(hex_mesh)THEN
+  IF(self%mesh%type==3)THEN
     CALL hcurl_2d_grid(self%order-1, self%indsf)
     CALL hcurl_3d_grid(self%order-1, self%indsc)
     select case(self%order)
@@ -497,7 +497,7 @@ real(r8), intent(out) :: val(:)
 real(r8) :: cofs(4),fhex(6),gbary(3,6),dtmp,cords(4),f1(3),f2(3),f3(3),vtmp(4)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i,j,fhtmp(4),ind,form
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   val=0.d0
   fhex=hex_get_bary(f)
   gbary=hex_get_bary_gop(gop)
@@ -808,7 +808,7 @@ real(r8), contiguous, intent(out) :: rop(:,:)
 integer(i4) :: i,j,etmp(2),fhtmp(4),offset
 real(r8) :: fhex(6),gbary(3,6),dtmp,cords(4),f1(3),f2(3),f3(3),vtmp(4)
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   fhex=hex_get_bary(f)
   gbary=hex_get_bary_gop(gop)
   !---Edges
@@ -1159,7 +1159,7 @@ integer(i4) :: i,j,ed,etmp(2),fc,ftmp(3),fhtmp(4),ind,form
 real(r8) :: fhex(6),gbary(3,6),dtmp,hcgop(3,3)
 real(r8) :: cords(4),f1(3),f2(3),f3(3),vec(3,3),vtmp(4)
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   val=0.d0
   fhex=hex_get_bary(f)
   gbary=hex_get_bary_gop(gop)
@@ -1584,7 +1584,7 @@ integer(i4) :: i,j,etmp(2),fhtmp(4),offset
 real(r8) :: gop(3,4),jac,vec(3,3),hcgop(3,3),vtmp(4)
 real(r8) :: val(3),cords(4),fhex(6),gbary(3,6),dtmp,f1(3),f2(3),f3(3)
 DEBUG_STACK_PUSH
-IF(hex_mesh)THEN
+IF(self%mesh%type==3)THEN
   fhex=hex_get_bary(f)
   gbary=hex_get_bary_gop(gop)
   hcgop(:,1)=cgop(:,1) ! (1 x 2)

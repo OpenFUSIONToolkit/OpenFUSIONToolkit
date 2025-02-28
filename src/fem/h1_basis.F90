@@ -22,7 +22,6 @@ USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_fem_ptr, oft_ml_fem_type, oft_bfem_type!, &
 ! oft_ml_bfem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
-USE oft_hcurl_basis, ONLY: ML_oft_hcurl
 USE oft_h0_basis, ONLY: oft_h0_fem, oft_h0_setup_vol
 IMPLICIT NONE
 #include "local.h"
@@ -46,10 +45,10 @@ IMPLICIT NONE
 !---
 ! class(oft_h0_fem), pointer :: oft_hgrad !< Active FE representation
 ! class(oft_h0_fem), pointer :: oft_hgrad_lin !< Highest linear element representation
-type(oft_ml_fem_type), TARGET :: ML_oft_hgrad !< ML container for all FE representations
+! type(oft_ml_fem_type), TARGET :: ML_oft_hgrad !< ML container for all FE representations
 !
 ! type(oft_fem_comp_type), pointer :: oft_h1 !< Active H1 representation
-type(oft_ml_fem_comp_type), TARGET :: ML_oft_h1 !< ML container for H1 representations
+! type(oft_ml_fem_comp_type), TARGET :: ML_oft_h1 !< ML container for H1 representations
 contains
 ! !---------------------------------------------------------------------------
 ! !> Set the current level for Nedelec H1 finite elements
@@ -88,12 +87,13 @@ contains
 !!
 !! @note Highest supported representation is quadratic
 !---------------------------------------------------------------------------
-subroutine oft_h1_setup(mg_mesh,order,ML_hcurl_obj,ML_h0_obj,ML_hcurl_aug_obj,minlev)
+subroutine oft_h1_setup(mg_mesh,order,ML_hcurl_obj,ML_h0_obj,ML_hcurl_aug_obj,ML_hgrad_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
 type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_obj
 type(oft_ml_fem_type), intent(inout) :: ML_h0_obj
 type(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_aug_obj
+type(oft_ml_fem_type), target, intent(inout) :: ML_hgrad_obj
 integer(i4), optional, intent(in) :: minlev
 integer(i4) :: i,nlevels,minlev_out
 DEBUG_STACK_PUSH
@@ -105,13 +105,13 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A,I4)')'Order  = ',order
   WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
 END IF
-ML_oft_hgrad%ml_mesh=>mg_mesh
+ML_hgrad_obj%ml_mesh=>mg_mesh
 !---Allocate multigrid operators
 nlevels=mg_mesh%mgdim+(order-1)
 IF(minlev_out<0)minlev_out=nlevels
 ! allocate(ML_oft_h1_ops(nlevels))
-ML_oft_hgrad%minlev=minlev_out
-ML_oft_hgrad%nlevels=nlevels
+ML_hgrad_obj%minlev=minlev_out
+ML_hgrad_obj%nlevels=nlevels
 ML_hcurl_aug_obj%minlev=minlev_out
 ML_hcurl_aug_obj%nlevels=nlevels
 
@@ -126,7 +126,7 @@ do i=1,mg_mesh%mgdim-1
     ML_hcurl_aug_obj%blevel=i
     ! oft_h1_blevel=i
   END IF
-  CALL oft_h0_setup_vol(ML_oft_hgrad%levels(i)%fe,mg_mesh%mesh,2)
+  CALL oft_h0_setup_vol(ML_hgrad_obj%levels(i)%fe,mg_mesh%mesh,2)
   ! !---
   ! oft_hgrad%mesh=>mg_mesh%mesh
   ! oft_hgrad%order=2
@@ -145,13 +145,13 @@ do i=1,order
     ! ML_oft_hgrad%levels(mg_mesh%mgdim+i-1)%fe=>ML_oft_h0%levels(mg_mesh%mgdim+i)%fe
     SELECT TYPE(this=>ML_h0_obj%levels(mg_mesh%mgdim+i)%fe)
       CLASS IS(oft_h0_fem)
-        ML_oft_hgrad%levels(mg_mesh%mgdim+i-1)%fe=>this
+      ML_hgrad_obj%levels(mg_mesh%mgdim+i-1)%fe=>this
       CLASS DEFAULT
         CALL oft_abort("Error casting H0 object", "oft_h1_setup", __FILE__)
     END SELECT
     ! oft_hgrad=>ML_oft_hgrad%levels(oft_h1_level)%fe
   ELSE
-    CALL oft_h0_setup_vol(ML_oft_hgrad%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
+    CALL oft_h0_setup_vol(ML_hgrad_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
     ! !---
     ! oft_hgrad%mesh=>mg_mesh%mesh
     ! oft_hgrad%order=i+1
@@ -184,7 +184,7 @@ ALLOCATE(ML_hcurl_aug_obj%ml_fields(ML_hcurl_aug_obj%nfields))
 ALLOCATE(ML_hcurl_aug_obj%field_tags(ML_hcurl_aug_obj%nfields))
 ML_hcurl_aug_obj%ml_fields(1)%ml=>ML_hcurl_obj
 ML_hcurl_aug_obj%field_tags(1)='c'
-ML_hcurl_aug_obj%ml_fields(2)%ml=>ML_oft_hgrad
+ML_hcurl_aug_obj%ml_fields(2)%ml=>ML_hgrad_obj
 ML_hcurl_aug_obj%field_tags(2)='g'
 call ML_hcurl_aug_obj%setup
 CALL ML_hcurl_aug_obj%set_level(ML_hcurl_aug_obj%nlevels,propogate=.TRUE.)

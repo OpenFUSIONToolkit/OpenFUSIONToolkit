@@ -88,17 +88,17 @@ USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
   create_cg_solver, create_diag_pre
 !---
-USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
+USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, &
-  ML_oft_lagrange, oft_scalar_fem, ML_oft_vlagrange, oft_3D_lagrange_cast
+  oft_scalar_fem, oft_3D_lagrange_cast
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag, oft_lag_vcinterp
 USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, &
-  oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem, &
+  oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem, &
   oft_3D_hcurl_cast
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
 !---
@@ -374,8 +374,12 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_rop => NULL()
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_cop => NULL()
 !$omp threadprivate(xmhd_lag_rop,xmhd_lag_gop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
+!
 CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_oft_h1,ML_oft_vlagrange
 CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
 CLASS(oft_hcurl_fem), POINTER :: oft_hcurl => NULL()
 !---------------------------------------------------------------------------

@@ -24,13 +24,14 @@ USE oft_la_base, ONLY: oft_vector,oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
-USE oft_h0_basis, ONLY: oft_h0_setup, ML_oft_h0, &
-  ML_oft_h0, ML_oft_bh0
+USE oft_h0_basis, ONLY: oft_h0_setup
+USE fem_base, ONLY: oft_ml_fem_type
 USE oft_h0_operators, ONLY: h0_setup_interp, h0_mloptions, &
   oft_h0_zerob, df_lop, nu_lop, oft_h0_getlop, oft_h0_getmop, h0_getlop_pre
 IMPLICIT NONE
 INTEGER(i4) :: minlev
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0
 TYPE(oft_h0_zerob), TARGET :: h0_zerob
 INTEGER(i4) :: order,ierr,io_unit
 LOGICAL :: mg_test
@@ -147,7 +148,7 @@ CALL create_cg_solver(linv,force_native=.TRUE.)
 linv%its=-3
 linv%A=>lop
 !---Setup MG preconditioner
-CALL h0_getlop_pre(linv%pre,ml_lop,'zerob',nlevels=nlevels)
+CALL h0_getlop_pre(ML_oft_h0,linv%pre,ml_lop,'zerob',nlevels=nlevels)
 lop=>ml_lop(nlevels)%M
 linv%A=>lop
 linv%bc=>h0_zerob
