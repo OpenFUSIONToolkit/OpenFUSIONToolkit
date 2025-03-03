@@ -106,6 +106,8 @@ class TokaMaker():
         self._virtual_coils = {'#VSC': -1}
         ## Coil set names in order of id number
         self.coil_set_names = []
+        ## Distribution coils, only (currently) saved for plotting utility
+        self.dist_coils = {}
         ## Vacuum F value
         self._F0 = 0.0
         ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
@@ -1154,8 +1156,14 @@ class TokaMaker():
         if coil_colormap is not None:
             _, region_currents = self.get_coil_currents()
             mesh_currents = numpy.zeros((self.lc.shape[0],))
-            for _ in range(self.ncoils):
+            if self.ncoils >0:
                 mesh_currents = region_currents[self.reg-1]
+            if len(self.dist_coils)>0:
+                for _, coil_dict in self._coil_dict.items():
+                    if (coil_id:=coil_dict["coil_id"]+1) in self.dist_coils.keys():
+                        mask = self.reg==coil_dict["reg_id"]
+                        face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
+                        mesh_currents[mask] *= face_currents[mask]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:
                 mesh_currents *= coil_scale
@@ -1414,6 +1422,20 @@ class TokaMaker():
         tokamaker_save_eqdsk(cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+
+    def set_coil_current_dist(self,iCoil,curr_vals):
+        '''! Overwrite current distribution associated with coil to model non-uniform conductivity.
+
+        @param iCoil Coil index
+        @param curr_vals Modified current values
+        '''
+        if curr_vals.shape[0] != self.np:
+            raise IndexError('Incorrect shape of "psi0", should be [np]')
+        if iCoil <= 0:
+            raise IndexError("iCoil must be between 1 and ncoils")
+        self.dist_coils[iCoil] = curr_vals
+        curr_vals = numpy.ascontiguousarray(curr_vals, dtype=numpy.float64)
+        tokamaker_set_coil_current_dist(c_int(iCoil),curr_vals)
 
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
