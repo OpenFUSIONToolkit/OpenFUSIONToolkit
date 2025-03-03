@@ -100,8 +100,8 @@ END FUNCTION oft_2D_hcurl_cast
 subroutine oft_hcurl_setup(mg_mesh,order,ML_hcurl_obj,ML_bhcurl_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order
-type(oft_ml_fem_type), intent(inout) :: ML_hcurl_obj
-type(oft_ml_fem_type), intent(inout) :: ML_bhcurl_obj
+type(oft_ml_fem_type), optional, intent(inout) :: ML_hcurl_obj
+type(oft_ml_fem_type), optional, intent(inout) :: ML_bhcurl_obj
 integer(i4), optional, intent(in) :: minlev
 integer(i4) :: i,j,nlevels,minlev_out
 DEBUG_STACK_PUSH
@@ -116,45 +116,53 @@ END IF
 !---Allocate multigrid operators
 nlevels=mg_mesh%mgdim+(order-1)
 IF(minlev_out<0)minlev_out=nlevels
-IF(ASSOCIATED(mg_mesh%meshes))THEN
+IF(PRESENT(ML_hcurl_obj))THEN
+  IF(.NOT.ASSOCIATED(mg_mesh%meshes))CALL oft_abort("No volume mesh available for 3D elements","oft_hcurl_setup",__FILE__)
   ML_hcurl_obj%nlevels=nlevels
   ML_hcurl_obj%minlev=minlev_out
   ML_hcurl_obj%ml_mesh=>mg_mesh
 ELSE
-  ML_hcurl_obj%nlevels=0
+  IF(.NOT.PRESENT(ML_bhcurl_obj))THEN
+    WRITE(*,*)'No HCurl FE objects requested, returning'
+    DEBUG_STACK_POP
+    RETURN
+  END IF
 END IF
-ML_bhcurl_obj%nlevels=nlevels
-ML_bhcurl_obj%minlev=minlev_out
-ML_bhcurl_obj%ml_mesh=>mg_mesh
+IF(PRESENT(ML_bhcurl_obj))THEN
+  IF(.NOT.ASSOCIATED(mg_mesh%smeshes))CALL oft_abort("No surface mesh available for 2D elements","oft_hcurl_setup",__FILE__)
+  ML_bhcurl_obj%nlevels=nlevels
+  ML_bhcurl_obj%minlev=minlev_out
+  ML_bhcurl_obj%ml_mesh=>mg_mesh
+END IF
 !---Set linear elements
 do i=1,mg_mesh%mgdim-1
-  IF(i<ML_hcurl_obj%minlev)CYCLE
+  IF(i<minlev_out)CYCLE
   CALL multigrid_level(mg_mesh,i)
-  IF(ML_hcurl_obj%nlevels>0)THEN
+  IF(PRESENT(ML_hcurl_obj))THEN
     CALL oft_hcurl_setup_vol(ML_hcurl_obj%levels(i)%fe,mg_mesh%mesh,1)
     IF(mg_mesh%level==mg_mesh%nbase)ML_hcurl_obj%blevel=i
     CALL ML_hcurl_obj%set_level(i)
+    IF(mg_mesh%level==mg_mesh%nbase)ML_hcurl_obj%blevel=i
   END IF
-  IF(ML_bhcurl_obj%nlevels>0)THEN
+  IF(PRESENT(ML_bhcurl_obj))THEN
     CALL oft_hcurl_setup_surf(ML_bhcurl_obj%levels(i)%fe,mg_mesh%smesh,1)
     IF(mg_mesh%level==mg_mesh%nbase)ML_bhcurl_obj%blevel=i
   END IF
-  IF(mg_mesh%level==mg_mesh%nbase)ML_hcurl_obj%blevel=i
 end do
 call multigrid_level(mg_mesh,mg_mesh%mgdim)
 !---Set high order elements
 do i=1,order
-  IF(i>1.AND.mg_mesh%mgdim+i-1<ML_hcurl_obj%minlev)CYCLE
-  IF(ML_hcurl_obj%nlevels>0)THEN
+  IF(i>1.AND.mg_mesh%mgdim+i-1<minlev_out)CYCLE
+  IF(PRESENT(ML_hcurl_obj))THEN
     CALL oft_hcurl_setup_vol(ML_hcurl_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
     CALL ML_hcurl_obj%set_level(mg_mesh%mgdim+i-1)
   END IF
-  IF(ML_bhcurl_obj%nlevels>0)THEN
+  IF(PRESENT(ML_bhcurl_obj))THEN
     CALL oft_hcurl_setup_surf(ML_bhcurl_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i)
   END IF
 end do
-IF(ML_hcurl_obj%nlevels>0)CALL ML_hcurl_obj%set_level(ML_hcurl_obj%nlevels)
-CALL ML_bhcurl_obj%set_level(ML_bhcurl_obj%nlevels)
+IF(PRESENT(ML_hcurl_obj))CALL ML_hcurl_obj%set_level(ML_hcurl_obj%nlevels)
+IF(PRESENT(ML_bhcurl_obj))CALL ML_bhcurl_obj%set_level(ML_bhcurl_obj%nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_setup

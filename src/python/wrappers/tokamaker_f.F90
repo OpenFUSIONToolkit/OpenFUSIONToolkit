@@ -70,8 +70,7 @@ TYPE, BIND(C) :: tokamaker_recon_settings_type
   TYPE(c_ptr) :: outfile !< Needs docs
 END TYPE tokamaker_recon_settings_type
 !
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
-TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_blagrange
 TYPE(gs_eq), POINTER :: gs_global => NULL() !< Global G-S object
 TYPE(oft_tmaker_td), POINTER :: gs_td_global => NULL() !< Global time-dependent object
 integer(i4), POINTER :: lc_plot(:,:) => NULL() !< Needs docs
@@ -261,7 +260,7 @@ END IF
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
 mg_mesh%smesh%tess_order=order
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
+CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
 CALL gs_global%setup(ML_oft_blagrange)
 !---------------------------------------------------------------------------
 ! Setup experimental geometry

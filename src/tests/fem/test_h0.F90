@@ -48,7 +48,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 !---
 minlev=2
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
-CALL oft_h0_setup(mg_mesh,order,ML_oft_h0,ML_oft_bh0,minlev)
+CALL oft_h0_setup(mg_mesh,order,ML_oft_h0,minlev=minlev)
 h0_zerob%ML_H0_rep=>ML_oft_h0
 IF(mg_test)THEN
   CALL h0_setup_interp(ML_oft_h0)

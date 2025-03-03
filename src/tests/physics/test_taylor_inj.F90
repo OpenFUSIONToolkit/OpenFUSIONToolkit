@@ -29,8 +29,8 @@ USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 USE oft_h1_basis, ONLY: oft_h1_setup
 USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
   taylor_minlev, taylor_jtol, taylor_tag_size, taylor_hvac, taylor_hcur, &
-  taylor_gffa, oft_taylor_rinterp, ML_oft_hcurl, ML_oft_bhcurl, ML_oft_h0, &
-  ML_oft_bh0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  taylor_gffa, oft_taylor_rinterp, ML_oft_hcurl, ML_oft_h0, &
+  ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
 implicit none
 INTEGER(i4) :: ierr,io_unit
 REAL(r8) :: comps(3),diff_err
@@ -59,9 +59,9 @@ ELSE
   taylor_minlev=mg_mesh%mgmax+order-1
 END IF
 !---
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,taylor_minlev)
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,taylor_minlev)
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,taylor_minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=taylor_minlev)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=taylor_minlev)
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=taylor_minlev)
 CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)

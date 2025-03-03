@@ -41,8 +41,8 @@ USE oft_h1_basis, ONLY: oft_h1_setup
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
   taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, taylor_htor, &
-  taylor_tag_size, ML_oft_hcurl, ML_oft_bhcurl, ML_oft_h0, &
-  ML_oft_bh0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  taylor_tag_size, ML_oft_hcurl, ML_oft_h0, &
+  ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
 !---Tracing
 USE tracing, ONLY: oft_tracer, create_tracer, tracing_poincare
 IMPLICIT NONE
@@ -83,15 +83,15 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
 CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL hcurl_mloptions(ML_oft_hcurl)
 !---H1(Grad) subspace
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0)
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0)
 CALL h0_setup_interp(ML_oft_h0)
 CALL h0_mloptions
 !---H1 full space

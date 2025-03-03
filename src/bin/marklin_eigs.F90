@@ -37,7 +37,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, ML_oft_lagrange, &
-  ML_oft_blagrange, ML_oft_vlagrange, ML_oft_hcurl, ML_oft_bhcurl
+  ML_oft_vlagrange, ML_oft_hcurl
 IMPLICIT NONE
 #include "local.h"
 !---Lagrange mass solver
@@ -79,11 +79,11 @@ ELSE
   IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,minlev)
 END IF
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,taylor_minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=taylor_minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,taylor_minlev)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=taylor_minlev)
 CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL hcurl_mloptions(ML_oft_hcurl)
 oft_env%pm=.TRUE.

@@ -48,8 +48,7 @@ USE oft_h1_operators, ONLY: oft_h1_divout, h1_mc
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields, &
-  ML_oft_hcurl, ML_oft_bhcurl, ML_oft_h0, ML_oft_bh0, ML_oft_h1, ML_oft_hgrad, &
-  ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  ML_oft_hcurl, ML_oft_h0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex1_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
@@ -90,11 +89,11 @@ CALL multigrid_construct(mg_mesh)
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
 !---H1(Grad) subspace
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=-1)
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,-1)
 h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad

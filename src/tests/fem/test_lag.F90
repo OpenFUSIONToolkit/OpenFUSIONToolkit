@@ -50,7 +50,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 !---
 minlev=2
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=minlev)
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)

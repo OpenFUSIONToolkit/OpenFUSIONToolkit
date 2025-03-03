@@ -40,8 +40,8 @@ USE oft_vector_inits, ONLY: uniform_field
 USE diagnostic, ONLY: vec_energy
 USE mhd_utils, ONLY: mu0, proton_mass
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, xmhd_lin_run, &
-  xmhd_sub_fields, ML_oft_hcurl, ML_oft_bhcurl, ML_oft_h0, &
-  ML_oft_bh0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  xmhd_sub_fields, ML_oft_hcurl, ML_oft_h0, &
+  ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
 USE test_phys_helpers, ONLY: alfven_eig
 IMPLICIT NONE
 !---H1 metric solver
@@ -88,13 +88,13 @@ CALL multigrid_construct(mg_mesh)
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,minlev)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=minlev)
 CALL hcurl_setup_interp(ML_oft_hcurl)
 !---H1(Grad) subspace
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=minlev)
 CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
 CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,minlev)

@@ -59,10 +59,10 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
 IF(mg_test)CALL hcurl_setup_interp(ML_oft_hcurl)
 !---H1(Grad) subspace
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0)
+CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0)
 IF(mg_test)CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
 WRITE(*,*)'Setup In'

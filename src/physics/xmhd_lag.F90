@@ -377,9 +377,9 @@ REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
 !
 CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
-TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange,ML_oft_blagrange
-TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_hcurl,ML_oft_bhcurl
-TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_oft_h1,ML_oft_vlagrange
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_hcurl
+TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_oft_vlagrange
 CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
 CLASS(oft_hcurl_fem), POINTER :: oft_hcurl => NULL()
 !---------------------------------------------------------------------------

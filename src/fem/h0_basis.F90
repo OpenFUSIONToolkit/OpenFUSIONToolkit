@@ -96,8 +96,8 @@ END FUNCTION oft_2D_h1_cast
 subroutine oft_h0_setup(mg_mesh,order,ML_h0_obj,ML_bh0_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
-TYPE(oft_ml_fem_type), TARGET, INTENT(inout) :: ML_h0_obj
-TYPE(oft_ml_fem_type), INTENT(inout) :: ML_bh0_obj
+TYPE(oft_ml_fem_type), optional, INTENT(inout) :: ML_h0_obj
+TYPE(oft_ml_fem_type), optional, INTENT(inout) :: ML_bh0_obj
 integer(i4), optional, intent(in) :: minlev !< Lowest level to construct
 integer(i4) :: i,j,k,nlevels,minlev_out
 REAL(r8), POINTER, DIMENSION(:) :: xnodes
@@ -113,45 +113,53 @@ END IF
 !---Allocate multigrid operators
 nlevels=mg_mesh%mgdim+(order-1)
 IF(minlev_out<0)minlev_out=nlevels
-IF(ASSOCIATED(mg_mesh%meshes))THEN
+IF(PRESENT(ML_h0_obj))THEN
+  IF(.NOT.ASSOCIATED(mg_mesh%meshes))CALL oft_abort("No volume mesh available for 3D elements","oft_h0_setup",__FILE__)
   ML_h0_obj%nlevels=nlevels
   ML_h0_obj%minlev=minlev_out
   ML_h0_obj%ml_mesh=>mg_mesh
 ELSE
-  ML_h0_obj%nlevels=0
+  IF(.NOT.PRESENT(ML_bh0_obj))THEN
+    WRITE(*,*)'No H1 FE objects requested, returning'
+    DEBUG_STACK_POP
+    RETURN
+  END IF
 END IF
-ML_bh0_obj%nlevels=nlevels
-ML_bh0_obj%minlev=minlev_out
-ML_bh0_obj%ml_mesh=>mg_mesh
+IF(PRESENT(ML_bh0_obj))THEN
+  IF(.NOT.ASSOCIATED(mg_mesh%smeshes))CALL oft_abort("No surface mesh available for 2D elements","oft_h0_setup",__FILE__)
+  ML_bh0_obj%nlevels=nlevels
+  ML_bh0_obj%minlev=minlev_out
+  ML_bh0_obj%ml_mesh=>mg_mesh
+END IF
 ! Set linear elements
 do i=1,mg_mesh%mgdim-1
-  IF(i<ML_h0_obj%minlev)CYCLE
+  IF(i<minlev_out)CYCLE
   CALL multigrid_level(mg_mesh,i)
-  IF(ML_h0_obj%nlevels>0)THEN
+  IF(PRESENT(ML_h0_obj))THEN
     CALL oft_h0_setup_vol(ML_h0_obj%levels(i)%fe,mg_mesh%mesh,1)
     IF(mg_mesh%level==mg_mesh%nbase)ML_h0_obj%blevel=i
     CALL ML_h0_obj%set_level(i)
+    IF(mg_mesh%level==mg_mesh%nbase)ML_h0_obj%blevel=i
   END IF
-  IF(ML_bh0_obj%nlevels>0)THEN
+  IF(PRESENT(ML_bh0_obj))THEN
     CALL oft_h0_setup_surf(ML_bh0_obj%levels(i)%fe,mg_mesh%smesh,1)
     IF(mg_mesh%level==mg_mesh%nbase)ML_bh0_obj%blevel=i
   END IF
-  IF(mg_mesh%level==mg_mesh%nbase)ML_h0_obj%blevel=i
 end do
 call multigrid_level(mg_mesh,mg_mesh%mgdim)
 ! Set high order elements
 do i=1,order
-  IF(mg_mesh%mgdim+i-1<ML_h0_obj%minlev)CYCLE
-  IF(ML_h0_obj%nlevels>0)THEN
+  IF(mg_mesh%mgdim+i-1<minlev_out)CYCLE
+  IF(PRESENT(ML_h0_obj))THEN
     CALL oft_h0_setup_vol(ML_h0_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
     CALL ML_h0_obj%set_level(mg_mesh%mgdim+i-1)
   END IF
-  IF(ML_bh0_obj%nlevels>0)THEN
+  IF(PRESENT(ML_bh0_obj))THEN
     CALL oft_h0_setup_surf(ML_bh0_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i)
   END IF
 end do
-IF(ML_h0_obj%nlevels>0)CALL ML_h0_obj%set_level(ML_h0_obj%nlevels)
-CALL ML_bh0_obj%set_level(ML_bh0_obj%nlevels)
+IF(PRESENT(ML_h0_obj))CALL ML_h0_obj%set_level(ML_h0_obj%nlevels)
+IF(PRESENT(ML_bh0_obj))CALL ML_bh0_obj%set_level(ML_bh0_obj%nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_h0_setup

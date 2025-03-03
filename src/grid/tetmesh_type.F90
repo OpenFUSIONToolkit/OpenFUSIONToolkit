@@ -29,8 +29,6 @@ USE tetmesh_tessellation, ONLY: tessellate1, tessellate2, tessellate3, tessellat
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
-! TYPE oft_tetmesh
-!------------------------------------------------------------------------------
 !> Tetrahedral Mesh type
 !!
 !! Contains geometry information for the computational grid.

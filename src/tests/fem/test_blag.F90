@@ -52,7 +52,7 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 CALL plot_file%setup("Test")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_blag_obj=ML_oft_blagrange,minlev=minlev)
 blag_zeroe%ML_lag_rep=>ML_oft_blagrange
 blag_zeroe%parent_geom_flag=>ML_oft_lagrange%current_level%bc
 !---Run tests

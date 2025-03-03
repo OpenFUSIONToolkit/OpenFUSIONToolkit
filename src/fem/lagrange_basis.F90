@@ -314,9 +314,9 @@ END SUBROUTINE oft_lag_boundary
 subroutine  oft_lag_setup(mg_mesh,order,ML_lag_obj,ML_blag_obj,ML_vlag_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
-TYPE(oft_ml_fem_type), TARGET, INTENT(inout) :: ML_lag_obj
-TYPE(oft_ml_fem_type), INTENT(inout) :: ML_blag_obj
-TYPE(oft_ml_fem_comp_type), INTENT(inout) :: ML_vlag_obj
+TYPE(oft_ml_fem_type), target, optional, INTENT(inout) :: ML_lag_obj
+TYPE(oft_ml_fem_type), optional, INTENT(inout) :: ML_blag_obj
+TYPE(oft_ml_fem_comp_type), optional, INTENT(inout) :: ML_vlag_obj
 integer(i4), optional, intent(in) :: minlev !< Lowest level to construct
 integer(i4) :: i,nlevels,minlev_out
 DEBUG_STACK_PUSH
@@ -332,23 +332,25 @@ CALL oft_increase_indent
 !---Allocate multigrid operators
 nlevels=mg_mesh%mgdim+(order-1)
 IF(minlev_out<0)minlev_out=nlevels
-IF(ASSOCIATED(mg_mesh%meshes))THEN
+IF(PRESENT(ML_lag_obj))THEN
+  IF(.NOT.ASSOCIATED(mg_mesh%meshes))CALL oft_abort("No volume mesh available for 3D elements","oft_lag_setup",__FILE__)
   ML_lag_obj%nlevels=nlevels
   ML_lag_obj%minlev=minlev_out
-  ML_vlag_obj%nlevels=ML_lag_obj%nlevels
   ML_lag_obj%ml_mesh=>mg_mesh
 ELSE
-  ML_lag_obj%nlevels=0
-  ML_vlag_obj%nlevels=0
+  IF(PRESENT(ML_vlag_obj))CALL oft_abort("Vector FE space requires scalar space","oft_lag_setup",__FILE__)
 END IF
-ML_blag_obj%ml_mesh=>mg_mesh
-ML_blag_obj%nlevels=nlevels
-ML_blag_obj%minlev=minlev_out
+IF(PRESENT(ML_blag_obj))THEN
+  IF(.NOT.ASSOCIATED(mg_mesh%smeshes))CALL oft_abort("No surface mesh available for 2D elements","oft_lag_setup",__FILE__)
+  ML_blag_obj%ml_mesh=>mg_mesh
+  ML_blag_obj%nlevels=nlevels
+  ML_blag_obj%minlev=minlev_out
+END IF
 !---Set linear elements
 do i=1,mg_mesh%mgdim-1
-  IF(i<ML_lag_obj%minlev)CYCLE
+  IF(i<minlev_out)CYCLE
   CALL multigrid_level(mg_mesh,i)
-  IF(ML_lag_obj%nlevels>0)THEN
+  IF(PRESENT(ML_lag_obj))THEN
     CALL oft_lag_setup_vol(ML_lag_obj%levels(i)%fe,mg_mesh%mesh,1)
     IF(mg_mesh%level==mg_mesh%nbase)ML_lag_obj%blevel=i
     CALL ML_lag_obj%set_level(i)
@@ -358,18 +360,18 @@ do i=1,mg_mesh%mgdim-1
       CLASS DEFAULT
         CALL oft_abort("Error casting FE obj","oft_lag_setup",__FILE__)
     END SELECT
+    IF(mg_mesh%level==mg_mesh%nbase)ML_lag_obj%blevel=i
   END IF
-  IF(ML_blag_obj%nlevels>0)THEN
+  IF(PRESENT(ML_blag_obj))THEN
     CALL oft_lag_setup_bmesh(ML_blag_obj%levels(i)%fe,mg_mesh%smesh,1)
     IF(mg_mesh%level==mg_mesh%nbase)ML_blag_obj%blevel=i
   END IF
-  IF(mg_mesh%level==mg_mesh%nbase)ML_lag_obj%blevel=i
 end do
 call multigrid_level(mg_mesh,mg_mesh%mgdim)
 !---Set high order elements
 do i=1,order
-  IF(i>1.AND.mg_mesh%mgdim+i-1<ML_lag_obj%minlev)CYCLE
-  IF(ML_lag_obj%nlevels>0)THEN
+  IF(i>1.AND.mg_mesh%mgdim+i-1<minlev_out)CYCLE
+  IF(PRESENT(ML_lag_obj))THEN
     CALL oft_lag_setup_vol(ML_lag_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
     CALL ML_lag_obj%set_level(mg_mesh%mgdim+i-1)
     SELECT TYPE(this=>ML_lag_obj%current_level)
@@ -379,12 +381,12 @@ do i=1,order
         CALL oft_abort("Error casting FE obj","oft_lag_setup",__FILE__)
     END SELECT
   END IF
-  IF(ML_blag_obj%nlevels>0)THEN
+  IF(PRESENT(ML_blag_obj))THEN
     CALL oft_lag_setup_bmesh(ML_blag_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i)
   END IF
 end do
 !---Setup vector rep
-IF(ML_lag_obj%nlevels>0)THEN
+IF(PRESENT(ML_vlag_obj))THEN
   ML_vlag_obj%nlevels=ML_lag_obj%nlevels
   ML_vlag_obj%nfields=3
   ALLOCATE(ML_vlag_obj%ml_fields(ML_vlag_obj%nfields))
@@ -398,11 +400,9 @@ IF(ML_lag_obj%nlevels>0)THEN
   CALL ML_vlag_obj%setup
 END IF
 !---Set to highest level when done
-IF(ML_lag_obj%nlevels>0)THEN
-  CALL ML_lag_obj%set_level(ML_lag_obj%nlevels)
-  CALL ML_vlag_obj%set_level(ML_lag_obj%nlevels)
-END IF
-CALL ML_blag_obj%set_level(ML_blag_obj%nlevels)
+IF(PRESENT(ML_lag_obj))CALL ML_lag_obj%set_level(ML_lag_obj%nlevels)
+IF(PRESENT(ML_vlag_obj))CALL ML_vlag_obj%set_level(ML_lag_obj%nlevels)
+IF(PRESENT(ML_blag_obj))CALL ML_blag_obj%set_level(ML_blag_obj%nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 CALL oft_decrease_indent
 DEBUG_STACK_POP

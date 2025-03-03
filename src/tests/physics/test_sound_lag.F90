@@ -29,7 +29,7 @@ USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop
 USE diagnostic, ONLY: scal_energy, vec_energy
 USE mhd_utils, ONLY: elec_charge, proton_mass
 USE xmhd_lag, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, temp_floor, &
-  xmhd_lin_run, xmhd_adv_b, xmhd_sub_fields, ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+  xmhd_lin_run, xmhd_adv_b, xmhd_sub_fields, ML_oft_lagrange, ML_oft_vlagrange
 USE test_phys_helpers, ONLY: sound_eig
 IMPLICIT NONE
 !---Lagrange Metric solver
@@ -75,7 +75,7 @@ CALL multigrid_construct(mg_mesh)
 ! Build FE structures
 !---------------------------------------------------------------------------
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 !---------------------------------------------------------------------------
 ! Create Lagrange metric solver
