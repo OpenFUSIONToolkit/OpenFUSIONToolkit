@@ -6,25 +6,28 @@
 !> Solve time-dependent MHD equations with lagrange basis
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
-USE oft_base
-USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
-     hdf5_create_timestep, hdf5_field_exist, oft_bin_file
-USE oft_quadrature
-USE oft_mesh_type, ONLY: smesh, cell_is_curved
-!
-USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_local_mat, oft_vector_ptr, &
-     vector_extrapolate
-USE oft_solver_utils, ONLY: create_solver_xml, create_diag_pre
-USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
-USE oft_solver_base, ONLY: oft_solver
-USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
-!
-USE fem_composite, ONLY: oft_fem_comp_type
-USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_blagrange, oft_blag_eval, oft_blag_geval
-IMPLICIT NONE
-#include "local.h"
-PRIVATE
+  USE oft_base
+  USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
+    hdf5_field_exist, oft_bin_file, xdmf_plot_file
+  USE oft_quadrature
+  USE oft_mesh_type, ONLY: smesh, cell_is_curved
+  !
+  USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_local_mat, oft_vector_ptr, &
+    vector_extrapolate
+  USE oft_solver_utils, ONLY: create_solver_xml, create_diag_pre
+  USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
+  USE oft_solver_base, ONLY: oft_solver
+  USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
+  !
+  USE fem_composite, ONLY: oft_fem_comp_type
+  USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
+  USE oft_lag_basis, ONLY: oft_lag_setup, oft_blagrange, oft_blag_eval, oft_blag_geval
+  IMPLICIT NONE
+  #include "local.h"
+  #if !defined(TDIFF_RST_LEN)
+  #define TDIFF_RST_LEN 5
+  #endif
+  PRIVATE
 
 TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: dt = -1.d0 !< Time step
@@ -33,11 +36,11 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: nu !< Needs docs
   REAL(r8) :: mu_0
   REAL(r8) :: gamma
-  REAL(r8) :: D
+  REAL(r8) :: D_diff
   REAL(r8) :: k_boltz
   REAL(r8) :: m_i
   REAL(r8) :: diag_vals(2) = 0.d0 !< Needs docs
-  !TODO: COMPLETE EDIT FOR NEW FIELDS
+
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:,:) :: vel_bc => NULL() !< vel BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: by_bc => NULL() !< by BC flag
@@ -60,12 +63,12 @@ TYPE, public :: oft_xmhd_2d_sim
   ! Edited to reflect new fields
   REAL(r8) :: chi = -1.d0 !< Needs docs
   REAL(r8) :: eta = -1.d0 !< Needs docs
-  REAL(r8) :: nu = 0.d0 !< Needs docs
-  REAL(r8) :: mu_0 !< Needs docs
-  REAL(r8) :: gamma !< Needs docs
-  REAL(r8) :: D !< Needs docs
-  REAL(r8) :: k_boltz !< Needs docs
-  REAL(r8) :: m_i
+  REAL(r8) :: nu = -1.d0 !< Needs docs
+  REAL(r8) :: mu_0 = -1.d0 !< Needs docs
+  REAL(r8) :: gamma = -1.d0 !< Needs docs
+  REAL(r8) :: D_diff = -1.d0 !< Needs docs
+  REAL(r8) :: k_boltz = -1.d0 !< Needs docs
+  REAL(r8) :: m_i = -1.d0
   REAL(r8) :: lin_tol = 1.d-8 !< Needs docs
   REAL(r8) :: nl_tol = 1.d-5 !< Needs docs
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
@@ -75,13 +78,14 @@ TYPE, public :: oft_xmhd_2d_sim
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: by_bc => NULL() !< by BC flag
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: jacobian_block_mask => NULL() !< Matrix block mask
   TYPE(oft_fem_comp_type), POINTER :: fe_rep => NULL() !< Finite element representation for solution field
+  TYPE(xdmf_plot_file) :: xdmf_plot
   CLASS(oft_vector), POINTER :: u => NULL() !< Needs docs
   CLASS(oft_matrix), POINTER :: jacobian => NULL() !< Needs docs
   TYPE(oft_mf_matrix), POINTER :: mf_mat => NULL() !< Matrix free operator
-  TYPE(xmhd_2d_nlfun), POINTER :: nlfun => NULL() !< Needs docs
-  TYPE(fox_node), POINTER :: xml_root => NULL() !< XML root element
-  TYPE(fox_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
-contains
+  TYPE(tdiff_nlfun), POINTER :: nlfun => NULL() !< Needs docs
+  TYPE(xml_node), POINTER :: xml_root => NULL() !< XML root element
+  TYPE(xml_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
+  contains
   !> Setup
   PROCEDURE :: setup => setup
   !> Run simulation
@@ -113,7 +117,7 @@ integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
 type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
 !---
-character(LEN=XMHD_2D_RST_LEN) :: rst_char
+character(LEN=TDIFF_RST_LEN) :: rst_char
 integer(i4) :: i,j,io_stat,rst_tmp
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time 
 real(r8), pointer :: plot_vals(:)
@@ -135,18 +139,17 @@ nextrap=0
 self%t=0.d0
 CALL u%add(0.d0,1.d0,self%u)
 !---Create initial conditions restart file
-!TODO: Edit for new fields
-104 FORMAT (I XMHD_2D_RST_LEN.XMHD_2D_RST_LEN)
+104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
-CALL self%rst_save(u, self%t, self%dt, 'xmhd_2d_'//rst_char//'.rst', 'U')
+CALL self%rst_save(u, self%t, self%dt, 'tDiff_'//rst_char//'.rst', 'U')
 NULLIFY(plot_vals)
-CALL hdf5_create_timestep(self%t)
+CALL self%xdmf_plot%add_timestep(self%t)
 CALL self%u%get_local(plot_vals,1)
-CALL smesh%save_vertex_scalar(plot_vals,'Ti')
+CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
 CALL self%u%get_local(plot_vals,2)
-CALL smesh%save_vertex_scalar(plot_vals,'Te')
+CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
 
-!---
+!
 ALLOCATE(self%nlfun)
 self%nlfun%chi=self%chi
 self%nlfun%eta=self%eta
@@ -208,7 +211,7 @@ END IF
 ! Setup history file
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
-  CALL hist_file%setup('oft_xmhd_2d.hist', desc="History file for non-linear thermal diffusion run")
+  CALL hist_file%setup('oft_tdiff.hist', desc="History file for non-linear thermal diffusion run")
   CALL hist_file%add_field('ts',   'i4', desc="Time step index")
   CALL hist_file%add_field('lits', 'i4', desc="Linear iteration count")
   CALL hist_file%add_field('nlits','i4', desc="Non-linear iteration count")
@@ -227,7 +230,6 @@ DO i=1,self%nsteps
   IF(oft_env%head_proc)CALL mytimer%tick()
   self%nlfun%dt=0.d0
   CALL self%nlfun%apply(u,v)
-  !TODO: Replace with new fields
   Ti_avg=self%nlfun%diag_vals(1)
   Te_avg=self%nlfun%diag_vals(2)
   self%nlfun%dt=self%dt
@@ -251,7 +253,7 @@ DO i=1,self%nsteps
   IF(oft_env%head_proc)THEN
     elapsed_time=mytimer%tock()
     hist_i4=[self%rst_base+i-1,nksolver%lits,nksolver%nlits]
-    hist_r4=REAL([self%t,n_avg,u_avg,T_avg,psi_avg,by_avg,elapsed_time],7)
+    hist_r4=REAL([self%t,Ti_avg,Te_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,2X,I4,F12.3,ES12.2)
     WRITE(*,103)self%rst_base+i,self%t,nksolver%lits,nksolver%nlits,elapsed_time,self%dt
     IF(oft_debug_print(1))WRITE(*,*)
@@ -268,18 +270,18 @@ DO i=1,self%nsteps
     WRITE(rst_char,104)self%rst_base+i
     READ(rst_char,104,IOSTAT=io_stat)rst_tmp
     IF((io_stat/=0).OR.(rst_tmp/=self%rst_base+i))CALL oft_abort("Step count exceeds format width", "run_simulation", __FILE__)
-    CALL self%rst_save(u, self%t, self%dt, 'xmhd_2d_'//rst_char//'.rst', 'U')
+    CALL self%rst_save(u, self%t, self%dt, 'tDiff_'//rst_char//'.rst', 'U')
     IF(oft_env%head_proc)THEN
-    elapsed_time=mytimer%tock()
-    WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
-    CALL hist_file%flush
+      elapsed_time=mytimer%tock()
+      WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
+      CALL hist_file%flush
     END IF
     !---
-    CALL hdf5_create_timestep(self%t)
+    CALL self%xdmf_plot%add_timestep(self%t)
     CALL self%u%get_local(plot_vals,1)
-    CALL smesh%save_vertex_scalar(plot_vals,'Ti')
+    CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
     CALL self%u%get_local(plot_vals,2)
-    CALL smesh%save_vertex_scalar(plot_vals,'Te')
+    CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
   END IF
 END DO
 CALL hist_file%close()
@@ -303,7 +305,7 @@ type(oft_quad_type), pointer :: quad
 LOGICAL :: curved
 INTEGER(i4) :: i,m,jr, k,l
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
-REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz, m_i, diag_vals(7)
+REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz, m_i, diag_vals(7)
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
          dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
@@ -332,7 +334,7 @@ eta = self%eta !< Needs docs
 nu = self%nu !< Needs docs
 mu_0 = self%mu_0 !< Needs docs
 gamma = self%gamma !< Needs docs
-D = self%D !< Needs docs
+D_diff = self%D_diff !< Needs docs
 k_boltz = self%k_boltz !< Needs docs
 ! might need a version of this logic for eta or suchlike
 ! IF(self%tau_eq>0.d0)THEN
@@ -414,7 +416,7 @@ DO i=1,smesh%nc
         + basis_vals(jr)*n*jac_det*quad%wts(m) &
         +self%dt*basis_vals(jr)*DOT_PRODUCT(dn, vel)*jac_det*quad%wts(m) &
         +self%dt*basis_vals(jr)*n*div_vel*jac_det*quad%wts(m) &
-        +self%dt*D*DOT_PRODUCT(dn,basis_grads(:,jr))*jac_det*quad%wts(m)
+        +self%dt*D_diff*DOT_PRODUCT(dn,basis_grads(:,jr))*jac_det*quad%wts(m)
       !---Momentum
       res_loc(jr, 2:4) = res_loc(jr, 2:4) &
         + basis_vals(jr)*vel*jac_det*quad%wts(m) &
@@ -494,12 +496,12 @@ end subroutine nlfun_apply
 !> Needs docs
 !---------------------------------------------------------------------------
 subroutine build_approx_jacobian(self,a)
-class(oft_tdiff_sim), intent(inout) :: self
+class(oft_xmhd_2d_sim), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Solution for computing jacobian
 LOGICAL :: curved
 INTEGER(i4) :: i,m,jr,jc
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
-REAL(r8) :: chi, eta, nu, D, gamma, mu_0, k_boltz, m_i
+REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz, m_i
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
 dvel(3,3),div_vel,jac_mat(3,4), jac_det, vtmp(3), btmp(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
@@ -533,7 +535,7 @@ eta = self%eta !< Needs docs
 nu = self%nu !< Needs docs
 mu_0 = self%mu_0 !< Needs docs
 gamma = self%gamma !< Needs docs
-D = self%D !< Needs docs
+D_diff = self%D_diff !< Needs docs
 k_boltz = self%k_boltz !< Needs docs
 ! IF(self%tau_eq>0.d0)THEN
 !   tau_eq_inv=1.d0/self%tau_eq
@@ -608,7 +610,7 @@ DO i=1,smesh%nc
         + basis_vals(jr)*basis_vals(:, jc)*jac_det*quad%wts(m) &
         + self%dt*basis_vals(jr)*dn*DOT_PRODUCT(basis_grads(:, jc), div_vel)*jac_det*quad%wts(m) & !delta_n*div(u)
         + self%dt*basis_vals(jr)*vel*basis_grads(:, jc)*jac_det*quad%wts(m) & ! u dot grad(delta_n)
-        + self%dt*D*DOT_PRODUCT(basis_grads(:, jr),basis_grads(:, jc))*jac_det*quad%wts(m)
+        + self%dt*D_diff*DOT_PRODUCT(basis_grads(:, jr),basis_grads(:, jc))*jac_det*quad%wts(m)
         ! delta_u=basis_vals(:, jc)
         jac_loc(1, 2)%m(jr,jc) = jac_loc(1, 2)%m(jr, jc) &
         + basis_vals(:, jr)*self%dt*n*SUM(basis_grads(: jc))*jac_det*quad%wts(m) & ! n*div(delta_u) = n*SUM(basis_grads)?
@@ -706,14 +708,17 @@ DO i=1,smesh%nc
       END DO
     END DO
   END DO
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%Ti_bc(cell_dofs),1)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%Te_bc(cell_dofs),2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%T_bc(cell_dofs),1)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%n_bc(cell_dofs),2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%vel_bc(cell_dofs),2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs),2)
   CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
 END DO
 !---Cleanup thread-local storage
 CALL self%fe_rep%mat_destroy_local(jac_loc)
 DEALLOCATE(basis_vals,basis_grads,T_weights_loc,vel_weights_loc&
-          psi_weights_loc, by_weights_loc, cell_dofs,jac_loc,iloc, btmp)
+          n_weights_loc, psi_weights_loc, by_weights_loc, cell_dofs,jac_loc,iloc, btmp)
 !$omp end parallel
 !--Destroy thread locks
 DO i=1,self%fe_rep%nfields
@@ -735,3 +740,111 @@ call tmp%delete
 DEALLOCATE(tmp,n_weights,vel_weights, T_weights, &
           by_weights, psi_weights)
 end subroutine build_approx_jacobian
+
+!---------------------------------------------------------------------------
+!> Update Jacobian matrices on all levels with new fields
+!---------------------------------------------------------------------------
+subroutine mfnk_update(uin)
+  class(oft_vector), target, intent(inout) :: uin !< Current field
+  IF(oft_debug_print(1))write(*,*)'Updating tDiff MF-Jacobian'
+  CALL current_sim%mf_mat%update(uin)
+  END SUBROUTINE mfnk_update
+  !---------------------------------------------------------------------------
+  !> Update Jacobian matrices on all levels with new solution
+  !---------------------------------------------------------------------------
+  subroutine update_jacobian(uin)
+  class(oft_vector), target, intent(inout) :: uin !< Current solution
+  IF(oft_debug_print(1))write(*,*)'Updating tDiff approximate Jacobian'
+  CALL build_approx_jacobian(current_sim,uin)
+  END SUBROUTINE update_jacobian
+  !---------------------------------------------------------------------------
+  !> Setup composite FE representation and ML environment
+  !---------------------------------------------------------------------------
+  subroutine setup(self,order)
+  class(oft_xmhd_2d_sim), intent(inout) :: self
+  integer(i4), intent(in) :: order
+  integer(i4) :: ierr,io_unit
+  IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup",__FILE__)
+  IF(ASSOCIATED(oft_blagrange))CALL oft_abort("FE space already built","setup",__FILE__)
+  
+  !---Look for XML defintion elements
+  #ifdef HAVE_XML
+  IF(ASSOCIATED(oft_env%xml))THEN
+    CALL xml_get_element(oft_env%xml,"tdiff",self%xml_root,ierr)
+    IF(ierr==0)THEN
+      !---Look for pre node
+      CALL xml_get_element(self%xml_root,"pre",self%xml_pre_def,ierr)
+      IF(ierr/=0)NULLIFY(self%xml_pre_def)
+    ELSE
+      NULLIFY(self%xml_root)
+    END IF
+  END IF
+  #endif
+  
+  !---Setup FE representation
+  IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
+  CALL oft_lag_setup(order, -1)
+  CALL self%xdmf_plot%setup("tdiff")
+  CALL smesh%setup_io(self%xdmf_plot,order)
+  
+  !---Build composite FE definition for solution field
+  IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
+  ALLOCATE(self%fe_rep)
+  self%fe_rep%nfields=2
+  ALLOCATE(self%fe_rep%fields(self%fe_rep%nfields))
+  ALLOCATE(self%fe_rep%field_tags(self%fe_rep%nfields))
+  self%fe_rep%fields(1)%fe=>oft_blagrange
+  self%fe_rep%field_tags(1)='Ti'
+  self%fe_rep%fields(2)%fe=>oft_blagrange
+  self%fe_rep%field_tags(2)='Te'
+  
+  !---Create solution vector
+  CALL self%fe_rep%vec_create(self%u)
+  
+!---Set boundary conditions (Dirichlet for now)
+self%n_bc=>oft_blagrange%be
+self%T_bc=>oft_blagrange%be
+self%vel_bc=>oft_blagrange%be
+self%psi_bc=>oft_blagrange%be
+self%by_bc=>oft_blagrange%be
+  
+!---Create Jacobian matrix
+ALLOCATE(self%jacobian_block_mask(self%fe_rep%nfields,self%fe_rep%nfields))
+self%jacobian_block_mask=1
+CALL self%fe_rep%mat_create(self%jacobian,self%jacobian_block_mask)
+end subroutine setup
+!---------------------------------------------------------------------------
+!> Save xMHD solution state to a restart file
+!---------------------------------------------------------------------------
+subroutine rst_save(self,u,t,dt,filename,path)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+class(oft_vector), pointer, intent(inout) :: u !< Solution to save
+real(r8), intent(in) :: t !< Current solution time
+real(r8), intent(in) :: dt !< Current timestep
+character(LEN=*), intent(in) :: filename !< Name of restart file
+character(LEN=*), intent(in) :: path !< Path to store solution vector in file
+DEBUG_STACK_PUSH
+CALL self%fe_rep%vec_save(u,filename,path)
+IF(oft_env%head_proc)THEN
+  CALL hdf5_write(t,filename,'t')
+  CALL hdf5_write(dt,filename,'dt')
+END IF
+DEBUG_STACK_POP
+end subroutine rst_save
+!---------------------------------------------------------------------------
+!> Load xMHD solution state from a restart file
+!---------------------------------------------------------------------------
+subroutine rst_load(self,u,filename,path,t,dt)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+class(oft_vector), pointer, intent(inout) :: u !< Solution to load
+character(LEN=*), intent(in) :: filename !< Name of restart file
+character(LEN=*), intent(in) :: path !< Path to store solution vector in file
+real(r8), optional, intent(out) :: t !< Time of loaded solution
+real(r8), optional, intent(out) :: dt !< Timestep at loaded time
+DEBUG_STACK_PUSH
+CALL self%fe_rep%vec_load(u,filename,path)
+IF(PRESENT(t))CALL hdf5_read(t,filename,'t')
+IF(PRESENT(dt))CALL hdf5_read(dt,filename,'dt')
+DEBUG_STACK_POP
+end subroutine rst_load
+END MODULE xmhd_2d
