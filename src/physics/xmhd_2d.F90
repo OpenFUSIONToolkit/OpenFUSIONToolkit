@@ -82,7 +82,7 @@ TYPE, public :: oft_xmhd_2d_sim
   CLASS(oft_vector), POINTER :: u => NULL() !< Needs docs
   CLASS(oft_matrix), POINTER :: jacobian => NULL() !< Needs docs
   TYPE(oft_mf_matrix), POINTER :: mf_mat => NULL() !< Matrix free operator
-  TYPE(tdiff_nlfun), POINTER :: nlfun => NULL() !< Needs docs
+  TYPE(xmhd_2d_nlfun), POINTER :: nlfun => NULL() !< Needs docs
   TYPE(xml_node), POINTER :: xml_root => NULL() !< XML root element
   TYPE(xml_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
   contains
@@ -154,7 +154,7 @@ ALLOCATE(self%nlfun)
 self%nlfun%chi=self%chi
 self%nlfun%eta=self%eta
 self%nlfun%nu=self%nu
-self%nlfun%D=self%D
+self%nlfun%D_diff=self%D_diff
 self%nlfun%mu_0=self%mu_0
 self%nlfun%gamma=self%gamma
 self%nlfun%k_boltz=self%k_boltz
@@ -298,7 +298,7 @@ end subroutine run_simulation
 !! b = F(a)
 !---------------------------------------------------------------------------
 subroutine nlfun_apply(self,a,b)
-class(tdiff_nlfun), intent(inout) :: self !< NL function object
+class(xmhd_2d_nlfun), intent(inout) :: self !< NL function object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 type(oft_quad_type), pointer :: quad
@@ -408,7 +408,7 @@ DO i=1,smesh%nc
     END DO
     div_vel = dvel(1,1) + dvel(2,2) + dvel(3,3)
     diag_vals = diag_vals + [T_i,T_e]*jac_det*quad%wts(m) !TODO: update this line for new fields
-    btmp = cross_product(dpsi, (0,1,0)) + by*(0,1,0)
+    btmp = cross_product(dpsi, [0,1,0]) + by*[0,1,0]
     !---Compute local function contributions
     DO jr=1,oft_blagrange%nce
       !---Diffusion
@@ -489,7 +489,7 @@ CALL b%restore_local(by_res,2,add=.TRUE.)
 !TODO: adjust diagonal vals
 self%diag_vals=oft_mpi_sum(diag_vals,2)
 !---Cleanup remaining storage
-DEALLOCATE(n_res,vel_res, T_res, psi_res, by_res &
+DEALLOCATE(n_res,vel_res, T_res, psi_res, by_res, &
         n_weights,vel_weights, T_weights, psi_weights, by_weights)
 end subroutine nlfun_apply
 !---------------------------------------------------------------------------
@@ -599,7 +599,7 @@ DO i=1,smesh%nc
     dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
     END DO
     div_vel = dvel(1,1) + dvel(2,2) + dvel(3,3)
-    btmp = cross_product(dpsi, (0,1,0)) + by*(0,1,0)
+    btmp = cross_product(dpsi, [0,1,0]) + by*[0,1,0]
     !---Compute local matrix contributions
     DO jr=1,oft_blagrange%nce
       DO jc=1,oft_blagrange%nce
@@ -657,12 +657,12 @@ DO i=1,smesh%nc
         + self%dt*basis_vals(jc)*dn*DOT_PRODUCT(cross_product(basis_grads(:,jc), (0,1,0)), btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) 
         ! --Momentum, By
         jac_loc(2:4,7)%m(jr,jc) = jac_loc(2:4,7)%m(jr,jc) &
-        + self%dt*DOT_PRODUCT(basis_grads(:,jr),(0,basis_vals(jc),0))*btmp*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-        + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*(0,basis_vals(jc),0)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-        - self%dt*basis_grads(:,jr)*DOT_PRODUCT((0,basis_vals(jc),0), btmp)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-        - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, (0,basis_vals(jc),0))*btmp*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
-        - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*(0,basis_vals(jc),0)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
-        + self%dt*basis_vals(jc)*dn*DOT_PRODUCT((0,basis_vals(jc),0), btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) 
+        + self%dt*DOT_PRODUCT(basis_grads(:,jr),[0,basis_vals(jc),0])*btmp*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+        + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*[0,basis_vals(jc),0]*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+        - self%dt*basis_grads(:,jr)*DOT_PRODUCT([0,basis_vals(jc),0], btmp)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
+        - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, [0,basis_vals(jc),0])*btmp*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
+        - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*[0,basis_vals(jc),0]*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
+        + self%dt*basis_vals(jc)*dn*DOT_PRODUCT([0,basis_vals(jc),0], btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) 
         ! Temperature: delta_T=basis_vals(:, jc)
         jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
         + basis_vals(:, jr) * basis_vals(:, jc)/(gamma-1)*jac_det*quad%wts(m) &! delta_T
