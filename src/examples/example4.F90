@@ -30,19 +30,17 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
-!---H1 Full FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
   taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, taylor_htor, &
   taylor_tag_size, ML_oft_hcurl, ML_oft_h0, &
-  ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
+  ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 !---Tracing
 USE tracing, ONLY: oft_tracer, create_tracer, tracing_poincare
 IMPLICIT NONE
@@ -95,7 +93,7 @@ CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0)
 CALL h0_setup_interp(ML_oft_h0)
 CALL h0_mloptions
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad)
 !!\subsection doc_ex4_code_taylor Compute Taylor state
 !!
 !!For composite Taylor states the lowest eigenmode is used used in addition to the injector fields. This
@@ -139,14 +137,14 @@ CALL taylor_vacuum(nh,hcpc,hcpv,htags)
 CALL taylor_injectors(taylor_hlam(1,ML_oft_hcurl%level))
 !---Setup field interpolation object
 fluxes=(/1.d0,0.d0/)
-CALL ML_oft_h1%vec_create(Bfield%uvac)
+CALL ML_hcurl_grad%vec_create(Bfield%uvac)
 DO i=1,nh
-  CALL Bfield%uvac%add(1.d0,fluxes(i),taylor_hvac(i,ML_oft_h1%level)%f)
+  CALL Bfield%uvac%add(1.d0,fluxes(i),taylor_hvac(i,ML_hcurl_grad%level)%f)
 END DO
 CALL ML_oft_hcurl%vec_create(Bfield%ua)
 CALL Bfield%ua%add(0.d0,fr/taylor_htor(1,ML_oft_hcurl%level),taylor_hffa(1,ML_oft_hcurl%level)%f)
 DO i=1,nh
-  CALL Bfield%ua%add(1.d0,fluxes(i),taylor_gffa(i,ML_oft_h1%level)%f)
+  CALL Bfield%ua%add(1.d0,fluxes(i),taylor_gffa(i,ML_hcurl_grad%level)%f)
 END DO
 !!\subsection doc_ex4_code_project Project Solution for Plotting
 !!

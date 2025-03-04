@@ -26,20 +26,19 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop, &
   oft_lag_getmop, oft_lag_project, oft_lag_rinterp, oft_lag_vrinterp
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project
 !---Physics
 USE diagnostic, ONLY: scal_energy, vec_energy
 USE mhd_utils, ONLY: elec_charge, proton_mass
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, temp_floor, &
   xmhd_lin_run, xmhd_adv_b, xmhd_sub_fields, ML_oft_hcurl, ML_oft_h0, &
-  ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
+  ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 USE test_phys_helpers, ONLY: sound_eig
 IMPLICIT NONE
 !---Lagrange Metric solver
@@ -94,8 +93,8 @@ CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=minlev)
 CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,minlev)
-CALL h1_setup_interp(ML_oft_h1,ML_oft_h0)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,minlev)
+CALL h1_setup_interp(ML_hcurl_grad,ML_oft_h0)
 !---------------------------------------------------------------------------
 ! Create Lagrange metric solver
 !---------------------------------------------------------------------------
@@ -178,8 +177,8 @@ DEALLOCATE(u,v,mop)
 !---------------------------------------------------------------------------
 ! Run simulation and test result
 !---------------------------------------------------------------------------
-CALL ML_oft_h1%vec_create(b)
-CALL ML_oft_h1%vec_create(db)
+CALL ML_hcurl_grad%vec_create(b)
+CALL ML_hcurl_grad%vec_create(db)
 xmhd_minlev=minlev
 xmhd_taxis=2
 xmhd_adv_b=.FALSE.

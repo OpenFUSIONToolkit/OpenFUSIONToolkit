@@ -1,7 +1,7 @@
 !---------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
-!> @file oft_h1_operators.F90
+!> @file hcurl_grad_operators.F90
 !
 !> Nedelec H1 FE operator definitions
 !! - Operator construction

@@ -38,17 +38,16 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pr
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: oft_h1_divout, h1_mc
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields, &
-  ML_oft_hcurl, ML_oft_h0, ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
+  ML_oft_hcurl, ML_oft_h0, ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex1_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
@@ -95,8 +94,8 @@ CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
 !---H1(Grad) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=-1)
 !---H1 full space
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,-1)
-h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,-1)
+h0_zerogrnd%ML_H0_rep=>ML_h1grad
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
 !! To visualize the solution fields once a simulation has completed, the \ref xmhd::xmhd_plot
@@ -157,12 +156,12 @@ divout%pm=.TRUE.
 ! Setup initial conditions
 !---------------------------------------------------------------------------
 !---Apply to equilibrium field
-CALL ML_oft_h1%vec_create(ic_fields%B)
+CALL ML_hcurl_grad%vec_create(ic_fields%B)
 CALL taylor_hffa(3,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
 !---Apply to perturbation field
-CALL ML_oft_h1%vec_create(pert_fields%B)
+CALL ML_hcurl_grad%vec_create(pert_fields%B)
 CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL pert_fields%B%restore_local(tmp,1)
 CALL divout%apply(pert_fields%B)

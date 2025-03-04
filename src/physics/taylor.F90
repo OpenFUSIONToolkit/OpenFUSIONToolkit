@@ -85,9 +85,9 @@ type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_hcur => NULL() !< Inhomo
 type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_gffa => NULL() !< Inhomogeneous force-free fields
 !---
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
-TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_h1,ML_oft_vlagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad,ML_oft_vlagrange
 !---General
 logical :: taylor_rst=.TRUE. !< Save solutions to data files
 contains
@@ -419,7 +419,7 @@ IF(.NOT.rst)THEN
   linv%A=>lop
   linv%its=-2
   ! divout%solver=>linv
-  CALL divout%setup(ML_oft_h1,'grnd',solver=linv)
+  CALL divout%setup(ML_hcurl_grad,'grnd',solver=linv)
 ELSE
   CALL create_cg_solver(linv)
   CALL create_diag_pre(linv%pre)
@@ -469,10 +469,10 @@ hcurl_divout%mop=>mop_hcurl
 !---------------------------------------------------------------------------
 NULLIFY(tmp)
 !---Get H1 mass matrix
-CALL h1_getmop(ML_oft_h1%current_level,mop,'none')
+CALL h1_getmop(ML_hcurl_grad%current_level,mop,'none')
 !---Allocate vacuum and current field containers
-ALLOCATE(taylor_hvac(taylor_nh,ML_oft_h1%nlevels))
-ALLOCATE(taylor_hcur(taylor_nh,ML_oft_h1%nlevels))
+ALLOCATE(taylor_hvac(taylor_nh,ML_hcurl_grad%nlevels))
+ALLOCATE(taylor_hcur(taylor_nh,ML_hcurl_grad%nlevels))
 !---Create temporary H1(Curl) vector
 CALL ML_oft_hcurl%vec_create(b)
 !---Loop over cut planes
@@ -481,8 +481,8 @@ DO i=1,taylor_nh
 ! Compute vacuum fields
 !---------------------------------------------------------------------------
   !---Setup level fields
-  CALL ML_oft_h1%vec_create(taylor_hvac(i,ML_oft_h1%level)%f)
-  u=>taylor_hvac(i,ML_oft_h1%level)%f
+  CALL ML_hcurl_grad%vec_create(taylor_hvac(i,ML_hcurl_grad%level)%f)
+  u=>taylor_hvac(i,ML_hcurl_grad%level)%f
   IF(.NOT.ASSOCIATED(tmp))CALL u%new(tmp)
   rst=.FALSE.
   IF(taylor_rst)THEN
@@ -490,7 +490,7 @@ DO i=1,taylor_nh
     WRITE(mnum,'(I2.2)')i
     filename='hvac_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(oft_file_exist(filename))THEN
-      CALL ML_oft_h1%current_level%vec_load(u,filename,'hvac')
+      CALL ML_hcurl_grad%current_level%vec_load(u,filename,'hvac')
       rst=.TRUE.
     END IF
   END IF
@@ -511,7 +511,7 @@ DO i=1,taylor_nh
     filename='hvac_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     IF(.NOT.oft_file_exist(filename))THEN
       CALL oft_mpi_barrier(ierr)
-      CALL ML_oft_h1%current_level%vec_save(u,filename,'hvac')
+      CALL ML_hcurl_grad%current_level%vec_save(u,filename,'hvac')
     END IF
   END IF
   !---Compute field energy
@@ -714,16 +714,16 @@ hcurl_divout%mop=>mop
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
-call ML_oft_h1%set_level(ML_oft_h1%nlevels,propogate=.TRUE.)
+call ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
 !---
 call ML_oft_hcurl%vec_create(tmp)
-allocate(taylor_gffa(taylor_nh,ML_oft_h1%nlevels))
+allocate(taylor_gffa(taylor_nh,ML_hcurl_grad%nlevels))
 IF(.NOT.rst)CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'zerob')
 !---
 do i=1,taylor_nh
   !---
-  CALL ML_oft_hcurl%vec_create(taylor_gffa(i,ML_oft_h1%level)%f)
-  u=>taylor_gffa(i,ML_oft_h1%level)%f
+  CALL ML_oft_hcurl%vec_create(taylor_gffa(i,ML_hcurl_grad%level)%f)
+  u=>taylor_gffa(i,ML_hcurl_grad%level)%f
   rst=.FALSE.
   IF(taylor_rst)THEN
     WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
@@ -738,7 +738,7 @@ do i=1,taylor_nh
     END IF
   END IF
   IF(.NOT.rst)THEN
-    CALL u%add(0.d0,1.d0,taylor_hcur(i,ML_oft_h1%level)%f)
+    CALL u%add(0.d0,1.d0,taylor_hcur(i,ML_hcurl_grad%level)%f)
     IF(do_orthog)CALL orthog%apply(u)
     CALL kop%apply(u,tmp)
     !---Solve
@@ -766,7 +766,7 @@ do i=1,taylor_nh
     END IF
   END IF
   !---
-  CALL u%add(lambda**2,lambda,taylor_hcur(i,ML_oft_h1%level)%f)
+  CALL u%add(lambda**2,lambda,taylor_hcur(i,ML_hcurl_grad%level)%f)
 end do
 !---
 CALL tmp%delete
@@ -873,14 +873,14 @@ hcurl_divout%mop=>mop
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
-call ML_oft_h1%set_level(ML_oft_h1%nlevels,propogate=.TRUE.)
+call ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
 !---
 call ML_oft_hcurl%vec_create(gffa)
 call ML_oft_hcurl%vec_create(tmp)
 !---
 CALL gffa%set(0.d0)
 do i=1,taylor_nh
-  CALL gffa%add(1.d0,fluxes(i),taylor_hcur(i,ML_oft_h1%level)%f)
+  CALL gffa%add(1.d0,fluxes(i),taylor_hcur(i,ML_hcurl_grad%level)%f)
 end do
 !---Orthogonalize (if within 5% of Taylor state)
 IF(taylor_nm>0)THEN
@@ -911,7 +911,7 @@ CALL hcurl_divout%apply(gffa)
 !---
 CALL gffa%scale(lambda**2)
 do i=1,taylor_nh
-  CALL gffa%add(1.d0,fluxes(i)*lambda,taylor_hcur(i,ML_oft_h1%level)%f)
+  CALL gffa%add(1.d0,fluxes(i)*lambda,taylor_hcur(i,ML_hcurl_grad%level)%f)
 end do
 !---
 CALL tmp%delete

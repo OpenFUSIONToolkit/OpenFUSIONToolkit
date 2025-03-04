@@ -43,13 +43,12 @@ USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_vrinterp
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---H1 Full FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: oft_h1_rinterp
 !---Tracing
 USE mhd_utils, ONLY: elec_charge, proton_mass
@@ -73,9 +72,9 @@ CLASS(oft_tracer), POINTER :: tracer
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
-TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_h1
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 REAL(r8), PARAMETER :: vel_scale = 1.d3
 !---Input options
 INTEGER(i4) :: order = 2
@@ -144,14 +143,14 @@ SELECT CASE(type)
     Bfield_lag%u=>u
     tracer%B=>Bfield_lag
     CALL Bfield_lag%setup(ML_oft_lagrange%current_level)
-  CASE(2) !  Nedelec H1 field
+  CASE(2) ! H(Curl) + Grad(H^1) field
     CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
     CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
-    CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,-1)
+    CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(x1)
     CALL ML_oft_h0%vec_create(x2)
-    CALL ML_oft_h1%vec_create(u)
+    CALL ML_hcurl_grad%vec_create(u)
     !---Load H1(Curl) component
     CALL ML_oft_hcurl%current_level%vec_load(x1,rst_file,fields(1))
     CALL x1%get_local(valtmp)
@@ -164,8 +163,8 @@ SELECT CASE(type)
     CALL u%scale(bscale)
     Bfield_H1%u=>u
     tracer%B=>Bfield_H1
-    CALL Bfield_H1%setup(ML_oft_h1%current_level)
-  CASE(3) !  Nedelec HCurl field
+    CALL Bfield_H1%setup(ML_hcurl_grad%current_level)
+  CASE(3) ! H(Curl) potential field
     CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(u)

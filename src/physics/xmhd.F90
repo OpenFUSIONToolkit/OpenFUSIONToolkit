@@ -388,9 +388,9 @@ CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
 !
 TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange
-TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_h0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_h0,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_hcurl
-TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_oft_h1,ML_oft_vlagrange
+TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_hcurl_grad,ML_oft_vlagrange
 !
 CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
 CLASS(oft_hcurl_fem), POINTER :: oft_hcurl => NULL()
@@ -590,7 +590,7 @@ DEBUG_STACK_PUSH
 mg_mesh=>ML_oft_hcurl%ml_mesh
 IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
 IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid Lagrange FE object","xmhd_run",__FILE__)
-IF(oft_3D_h1_cast(oft_hgrad,ML_oft_hgrad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
+IF(oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
 mesh=>oft_hcurl%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
@@ -624,8 +624,8 @@ END IF
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
-call ML_oft_h1%vec_create(sub_fields%B)
-CALL divout%setup(ML_oft_h1,"grnd")
+call ML_hcurl_grad%vec_create(sub_fields%B)
+CALL divout%setup(ML_hcurl_grad,"grnd")
 divout%pm=.TRUE.
 IF(TRIM(bbc)=="ic")divout%keep_boundary=.TRUE.
 !---------------------------------------------------------------------------
@@ -736,7 +736,7 @@ IF(xmhd_monitor_div)THEN
   Bfield%u=>sub_fields%B
   CALL Bfield%setup(oft_hcurl,oft_hgrad)
   !---Compute jump error
-  jump_error=h1_jump_error(ML_oft_h1%current_level,sub_fields%B,oft_hcurl%quad%order)
+  jump_error=h1_jump_error(ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
   divfield%u=>sub_fields%B
   CALL divfield%setup(oft_hcurl,oft_hgrad)
   derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
@@ -747,9 +747,9 @@ END IF
 !---Setup B-norm
 IF(.NOT.xmhd_bnorm_force)THEN
   IF(.NOT.xmhd_monitor_div)CALL oft_xmhd_pop(u,sub_fields)
-  CALL ML_oft_hgrad%vec_create(divout%bnorm)
-  CALL h1_div(ML_oft_h1%current_level,sub_fields%B,divout%bnorm)
-  h0_zeroi%ML_H0_rep=>ML_oft_hgrad
+  CALL ML_h1grad%vec_create(divout%bnorm)
+  CALL h1_div(ML_hcurl_grad%current_level,sub_fields%B,divout%bnorm)
+  h0_zeroi%ML_H0_rep=>ML_h1grad
   CALL h0_zeroi%apply(divout%bnorm)
 END IF
 !---------------------------------------------------------------------------
@@ -1003,7 +1003,7 @@ DO i=1,nsteps
       Bfield%u=>sub_fields%B
       CALL Bfield%setup(oft_hcurl,oft_hgrad)
       !---Compute jump error
-      jump_error=h1_jump_error(ML_oft_h1%current_level,sub_fields%B,oft_hcurl%quad%order)
+      jump_error=h1_jump_error(ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
       divfield%u=>sub_fields%B
       CALL divfield%setup(oft_hcurl,oft_hgrad)
       derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
@@ -1135,7 +1135,7 @@ integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
 IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid Curl FE object","xmhd_lin_run",__FILE__)
 IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid Lagrange FE object","xmhd_lin_run",__FILE__)
-IF(oft_3D_h1_cast(oft_hgrad,ML_oft_hgrad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_lin_run",__FILE__)
+IF(oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_lin_run",__FILE__)
 mg_mesh=>ML_oft_hcurl%ml_mesh
 mesh=>oft_hcurl%mesh
 !---------------------------------------------------------------------------
@@ -1180,8 +1180,8 @@ END IF
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
-call ML_oft_h1%vec_create(sub_fields%B)
-CALL divout%setup(ML_oft_h1,"grnd")
+call ML_hcurl_grad%vec_create(sub_fields%B)
+CALL divout%setup(ML_hcurl_grad,"grnd")
 divout%pm=.TRUE.
 IF(TRIM(bbc)=="ic")divout%keep_boundary=.TRUE.
 !---------------------------------------------------------------------------
@@ -1284,7 +1284,7 @@ IF(xmhd_monitor_div)THEN
   Bfield%u=>sub_fields%B
   CALL Bfield%setup(oft_hcurl,oft_hgrad)
   !---Compute jump error
-  jump_error=h1_jump_error(ML_oft_h1%current_level,sub_fields%B,oft_hcurl%quad%order)
+  jump_error=h1_jump_error(ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
   divfield%u=>sub_fields%B
   CALL divfield%setup(oft_hcurl,oft_hgrad)
   derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
@@ -1441,7 +1441,7 @@ DO i=1,nsteps
       Bfield%u=>sub_fields%B
       CALL Bfield%setup(oft_hcurl,oft_hgrad)
       !---Compute jump error
-      jump_error=h1_jump_error(ML_oft_h1%current_level,sub_fields%B,oft_hcurl%quad%order)
+      jump_error=h1_jump_error(ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
       divfield%u=>sub_fields%B
       CALL divfield%setup(oft_hcurl,oft_hgrad)
       derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
@@ -3773,7 +3773,7 @@ ALLOCATE(ML_xmhd_rep%ml_fields(ML_xmhd_rep%nfields))
 ALLOCATE(ML_xmhd_rep%field_tags(ML_xmhd_rep%nfields))
 ML_xmhd_rep%ml_fields(1)%ml=>ML_oft_hcurl
 ML_xmhd_rep%field_tags(1)='Bc'
-ML_xmhd_rep%ml_fields(2)%ml=>ML_oft_hgrad
+ML_xmhd_rep%ml_fields(2)%ml=>ML_h1grad
 ML_xmhd_rep%field_tags(2)='Bg'
 ML_xmhd_rep%ml_fields(3)%ml=>ML_oft_lagrange
 ML_xmhd_rep%field_tags(3)='Vx'
@@ -3823,9 +3823,9 @@ xmhd_rep=>ML_xmhd_rep%current_level
 !---
 CALL ML_oft_lagrange%set_level(level)
 IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid FE object","xmhd_set_level",__FILE__)
-CALL ML_oft_h1%set_level(level,propogate=.TRUE.)
+CALL ML_hcurl_grad%set_level(level,propogate=.TRUE.)
 IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
-IF(oft_3D_h1_cast(oft_hgrad,ML_oft_hgrad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
+IF(oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
 xmhd_level=level
 ! xmhd_lev=oft_hcurl_lev
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)
@@ -4686,7 +4686,7 @@ call ML_oft_vlagrange%vec_create(ap)
 call ML_oft_vlagrange%vec_create(bp)
 allocate(bvout(3,x%n))
 !---Allocate sub-fields
-call ML_oft_h1%vec_create(sub_fields%B)
+call ML_hcurl_grad%vec_create(sub_fields%B)
 call ML_oft_vlagrange%vec_create(sub_fields%V)
 call ML_oft_lagrange%vec_create(sub_fields%Ne)
 call ML_oft_lagrange%vec_create(sub_fields%Ti)

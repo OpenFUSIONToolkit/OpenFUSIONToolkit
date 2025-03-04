@@ -29,6 +29,8 @@ USE oft_hexmesh_type, ONLY: hex_bary_ecoords, hex_bary_efcoords, hex_bary_fcoord
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_h0_basis, ONLY: oft_h0_fem, oft_h0_setup_vol
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -166,6 +168,69 @@ IF(PRESENT(ML_bhcurl_obj))CALL ML_bhcurl_obj%set_level(ML_bhcurl_obj%nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_setup
+!---------------------------------------------------------------------------
+!> Construct a vector FE space for H(Curl) and it's compliment (\f$ \nabla H^1 \f$)
+!---------------------------------------------------------------------------
+subroutine oft_hcurl_grad_setup(ML_hcurl_obj,ML_h1_obj,ML_hcurl_grad_obj,ML_h1grad_obj,minlev)
+type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_obj
+type(oft_ml_fem_type), intent(inout) :: ML_h1_obj
+type(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_grad_obj
+type(oft_ml_fem_type), target, intent(inout) :: ML_h1grad_obj
+integer(i4), optional, intent(in) :: minlev
+integer(i4) :: i,nlevels,minlev_out,order
+DEBUG_STACK_PUSH
+minlev_out=1
+IF(PRESENT(minlev))minlev_out=minlev
+order = ML_hcurl_obj%levels(ML_hcurl_obj%nlevels)%fe%order
+IF(oft_env%head_proc)THEN
+  WRITE(*,*)
+  WRITE(*,'(A)')'**** Creating H(Curl) + Grad(H^1) FE space'
+  WRITE(*,'(2X,A,I4)')'Order  = ',order
+  WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
+END IF
+ML_h1grad_obj%ml_mesh=>ML_hcurl_obj%ml_mesh
+!---Allocate multigrid operators
+nlevels=ML_hcurl_obj%ml_mesh%mgdim+(order-1)
+IF(minlev_out<0)minlev_out=nlevels
+ML_h1grad_obj%minlev=minlev_out
+ML_h1grad_obj%nlevels=nlevels
+ML_hcurl_grad_obj%minlev=minlev_out
+ML_hcurl_grad_obj%nlevels=nlevels
+!---Set linear elements
+do i=1,ML_hcurl_obj%ml_mesh%mgdim-1
+  IF(i<ML_hcurl_grad_obj%minlev)CYCLE
+  CALL multigrid_level(ML_hcurl_obj%ml_mesh,i)
+  if(ML_hcurl_obj%ml_mesh%level==ML_hcurl_obj%ml_mesh%nbase)ML_hcurl_grad_obj%blevel=i
+  CALL oft_h0_setup_vol(ML_h1grad_obj%levels(i)%fe,ML_hcurl_obj%ml_mesh%mesh,2)
+end do
+call multigrid_level(ML_hcurl_obj%ml_mesh,ML_hcurl_obj%ml_mesh%mgdim)
+!---Set high order elements
+do i=1,order
+  IF(ML_hcurl_obj%ml_mesh%mgdim+i-1<ML_hcurl_grad_obj%minlev)CYCLE
+  IF(ML_h1_obj%nlevels>=ML_hcurl_obj%ml_mesh%mgdim+i)THEN
+    SELECT TYPE(this=>ML_h1_obj%levels(ML_hcurl_obj%ml_mesh%mgdim+i)%fe)
+      CLASS IS(oft_h0_fem)
+      ML_h1grad_obj%levels(ML_hcurl_obj%ml_mesh%mgdim+i-1)%fe=>this
+      CLASS DEFAULT
+        CALL oft_abort("Error casting H1 object", "oft_hcurl_grad_setup", __FILE__)
+    END SELECT
+  ELSE
+    CALL oft_h0_setup_vol(ML_h1grad_obj%levels(ML_hcurl_obj%ml_mesh%mgdim+i-1)%fe,ML_hcurl_obj%ml_mesh%mesh,i)
+  END IF
+end do
+!---Setup composite structure
+ML_hcurl_grad_obj%nfields=2
+ALLOCATE(ML_hcurl_grad_obj%ml_fields(ML_hcurl_grad_obj%nfields))
+ALLOCATE(ML_hcurl_grad_obj%field_tags(ML_hcurl_grad_obj%nfields))
+ML_hcurl_grad_obj%ml_fields(1)%ml=>ML_hcurl_obj
+ML_hcurl_grad_obj%field_tags(1)='c'
+ML_hcurl_grad_obj%ml_fields(2)%ml=>ML_h1grad_obj
+ML_hcurl_grad_obj%field_tags(2)='g'
+call ML_hcurl_grad_obj%setup
+CALL ML_hcurl_grad_obj%set_level(ML_hcurl_grad_obj%nlevels,propogate=.TRUE.)
+IF(oft_env%head_proc)WRITE(*,*)
+DEBUG_STACK_POP
+end subroutine oft_hcurl_grad_setup
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------

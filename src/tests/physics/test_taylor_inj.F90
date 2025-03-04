@@ -22,15 +22,14 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, oft_lag_vgetmop, &
   oft_lag_vproject
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
-USE oft_h1_basis, ONLY: oft_h1_setup
 USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
   taylor_minlev, taylor_jtol, taylor_tag_size, taylor_hvac, taylor_hcur, &
   taylor_gffa, oft_taylor_rinterp, ML_oft_hcurl, ML_oft_h0, &
-  ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
+  ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 implicit none
 INTEGER(i4) :: ierr,io_unit
 REAL(r8) :: comps(3),diff_err
@@ -62,7 +61,7 @@ END IF
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=taylor_minlev)
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=taylor_minlev)
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=taylor_minlev)
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,taylor_minlev)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
@@ -80,12 +79,12 @@ taylor_jtol=1.d-4
 oft_env%pm=.FALSE.
 CALL taylor_vacuum(nh,hcpc,hcpv,htags,energy)
 CALL taylor_injectors(5.d0)
-comps(1) = taylor_hvac(1,ML_oft_h1%level)%f%dot(taylor_hvac(1,ML_oft_h1%level)%f)
-comps(2) = taylor_hcur(1,ML_oft_h1%level)%f%dot(taylor_hcur(1,ML_oft_h1%level)%f)
-comps(3) = taylor_gffa(1,ML_oft_h1%level)%f%dot(taylor_gffa(1,ML_oft_h1%level)%f)
-CALL taylor_gffa(1,ML_oft_h1%level)%f%new(gffa)
+comps(1) = taylor_hvac(1,ML_hcurl_grad%level)%f%dot(taylor_hvac(1,ML_hcurl_grad%level)%f)
+comps(2) = taylor_hcur(1,ML_hcurl_grad%level)%f%dot(taylor_hcur(1,ML_hcurl_grad%level)%f)
+comps(3) = taylor_gffa(1,ML_hcurl_grad%level)%f%dot(taylor_gffa(1,ML_hcurl_grad%level)%f)
+CALL taylor_gffa(1,ML_hcurl_grad%level)%f%new(gffa)
 CALL taylor_injector_single(5.d0,(/1.d0/),gffa)
-CALL gffa%add(1.d0,-1.d0,taylor_gffa(1,ML_oft_h1%level)%f)
+CALL gffa%add(1.d0,-1.d0,taylor_gffa(1,ML_hcurl_grad%level)%f)
 diff_err = gffa%dot(gffa)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='taylor.results')
@@ -116,8 +115,8 @@ lminv%its=-2
 CALL ML_oft_vlagrange%current_level%vec_create(u)
 CALL ML_oft_vlagrange%current_level%vec_create(v)
 !---Plot solution
-Bfield%uvac=>taylor_hvac(1,ML_oft_h1%level)%f
-Bfield%ua=>taylor_gffa(1,ML_oft_h1%level)%f
+Bfield%uvac=>taylor_hvac(1,ML_hcurl_grad%level)%f
+Bfield%ua=>taylor_gffa(1,ML_hcurl_grad%level)%f
 CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
 !---Project field
 CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)

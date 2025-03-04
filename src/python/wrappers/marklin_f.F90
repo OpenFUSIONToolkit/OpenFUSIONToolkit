@@ -31,7 +31,7 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
     oft_lag_vgetmop, oft_lag_vproject
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
     hcurl_mloptions
 !---H1(Grad) FE space
@@ -39,13 +39,12 @@ USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, oft_h0_zerogrnd, &
   oft_h0_zerob
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: oft_h1_divout, oft_h1_zeroi, h1_mc, oft_h1_curl_zerob, &
   h1_setup_interp, oft_h1_rinterp
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
   taylor_rst, taylor_hlam, ML_oft_hcurl, ML_oft_h0, &
-  ML_oft_h1, ML_oft_hgrad, ML_oft_lagrange, ML_oft_vlagrange
+  ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -263,13 +262,13 @@ IF(.NOT.c_associated(marklin_ptr))THEN
   RETURN
 END IF
 CALL c_f_pointer(marklin_ptr,self)
-IF(ML_oft_h1%nlevels==0)THEN
+IF(ML_hcurl_grad%nlevels==0)THEN
   !---H1(Grad) subspace
   CALL oft_h0_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h0,minlev=ML_oft_hcurl%minlev+1)
   CALL h0_setup_interp(ML_oft_h0)
   !---H1 full space
-  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad,ML_oft_hcurl%minlev)
-  CALL h1_setup_interp(ML_oft_h1,ML_oft_h0)
+  CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,ML_oft_hcurl%minlev)
+  CALL h1_setup_interp(ML_hcurl_grad,ML_oft_h0)
 END IF
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
@@ -286,18 +285,18 @@ linv%its=-2
 CALL create_diag_pre(linv%pre) ! Setup Preconditioner
 divout%solver=>linv
 IF(zero_norm)THEN
-  h0_zerogrnd%ML_H0_rep=>ML_oft_hgrad
+  h0_zerogrnd%ML_H0_rep=>ML_h1grad
   divout%bc=>h0_zerogrnd
   divout%keep_boundary=.TRUE.
 ELSE
-  h0_zerob%ML_H0_rep=>ML_oft_hgrad
+  h0_zerob%ML_H0_rep=>ML_h1grad
   divout%bc=>h0_zerob
 END IF
 !---------------------------------------------------------------------------
 ! Setup initial conditions
 !---------------------------------------------------------------------------
 ALLOCATE(interp_obj)
-CALL ML_oft_h1%vec_create(interp_obj%u)
+CALL ML_hcurl_grad%vec_create(interp_obj%u)
 CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
 CALL interp_obj%u%restore_local(tmp,1)
 IF(zero_norm)WRITE(*,*)'Setting gauge'

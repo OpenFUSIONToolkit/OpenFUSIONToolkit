@@ -28,21 +28,20 @@ USE oft_solver_utils, ONLY: create_native_mlpre, create_cg_solver, create_diag_p
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 !---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 !---H1(Grad) FE space
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp
 !---H1 FE space
-USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_getmop, h1_setup_interp, h1_getmop_pre, h1_mloptions, &
   oft_h1_rinterp, oft_h1_grad_zerop
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_oft_hgrad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
-TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_h1
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 TYPE(oft_h1_grad_zerop), TARGET :: h1grad_zerop
 LOGICAL :: mg_test
 NAMELIST/test_h1_options/order,mg_test
@@ -65,15 +64,12 @@ IF(mg_test)CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0)
 IF(mg_test)CALL h0_setup_interp(ML_oft_h0)
 !---H1 full space
-WRITE(*,*)'Setup In'
-CALL oft_h1_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_h0,ML_oft_h1,ML_oft_hgrad)
-h1grad_zerop%ML_h1_rep=>ML_oft_h1
-WRITE(*,*)'Setup Done'
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad)
+h1grad_zerop%ML_h1_rep=>ML_hcurl_grad
 IF(mg_test)THEN
-  CALL h1_setup_interp(ML_oft_h1,ML_oft_h0,create_full=.TRUE.)
+  CALL h1_setup_interp(ML_hcurl_grad,ML_oft_h0,create_full=.TRUE.)
   CALL h1_mloptions
 END IF
-WRITE(*,*)'Interp Done'
 !---Run tests
 oft_env%pm=.FALSE.
 IF(mg_test)THEN
@@ -97,12 +93,12 @@ REAL(r8) :: uu
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Set FE level
-CALL ML_oft_h1%set_level(ML_oft_h1%nlevels,propogate=.TRUE.)
+CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
 !---Create solver fields
-CALL ML_oft_h1%vec_create(u)
-CALL ML_oft_h1%vec_create(v)
+CALL ML_hcurl_grad%vec_create(u)
+CALL ML_hcurl_grad%vec_create(v)
 !---Get FE operators
-CALL h1_getmop(ML_oft_h1%current_level,mop,'none')
+CALL h1_getmop(ML_hcurl_grad%current_level,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(winv)
 winv%A=>mop
@@ -145,13 +141,13 @@ CLASS(oft_vector), POINTER :: u,v,x,y
 CLASS(oft_matrix), POINTER :: mop => NULL()
 TYPE(oft_h1_rinterp) :: field
 !---Set FE level
-CALL ML_oft_h1%set_level(ML_oft_h1%nlevels,propogate=.TRUE.)
+CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
 !---Create solver fields
-CALL ML_oft_h1%vec_create(u)
-CALL ML_oft_h1%vec_create(v)
+CALL ML_hcurl_grad%vec_create(u)
+CALL ML_hcurl_grad%vec_create(v)
 !---Setup matrix solver
-nlevels=ML_oft_h1%nlevels-1
-CALL h1_getmop_pre(ML_oft_h1,winv%pre,mats,nlevels=nlevels)
+nlevels=ML_hcurl_grad%nlevels-1
+CALL h1_getmop_pre(ML_hcurl_grad,winv%pre,mats,nlevels=nlevels)
 mop=>mats(nlevels)%M
 winv%A=>mop
 winv%nrits=20
