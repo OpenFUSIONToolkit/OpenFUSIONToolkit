@@ -29,39 +29,45 @@ INTERFACE sort_array
   ! Sort 1D array and companion array (done in C++)
   SUBROUTINE int_sort_array44(list,ind,n) BIND(C)
     IMPORT c_int
-    INTEGER(c_int), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: list
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind
+    INTEGER(c_int), INTENT(in) :: n
   END SUBROUTINE int_sort_array44
   SUBROUTINE int_sort_array48(list,ind,n) BIND(C)
     IMPORT c_int, c_long
-    INTEGER(c_long), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: list
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind
+    INTEGER(c_long), INTENT(in) :: n
   END SUBROUTINE int_sort_array48
   SUBROUTINE int_sort_array84(list,ind,n) BIND(C)
     IMPORT c_int, c_long
-    INTEGER(c_int), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: list
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind
+    INTEGER(c_int), INTENT(in) :: n
   END SUBROUTINE int_sort_array84
   SUBROUTINE int_sort_array88(list,ind,n) BIND(C)
     IMPORT c_long
-    INTEGER(c_long), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: list
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind
+    INTEGER(c_long), INTENT(in) :: n
   END SUBROUTINE int_sort_array88
   SUBROUTINE real_sort_array4(list,ind,n) BIND(C)
     IMPORT c_int, c_double
-    INTEGER(c_int), INTENT(in) :: n
+    IMPLICIT NONE
     REAL(c_double), DIMENSION(n), INTENT(inout) :: list
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind
+    INTEGER(c_int), INTENT(in) :: n
   END SUBROUTINE real_sort_array4
   SUBROUTINE real_sort_array8(list,ind,n) BIND(C)
     IMPORT c_long, c_double
-    INTEGER(c_long), INTENT(in) :: n
+    IMPLICIT NONE
     REAL(c_double), DIMENSION(n), INTENT(inout) :: list
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind
+    INTEGER(c_long), INTENT(in) :: n
   END SUBROUTINE real_sort_array8
   ! Sort 2D array as 1D
   MODULE PROCEDURE sorta4
@@ -81,111 +87,134 @@ INTERFACE
 #if !defined(__INTEL_COMPILER)
   SUBROUTINE int_sort44(list,n) BIND(C)
     IMPORT c_int
-    INTEGER(c_int), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: list
+    INTEGER(c_int), INTENT(in) :: n
   END SUBROUTINE
   SUBROUTINE int_sort48(list,n) BIND(C)
     IMPORT c_int, c_long
-    INTEGER(c_long), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: list
+    INTEGER(c_long), INTENT(in) :: n
   END SUBROUTINE
   SUBROUTINE int_sort84(list,n) BIND(C)
     IMPORT c_int, c_long
-    INTEGER(c_int), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: list
+    INTEGER(c_int), INTENT(in) :: n
   END SUBROUTINE
   SUBROUTINE int_sort88(list,n) BIND(C)
     IMPORT c_long
-    INTEGER(c_long), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: list
+    INTEGER(c_long), INTENT(in) :: n
   END SUBROUTINE
   PURE SUBROUTINE int_search44(list,n,item,result) BIND(C)
     IMPORT c_int
-    INTEGER(c_int), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_int), DIMENSION(n), INTENT(in) :: list
+    INTEGER(c_int), INTENT(in) :: n
     INTEGER(c_int), INTENT(in) :: item
     INTEGER(c_int), INTENT(in) :: result
   END SUBROUTINE
   PURE SUBROUTINE int_search48(list,n,item,result) BIND(C)
     IMPORT c_int, c_long
-    INTEGER(c_long), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_int), DIMENSION(n), INTENT(in) :: list
+    INTEGER(c_long), INTENT(in) :: n
     INTEGER(c_int), INTENT(in) :: item
     INTEGER(c_long), INTENT(in) :: result
   END SUBROUTINE
   PURE SUBROUTINE int_search84(list,n,item,result) BIND(C)
     IMPORT c_int, c_long
-    INTEGER(c_int), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_long), DIMENSION(n), INTENT(in) :: list
+    INTEGER(c_int), INTENT(in) :: n
     INTEGER(c_long), INTENT(in) :: item
     INTEGER(c_int), INTENT(in) :: result
   END SUBROUTINE
   PURE SUBROUTINE int_search88(list,n,item,result) BIND(C)
     IMPORT c_long
-    INTEGER(c_long), INTENT(in) :: n
+    IMPLICIT NONE
     INTEGER(c_long), DIMENSION(n), INTENT(in) :: list
+    INTEGER(c_long), INTENT(in) :: n
     INTEGER(c_long), INTENT(in) :: item
     INTEGER(c_long), INTENT(in) :: result
   END SUBROUTINE
 #endif
 END INTERFACE
 PUBLIC sort_array, search_array
-!------------------------------------------------------------------------------
-!> Sort rows of a matrix and associated index vector by the first column in ascending order
-!!
-!! @param[in,out] matrix Matrix to sort [2,n]
-!! @param[in,out] ind Index vector [n]
-!! @param[in] n Number of rows in matrix
-!------------------------------------------------------------------------------
+!
 INTERFACE sort_matrix
+  !------------------------------------------------------------------------------
+  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix44(matrix,ind,n) BIND(C)
     IMPORT c_int
-    INTEGER(c_int), INTENT(in) :: n
-    INTEGER(c_int), DIMENSION(n,2), INTENT(inout) :: matrix
-    INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind
+    IMPLICIT NONE
+    INTEGER(c_int), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
+    INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
+    INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
+  !------------------------------------------------------------------------------
+  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix48(matrix,ind,n) BIND(C)
     IMPORT c_int, c_long
-    INTEGER(c_long), INTENT(in) :: n
-    INTEGER(c_int), DIMENSION(n,2), INTENT(inout) :: matrix
-    INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind
+    IMPLICIT NONE
+    INTEGER(c_int), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
+    INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
+    INTEGER(c_long), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
+  !------------------------------------------------------------------------------
+  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix84(matrix,ind,n) BIND(C)
     IMPORT c_int, c_long
-    INTEGER(c_int), INTENT(in) :: n
-    INTEGER(c_long), DIMENSION(n,2), INTENT(inout) :: matrix
-    INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind
+    IMPLICIT NONE
+    INTEGER(c_long), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
+    INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
+    INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
+  !------------------------------------------------------------------------------
+  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix88(matrix,ind,n) BIND(C)
     IMPORT c_long
-    INTEGER(c_long), INTENT(in) :: n
-    INTEGER(c_long), DIMENSION(n,2), INTENT(inout) :: matrix
-    INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind
+    IMPLICIT NONE
+    INTEGER(c_long), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
+    INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
+    INTEGER(c_long), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
+  !------------------------------------------------------------------------------
+  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !------------------------------------------------------------------------------
   SUBROUTINE real_sort_matrix4(matrix,ind,n) BIND(C)
     IMPORT c_int, c_double
-    INTEGER(c_int), INTENT(in) :: n
-    REAL(c_double), DIMENSION(n,2), INTENT(inout) :: matrix
-    INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind
+    IMPLICIT NONE
+    REAL(c_double), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
+    INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
+    INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
+  !------------------------------------------------------------------------------
+  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !------------------------------------------------------------------------------
   SUBROUTINE real_sort_matrix8(matrix,ind,n) BIND(C)
     IMPORT c_long, c_double
-    INTEGER(c_long), INTENT(in) :: n
-    REAL(c_double), DIMENSION(n,2), INTENT(inout) :: matrix
-    INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind
+    IMPLICIT NONE
+    REAL(c_double),  DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
+    INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
+    INTEGER(c_long), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
 END INTERFACE sort_matrix
 PUBLIC sort_matrix
 CONTAINS
 !---------------------------------------------------------------------------
-!> Sorts an int4 vector.
-!!
-!! @note This function should not be called directly,
-!! use the oft_sort interface
+!> Integer(4) implementation of @ref sort_array
 !---------------------------------------------------------------------------
 SUBROUTINE sort4(ia,n)
-INTEGER(i4), INTENT(in) :: n
-INTEGER(i4), INTENT(inout) :: ia(n)
+INTEGER(i4), INTENT(inout) :: ia(n) !< Array to sort
+INTEGER(i4), INTENT(in) :: n !< Number of values in array
 IF(n==0)RETURN
 ! DEBUG_STACK_PUSH
 #ifdef __INTEL_COMPILER
@@ -196,14 +225,11 @@ CALL int_sort44(ia,n)
 ! DEBUG_STACK_POP
 END SUBROUTINE sort4
 !---------------------------------------------------------------------------
-!> Sorts an int8 vector.
-!!
-!! @note This function should not be called directly,
-!! use the oft_sort interface
+!> Integer(8) implementation of @ref sort_array
 !---------------------------------------------------------------------------
 SUBROUTINE sort8(ia,n)
-INTEGER(i8), INTENT(in) :: n
-INTEGER(i8), INTENT(inout) :: ia(n)
+INTEGER(i8), INTENT(inout) :: ia(n) !< Array to sort
+INTEGER(i8), INTENT(in) :: n !< Number of values in array
 IF(n==0)RETURN
 ! DEBUG_STACK_PUSH
 #ifdef __INTEL_COMPILER
@@ -214,15 +240,14 @@ CALL int_sort88(ia,n)
 ! DEBUG_STACK_POP
 END SUBROUTINE sort8
 !---------------------------------------------------------------------------
-!> Sorts an int4 MxN array.
+!> Integer(4) 2D implementation of @ref sort_array
 !!
-!! @note This function should not be called directly,
-!! use the oft_sort interface
+!! @note Matrix is flattened for sorting
 !---------------------------------------------------------------------------
 SUBROUTINE sorta4(ia,n,m)
-INTEGER(i4), INTENT(in) :: n
-INTEGER(i4), INTENT(in) :: m
-INTEGER(i4), INTENT(inout) :: ia(n,m)
+INTEGER(i4), INTENT(inout) :: ia(n,m) !< Array to sort
+INTEGER(i4), INTENT(in) :: n !< Number of values in first dimension of array
+INTEGER(i4), INTENT(in) :: m !< Number of values in second dimension of array
 IF(n==0.OR.m==0)RETURN
 ! DEBUG_STACK_PUSH
 #ifdef __INTEL_COMPILER
@@ -233,15 +258,14 @@ CALL int_sort44(ia,n*m)
 ! DEBUG_STACK_POP
 END SUBROUTINE sorta4
 !---------------------------------------------------------------------------
-!> Sorts an int8 MxN array.
+!> Integer(8) 2D implementation of @ref sort_array
 !!
-!! @note This function should not be called directly,
-!! use the oft_sort interface
+!! @note Matrix is flattened for sorting
 !---------------------------------------------------------------------------
 SUBROUTINE sorta8(ia,n,m)
-INTEGER(i8), INTENT(in) :: n
-INTEGER(i8), INTENT(in) :: m
-INTEGER(i8), INTENT(inout) :: ia(n,m)
+INTEGER(i8), INTENT(inout) :: ia(n,m) !< Array to sort
+INTEGER(i8), INTENT(in) :: n !< Number of values in first dimension of array
+INTEGER(i8), INTENT(in) :: m !< Number of values in second dimension of array
 IF(n==0.OR.m==0)RETURN
 ! DEBUG_STACK_PUSH
 #ifdef __INTEL_COMPILER
@@ -252,15 +276,13 @@ CALL int_sort88(ia,n*m)
 ! DEBUG_STACK_POP
 END SUBROUTINE sorta8
 !---------------------------------------------------------------------------
-!> Search for a value in a sorted integer array
-!!
-!! @result Index of item in array
+!> Integer(4) implementation of @ref search_array
 !---------------------------------------------------------------------------
 FUNCTION search4(item,list,n)
 INTEGER(i4), INTENT(in) :: item !< Value to search for
 INTEGER(i4), INTENT(in) :: list(n) !< Array to search [n]
 INTEGER(i4), INTENT(in) :: n !< Size of array
-INTEGER(i4) :: search4
+INTEGER(i4) :: search4 !< Index of item in array (0 if not found)
 IF(n==0)THEN
   search4=0
   RETURN
@@ -274,15 +296,13 @@ CALL int_search44(list,n,item,search4)
 ! DEBUG_STACK_POP
 END FUNCTION search4
 !---------------------------------------------------------------------------
-!> Search for a value in a sorted integer array
-!!
-!! @result Index of item in array
+!> Integer(8) implementation of @ref search_array
 !---------------------------------------------------------------------------
 FUNCTION search8(item,list,n)
-INTEGER(i8), intent(in) :: item !< Value to search for
-INTEGER(i8), intent(in) :: list(n) !< Array to search [n]
-INTEGER(i8), intent(in) :: n !< Size of array
-INTEGER(i8) :: search8
+INTEGER(i8), INTENT(in) :: item !< Value to search for
+INTEGER(i8), INTENT(in) :: list(n) !< Array to search [n]
+INTEGER(i8), INTENT(in) :: n !< Size of array
+INTEGER(i8) :: search8 !<  Index of item in array (0 if not found)
 IF(n==0)THEN
   search8=0
   RETURN

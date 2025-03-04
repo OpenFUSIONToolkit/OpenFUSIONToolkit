@@ -45,12 +45,6 @@ TYPE :: seam_list
 END TYPE seam_list
 !---------------------------------------------------------------------------
 !> Perform a global dot product for vectors with a given seam structure
-!!
-!! @param[in] self Seam structure for "a" and "b"
-!! @param[in] a Local values for vector 1
-!! @param[in] b Local values for vector 2
-!! @param[out] n Local size of vectors
-!! @result \f$ a \cdot b \f$
 !---------------------------------------------------------------------------
 INTERFACE oft_global_dp
   MODULE PROCEDURE global_dp_r8
@@ -58,11 +52,6 @@ INTERFACE oft_global_dp
 END INTERFACE oft_global_dp
 !------------------------------------------------------------------------------
 !> Perform a global sum reduction for a vector with a given seam structure
-!!
-!! @param[in] self Seam structure for vector "a"
-!! @param[in] a Local values for vector
-!! @param[out] n Local size of vector
-!! @result \f$ \sum_i a_i \f$
 !------------------------------------------------------------------------------
 INTERFACE oft_global_reduction
   MODULE PROCEDURE global_reduction_r8
