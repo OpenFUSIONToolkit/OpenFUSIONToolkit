@@ -262,7 +262,7 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
         if dist is None:
             return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
         else:
-            return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]*dist(r,z)
+            return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]*dist(rc,zc)
     def masked_err(point_mask,gs_obj,psi,sort_ind):
         bdry_points = gs_obj.r[point_mask,:]
         sort_ind = bdry_points[:,sort_ind].argsort()
