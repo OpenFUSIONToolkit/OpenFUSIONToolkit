@@ -30,15 +30,13 @@ USE fem_composite, ONLY: oft_ml_fem_comp_type
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
-USE oft_hcurl_operators, ONLY: hcurl_wop_eigs
-!---H1(Grad) FE space
+!---H1 FE (Grad(H^1) subspace)
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_lop_eigs
-!---H1 FE space
-! USE oft_h1_basis, ONLY: oft_h1_setup
-USE oft_h1_operators, ONLY: h1_mop_eigs
+!---Full H(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_operators, ONLY: hcurl_wop_eigs
+USE oft_hcurl_grad_operators, ONLY: hcurl_grad_mop_eigs
 IMPLICIT NONE
 INTEGER(i4) :: ierr,io_unit
 TYPE(xdmf_plot_file) :: plot_file
@@ -92,7 +90,7 @@ IF(order>0)THEN
   CALL lag_lop_eigs(ML_oft_lagrange,minlev)
   CALL h0_lop_eigs(ML_oft_h0,minlev)
   CALL hcurl_wop_eigs(ML_oft_hcurl,minlev)
-  CALL h1_mop_eigs(ML_hcurl_grad,minlev)
+  CALL hcurl_grad_mop_eigs(ML_hcurl_grad,minlev)
 END IF
 !---Finalize enviroment
 CALL oft_finalize

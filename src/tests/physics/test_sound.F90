@@ -25,14 +25,13 @@ USE fem_utils, ONLY: diff_interp
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop, &
   oft_lag_getmop, oft_lag_project, oft_lag_rinterp, oft_lag_vrinterp
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp
-!---H1(Grad) FE space
+!---H1 FE space (Grad(H^1) subspace)
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp
-!---H1 FE space
-USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project
+!---Full H(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
+USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, oft_hcurl_grad_project
 !---Physics
 USE diagnostic, ONLY: scal_energy, vec_energy
 USE mhd_utils, ONLY: elec_charge, proton_mass
@@ -83,18 +82,18 @@ CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
-!---Lagrange
+!--- Lagrange
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
-!---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=minlev)
-CALL hcurl_setup_interp(ML_oft_hcurl)
-!---H1(Grad) subspace
+!--- Grad(H^1) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=minlev)
 CALL h0_setup_interp(ML_oft_h0)
-!---H1 full space
+!--- H(Curl) subspace
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=minlev)
+CALL hcurl_setup_interp(ML_oft_hcurl)
+!--- Full H(Curl) space
 CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,minlev)
-CALL h1_setup_interp(ML_hcurl_grad,ML_oft_h0)
+CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h0)
 !---------------------------------------------------------------------------
 ! Create Lagrange metric solver
 !---------------------------------------------------------------------------

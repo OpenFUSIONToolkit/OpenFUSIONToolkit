@@ -31,7 +31,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
-!---H1(Curl) FE space
+!---H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
@@ -82,7 +82,7 @@ END IF
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=taylor_minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
-!---H1(Curl) subspace
+!---H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=taylor_minlev)
 CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL hcurl_mloptions(ML_oft_hcurl)

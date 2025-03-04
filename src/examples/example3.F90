@@ -162,7 +162,7 @@
 !!
 !!\subsection doc_ex3_code_inc Module Includes
 !!
-!!The \ref taylor "Taylor" module requires the \ref lag_group "Lagrange" and \ref hcurl_group "H1(Curl)"
+!!The \ref taylor "Taylor" module requires the \ref lag_group "Lagrange" and \ref hcurl_group "H(Curl)"
 !!finite element representations.
 ! START SOURCE
 PROGRAM example3
@@ -180,7 +180,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
-!---H1(Curl) FE space
+!---H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
@@ -227,7 +227,7 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
-!---H1(Curl) subspace
+!---H(Curl) space
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
 CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL hcurl_mloptions(ML_oft_hcurl)
@@ -257,7 +257,7 @@ CALL taylor_hmodes(1)
 !!Integration is performed by the \ref oft_lag_operators::oft_lag_vproject "oft_lag_vproject"
 !!subroutine, which takes a general \ref fem_utils::oft_fem_interp "interpolation" object that is
 !!used to evaluate the field. The result of \ref taylor::taylor_hmodes "taylor_hmodes" is the vector
-!!potential \ref taylor::taylor_hffa "taylor_hffa" in H1(Curl) form so the \ref
+!!potential \ref taylor::taylor_hffa "taylor_hffa" in H(Curl) form so the \ref
 !!oft_hcurl_operators::oft_hcurl_cinterp "oft_hcurl_cinterp" object is used to provide evaluation of
 !!\f$ B = \nabla \times A \f$.
 !---Construct operator

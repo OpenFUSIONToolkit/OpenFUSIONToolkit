@@ -3,7 +3,7 @@
 !---------------------------------------------------------------------------
 !> @file test_hcurl_sop.F90
 !
-!> Regression tests for surface operators for vector H1(Curl) finite elements.
+!> Regression tests for surface operators for vector H(Curl) finite elements.
 !! Tests are performed on a unit cube at different polynomial orders.
 !!
 !! The current test cases are:
@@ -51,11 +51,9 @@ CALL test_wop
 CALL oft_finalize
 CONTAINS
 !------------------------------------------------------------------------------
-! SUBROUTINE: test_wop
-!------------------------------------------------------------------------------
 !> Solve the equation \f$ \nabla \times \nabla \times B = K \hat{I} \f$, where
 !! \f$ K \f$ is the helicity matrix and \f$ \hat{I} \f$ is the identity vector
-!! using H1(Curl) elements.
+!! using H(Curl) elements.
 !------------------------------------------------------------------------------
 SUBROUTINE test_wop
 !---Create solver objects

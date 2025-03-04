@@ -195,7 +195,7 @@ type, extends(fem_interp) :: xmhd_interp
   real(r8), contiguous, pointer, dimension(:,:) :: lf_loc => NULL() !< Local field values (B, V, N, Ti)
   class(oft_vector), pointer :: u => NULL() !< Field to interpolate
   class(oft_scalar_fem), pointer :: lag_rep => NULL() !< Lagrange FE representation
-  class(oft_hcurl_fem), pointer :: hcurl_rep => NULL() !< H1(Curl) FE representation
+  class(oft_hcurl_fem), pointer :: hcurl_rep => NULL() !< H(Curl) FE representation
   type(xmhd_interp_cache), pointer, dimension(:) :: cache => NULL() !< Thread cache
 contains
   !> Retrieve local values for interpolation

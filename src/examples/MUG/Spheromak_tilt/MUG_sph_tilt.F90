@@ -37,13 +37,12 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pr
   create_ilu_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
-!---H1(Grad) FE space
+!---H1 FE space (Grad(H^1) subspace)
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_zerogrnd
-!---H1 FE space
-USE oft_h1_operators, ONLY: oft_h1_divout, h1_mc
+!---Full H(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields, &
@@ -52,9 +51,9 @@ IMPLICIT NONE
 !!\subsection doc_mug_sph_ex1_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
 !! run the time-dependent solve and post-processing.
-!---H1 divergence cleaner
+!---H(Curl) divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
-TYPE(oft_h1_divout) :: divout
+TYPE(oft_hcurl_grad_divout) :: divout
 CLASS(oft_matrix), pointer :: lop => NULL()
 !---Local variables
 INTEGER(i4) :: ierr,io_unit
@@ -87,13 +86,13 @@ CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
-!---Lagrange
+!--- Lagrange
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
-!---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
-!---H1(Grad) subspace
+!--- Grad(H^1) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=-1)
-!---H1 full space
+!--- H(Curl) subspace
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
+!--- Full H(Curl) space
 CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,-1)
 h0_zerogrnd%ML_H0_rep=>ML_h1grad
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
@@ -131,7 +130,7 @@ CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !! condition from the vector potential without changing the representation
 !! order or projecting the field.
 !!
-!! The gauge is transformed using a \ref oft_h1_operators::h1_divout "divergence cleaning"
+!! The gauge is transformed using a \ref oft_hcurl_grad_operators::hcurl_grad_divout "divergence cleaning"
 !! procedure to remove divergence from the vector potential by adding a gradient.
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" already sets the gauge such that
 !! \f$ \nabla \cdot \textbf{A} = 0 \f$, however it does so while enforcing \f$ \textbf{A} \times \hat{\textbf{n}} = 0 \f$.

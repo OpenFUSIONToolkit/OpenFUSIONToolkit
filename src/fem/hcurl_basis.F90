@@ -3,11 +3,11 @@
 !---------------------------------------------------------------------------
 !> @file oft_hcurl_basis.F90
 !
-!> @defgroup doxy_oft_hcurl Nedelec H1(Curl)
-!! Nedelec H1(Curl) finite element implementation for the Open FUSION Toolkit
+!> @defgroup doxy_oft_hcurl Nedelec H(Curl)
+!! Nedelec H(Curl) finite element implementation for the Open FUSION Toolkit
 !! @ingroup doxy_oft_fem
 !
-!> Base Nedelec H1(Curl) FE class and basis evaluation
+!> Base Nedelec H(Curl) FE class and basis evaluation
 !! - FE Construction
 !! - Basis evaluation
 !!   - Interpolation
@@ -93,7 +93,7 @@ END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_hcurl_cast
 !---------------------------------------------------------------------------
-!> Construct Nedelec H1(Curl) FE on each mesh level
+!> Construct Nedelec H(Curl) FE on each mesh level
 !!
 !! @note Highest supported representation is quadratic.
 !!
@@ -111,7 +111,7 @@ minlev_out=1
 IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
-  WRITE(*,'(A)')'**** Creating Nedelec H1(Curl) FE space'
+  WRITE(*,'(A)')'**** Creating Nedelec H(Curl) FE space'
   WRITE(*,'(2X,A,I4)')'Order  = ',order
   WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
 END IF
@@ -394,7 +394,7 @@ DO k=1,order
 END DO
 end subroutine hcurl_3d_grid
 !---------------------------------------------------------------------------
-!> Evaluate Nedelec H1(Curl) interpolation function in the interior
+!> Evaluate Nedelec H(Curl) interpolation function in the interior
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in physical coordinates
@@ -497,7 +497,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_eval
 !---------------------------------------------------------------------------
-!> Evaluate Nedelec H1(Curl) interpolation function on the boundary
+!> Evaluate Nedelec H(Curl) interpolation function on the boundary
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in physical coordinates
@@ -1006,7 +1006,7 @@ rop(:,53) = f2*f3*f4*(-4.d0*f1 + 2.d0*f2)*gop(:,1) &
 DEBUG_STACK_POP
 end subroutine oft_hcurl_eval_all4
 !---------------------------------------------------------------------------
-!> Evaluate Nedelec H1(Curl) curl function in the interior
+!> Evaluate Nedelec H(Curl) curl function in the interior
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in, and curl with respect to, physical coordinates
@@ -1168,7 +1168,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_ceval
 !---------------------------------------------------------------------------
-!> Evaluate Nedelec H1(Curl) curl function on the boundary
+!> Evaluate Nedelec H(Curl) curl function on the boundary
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in, and curl with respect to, physical coordinates

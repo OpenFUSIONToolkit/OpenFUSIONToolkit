@@ -30,17 +30,16 @@ USE fem_utils, ONLY: fem_interp
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
     oft_lag_vgetmop, oft_lag_vproject
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
-USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
-    hcurl_mloptions
-!---H1(Grad) FE space
+!---H1 FE space (Grad(H^1) subspace)
 USE oft_h0_basis, ONLY: oft_h0_setup
 USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, oft_h0_zerogrnd, &
   oft_h0_zerob
-!---H1 FE space
-USE oft_h1_operators, ONLY: oft_h1_divout, oft_h1_zeroi, h1_mc, oft_h1_curl_zerob, &
-  h1_setup_interp, oft_h1_rinterp
+!---Full H(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
+    hcurl_mloptions
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, oft_hcurl_grad_zeroi, hcurl_grad_mc, oft_hcurl_grad_czerob, &
+  hcurl_grad_setup_interp, oft_hcurl_grad_rinterp
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
   taylor_rst, taylor_hlam, ML_oft_hcurl, ML_oft_h0, &
@@ -90,7 +89,7 @@ self%minlev=minlev
 CALL c_f_pointer(mesh_ptr,self%ml_mesh)
 !---Lagrange
 CALL oft_lag_setup(self%ml_mesh,self%order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=self%minlev)
-!---H1(Curl) subspace
+!---H(Curl) subspace
 CALL oft_hcurl_setup(self%ml_mesh,self%order,ML_oft_hcurl,minlev=self%minlev)
 !---Compute modes
 IF(self%minlev<0)THEN
@@ -189,7 +188,7 @@ REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 TYPE(marklin_obj), POINTER :: self
 CLASS(oft_vector), POINTER :: u,v
-TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
+TYPE(oft_hcurl_grad_rinterp), POINTER :: ainterp_obj
 TYPE(oft_hcurl_cinterp), POINTER :: binterp_obj
 CHARACTER(LEN=80) :: name_tmp = ''
 CALL copy_string('',error_str)
@@ -249,9 +248,9 @@ TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: zero_norm !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 TYPE(marklin_obj), POINTER :: self
-TYPE(oft_h1_rinterp), POINTER :: interp_obj
+TYPE(oft_hcurl_grad_rinterp), POINTER :: interp_obj
 CLASS(oft_solver), POINTER :: linv => NULL()
-TYPE(oft_h1_divout) :: divout
+TYPE(oft_hcurl_grad_divout) :: divout
 CLASS(oft_matrix), POINTER :: lop => NULL()
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(oft_h0_zerogrnd), TARGET :: h0_zerogrnd
@@ -263,12 +262,12 @@ IF(.NOT.c_associated(marklin_ptr))THEN
 END IF
 CALL c_f_pointer(marklin_ptr,self)
 IF(ML_hcurl_grad%nlevels==0)THEN
-  !---H1(Grad) subspace
+  !---Grad(H^1) subspace
   CALL oft_h0_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h0,minlev=ML_oft_hcurl%minlev+1)
   CALL h0_setup_interp(ML_oft_h0)
-  !---H1 full space
+  !---Full H(Curl) + Grad(H^1) space
   CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,ML_oft_hcurl%minlev)
-  CALL h1_setup_interp(ML_hcurl_grad,ML_oft_h0)
+  CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h0)
 END IF
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
@@ -341,7 +340,7 @@ REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Needs docs
 INTEGER(c_int), INTENT(inout) :: cell !< Needs docs
 REAL(c_double), INTENT(out) :: field(3) !< Needs docs
 TYPE(marklin_obj), POINTER :: self
-TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
+TYPE(oft_hcurl_grad_rinterp), POINTER :: ainterp_obj
 TYPE(oft_hcurl_cinterp), POINTER :: binterp_obj
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
 IF(.NOT.c_associated(marklin_ptr))THEN

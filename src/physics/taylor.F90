@@ -38,7 +38,7 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_hcurl_ceval_all, &
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, oft_hcurl_orthog, &
   oft_hcurl_divout, hcurl_getwop_pre, oft_hcurl_zerob, oft_hcurl_getmop, oft_hcurl_getkop, &
   oft_hcurl_getwop, oft_hcurl_getjmlb, hcurl_getjmlb_pre
-USE oft_h1_operators, ONLY: oft_h1_divout, h1_getmop, h1_mc
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_getmop, hcurl_grad_mc
 !---
 USE diagnostic, ONLY: tfluxfun
 implicit none
@@ -57,8 +57,8 @@ type, extends(fem_interp) :: oft_taylor_rinterp
   real(r8), pointer, dimension(:) :: vac_grad => NULL() !< Local vacuum field (gradient)
   real(r8), pointer, dimension(:) :: vac_curl => NULL() !< Local vacuum field (curl)
   real(r8), pointer, dimension(:) :: acurl => NULL() !< Local vector potential
-  class(oft_h0_fem), pointer :: hgrad_rep => NULL() !< H1(Grad) FE representation
-  class(oft_hcurl_fem), pointer :: hcurl_rep => NULL() !< H1(Curl) FE representation
+  class(oft_h0_fem), pointer :: grad_rep => NULL() !< Grad(H^1) FE representation
+  class(oft_hcurl_fem), pointer :: curl_rep => NULL() !< H(Curl) FE representation
 contains
   !> Retrieve local values for interpolation
   generic :: setup => setup1, setup2
@@ -337,12 +337,12 @@ real(r8), intent(in) :: hcpc(3,nh) !< Jump plane center possitions [3,nh]
 real(r8), intent(in) :: hcpv(3,nh) !< Jump plane normal vectors [3,nh]
 character(LEN=taylor_tag_size), optional, intent(in) :: htags(nh) !< Names for each jump plane [LEN=taylor_tag_size,nh] (optional)
 real(r8), optional, intent(out) :: energy(nh) !< Vacuum energy for each jump plan (optional)
-!---H1 Divergence cleaner
+!---H(Curl) full space divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
-TYPE(oft_h1_divout) :: divout
+TYPE(oft_hcurl_grad_divout) :: divout
 !---WOP solver
 CLASS(oft_solver), POINTER :: winv => NULL()
-!---H1(Curl) Divergence cleaner
+!---H(Curl) subspace divergence cleaner
 CLASS(oft_solver), POINTER :: linv_lag => NULL()
 TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
 !--- ML structures for MG-preconditioner
@@ -425,7 +425,7 @@ ELSE
   CALL create_diag_pre(linv%pre)
 END IF
 !---------------------------------------------------------------------------
-! Setup H1(Curl)::WOP preconditioner
+! Setup H(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
 CALL create_cg_solver(winv, force_native=.TRUE.)
 IF((taylor_minlev==ML_oft_hcurl%level).OR.rst)THEN ! Lowest level uses diag precond
@@ -437,7 +437,7 @@ ELSE ! Nested levels use MG
   wop=>ml_wop(ML_oft_hcurl%level-taylor_minlev+1)%M
 END IF
 !---------------------------------------------------------------------------
-! Create H1(Curl)::WOP solver
+! Create H(Curl)::WOP solver
 !---------------------------------------------------------------------------
 winv%A=>wop
 winv%its=-3
@@ -449,7 +449,7 @@ CLASS IS(oft_native_cg_solver)
     CALL oft_abort('Error allocating winv solver', 'taylor_vacuum', __FILE__)
 END SELECT
 !---------------------------------------------------------------------------
-! Create H1(Curl) divergence cleaner
+! Create H(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%ml_mesh%mgdim))
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
@@ -468,12 +468,12 @@ hcurl_divout%mop=>mop_hcurl
 !
 !---------------------------------------------------------------------------
 NULLIFY(tmp)
-!---Get H1 mass matrix
-CALL h1_getmop(ML_hcurl_grad%current_level,mop,'none')
+!---Get H(Curl) + Grad(H^1) mass matrix
+CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,'none')
 !---Allocate vacuum and current field containers
 ALLOCATE(taylor_hvac(taylor_nh,ML_hcurl_grad%nlevels))
 ALLOCATE(taylor_hcur(taylor_nh,ML_hcurl_grad%nlevels))
-!---Create temporary H1(Curl) vector
+!---Create temporary H(Curl) vector
 CALL ML_oft_hcurl%vec_create(b)
 !---Loop over cut planes
 DO i=1,taylor_nh
@@ -496,7 +496,7 @@ DO i=1,taylor_nh
   END IF
   !---Compute jump and solve
   IF(.NOT.rst)THEN
-    CALL h1_mc(ML_oft_hcurl%ml_mesh%mesh,u,taylor_hcpc(:,i),taylor_hcpv(:,i),taylor_jtol)
+    CALL hcurl_grad_mc(ML_oft_hcurl%ml_mesh%mesh,u,taylor_hcpc(:,i),taylor_hcpv(:,i),taylor_jtol)
     venergy=u%dot(u)
     IF(venergy<1.d-12)CALL oft_abort('Plane does not intersect mesh.','taylor_vacuum',__FILE__)
     divout%pm=oft_env%pm
@@ -541,7 +541,7 @@ DO i=1,taylor_nh
     END IF
   END IF
   IF(.NOT.rst)THEN
-    !---Copy H1(Curl) subpace into new vector
+    !---Copy H(Curl) subpace into new vector
     CALL b%set(0.d0)
     NULLIFY(vals)
     CALL tmp%get_slice(vals,1)
@@ -631,7 +631,7 @@ CLASS(oft_matrix), POINTER :: wop => NULL()
 CLASS(oft_matrix), POINTER :: jmlb_mat => NULL()
 !---JMLB solver
 TYPE(oft_native_gmres_solver), TARGET :: jmlb_inv
-!---H1(Curl) Divergence cleaner
+!---H(Curl) Divergence cleaner
 CLASS(oft_solver), POINTER :: linv_lag => NULL()
 TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
 !---
@@ -675,7 +675,7 @@ IF(.NOT.rst)THEN
     END IF
   END IF
 !---------------------------------------------------------------------------
-! Setup H1(Curl)::WOP preconditioner
+! Setup H(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
   IF(taylor_minlev==ML_oft_hcurl%nlevels)THEN ! Lowest level uses diag precond
     CALL oft_hcurl_getjmlb(ML_oft_hcurl%current_level,jmlb_mat,lambda,'zerob')
@@ -685,7 +685,7 @@ IF(.NOT.rst)THEN
     jmlb_mat=>ml_jmlb(ML_oft_hcurl%level-taylor_minlev+1)%M
   END IF
 !---------------------------------------------------------------------------
-! Create H1(Curl)::WOP solver
+! Create H(Curl)::WOP solver
 !---------------------------------------------------------------------------
   jmlb_inv%A=>jmlb_mat
   jmlb_inv%atol=1.d-8
@@ -695,7 +695,7 @@ IF(.NOT.rst)THEN
   !jmlb_inv%bc=>hcurl_zerob
 END IF
 !---------------------------------------------------------------------------
-! Create H1(Curl) divergence cleaner
+! Create H(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%ml_mesh%mgdim))
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
@@ -815,7 +815,7 @@ CLASS(oft_matrix), POINTER :: wop => NULL()
 CLASS(oft_matrix), POINTER :: jmlb_mat => NULL()
 !---JMLB solver
 TYPE(oft_native_gmres_solver), TARGET :: jmlb_inv
-!---H1(Curl) Divergence cleaner
+!---H(Curl) Divergence cleaner
 CLASS(oft_solver), POINTER :: linv_lag => NULL()
 TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
 !---
@@ -833,7 +833,7 @@ IF(.NOT.ASSOCIATED(taylor_hcpc))CALL oft_abort("Vacuum fields not available", &
 NULLIFY(mop,kop,wop,ml_jmlb)
 IF(taylor_minlev<0)taylor_minlev=ML_oft_hcurl%nlevels
 !---------------------------------------------------------------------------
-! Setup H1(Curl)::WOP preconditioner
+! Setup H(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
 IF(taylor_minlev==ML_oft_hcurl%nlevels)THEN ! Lowest level uses diag precond
   CALL oft_hcurl_getjmlb(ML_oft_hcurl%current_level,jmlb_mat,lambda,'zerob')
@@ -845,7 +845,7 @@ END IF
 hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
 lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---------------------------------------------------------------------------
-! Create H1(Curl)::WOP solver
+! Create H(Curl)::WOP solver
 !---------------------------------------------------------------------------
 jmlb_inv%A=>jmlb_mat
 jmlb_inv%atol=1.d-7
@@ -854,7 +854,7 @@ jmlb_inv%nrits=20
 jmlb_inv%itplot=1
 !jmlb_inv%bc=>hcurl_zerob
 !---------------------------------------------------------------------------
-! Create H1(Curl) divergence cleaner
+! Create H(Curl) divergence cleaner
 !---------------------------------------------------------------------------
 CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%ml_mesh%mgdim))
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
@@ -894,7 +894,7 @@ IF(taylor_nm>0)THEN
     DEALLOCATE(wop)
   END IF
 END IF
-!---Get H1(Curl) helicity matrix
+!---Get H(Curl) helicity matrix
 CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'zerob')
 CALL kop%apply(gffa,tmp)
 CALL kop%delete
@@ -940,24 +940,24 @@ end subroutine taylor_injector_single
 !!
 !! @note Should only be used via class \ref oft_taylor_rinterp or children
 !---------------------------------------------------------------------------
-subroutine taylor_rinterp_setup1(self,h1_rep)
+subroutine taylor_rinterp_setup1(self,hcurl_grad_rep)
 class(oft_taylor_rinterp), intent(inout) :: self
-class(oft_fem_comp_type), target, intent(inout) :: h1_rep
+class(oft_fem_comp_type), target, intent(inout) :: hcurl_grad_rep
 DEBUG_STACK_PUSH
 !---Get local slice
 CALL self%ua%get_local(self%acurl)
 CALL self%uvac%get_local(self%vac_curl,1)
 CALL self%uvac%get_local(self%vac_grad,2)
-SELECT TYPE(this=>h1_rep%fields(1)%fe)
+SELECT TYPE(this=>hcurl_grad_rep%fields(1)%fe)
   CLASS IS(oft_hcurl_fem)
-    self%hcurl_rep=>this
+    self%curl_rep=>this
     self%mesh=>this%mesh
   CLASS DEFAULT
     CALL oft_abort("Invalid HCurl space","taylor_rinterp_setup1",__FILE__)
 END SELECT
-SELECT TYPE(this=>h1_rep%fields(2)%fe)
+SELECT TYPE(this=>hcurl_grad_rep%fields(2)%fe)
   CLASS IS(oft_h0_fem)
-    self%hgrad_rep=>this
+    self%grad_rep=>this
   CLASS DEFAULT
     CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup1",__FILE__)
 END SELECT
@@ -983,14 +983,14 @@ CALL self%uvac%get_local(self%vac_curl,1)
 CALL self%uvac%get_local(self%vac_grad,2)
 SELECT TYPE(hcurl_rep)
   CLASS IS(oft_hcurl_fem)
-    self%hcurl_rep=>hcurl_rep
+    self%curl_rep=>hcurl_rep
     self%mesh=>hcurl_rep%mesh
   CLASS DEFAULT
     CALL oft_abort("Invalid HCurl space","taylor_rinterp_setup2",__FILE__)
 END SELECT
 SELECT TYPE(hgrad_rep)
   CLASS IS(oft_h0_fem)
-    self%hgrad_rep=>hgrad_rep
+    self%grad_rep=>hgrad_rep
   CLASS DEFAULT
     CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup2",__FILE__)
 END SELECT
@@ -1016,25 +1016,25 @@ DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%vac_grad))CALL oft_abort('Setup has not been called!','taylor_rinterp',__FILE__)
 val=0.d0
 !---Get curl dofs
-allocate(j(self%hcurl_rep%nce),rop(3,self%hcurl_rep%nce))
-call self%hcurl_rep%ncdofs(cell,j) ! get DOFs
+allocate(j(self%curl_rep%nce),rop(3,self%curl_rep%nce))
+call self%curl_rep%ncdofs(cell,j) ! get DOFs
 CALL oft_hcurl_get_cgops(gop,cgop)
 !---Reconstruct field
-call oft_hcurl_eval_all(self%hcurl_rep,cell,f,rop,gop)
-do jc=1,self%hcurl_rep%nce
+call oft_hcurl_eval_all(self%curl_rep,cell,f,rop,gop)
+do jc=1,self%curl_rep%nce
   val=val+self%vac_curl(j(jc))*rop(:,jc)
 end do
-call oft_hcurl_ceval_all(self%hcurl_rep,cell,f,rop,cgop)
-do jc=1,self%hcurl_rep%nce
+call oft_hcurl_ceval_all(self%curl_rep,cell,f,rop,cgop)
+do jc=1,self%curl_rep%nce
   val=val+self%acurl(j(jc))*rop(:,jc)
 end do
 deallocate(j,rop)
 !---Get curl dofs
-allocate(j(self%hgrad_rep%nce),rop(3,self%hgrad_rep%nce))
-call self%hgrad_rep%ncdofs(cell,j) ! get DOFs
+allocate(j(self%grad_rep%nce),rop(3,self%grad_rep%nce))
+call self%grad_rep%ncdofs(cell,j) ! get DOFs
 !---Reconstruct field
-call oft_h0_geval_all(self%hgrad_rep,cell,f,rop,gop)
-do jc=1,self%hgrad_rep%nce
+call oft_h0_geval_all(self%grad_rep,cell,f,rop,gop)
+do jc=1,self%grad_rep%nce
   val=val+self%vac_grad(j(jc))*rop(:,jc)
 end do
 deallocate(j,rop)

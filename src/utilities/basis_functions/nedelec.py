@@ -73,7 +73,7 @@ def H0(n):
                 fc.append(f)
     return fp, fe, ff, fc
 #----------------------------------------------------------------
-# Basis functions for the Nedelec H1(Curl) space
+# Basis functions for the H(Curl) space
 #----------------------------------------------------------------
 def HCurl(n):
     if n>1:
@@ -118,7 +118,7 @@ def HCurl(n):
                     fc.append(f)
     return fe, ff, fc
 #----------------------------------------------------------------
-# Basis functions for the Nedelec H2(Curl) space, ie. Curl(H1)
+# Basis functions for the H(Div) space, ie. Curl( H(Curl) )
 #----------------------------------------------------------------
 def HCurlCurl(n):
     # Return if invalid order

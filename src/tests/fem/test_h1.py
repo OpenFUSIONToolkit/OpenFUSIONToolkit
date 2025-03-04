@@ -27,19 +27,19 @@ oft_in_template = """
  mesh_type={3}
 /
 
-&h1_op_options
+&hcurl_grad_op_options
  df_mop={5}
  nu_mop={6}
 /
 
-&test_h1_options
+&test_hcurl_grad_options
  order={2}
  mg_test={4}
 /
 """
 
 # Common setup function and process handling
-def h1_setup(nbase, nlevels, order, grid_type, mg='F', df='', nu='', petsc_flag='F'):
+def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg='F', df='', nu='', petsc_flag='F'):
     nproc = 1
     if nbase != nlevels:
         nproc = 2
@@ -47,10 +47,10 @@ def h1_setup(nbase, nlevels, order, grid_type, mg='F', df='', nu='', petsc_flag=
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg, df, nu, petsc_flag))
-    return run_OFT("./test_h1", nproc, 120)
+    return run_OFT("./test_hcurl_grad", nproc, 120)
 
 def validate_result(iteration_count,converged_error):
-    fid = open('h1.results','r')
+    fid = open('hcurl_grad.results','r')
     its_test = int(fid.readline())
     if iteration_count != None:
         if abs(iteration_count-its_test) >= max(2,.05*iteration_count):
@@ -74,13 +74,13 @@ def single_level(nlevels,order,exp_its,exp_error,grid_type=1,mpi=False,petsc_fla
     else:
         nbase = nlevels
         nlev = nlevels
-    assert h1_setup(nbase, nlev, order, grid_type, petsc_flag=petsc_flag)
+    assert hcurl_grad_setup(nbase, nlev, order, grid_type, petsc_flag=petsc_flag)
     assert validate_result(exp_its, exp_error)
 # Multi-level test function
 df_string='0.,.39,.36,.217,.172,.142'
 nu_string='0,80,16,8,4,2'
 def multi_level(nlevels,order,exp_its,exp_error,grid_type=1,petsc_flag='F'):
-    assert h1_setup(nlevels, nlevels, order, grid_type, mg='T', df=df_string, nu=nu_string, petsc_flag=petsc_flag)
+    assert hcurl_grad_setup(nlevels, nlevels, order, grid_type, mg='T', df=df_string, nu=nu_string, petsc_flag=petsc_flag)
     assert validate_result(exp_its, exp_error)
 
 #============================================================================

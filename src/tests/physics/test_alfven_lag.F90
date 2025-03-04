@@ -33,7 +33,7 @@ USE xmhd_lag, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, xmhd_lin_run, 
   xmhd_sub_fields, ML_oft_lagrange, ML_oft_vlagrange
 USE test_phys_helpers, ONLY: alfven_eig
 IMPLICIT NONE
-!---H1 metric solver
+!---Lagrange mass matrix solver
 CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Local variables

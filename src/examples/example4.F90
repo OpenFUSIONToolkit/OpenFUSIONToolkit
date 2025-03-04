@@ -29,13 +29,13 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
-!---H1(Curl) FE space
+!---H1 FE space (Grad(H^1) subspace)
+USE oft_h0_basis, ONLY: oft_h0_setup
+USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
+!---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
-!---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
   taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, taylor_htor, &
@@ -80,19 +80,19 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
-!---Lagrange
+!--- Lagrange
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
-!---H1(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
-CALL hcurl_setup_interp(ML_oft_hcurl)
-CALL hcurl_mloptions(ML_oft_hcurl)
-!---H1(Grad) subspace
+!--- Grad(H^1) subspace
 CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0)
 CALL h0_setup_interp(ML_oft_h0)
 CALL h0_mloptions
-!---H1 full space
+!--- H(Curl) subspace
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
+CALL hcurl_setup_interp(ML_oft_hcurl)
+CALL hcurl_mloptions(ML_oft_hcurl)
+!--- Full H(Curl) space
 CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad)
 !!\subsection doc_ex4_code_taylor Compute Taylor state
 !!
