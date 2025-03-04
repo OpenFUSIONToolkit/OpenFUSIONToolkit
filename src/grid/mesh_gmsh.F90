@@ -407,23 +407,15 @@ end subroutine mesh_gmsh_add_quad
 !! minimizing the weighted sum of distances to 2 constraint points.
 !!
 !! \f[ \sum_i w_i*(r_n - p_i)^2 \f]
-!!
-!! @param[in] face Face index
-!! @param[in,out] pt Solution point
-!! @param[in] pt1 Constraint point 1
-!! @param[in] pt2 Constraint point 2
-!! @param[in] wt1 Constraint weight 1
-!! @param[in] wt2 Constraint weight 2
-!! @param[out] ierr Error flag
 !---------------------------------------------------------------------------
 subroutine gmsh_surf_midpoint(face,pt,pt1,pt2,wt1,wt2,ierr)
-integer(i4), intent(in) :: face
-real(r8), intent(inout) :: pt(3)
-real(r8), intent(in) :: pt1(3)
-real(r8), intent(in) :: pt2(3)
-real(r8), intent(in) :: wt1
-real(r8), intent(in) :: wt2
-integer(i4), intent(out) :: ierr
+integer(i4), intent(in) :: face !< Face index
+real(r8), intent(inout) :: pt(3) !< Solution point
+real(r8), intent(in) :: pt1(3) !< Constraint point 1
+real(r8), intent(in) :: pt2(3) !< Constraint point 2
+real(r8), intent(in) :: wt1 !< Constraint weight 1
+real(r8), intent(in) :: wt2 !< Constraint weight 2
+integer(i4), intent(out) :: ierr !< Error flag
 !---
 integer(i4), parameter :: nerr=3
 integer(i4), parameter :: neq=2
@@ -480,18 +472,13 @@ end subroutine gmsh_surf_midpoint
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref mesh_gmsh::gmsh_surf_midpoint "gmsh_surf_midpoint"
-!!
-!! @param[in] m Number of spatial dimensions (3)
-!! @param[in] n Number of parametric dimensions (2)
-!! @param[in] uv Parametric possition [n]
-!! @param[out] err Error vector between current and desired point [3]
-!! @param[in,out] iflag Unused flag
 !---------------------------------------------------------------------------
 subroutine gmsh_spt_error(m,n,uv,err,iflag)
-integer(i4), intent(in) :: m,n
-real(r8), intent(in) :: uv(n)
-real(r8), intent(out) :: err(m)
-integer(i4), intent(inout) :: iflag
+integer(i4), intent(in) :: m !< Number of spatial dimensions [3]
+integer(i4), intent(in) :: n !< Number of parametric dimensions [2]
+real(r8), intent(in) :: uv(n) !< Parametric possition [n]
+real(r8), intent(out) :: err(m) !< Error vector between current and desired point [3]
+integer(i4), intent(inout) :: iflag !< Unused flag
 real(r8) :: pt(3),f(3)
 DEBUG_STACK_PUSH
 f(1)=uv(1)
