@@ -81,20 +81,13 @@ CALL oft_finalize
 !---
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE poly_eval
-!---------------------------------------------------------------------------
 !> Evaluate test polynomial at a point in space
-!!
-!! @param[in] x Array of spatial locations [3]
-!! @param[in] c Array of polynomial coefficients [3]
-!! @param[in] e Array of polynomial exponents [3]
-!! @returns \f$ \sum c_i x_i^{e_i} \f$
 !---------------------------------------------------------------------------
 FUNCTION poly_eval(x,c,e) RESULT(y)
-REAL(r8), INTENT(in) :: x(3)
-REAL(r8), INTENT(in) :: c(3)
-INTEGER(i4), INTENT(in) :: e(3)
-REAL(r8) :: y
+REAL(r8), INTENT(in) :: x(3) !< Array of spatial locations [3]
+REAL(r8), INTENT(in) :: c(3) !< Array of polynomial coefficients [3]
+INTEGER(i4), INTENT(in) :: e(3) !< Array of polynomial exponents [3]
+REAL(r8) :: y !< \f$ \sum c_i x_i^{e_i} \f$
 INTEGER(i4) :: i
 y=0.d0
 DO i=1,3
@@ -102,18 +95,13 @@ DO i=1,3
 END DO
 END FUNCTION poly_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE vint_eval
-!---------------------------------------------------------------------------
 !> Evaluate integral of the domain {[0,1],[0,1],[0,1]}
-!!
-!! @param[in] c Array of polynomial coefficients [3]
-!! @param[in] e Array of polynomial exponents [3]
-!! @returns \f$ \int \sum{i=1}^3 c_i x_i^{e_i} dV \f$
 !---------------------------------------------------------------------------
 FUNCTION vint_eval(c,e) RESULT(y)
-REAL(r8), INTENT(in) :: c(3)
-INTEGER(i4), INTENT(in) :: e(3)
-REAL(r8) :: y,v,goptmp(3,4),pt(3)
+REAL(r8), INTENT(in) :: c(3) !< Array of polynomial coefficients [3]
+INTEGER(i4), INTENT(in) :: e(3) !< Array of polynomial exponents [3]
+REAL(r8) :: y !< \f$ \int \sum{i=1}^3 c_i x_i^{e_i} dV \f$
+REAL(r8) :: v,goptmp(3,4),pt(3)
 INTEGER(i4) :: i,m,order
 TYPE(oft_quad_type) :: quad
 !---
@@ -133,18 +121,13 @@ END DO
 CALL quad%delete
 END FUNCTION vint_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE sint_eval
-!---------------------------------------------------------------------------
 !> Evaluate integral of the domain {[0,1],[0,1],1}
-!!
-!! @param[in] c Array of polynomial coefficients [3]
-!! @param[in] e Array of polynomial exponents [3]
-!! @returns \f$ \int \sum_{i=1}^2 c_i x_i^{e_i} dV \f$
 !---------------------------------------------------------------------------
 FUNCTION sint_eval(c,e) RESULT(y)
-REAL(r8), INTENT(in) :: c(3)
-INTEGER(i4), INTENT(in) :: e(3)
-REAL(r8) :: y,v,goptmp(3,3),pt(3)
+REAL(r8), INTENT(in) :: c(3) !< Array of polynomial coefficients [3]
+INTEGER(i4), INTENT(in) :: e(3) !< Array of polynomial exponents [3]
+REAL(r8) :: y !< \f$ \int \sum_{i=1}^2 c_i x_i^{e_i} dV \f$
+REAL(r8) :: v,goptmp(3,3),pt(3)
 INTEGER(i4) :: i,j,m,order
 TYPE(oft_quad_type) :: quad
 !---
@@ -166,18 +149,13 @@ END DO
 CALL quad%delete
 END FUNCTION sint_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE lint_eval
-!---------------------------------------------------------------------------
 !> Evaluate integral of the domain {[0,1],1,1}
-!!
-!! @param[in] c Array of polynomial coefficients [3]
-!! @param[in] e Array of polynomial exponents [3]
-!! @returns \f$ \int \sum_{i=1}^2 c_i x_i^{e_i} dV \f$
 !---------------------------------------------------------------------------
 FUNCTION lint_eval(c,e) RESULT(y)
-REAL(r8), INTENT(in) :: c(3)
-INTEGER(i4), INTENT(in) :: e(3)
-REAL(r8) :: y,v,goptmp(3,3),pt(3)
+REAL(r8), INTENT(in) :: c(3) !< Array of polynomial coefficients [3]
+INTEGER(i4), INTENT(in) :: e(3) !< Array of polynomial exponents [3]
+REAL(r8) :: y !< \f$ \int \sum_{i=1}^2 c_i x_i^{e_i} dV \f$
+REAL(r8) :: v,goptmp(3,3),pt(3)
 INTEGER(i4) :: i,j,m,order
 TYPE(oft_quad_type) :: quad
 !---

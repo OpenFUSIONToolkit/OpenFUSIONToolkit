@@ -587,9 +587,9 @@ real(r8) :: lin_tol,nl_tol,scale_tmp(4)
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
 mg_mesh=>ML_oft_hcurl%ml_mesh
-IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
-IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid Lagrange FE object","xmhd_run",__FILE__)
-IF(oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
 mesh=>oft_hcurl%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
@@ -1132,9 +1132,9 @@ logical :: rst
 real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid Curl FE object","xmhd_lin_run",__FILE__)
-IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid Lagrange FE object","xmhd_lin_run",__FILE__)
-IF(oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_lin_run",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_lin_run",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_lin_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_lin_run",__FILE__)
 mg_mesh=>ML_oft_hcurl%ml_mesh
 mesh=>oft_hcurl%mesh
 !---------------------------------------------------------------------------
@@ -3821,10 +3821,10 @@ CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
 CALL ML_oft_lagrange%set_level(level)
-IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid FE object","xmhd_set_level",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid FE object","xmhd_set_level",__FILE__)
 CALL ML_hcurl_grad%set_level(level,propogate=.TRUE.)
-IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
-IF(oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level)/=0)CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
 xmhd_level=level
 ! xmhd_lev=oft_hcurl_lev
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)

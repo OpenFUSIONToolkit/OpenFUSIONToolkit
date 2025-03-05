@@ -26,16 +26,16 @@ PRIVATE
 !> Needs docs
 !------------------------------------------------------------------------------
 type, public :: oft_local_mat
-  real(r8), pointer, contiguous, dimension(:,:) :: m => NULL()
-  integer(i4), pointer, contiguous, dimension(:,:) :: ind => NULL()
+  real(r8), pointer, contiguous, dimension(:,:) :: m => NULL() !< Needs docs
+  integer(i4), pointer, contiguous, dimension(:,:) :: ind => NULL() !< Needs docs
 end type oft_local_mat
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, public :: oft_local_cmat
-  real(r8), pointer, contiguous, dimension(:,:) :: mreal => NULL()
-  real(r8), pointer, contiguous, dimension(:,:) :: mcomp => NULL()
-  integer(i4), pointer, contiguous, dimension(:,:) :: ind => NULL()
+  real(r8), pointer, contiguous, dimension(:,:) :: mreal => NULL() !< Needs docs
+  real(r8), pointer, contiguous, dimension(:,:) :: mcomp => NULL() !< Needs docs
+  integer(i4), pointer, contiguous, dimension(:,:) :: ind => NULL() !< Needs docs
 end type oft_local_cmat
 !------------------------------------------------------------------------------
 !> Block mapping structure
@@ -57,7 +57,7 @@ END TYPE oft_map
 !> Block mapping pointer
 !------------------------------------------------------------------------------
 TYPE, PUBLIC :: map_list
-  TYPE(oft_map), POINTER :: m => NULL()
+  TYPE(oft_map), POINTER :: m => NULL() !< Needs docs
 END TYPE map_list
 !------------------------------------------------------------------------------
 !> Abstract vector class
@@ -113,7 +113,7 @@ END TYPE oft_vector
 !> Vector pointer
 !------------------------------------------------------------------------------
 type, public :: oft_vector_ptr
-  class(oft_vector), pointer :: f => NULL()
+  class(oft_vector), pointer :: f => NULL() !< Needs docs
 end type oft_vector_ptr
 !------------------------------------------------------------------------------
 !> Abstract complex vector class
@@ -170,10 +170,10 @@ CONTAINS
   procedure :: delete => cvector_delete
 END TYPE oft_cvector
 !------------------------------------------------------------------------------
-!> Vector pointer
+!> Vector pointer (complex)
 !------------------------------------------------------------------------------
 type, public :: oft_cvector_ptr
-  class(oft_cvector), pointer :: f => NULL()
+  class(oft_cvector), pointer :: f => NULL() !< Needs docs
 end type oft_cvector_ptr
 !--- Real interfaces
 ABSTRACT INTERFACE

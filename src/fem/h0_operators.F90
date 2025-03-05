@@ -33,7 +33,7 @@ USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
   oft_ml_fe_vecspace
 USE fem_utils, ONLY: fem_interp
 USE oft_h0_basis, ONLY: oft_h0_eval_all, oft_h0_geval_all, &
-  oft_h0_fem
+  oft_h0_fem, oft_3D_h1_cast
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -123,13 +123,7 @@ end subroutine h0_mloptions
 subroutine h0_rinterp_setup(self,h0_rep)
 class(oft_h0_rinterp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: h0_rep
-!---
-SELECT TYPE(h0_rep)
-CLASS IS(oft_h0_fem)
-  self%h0_rep=>h0_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","h0_rinterp_setup",__FILE__)
-END SELECT
+IF(.NOT.oft_3D_h1_cast(self%h0_rep,h0_rep))CALL oft_abort("Incorrect FE type","h0_rinterp_setup",__FILE__)
 self%mesh=>self%h0_rep%mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
@@ -238,20 +232,17 @@ class(oft_h0_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
+CLASS(oft_h0_fem), POINTER :: this
 DEBUG_STACK_PUSH
-SELECT TYPE(this=>self%ML_H0_rep%current_level)
-CLASS IS(oft_fem_type)
-  ! Cast to vector type
-  NULLIFY(aloc)
-  CALL a%get_local(aloc)
-  !---
-  if(this%mesh%igrnd(1)>0)aloc(this%mesh%igrnd(1))=0.d0
-  if(this%mesh%igrnd(2)>0)aloc(this%mesh%igrnd(2))=0.d0
-  CALL a%restore_local(aloc)
-  DEALLOCATE(aloc)
-CLASS DEFAULT
-  CALL oft_abort("Invalid fe object","zerogrnd_apply",__FILE__)
-END SELECT
+IF(.NOT.oft_3D_h1_cast(this,self%ML_H0_rep%current_level))CALL oft_abort("Invalid fe object","zerogrnd_apply",__FILE__)
+! Cast to vector type
+NULLIFY(aloc)
+CALL a%get_local(aloc)
+!---
+if(this%mesh%igrnd(1)>0)aloc(this%mesh%igrnd(1))=0.d0
+if(this%mesh%igrnd(2)>0)aloc(this%mesh%igrnd(2))=0.d0
+CALL a%restore_local(aloc)
+DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
 !---------------------------------------------------------------------------
@@ -299,12 +290,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H0::MOP'
   CALL mytimer%tick()
 END IF
-SELECT TYPE(fe_rep)
-CLASS IS(oft_h0_fem)
-  h0_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_h0_getmop",__FILE__)
-END SELECT
+IF(.NOT.oft_3D_h1_cast(h0_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_h0_getmop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -418,12 +404,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H0::LOP'
   CALL mytimer%tick()
 END IF
-SELECT TYPE(fe_rep)
-CLASS IS(oft_h0_fem)
-  h0_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_h0_getlop",__FILE__)
-END SELECT
+IF(.NOT.oft_3D_h1_cast(h0_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_h0_getlop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -535,12 +516,7 @@ integer(i4), allocatable :: j(:)
 logical :: curved
 CLASS(oft_h0_fem), POINTER :: h0_rep
 DEBUG_STACK_PUSH
-SELECT TYPE(fe_rep)
-CLASS IS(oft_h0_fem)
-  h0_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_h0_project",__FILE__)
-END SELECT
+IF(.NOT.oft_3D_h1_cast(h0_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_h0_project",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -608,7 +584,6 @@ INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 CLASS(oft_afem_type), POINTER :: h0_cors => NULL()
 CLASS(oft_afem_type), POINTER :: h0_fine => NULL()
-! TYPE(h0_ops), POINTER :: ops
 class(oft_mesh), pointer :: cmesh
 CLASS(oft_vector), POINTER :: h0_vec,h0_vec_cors
 integer(i4) :: jfe(3),jce(6)
@@ -624,12 +599,7 @@ end if
 cmesh=>ML_h0_rep%ml_mesh%meshes(ML_h0_rep%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "h0_ginterpmatrix", __FILE__)
-SELECT TYPE(this=>ML_h0_rep%levels(ML_h0_rep%level)%fe)
-  CLASS IS(oft_h0_fem)
-    h0_fine=>this
-  CLASS DEFAULT
-    CALL oft_abort("Error casting fine level", "hcurl_ginterpmatrix", __FILE__)
-END SELECT
+h0_fine=>ML_h0_rep%levels(ML_h0_rep%level)%fe
 if(h0_fine%order/=1)then
   call oft_abort('Attempted geometric interpolation for pd > 1','h0_ginterpmatrix',__FILE__)
 end if
@@ -739,30 +709,17 @@ INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4) :: offsetc,offsetf
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 REAL(r8) :: f(4),val,mop(1)
-CLASS(oft_fem_type), POINTER :: h0_cors => NULL()
-CLASS(oft_fem_type), POINTER :: h0_fine => NULL()
-! TYPE(h0_ops), POINTER :: ops
+CLASS(oft_h0_fem), POINTER :: h0_cors => NULL()
+CLASS(oft_h0_fem), POINTER :: h0_fine => NULL()
 CLASS(oft_vector), POINTER :: h0_vec,h0_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 class(oft_mesh), pointer :: mesh
 type(oft_graph), POINTER :: interp_graph
 DEBUG_STACK_PUSH
 !---
-! mesh=>oft_h0%mesh
-! ops=>oft_h0_ops
-SELECT TYPE(this=>ML_h0_rep%levels(ML_h0_rep%level)%fe)
-  CLASS IS(oft_h0_fem)
-    h0_fine=>this
-    mesh=>this%mesh
-  CLASS DEFAULT
-    CALL oft_abort("Error casting fine level", "h0_pinterpmatrix", __FILE__)
-END SELECT
-SELECT TYPE(this=>ML_h0_rep%levels(ML_h0_rep%level-1)%fe)
-CLASS IS(oft_fem_type)
-  h0_cors=>this
-CLASS DEFAULT
-  CALL oft_abort("Error getting coarse FE object","h0_pinterpmatrix",__FILE__)
-END SELECT
+IF(.NOT.oft_3D_h1_cast(h0_fine,ML_h0_rep%levels(ML_h0_rep%level)%fe))CALL oft_abort("Error casting fine level", "hcurl_ginterpmatrix",__FILE__)
+IF(.NOT.oft_3D_h1_cast(h0_cors,ML_h0_rep%levels(ML_h0_rep%level-1)%fe))CALL oft_abort("Error casting coarse level", "hcurl_ginterpmatrix",__FILE__)
+mesh=>h0_fine%mesh
 ALLOCATE(ML_h0_rep%interp_graphs(ML_h0_rep%level)%g)
 interp_graph=>ML_h0_rep%interp_graphs(ML_h0_rep%level)%g
 !---Setup matrix sizes
@@ -987,6 +944,7 @@ CLASS(oft_vector), POINTER :: u
 TYPE(oft_irlm_eigsolver) :: arsolver
 CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: lop => NULL()
+CLASS(oft_h0_fem), POINTER :: h0_obj
 TYPE(oft_h0_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
 bc_tmp%ML_H0_rep=>ML_h0_rep
@@ -1002,13 +960,8 @@ DO i=minlev,ML_h0_rep%nlevels
   CALL ML_h0_rep%vec_create(u)
   !---Get Ev range
   NULLIFY(lop)
-  SELECT TYPE(this=>ML_h0_rep%current_level)
-  CLASS IS(oft_h0_fem)
-    CALL oft_h0_getlop(this,lop,'grnd')
-  CLASS DEFAULT
-    CALL oft_abort("Error getting current FE rep","h0_lop_eigs",__FILE__)
-  END SELECT
-  ! CALL oft_h0_getlop(oft_h0,lop,'grnd')
+  IF(.NOT.oft_3D_h1_cast(h0_obj,ML_h0_rep%current_level))CALL oft_abort("Error getting current FE rep","h0_lop_eigs",__FILE__)
+  CALL oft_h0_getlop(h0_obj,lop,'grnd')
   CALL create_diagmatrix(md,lop%D)
   !---
   arsolver%A=>lop

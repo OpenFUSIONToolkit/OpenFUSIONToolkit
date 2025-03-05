@@ -65,8 +65,6 @@ END IF
 CALL oft_finalize
 CONTAINS
 !------------------------------------------------------------------------------
-! SUBROUTINE: test_lap
-!------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
 !------------------------------------------------------------------------------
@@ -117,8 +115,6 @@ CALL linv%pre%delete
 !---Destory solver
 CALL linv%delete
 END SUBROUTINE test_lap
-!------------------------------------------------------------------------------
-! SUBROUTINE: test_lapmg
 !------------------------------------------------------------------------------
 !> Same as \ref test_h0::test_lap "test_lap" but use MG preconditioning.
 !------------------------------------------------------------------------------

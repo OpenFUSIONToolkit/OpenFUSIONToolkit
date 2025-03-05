@@ -566,7 +566,7 @@ real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
 mg_mesh=>ML_oft_lagrange%ml_mesh
-IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid lagrange FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid lagrange FE object","xmhd_run",__FILE__)
 mesh=>oft_lagrange%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
@@ -577,7 +577,7 @@ IF(den_scale<0.d0)den_scale=SQRT(initial_fields%Ne%dot(initial_fields%Ne)/REAL(i
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))THEN
   j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
-  IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid HCurl FE object","xmhd_run",__FILE__)
+  IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level))CALL oft_abort("Invalid HCurl FE object","xmhd_run",__FILE__)
 END IF
 !---------------------------------------------------------------------------
 ! Setup ML environment
@@ -1048,7 +1048,7 @@ real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
 mg_mesh=>ML_oft_lagrange%ml_mesh
-IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid lagrange FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid lagrange FE object","xmhd_run",__FILE__)
 mesh=>oft_lagrange%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
@@ -3742,10 +3742,10 @@ CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
 CALL ML_oft_lagrange%set_level(level)
-IF(oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid lagrange FE object","xmhd_set_level",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid lagrange FE object","xmhd_set_level",__FILE__)
 IF(j2_ind>0)THEN
   CALL ML_oft_hcurl%set_level(level)
-  IF(oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level)/=0)CALL oft_abort("Invalid HCurl FE object","xmhd_set_level",__FILE__)
+  IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level))CALL oft_abort("Invalid HCurl FE object","xmhd_set_level",__FILE__)
 END IF
 xmhd_level=level
 ! xmhd_lev=oft_lagrange_lev

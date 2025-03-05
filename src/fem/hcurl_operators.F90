@@ -286,8 +286,8 @@ real(r8), allocatable :: rop_curl(:,:),rop_grad(:,:),btmp(:)
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_rep,lag_fe)/=0)CALL oft_abort("Incorrect Lagrange FE type","hcurl_div",__FILE__)
-IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_fe)/=0)CALL oft_abort("Incorrect HCurl FE type","hcurl_div",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,lag_fe))CALL oft_abort("Incorrect Lagrange FE type","hcurl_div",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_fe))CALL oft_abort("Incorrect HCurl FE type","hcurl_div",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate Laplacian Op
 !---------------------------------------------------------------------------
@@ -353,7 +353,7 @@ integer :: i,j,k,l
 real(r8) :: reg
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_fe)/=0)CALL oft_abort("Incorrect HCurl FE type","hcurl_grad",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_fe))CALL oft_abort("Incorrect HCurl FE type","hcurl_grad",__FILE__)
 !---Get local values
 NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
@@ -384,7 +384,7 @@ integer :: i,j,k
 class(oft_mesh), pointer :: mesh
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_fe)/=0)CALL oft_abort("Incorrect HCurl FE type","hcurl_gradtp",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_fe))CALL oft_abort("Incorrect HCurl FE type","hcurl_gradtp",__FILE__)
 !---Get local values
 NULLIFY(aloc,bloc)
 CALL a%get_local(aloc)
@@ -468,7 +468,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H(Curl)::MOP'
   CALL mytimer%tick()
 END IF
-IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_getmop",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getmop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -567,7 +567,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H(Curl)::KOP'
   CALL mytimer%tick()
 END IF
-IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_getkop",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getkop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -669,7 +669,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H(Curl)::WOP'
   CALL mytimer%tick()
 END IF
-IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_getwop",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getwop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate Laplacian Op
 !---------------------------------------------------------------------------
@@ -770,7 +770,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing H(Curl)::JMLB'
   CALL mytimer%tick()
 END IF
-IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_getjmlb",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getjmlb",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate Laplacian Op
 !---------------------------------------------------------------------------
@@ -868,7 +868,7 @@ real(r8), allocatable, dimension(:,:) :: rop
 logical :: curved
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_hcurl_project",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_project",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -919,8 +919,8 @@ CLASS(oft_hcurl_bfem), POINTER :: bhcurl_rep
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_bmesh), POINTER :: smesh
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(hcurl_rep,fe_rep)/=0)CALL oft_abort("Incorrect 3D FE type","oft_hcurl_project",__FILE__)
-IF(oft_2D_hcurl_cast(bhcurl_rep,bfe_rep)/=0)CALL oft_abort("Incorrect 2D FE type","oft_hcurl_project",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect 3D FE type","oft_hcurl_project",__FILE__)
+IF(.NOT.oft_2D_hcurl_cast(bhcurl_rep,bfe_rep))CALL oft_abort("Incorrect 2D FE type","oft_hcurl_project",__FILE__)
 mesh=>hcurl_rep%mesh
 smesh=>bhcurl_rep%mesh
 !---Initialize vectors to zero

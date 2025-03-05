@@ -21,7 +21,7 @@
 !! - Block-Jacobi
 !! - Multi-Grid
 !!
-!! @sa oft_cg, oft_gmres, oft_petsc_solvers
+!! @sa oft_native_solvers, oft_petsc_solvers
 !!
 !! @authors Chris Hansen
 !! @date August 2011
@@ -59,7 +59,7 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE oft_bc_proto(self,a)
     IMPORT oft_solver_bc, oft_vector
-    CLASS(oft_solver_bc), INTENT(inout) :: self
+    CLASS(oft_solver_bc), INTENT(inout) :: self !< Boundary condition object
     CLASS(oft_vector), INTENT(inout) :: a !< Field to apply BC to
   END SUBROUTINE oft_bc_proto
   !---------------------------------------------------------------------------
@@ -70,14 +70,14 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE oft_bc_delete(self)
     IMPORT oft_solver_bc
-    CLASS(oft_solver_bc), INTENT(inout) :: self
+    CLASS(oft_solver_bc), INTENT(inout) :: self !< Boundary condition object
   END SUBROUTINE oft_bc_delete
   !---------------------------------------------------------------------------
   !> Abstract boundary condition prototype
   !---------------------------------------------------------------------------
   SUBROUTINE oft_cbc_proto(self,a)
     IMPORT oft_csolver_bc, oft_cvector
-    CLASS(oft_csolver_bc), INTENT(inout) :: self
+    CLASS(oft_csolver_bc), INTENT(inout) :: self !< Boundary condition object
     CLASS(oft_cvector), INTENT(inout) :: a !< Field to apply BC to
   END SUBROUTINE oft_cbc_proto
   !---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE oft_cbc_delete(self)
     IMPORT oft_csolver_bc
-    CLASS(oft_csolver_bc), INTENT(inout) :: self
+    CLASS(oft_csolver_bc), INTENT(inout) :: self !< Boundary condition object
   END SUBROUTINE oft_cbc_delete
 END INTERFACE
 !---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ END TYPE oft_solver
 !> Solver container
 !---------------------------------------------------------------------------
 type, public :: oft_solver_ptr
-  CLASS(oft_solver), POINTER :: s => NULL()
+  CLASS(oft_solver), POINTER :: s => NULL() !< Needs docs
 end type oft_solver_ptr
 ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
@@ -135,7 +135,7 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE solver_apply(self,u,g)
   IMPORT oft_solver, oft_vector
-  CLASS(oft_solver), INTENT(inout) :: self
+  CLASS(oft_solver), INTENT(inout) :: self !< Solver object
   CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
   CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
   END SUBROUTINE solver_apply
@@ -147,7 +147,7 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE solver_delete(self)
   IMPORT oft_solver
-  CLASS(oft_solver), INTENT(inout) :: self
+  CLASS(oft_solver), INTENT(inout) :: self !< Solver object
   END SUBROUTINE solver_delete
 END INTERFACE
 !---------------------------------------------------------------------------
@@ -194,7 +194,7 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE csolver_apply(self,u,g)
   IMPORT oft_csolver, oft_cvector
-  CLASS(oft_csolver), INTENT(inout) :: self
+  CLASS(oft_csolver), INTENT(inout) :: self !< Solver object
   CLASS(oft_cvector), INTENT(inout) :: u !< Guess/Solution field
   CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
   END SUBROUTINE csolver_apply
@@ -206,7 +206,7 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE csolver_delete(self)
   IMPORT oft_csolver
-  CLASS(oft_csolver), INTENT(inout) :: self
+  CLASS(oft_csolver), INTENT(inout) :: self !< Solver object
   END SUBROUTINE csolver_delete
 END INTERFACE
 !---------------------------------------------------------------------------
@@ -239,7 +239,7 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE eigsolver_apply(self,u,alam)
   IMPORT oft_eigsolver, oft_vector, r8
-  CLASS(oft_eigsolver), INTENT(inout) :: self
+  CLASS(oft_eigsolver), INTENT(inout) :: self !< Solver object
   CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
   REAL(r8), INTENT(inout) :: alam !< Eigenvalue
   END SUBROUTINE eigsolver_apply
@@ -251,7 +251,7 @@ ABSTRACT INTERFACE
   !---------------------------------------------------------------------------
   SUBROUTINE eigsolver_delete(self)
   IMPORT oft_eigsolver
-  CLASS(oft_eigsolver), INTENT(inout) :: self
+  CLASS(oft_eigsolver), INTENT(inout) :: self !< Solver object
   END SUBROUTINE eigsolver_delete
 END INTERFACE
 !---Make classes and prototypes public
@@ -261,7 +261,7 @@ CONTAINS
 !> Update solver after changing settings/operators
 !---------------------------------------------------------------------------
 SUBROUTINE solver_setup(self)
-CLASS(oft_solver), INTENT(inout) :: self
+CLASS(oft_solver), INTENT(inout) :: self !< Solver object
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%pre))THEN
   IF(.NOT.ASSOCIATED(self%pre%A))self%pre%A=>self%A
@@ -276,7 +276,7 @@ END SUBROUTINE solver_setup
 !! of the member function and catch errors in uninitialized solvers
 !---------------------------------------------------------------------------
 recursive SUBROUTINE solver_update(self,new_pattern)
-CLASS(oft_solver), intent(inout) :: self
+CLASS(oft_solver), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix non-zero pattern? (optional)
 IF(ASSOCIATED(self%pre))CALL self%pre%update(new_pattern)
 END SUBROUTINE solver_update
@@ -287,7 +287,7 @@ END SUBROUTINE solver_update
 !! of the member function and catch errors in uninitialized solvers
 !---------------------------------------------------------------------------
 SUBROUTINE solver_setup_xml(self,solver_node,level)
-class(oft_solver), intent(inout) :: self
+class(oft_solver), intent(inout) :: self !< Solver object
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 end SUBROUTINE solver_setup_xml
@@ -298,13 +298,13 @@ end SUBROUTINE solver_setup_xml
 !! of the member function and catch errors in uninitialized solvers
 !---------------------------------------------------------------------------
 SUBROUTINE solver_view(self)
-class(oft_solver), intent(inout) :: self
+class(oft_solver), intent(inout) :: self !< Solver object
 end SUBROUTINE solver_view
 !---------------------------------------------------------------------------
 !> Check thread safety
 !---------------------------------------------------------------------------
 recursive function solver_check_thread(self) result(thread_safe)
-class(oft_solver), intent(inout) :: self
+class(oft_solver), intent(inout) :: self !< Solver object
 logical :: thread_safe
 thread_safe=.TRUE.
 IF(ASSOCIATED(self%pre))thread_safe=(thread_safe.AND.self%pre%check_thread())
@@ -313,7 +313,7 @@ end function solver_check_thread
 !> Update solver after changing settings/operators
 !---------------------------------------------------------------------------
 SUBROUTINE csolver_setup(self)
-CLASS(oft_csolver), INTENT(inout) :: self
+CLASS(oft_csolver), INTENT(inout) :: self !< Solver object
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%pre))THEN
   IF(.NOT.ASSOCIATED(self%pre%A))self%pre%A=>self%A
@@ -328,7 +328,7 @@ END SUBROUTINE csolver_setup
 !! of the member function and catch errors in uninitialized solvers
 !---------------------------------------------------------------------------
 recursive SUBROUTINE csolver_update(self,new_pattern)
-CLASS(oft_csolver), intent(inout) :: self
+CLASS(oft_csolver), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix non-zero pattern? (optional)
 IF(ASSOCIATED(self%pre))CALL self%pre%update(new_pattern)
 END SUBROUTINE csolver_update
@@ -339,7 +339,7 @@ END SUBROUTINE csolver_update
 !! of the member function and catch errors in uninitialized solvers
 !---------------------------------------------------------------------------
 SUBROUTINE csolver_setup_xml(self,solver_node,level)
-class(oft_csolver), intent(inout) :: self
+class(oft_csolver), intent(inout) :: self !< Solver object
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 end SUBROUTINE csolver_setup_xml
@@ -350,13 +350,13 @@ end SUBROUTINE csolver_setup_xml
 !! of the member function and catch errors in uninitialized solvers
 !---------------------------------------------------------------------------
 SUBROUTINE csolver_view(self)
-class(oft_csolver), intent(inout) :: self
+class(oft_csolver), intent(inout) :: self !< Solver object
 end SUBROUTINE csolver_view
 !---------------------------------------------------------------------------
 !> Check thread safety
 !---------------------------------------------------------------------------
 recursive function csolver_check_thread(self) result(thread_safe)
-class(oft_csolver), intent(inout) :: self
+class(oft_csolver), intent(inout) :: self !< Solver object
 logical :: thread_safe
 thread_safe=.TRUE.
 IF(ASSOCIATED(self%pre))thread_safe=(thread_safe.AND.self%pre%check_thread())
@@ -365,7 +365,7 @@ end function csolver_check_thread
 !> Update solver after changing settings/operators
 !---------------------------------------------------------------------------
 subroutine eigsolver_setup(self)
-class(oft_eigsolver), intent(inout) :: self
+class(oft_eigsolver), intent(inout) :: self !< Solver object
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%pre))THEN
   IF(.NOT.ASSOCIATED(self%pre%A))self%pre%A=>self%A

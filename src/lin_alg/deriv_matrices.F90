@@ -390,20 +390,20 @@ end subroutine create_diagmatrix
 !------------------------------------------------------------------------------
 !> Cast a matrix object to a oft_diagmatrix
 !!
-!! The source matrix must be oft_diagmatrix or a child class, 
-!! otherwise an error will be thrown
+!! The source matrix must be @ref oft_diagmatrix or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
-FUNCTION diagmatrix_cast(self,source) result(ierr)
-class(oft_diagmatrix), pointer, intent(out) :: self !< Pointer to cast oft_diagmatrix
+FUNCTION diagmatrix_cast(self,source) result(success)
+class(oft_diagmatrix), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_matrix), target, intent(in) :: source !< Source matrix to cast
-integer(i4) :: ierr
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_diagmatrix)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION diagmatrix_cast
@@ -463,7 +463,7 @@ end subroutine diagmat_set_values
 !! of the member function and catch errors in uninitialized matrices
 !------------------------------------------------------------------------------
 subroutine diagmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_diagmatrix), intent(inout) :: self
+class(oft_diagmatrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
@@ -476,12 +476,10 @@ call oft_abort('Invalid operation for matrix type','diagmat_add_values',__FILE__
 end subroutine diagmat_add_values
 !------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
 !------------------------------------------------------------------------------
 SUBROUTINE diagmat_assemble(self,diag)
-CLASS(oft_diagmatrix), INTENT(inout) :: self
-CLASS(oft_vector), OPTIONAL, TARGET, INTENT(inout) :: diag
+CLASS(oft_diagmatrix), INTENT(inout) :: self !< Matrix object
+CLASS(oft_vector), OPTIONAL, TARGET, INTENT(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 IF(present(diag))THEN
@@ -496,9 +494,6 @@ DEBUG_STACK_POP
 END SUBROUTINE diagmat_assemble
 !------------------------------------------------------------------------------
 !> Zero all entries in matrix
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
 !------------------------------------------------------------------------------
 subroutine diagmat_zero(self)
 class(oft_diagmatrix), intent(inout) :: self
@@ -506,21 +501,13 @@ CALL self%D%set(0.d0)
 end subroutine diagmat_zero
 !------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine diagmat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_diagmatrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+class(oft_diagmatrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 call oft_abort('Invalid operation for matrix type','diagmat_zero_rows',__FILE__)
 end subroutine diagmat_zero_rows
 !------------------------------------------------------------------------------
@@ -536,39 +523,34 @@ self%nr=0; self%nrg=0
 self%nc=0; self%ncg=0
 end subroutine diagmat_delete
 !------------------------------------------------------------------------------
-!> Cast a matrix object to a oft_sum_matrix
+!> Cast a matrix object to a sum_matrix_cast
 !!
-!! The source matrix must be oft_sum_matrix or a child class, otherwise an error will be thrown.
-!!
-!! @param[out] self Pointer to cast sum_matrix
-!! @param[in] source Source matrix to cast
+!! The source matrix must be @ref sum_matrix_cast or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
-FUNCTION sum_matrix_cast(self,source) result(ierr)
-class(oft_sum_matrix), pointer, intent(out) :: self
-class(oft_matrix), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION sum_matrix_cast(self,source) result(success)
+class(oft_sum_matrix), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_matrix), target, intent(in) :: source !< Source matrix to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_sum_matrix)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION sum_matrix_cast
 !------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix vector product
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = (self%beta*self%J + self%alam*self%K) * a
 !------------------------------------------------------------------------------
 subroutine sum_mat_apply_real(self,a,b)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_vector), intent(inout) :: b !< Result vector
 class(oft_vector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_apply_real',__FILE__)
@@ -583,17 +565,14 @@ DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_mat_apply_real
 !------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix vector product (complex)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = (self%beta*self%J + self%alam*self%K) * a
 !------------------------------------------------------------------------------
 subroutine sum_mat_apply_comp(self,a,b)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_apply_comp',__FILE__)
@@ -608,17 +587,14 @@ DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_mat_apply_comp
 !------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix vector product for matrix transpose
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = self%beta*self%J^T + self%alam*self%K^T * a
 !------------------------------------------------------------------------------
 subroutine sum_mat_applyt_real(self,a,b)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_vector), intent(inout) :: b !< Result vector
 class(oft_vector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_applyt_real',__FILE__)
@@ -633,17 +609,14 @@ DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_mat_applyt_real
 !------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix vector product for matrix transpose (complex)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = self%beta*self%J^T + self%alam*self%K^T * a
 !------------------------------------------------------------------------------
 subroutine sum_mat_applyt_comp(self,a,b)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_applyt_comp',__FILE__)
@@ -659,12 +632,10 @@ DEBUG_STACK_POP
 end subroutine sum_mat_applyt_comp
 !------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
 !------------------------------------------------------------------------------
 subroutine sum_mat_assemble(self,diag)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_vector), optional, target, intent(inout) :: diag
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
 !---
 if(present(diag))then
@@ -690,17 +661,14 @@ self%nc=self%J%nc; self%ncg=self%J%ncg
 DEBUG_STACK_POP
 end subroutine sum_mat_assemble
 !------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix vector product (real)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = (self%beta*self%J + self%alam*self%K) * a
 !------------------------------------------------------------------------------
 subroutine sum_cmat_apply_real(self,a,b)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_vector), pointer :: rtmp
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
@@ -732,17 +700,14 @@ DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_cmat_apply_real
 !------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix vector product
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = (self%beta*self%J + self%alam*self%K) * a
 !------------------------------------------------------------------------------
 subroutine sum_cmat_apply_comp(self,a,b)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_apply_comp',__FILE__)
@@ -765,17 +730,14 @@ DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_cmat_apply_comp
 !------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix vector product for matrix transpose (real)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = self%beta*self%J^T + self%alam*self%K^T * a
 !------------------------------------------------------------------------------
 subroutine sum_cmat_applyt_real(self,a,b)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_vector), pointer :: rtmp
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
@@ -807,17 +769,14 @@ DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_cmat_applyt_real
 !------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix vector product for matrix transpose
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = self%beta*self%J^T + self%alam*self%K^T * a
 !------------------------------------------------------------------------------
 subroutine sum_cmat_applyt_comp(self,a,b)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_applyt_comp',__FILE__)
@@ -841,12 +800,10 @@ DEBUG_STACK_POP
 end subroutine sum_cmat_applyt_comp
 !------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
 !------------------------------------------------------------------------------
 subroutine sum_cmat_assemble(self,diag)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_cvector), optional, target, intent(inout) :: diag
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 class(oft_vector), pointer :: rdiag
 DEBUG_STACK_PUSH
 !---
@@ -900,15 +857,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine sum_cmat_assemble
 !---------------------------------------------------------------------------
-!> Compute Jacobian approximation
+!> Compute matrix vector product
 !!
-!! @param[in] a Source field
-!! @param[in,out] b F(a)
+!! b = (self%f(a) - self%f0)/eps
 !---------------------------------------------------------------------------
 subroutine mf_mat_apply_real(self,a,b)
-class(oft_mf_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_mf_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_vector), intent(inout) :: b !< Result vector
 real(r8) :: eps,bb,aa,a1
 aa=a%dot(a)
 IF(aa==0.d0)THEN
@@ -933,15 +889,12 @@ CALL b%add(1.d0/eps,-1.d0/eps,self%f0)
 end subroutine mf_mat_apply_real
 !---------------------------------------------------------------------------
 !> Setup matrix-free Jacobian operator
-!!
-!! @param[in] a Field defining domain and range spaces
-!! @param[in] f Non-linear function defining the Jacobian
 !---------------------------------------------------------------------------
 subroutine mf_mat_setup(self,a,f,utyp)
-class(oft_mf_matrix), intent(inout) :: self
-class(oft_vector), intent(inout) :: a
-class(oft_matrix), target, intent(in) :: f
-class(oft_vector), optional, intent(inout) :: utyp
+class(oft_mf_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), intent(inout) :: a !< Vector defining domain and range spaces
+class(oft_matrix), target, intent(in) :: f !< Non-linear function defining the Jacobian
+class(oft_vector), optional, intent(inout) :: utyp !< Vector of "typical sizes" (optional)
 self%f=>f
 CALL a%new(self%u0)
 CALL a%new(self%f0)
@@ -954,13 +907,11 @@ ELSE
 END IF
 end subroutine mf_mat_setup
 !---------------------------------------------------------------------------
-!> Update linearization point
-!!
-!! @param[in] a New linearization point
+!> Update linearization point for matrix-free Jacobian
 !---------------------------------------------------------------------------
 subroutine mf_mat_update(self,a)
-class(oft_mf_matrix), intent(inout) :: self
-class(oft_vector), intent(inout) :: a
+class(oft_mf_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), intent(inout) :: a !< New linearization point
 integer(i4) :: i,nslice,ierr
 real(r8) :: umin
 real(r8), pointer :: vals(:)
@@ -971,7 +922,7 @@ END SUBROUTINE mf_mat_update
 !> Cleanup internal storage and reset defaults
 !---------------------------------------------------------------------------
 subroutine mf_mat_delete(self)
-class(oft_mf_matrix), intent(inout) :: self
+class(oft_mf_matrix), intent(inout) :: self !< Matrix object
 IF(ASSOCIATED(self%u0))THEN
   CALL self%u0%delete
   CALL self%f0%delete

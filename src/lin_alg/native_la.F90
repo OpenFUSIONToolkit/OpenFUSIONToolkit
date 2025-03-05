@@ -1690,7 +1690,7 @@ end subroutine cvec_delete
 !! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
 FUNCTION native_matrix_cast(self,source) result(success)
-class(oft_native_matrix), pointer, intent(out) :: self  !< Cast pointer
+class(oft_native_matrix), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_matrix), target, intent(in) :: source !< Abstract vector object
 logical :: success !< Cast success flag
 DEBUG_STACK_PUSH

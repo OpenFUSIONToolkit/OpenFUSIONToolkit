@@ -32,7 +32,7 @@ USE fem_base, ONLY: oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type
   oft_afem_type
 USE fem_utils, ONLY: fem_interp, bfem_interp
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, oft_blag_d2eval, &
-  oft_lag_nodes, oft_blag_eval, &
+  oft_lag_nodes, oft_blag_eval, oft_2D_lagrange_cast, &
   oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
 IMPLICIT NONE
 #include "local.h"
@@ -126,12 +126,7 @@ contains
 subroutine lag_brinterp_setup(self,lag_rep)
 class(oft_lag_brinterp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: lag_rep
-SELECT TYPE(lag_rep)
-CLASS IS(oft_scalar_bfem)
-  self%lag_rep=>lag_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","lag_brinterp_setup",__FILE__)
-END SELECT
+IF(.NOT.oft_2D_lagrange_cast(self%lag_rep,lag_rep))CALL oft_abort("Incorrect FE type","lag_brinterp_setup",__FILE__)
 self%mesh=>self%lag_rep%mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
@@ -269,12 +264,7 @@ subroutine lag_bvrinterp_setup(self,lag_rep)
 class(oft_lag_bvrinterp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: lag_rep
 real(r8), pointer, dimension(:) :: vtmp
-SELECT TYPE(lag_rep)
-CLASS IS(oft_scalar_bfem)
-  self%lag_rep=>lag_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","lag_bvrinterp_setup",__FILE__)
-END SELECT
+IF(.NOT.oft_2D_lagrange_cast(self%lag_rep,lag_rep))CALL oft_abort("Incorrect FE type","lag_bvrinterp_setup",__FILE__)
 self%mesh=>self%lag_rep%mesh
 !---Get local slice
 IF(.NOT.ASSOCIATED(self%vals))ALLOCATE(self%vals(3,self%lag_rep%ne))
@@ -391,9 +381,9 @@ class(oft_blag_zeroe), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
 real(r8), pointer, dimension(:) :: vloc
+class(oft_scalar_bfem), pointer :: this
 DEBUG_STACK_PUSH
-SELECT TYPE(this=>self%ML_lag_rep%current_level)
-CLASS IS(oft_scalar_bfem)
+IF(.NOT.oft_2D_lagrange_cast(this,self%ML_lag_rep%current_level))CALL oft_abort("Incorrect FE type","zeroe_apply",__FILE__)
 !---Cast to vector type
 NULLIFY(vloc)
 call a%get_local(vloc)
@@ -406,7 +396,6 @@ end do
 !---
 call a%restore_local(vloc)
 deallocate(vloc)
-END SELECT
 DEBUG_STACK_POP
 end subroutine zeroe_apply
 !---------------------------------------------------------------------------
@@ -433,12 +422,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing Boundary LAG::MOP'
   CALL mytimer%tick()
 END IF
-SELECT TYPE(fe_rep)
-CLASS IS(oft_scalar_bfem)
-  lag_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_blag_getmop",__FILE__)
-END SELECT
+IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_getmop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -517,12 +501,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing Boundary LAG::LOP'
   CALL mytimer%tick()
 END IF
-SELECT TYPE(fe_rep)
-CLASS IS(oft_scalar_bfem)
-  lag_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_blag_getlop",__FILE__)
-END SELECT
+IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_getlop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -652,12 +631,7 @@ REAL(r8) :: vol,det,etmp(1),sgop(3,3),rop
 REAL(r8), POINTER, DIMENSION(:) :: xloc
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-SELECT TYPE(fe_rep)
-CLASS IS(oft_scalar_bfem)
-  lag_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_blag_getlop",__FILE__)
-END SELECT
+IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_project",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -705,12 +679,7 @@ REAL(r8) :: vol,det,etmp(3),sgop(3,3),rop
 REAL(r8), POINTER, DIMENSION(:) :: xloc,yloc,zloc
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-SELECT TYPE(fe_rep)
-CLASS IS(oft_scalar_bfem)
-  lag_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect FE type","oft_blag_getlop",__FILE__)
-END SELECT
+IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_vproject",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc,yloc,zloc)
 call x%set(0.d0)
@@ -768,12 +737,7 @@ REAL(r8), POINTER, DIMENSION(:) :: xloc
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 CLASS(oft_scalar_fem), POINTER :: vlag_rep
 DEBUG_STACK_PUSH
-SELECT TYPE(fe_rep)
-CLASS IS(oft_scalar_bfem)
-  lag_rep=>fe_rep
-CLASS DEFAULT
-  CALL oft_abort("Incorrect 2D FE type","oft_blag_nproject",__FILE__)
-END SELECT
+IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_nproject",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)

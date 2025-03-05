@@ -92,8 +92,6 @@ CALL test_lap(nlocal,sol_type)
 CALL oft_finalize
 CONTAINS
 !------------------------------------------------------------------------------
-! SUBROUTINE: test_lap
-!------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
 !------------------------------------------------------------------------------

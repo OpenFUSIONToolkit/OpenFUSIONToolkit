@@ -91,8 +91,6 @@ END IF
 CALL oft_finalize
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE compute_volume
-!---------------------------------------------------------------------------
 !> Compute volume of the current mesh and output
 !---------------------------------------------------------------------------
 SUBROUTINE compute_volume
@@ -118,8 +116,6 @@ IF(oft_env%head_proc)THEN
   WRITE(io_unit,*)volume
 END IF
 END SUBROUTINE compute_volume
-!---------------------------------------------------------------------------
-! SUBROUTINE compute_area
 !---------------------------------------------------------------------------
 !> Compute surface area of the current mesh and output
 !---------------------------------------------------------------------------

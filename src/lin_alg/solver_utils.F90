@@ -128,7 +128,7 @@ SELECT CASE(smoother)
   CASE(1) ! Jacobi
     ALLOCATE(oft_jblock_precond::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(jblock_precond_cast(this_jac,this_ml%smooth_up)<0) &
+    IF(.NOT.jblock_precond_cast(this_jac,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_jac".','create_native_mlpre',__FILE__)
     this_jac%A=>Mats(nlevels)%M
     IF(PRESENT(bc))this_jac%bc=>bc
@@ -137,7 +137,7 @@ SELECT CASE(smoother)
   CASE(2) ! FGMRES
     ALLOCATE(oft_native_gmres_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(native_gmres_solver_cast(this_gmres,this_ml%smooth_up)<0) &
+    IF(.NOT.native_gmres_solver_cast(this_gmres,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_gmres".','create_native_mlpre',__FILE__)
     this_gmres%A=>Mats(nlevels)%M
     IF(PRESENT(bc))this_gmres%bc=>bc
@@ -145,13 +145,13 @@ SELECT CASE(smoother)
     this_gmres%its=nu(nlevels)
     !---
     ALLOCATE(oft_diag_scale::this_gmres%pre)
-    IF(diag_scale_cast(this_diag,this_gmres%pre)<0) &
+    IF(.NOT.diag_scale_cast(this_diag,this_gmres%pre)) &
       CALL oft_abort('Failed to allocate "this_diag".','create_native_mlpre',__FILE__)
     this_diag%A=>Mats(nlevels)%M
   CASE(3) ! CG
     ALLOCATE(oft_native_cg_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(native_cg_solver_cast(this_cg,this_ml%smooth_up)<0) &
+    IF(.NOT.native_cg_solver_cast(this_cg,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_cg".','create_native_mlpre',__FILE__)
     this_cg%A=>Mats(nlevels)%M
     IF(PRESENT(bc))this_cg%bc=>bc
@@ -163,7 +163,7 @@ this_ml%symmetric=.TRUE.
 DO i=nlevels-1,1,-1
   !---Set smoother
   ALLOCATE(oft_ml_precond::this_ml%base_solve)
-  IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
+  IF(.NOT.ml_precond_cast(this_ml,this_ml%base_solve)) &
     CALL oft_abort('Failed to allocate "this_ml".','create_native_mlpre',__FILE__)
   !---Setup MG smoother
   this_ml%ml_vecspace=>ml_vecspace
@@ -174,7 +174,7 @@ DO i=nlevels-1,1,-1
     CASE(1)
       ALLOCATE(oft_jblock_precond::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(jblock_precond_cast(this_jac,this_ml%smooth_up)<0) &
+      IF(.NOT.jblock_precond_cast(this_jac,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_jac".','create_native_mlpre',__FILE__)
       this_jac%A=>Mats(i)%M
       IF(PRESENT(bc))this_jac%bc=>bc
@@ -185,7 +185,7 @@ DO i=nlevels-1,1,-1
     CASE(2) ! FGMRES
       ALLOCATE(oft_native_gmres_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(native_gmres_solver_cast(this_gmres,this_ml%smooth_up)<0) &
+      IF(.NOT.native_gmres_solver_cast(this_gmres,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_gmres".','create_native_mlpre',__FILE__)
       this_gmres%A=>Mats(i)%M
       IF(PRESENT(bc))this_gmres%bc=>bc
@@ -193,7 +193,7 @@ DO i=nlevels-1,1,-1
       this_gmres%its=nu(i)
       !---
       ALLOCATE(oft_diag_scale::this_gmres%pre)
-      IF(diag_scale_cast(this_diag,this_gmres%pre)<0) &
+      IF(.NOT.diag_scale_cast(this_diag,this_gmres%pre)) &
         CALL oft_abort('Failed to allocate "this_diag".','create_native_mlpre',__FILE__)
       this_diag%A=>Mats(i)%M
       IF(i>1)THEN
@@ -203,7 +203,7 @@ DO i=nlevels-1,1,-1
     CASE(3) ! CG
       ALLOCATE(oft_native_cg_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(native_cg_solver_cast(this_cg,this_ml%smooth_up)<0) &
+      IF(.NOT.native_cg_solver_cast(this_cg,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_cg".','create_native_mlpre',__FILE__)
       this_cg%A=>Mats(i)%M
       IF(PRESENT(bc))this_cg%bc=>bc
@@ -279,7 +279,7 @@ SELECT CASE(smoother)
   CASE(1) ! Jacobi
     ALLOCATE(oft_petsc_sjacobi_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(petsc_sjacobi_solver_cast(this_jac,this_ml%smooth_up)<0) &
+    IF(.NOT.petsc_sjacobi_solver_cast(this_jac,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_jac".','create_petsc_mlpre',__FILE__)
     this_jac%A=>Mats(nlevels)%M
     this_jac%df=df(nlevels)
@@ -288,7 +288,7 @@ SELECT CASE(smoother)
   CASE(2) ! FGMRES
     ALLOCATE(oft_petsc_gmres_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(petsc_gmres_solver_cast(this_gmres,this_ml%smooth_up)<0) &
+    IF(.NOT.petsc_gmres_solver_cast(this_gmres,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_gmres".','create_petsc_mlpre',__FILE__)
     this_gmres%A=>Mats(nlevels)%M
     this_gmres%nrits=nu(nlevels)
@@ -298,13 +298,13 @@ SELECT CASE(smoother)
   CASE(3) ! CG
     ALLOCATE(oft_petsc_cg_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(petsc_cg_solver_cast(this_cg,this_ml%smooth_up)<0) &
+    IF(.NOT.petsc_cg_solver_cast(this_cg,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_cg".','create_petsc_mlpre',__FILE__)
     this_cg%A=>Mats(nlevels)%M
     this_cg%its=nu(nlevels)
     !---
     ALLOCATE(oft_petsc_diagprecond::this_cg%pre)
-    IF(petsc_diagprecond_cast(this_diag,this_cg%pre)<0) &
+    IF(.NOT.petsc_diagprecond_cast(this_diag,this_cg%pre)) &
       CALL oft_abort('Failed to allocate "this_diag".','create_petsc_mlpre',__FILE__)
 END SELECT
 this_ml%smooth_down=>this_ml%smooth_up
@@ -313,7 +313,7 @@ this_ml%symmetric=.TRUE.
 DO i=nlevels-1,1,-1
   !---Set smoother
   ALLOCATE(oft_ml_precond::this_ml%base_solve)
-  IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
+  IF(.NOT.ml_precond_cast(this_ml,this_ml%base_solve)) &
     CALL oft_abort('Failed to allocate "this_ml".','create_petsc_mlpre',__FILE__)
   !---Setup MG smoother
   this_ml%ml_vecspace=>ml_vecspace
@@ -323,7 +323,7 @@ DO i=nlevels-1,1,-1
   IF(i==1.AND.stype<0)THEN
     ALLOCATE(oft_petsc_direct_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(petsc_direct_solver_cast(this_direct,this_ml%smooth_up)<0) &
+    IF(.NOT.petsc_direct_solver_cast(this_direct,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_direct".','create_petsc_mlpre',__FILE__)
     this_direct%A=>Mats(i)%M
     this_direct%its=nu(i)
@@ -333,7 +333,7 @@ DO i=nlevels-1,1,-1
     CASE(1)
       ALLOCATE(oft_petsc_sjacobi_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(petsc_sjacobi_solver_cast(this_jac,this_ml%smooth_up)<0) &
+      IF(.NOT.petsc_sjacobi_solver_cast(this_jac,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_jac".','create_petsc_mlpre',__FILE__)
       this_jac%A=>Mats(i)%M
       this_jac%df=df(i)
@@ -344,7 +344,7 @@ DO i=nlevels-1,1,-1
     CASE(2) ! FGMRES
       ALLOCATE(oft_petsc_gmres_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(petsc_gmres_solver_cast(this_gmres,this_ml%smooth_up)<0) &
+      IF(.NOT.petsc_gmres_solver_cast(this_gmres,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_gmres".','create_petsc_mlpre',__FILE__)
       this_gmres%A=>Mats(i)%M
       this_gmres%nrits=MIN(20,nu(i))
@@ -358,13 +358,13 @@ DO i=nlevels-1,1,-1
     CASE(3) ! CG
       ALLOCATE(oft_petsc_cg_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(petsc_cg_solver_cast(this_cg,this_ml%smooth_up)<0) &
+      IF(.NOT.petsc_cg_solver_cast(this_cg,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_cg".','create_petsc_mlpre',__FILE__)
       this_cg%A=>Mats(i)%M
       this_cg%its=nu(i)
       !---
       ALLOCATE(oft_petsc_diagprecond::this_cg%pre)
-      IF(petsc_diagprecond_cast(this_diag,this_cg%pre)<0) &
+      IF(.NOT.petsc_diagprecond_cast(this_diag,this_cg%pre)) &
         CALL oft_abort('Failed to allocate "this_diag".','create_petsc_mlpre',__FILE__)
       IF(i>1)THEN
         this_ml%smooth_down=>this_ml%smooth_up
@@ -829,7 +829,7 @@ END IF
 DO i=nlevels-1,1,-1
   !---Set smoother
   ALLOCATE(oft_ml_precond::this_ml%base_solve)
-  IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
+  IF(.NOT.ml_precond_cast(this_ml,this_ml%base_solve)) &
     CALL oft_abort('Failed to allocate "this_ml".','create_petsc_mlpre',__FILE__)
   !---Setup MG smoother
   this_ml%ml_vecspace=>ml_vecspace

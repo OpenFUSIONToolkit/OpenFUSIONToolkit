@@ -21,8 +21,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
-USE oft_lag_basis, ONLY: oft_lag_setup!, &
-  ! ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zeroe
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -61,8 +60,6 @@ CALL test_lap
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE: test_lap
 !------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.

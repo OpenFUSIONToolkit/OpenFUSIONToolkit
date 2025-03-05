@@ -20,23 +20,23 @@ USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_map, map_list, &
   oft_graph, oft_graph_ptr, oft_matrix_map
 USE oft_native_la, ONLY: oft_native_vector, oft_native_cvector, &
   oft_native_matrix, oft_native_cmatrix, native_cvector_cast
-! #ifdef HAVE_PETSC
-! USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
-!   oft_petsc_matrix_cast
-! #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>5)
-! #if PETSC_VERSION_MINOR<8
-! #include "petsc/finclude/petscmatdef.h"
-! #define PETSC_NULL_MAT PETSC_NULL_OBJECT
-! #else
-! #include "petsc/finclude/petscmat.h"
-! #endif
-! #else
-! #include "finclude/petscmatdef.h"
-! #endif
-! #undef IS
-! #undef Mat
-! use petscmat
-! #endif
+#ifdef HAVE_PETSC
+USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
+  oft_petsc_matrix_cast
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>5)
+#if PETSC_VERSION_MINOR<8
+#include "petsc/finclude/petscmatdef.h"
+#define PETSC_NULL_MAT PETSC_NULL_OBJECT
+#else
+#include "petsc/finclude/petscmat.h"
+#endif
+#else
+#include "finclude/petscmatdef.h"
+#endif
+#undef IS
+#undef Mat
+use petscmat
+#endif
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------

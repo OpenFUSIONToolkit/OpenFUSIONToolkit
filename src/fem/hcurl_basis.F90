@@ -53,42 +53,42 @@ contains
 !------------------------------------------------------------------------------
 !> Cast abstract FE type to 3D H(Curl) finite element type
 !!
-!! @note If object is not of class @ref oft_hcurl_fem then self will be null
-!! and the result will be -1
+!! The source matrix must be @ref oft_hcurl_fem or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
-FUNCTION oft_3D_hcurl_cast(self,source) RESULT(ierr)
+FUNCTION oft_3D_hcurl_cast(self,source) RESULT(success)
 CLASS(oft_hcurl_fem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
 CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
-INTEGER(i4) :: ierr
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 SELECT TYPE(source)
   CLASS IS(oft_hcurl_fem)
     self=>source
-    ierr=0
+    success=.TRUE.
   CLASS DEFAULT
     NULLIFY(self)
-    ierr=-1
+    success=.FALSE.
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_3D_hcurl_cast
 !------------------------------------------------------------------------------
 !> Cast abstract FE type to 2D H(Curl) finite element type
 !!
-!! @note If object is not of class @ref oft_hcurl_bfem then self will be null
-!! and the result will be -1
+!! The source matrix must be @ref oft_hcurl_bfem or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
-FUNCTION oft_2D_hcurl_cast(self,source) RESULT(ierr)
+FUNCTION oft_2D_hcurl_cast(self,source) RESULT(success)
 CLASS(oft_hcurl_bfem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
 CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
-INTEGER(i4) :: ierr
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 SELECT TYPE(source)
   CLASS IS(oft_hcurl_bfem)
     self=>source
-    ierr=0
+    success=.TRUE.
   CLASS DEFAULT
     NULLIFY(self)
-    ierr=-1
+    success=.FALSE.
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_hcurl_cast

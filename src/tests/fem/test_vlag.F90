@@ -64,8 +64,6 @@ END IF
 CALL oft_finalize
 CONTAINS
 !------------------------------------------------------------------------------
-! SUBROUTINE: test_mop
-!------------------------------------------------------------------------------
 !> Invert the mass matrix and output required iterataions and final field energy.
 !------------------------------------------------------------------------------
 SUBROUTINE test_mop
@@ -111,8 +109,6 @@ CALL minv%pre%delete
 !---Destory solver
 CALL minv%delete
 END SUBROUTINE test_mop
-!------------------------------------------------------------------------------
-! SUBROUTINE: test_mopmg
 !------------------------------------------------------------------------------
 !> Invert the mass matrix and output required iterataions and final field energy.
 !------------------------------------------------------------------------------

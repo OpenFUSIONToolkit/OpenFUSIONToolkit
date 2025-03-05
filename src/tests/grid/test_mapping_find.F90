@@ -36,8 +36,6 @@ CALL check_surface_points(4,1.d-6)
 CALL oft_finalize
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE check_surface_points
-!---------------------------------------------------------------------------
 !> Validates @ref tetmesh_mapping::tetmesh_findcell "tetmesh_findcell" by
 !! creating points on the boundary of the mesh and comparing them to the
 !! locations found by @ref tetmesh_mapping::tetmesh_findcell "tetmesh_findcell".

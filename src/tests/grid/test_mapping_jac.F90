@@ -61,8 +61,6 @@ CLOSE(io_unit)
 CALL oft_finalize
 CONTAINS
 !---------------------------------------------------------------------------
-! FUNCTION check_jac2
-!---------------------------------------------------------------------------
 !> Validate 2nd order spatial derivatives by comparing the computed derivatives
 !! to a known result. Currently, setup to test all quadratic functions in 3
 !! dimensions.
@@ -80,7 +78,7 @@ CHARACTER(LEN=1), PARAMETER :: coords(0:3)=(/'s','x','y','z'/)
 WRITE(*,*)'Testing ',coords(xi),coords(xj)
 !---
 fail_count=0
-IF(oft_3D_lagrange_cast(lag_rep,ML_oft_lagrange%current_level)/=0)CALL oft_abort("Invalid FE type","check_jac2",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,ML_oft_lagrange%current_level))CALL oft_abort("Invalid FE type","check_jac2",__FILE__)
 quad=>lag_rep%quad
 !$omp parallel private(k,j,f,pt_loc,v,vloc,val,rop,gop,g2op,Kmat) reduction(+:fail_count)
 ALLOCATE(pt_loc(0:3,lag_rep%nce))

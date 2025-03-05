@@ -1214,26 +1214,22 @@ NULLIFY(self%ydot)
 DEBUG_STACK_POP
 end subroutine tracer_euler_delete
 !------------------------------------------------------------------------------
-! FUNCTION: tracer_lsode_cast
-!------------------------------------------------------------------------------
-!> Cast \ref tracing::oft_tracer "oft_tracer" to \ref tracing::oft_tracer_lsode
-!! "oft_tracer_lsode"
+!> Cast a tracer object to a oft_tracer_lsode
 !!
-!! @param[out] self Object of desired type, unassociated if cast fails
-!! @param[in] source Source object to cast
-!! @result Error flag
+!! The source matrix must be @ref oft_tracer_lsode or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
-FUNCTION tracer_lsode_cast(self,source) result(ierr)
-class(oft_tracer_lsode), pointer, intent(out) :: self
-class(oft_tracer), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION tracer_lsode_cast(self,source) result(success)
+class(oft_tracer_lsode), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_tracer), target, intent(in) :: source !< Source tracer to cast
+logical :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_tracer_lsode)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION tracer_lsode_cast
@@ -1309,7 +1305,7 @@ class(oft_tracer), pointer, intent(out) :: new
 class(oft_tracer_lsode), pointer :: newtmp
 DEBUG_STACK_PUSH
 allocate(oft_tracer_lsode::new)
-IF(tracer_lsode_cast(newtmp,new)<0)CALL oft_abort('Failure to allocate LSODE.', &
+IF(.NOT.tracer_lsode_cast(newtmp,new))CALL oft_abort('Failure to allocate LSODE.', &
   'tracer_lsode_copy',__FILE__)
 new%B=>self%B
 new%maxsteps=self%maxsteps

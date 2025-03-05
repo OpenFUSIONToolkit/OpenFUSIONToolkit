@@ -202,7 +202,7 @@ ELSE
   !---Get local slice
   CALL self%u%get_local(self%vals)
   !
-  IF(oft_3D_lagrange_cast(self%lag_rep,lag_rep)/=0)CALL oft_abort("Incorrect FE type","lag_rinterp_setup",__FILE__)
+  IF(.NOT.oft_3D_lagrange_cast(self%lag_rep,lag_rep))CALL oft_abort("Incorrect FE type","lag_rinterp_setup",__FILE__)
   self%mesh=>self%lag_rep%mesh
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
@@ -349,7 +349,7 @@ ELSE
   CALL self%u%get_local(vtmp,2)
   vtmp=>self%vals(3,:)
   CALL self%u%get_local(vtmp,3)
-  IF(oft_3D_lagrange_cast(self%lag_rep,lag_rep)/=0)CALL oft_abort("Incorrect FE type","lag_vrinterp_setup",__FILE__)
+  IF(.NOT.oft_3D_lagrange_cast(self%lag_rep,lag_rep))CALL oft_abort("Incorrect FE type","lag_vrinterp_setup",__FILE__)
   self%mesh=>self%lag_rep%mesh
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
@@ -560,7 +560,7 @@ real(r8), pointer, dimension(:) :: aloc
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER ::lag_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_rep,self%ML_lag_rep%current_level)/=0)CALL oft_abort("Incorrect FE type","zerogrnd_apply",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_lag_rep%current_level))CALL oft_abort("Incorrect FE type","zerogrnd_apply",__FILE__)
 !---Zero boundary values
 NULLIFY(aloc)
 CALL a%get_local(aloc)
@@ -622,7 +622,7 @@ real(r8), pointer, dimension(:) :: x,y,z
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_rep,self%ML_vlag_rep%current_level%fields(1)%fe)/=0)CALL oft_abort("Incorrect FE type","vzeron_apply",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_vlag_rep%current_level%fields(1)%fe))CALL oft_abort("Incorrect FE type","vzeron_apply",__FILE__)
 !---Cast to vector type
 NULLIFY(x,y,z)
 CALL a%get_local(x,1)
@@ -659,7 +659,7 @@ real(r8), pointer, dimension(:) :: x,y,z
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_rep,self%ML_vlag_rep%current_level%fields(1)%fe)/=0)CALL oft_abort("Incorrect FE type","vzerot_apply",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_vlag_rep%current_level%fields(1)%fe))CALL oft_abort("Incorrect FE type","vzerot_apply",__FILE__)
 !---Cast to vector type
 NULLIFY(x,y,z)
 CALL a%get_local(x,1)
@@ -798,7 +798,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing LAG::MOP'
   CALL mytimer%tick()
 END IF
-IF(oft_3D_lagrange_cast(lag_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_lag_getmop",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_getmop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -912,7 +912,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing LAG::LOP'
   CALL mytimer%tick()
 END IF
-IF(oft_3D_lagrange_cast(lag_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_lag_getlop",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_getlop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -1028,7 +1028,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing LAG::PDOP'
   CALL mytimer%tick()
 END IF
-IF(oft_3D_lagrange_cast(lag_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_lag_getpdop",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_getpdop",__FILE__)
 !---
 perp_diff=0.d0
 if(present(perp))perp_diff=perp
@@ -1151,7 +1151,7 @@ real(r8), allocatable :: rop(:)
 logical :: curved
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_lag_project",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_project",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -1201,7 +1201,7 @@ integer(i4), allocatable :: j(:)
 logical :: curved
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_lag_project_div",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_project_div",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc)
 call x%set(0.d0)
@@ -1262,7 +1262,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing LAG_V::MOP'
   CALL mytimer%tick()
 END IF
-IF(oft_3D_lagrange_cast(lag_rep,vlag_rep%fields(1)%fe)/=0)CALL oft_abort("Incorrect FE type","oft_lag_vgetmop",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,vlag_rep%fields(1)%fe))CALL oft_abort("Incorrect FE type","oft_lag_vgetmop",__FILE__)
 !---Set BC flag
 SELECT CASE(TRIM(bc))
   CASE("none")
@@ -1426,7 +1426,7 @@ integer(i4), allocatable :: j(:)
 logical :: curved
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","oft_lag_vproject",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_vproject",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xloc,yloc,zloc)
 call x%set(0.d0)
@@ -1479,7 +1479,7 @@ real(r8), allocatable :: gop(:,:)
 logical :: curved
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_rep,fe_rep)/=0)CALL oft_abort("Incorrect FE type","lag_div",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","lag_div",__FILE__)
 !---Cast to vector type
 NULLIFY(x,y,z)
 CALL a%get_local(x,1)
@@ -1583,7 +1583,7 @@ end if
 cmesh=>ML_lag_rep%ml_mesh%meshes(ML_lag_rep%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "lag_ginterpmatrix", __FILE__)
-IF(oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level)/=0)CALL oft_abort("Incorrect FE type","lag_ginterpmatrix",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("Incorrect FE type","lag_ginterpmatrix",__FILE__)
 if(lag_fine%order/=1)then
   call oft_abort('Attempted geometric interpolation for pd > 1','lag_ginterpmatrix',__FILE__)
 end if
@@ -1696,12 +1696,12 @@ type(oft_graph), POINTER :: interp_graph
 class(oft_mesh), pointer :: mesh
 CLASS(oft_scalar_fem), POINTER :: lag_fine
 DEBUG_STACK_PUSH
-IF(oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level)/=0)CALL oft_abort("Incorrect fine FE type","lag_pinterpmatrix",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("Incorrect fine FE type","lag_pinterpmatrix",__FILE__)
 mesh=>lag_fine%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
 !---
 ! ops=>oft_lagrange_ops
-IF(oft_3D_lagrange_cast(lag_cors,ML_lag_rep%levels(ML_lag_rep%level-1)%fe)/=0)CALL oft_abort("Incorrect coarse FE type","lag_pinterpmatrix",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_cors,ML_lag_rep%levels(ML_lag_rep%level-1)%fe))CALL oft_abort("Incorrect coarse FE type","lag_pinterpmatrix",__FILE__)
 ! lag_cors=>ML_lag_rep%levels(ML_lag_rep%level-1)%fe
 !WRITE(*,*)lag_cors%gstruct
 !WRITE(*,*)lag_fine%gstruct

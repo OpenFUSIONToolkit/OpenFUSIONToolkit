@@ -701,8 +701,8 @@ DEBUG_STACK_PUSH
 NULLIFY(aloc,bcurl,bgrad)
 zero_boundary=.FALSE.
 IF(PRESENT(keep_boundary))zero_boundary=keep_boundary
-IF(oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe)/=0)CALL oft_abort("Incorrect HCurl FE type","hcurl_grad_grad",__FILE__)
-IF(oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe)/=0)CALL oft_abort("Incorrect HCurl FE type","hcurl_grad_grad",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect HCurl FE type","hcurl_grad_grad",__FILE__)
+IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect HCurl FE type","hcurl_grad_grad",__FILE__)
 mesh=>curl_rep%mesh
 !---Get local values
 CALL a%get_local(aloc)
@@ -749,7 +749,7 @@ real(r8) :: reg
 CLASS(oft_h0_fem), POINTER :: grad_rep
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
-IF(oft_3D_h1_cast(grad_rep,h0_fe)/=0)CALL oft_abort("Incorrect Grad FE type","hcurl_grad_gradtp",__FILE__)
+IF(.NOT.oft_3D_h1_cast(grad_rep,h0_fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_gradtp",__FILE__)
 mesh=>grad_rep%mesh
 NULLIFY(acurl,agrad,bloc)
 !---Cast local values
@@ -807,8 +807,8 @@ logical :: curved
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
 CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","hcurl_grad_div",__FILE__)
-IF(oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","hcurl_grad_div",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_div",__FILE__)
+IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_div",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate Laplacian Op
 !---------------------------------------------------------------------------
@@ -891,8 +891,8 @@ real(r8), allocatable :: rop_curl(:,:),cop_curl(:,:),rop_grad(:,:),btmp(:)
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
 CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","hcurl_grad_curltp",__FILE__)
-IF(oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","hcurl_grad_curltp",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_curltp",__FILE__)
+IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_curltp",__FILE__)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
@@ -981,8 +981,8 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 !---
-IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_grad_rep%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","hcurl_grad_getmop",__FILE__)
-IF(oft_3D_h1_cast(hgrad_rep,hcurl_grad_rep%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","hcurl_grad_getmop",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_grad_rep%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_getmop",__FILE__)
+IF(.NOT.oft_3D_h1_cast(hgrad_rep,hcurl_grad_rep%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_getmop",__FILE__)
 !---------------------------------------------------------------------------
 ! Allocate matrix
 !---------------------------------------------------------------------------
@@ -1136,8 +1136,8 @@ CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 CLASS(oft_h0_fem), POINTER :: hgrad_rep
 DEBUG_STACK_PUSH
 !---
-IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_grad_rep%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","hcurl_grad_getmop",__FILE__)
-IF(oft_3D_h1_cast(hgrad_rep,hcurl_grad_rep%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","hcurl_grad_getmop",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_grad_rep%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_getmop",__FILE__)
+IF(.NOT.oft_3D_h1_cast(hgrad_rep,hcurl_grad_rep%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_getmop",__FILE__)
 !---Initialize vectors to zero
 NULLIFY(xcurl,xgrad)
 call x%set(0.d0)
@@ -1197,8 +1197,8 @@ CLASS(oft_bmesh), POINTER :: smesh
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---
-IF(oft_3D_hcurl_cast(hcurl_rep,hcurl_grad_rep%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","oft_hcurl_grad_bproject",__FILE__)
-IF(oft_3D_h1_cast(hgrad_rep,hcurl_grad_rep%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","oft_hcurl_grad_bproject",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_grad_rep%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","oft_hcurl_grad_bproject",__FILE__)
+IF(.NOT.oft_3D_h1_cast(hgrad_rep,hcurl_grad_rep%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","oft_hcurl_grad_bproject",__FILE__)
 mesh=>hcurl_rep%mesh
 smesh=>hcurl_rep%mesh%bmesh
 CALL smesh%quad_rule(hcurl_rep%order*2+1,quad)
@@ -1762,8 +1762,8 @@ CLASS(oft_ml_fem_type), POINTER :: Ml_curl,ML_grad
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
 CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(curl_rep,self%ML_FE_rep%ml_fields(1)%ml%current_level)/=0)CALL oft_abort("Incorrect Curl FE type","base_push",__FILE__)
-IF(oft_3D_h1_cast(grad_rep,self%ML_FE_rep%ml_fields(2)%ml%current_level)/=0)CALL oft_abort("Incorrect Grad FE type","base_push",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(curl_rep,self%ML_FE_rep%ml_fields(1)%ml%current_level))CALL oft_abort("Incorrect Curl FE type","base_push",__FILE__)
+IF(.NOT.oft_3D_h1_cast(grad_rep,self%ML_FE_rep%ml_fields(2)%ml%current_level))CALL oft_abort("Incorrect Grad FE type","base_push",__FILE__)
 !---
 NULLIFY(array_c,array_f)
 Ml_curl=>self%ML_FE_rep%ml_fields(1)%ml
@@ -1979,8 +1979,8 @@ CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
 CLASS(oft_h0_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
-IF(oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe)/=0)CALL oft_abort("Incorrect Curl FE type","hcurl_grad_jump_error",__FILE__)
-IF(oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe)/=0)CALL oft_abort("Incorrect Grad FE type","hcurl_grad_jump_error",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_jump_error",__FILE__)
+IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_jump_error",__FILE__)
 !---Set quadrature order
 ALLOCATE(oft_trimesh::mesh_tmp)
 CALL mesh_tmp%quad_rule(quad_order, quad)

@@ -59,8 +59,6 @@ CALL test_lop_eig()
 CALL oft_finalize
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE: test_lop_eig
-!---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator LAG::LOP
 !---------------------------------------------------------------------------
 SUBROUTINE test_lop_eig()
