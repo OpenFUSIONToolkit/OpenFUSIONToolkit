@@ -19,7 +19,7 @@ module fem_base
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array, sort_matrix
 USE oft_quadrature
-USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, oft_init_seam
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_stitch_check, destory_seam
 USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
@@ -561,17 +561,17 @@ nbemax=nbetmp
 IF(.NOT.row%linkage%full)nbemax=oft_mpi_max(nbetmp)
 IF(oft_debug_print(3))WRITE(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lerecv(0:oft_env%nproc_con),lesend(0:oft_env%nproc_con))
+ALLOCATE(lerecv(0:row%linkage%nproc_con),lesend(0:row%linkage%nproc_con))
 ALLOCATE(lesend(0)%le(nbemax,2))
 !---Setup sorted linkage lists
 IF(.NOT.row%linkage%full)THEN
   !---Row vector space
   ALLOCATE(lle_tmp(row%linkage%nle))
   lle_tmp=row%linkage%lle(1,:)
-  ALLOCATE(row_skips(oft_env%nproc_con,row%ne))
+  ALLOCATE(row_skips(row%linkage%nproc_con,row%ne))
   row_skips=.TRUE.
   !$omp parallel do private(jp,jn,i,jk) schedule(dynamic,1)
-  DO j=1,oft_env%nproc_con
+  DO j=1,row%linkage%nproc_con
     jp=row%linkage%kle(j)
     jn=row%linkage%kle(j+1)-jp
     IF(jn>0)THEN
@@ -586,10 +586,10 @@ IF(.NOT.row%linkage%full)THEN
   !---Column vector space
   ALLOCATE(lle_tmp(col%linkage%nle))
   lle_tmp=col%linkage%lle(1,:)
-  ALLOCATE(col_skips(oft_env%nproc_con,col%ne))
+  ALLOCATE(col_skips(row%linkage%nproc_con,col%ne))
   col_skips=.TRUE.
   !$omp parallel do private(jp,jn,i,jk) schedule(dynamic,1)
-  DO j=1,oft_env%nproc_con
+  DO j=1,row%linkage%nproc_con
     jp=col%linkage%kle(j)
     jn=col%linkage%kle(j+1)-jp
     IF(jn>0)THEN
@@ -603,7 +603,7 @@ IF(.NOT.row%linkage%full)THEN
   DEALLOCATE(lle_tmp)
 END IF
 !---
-ALLOCATE(ncon(0:oft_env%nproc_con),nrecv(0:oft_env%nproc_con))
+ALLOCATE(ncon(0:row%linkage%nproc_con),nrecv(0:row%linkage%nproc_con))
 ncon=0
 DO i=1,row%nbe
   k=row%lbe(i)
@@ -612,7 +612,7 @@ DO i=1,row%nbe
       ncon(0)=ncon(0)+1
       lesend(0)%le(ncon(0),:) = (/row%global%le(k),col%global%le(lee(j))/)
       IF(.NOT.row%linkage%full)THEN
-        DO m=1,oft_env%nproc_con
+        DO m=1,row%linkage%nproc_con
           IF(row_skips(m,k).AND.col_skips(m,lee(j)))CYCLE
           ncon(m)=ncon(m)+1
         END DO
@@ -624,7 +624,7 @@ DO i=1,row%nbe
         ncon(0)=ncon(0)+1
         lesend(0)%le(ncon(0),:) = (/row%global%le(k),col%global%le(lee(j))/)
         IF(.NOT.row%linkage%full)THEN
-          DO m=1,oft_env%nproc_con
+          DO m=1,row%linkage%nproc_con
             IF(row_skips(m,k).OR.col_skips(m,lee(j)))CYCLE
             ncon(m)=ncon(m)+1
           END DO
@@ -642,7 +642,7 @@ IF(periodic)THEN
         ncon(0)=ncon(0)+1
         lesend(0)%le(ncon(0),:) = (/row%global%le(i),col%global%le(lee(j))/)
         IF(.NOT.row%linkage%full)THEN
-          DO m=1,oft_env%nproc_con
+          DO m=1,row%linkage%nproc_con
             IF(row_skips(m,i).AND.col_skips(m,lee(j)))CYCLE
             ncon(m)=ncon(m)+1
           END DO
@@ -654,25 +654,25 @@ END IF
 nrecv(0)=nbemax
 IF(.NOT.row%linkage%full)THEN
 #ifdef HAVE_MPI
-  DO j=1,oft_env%nproc_con
-    CALL MPI_ISEND(ncon(j),1,OFT_MPI_I4,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  DO j=1,row%linkage%nproc_con
+    CALL MPI_ISEND(ncon(j),1,OFT_MPI_I4,row%linkage%proc_con(j),1,oft_env%COMM,row%linkage%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','fem_fill_lgraph',__FILE__)
-    CALL MPI_IRECV(nrecv(j),1,OFT_MPI_I4,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    CALL MPI_IRECV(nrecv(j),1,OFT_MPI_I4,row%linkage%proc_con(j),1,oft_env%COMM,row%linkage%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','fem_fill_lgraph',__FILE__)
   END DO
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%recv,ierr)
-  DO i=1,oft_env%nproc_con
+  CALL oft_mpi_waitall(row%linkage%nproc_con,row%linkage%recv_reqs,ierr)
+  DO i=1,row%linkage%nproc_con
     ALLOCATE(lesend(i)%le(ncon(i),2))
     lesend(i)%le=0
     ALLOCATE(lerecv(i)%le(nrecv(i),2))
   END DO
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(row%linkage%nproc_con,row%linkage%send_reqs,ierr)
   ncon=0
   DO i=1,row%nbe
     k=row%lbe(i)
     IF(glob_irow(k))THEN
       DO j=kee(k),kee(k+1)-1
-        DO m=1,oft_env%nproc_con
+        DO m=1,row%linkage%nproc_con
           IF(row_skips(m,k).AND.col_skips(m,lee(j)))CYCLE
           ncon(m)=ncon(m)+1
           lesend(m)%le(ncon(m),:) = (/row%global%le(k),col%global%le(lee(j))/)
@@ -681,7 +681,7 @@ IF(.NOT.row%linkage%full)THEN
     ELSE
       DO j=kee(k),kee(k+1)-1
         IF(col%be(lee(j)))THEN
-          DO m=1,oft_env%nproc_con
+          DO m=1,row%linkage%nproc_con
             IF(row_skips(m,k).OR.col_skips(m,lee(j)))CYCLE
             ncon(m)=ncon(m)+1
             lesend(m)%le(ncon(m),:) = (/row%global%le(k),col%global%le(lee(j))/)
@@ -696,7 +696,7 @@ IF(.NOT.row%linkage%full)THEN
       IF(row%be(i))CYCLE
       DO j=kee(i),kee(i+1)-1
         IF(glob_icol(lee(j)))THEN
-          DO m=1,oft_env%nproc_con
+          DO m=1,row%linkage%nproc_con
             IF(row_skips(m,i).AND.col_skips(m,lee(j)))CYCLE
             ncon(m)=ncon(m)+1
             lesend(m)%le(ncon(m),:) = (/row%global%le(i),col%global%le(lee(j))/)
@@ -717,16 +717,16 @@ IF(.NOT.row%linkage%full)THEN
 #ifdef HAVE_MPI
   CALL oft_mpi_barrier(ierr) ! Wait for all processes
   !---Create Send and Recv calls
-  do j=1,oft_env%nproc_con
-    call MPI_ISEND(lesend(j)%le,2*ncon(j),OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  do j=1,row%linkage%nproc_con
+    call MPI_ISEND(lesend(j)%le,2*ncon(j),OFT_MPI_I8,row%linkage%proc_con(j),1,oft_env%COMM,row%linkage%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','fem_fill_lgraph',__FILE__)
-    call MPI_IRECV(lerecv(j)%le,2*nrecv(j),OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    call MPI_IRECV(lerecv(j)%le,2*nrecv(j),OFT_MPI_I8,row%linkage%proc_con(j),1,oft_env%COMM,row%linkage%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','fem_fill_lgraph',__FILE__)
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+    IF(oft_mpi_check_reqs(row%linkage%nproc_con,row%linkage%recv_reqs))EXIT ! All recieves have been processed
+    CALL oft_mpi_waitany(row%linkage%nproc_con,row%linkage%recv_reqs,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','fem_fill_lgraph',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array
     netmp=nrecv(j)
@@ -791,7 +791,7 @@ ALLOCATE(lrtmp(nnz_new),new_graph%kr(row%ne+1))
 nnz_new=0
 new_graph%kr=0
 ncon=1
-nproc_con=oft_env%nproc_con
+nproc_con=row%linkage%nproc_con
 IF(row%linkage%full)nproc_con=0
 DO i=1,row%ne
   DO j=kee(i),kee(i+1)-1
@@ -857,10 +857,10 @@ __FILE__)
 DEALLOCATE(lesend(0)%le)
 IF(.NOT.row%linkage%full)THEN
 #ifdef HAVE_MPI
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(row%linkage%nproc_con,row%linkage%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','fem_fill_lgraph',__FILE__)
   CALL oft_mpi_barrier(ierr)
-  DO i=1,oft_env%nproc_con
+  DO i=1,row%linkage%nproc_con
     DEALLOCATE(lesend(i)%le)
     DEALLOCATE(lerecv(i)%le)
   END DO
@@ -1097,8 +1097,9 @@ DEBUG_STACK_PUSH
 mesh=>self%mesh
 IF(.NOT.mesh%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 CALL oft_increase_indent
-!---Set MPI transfer arrays
+!---Copy seam information from mesh
 allocate(self%linkage,self%global)
+CALL oft_init_seam(mesh,self%linkage)
 !---Determine global element count
 mycounts=(/mesh%global%np,mesh%global%ne,mesh%global%nf,mesh%global%nc/)
 self%global%ne=sum(self%gstruct*mycounts)
@@ -1154,11 +1155,11 @@ do i=1,mesh%nc
 end do
 !$omp end parallel
 !---
-ALLOCATE(linktmp(2,5*self%nbe,0:oft_env%nproc_con))
+ALLOCATE(linktmp(2,5*self%nbe,0:self%linkage%nproc_con))
 linktmp = 0
-ALLOCATE(ncon(0:oft_env%nproc_con))
+ALLOCATE(ncon(0:self%linkage%nproc_con))
 ncon=0
-ALLOCATE(self%linkage%kle(0:oft_env%nproc_con+1)) ! Allocate point linkage arrays
+ALLOCATE(self%linkage%kle(0:self%linkage%nproc_con+1)) ! Allocate point linkage arrays
 self%linkage%kle=0
 self%linkage%nbe=self%nbe
 self%linkage%lbe=>self%lbe
@@ -1171,10 +1172,10 @@ IF(.NOT.mesh%fullmesh)nbemax=oft_mpi_max(nbetmp)
 if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 self%linkage%nbemax=nbemax
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lesend(oft_env%nproc_con+1),lerecv(oft_env%nproc_con+1))
+ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))
 allocate(lesend(1)%le(nbemax))
 IF(.NOT.mesh%fullmesh)THEN
-  do i=1,oft_env%nproc_con
+  do i=1,self%linkage%nproc_con
     allocate(lerecv(i)%le(nbemax))
   end do
 END IF
@@ -1189,20 +1190,20 @@ IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
   CALL oft_mpi_barrier(ierr) ! Wait for all processes
   !---Point dummy Send arrays to main Send array
-  do i=2,oft_env%nproc_con
+  do i=2,self%linkage%nproc_con
     lesend(i)%le=>lesend(1)%le
   end do
   !---Create Send and Recv calls
-  do j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  do j=1,self%linkage%nproc_con
+    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','fem_global_linkage',__FILE__)
-    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','fem_global_linkage',__FILE__)
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+    IF(oft_mpi_check_reqs(self%linkage%nproc_con,self%linkage%recv_reqs))EXIT ! All recieves have been processed
+    CALL oft_mpi_waitany(self%linkage%nproc_con,self%linkage%recv_reqs,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','fem_global_linkage',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array
     !---Determine location of boundary points on other processors
@@ -1249,20 +1250,20 @@ END IF
 self%linkage%kle(0)=neel
 !---Condense linkage to sparse rep
 self%linkage%nle=sum(self%linkage%kle)
-self%linkage%kle(oft_env%nproc_con+1)=self%linkage%nle+1
-do i=oft_env%nproc_con,0,-1 ! cumulative unique point linkage count
+self%linkage%kle(self%linkage%nproc_con+1)=self%linkage%nle+1
+do i=self%linkage%nproc_con,0,-1 ! cumulative unique point linkage count
   self%linkage%kle(i)=self%linkage%kle(i+1)-self%linkage%kle(i)
 end do
 !---
 if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count','fem_global_linkage',__FILE__)
 !---
 allocate(self%linkage%lle(2,self%linkage%nle))
-allocate(self%linkage%send(0:oft_env%nproc_con),self%linkage%recv(0:oft_env%nproc_con))
+allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
 !---
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
-do i=0,oft_env%nproc_con
+do i=0,self%linkage%nproc_con
   !---
   DO j=1,ncon(i)
     m=linktmp(2,j,i)
@@ -1270,7 +1271,7 @@ do i=0,oft_env%nproc_con
     isort(j)=j
     !---
     IF(i>0)THEN
-      IF(oft_env%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
+      IF(self%linkage%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
     END IF
   END DO
   !---
@@ -1313,10 +1314,10 @@ do i=1,self%nbe
 end do
 IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr) ! Wait for all sends to complete
+  CALL oft_mpi_waitall(self%linkage%nproc_con,self%linkage%send_reqs,ierr) ! Wait for all sends to complete
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','fem_global_linkage',__FILE__)
   !---Deallocate temporary work arrays
-  do i=1,oft_env%nproc_con
+  do i=1,self%linkage%nproc_con
     deallocate(lerecv(i)%le)
   end do
 #else
@@ -1479,7 +1480,6 @@ force_native=.FALSE.
 IF(PRESENT(cache))do_cache=cache
 IF(PRESENT(native))force_native=native
 !---
-
 IF(use_petsc.AND.(.NOT.force_native))THEN
   IF(ASSOCIATED(self%cache_PETSc))THEN
     CALL self%cache_PETSc%new(new)
@@ -1531,7 +1531,7 @@ NULLIFY(valtmp)
 IF(oft_debug_print(1))WRITE(*,'(6A)')oft_indent,'Writing "',TRIM(path), &
   '" to file "',TRIM(filename),'"'
 CALL self%vec_create(outfield,native=.TRUE.)
-IF(native_vector_cast(outvec,outfield)<0)CALL oft_abort('Failed to create "outfield".', &
+IF(.NOT.native_vector_cast(outvec,outfield))CALL oft_abort('Failed to create "outfield".', &
   'fem_vec_save',__FILE__)
 !---
 CALL source%get_local(valtmp,1)
@@ -1569,7 +1569,7 @@ NULLIFY(valtmp)
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Reading "',TRIM(path), &
   '" from file "',TRIM(filename),'"'
 CALL self%vec_create(infield,native=.TRUE.)
-IF(native_vector_cast(invec,infield)<0)CALL oft_abort('Failed to create "infield".', &
+IF(.NOT.native_vector_cast(invec,infield))CALL oft_abort('Failed to create "infield".', &
   'fem_vec_load',__FILE__)
 !---
 lge=>self%global%le
@@ -1920,6 +1920,7 @@ mesh=>self%mesh
 has_parent=ASSOCIATED(mesh%parent)
 IF(mesh%skip)THEN
   allocate(self%linkage,self%global)
+  CALL oft_init_seam(mesh,self%linkage)
   IF(.NOT.mesh%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
   self%linkage%skip=.TRUE.
   !---Determine global element count
@@ -1937,17 +1938,17 @@ IF(mesh%skip)THEN
     self%linkage%full=.FALSE.
   END IF
   !---
-  allocate(self%linkage%kle(0:oft_env%nproc_con+1))
+  allocate(self%linkage%kle(0:self%linkage%nproc_con+1))
   self%linkage%kle=0
   nbetmp=0_i4
   nbemax=oft_mpi_max(nbetmp)
   if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
   self%linkage%nbemax=nbemax
   !---Allocate temporary Send/Recv arrays
-  ALLOCATE(lesend(oft_env%nproc_con+1),lerecv(oft_env%nproc_con+1))
+  ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))
   allocate(lesend(1)%le(nbemax))
   IF(.NOT.mesh%fullmesh)THEN
-    do i=1,oft_env%nproc_con
+    do i=1,self%linkage%nproc_con
       allocate(lerecv(i)%le(nbemax))
     end do
   END IF
@@ -1958,20 +1959,20 @@ IF(mesh%skip)THEN
 #ifdef HAVE_MPI
     CALL oft_mpi_barrier(ierr) ! Wait for all processes
     !---Point dummy Send arrays to main Send array
-    do i=2,oft_env%nproc_con
+    do i=2,self%linkage%nproc_con
       lesend(i)%le=>lesend(1)%le
     end do
     !---Create Send and Recv calls
-    do j=1,oft_env%nproc_con
-      CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+    do j=1,self%linkage%nproc_con
+      CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%send_reqs(j),ierr)
       IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','bfem_global_linkage',__FILE__)
-      CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+      CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%recv_reqs(j),ierr)
       IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','bfem_global_linkage',__FILE__)
     end do
     !---Loop over each connected processor
     do while(.TRUE.)
-      IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-      CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+      IF(oft_mpi_check_reqs(self%linkage%nproc_con,self%linkage%recv_reqs))EXIT ! All recieves have been processed
+      CALL oft_mpi_waitany(self%linkage%nproc_con,self%linkage%recv_reqs,j,ierr) ! Wait for completed recieve
       IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','bfem_global_linkage',__FILE__)
     end do
 #else
@@ -1980,24 +1981,24 @@ CALL oft_abort("Distributed linkage requires MPI","bfem_global_linkage",__FILE__
   END IF
   !---Condense linkage to sparse rep
   self%linkage%nle=SUM(self%linkage%kle)
-  self%linkage%kle(oft_env%nproc_con+1)=self%linkage%nle+1
-  do i=oft_env%nproc_con,0,-1 ! cumulative unique point linkage count
+  self%linkage%kle(self%linkage%nproc_con+1)=self%linkage%nle+1
+  do i=self%linkage%nproc_con,0,-1 ! cumulative unique point linkage count
     self%linkage%kle(i)=self%linkage%kle(i+1)-self%linkage%kle(i)
   end do
   !---
   if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count(skip)','bfem_global_linkage',__FILE__)
   !---
-  allocate(self%linkage%send(0:oft_env%nproc_con),self%linkage%recv(0:oft_env%nproc_con))
-  do i=0,oft_env%nproc_con
+  allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
+  do i=0,self%linkage%nproc_con
     !---Allocate permanent stitching arrays
     self%linkage%send(i)%n=0; self%linkage%recv(i)%n=0
   end do
   IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
-    CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr) ! Wait for all sends to complete
+    CALL oft_mpi_waitall(self%linkage%nproc_con,self%linkage%send_reqs,ierr) ! Wait for all sends to complete
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','bfem_global_linkage',__FILE__)
     !---Deallocate temporary work arrays
-    do i=1,oft_env%nproc_con
+    do i=1,self%linkage%nproc_con
       deallocate(lerecv(i)%le)
     end do
 #else
@@ -2024,6 +2025,8 @@ CALL oft_abort("Distributed linkage requires MPI","bfem_global_linkage",__FILE__
 END IF
 !---Set MPI transfer arrays
 allocate(self%linkage,self%global)
+CALL oft_init_seam(mesh,self%linkage)
+!
 IF(has_parent)ALLOCATE(self%parent)
 IF(.NOT.mesh%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !---Determine global element count
@@ -2095,11 +2098,11 @@ do i=1,mesh%nc
   end do
 end do
 !$omp end parallel
-ALLOCATE(linktmp(2,5*self%nbe,0:oft_env%nproc_con))
+ALLOCATE(linktmp(2,5*self%nbe,0:self%linkage%nproc_con))
 linktmp = 0
-ALLOCATE(ncon(0:oft_env%nproc_con))
+ALLOCATE(ncon(0:self%linkage%nproc_con))
 ncon=0
-ALLOCATE(self%linkage%kle(0:oft_env%nproc_con+1)) ! Allocate point linkage arrays
+ALLOCATE(self%linkage%kle(0:self%linkage%nproc_con+1)) ! Allocate point linkage arrays
 self%linkage%kle=0
 self%linkage%nbe=self%nbe
 self%linkage%lbe=>self%lbe
@@ -2112,10 +2115,10 @@ IF(.NOT.mesh%fullmesh)nbemax=oft_mpi_max(nbetmp)
 if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 self%linkage%nbemax=nbemax
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lesend(oft_env%nproc_con+1),lerecv(oft_env%nproc_con+1))
+ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))
 allocate(lesend(1)%le(nbemax))
 IF(.NOT.mesh%fullmesh)THEN
-  do i=1,oft_env%nproc_con
+  do i=1,self%linkage%nproc_con
     allocate(lerecv(i)%le(nbemax))
   end do
 END IF
@@ -2130,20 +2133,20 @@ IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
   CALL oft_mpi_barrier(ierr) ! Wait for all processes
   !---Point dummy Send arrays to main Send array
-  do i=2,oft_env%nproc_con
+  do i=2,self%linkage%nproc_con
     lesend(i)%le=>lesend(1)%le
   end do
   !---Create Send and Recv calls
-  do j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  do j=1,self%linkage%nproc_con
+    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','bfem_global_linkage',__FILE__)
-    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','bfem_global_linkage',__FILE__)
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+    IF(oft_mpi_check_reqs(self%linkage%nproc_con,self%linkage%recv_reqs))EXIT ! All recieves have been processed
+    CALL oft_mpi_waitany(self%linkage%nproc_con,self%linkage%recv_reqs,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','bfem_global_linkage',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array
     !---Determine location of boundary points on other processors
@@ -2189,20 +2192,20 @@ end do
 self%linkage%kle(0)=neel
 !---Condense linkage to sparse rep
 self%linkage%nle=sum(self%linkage%kle)
-self%linkage%kle(oft_env%nproc_con+1)=self%linkage%nle+1
-do i=oft_env%nproc_con,0,-1 ! cumulative unique point linkage count
+self%linkage%kle(self%linkage%nproc_con+1)=self%linkage%nle+1
+do i=self%linkage%nproc_con,0,-1 ! cumulative unique point linkage count
   self%linkage%kle(i)=self%linkage%kle(i+1)-self%linkage%kle(i)
 end do
 !---
 if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count','bfem_global_linkage',__FILE__)
 !---
 allocate(self%linkage%lle(2,self%linkage%nle))
-allocate(self%linkage%send(0:oft_env%nproc_con),self%linkage%recv(0:oft_env%nproc_con))
+allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
 !---
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
-do i=0,oft_env%nproc_con
+do i=0,self%linkage%nproc_con
   !---
   DO j=1,ncon(i)
     m=linktmp(2,j,i)
@@ -2210,7 +2213,7 @@ do i=0,oft_env%nproc_con
     isort(j)=j
     !---
     IF(i>0)THEN
-      IF(oft_env%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
+      IF(self%linkage%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
     END IF
   END DO
   !---
@@ -2248,10 +2251,10 @@ do i=1,self%nbe
 end do
 !---Synchronize
 IF(.NOT.mesh%fullmesh)THEN
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr) ! Wait for all sends to complete
+  CALL oft_mpi_waitall(self%linkage%nproc_con,self%linkage%send_reqs,ierr) ! Wait for all sends to complete
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','bfem_global_linkage',__FILE__)
   !---Deallocate temporary work arrays
-  do i=1,oft_env%nproc_con
+  do i=1,self%linkage%nproc_con
     deallocate(lerecv(i)%le)
   end do
 END IF

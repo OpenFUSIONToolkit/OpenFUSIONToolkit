@@ -1568,16 +1568,16 @@ integer(i4) :: i,k,ierr
 DEBUG_STACK_PUSH
 IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','jblock_precond_apply',__FILE__)
 IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','jblock_precond_apply',__FILE__)
-IF(native_vector_cast(uv,u)<0)CALL oft_abort('"u" is not a vector object.','jblock_precond_apply',__FILE__)
-IF(native_vector_cast(gv,g)<0)CALL oft_abort('"g" is not a vector object.','jblock_precond_apply',__FILE__)
-IF(native_vector_cast(md,self%A%D)<0)CALL oft_abort('"A%D" is not a vector object.','jblock_precond_apply',__FILE__)
+IF(.NOT.native_vector_cast(uv,u))CALL oft_abort('"u" is not a vector object.','jblock_precond_apply',__FILE__)
+IF(.NOT.native_vector_cast(gv,g))CALL oft_abort('"g" is not a vector object.','jblock_precond_apply',__FILE__)
+IF(.NOT.native_vector_cast(md,self%A%D))CALL oft_abort('"A%D" is not a vector object.','jblock_precond_apply',__FILE__)
 !---Initialize solver
 IF(.NOT.self%initialized)THEN
   ALLOCATE(self%u_save(u%n),self%g_save(u%n))
   CALL u%new(p)
-  ierr=native_vector_cast(self%p,p)
+  IF(.NOT.native_vector_cast(self%p,p))CALL oft_abort('"p" is not a vector object.','jblock_precond_apply',__FILE__)
   CALL u%new(q)
-  ierr=native_vector_cast(self%q,q)
+  IF(.NOT.native_vector_cast(self%q,q))CALL oft_abort('"q" is not a vector object.','jblock_precond_apply',__FILE__)
   NULLIFY(p,q)
   CALL solver_setup(self)
 END IF
@@ -1987,7 +1987,7 @@ CLASS(oft_solver), POINTER :: pretmp
 TYPE(oft_1d_int), pointer, dimension(:) :: parts_tmp => NULL()
 DEBUG_STACK_PUSH
 !---
-IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'bjprecond_apply',__FILE__)
 !---Initialize local matrix
 IF(.NOT.self%initialized)THEN

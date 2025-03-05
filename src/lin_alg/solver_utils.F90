@@ -15,7 +15,7 @@ USE oft_stitching, ONLY: oft_seam, seam_list, oft_global_stitch, &
   oft_stitch_check
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_matrix, oft_matrix_ptr, &
   oft_graph, oft_graph_ptr, oft_matrix_map, oft_ml_vecspace
-USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, oft_native_matrix
+USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_native_solvers, ONLY: oft_native_cg_solver, native_cg_solver_cast, &
   oft_native_gmres_solver, native_gmres_solver_cast, oft_jblock_precond, &

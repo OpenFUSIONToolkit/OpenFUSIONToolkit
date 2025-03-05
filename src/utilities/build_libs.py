@@ -391,7 +391,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         if "MPI_FC" in mydict:
             cmake_lines.append("-DMPI_Fortran_COMPILER:PATH={0}".format(mydict["MPI_FC"]))
     if have_mpi:
-        if "MPI_USE_HEADERS" in mydict:
+        if mydict.get("MPI_USE_HEADERS",False):
             cmake_lines.append("-DOFT_MPI_HEADER:BOOL=TRUE")
     else:
         cmake_lines.append("-DOFT_USE_MPI:BOOL=FALSE")
@@ -402,6 +402,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DOFT_METIS_ROOT:PATH={0}".format(mydict["METIS_ROOT"]))
     if "HDF5_ROOT" in mydict:
         cmake_lines.append("-DHDF5_ROOT:PATH={0}".format(mydict["HDF5_ROOT"]))
+    if mydict.get("HDF5_HAS_HL",False):
+        cmake_lines.append("-DOFT_HDF5_HL:BOOL=TRUE")
     if "NETCDF_ROOT" in mydict:
         cmake_lines.append("-DOFT_NETCDF_ROOT:PATH={0}".format(mydict["NETCDF_ROOT"]))
     if "BLAS_ROOT" in mydict:
@@ -766,7 +768,7 @@ class MPICH(package):
         if ver_major == 3:
             self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
         elif ver_major == 4:
-            self.url = "https://www.mpich.org/static/downloads/4.2.2/mpich-4.2.2.tar.gz"
+            self.url = "https://www.mpich.org/static/downloads/4.2.3/mpich-4.2.3.tar.gz"
         else:
             raise ValueError("Unknown MPICH version")
         self.build_timeout = 30
@@ -806,7 +808,8 @@ class MPICH(package):
         config_options = [
             "--prefix={MPI_ROOT}",
             "--enable-fortran=yes",
-            "--enable-shared=no",
+            "--enable-shared=yes",
+            "--enable-static=no",
             "--with-pic",
             "--without-hip",
             "--without-cuda"
@@ -928,14 +931,17 @@ class OpenMPI(package):
 
 
 class HDF5(package):
-    def __init__(self, parallel=False, cmake_build=False):
+    def __init__(self, parallel=False, cmake_build=False, build_hl=False):
         self.name = "HDF5"
         self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.5/hdf5-1.14.5.tar.gz"
         self.parallel = parallel
         self.cmake_build = cmake_build
+        self.build_hl = build_hl
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
+        if self.build_hl:
+            self.config_dict["HDF5_HAS_HL"] = True
         if "HDF5_CC" in config_dict:
             self.skip = True
             print("HDF5 provided by compiler wrappers: Skipping build")
@@ -980,6 +986,14 @@ class HDF5(package):
                 # "--enable-examples=no",
                 "--with-pic"
             ]
+        if self.build_hl:
+            if self.cmake_build:
+                cmake_options.append("HDF5_BUILD_HL_LIB:BOOL=ON")
+            else:
+                configure_options.append("--enable-hl=yes")
+        else:
+            if not self.cmake_build:
+                configure_options.append("--enable-hl=no")
         if self.parallel and ("MPI_CC" in self.config_dict):
             build_lines += [
                 "export CC={MPI_CC}",
@@ -1020,12 +1034,13 @@ class HDF5(package):
 
 
 class NETCDF(package):
-    def __init__(self, comp_wrapper=False):
+    def __init__(self, comp_wrapper=False, cmake_build=True):
         self.name = "NETCDF"
-        self.url = "https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.6.2.tar.gz"
-        self.build_dir = "netcdf-c-4.6.2"
-        self.install_dir = "netcdf-4_6_2"
+        self.url = "https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.7.4.tar.gz"
+        self.build_dir = "netcdf-c-4.7.4"
+        self.install_dir = "netcdf-4_7_4"
         self.comp_wrapper = comp_wrapper
+        self.cmake_build = cmake_build
         self.children = [NETCDF_Fortran(comp_wrapper)]
 
     def setup(self, config_dict):
@@ -1051,26 +1066,21 @@ class NETCDF(package):
         return self.config_dict
 
     def build(self):
-#         build_script = """rm -rf build
-# mkdir build && cd build
-# export CC={CC}
-# export FC={FC}
-# {CMAKE} \
-#   -DCMAKE_INSTALL_PREFIX:PATH={NETCDF_ROOT} \
-#   -DHDF5_ROOT:PATH={HDF5_ROOT} \
-#   -DBUILD_SHARED_LIBS:BOOL=FALSE \
-#   -DENABLE_DAP:BOOL=FALSE \
-#   ..
-# make -j{MAKE_THREADS}
-# make install""".format(**self.config_dict)
-#         self.run_build(build_script)
+        if self.cmake_build:
+            configure_lines = [
+                '{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={NETCDF_ROOT} -DHDF5_ROOT:PATH={HDF5_ROOT} -DBUILD_SHARED_LIBS:BOOL=OFF -DENABLE_DAP:BOOL=OFF ..'
+            ]
+        else:
+            configure_lines = [
+                "../configure --prefix={NETCDF_ROOT} --enable-netcdf-4 --enable-shared=no --with-pic --disable-dap"
+            ]
         build_lines = [
             "rm -rf build",
             "mkdir build",
             "cd build",
-            "export CC={HDF5_CC}",
-            "export FC={HDF5_FC}",
-            "../configure --prefix={NETCDF_ROOT} --enable-netcdf-4 --enable-shared=no --with-pic --disable-dap",
+            "export CC={CC}",
+            "export FC={FC}"
+        ] + configure_lines + [
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1078,12 +1088,13 @@ class NETCDF(package):
 
 
 class NETCDF_Fortran(package):
-    def __init__(self, comp_wrapper=False):
+    def __init__(self, comp_wrapper=False, cmake_build=True):
         self.name = "NETCDF_Fortran"
-        self.url = "https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.4.4.tar.gz"
-        self.build_dir = "netcdf-fortran-4.4.4"
-        self.install_dir = "netcdf-4_6_2"
+        self.url = "https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.5.4.tar.gz"
+        self.build_dir = "netcdf-fortran-4.5.4"
+        self.install_dir = "netcdf-4_7_4"
         self.comp_wrapper = comp_wrapper
+        self.cmake_build = cmake_build
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1097,17 +1108,6 @@ class NETCDF_Fortran(package):
         return self.config_dict
 
     def build(self):
-#         build_script = """rm -rf build
-# mkdir build && cd build
-# export CC={CC}
-# export FC={FC}
-# {CMAKE} \
-#   -DCMAKE_INSTALL_PREFIX:PATH={NETCDF_ROOT} \
-#   -DBUILD_SHARED_LIBS:BOOL=FALSE \
-#   ..
-# make -j{MAKE_THREADS}
-# make install""".format(**self.config_dict)
-#         self.run_build(build_script)
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -1116,13 +1116,21 @@ class NETCDF_Fortran(package):
             "export FC={FC}",
             'export CPPFLAGS="-I{NETCDF_INCLUDE}"',
             'export LDFLAGS="-L{NETCDF_LIB}"',
-            'export LIBS="{NETCDF_C_LIBS}"']
+            'export LIBS="{NETCDF_C_LIBS}"'
+        ]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
             build_lines.append('export FCFLAGS="-fallow-argument-mismatch -I{NETCDF_INCLUDE}"')
         else:
             build_lines.append('export FCFLAGS="-I{NETCDF_INCLUDE}"')
-        build_lines += [
-            "../configure --prefix={NETCDF_Fortran_ROOT} --enable-shared=no --with-pic",
+        if self.cmake_build:
+            configure_lines = [
+                '{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={NETCDF_Fortran_ROOT} -DHDF5_ROOT:PATH={HDF5_ROOT} -DBUILD_SHARED_LIBS:BOOL=OFF ..'
+            ]
+        else:
+            configure_lines = [
+                "../configure --prefix={NETCDF_Fortran_ROOT} --enable-shared=no --with-pic"
+            ]
+        build_lines += configure_lines + [
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1949,12 +1957,13 @@ else:
     if (options.build_petsc == 1) or options.petsc_wrapper:
         parser.exit(-1, 'PETSc requires MPI\n')
 # HDF5
+HDF5_HL_required = ((options.build_netcdf == 1) or options.netcdf_wrapper)
 if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     config_dict['HDF5_CC'] = options.hdf5_cc
     config_dict['HDF5_FC'] = options.hdf5_fc
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
 else:
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())

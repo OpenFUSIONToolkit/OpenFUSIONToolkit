@@ -124,17 +124,7 @@ TYPE :: oft_env_type
   INTEGER(i4) :: nprocs = -1 !< Number of MPI tasks
   INTEGER(i4) :: nthreads = -1 !< Number of OpenMP threads
   INTEGER(i4) :: rank = -1 !< MPI rank
-  INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
-  INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
   INTEGER(i4) :: debug = 0 !< Debug level (1-3)
-  INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
-#ifdef OFT_MPI_F08
-  TYPE(mpi_request), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
-  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
-#else
-  INTEGER(i4), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
-  INTEGER(i4), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
-#endif
   LOGICAL :: head_proc = .FALSE. !< Lead processor flag
   LOGICAL :: pm = .TRUE. !< Performance monitor (default T=on, F=off)
   LOGICAL :: test_run = .FALSE. !< Test run
@@ -581,7 +571,7 @@ LOGICAL :: all_null
 all_null=.TRUE.
 #ifdef HAVE_MPI
 DO i=1,n
-  all_null=all_null.AND.(oft_env%recv(i)==MPI_REQUEST_NULL)
+  all_null=all_null.AND.(req(i)==MPI_REQUEST_NULL)
 END DO
 #endif
 END FUNCTION oft_mpi_check_reqs

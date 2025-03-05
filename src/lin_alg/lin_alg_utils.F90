@@ -19,7 +19,7 @@ USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_map, map_list, &
   oft_matrix, oft_matrix_ptr, oft_cmatrix, oft_cmatrix_ptr, &
   oft_graph, oft_graph_ptr, oft_matrix_map
 USE oft_native_la, ONLY: oft_native_vector, oft_native_cvector, &
-  oft_native_matrix, oft_native_cmatrix, native_vector_cast, native_cvector_cast
+  oft_native_matrix, oft_native_cmatrix, native_cvector_cast
 ! #ifdef HAVE_PETSC
 ! USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
 !   oft_petsc_matrix_cast
@@ -313,7 +313,13 @@ DEBUG_STACK_PUSH
 !---
 IF(oft_debug_print(3))WRITE(*,'(4X,A)')'Condensing seam structures'
 nblocks=SIZE(stitch_info)
-!---Condense stitching info
+!---
+stitcher%nproc_con=stitch_info(1)%s%nproc_con
+stitcher%proc_split=stitch_info(1)%s%proc_split
+stitcher%proc_con=>stitch_info(1)%s%proc_con
+stitcher%send_reqs=>stitch_info(1)%s%send_reqs
+stitcher%recv_reqs=>stitch_info(1)%s%recv_reqs
+!---Condense stitching 
 stitcher%full=.TRUE.
 stitcher%skip=.TRUE.
 stitcher%nbe=0
@@ -322,6 +328,11 @@ DO i=1,nblocks
   stitcher%full=stitcher%full.AND.stitch_info(i)%s%full
   stitcher%skip=stitcher%skip.AND.stitch_info(i)%s%skip
   stitcher%nbe=stitcher%nbe+stitch_info(i)%s%nbe
+  IF(stitcher%nproc_con/=stitch_info(i)%s%nproc_con)CALL oft_abort("Inconsistent number of processor connections","condense_stitch",__FILE__)
+  IF(stitcher%proc_split/=stitch_info(i)%s%proc_split)CALL oft_abort("Inconsistent processor connectivity split","condense_stitch",__FILE__)
+  IF(stitcher%nproc_con>0)THEN
+    IF(.NOT.ALL(stitcher%proc_con==stitch_info(i)%s%proc_con))CALL oft_abort("Inconsistent processor connectivity","condense_stitch",__FILE__)
+  END IF
   !---
   offset1=offset1+map(i)%n
 END DO
@@ -344,24 +355,24 @@ DO i=1,nblocks
   offset1=offset1+stitch_info(i)%s%nbe
 END DO
 !---
-allocate(stitcher%kle(0:oft_env%nproc_con+1)) ! Allocate point linkage arrays
+allocate(stitcher%kle(0:stitcher%nproc_con+1)) ! Allocate point linkage arrays
 stitcher%kle=0
 DO i=1,nblocks
-  DO j=0,oft_env%nproc_con
+  DO j=0,stitcher%nproc_con
     stitcher%kle(j)=stitcher%kle(j)+stitch_info(i)%s%kle(j+1)-stitch_info(i)%s%kle(j)
   END DO
 END DO
 !---Condense linkage to sparse rep
 stitcher%nle=SUM(stitcher%kle)
-stitcher%kle(oft_env%nproc_con+1)=stitcher%nle+1
-do i=oft_env%nproc_con,0,-1 ! cumulative unique point linkage count
+stitcher%kle(stitcher%nproc_con+1)=stitcher%nle+1
+do i=stitcher%nproc_con,0,-1 ! cumulative unique point linkage count
   stitcher%kle(i)=stitcher%kle(i+1)-stitcher%kle(i)
 end do
 if(stitcher%kle(0)/=1)call oft_abort('Bad element linkage count','fem_global_linkage',__FILE__)
 !---Construct seam lists
 allocate(stitcher%lle(2,stitcher%nle))
-allocate(stitcher%send(0:oft_env%nproc_con),stitcher%recv(0:oft_env%nproc_con))
-DO j=1,oft_env%nproc_con
+allocate(stitcher%send(0:stitcher%nproc_con),stitcher%recv(0:stitcher%nproc_con))
+DO j=1,stitcher%nproc_con
   m=stitcher%kle(j)
   offset1=0
   stitcher%nbemax=0
@@ -677,9 +688,9 @@ TYPE(oft_graph), POINTER :: outgraph
 INTEGER(i4) :: ierr
 INTEGER(i8) :: gsize,gtmp,gmax,gmin
 !---Allocate and setup map structure
-IF(native_cvector_cast(rowv,row_vec)<0)CALL oft_abort('"row_vec" is not a native vector.', &
+IF(.NOT.native_cvector_cast(rowv,row_vec))CALL oft_abort('"row_vec" is not a native vector.', &
   'create_matrix_real',__FILE__)
-IF(native_cvector_cast(colv,col_vec)<0)CALL oft_abort('"col_vec" is not a native vector.', &
+IF(.NOT.native_cvector_cast(colv,col_vec))CALL oft_abort('"col_vec" is not a native vector.', &
   'create_matrix_real',__FILE__)
 !---
 CALL condense_graph(ingraphs,outgraph,this%map,rowv%map,colv%map)

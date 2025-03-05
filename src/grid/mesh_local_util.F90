@@ -69,14 +69,12 @@ mesh_local_findedge=js
 DEBUG_STACK_POP
 end function mesh_local_findedge
 !------------------------------------------------------------------------------
-!> Find oriented face with corner points i1, i2 and i3.
-!!
-!! Orientation is (+,-) if [imin,imid,imax] is a (cyclic,anticyclic) permutation of [i1,i2,i3]
+!> Find face with corner points `inds` (no orientation is applied)
 !------------------------------------------------------------------------------
 function mesh_local_findface(self,inds)
 class(oft_mesh), intent(in) :: self !< Mesh to search
 integer(i4), intent(in) :: inds(:) !< Face points (ordered)
-integer(i4) :: mesh_local_findface !< Oriented face linking i1 -> i2 -> i3, zero if no face exists
+integer(i4) :: mesh_local_findface !< Face composed of `inds`, zero if no face exists
 integer(i4) :: ilo,imi,ihi,js,je,jp,jn,etmp(2),jsh(4)
 DEBUG_STACK_PUSH
 mesh_local_findface=0
@@ -107,7 +105,7 @@ ELSE
   END IF
   js=MINVAL(jsh); je=MAXVAL(jsh)
 END IF
-jp=self%klef(js)   ! pointer into low edge list
+jp=self%klef(js)      ! pointer into low edge list
 jn=self%klef(js+1)-jp ! number of shared faces
 js=search_array(je,self%llef(jp:jp+jn-1),jn)
 if(js/=0)js=js+jp-1

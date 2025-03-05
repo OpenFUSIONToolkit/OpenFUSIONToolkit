@@ -217,7 +217,7 @@ DO i=1,self%nfields
   IF(oft_debug_print(2))WRITE(*,'(4X,3A)')'Field -> "', &
   TRIM(path)//'_'//TRIM(self%field_tags(i)),'"'
   CALL self%fields(i)%fe%vec_create(outfield,native=.TRUE.)
-  IF(native_vector_cast(outvec,outfield)<0)CALL oft_abort('Failed to create "outfield".', &
+  IF(.NOT.native_vector_cast(outvec,outfield))CALL oft_abort('Failed to create "outfield".', &
     'fem_vec_save',__FILE__)
   !---
   CALL source%get_local(valtmp,i)
@@ -258,7 +258,7 @@ DO i=1,self%nfields
   IF(oft_debug_print(2))WRITE(*,'(4X,3A)')'  Field -> "', &
     TRIM(path)//'_'//TRIM(self%field_tags(i)),'"'
   CALL self%fields(i)%fe%vec_create(infield,native=.TRUE.)
-  IF(native_vector_cast(invec,infield)<0)CALL oft_abort('Failed to create "infield".', &
+  IF(.NOT.native_vector_cast(invec,infield))CALL oft_abort('Failed to create "infield".', &
     'fem_vec_load',__FILE__)
   lge=>self%fields(i)%fe%global%le
   IF(legacy)THEN

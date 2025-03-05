@@ -33,8 +33,6 @@ public mesh_sphere_add_quad, smesh_circle_load, smesh_circle_cadlink
 public smesh_circle_reffix, smesh_circle_add_quad
 contains
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_sphere_load
-!------------------------------------------------------------------------------
 !> Setup a spherical test mesh
 !! The mesh is initialized with a minimal "wheel" of cells
 !! - 7 Points

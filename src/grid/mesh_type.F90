@@ -32,7 +32,7 @@ USE oft_quadrature
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
-PUBLIC cell_is_curved, mesh_findcell, mesh_findcell2, bmesh_findcell
+PUBLIC cell_is_curved, oft_init_seam, mesh_findcell, mesh_findcell2, bmesh_findcell
 !------------------------------------------------------------------------------
 !> Global mesh information and indicies
 !!
@@ -69,6 +69,21 @@ TYPE, PUBLIC :: mesh_save_index
   INTEGER(i8) :: ncmax = 0 !< Max # of cells on one proc
 END TYPE mesh_save_index
 !------------------------------------------------------------------------------
+!> Processor-processor connectivity information for mesh
+!------------------------------------------------------------------------------
+TYPE, PUBLIC :: mesh_seam
+  INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
+  INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
+  INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
+#ifdef OFT_MPI_F08
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
+#else
+  INTEGER(i4), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
+  INTEGER(i4), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
+#endif
+END TYPE mesh_seam
+!------------------------------------------------------------------------------
 !> Global mesh information and indicies
 !!
 !! Contains global mexh context information.
@@ -81,6 +96,8 @@ TYPE, PUBLIC :: mesh_global
   INTEGER(i8) :: ne = 0 !< Global edge count
   INTEGER(i8) :: nf = 0 !< Global face count
   INTEGER(i8) :: nc = 0 !< Global cell count
+  ! INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
+  ! INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
   LOGICAL, POINTER, DIMENSION(:) :: gbp => NULL() !< Global boundary point flag (np)
   LOGICAL, POINTER, DIMENSION(:) :: gbe => NULL() !< Global boundary edge flag (ne)
   LOGICAL, POINTER, DIMENSION(:) :: gbf => NULL() !< Global boundary face flag (nf)
@@ -89,6 +106,15 @@ TYPE, PUBLIC :: mesh_global
   INTEGER(i8), POINTER, DIMENSION(:) :: le => NULL() !< Global index of edges (ne) [oriented]
   INTEGER(i8), POINTER, DIMENSION(:) :: lf => NULL() !< Global index of faces (nf)
   INTEGER(i8), POINTER, DIMENSION(:) :: lc => NULL() !< Global index of cells (nc)
+  TYPE(mesh_seam), POINTER :: seam => NULL()
+!   INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
+! #ifdef OFT_MPI_F08
+!   TYPE(mpi_request), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
+!   TYPE(mpi_request), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
+! #else
+!   INTEGER(i4), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
+!   INTEGER(i4), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
+! #endif
 END TYPE mesh_global
 !------------------------------------------------------------------------------
 !> Base mesh information and indicies
@@ -730,6 +756,24 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end function cell_is_curved
+!------------------------------------------------------------------------------
+!> Create @ref oft_seam object from mesh connectivity
+!------------------------------------------------------------------------------
+subroutine oft_init_seam(self,seam_obj)
+class(oft_amesh), intent(in) :: self !< Mesh containing cell
+type(oft_seam), intent(out) :: seam_obj !< Resulting seam object
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%global%seam))THEN
+  seam_obj%nproc_con=self%global%seam%nproc_con
+  seam_obj%proc_split=self%global%seam%proc_split
+  seam_obj%proc_con=>self%global%seam%proc_con
+  seam_obj%send_reqs=>self%global%seam%send_reqs
+  seam_obj%recv_reqs=>self%global%seam%recv_reqs
+ELSE
+  seam_obj%nproc_con=0
+END IF
+DEBUG_STACK_POP
+end subroutine oft_init_seam
 !---------------------------------------------------------------------------
 !> Estimate mesh volume
 !---------------------------------------------------------------------------

@@ -12,7 +12,7 @@
 module multigrid
 use oft_base
 USE oft_sort, ONLY: sort_array, sort_matrix
-use oft_mesh_type, only: oft_mesh, oft_bmesh
+use oft_mesh_type, only: oft_mesh, oft_bmesh, mesh_seam
 use oft_mesh_local_util, only: mesh_local_findedge, mesh_local_findface
 use oft_mesh_global_util, only: mesh_global_set_curved
 use oft_hexmesh_type, only: hex_fe
@@ -46,8 +46,19 @@ type :: multigrid_mesh
   integer(i4) :: lev = 0 !< Current structure level
   integer(i4) :: mgdim = 0 !< Size of MG structure
   integer(i4) :: nbase = 0 !< Number of local base refinements
+  INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
+  INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
+  INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
+#ifdef OFT_MPI_F08
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
+#else
+  INTEGER(i4), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
+  INTEGER(i4), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
+#endif
   class(oft_mesh), pointer :: mesh => NULL() !< Structure containing current mesh
   class(oft_bmesh), pointer :: smesh => NULL() !< Structure containing current mesh
+  TYPE(mesh_seam), POINTER :: seam => NULL()
   class(oft_mesh), pointer, dimension(:) :: meshes => NULL() !< Structure containing all meshes
   class(oft_bmesh), pointer, dimension(:) :: smeshes => NULL() !< Structure containing current mesh
   type(multigrid_inter), pointer, dimension(:) :: inter => NULL() !< Structure containing linkages
@@ -560,10 +571,8 @@ subroutine multigrid_reffix_ho_surf(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,ncde,cc
 real(r8) :: f1(4),f2(4),ftmp(4)
-class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
 class(oft_bmesh), pointer :: pmesh
-mesh=>mg_mesh%mesh
 smesh=>mg_mesh%smesh
 pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
 IF(.NOT.ASSOCIATED(pmesh%ho_info%r))RETURN
@@ -717,9 +726,9 @@ IF(smesh%ho_info%ncp==1)THEN
       DO j=1,2
         IF(smesh%lc(j,cc)>pmesh%np+pmesh%ne)THEN
           ftmp=ftmp+f2
-        ELSE IF(smesh%lc(j,cc)>pmesh%np)THEN
+        ELSE IF((smesh%lc(j,cc)>pmesh%np).AND.(smesh%lc(j,cc)<=pmesh%np+pmesh%ne))THEN
           !---Endpoint is mid point of edge
-          ed2=smesh%le(j,ed)-pmesh%np
+          ed2=smesh%lc(j,cc)-pmesh%np
           DO k=1,smesh%cell_np
             IF(ANY(pmesh%lc(k,i)==pmesh%le(:,ed2)))THEN
               CALL pmesh%vlog(k,f1)
@@ -737,8 +746,8 @@ IF(smesh%ho_info%ncp==1)THEN
         END IF
       END DO
       ftmp=ftmp/REAL(smesh%cell_np,8)
-      smesh%ho_info%r(:,cc+mesh%ne) = pmesh%log2phys(i,ftmp)
-      smesh%ho_info%lcp(1,cc) = cc+mesh%ne
+      smesh%ho_info%r(:,cc+smesh%ne) = pmesh%log2phys(i,ftmp)
+      smesh%ho_info%lcp(1,cc) = cc+smesh%ne
     END DO
   END DO
   !$omp end do nowait
@@ -1096,9 +1105,9 @@ END IF
 ! DEALLOCATE(mg_mesh)
 !---Reset global environment info (needs to be moved to a mesh-specific object)
 oft_env%nbase = -1
-oft_env%nproc_con = 0
-oft_env%proc_split = 0
-IF(ASSOCIATED(oft_env%proc_con))DEALLOCATE(oft_env%proc_con,oft_env%send,oft_env%recv)
+mg_mesh%nproc_con = 0
+mg_mesh%proc_split = 0
+IF(ASSOCIATED(mg_mesh%proc_con))DEALLOCATE(mg_mesh%proc_con,mg_mesh%send_reqs,mg_mesh%recv_reqs)
 contains
 subroutine destory_inter(obj)
 type(multigrid_inter), intent(inout) :: obj

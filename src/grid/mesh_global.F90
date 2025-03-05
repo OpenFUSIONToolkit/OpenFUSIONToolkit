@@ -20,7 +20,7 @@
 MODULE oft_mesh_global
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_mesh_type, ONLY: oft_mesh, oft_amesh, oft_bmesh
+USE oft_mesh_type, ONLY: oft_mesh, oft_amesh, oft_bmesh, oft_init_seam
 USE oft_mesh_local, ONLY: mesh_local_init, mesh_local_init, oft_metis_partmesh, &
   bmesh_local_init
 USE oft_stitching, ONLY: oft_seam, oft_stitch_check
@@ -337,7 +337,6 @@ if(oft_env%rank==0)then
       END IF
       pflag(isort(i))=k
     END DO
-    WRITE(*,*)'CHK',COUNT(pflag<=0),COUNT(pflag>oft_env%nnodes)
     DO i=1,self%nc
       cpart(i)=oft_env%nnodes+1
       DO k=1,self%cell_np
@@ -363,7 +362,6 @@ if(oft_env%rank==0)then
       END IF
       pflag(isort(i))=k
     END DO
-    WRITE(*,*)'CHK',COUNT(pflag<=0),COUNT(pflag>oft_env%nnodes)
     DO i=1,self%nc
       cpart(i)=oft_env%nnodes+1
       DO k=1,self%cell_np
@@ -488,8 +486,9 @@ do i=1,INT(self%global%nc,4) ! Loop over global cells
     enddo
   endif
 enddo
-call mesh_global_proccon(conflag,npcors) ! Determine neighbor processors
-allocate(oft_env%send(oft_env%nproc_con),oft_env%recv(oft_env%nproc_con))
+ALLOCATE(self%global%seam) ! Allocate grid seam structure
+call mesh_global_proccon(self,conflag,npcors) ! Determine neighbor processors
+allocate(self%global%seam%send_reqs(self%global%seam%nproc_con),self%global%seam%recv_reqs(self%global%seam%nproc_con))
 !---Sort point list
 allocate(isort(self%np))
 isort=(/(i,i=1,self%np)/)
@@ -531,7 +530,8 @@ end subroutine mesh_global_decomp
 !------------------------------------------------------------------------------
 !> Determine neighboring processors for MPI linkage
 !------------------------------------------------------------------------------
-subroutine mesh_global_proccon(lptmp,np)
+subroutine mesh_global_proccon(self,lptmp,np)
+class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(i4), intent(in) :: lptmp(np) !< List of global point indices from initialization
 integer(i4), intent(in) :: np !< number of points
 integer(i4), allocatable :: c(:),b(:),a(:)
@@ -579,14 +579,14 @@ do while(l.NE.oft_env%rank)
 enddo
 #endif
 DEALLOCATE(a,c)
-oft_env%nproc_con=sum(b) ! Number of processor connections
-oft_env%proc_split=oft_env%nproc_con
-allocate(oft_env%proc_con(oft_env%nproc_con)) ! Allocate processor linkage list
+self%global%seam%nproc_con=sum(b) ! Number of processor connections
+self%global%seam%proc_split=self%global%seam%nproc_con
+allocate(self%global%seam%proc_con(self%global%seam%nproc_con)) ! Allocate processor linkage list
 k=1
 do i=1,oft_env%nprocs
   if(b(i)==1)then ! Processor links to this domain
-    oft_env%proc_con(k)=i-1 ! Populate processor linkage list
-    IF((i-1>oft_env%rank).AND.(k-1<oft_env%proc_split))oft_env%proc_split=k-1
+    self%global%seam%proc_con(k)=i-1 ! Populate processor linkage list
+    IF((i-1>oft_env%rank).AND.(k-1<self%global%seam%proc_split))self%global%seam%proc_split=k-1
     k=k+1
   endif
 enddo
@@ -611,7 +611,6 @@ INTEGER(i4), ALLOCATABLE :: linktmp(:,:,:),isort(:),ncon(:),bpi(:),child_list(:,
 INTEGER(i4) :: nppl
 INTEGER(i4) :: m,mm,nptmp,nbpmax
 INTEGER(i4) :: ierr,i,j
-! TYPE(oft_seam) :: pstitch
 DEBUG_STACK_PUSH
 !---
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Point linkage'
@@ -625,27 +624,29 @@ nbpmax=self%nbp
 IF(.NOT.self%fullmesh)nbpmax=oft_mpi_max(nptmp)
 IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam points =',nbpmax
 self%pstitch%nbemax=nbpmax
+!---Initialize seam structure from mesh
+CALL oft_init_seam(self,self%pstitch)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
 !---Temporary linkage array
-ALLOCATE(linktmp(2,(self%periodic%nper+2)*self%nbp,0:oft_env%nproc_con))
+ALLOCATE(linktmp(2,(self%periodic%nper+2)*self%nbp,0:self%pstitch%nproc_con))
 linktmp = 0
-ALLOCATE(ncon(0:oft_env%nproc_con))
+ALLOCATE(ncon(0:self%pstitch%nproc_con))
 ncon=0
 !---Pointer into linkage array
-ALLOCATE(self%pstitch%kle(0:oft_env%nproc_con+1))
+ALLOCATE(self%pstitch%kle(0:self%pstitch%nproc_con+1))
 self%pstitch%kle = 0
 !---Global boundary point tag
 IF(ASSOCIATED(self%global%gbp))DEALLOCATE(self%global%gbp)
 ALLOCATE(self%global%gbp(self%np))
 self%global%gbp = .FALSE.
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lpsend(oft_env%nproc_con+1),lprecv(oft_env%nproc_con+1))
+ALLOCATE(lpsend(self%pstitch%nproc_con+1),lprecv(self%pstitch%nproc_con+1))
 ALLOCATE(lpsend(1)%lp(nbpmax))
 ALLOCATE(lpsend(1)%rp(nbpmax))
 IF(.NOT.self%fullmesh)THEN
-  DO i=1,oft_env%nproc_con
+  DO i=1,self%pstitch%nproc_con
     ALLOCATE(lprecv(i)%lp(nbpmax))
     ALLOCATE(lprecv(i)%rp(nbpmax))
   END DO
@@ -666,7 +667,7 @@ END DO
 IF(.NOT.self%fullmesh)THEN
 #ifdef HAVE_MPI
   !---Point dummy Send arrays to main Send array
-  DO i=2,oft_env%nproc_con
+  DO i=2,self%pstitch%nproc_con
     lpsend(i)%lp=>lpsend(1)%lp
     lpsend(i)%rp=>lpsend(1)%rp
   END DO
@@ -675,10 +676,10 @@ IF(.NOT.self%fullmesh)THEN
 !---------------------------------------------------------------------------
 ! Create Send and Recv calls
 !---------------------------------------------------------------------------
-  DO j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lpsend(j)%lp,nbpmax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  DO j=1,self%pstitch%nproc_con
+    CALL MPI_ISEND(lpsend(j)%lp,nbpmax,OFT_MPI_I8,self%pstitch%proc_con(j),1,oft_env%COMM,self%pstitch%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','mesh_global_plinkage',__FILE__)
-    CALL MPI_IRECV(lprecv(j)%lp,nbpmax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    CALL MPI_IRECV(lprecv(j)%lp,nbpmax,OFT_MPI_I8,self%pstitch%proc_con(j),1,oft_env%COMM,self%pstitch%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','mesh_global_plinkage',__FILE__)
   END DO
 !---------------------------------------------------------------------------
@@ -686,9 +687,9 @@ IF(.NOT.self%fullmesh)THEN
 !---------------------------------------------------------------------------
   DO WHILE(.TRUE.)
     !---All recieves have been processed
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT
+    IF(oft_mpi_check_reqs(self%pstitch%nproc_con,self%pstitch%recv_reqs))EXIT
     !---Wait for completed recieve
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr)
+    CALL oft_mpi_waitany(self%pstitch%nproc_con,self%pstitch%recv_reqs,j,ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','mesh_global_plinkage',__FILE__)
     !---Point dummy input array to current Recv array
     lptmp=>lprecv(j)%lp
@@ -794,17 +795,17 @@ self%pstitch%kle(0)=nppl
 !---Transfer load balancing arrays
 IF(.NOT.self%fullmesh)THEN
 #ifdef HAVE_MPI
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(self%pstitch%nproc_con,self%pstitch%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_plinkage',__FILE__)
-  DO j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lpsend(j)%rp,nbpmax,OFT_MPI_R8,oft_env%proc_con(j), &
-                   1,oft_env%COMM,oft_env%send(j),ierr)
-    CALL MPI_IRECV(lprecv(j)%rp,nbpmax,OFT_MPI_R8,oft_env%proc_con(j), &
-                   1,oft_env%COMM,oft_env%recv(j),ierr)
+  DO j=1,self%pstitch%nproc_con
+    CALL MPI_ISEND(lpsend(j)%rp,nbpmax,OFT_MPI_R8,self%pstitch%proc_con(j), &
+                   1,oft_env%COMM,self%pstitch%send_reqs(j),ierr)
+    CALL MPI_IRECV(lprecv(j)%rp,nbpmax,OFT_MPI_R8,self%pstitch%proc_con(j), &
+                   1,oft_env%COMM,self%pstitch%recv_reqs(j),ierr)
   END DO
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%recv,ierr)
+  CALL oft_mpi_waitall(self%pstitch%nproc_con,self%pstitch%recv_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_plinkage',__FILE__)
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(self%pstitch%nproc_con,self%pstitch%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_plinkage',__FILE__)
 #else
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_plinkage",__FILE__)
@@ -814,9 +815,9 @@ END IF
 ! Condense linkage to sparse rep
 !---------------------------------------------------------------------------
 self%pstitch%nle=SUM(self%pstitch%kle)
-self%pstitch%kle(oft_env%nproc_con+1)=self%pstitch%nle+1
+self%pstitch%kle(self%pstitch%nproc_con+1)=self%pstitch%nle+1
 !---Cumulative unique point linkage count
-DO i=oft_env%nproc_con,0,-1
+DO i=self%pstitch%nproc_con,0,-1
   self%pstitch%kle(i)=self%pstitch%kle(i+1)-self%pstitch%kle(i)
 END DO
 IF(self%pstitch%kle(0)/=1)CALL oft_abort('Bad point linkage count','mesh_global_plinkage',__FILE__)
@@ -826,21 +827,21 @@ ALLOCATE(self%pstitch%lle(2,self%pstitch%nle))
 self%pstitch%full=self%fullmesh
 self%pstitch%nbe=self%nbp
 self%pstitch%lbe=>self%lbp
-ALLOCATE(self%pstitch%send(0:oft_env%nproc_con),self%pstitch%recv(0:oft_env%nproc_con))
+ALLOCATE(self%pstitch%send(0:self%pstitch%nproc_con),self%pstitch%recv(0:self%pstitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
-DO i=0,oft_env%nproc_con
+DO i=0,self%pstitch%nproc_con
   DO j=1,ncon(i)
     m=linktmp(2,j,i)
     lsort(j)=m
     isort(j)=j
     !---
     IF(i>0)THEN
-      IF(oft_env%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
+      IF(self%pstitch%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
       IF(lprecv(i)%rp(linktmp(1,j,i))>lpsend(1)%rp(m))THEN
         self%pstitch%leo(m) = .FALSE.
-      ELSE IF(lprecv(i)%rp(linktmp(1,j,i))==lpsend(1)%rp(m).AND.oft_env%proc_con(i)<oft_env%rank)THEN
+      ELSE IF(lprecv(i)%rp(linktmp(1,j,i))==lpsend(1)%rp(m).AND.self%pstitch%proc_con(i)<oft_env%rank)THEN
         self%pstitch%leo(m) = .FALSE.
       END IF
     END IF
@@ -866,7 +867,7 @@ DEALLOCATE(lpsend(1)%lp)
 DEALLOCATE(lpsend(1)%rp)
 IF(.NOT.self%fullmesh)THEN
   !---Deallocate temporary work arrays
-  DO i=1,oft_env%nproc_con
+  DO i=1,self%pstitch%nproc_con
     DEALLOCATE(lprecv(i)%lp)
     DEALLOCATE(lprecv(i)%rp)
   END DO
@@ -911,17 +912,19 @@ nbemax=self%nbe
 IF(.NOT.self%fullmesh)nbemax=oft_mpi_max(netmp)
 IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam edges =',nbemax
 self%estitch%nbemax=nbemax
+!---Initialize seam structure from mesh
+CALL oft_init_seam(self,self%estitch)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
 !---Temporary linkage array
-ALLOCATE(linktmp(2,(self%periodic%nper+2)*self%nbe,0:oft_env%nproc_con))
+ALLOCATE(linktmp(2,(self%periodic%nper+2)*self%nbe,0:self%estitch%nproc_con))
 linktmp = 0
-ALLOCATE(ncon(0:oft_env%nproc_con),echeck(0:oft_env%nproc_con,self%nbe))
+ALLOCATE(ncon(0:self%estitch%nproc_con),echeck(0:self%estitch%nproc_con,self%nbe))
 ncon=0
 echeck=.FALSE.
 !---Pointer into linkage array
-ALLOCATE(self%estitch%kle(0:oft_env%nproc_con+1))
+ALLOCATE(self%estitch%kle(0:self%estitch%nproc_con+1))
 self%estitch%kle = 0
 !---Global boundary edge tag (setup for surface meshes only)
 IF(ASSOCIATED(self%global%gbe))DEALLOCATE(self%global%gbe)
@@ -938,11 +941,11 @@ IF(set_gbe)THEN
   END DO
 END IF
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lesend(oft_env%nproc_con+1),lerecv(oft_env%nproc_con+1))
+ALLOCATE(lesend(self%estitch%nproc_con+1),lerecv(self%estitch%nproc_con+1))
 ALLOCATE(lesend(1)%le(nbemax))
 ALLOCATE(lesend(1)%re(nbemax))
 IF(.NOT.self%fullmesh)THEN
-  DO i=1,oft_env%nproc_con
+  DO i=1,self%estitch%nproc_con
     ALLOCATE(lerecv(i)%le(nbemax))
     ALLOCATE(lerecv(i)%re(nbemax))
   END DO
@@ -965,7 +968,7 @@ DO i=1,self%nbe
     ll(m)=bpi(self%le(m,self%lbe(i))) ! Get endpoints in boundary index
   END DO
   leout(i)=ABS(self%global%le(self%lbe(i))) ! Populate linkage array
-  DO m=0,oft_env%nproc_con ! Flag processors to be checked
+  DO m=0,self%estitch%nproc_con ! Flag processors to be checked
     js=self%pstitch%kle(m)
     jn=self%pstitch%kle(m+1)-1
     etest=.TRUE.
@@ -979,7 +982,7 @@ DEALLOCATE(bpi)
 IF(.NOT.self%fullmesh)THEN
 #ifdef HAVE_MPI
   !---Point dummy Send arrays to main Send array
-  DO i=2,oft_env%nproc_con
+  DO i=2,self%estitch%nproc_con
     lesend(i)%le=>lesend(1)%le
     lesend(i)%re=>lesend(1)%re
   END DO
@@ -988,10 +991,10 @@ IF(.NOT.self%fullmesh)THEN
 !---------------------------------------------------------------------------
 ! Create Send and Recv calls
 !---------------------------------------------------------------------------
-  DO j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j), ierr)
+  DO j=1,self%estitch%nproc_con
+    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,self%estitch%proc_con(j),1,oft_env%COMM,self%estitch%send_reqs(j), ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','mesh_global_elinkage',__FILE__)
-    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j), ierr)
+    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,self%estitch%proc_con(j),1,oft_env%COMM,self%estitch%recv_reqs(j), ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','mesh_global_elinkage',__FILE__)
   END DO
 !---------------------------------------------------------------------------
@@ -999,9 +1002,9 @@ IF(.NOT.self%fullmesh)THEN
 !---------------------------------------------------------------------------
   DO WHILE(.TRUE.)
     !---All recieves have been processed
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT
+    IF(oft_mpi_check_reqs(self%estitch%nproc_con,self%estitch%recv_reqs))EXIT
     !---Wait for completed recieve
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr)
+    CALL oft_mpi_waitany(self%estitch%nproc_con,self%estitch%recv_reqs,j,ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','mesh_global_elinkage',__FILE__)
     !---Point dummy input array to current Recv array
     letmp=>lerecv(j)%le
@@ -1117,17 +1120,17 @@ self%estitch%kle(0)=neel
 !---Transfer load balancing arrays
 IF(.NOT.self%fullmesh)THEN
 #ifdef HAVE_MPI
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(self%estitch%nproc_con,self%estitch%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_elinkage',__FILE__)
-  DO j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lesend(j)%re,nbemax,OFT_MPI_R8,oft_env%proc_con(j), &
-                   1,oft_env%COMM,oft_env%send(j),ierr)
-    CALL MPI_IRECV(lerecv(j)%re,nbemax,OFT_MPI_R8,oft_env%proc_con(j), &
-                   1,oft_env%COMM,oft_env%recv(j),ierr)
+  DO j=1,self%estitch%nproc_con
+    CALL MPI_ISEND(lesend(j)%re,nbemax,OFT_MPI_R8,self%estitch%proc_con(j), &
+                   1,oft_env%COMM,self%estitch%send_reqs(j),ierr)
+    CALL MPI_IRECV(lerecv(j)%re,nbemax,OFT_MPI_R8,self%estitch%proc_con(j), &
+                   1,oft_env%COMM,self%estitch%recv_reqs(j),ierr)
   END DO
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%recv,ierr)
+  CALL oft_mpi_waitall(self%estitch%nproc_con,self%estitch%recv_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_elinkage',__FILE__)
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(self%estitch%nproc_con,self%estitch%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_elinkage',__FILE__)
 #else
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_elinkage",__FILE__)
@@ -1137,8 +1140,8 @@ END IF
 ! Condense linkage to sparse rep
 !---------------------------------------------------------------------------
 self%estitch%nle=SUM(self%estitch%kle)
-self%estitch%kle(oft_env%nproc_con+1)=self%estitch%nle+1
-DO i=oft_env%nproc_con,0,-1 ! cumulative unique edge linkage count
+self%estitch%kle(self%estitch%nproc_con+1)=self%estitch%nle+1
+DO i=self%estitch%nproc_con,0,-1 ! cumulative unique edge linkage count
   self%estitch%kle(i)=self%estitch%kle(i+1)-self%estitch%kle(i)
 END DO
 IF(self%estitch%kle(0)/=1)CALL oft_abort('Bad edge linkage count','mesh_global_elinkage',__FILE__)
@@ -1148,21 +1151,21 @@ ALLOCATE(self%estitch%lle(2,self%estitch%nle))
 self%estitch%full=self%fullmesh
 self%estitch%nbe=self%nbe
 self%estitch%lbe=>self%lbe
-ALLOCATE(self%estitch%send(0:oft_env%nproc_con),self%estitch%recv(0:oft_env%nproc_con))
+ALLOCATE(self%estitch%send(0:self%estitch%nproc_con),self%estitch%recv(0:self%estitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
-DO i=0,oft_env%nproc_con
+DO i=0,self%estitch%nproc_con
   DO j=1,ncon(i)
     m=linktmp(2,j,i)
     lsort(j)=m
     isort(j)=j
     !---
     IF(i>0)THEN
-      IF(oft_env%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
+      IF(self%estitch%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
       IF(lerecv(i)%re(linktmp(1,j,i))>lesend(1)%re(m))THEN
         self%estitch%leo(m) = .FALSE.
-      ELSE IF(lerecv(i)%re(linktmp(1,j,i))==lesend(1)%re(m).AND.oft_env%proc_con(i)<oft_env%rank)THEN
+      ELSE IF(lerecv(i)%re(linktmp(1,j,i))==lesend(1)%re(m).AND.self%estitch%proc_con(i)<oft_env%rank)THEN
         self%estitch%leo(m) = .FALSE.
       END IF
     END IF
@@ -1188,7 +1191,7 @@ DEALLOCATE(lesend(1)%le)
 DEALLOCATE(lesend(1)%re)
 IF(.NOT.self%fullmesh)THEN
   !---Deallocate temporary work arrays
-  DO i=1,oft_env%nproc_con
+  DO i=1,self%estitch%nproc_con
     DEALLOCATE(lerecv(i)%le)
     DEALLOCATE(lerecv(i)%re)
   END DO
@@ -1234,17 +1237,19 @@ nbfmax=self%nbf
 IF(.NOT.self%fullmesh)nbfmax=oft_mpi_max(nftmp)
 IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam faces =',nbfmax
 self%fstitch%nbemax=nbfmax
+!---Initialize seam structure from mesh
+CALL oft_init_seam(self,self%fstitch)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
 !---Temporary linkage array
-ALLOCATE(linktmp(2,self%nbf,0:oft_env%nproc_con))
+ALLOCATE(linktmp(2,self%nbf,0:self%fstitch%nproc_con))
 linktmp = 0
-ALLOCATE(ncon(0:oft_env%nproc_con),fcheck(0:oft_env%nproc_con,self%nbf))
+ALLOCATE(ncon(0:self%fstitch%nproc_con),fcheck(0:self%fstitch%nproc_con,self%nbf))
 ncon=0
 fcheck=.FALSE.
 !---Pointer into linkage array
-ALLOCATE(self%fstitch%kle(0:oft_env%nproc_con+1))
+ALLOCATE(self%fstitch%kle(0:self%fstitch%nproc_con+1))
 self%fstitch%kle = 0
 !---Global boundary face tag
 IF(ASSOCIATED(self%global%gbf))DEALLOCATE(self%global%gbf)
@@ -1254,11 +1259,11 @@ DO i=1,self%nf
   IF(self%bf(i))self%global%gbf(i)=.TRUE.
 END DO
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lfsend(oft_env%nproc_con+1),lfrecv(oft_env%nproc_con+1))
+ALLOCATE(lfsend(self%fstitch%nproc_con+1),lfrecv(self%fstitch%nproc_con+1))
 ALLOCATE(lfsend(1)%lf(nbfmax))
 ALLOCATE(lfsend(1)%rf(nbfmax))
 IF(.NOT.self%fullmesh)THEN
-  DO i=1,oft_env%nproc_con
+  DO i=1,self%fstitch%nproc_con
     ALLOCATE(lfrecv(i)%lf(nbfmax))
     ALLOCATE(lfrecv(i)%rf(nbfmax))
   END DO
@@ -1282,7 +1287,7 @@ DO i=1,self%nbf
     ll(m)=bpi(self%lf(m,self%lbf(i))) ! Get endpoints in boundary index
   END DO
   lfout(i)=ABS(self%global%lf(self%lbf(i))) ! Populate output array with global face indices
-  DO m=0,oft_env%nproc_con  ! Flag processors to be checked
+  DO m=0,self%fstitch%nproc_con  ! Flag processors to be checked
     js=self%pstitch%kle(m)
     jn=self%pstitch%kle(m+1)-1
     ftest=.TRUE.
@@ -1296,7 +1301,7 @@ DEALLOCATE(bpi)
 !---Point dummy Send arrays to main Send array
 IF(.NOT.self%fullmesh)THEN
 #ifdef HAVE_MPI
-  DO i=2,oft_env%nproc_con
+  DO i=2,self%fstitch%nproc_con
     lfsend(i)%lf=>lfsend(1)%lf
     lfsend(i)%rf=>lfsend(1)%rf
   END DO
@@ -1305,18 +1310,18 @@ IF(.NOT.self%fullmesh)THEN
 !---------------------------------------------------------------------------
 ! Create Send and Recv calls
 !---------------------------------------------------------------------------
-  DO j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lfsend(j)%lf,nbfmax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  DO j=1,self%fstitch%nproc_con
+    CALL MPI_ISEND(lfsend(j)%lf,nbfmax,OFT_MPI_I8,self%fstitch%proc_con(j),1,oft_env%COMM,self%fstitch%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','mesh_global_flinkage',__FILE__)
-    CALL MPI_IRECV(lfrecv(j)%lf,nbfmax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    CALL MPI_IRECV(lfrecv(j)%lf,nbfmax,OFT_MPI_I8,self%fstitch%proc_con(j),1,oft_env%COMM,self%fstitch%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','mesh_global_flinkage',__FILE__)
   END DO
 !---------------------------------------------------------------------------
 ! Loop over each connected processor
 !---------------------------------------------------------------------------
   DO WHILE(.TRUE.)
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+    IF(oft_mpi_check_reqs(self%fstitch%nproc_con,self%fstitch%recv_reqs))EXIT ! All recieves have been processed
+    CALL oft_mpi_waitany(self%fstitch%nproc_con,self%fstitch%recv_reqs,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','mesh_global_flinkage',__FILE__)
     lftmp=>lfrecv(j)%lf ! Point dummy input array to current Recv array
     !---
@@ -1403,17 +1408,17 @@ self%fstitch%kle(0)=nffl
 !---Transfer load balancing arrays
 IF(.NOT.self%fullmesh)THEN
 #ifdef HAVE_MPI
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(self%fstitch%nproc_con,self%fstitch%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_flinkage',__FILE__)
-  DO j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lfsend(j)%rf,nbfmax,OFT_MPI_R8,oft_env%proc_con(j), &
-                   1,oft_env%COMM,oft_env%send(j),ierr)
-    CALL MPI_IRECV(lfrecv(j)%rf,nbfmax,OFT_MPI_R8,oft_env%proc_con(j), &
-                   1,oft_env%COMM,oft_env%recv(j),ierr)
+  DO j=1,self%fstitch%nproc_con
+    CALL MPI_ISEND(lfsend(j)%rf,nbfmax,OFT_MPI_R8,self%fstitch%proc_con(j), &
+                   1,oft_env%COMM,self%fstitch%send_reqs(j),ierr)
+    CALL MPI_IRECV(lfrecv(j)%rf,nbfmax,OFT_MPI_R8,self%fstitch%proc_con(j), &
+                   1,oft_env%COMM,self%fstitch%recv_reqs(j),ierr)
   END DO
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%recv,ierr)
+  CALL oft_mpi_waitall(self%fstitch%nproc_con,self%fstitch%recv_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_flinkage',__FILE__)
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(self%fstitch%nproc_con,self%fstitch%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','mesh_global_flinkage',__FILE__)
 #else
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_flinkage",__FILE__)
@@ -1423,8 +1428,8 @@ END IF
 ! Condense linkage to sparse rep
 !---------------------------------------------------------------------------
 self%fstitch%nle=sum(self%fstitch%kle)
-self%fstitch%kle(oft_env%nproc_con+1)=self%fstitch%nle+1
-DO i=oft_env%nproc_con,0,-1 ! cumulative unique edge linkage count
+self%fstitch%kle(self%fstitch%nproc_con+1)=self%fstitch%nle+1
+DO i=self%fstitch%nproc_con,0,-1 ! cumulative unique edge linkage count
   self%fstitch%kle(i)=self%fstitch%kle(i+1)-self%fstitch%kle(i)
 END DO
 IF(self%fstitch%kle(0)/=1)CALL oft_abort('Bad face linkage count','mesh_global_flinkage',__FILE__)
@@ -1439,21 +1444,21 @@ self%fstitch%lbe=>self%lbf
 ! mesh%fstitch%kle=>mesh%linkage%klf
 ! mesh%fstitch%lle=>mesh%linkage%llf
 ! mesh%fstitch%leo=>mesh%linkage%lfo
-ALLOCATE(self%fstitch%send(0:oft_env%nproc_con),self%fstitch%recv(0:oft_env%nproc_con))
+ALLOCATE(self%fstitch%send(0:self%fstitch%nproc_con),self%fstitch%recv(0:self%fstitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
-DO i=0,oft_env%nproc_con
+DO i=0,self%fstitch%nproc_con
   DO j=1,ncon(i)
     m=linktmp(2,j,i)
     lsort(j)=m
     isort(j)=j
     !---
     IF(i>0)THEN
-      IF(oft_env%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
+      IF(self%fstitch%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
       IF(lfrecv(i)%rf(linktmp(1,j,i))>lfsend(1)%rf(m))THEN
         self%fstitch%leo(m) = .FALSE.
-      ELSE IF(lfrecv(i)%rf(linktmp(1,j,i))==lfsend(1)%rf(m).AND.oft_env%proc_con(i)<oft_env%rank)THEN
+      ELSE IF(lfrecv(i)%rf(linktmp(1,j,i))==lfsend(1)%rf(m).AND.self%fstitch%proc_con(i)<oft_env%rank)THEN
         self%fstitch%leo(m) = .FALSE.
       END IF
     END IF
@@ -1479,7 +1484,7 @@ DEALLOCATE(lfsend(1)%lf)
 DEALLOCATE(lfsend(1)%rf)
 IF(.NOT.self%fullmesh)THEN
   !---Deallocate temporary work arrays
-  DO i=1,oft_env%nproc_con
+  DO i=1,self%fstitch%nproc_con
     DEALLOCATE(lfrecv(i)%lf)
     DEALLOCATE(lfrecv(i)%rf)
   END DO
@@ -1519,9 +1524,10 @@ CALL get_inverse_map(self%lbp,self%nbp,lpbound,self%np)
 ALLOCATE(lploc(parent%np))
 CALL get_inverse_map(self%parent%lp,self%np,lploc,self%parent%np)
 !---
-ALLOCATE(self%pstitch%kle(oft_env%nproc_con+1))
+CALL oft_init_seam(self,self%pstitch)
+ALLOCATE(self%pstitch%kle(self%pstitch%nproc_con+1))
 self%pstitch%kle=0
-DO i=1,oft_env%nproc_con
+DO i=1,self%pstitch%nproc_con
   m=0
   DO j=parent%pstitch%kle(i),parent%pstitch%kle(i+1)-1
     k=parent%lbp(parent%pstitch%lle(1,j))
@@ -1535,19 +1541,19 @@ END DO
 ! Condense linkage to sparse rep
 !---------------------------------------------------------------------------
 self%pstitch%nle=SUM(self%pstitch%kle)
-self%pstitch%kle(oft_env%nproc_con+1)=self%pstitch%nle+1
+self%pstitch%kle(self%pstitch%nproc_con+1)=self%pstitch%nle+1
 !---Cumulative unique point linkage count
-DO i=oft_env%nproc_con,1,-1
+DO i=self%pstitch%nproc_con,1,-1
   self%pstitch%kle(i)=self%pstitch%kle(i+1)-self%pstitch%kle(i)
 END DO
 !---
 IF(self%pstitch%kle(1)/=1)CALL oft_abort('Bad point linkage count','tetmesh_global_plinkage',__FILE__)
 !---
 ALLOCATE(self%pstitch%lle(2,self%pstitch%nle),self%pstitch%leo(parent%nbp))
-ALLOCATE(self%pstitch%send(oft_env%nproc_con),self%pstitch%recv(oft_env%nproc_con))
+ALLOCATE(self%pstitch%send(self%pstitch%nproc_con),self%pstitch%recv(self%pstitch%nproc_con))
 !---
 !!$omp do
-DO i=1,oft_env%nproc_con
+DO i=1,self%pstitch%nproc_con
   m=0
   DO j=parent%pstitch%kle(i),parent%pstitch%kle(i+1)-1
     k=parent%lbp(parent%pstitch%lle(1,j))
@@ -1601,9 +1607,10 @@ CALL get_inverse_map(self%lbe,self%nbe,lebound,self%ne)
 ALLOCATE(leloc(parent%ne))
 CALL get_inverse_map(self%parent%le,self%ne,leloc,self%parent%ne)
 !---
-ALLOCATE(self%estitch%kle(oft_env%nproc_con+1))
+CALL oft_init_seam(self,self%estitch)
+ALLOCATE(self%estitch%kle(self%estitch%nproc_con+1))
 self%estitch%kle=0
-DO i=1,oft_env%nproc_con
+DO i=1,self%estitch%nproc_con
   m=0
   DO j=parent%estitch%kle(i),parent%estitch%kle(i+1)-1
     k=parent%lbe(parent%estitch%lle(1,j))
@@ -1617,19 +1624,19 @@ END DO
 ! Condense linkage to sparse rep
 !---------------------------------------------------------------------------
 self%estitch%nle=SUM(self%estitch%kle)
-self%estitch%kle(oft_env%nproc_con+1)=self%estitch%nle+1
+self%estitch%kle(self%estitch%nproc_con+1)=self%estitch%nle+1
 !---Cumulative unique point linkage count
-DO i=oft_env%nproc_con,1,-1
+DO i=self%estitch%nproc_con,1,-1
   self%estitch%kle(i)=self%estitch%kle(i+1)-self%estitch%kle(i)
 END DO
 !---
 IF(self%estitch%kle(1)/=1)CALL oft_abort('Bad point linkage count','tetmesh_global_plinkage',__FILE__)
 !---
 ALLOCATE(self%estitch%lle(2,self%estitch%nle),self%estitch%leo(parent%nbe))
-ALLOCATE(self%estitch%send(oft_env%nproc_con),self%estitch%recv(oft_env%nproc_con))
+ALLOCATE(self%estitch%send(self%estitch%nproc_con),self%estitch%recv(self%estitch%nproc_con))
 !---
 !!$omp do
-DO i=1,oft_env%nproc_con
+DO i=1,self%estitch%nproc_con
   m=0
   DO j=parent%estitch%kle(i),parent%estitch%kle(i+1)-1
     k=parent%lbe(parent%estitch%lle(1,j))

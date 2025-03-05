@@ -366,7 +366,7 @@ TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting LU solver: ',self%package,self%refactor
-IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'lusolver_apply',__FILE__)
 !---Check call threading for MUMPS
 IF(self%package(1:5)=='mumps')THEN
@@ -781,7 +781,7 @@ TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting ILU solver: ',self%package,self%refactor
-IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'ilusolver_apply',__FILE__)
 IF(ASSOCIATED(A_native%Mfull))THEN
   mat_vals=>A_native%Mfull

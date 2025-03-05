@@ -129,7 +129,7 @@ select case(mesh%cad_type)
     call mesh_t3d_reffix(mg_mesh)
   case(mesh_cubit_id)
 #ifdef HAVE_NCDF
-    call mesh_cubit_reffix(mg_mesh%mesh)
+    call mesh_cubit_reffix(mg_mesh)
 #endif
   case(mesh_gmsh_id)
     call mesh_gmsh_reffix(mg_mesh)
@@ -563,6 +563,12 @@ SELECT CASE(grid_order)
   CASE DEFAULT
     CALL oft_abort('Requested invalid grid order.','multigrid_construct',__FILE__)
 END SELECT
+do level=1,mg_mesh%nbase
+  CALL multigrid_level(mg_mesh,level)
+  mg_mesh%mesh%global%seam=>mg_mesh%seam
+  mg_mesh%smesh%global%seam=>mg_mesh%seam
+end do
+CALL multigrid_level(mg_mesh,nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 CONTAINS
@@ -678,6 +684,8 @@ END IF
 CALL oft_increase_indent
 !---Decompose and setup local geometry
 call mesh_global_decomp(mesh,part_meth)
+mg_mesh%seam=>mesh%global%seam
+smesh%global%seam=>mg_mesh%seam
 call mesh_local_init(mesh)
 mesh%fullmesh=.FALSE.
 !---Setup hybrid transfer level
@@ -725,6 +733,9 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
+!---
+mesh%global%seam=>mg_mesh%seam
+smesh%global%seam=>mg_mesh%seam
 !---Refine and setup local geometry
 mesh%fullmesh=.FALSE.
 smesh%fullmesh=.FALSE.
@@ -1007,6 +1018,11 @@ SELECT CASE(grid_order)
   CASE DEFAULT
     CALL oft_abort('Requested invalid grid order.','multigrid_construct',__FILE__)
 END SELECT
+do level=1,mg_mesh%nbase
+  CALL multigrid_level(mg_mesh,level)
+  mg_mesh%smesh%global%seam=>mg_mesh%seam
+end do
+CALL multigrid_level(mg_mesh,nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 CONTAINS
@@ -1095,6 +1111,7 @@ END IF
 CALL oft_increase_indent
 !---Decompose and setup local geometry
 call mesh_global_decomp(smesh,part_meth)
+mg_mesh%seam=>smesh%global%seam
 CALL bmesh_local_init(smesh)
 smesh%fullmesh=.FALSE.
 !---Setup hybrid transfer level
@@ -1134,6 +1151,8 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
+!---
+smesh%global%seam=>mg_mesh%seam
 !---Refine and setup local geometry
 smesh%fullmesh=.FALSE.
 call multigrid_brefine(mg_mesh)

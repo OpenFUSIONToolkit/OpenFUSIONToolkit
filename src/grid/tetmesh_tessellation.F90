@@ -37,24 +37,16 @@ INTEGER(i4), PARAMETER :: tess4(4,64) = RESHAPE((/7,26,13,25,22,23,24,34,22,26,3
 PUBLIC tessellate1, tessellate2, tessellate3, tessellate4
 CONTAINS
 !------------------------------------------------------------------------------
-! SUBROUTINE: tessellate1
-!------------------------------------------------------------------------------
-!> Construct point and cell lists for a single tessellation.
-!! This corresponds to the input triangulation with no refinement.
+!> Construct point and cell lists for a single tessellation
+!!
+!! This corresponds to the input triangulation with no refinement
 !! - np_tess = np
 !! - nc_tess = nc
-!!
-!! @note Should not be called directly, see \ref tetmesh_tessellation::tetmesh_tessellate
-!! "tetmesh_tessellate"
-!!
-!! @param[in] self Mesh to tessellate
-!! @param[out] rtmp Tessellated mesh points [3,np_tess]
-!! @param[out] lctmp Tessellated cell list [4,nc_tess]
 !------------------------------------------------------------------------------
 SUBROUTINE tessellate1(self,rtmp,lctmp)
-class(oft_mesh), INTENT(in) :: self
-REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp
-INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp
+CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
+REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,np_tess]
+INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp !< Tessellated cell list [4,nc_tess]
 INTEGER(i4) :: i,np,nc
 DEBUG_STACK_PUSH
 !---
@@ -74,24 +66,16 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE tessellate1
 !------------------------------------------------------------------------------
-! SUBROUTINE: tessellate2
-!------------------------------------------------------------------------------
-!> Construct point and cell lists for a 2 level tessellation.
-!! This corresponds to the input triangulation with quadratic nodes added.
+!> Construct point and cell lists for a 2 level tessellation
+!!
+!! This corresponds to the input triangulation with quadratic nodes added
 !! - np_tess = np + ne
 !! - nc_tess = nc*8
-!!
-!! @note Should not be called directly, see \ref tetmesh_tessellation::tetmesh_tessellate
-!! "tetmesh_tessellate"
-!!
-!! @param[in] self Mesh to tessellate
-!! @param[out] rtmp Tessellated mesh points [3,np_tess]
-!! @param[out] lctmp Tessellated cell list [4,nc_tess]
 !------------------------------------------------------------------------------
 SUBROUTINE tessellate2(self,rtmp,lctmp)
-class(oft_mesh), INTENT(in) :: self
-REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp
-INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp
+CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
+REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,np_tess]
+INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp !< Tessellated cell list [4,nc_tess]
 REAL(r8), PARAMETER :: ed_dofs(2,1)=RESHAPE((/.5d0,.5d0/),(/2,1/))
 REAL(r8) :: f(4),pt(3),diag(3)
 INTEGER(i4) :: i,j,k,ind,np,nc,ed(2),dofs(10),lccors(4),lcecors(6)
@@ -165,24 +149,16 @@ lctmp=lctmp-1
 DEBUG_STACK_POP
 END SUBROUTINE tessellate2
 !------------------------------------------------------------------------------
-! SUBROUTINE: tessellate3
-!------------------------------------------------------------------------------
-!> Construct point and cell lists for a 3 level tessellation.
-!! This corresponds to the input triangulation with cubic nodes added.
+!> Construct point and cell lists for a 3 level tessellation
+!!
+!! This corresponds to the input triangulation with cubic nodes added
 !! - np_tess = np + 2*ne + nf
 !! - nc_tess = nc*27
-!!
-!! @note Should not be called directly, see \ref tetmesh_tessellation::tetmesh_tessellate
-!! "tetmesh_tessellate"
-!!
-!! @param[in] self Mesh to tessellate
-!! @param[out] rtmp Tessellated mesh points [3,np_tess]
-!! @param[out] lctmp Tessellated cell list [4,nc_tess]
 !------------------------------------------------------------------------------
 SUBROUTINE tessellate3(self,rtmp,lctmp)
-class(oft_mesh), INTENT(in) :: self
-REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp
-INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp
+CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
+REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,np_tess]
+INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp !< Tessellated cell list [4,nc_tess]
 REAL(r8), PARAMETER :: ed_dofs(2,2)=RESHAPE((/1.d0/3.d0,2.d0/3.d0,2.d0/3.d0,1.d0/3.d0/),(/2,2/))
 REAL(r8), PARAMETER :: fc_dofs(3,1)=RESHAPE((/1.d0/3.d0,1.d0/3.d0,1.d0/3.d0/),(/3,1/))
 REAL(r8) :: f(4),pt(3)
@@ -253,24 +229,16 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE tessellate3
 !------------------------------------------------------------------------------
-! SUBROUTINE: tessellate4
-!------------------------------------------------------------------------------
-!> Construct point and cell lists for a 3 level tessellation.
-!! This corresponds to the input triangulation with cubic nodes added.
+!> Construct point and cell lists for a 3 level tessellation
+!!
+!! This corresponds to the input triangulation with cubic nodes added
 !! - np_tess = np + 3*ne + 3*nf + nc
 !! - nc_tess = nc*64
-!!
-!! @note Should not be called directly, see \ref tetmesh_tessellation::tetmesh_tessellate
-!! "tetmesh_tessellate"
-!!
-!! @param[in] self Mesh to tessellate
-!! @param[out] rtmp Tessellated mesh points [3,np_tess]
-!! @param[out] lctmp Tessellated cell list [4,nc_tess]
 !------------------------------------------------------------------------------
 SUBROUTINE tessellate4(self,rtmp,lctmp)
-class(oft_mesh), INTENT(in) :: self
-REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp
-INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp
+CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
+REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,np_tess]
+INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp !< Tessellated cell list [4,nc_tess]
 REAL(r8), PARAMETER :: ed_dofs(2,3)=RESHAPE((/1.d0/4,3.d0/4,1.d0/2,1.d0/2,3.d0/4,1.d0/4/),(/2,3/))
 REAL(r8), PARAMETER :: fc_dofs(3,3)=RESHAPE((/1.d0/4,1.d0/4,1.d0/2,1.d0/4,1.d0/2,1.d0/4, &
 1.d0/2,1.d0/4,1.d0/4/),(/3,3/))
