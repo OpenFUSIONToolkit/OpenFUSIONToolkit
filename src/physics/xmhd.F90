@@ -102,8 +102,8 @@ USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp
 USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_3D_hcurl_cast, &
   oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
-USE oft_h0_basis, ONLY: oft_h0_fem, oft_h0_geval_all, oft_3D_h1_cast
-USE oft_h0_operators, ONLY: oft_h0_zeroi
+USE oft_h1_basis, ONLY: oft_h1_fem, oft_h1_geval_all, oft_3D_h1_cast
+USE oft_h1_operators, ONLY: oft_h1_zeroi
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp, oft_hcurl_grad_cinterp, oft_hcurl_grad_dinterp, &
   oft_hcurl_grad_divout, hcurl_grad_jump_error, hcurl_grad_div
 !---
@@ -205,7 +205,7 @@ type, extends(fem_interp) :: xmhd_interp
   real(r8), contiguous, pointer, dimension(:) :: J2_loc => NULL() !< Local hyper-res aux values (HCurl)
   real(r8), contiguous, pointer, dimension(:,:) :: lf_loc => NULL() !< Local Lagrange values (V,N,Ti)
   class(oft_vector), pointer :: u => NULL() !< Field to interpolate
-  class(oft_h0_fem), pointer :: grad_rep => NULL() !< Grad(H^1) FE representation
+  class(oft_h1_fem), pointer :: grad_rep => NULL() !< Grad(H^1) FE representation
   class(oft_hcurl_fem), pointer :: curl_rep => NULL() !< H(Curl) FE representation
   class(oft_scalar_fem), pointer :: lag_rep => NULL() !< Lagrange FE representation
   type(xmhd_interp_cache), pointer :: cache(:) => NULL() !< Thread local field cache
@@ -393,7 +393,7 @@ TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_hcurl_grad,ML_oft_vlagrange
 !
 CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
 CLASS(oft_hcurl_fem), POINTER :: oft_hcurl => NULL()
-CLASS(oft_h0_fem), POINTER :: oft_hgrad => NULL()
+CLASS(oft_h1_fem), POINTER :: oft_hgrad => NULL()
 !---------------------------------------------------------------------------
 ! Exported interfaces
 !---------------------------------------------------------------------------
@@ -573,7 +573,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,tmpint(2)
 character(LEN=XMHD_RST_LEN) :: rst_char
 LOGICAL :: force_refactor,exists,rst
-TYPE(oft_h0_zeroi), TARGET :: h0_zeroi
+TYPE(oft_h1_zeroi), TARGET :: h0_zeroi
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -748,7 +748,7 @@ IF(.NOT.xmhd_bnorm_force)THEN
   IF(.NOT.xmhd_monitor_div)CALL oft_xmhd_pop(u,sub_fields)
   CALL ML_h1grad%vec_create(divout%bnorm)
   CALL hcurl_grad_div(ML_hcurl_grad%current_level,sub_fields%B,divout%bnorm)
-  h0_zeroi%ML_H0_rep=>ML_h1grad
+  h0_zeroi%ML_H1_rep=>ML_h1grad
   CALL h0_zeroi%apply(divout%bnorm)
 END IF
 !---------------------------------------------------------------------------
@@ -1630,7 +1630,7 @@ do ii=1,mesh%tloc_c(ip)%n
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
     CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
     lag_gopt=TRANSPOSE(lag_gop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     hgrad_ropt=TRANSPOSE(hgrad_rop)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     hcurl_ropt=TRANSPOSE(hcurl_rop)
@@ -2902,7 +2902,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !---Get local reconstruction operators
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
     CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !---Evaluate centering values
@@ -3475,7 +3475,7 @@ do ii=1,mesh%tloc_c(ip)%n
     det=vol*quad%wts(m)
     !---Lagrange elements
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !
@@ -3701,7 +3701,7 @@ do ii=1,mesh%tloc_c(ip)%n
     det=vol*quad%wts(m)
     !---Lagrange elements
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !
@@ -4054,7 +4054,7 @@ ELSE
   DEALLOCATE(lag_rop,lag_gop)
   !---Grad(H^1) elements
   ALLOCATE(hgrad_rop(3,self%grad_rep%nce))
-  CALL oft_h0_geval_all(self%grad_rep,cell,f,hgrad_rop,gop)
+  CALL oft_h1_geval_all(self%grad_rep,cell,f,hgrad_rop,gop)
   !---Reconstruct magnetic field
   !$omp simd reduction(+:b0)
   do jc=1,self%grad_rep%nce

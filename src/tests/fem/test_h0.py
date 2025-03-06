@@ -27,19 +27,19 @@ oft_in_template = """
  mesh_type={3}
 /
 
-&h0_op_options
+&h1_op_options
  df_lop={5}
  nu_lop={6}
 /
 
-&test_h0_options
+&test_h1_options
  order={2}
  mg_test={4}
 /
 """
 
 # Common setup function and process handling
-def h0_setup(nbase, nlevels, order, grid_type, mg='F', df='', nu='', petsc_flag='F'):
+def h1_setup(nbase, nlevels, order, grid_type, mg='F', df='', nu='', petsc_flag='F'):
     nproc = 1
     if nbase != nlevels:
         nproc = 2
@@ -50,7 +50,7 @@ def h0_setup(nbase, nlevels, order, grid_type, mg='F', df='', nu='', petsc_flag=
     return run_OFT("./test_h0", nproc, 120)
 
 def validate_result(iteration_count,converged_error):
-    fid = open('h0.results','r')
+    fid = open('h1.results','r')
     its_test = int(fid.readline())
     if iteration_count != None:
         if abs(iteration_count-its_test) >= max(2,.05*iteration_count):
@@ -73,7 +73,7 @@ def single_level(nlevels,order,exp_its,exp_error,grid_type=1,mpi=False,petsc_fla
     else:
         nbase = nlevels
         nlev = nlevels
-    assert h0_setup(nbase, nlev, order, grid_type, petsc_flag=petsc_flag)
+    assert h1_setup(nbase, nlev, order, grid_type, petsc_flag=petsc_flag)
     assert validate_result(exp_its, exp_error)
 # Multi-level test function
 def multi_level(nlevels,order,exp_its,exp_error,grid_type=1,petsc_flag='F'):
@@ -83,7 +83,7 @@ def multi_level(nlevels,order,exp_its,exp_error,grid_type=1,petsc_flag='F'):
     else:
         df_string='0.,0.,1.48,0.42,0.40,0.36,0.36'
         nu_string='0,0,8,2,2,2,2'
-    assert h0_setup(nlevels, nlevels, order, grid_type, mg='T', df=df_string, nu=nu_string, petsc_flag=petsc_flag)
+    assert h1_setup(nlevels, nlevels, order, grid_type, mg='T', df=df_string, nu=nu_string, petsc_flag=petsc_flag)
     assert validate_result(exp_its, exp_error)
 
 #============================================================================

@@ -30,8 +30,8 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
 !---H1 FE space (Grad(H^1) subspace)
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_mloptions, h1_setup_interp
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
@@ -85,9 +85,9 @@ CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 !--- Grad(H^1) subspace
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0)
-CALL h0_setup_interp(ML_oft_h0)
-CALL h0_mloptions
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0)
+CALL h1_setup_interp(ML_oft_h0)
+CALL h1_mloptions
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
 CALL hcurl_setup_interp(ML_oft_hcurl)
@@ -242,7 +242,7 @@ END PROGRAM example4
 !! nu_lop=64,2,1
 !!/
 !!
-!!&h0_op_options
+!!&h1_op_options
 !! df_lop=.98,.564,.441,.363
 !! nu_lop=64,4,2,1
 !!/
@@ -283,7 +283,7 @@ END PROGRAM example4
 !! nu_lop=0,64,2,1
 !!/
 !!
-!!&h0_op_options
+!!&h1_op_options
 !! df_lop=0.,.98,.564,.441,.363
 !! nu_lop=0,64,4,2,1
 !!/

@@ -1,9 +1,9 @@
 !---------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
-!> @file test_h0.F90
+!> @file test_h1.F90
 !
-!> Regression tests for scalar H0 finite elements. Tests are performed
+!> Regression tests for scalar h1 finite elements. Tests are performed
 !! on a unit cube at different polynomial orders.
 !!
 !! The current test cases are:
@@ -14,7 +14,7 @@
 !! @date April 2013
 !! @ingroup testing
 !---------------------------------------------------------------------------
-PROGRAM test_h0
+PROGRAM test_h1
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
@@ -24,23 +24,23 @@ USE oft_la_base, ONLY: oft_vector,oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
-USE oft_h0_basis, ONLY: oft_h0_setup
+USE oft_h1_basis, ONLY: oft_h1_setup
 USE fem_base, ONLY: oft_ml_fem_type
-USE oft_h0_operators, ONLY: h0_setup_interp, h0_mloptions, &
-  oft_h0_zerob, df_lop, nu_lop, oft_h0_getlop, oft_h0_getmop, h0_getlop_pre
+USE oft_h1_operators, ONLY: h1_setup_interp, h1_mloptions, &
+  oft_h1_zerob, df_lop, nu_lop, oft_h1_getlop, oft_h1_getmop, h1_getlop_pre
 IMPLICIT NONE
 INTEGER(i4) :: minlev
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0
-TYPE(oft_h0_zerob), TARGET :: h0_zerob
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_oft_bh1
+TYPE(oft_h1_zerob), TARGET :: h1_zerob
 INTEGER(i4) :: order,ierr,io_unit
 LOGICAL :: mg_test
-NAMELIST/test_h0_options/order,mg_test
+NAMELIST/test_h1_options/order,mg_test
 !---Initialize enviroment
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
-READ(io_unit,test_h0_options,IOSTAT=ierr)
+READ(io_unit,test_h1_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct(mg_mesh)
@@ -48,11 +48,11 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 !---
 minlev=2
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
-CALL oft_h0_setup(mg_mesh,order,ML_oft_h0,minlev=minlev)
-h0_zerob%ML_H0_rep=>ML_oft_h0
+CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,minlev=minlev)
+h1_zerob%ML_H1_rep=>ML_oft_h1
 IF(mg_test)THEN
-  CALL h0_setup_interp(ML_oft_h0)
-  CALL h0_mloptions
+  CALL h1_setup_interp(ML_oft_h1)
+  CALL h1_mloptions
 END IF
 !---Run tests
 oft_env%pm=.FALSE.
@@ -77,13 +77,13 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Set FE level
-CALL ML_oft_h0%set_level(ML_oft_h0%nlevels)
+CALL ML_oft_h1%set_level(ML_oft_h1%nlevels)
 !---Create solver fields
-CALL ML_oft_h0%vec_create(u)
-CALL ML_oft_h0%vec_create(v)
+CALL ML_oft_h1%vec_create(u)
+CALL ML_oft_h1%vec_create(v)
 !---Get FE operators
-CALL oft_h0_getlop(ML_oft_h0%current_level,lop,'zerob')
-CALL oft_h0_getmop(ML_oft_h0%current_level,mop,'none')
+CALL oft_h1_getlop(ML_oft_h1%current_level,lop,'zerob')
+CALL oft_h1_getmop(ML_oft_h1%current_level,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -92,12 +92,12 @@ CALL create_diag_pre(linv%pre)
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL h0_zerob%apply(v)
+CALL h1_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 uu=u%dot(u)
 IF(oft_env%head_proc)THEN
-  OPEN(NEWUNIT=io_unit,FILE='h0.results')
+  OPEN(NEWUNIT=io_unit,FILE='h1.results')
   WRITE(io_unit,*)linv%cits
   WRITE(io_unit,*)uu
   CLOSE(io_unit)
@@ -116,7 +116,7 @@ CALL linv%pre%delete
 CALL linv%delete
 END SUBROUTINE test_lap
 !------------------------------------------------------------------------------
-!> Same as \ref test_h0::test_lap "test_lap" but use MG preconditioning.
+!> Same as \ref test_h1::test_lap "test_lap" but use MG preconditioning.
 !------------------------------------------------------------------------------
 SUBROUTINE test_lapmg
 !---Solver object
@@ -131,12 +131,12 @@ TYPE(oft_matrix_ptr), POINTER :: ml_lop(:) => NULL()
 !---------------------------------------------------------------------------
 ! Create ML Matrices
 !---------------------------------------------------------------------------
-nlevels=ML_oft_h0%nlevels-minlev+1
+nlevels=ML_oft_h1%nlevels-minlev+1
 !---Create solver fields
-CALL ML_oft_h0%vec_create(u)
-CALL ML_oft_h0%vec_create(v)
+CALL ML_oft_h1%vec_create(u)
+CALL ML_oft_h1%vec_create(v)
 !---Get FE operators
-CALL oft_h0_getmop(ML_oft_h0%current_level,mop,'none')
+CALL oft_h1_getmop(ML_oft_h1%current_level,mop,'none')
 !---------------------------------------------------------------------------
 ! Setup matrix solver
 !---------------------------------------------------------------------------
@@ -144,21 +144,21 @@ CALL create_cg_solver(linv,force_native=.TRUE.)
 linv%its=-3
 linv%A=>lop
 !---Setup MG preconditioner
-CALL h0_getlop_pre(ML_oft_h0,linv%pre,ml_lop,'zerob',nlevels=nlevels)
+CALL h1_getlop_pre(ML_oft_h1,linv%pre,ml_lop,'zerob',nlevels=nlevels)
 lop=>ml_lop(nlevels)%M
 linv%A=>lop
-linv%bc=>h0_zerob
+linv%bc=>h1_zerob
 !---------------------------------------------------------------------------
 ! Solve system
 !---------------------------------------------------------------------------
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL h0_zerob%apply(v)
+CALL h1_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 uu=u%dot(u)
 IF(oft_env%head_proc)THEN
-  OPEN(NEWUNIT=io_unit,FILE='h0.results')
+  OPEN(NEWUNIT=io_unit,FILE='h1.results')
   WRITE(io_unit,*)linv%cits
   WRITE(io_unit,*)uu
   CLOSE(io_unit)
@@ -177,4 +177,4 @@ DEALLOCATE(linv%pre)
 !---Destory solver
 CALL linv%delete
 END SUBROUTINE test_lapmg
-END PROGRAM test_h0
+END PROGRAM test_h1

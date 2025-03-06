@@ -30,7 +30,7 @@ USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
-USE oft_h0_basis, ONLY: oft_h0_fem, oft_h0_setup_vol
+USE oft_h1_basis, ONLY: oft_h1_fem, oft_h1_setup_vol
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ do i=1,ML_hcurl_obj%ml_mesh%mgdim-1
   IF(i<ML_hcurl_grad_obj%minlev)CYCLE
   CALL multigrid_level(ML_hcurl_obj%ml_mesh,i)
   if(ML_hcurl_obj%ml_mesh%level==ML_hcurl_obj%ml_mesh%nbase)ML_hcurl_grad_obj%blevel=i
-  CALL oft_h0_setup_vol(ML_h1grad_obj%levels(i)%fe,ML_hcurl_obj%ml_mesh%mesh,2)
+  CALL oft_h1_setup_vol(ML_h1grad_obj%levels(i)%fe,ML_hcurl_obj%ml_mesh%mesh,2)
 end do
 call multigrid_level(ML_hcurl_obj%ml_mesh,ML_hcurl_obj%ml_mesh%mgdim)
 !---Set high order elements
@@ -209,13 +209,13 @@ do i=1,order
   IF(ML_hcurl_obj%ml_mesh%mgdim+i-1<ML_hcurl_grad_obj%minlev)CYCLE
   IF(ML_h1_obj%nlevels>=ML_hcurl_obj%ml_mesh%mgdim+i)THEN
     SELECT TYPE(this=>ML_h1_obj%levels(ML_hcurl_obj%ml_mesh%mgdim+i)%fe)
-      CLASS IS(oft_h0_fem)
+      CLASS IS(oft_h1_fem)
       ML_h1grad_obj%levels(ML_hcurl_obj%ml_mesh%mgdim+i-1)%fe=>this
       CLASS DEFAULT
         CALL oft_abort("Error casting H1 object", "oft_hcurl_grad_setup", __FILE__)
     END SELECT
   ELSE
-    CALL oft_h0_setup_vol(ML_h1grad_obj%levels(ML_hcurl_obj%ml_mesh%mgdim+i-1)%fe,ML_hcurl_obj%ml_mesh%mesh,i)
+    CALL oft_h1_setup_vol(ML_h1grad_obj%levels(ML_hcurl_obj%ml_mesh%mgdim+i-1)%fe,ML_hcurl_obj%ml_mesh%mesh,i)
   END IF
 end do
 !---Setup composite structure
@@ -778,11 +778,11 @@ ELSE
                  +  f(etmp(1))*gop(:,etmp(2))
       END DO
     case(2)
-      call oft_hcurl_eval_all2(self,cell,f,rop,gop)
+      call oft_hcurl_eval_all2()!self,cell,f,rop,gop)
     case(3)
-      call oft_hcurl_eval_all3(self,cell,f,rop,gop)
+      call oft_hcurl_eval_all3()!self,cell,f,rop,gop)
     case(4)
-      call oft_hcurl_eval_all4(self,cell,f,rop,gop)
+      call oft_hcurl_eval_all4()!self,cell,f,rop,gop)
     case default ! Fall back to normal evaluation
       DO i=1,self%nce
         call oft_hcurl_eval(self,cell,i,f,rop(:,i),gop)
@@ -790,18 +790,18 @@ ELSE
   end select
 END IF
 DEBUG_STACK_POP
-end subroutine oft_hcurl_eval_all
+contains
 !---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quadratic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
-subroutine oft_hcurl_eval_all2(self,cell,f,rop,gop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell !< Cell for evaluation
-real(r8), intent(in) :: f(4) !< Position in cell in logical space
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,14)
+subroutine oft_hcurl_eval_all2()!self,cell,f,rop,gop)
+! class(oft_fem_type), intent(in) :: self
+! integer(i4), intent(in) :: cell !< Cell for evaluation
+! real(r8), intent(in) :: f(4) !< Position in cell in logical space
+! real(r8), intent(in) :: gop(3,4)
+! real(r8), intent(out) :: rop(3,14)
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,u1(3),u2(3),u3(3)
 DEBUG_STACK_PUSH
@@ -830,12 +830,12 @@ end subroutine oft_hcurl_eval_all2
 !!
 !! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
-subroutine oft_hcurl_eval_all3(self,cell,f,rop,gop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell !< Cell for evaluation
-real(r8), intent(in) :: f(4) !< Position in cell in logical space
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,29)
+subroutine oft_hcurl_eval_all3()!self,cell,f,rop,gop)
+! class(oft_fem_type), intent(in) :: self
+! integer(i4), intent(in) :: cell !< Cell for evaluation
+! real(r8), intent(in) :: f(4) !< Position in cell in logical space
+! real(r8), intent(in) :: gop(3,4)
+! real(r8), intent(out) :: rop(3,29)
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,f4,u1(3),u2(3),u3(3)
 DEBUG_STACK_PUSH
@@ -892,12 +892,12 @@ end subroutine oft_hcurl_eval_all3
 !!
 !! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
-subroutine oft_hcurl_eval_all4(self,cell,f,rop,gop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell !< Cell for evaluation
-real(r8), intent(in) :: f(4) !< Position in cell in logical space
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,53)
+subroutine oft_hcurl_eval_all4()!self,cell,f,rop,gop)
+! class(oft_fem_type), intent(in) :: self
+! integer(i4), intent(in) :: cell !< Cell for evaluation
+! real(r8), intent(in) :: f(4) !< Position in cell in logical space
+! real(r8), intent(in) :: gop(3,4)
+! real(r8), intent(out) :: rop(3,53)
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,f4,u1(3),u2(3),u3(3)
 DEBUG_STACK_PUSH
@@ -1005,6 +1005,7 @@ rop(:,53) = f2*f3*f4*(-4.d0*f1 + 2.d0*f2)*gop(:,1) &
           + f1*f2*f3*(2.d0*f1 - 2.d0*f2)*gop(:,4)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_eval_all4
+end subroutine oft_hcurl_eval_all
 !---------------------------------------------------------------------------
 !> Evaluate Nedelec H(Curl) curl function in the interior
 !!
@@ -1570,28 +1571,28 @@ ELSE
         rop(:,i) = 2.d0*cgop(:,ABS(cgop_map(etmp(1),etmp(2))))*SIGN(1,cgop_map(etmp(1),etmp(2)))
       END DO
     case(2)
-      call oft_hcurl_ceval_all2(self,cell,f,rop,cgop)
+      call oft_hcurl_ceval_all2()!self,cell,f,rop,cgop)
     case(3)
-      call oft_hcurl_ceval_all3(self,cell,f,rop,cgop)
+      call oft_hcurl_ceval_all3()!self,cell,f,rop,cgop)
     case(4)
-      call oft_hcurl_ceval_all4(self,cell,f,rop,cgop)
+      call oft_hcurl_ceval_all4()!self,cell,f,rop,cgop)
     case default ! Fall back to normal evaluation
       CALL oft_abort('BAD ORDER','oft_hcurl_ceval_all',__FILE__)
   end select
 END IF
 DEBUG_STACK_POP
-end subroutine oft_hcurl_ceval_all
+contains
 !---------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quadratic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
-subroutine oft_hcurl_ceval_all2(self,cell,f,rop,cgop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(in) :: cgop(3,6)
-real(r8), intent(out) :: rop(3,14)
+subroutine oft_hcurl_ceval_all2()!self,cell,f,rop,cgop)
+! class(oft_fem_type), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(4)
+! real(r8), intent(in) :: cgop(3,6)
+! real(r8), intent(out) :: rop(3,14)
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3
 real(r8) :: g1xg2(3),g1xg3(3),g2xg3(3)
@@ -1622,12 +1623,12 @@ end subroutine oft_hcurl_ceval_all2
 !!
 !! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
-subroutine oft_hcurl_ceval_all3(self,cell,f,rop,cgop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(in) :: cgop(3,6)
-real(r8), intent(out) :: rop(3,29)
+subroutine oft_hcurl_ceval_all3()!self,cell,f,rop,cgop)
+! class(oft_fem_type), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(4)
+! real(r8), intent(in) :: cgop(3,6)
+! real(r8), intent(out) :: rop(3,29)
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,f4
 real(r8) :: g1xg2(3),g1xg3(3),g2xg3(3)
@@ -1692,12 +1693,12 @@ end subroutine oft_hcurl_ceval_all3
 !!
 !! @note Evaluation is performed in logical coordinates
 !---------------------------------------------------------------------------
-subroutine oft_hcurl_ceval_all4(self,cell,f,rop,cgop)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(4)
-real(r8), intent(in) :: cgop(3,6)
-real(r8), intent(out) :: rop(3,53)
+subroutine oft_hcurl_ceval_all4()!self,cell,f,rop,cgop)
+! class(oft_fem_type), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(4)
+! real(r8), intent(in) :: cgop(3,6)
+! real(r8), intent(out) :: rop(3,53)
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,f4
 real(r8) :: g1xg2(3),g1xg3(3),g2xg3(3)
@@ -1829,4 +1830,5 @@ rop(:,53) = 0*cgop(:,1) &
           + 0*cgop(:,6)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_ceval_all4
+end subroutine oft_hcurl_ceval_all
 end module oft_hcurl_basis

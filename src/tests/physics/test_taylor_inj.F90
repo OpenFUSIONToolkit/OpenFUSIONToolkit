@@ -24,8 +24,8 @@ USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, oft_lag_vgetmop, &
   oft_lag_vproject
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_mloptions, h1_setup_interp
 USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
   taylor_minlev, taylor_jtol, taylor_tag_size, taylor_hvac, taylor_hcur, &
   taylor_gffa, oft_taylor_rinterp, ML_oft_hcurl, ML_oft_h0, &
@@ -60,15 +60,15 @@ END IF
 !---
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=taylor_minlev)
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=taylor_minlev)
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=taylor_minlev)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,minlev=taylor_minlev)
 CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
   CALL hcurl_setup_interp(ML_oft_hcurl)
   CALL hcurl_mloptions(ML_oft_hcurl)
-  CALL h0_setup_interp(ML_oft_h0)
-  CALL h0_mloptions
+  CALL h1_setup_interp(ML_oft_h0)
+  CALL h1_mloptions
 END IF
 !---Define jumps
 hcpc(:,1)=(/1.d0, 0.d0, 0.d0/)

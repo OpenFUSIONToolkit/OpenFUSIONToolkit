@@ -31,8 +31,8 @@ USE fem_base, ONLY: oft_fem_type, oft_afem_type, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE oft_lag_operators, ONLY: oft_lag_zerob, lag_getlop_pre, oft_lag_getlop
-USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_fem
-USE oft_h0_operators, ONLY: oft_h0_zerogrnd, h0_getlop_pre, oft_h0_getlop
+USE oft_h1_basis, ONLY: oft_h1_geval_all, oft_h1_fem
+USE oft_h1_operators, ONLY: oft_h1_zerogrnd, h1_getlop_pre, oft_h1_getlop
 USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_hcurl_ceval_all, &
   oft_hcurl_get_cgops, oft_hcurl_fem
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, oft_hcurl_orthog, &
@@ -57,7 +57,7 @@ type, extends(fem_interp) :: oft_taylor_rinterp
   real(r8), pointer, dimension(:) :: vac_grad => NULL() !< Local vacuum field (gradient)
   real(r8), pointer, dimension(:) :: vac_curl => NULL() !< Local vacuum field (curl)
   real(r8), pointer, dimension(:) :: acurl => NULL() !< Local vector potential
-  class(oft_h0_fem), pointer :: grad_rep => NULL() !< Grad(H^1) FE representation
+  class(oft_h1_fem), pointer :: grad_rep => NULL() !< Grad(H^1) FE representation
   class(oft_hcurl_fem), pointer :: curl_rep => NULL() !< H(Curl) FE representation
 contains
   !> Retrieve local values for interpolation
@@ -405,12 +405,12 @@ IF(.NOT.rst)THEN
 ! Setup H0::LOP preconditioner
 !---------------------------------------------------------------------------
   if(taylor_minlev==ML_oft_h0%nlevels-1)then ! Lowest level uses diag precond
-    CALL oft_h0_getlop(ML_oft_h0%current_level,lop,'grnd')
+    CALL oft_h1_getlop(ML_oft_h0%current_level,lop,'grnd')
     CALL create_cg_solver(linv)
     CALL create_diag_pre(linv%pre)
   else ! Nested levels use MG
     CALL create_cg_solver(linv, force_native=.TRUE.)
-    CALL h0_getlop_pre(ML_oft_h0,linv%pre,ml_lop,'grnd',nlevels=ML_oft_h0%nlevels-taylor_minlev+1)
+    CALL h1_getlop_pre(ML_oft_h0,linv%pre,ml_lop,'grnd',nlevels=ML_oft_h0%nlevels-taylor_minlev+1)
       lop=>ml_lop(ML_oft_h0%nlevels-taylor_minlev+1)%M
   end if
 !---------------------------------------------------------------------------
@@ -956,7 +956,7 @@ SELECT TYPE(this=>hcurl_grad_rep%fields(1)%fe)
     CALL oft_abort("Invalid HCurl space","taylor_rinterp_setup1",__FILE__)
 END SELECT
 SELECT TYPE(this=>hcurl_grad_rep%fields(2)%fe)
-  CLASS IS(oft_h0_fem)
+  CLASS IS(oft_h1_fem)
     self%grad_rep=>this
   CLASS DEFAULT
     CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup1",__FILE__)
@@ -989,7 +989,7 @@ SELECT TYPE(hcurl_rep)
     CALL oft_abort("Invalid HCurl space","taylor_rinterp_setup2",__FILE__)
 END SELECT
 SELECT TYPE(hgrad_rep)
-  CLASS IS(oft_h0_fem)
+  CLASS IS(oft_h1_fem)
     self%grad_rep=>hgrad_rep
   CLASS DEFAULT
     CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup2",__FILE__)
@@ -1033,7 +1033,7 @@ deallocate(j,rop)
 allocate(j(self%grad_rep%nce),rop(3,self%grad_rep%nce))
 call self%grad_rep%ncdofs(cell,j) ! get DOFs
 !---Reconstruct field
-call oft_h0_geval_all(self%grad_rep,cell,f,rop,gop)
+call oft_h1_geval_all(self%grad_rep,cell,f,rop,gop)
 do jc=1,self%grad_rep%nce
   val=val+self%vac_grad(j(jc))*rop(:,jc)
 end do

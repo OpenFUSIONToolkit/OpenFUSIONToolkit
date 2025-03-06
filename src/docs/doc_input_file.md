@@ -94,18 +94,18 @@ are supported.
 | `df_pdop=1`  | Smoothing factors for LAG::PDOP | real [nlevels] |
 | `nu_pdop=1`  | Number of smoother iterations for LAG::PDOP | int [nlevels] |
 
-## Nedelec H0
+## H^1
 
 This group is used to specify the common smoother settings for common H0 scalar
 operators. Currently only the isotropic Laplacian operator is supported.
 
-**Option group:** `h0_op_options`
+**Option group:** `h1_op_options`
 |  Option  |  Description  | Type |
 |------------|------------|-----|
 | `df_lop=1`   | Smoothing factors for H0::LOP | real [nlevels] |
 | `nu_lop=1`   | Number of smoother iterations for H0::LOP | int [nlevels] |
 
-## Nedelec HCurl
+## H(Curl)
 
 This group is used to specify the common smoother settings for common H1(Curl) vector
 operators. Currently only the \f$ \nabla \times \nabla \times \f$ operator is supported.

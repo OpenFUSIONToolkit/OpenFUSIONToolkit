@@ -42,8 +42,8 @@ USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_vrinterp
 !---H1 FE (Grad(H^1) subspace)
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_mloptions, h1_setup_interp
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp
@@ -121,7 +121,7 @@ SELECT CASE(type)
     CALL Bfield_lag%setup(ML_oft_lagrange%current_level)
   CASE(2) ! H(Curl) + Grad(H^1) field
     CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
-    CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
+    CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
     CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(x1)

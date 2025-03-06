@@ -694,11 +694,11 @@ ELSE
       rop(i)=f(i)
     END DO
   CASE(2)
-    CALL tet_eval_all2(self,cell,f,rop)
+    CALL tet_eval_all2()!self,cell,f,rop)
   CASE(3)
-    CALL tet_eval_all3(self,cell,f,rop)
+    CALL tet_eval_all3()!self,cell,f,rop)
   CASE(4)
-    CALL tet_eval_all4(self,cell,f,rop)
+    CALL tet_eval_all4()!self,cell,f,rop)
   CASE DEFAULT
     IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
     DO i=1,4
@@ -730,17 +730,16 @@ ELSE
   END SELECT
 END IF
 DEBUG_STACK_POP
-end subroutine oft_lag_eval_all
+contains
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine tet_eval_all2(self,cell,f,rop)
-class(oft_scalar_fem), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: rop(10)
-integer(i4) :: i,j,offset,ind,inc,etmp(2),ftmp(3)
-integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
+subroutine tet_eval_all2()!self,cell,f,rop)
+! class(oft_scalar_fem), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(:)
+! real(r8), intent(out) :: rop(10)
+integer(i4) :: i,offset,etmp(2)
 real(r8) :: pnorm,nodes1(4)
 DEBUG_STACK_PUSH
 !---Vertices
@@ -761,13 +760,12 @@ end subroutine tet_eval_all2
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine tet_eval_all3(self,cell,f,rop)
-class(oft_scalar_fem), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: rop(20)
-integer(i4) :: i,j,offset,ind,inc,etmp(2),ftmp(3)
-integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
+subroutine tet_eval_all3()!self,cell,f,rop)
+! class(oft_scalar_fem), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(:)
+! real(r8), intent(out) :: rop(20)
+integer(i4) :: i,offset,etmp(2),ftmp(3)
 real(r8) :: pnorm,enorm,fnorm,nodes1(4),nodes2(4)
 DEBUG_STACK_PUSH
 IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
@@ -798,13 +796,12 @@ end subroutine tet_eval_all3
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine tet_eval_all4(self,cell,f,rop)
-class(oft_scalar_fem), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: rop(35)
-integer(i4) :: i,j,offset,ind,inc,etmp(2),ftmp(3)
-integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
+subroutine tet_eval_all4()!self,cell,f,rop)
+! class(oft_scalar_fem), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(:)
+! real(r8), intent(out) :: rop(35)
+integer(i4) :: i,offset,etmp(2),ftmp(3)
 real(r8) :: pnorm,enorm(2),fnorm,nodes1(4),nodes2(4),nodes3(4)
 DEBUG_STACK_PUSH
 IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
@@ -840,6 +837,7 @@ offset=4*3 + 6*3 + 4
 rop(offset+1) = PRODUCT(f-self%xnodes(1))/((self%xnodes(2)-self%xnodes(1))**4)
 DEBUG_STACK_POP
 end subroutine tet_eval_all4
+end subroutine oft_lag_eval_all
 !---------------------------------------------------------------------------
 !> Evaluate lagrange gradient function
 !!
@@ -994,7 +992,7 @@ real(r8), contiguous, intent(out) :: rop(:,:) !< Value of interpolation function
 real(r8), intent(in) :: gop(:,:) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: i,j,k,offset,ind,inc,etmp(2),ftmp(3)
 integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
-real(r8) :: cofs(4),val(3),vtmp(3),pnorm
+real(r8) :: cofs(4),val(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: grid_1d,dgrid_1d
 DEBUG_STACK_PUSH
 IF(self%mesh%type==3)THEN
@@ -1075,11 +1073,11 @@ ELSE
       rop(:,i)=gop(:,i)
     END DO
   CASE(2)
-    CALL tet_geval_all2(self,cell,f,gop,rop)
+    CALL tet_geval_all2()!self,cell,f,gop,rop)
   CASE(3)
-    CALL tet_geval_all3(self,cell,f,gop,rop)
+    CALL tet_geval_all3()!self,cell,f,gop,rop)
   CASE(4)
-    CALL tet_geval_all4(self,cell,f,gop,rop)
+    CALL tet_geval_all4()!self,cell,f,gop,rop)
   CASE DEFAULT
     IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
     DO i=1,4
@@ -1126,18 +1124,20 @@ ELSE
   END SELECT
 END IF
 DEBUG_STACK_POP
-end subroutine oft_lag_geval_all
+contains
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine tet_geval_all2(self,cell,f,gop,rop)
-class(oft_scalar_fem), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,10)
-integer(i4) :: i,j,k,offset,ind,inc,etmp(2),ftmp(3)
-integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
+subroutine tet_geval_all2()!self,cell,f,gop,rop)
+! class(oft_scalar_fem), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(:)
+! real(r8), intent(in) :: gop(3,4)
+! real(r8), intent(out) :: rop(3,10)
+! integer(i4) :: i,j,k,offset,ind,inc,etmp(2),ftmp(3)
+! integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
+! real(r8) :: cof1,cofs2(2),pnorm,nodes1(4)
+integer(i4) :: i,offset,etmp(2)
 real(r8) :: cof1,cofs2(2),pnorm,nodes1(4)
 DEBUG_STACK_PUSH
 !---Vertices
@@ -1159,12 +1159,12 @@ end subroutine tet_geval_all2
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine tet_geval_all3(self,cell,f,gop,rop)
-class(oft_scalar_fem), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,20)
+subroutine tet_geval_all3()!self,cell,f,gop,rop)
+! class(oft_scalar_fem), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(:)
+! real(r8), intent(in) :: gop(3,4)
+! real(r8), intent(out) :: rop(3,20)
 integer(i4) :: i,offset,etmp(2),ftmp(3)
 real(r8) :: pnorm,enorm,fnorm,nodes1(4),nodes2(4),dnodes2(4)
 DEBUG_STACK_PUSH
@@ -1201,12 +1201,13 @@ end subroutine tet_geval_all3
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine tet_geval_all4(self,cell,f,gop,rop)
-class(oft_scalar_fem), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,4)
-real(r8), intent(out) :: rop(3,35)
+subroutine tet_geval_all4()!self,cell,f,gop,rop)
+! class(oft_scalar_fem), intent(in) :: self
+! integer(i4), intent(in) :: cell
+! real(r8), intent(in) :: f(:)
+! real(r8), intent(in) :: gop(3,4)
+! real(r8), intent(out) :: rop(3,35)
+! integer(i4) :: i,offset,etmp(2),ftmp(3)
 integer(i4) :: i,offset,etmp(2),ftmp(3)
 real(r8) :: pnorm,enorm(2),fnorm,cofs4(4)
 real(r8) :: nodes1(4),nodes2(4),nodes3(4),dnodes2(4),dnodes3(4)
@@ -1257,6 +1258,7 @@ cofs4 = (/PRODUCT(nodes1(2:4)),PRODUCT(nodes1((/1,3,4/))), &
 rop(:,offset+1) = MATMUL(gop,cofs4)/((self%xnodes(2)-self%xnodes(1))**4)
 DEBUG_STACK_POP
 end subroutine tet_geval_all4
+end subroutine oft_lag_geval_all
 !---------------------------------------------------------------------------
 !> Evaluate lagrange gradient function
 !!

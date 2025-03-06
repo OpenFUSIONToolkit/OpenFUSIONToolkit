@@ -31,8 +31,8 @@ USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs
 !---H1 FE (Grad(H^1) subspace)
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_lop_eigs
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_lop_eigs
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_wop_eigs
@@ -73,7 +73,7 @@ IF(order>0)THEN
   !---Lagrange
   CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
   !---H^1 (Grad(H^1) subspace)
-  CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
+  CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
   !---H(Curl) subspace
   CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,minlev)
   !---H(Curl) + Grad(H^1) space
@@ -88,7 +88,7 @@ IF(order>0)THEN
   END IF
   oft_env%pm=.FALSE.
   CALL lag_lop_eigs(ML_oft_lagrange,minlev)
-  CALL h0_lop_eigs(ML_oft_h0,minlev)
+  CALL h1_lop_eigs(ML_oft_h0,minlev)
   CALL hcurl_wop_eigs(ML_oft_hcurl,minlev)
   CALL hcurl_grad_mop_eigs(ML_hcurl_grad,minlev)
 END IF

@@ -28,8 +28,8 @@ USE oft_solver_utils, ONLY: create_native_mlpre, create_cg_solver, create_diag_p
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 !---Grad(H^1) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_setup_interp
 !---H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
@@ -57,8 +57,8 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 ! Build FE structures
 !---------------------------------------------------------------------------
 !--- Grad(H^1) subspace
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0)
-IF(mg_test)CALL h0_setup_interp(ML_oft_h0)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0)
+IF(mg_test)CALL h1_setup_interp(ML_oft_h0)
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
 IF(mg_test)CALL hcurl_setup_interp(ML_oft_hcurl)

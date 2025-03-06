@@ -26,8 +26,8 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop, &
   oft_lag_getmop, oft_lag_project, oft_lag_rinterp, oft_lag_vrinterp
 !---H1 FE space (Grad(H^1) subspace)
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_setup_interp
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
@@ -86,8 +86,8 @@ CALL multigrid_construct(mg_mesh)
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 !--- Grad(H^1) subspace
-CALL oft_h0_setup(mg_mesh,order+1,ML_oft_h0,minlev=minlev)
-CALL h0_setup_interp(ML_oft_h0)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,minlev=minlev)
+CALL h1_setup_interp(ML_oft_h0)
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=minlev)
 CALL hcurl_setup_interp(ML_oft_hcurl)

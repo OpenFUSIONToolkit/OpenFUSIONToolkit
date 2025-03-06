@@ -42,9 +42,9 @@ USE fem_base, ONLY: oft_afem_type, oft_fem_type, fem_max_levels, oft_ml_fem_type
 USE fem_utils, ONLY: fem_interp
 USE fem_composite, ONLY: oft_ml_fem_comp_type, oft_fem_comp_type, oft_ml_fe_comp_vecspace
 USE oft_lag_basis, ONLY: oft_lag_geval_all
-USE oft_h0_basis, ONLY: oft_h0_geval_all, oft_h0_d2eval, oft_h0_fem, &
+USE oft_h1_basis, ONLY: oft_h1_geval_all, oft_h1_d2eval, oft_h1_fem, &
   oft_3D_h1_cast
-USE oft_h0_operators, ONLY: oft_h0_zerob, oft_h0_zerogrnd, oft_h0_getlop, oft_h0_gop
+USE oft_h1_operators, ONLY: oft_h1_zerob, oft_h1_zerogrnd, oft_h1_getlop, oft_h1_gop
 USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, &
   oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem, oft_3D_hcurl_cast
 USE oft_hcurl_operators, ONLY: oft_hcurl_rop, oft_hcurl_cop
@@ -60,7 +60,7 @@ type, extends(fem_interp) :: oft_hcurl_grad_rinterp
   real(r8), pointer, dimension(:) :: curl_vals => NULL() !< Local curl values
   real(r8), pointer, dimension(:,:) :: cache_grad => NULL() !< Needs Docs
   real(r8), pointer, dimension(:,:) :: cache_curl => NULL() !< Needs Docs
-  class(oft_h0_fem), pointer :: hgrad_rep => NULL() !< Grad(H^1) FE representation
+  class(oft_h1_fem), pointer :: hgrad_rep => NULL() !< Grad(H^1) FE representation
   class(oft_hcurl_fem), pointer :: hcurl_rep => NULL() !< H(Curl) FE representation
 contains
   !> Retrieve local values for interpolation
@@ -232,7 +232,7 @@ ELSE
       CALL oft_abort("Invalid HCurl space","rinterp_setup",__FILE__)
   END SELECT
   SELECT TYPE(this=>hcurl_grad_rep%fields(2)%fe)
-    CLASS IS(oft_h0_fem)
+    CLASS IS(oft_h1_fem)
       self%hgrad_rep=>this
     CLASS DEFAULT
       CALL oft_abort("Invalid HGrad space","rinterp_setup",__FILE__)
@@ -284,7 +284,7 @@ ELSE
       CALL oft_abort("Invalid HCurl space","rinterp_setup",__FILE__)
   END SELECT
   SELECT TYPE(hgrad_rep)
-    CLASS IS(oft_h0_fem)
+    CLASS IS(oft_h1_fem)
       self%hgrad_rep=>hgrad_rep
     CLASS DEFAULT
       CALL oft_abort("Invalid HGrad space","rinterp_setup",__FILE__)
@@ -366,13 +366,13 @@ ELSE
   end do
   DEALLOCATE(hgrad_rop)
 END IF
-IF(ASSOCIATED(oft_h0_gop))THEN
+IF(ASSOCIATED(oft_h1_gop))THEN
   do jc=1,self%hgrad_rep%nce
-    val=val+self%cache_grad(jc,oft_tid)*oft_h0_gop(:,jc)
+    val=val+self%cache_grad(jc,oft_tid)*oft_h1_gop(:,jc)
   end do
 ELSE
   ALLOCATE(hgrad_rop(3,self%hgrad_rep%nce))
-  CALL oft_h0_geval_all(self%hgrad_rep,cell,f,hgrad_rop,gop)
+  CALL oft_h1_geval_all(self%hgrad_rep,cell,f,hgrad_rop,gop)
   do jc=1,self%hgrad_rep%nce
     val=val+self%cache_grad(jc,oft_tid)*hgrad_rop(:,jc)
   end do
@@ -465,7 +465,7 @@ END IF
 val=0.d0
 CALL self%hcurl_rep%mesh%hessian(cell,f,g2op,Kmat)
 do jc=1,self%hgrad_rep%nce
-  call oft_h0_d2eval(self%hgrad_rep,cell,jc,f,dop,g2op)
+  call oft_h1_d2eval(self%hgrad_rep,cell,jc,f,dop,g2op)
   val=val+self%cache_grad(jc,oft_tid)*(dop(1)+dop(4)+dop(6))
 end do
 DEBUG_STACK_POP
@@ -696,7 +696,7 @@ real(r8) :: reg
 LOGICAL :: zero_boundary
 class(oft_mesh), pointer :: mesh
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
-CLASS(oft_h0_fem), POINTER :: grad_rep
+CLASS(oft_h1_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
 NULLIFY(aloc,bcurl,bgrad)
 zero_boundary=.FALSE.
@@ -746,7 +746,7 @@ real(r8), pointer, dimension(:) :: bloc
 integer(i4), allocatable, dimension(:) :: emap
 integer(i4) :: i,j,k,l
 real(r8) :: reg
-CLASS(oft_h0_fem), POINTER :: grad_rep
+CLASS(oft_h1_fem), POINTER :: grad_rep
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_h1_cast(grad_rep,h0_fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_gradtp",__FILE__)
@@ -805,7 +805,7 @@ real(r8), allocatable, dimension(:) :: ac_tmp,ag_tmp,btmp
 real(r8), allocatable, dimension(:,:) :: rop_curl,rop_grad
 logical :: curved
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
-CLASS(oft_h0_fem), POINTER :: grad_rep
+CLASS(oft_h1_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_div",__FILE__)
 IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_div",__FILE__)
@@ -847,7 +847,7 @@ do i=1,grad_rep%mesh%nc
     if(curved.OR.m==1)call grad_rep%mesh%jacobian(i,grad_rep%quad%pts(:,m),goptmp,vol)
     det=vol*grad_rep%quad%wts(m)
     call oft_hcurl_eval_all(curl_rep,i,grad_rep%quad%pts(:,m),rop_curl,goptmp)
-    call oft_h0_geval_all(grad_rep,i,grad_rep%quad%pts(:,m),rop_grad,goptmp)
+    call oft_h1_geval_all(grad_rep,i,grad_rep%quad%pts(:,m),rop_grad,goptmp)
     !---Compute local operator contribution
     aloc = 0.d0
     do jr=1,curl_rep%nce
@@ -889,7 +889,7 @@ real(r8) :: v,f(4),det,vol
 logical :: curved
 real(r8), allocatable :: rop_curl(:,:),cop_curl(:,:),rop_grad(:,:),btmp(:)
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
-CLASS(oft_h0_fem), POINTER :: grad_rep
+CLASS(oft_h1_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_curltp",__FILE__)
 IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_curltp",__FILE__)
@@ -930,7 +930,7 @@ do i=1,grad_rep%mesh%nc
     det=v*curl_rep%quad%wts(m)
     call oft_hcurl_eval_all(curl_rep,i,curl_rep%quad%pts(:,m),rop_curl,goptmp)
     call oft_hcurl_ceval_all(curl_rep,i,curl_rep%quad%pts(:,m),cop_curl,cgop)
-    call oft_h0_geval_all(grad_rep,i,curl_rep%quad%pts(:,m),rop_grad,goptmp)
+    call oft_h1_geval_all(grad_rep,i,curl_rep%quad%pts(:,m),rop_grad,goptmp)
     !---Compute local operator contribution
     do jr=1,curl_rep%nce
       do jc=1,curl_rep%nce
@@ -973,7 +973,7 @@ real(r8), allocatable, dimension(:,:) :: mop11,mop12,mop21,mop22
 logical :: curved
 CLASS(oft_vector), POINTER :: oft_hcurl_grad_vec
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
-CLASS(oft_h0_fem), POINTER :: hgrad_rep
+CLASS(oft_h1_fem), POINTER :: hgrad_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
@@ -1014,7 +1014,7 @@ do i=1,hgrad_rep%mesh%nc
     if(curved.OR.m==1)call hgrad_rep%mesh%jacobian(i,hcurl_rep%quad%pts(:,m),goptmp,vol)
     det=vol*hcurl_rep%quad%wts(m)
     call oft_hcurl_eval_all(hcurl_rep,i,hcurl_rep%quad%pts(:,m),rop_curl,goptmp)
-    call oft_h0_geval_all(hgrad_rep,i,hcurl_rep%quad%pts(:,m),rop_grad,goptmp)
+    call oft_h1_geval_all(hgrad_rep,i,hcurl_rep%quad%pts(:,m),rop_grad,goptmp)
     !---Compute local matrix contributions
     do jr=1,hcurl_rep%nce
       do jc=1,hcurl_rep%nce
@@ -1133,7 +1133,7 @@ real(r8), pointer, dimension(:) :: xcurl,xgrad
 real(r8), allocatable, dimension(:,:) :: rop_curl,rop_grad
 logical :: curved
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
-CLASS(oft_h0_fem), POINTER :: hgrad_rep
+CLASS(oft_h1_fem), POINTER :: hgrad_rep
 DEBUG_STACK_PUSH
 !---
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_grad_rep%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_getmop",__FILE__)
@@ -1157,7 +1157,7 @@ do i=1,hgrad_rep%mesh%nc ! Loop over cells
     det=vol*hcurl_rep%quad%wts(m)
     call field%interp(i,hcurl_rep%quad%pts(:,m),goptmp,bcc)
     call oft_hcurl_eval_all(hcurl_rep,i,hcurl_rep%quad%pts(:,m),rop_curl,goptmp)
-    call oft_h0_geval_all(hgrad_rep,i,hcurl_rep%quad%pts(:,m),rop_grad,goptmp)
+    call oft_h1_geval_all(hgrad_rep,i,hcurl_rep%quad%pts(:,m),rop_grad,goptmp)
     do jc=1,hcurl_rep%nce
       !$omp atomic
       xcurl(j_hcurl(jc))=xcurl(j_hcurl(jc))+DOT_PRODUCT(rop_curl(:,jc),bcc)*det
@@ -1191,7 +1191,7 @@ REAL(r8) :: vol,det,f(4),norm(3),etmp(3),goptmp(3,3),gop(3,4)
 REAL(r8), POINTER, DIMENSION(:) :: xcurl,xgrad
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: rop_curl,rop_grad
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
-CLASS(oft_h0_fem), POINTER :: hgrad_rep
+CLASS(oft_h1_fem), POINTER :: hgrad_rep
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_bmesh), POINTER :: smesh
 TYPE(oft_quad_type) :: quad
@@ -1227,7 +1227,7 @@ do i=1,smesh%nc
     call mesh%jacobian(cell,f,gop,vol)
     call field%interp(cell,f,gop,etmp)
     call oft_hcurl_eval_all(hcurl_rep,cell,f,rop_curl,gop)
-    call oft_h0_geval_all(hgrad_rep,cell,f,rop_grad,gop)
+    call oft_h1_geval_all(hgrad_rep,cell,f,rop_grad,gop)
     do jc=1,hcurl_rep%nce
       !$omp atomic
       xcurl(j_hcurl(jc))=xcurl(j_hcurl(jc)) &
@@ -1260,8 +1260,8 @@ class(oft_solver), target, optional, intent(in) :: solver
 !---
 CLASS(oft_matrix), POINTER :: lop
 CLASS(oft_solver), POINTER :: linv
-TYPE(oft_h0_zerob), POINTER :: bc_zerob
-TYPE(oft_h0_zerogrnd), POINTER :: bc_zerogrnd
+TYPE(oft_h1_zerob), POINTER :: bc_zerob
+TYPE(oft_h1_zerogrnd), POINTER :: bc_zerogrnd
 DEBUG_STACK_PUSH
 self%ML_hcurl_full=>ML_hcurl_grad_rep
 self%ML_curl=>ML_hcurl_grad_rep%ml_fields(1)%ml
@@ -1271,7 +1271,7 @@ IF(PRESENT(solver))THEN
   self%internal_solver=.FALSE.
 ELSE
   NULLIFY(lop)
-  CALL oft_h0_getlop(self%ML_grad%current_level,lop,bc)
+  CALL oft_h1_getlop(self%ML_grad%current_level,lop,bc)
   CALL create_cg_solver(linv)
   linv%A=>lop
   linv%its=-3
@@ -1281,11 +1281,11 @@ ELSE
 END IF
 IF(TRIM(bc)=='grnd')THEN
   ALLOCATE(bc_zerogrnd)
-  bc_zerogrnd%ML_H0_rep=>self%ML_grad
+  bc_zerogrnd%ML_H1_rep=>self%ML_grad
   self%bc=>bc_zerogrnd
 ELSE
   ALLOCATE(bc_zerob)
-  bc_zerob%ML_H0_rep=>self%ML_grad
+  bc_zerob%ML_H1_rep=>self%ML_grad
   self%bc=>bc_zerob
 END IF
 DEBUG_STACK_POP
@@ -1760,7 +1760,7 @@ integer(i4) :: i,j,ierr
 real(r8), pointer, dimension(:) :: alias,array_c,array_f
 CLASS(oft_ml_fem_type), POINTER :: Ml_curl,ML_grad
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
-CLASS(oft_h0_fem), POINTER :: grad_rep
+CLASS(oft_h1_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_hcurl_cast(curl_rep,self%ML_FE_rep%ml_fields(1)%ml%current_level))CALL oft_abort("Incorrect Curl FE type","base_push",__FILE__)
 IF(.NOT.oft_3D_h1_cast(grad_rep,self%ML_FE_rep%ml_fields(2)%ml%current_level))CALL oft_abort("Incorrect Grad FE type","base_push",__FILE__)
@@ -1977,7 +1977,7 @@ TYPE(oft_quad_type) :: quad
 CLASS(oft_bmesh), POINTER :: mesh_tmp
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_hcurl_fem), POINTER :: curl_rep
-CLASS(oft_h0_fem), POINTER :: grad_rep
+CLASS(oft_h1_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_jump_error",__FILE__)
 IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_jump_error",__FILE__)
@@ -2032,7 +2032,7 @@ DO i=1,mesh%nf
       !---
       val=0.d0
       CALL oft_hcurl_eval_all(curl_rep,cell(j),f,rop_curl,gop)
-      CALL oft_h0_geval_all(grad_rep,cell(j),f,rop_grad,gop)
+      CALL oft_h1_geval_all(grad_rep,cell(j),f,rop_grad,gop)
       DO jc=1,curl_rep%nce
         val=val+curl_vals(j_hcurl(jc))*rop_curl(:,jc)
       END DO

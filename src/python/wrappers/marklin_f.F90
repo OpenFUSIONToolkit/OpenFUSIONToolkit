@@ -31,9 +31,9 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
     oft_lag_vgetmop, oft_lag_vproject
 !---H1 FE space (Grad(H^1) subspace)
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, oft_h0_zerogrnd, &
-  oft_h0_zerob
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_setup_interp, oft_h1_getlop, oft_h1_zerogrnd, &
+  oft_h1_zerob
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
@@ -253,8 +253,8 @@ CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_hcurl_grad_divout) :: divout
 CLASS(oft_matrix), POINTER :: lop => NULL()
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
-TYPE(oft_h0_zerogrnd), TARGET :: h0_zerogrnd
-TYPE(oft_h0_zerob), TARGET :: h0_zerob
+TYPE(oft_h1_zerogrnd), TARGET :: h0_zerogrnd
+TYPE(oft_h1_zerob), TARGET :: h0_zerob
 CALL copy_string('',error_str)
 IF(.NOT.c_associated(marklin_ptr))THEN
   CALL copy_string('Marklin object not associated',error_str)
@@ -263,8 +263,8 @@ END IF
 CALL c_f_pointer(marklin_ptr,self)
 IF(ML_hcurl_grad%nlevels==0)THEN
   !---Grad(H^1) subspace
-  CALL oft_h0_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h0,minlev=ML_oft_hcurl%minlev+1)
-  CALL h0_setup_interp(ML_oft_h0)
+  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h0,minlev=ML_oft_hcurl%minlev+1)
+  CALL h1_setup_interp(ML_oft_h0)
   !---Full H(Curl) + Grad(H^1) space
   CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,ML_oft_hcurl%minlev)
   CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h0)
@@ -274,9 +274,9 @@ END IF
 !---------------------------------------------------------------------------
 NULLIFY(lop,tmp)
 IF(zero_norm)THEN
-  CALL oft_h0_getlop(ML_oft_h0%current_level,lop,"grnd")
+  CALL oft_h1_getlop(ML_oft_h0%current_level,lop,"grnd")
 ELSE
-  CALL oft_h0_getlop(ML_oft_h0%current_level,lop,"zerob")
+  CALL oft_h1_getlop(ML_oft_h0%current_level,lop,"zerob")
 END IF
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -284,11 +284,11 @@ linv%its=-2
 CALL create_diag_pre(linv%pre) ! Setup Preconditioner
 divout%solver=>linv
 IF(zero_norm)THEN
-  h0_zerogrnd%ML_H0_rep=>ML_h1grad
+  h0_zerogrnd%ML_H1_rep=>ML_h1grad
   divout%bc=>h0_zerogrnd
   divout%keep_boundary=.TRUE.
 ELSE
-  h0_zerob%ML_H0_rep=>ML_h1grad
+  h0_zerob%ML_H1_rep=>ML_h1grad
   divout%bc=>h0_zerob
 END IF
 !---------------------------------------------------------------------------
