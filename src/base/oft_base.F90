@@ -116,14 +116,17 @@ TYPE :: oft_env_type
   INTEGER(i4) :: nparts = 1 !< Number of OpenMP paritions
 #ifdef OFT_MPI_F08
   TYPE(mpi_comm) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+  TYPE(mpi_comm) :: NODE_COMM = MPI_COMM_SELF !< Open FUSION Toolkit MPI node-local communicator
 #else
   INTEGER(i4) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+  INTEGER(i4) :: NODE_COMM = MPI_COMM_SELF !< Open FUSION Toolkit MPI node-local communicator
 #endif
   INTEGER(i4) :: nnodes = -1 !< Number of MPI tasks
   INTEGER(i4) :: ppn = 1 !< Number of procs per NUMA node
   INTEGER(i4) :: nprocs = -1 !< Number of MPI tasks
   INTEGER(i4) :: nthreads = -1 !< Number of OpenMP threads
   INTEGER(i4) :: rank = -1 !< MPI rank
+  INTEGER(i4) :: node_rank = -1 !< MPI node-local rank
   INTEGER(i4) :: debug = 0 !< Debug level (1-3)
   LOGICAL :: head_proc = .FALSE. !< Lead processor flag
   LOGICAL :: pm = .TRUE. !< Performance monitor (default T=on, F=off)
@@ -298,6 +301,14 @@ oft_env%debug=debug
 oft_env%test_run=test_run
 oft_env%nparts=nparts
 oft_indent=""
+#ifdef HAVE_MPI
+IF(oft_env%ppn>1)THEN
+  CALL MPI_Comm_split(oft_env%comm,oft_env%rank/oft_env%ppn,oft_env%rank,oft_env%NODE_COMM,ierr)
+  CALL MPI_Comm_rank(oft_env%NODE_COMM,oft_env%node_rank,ierr)
+ELSE
+  oft_env%node_rank=0
+END IF
+#endif
 !---Print runtime information
 IF(oft_env%rank==0)THEN
   WRITE(*,'(A)')    '#----------------------------------------------'

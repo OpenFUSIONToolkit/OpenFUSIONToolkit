@@ -70,8 +70,6 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 				double *values, int_t *colind, int_t *rowptr,
 				double *b, int ldb, gridinfo_t **grid_handle,
 				factors_dist_t **f_factors, int perm_spec, bool iter_refine, int *info)
-
-{
 /*
  * Purpose
  * =======
@@ -116,6 +114,7 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
  * info (output) int
  *
  */
+{
 	superlu_dist_options_t options;
 	SuperLUStat_t stat;
 	SuperMatrix A;

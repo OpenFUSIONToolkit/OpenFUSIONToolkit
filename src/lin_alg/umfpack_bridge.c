@@ -16,8 +16,6 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
                     double *b, int ldb,
                     factors_t **f_factors,
                     int col_perm, bool iter_refine, int *info)
-
-{
 /*
  * This routine can be called from Fortran.
  *
@@ -34,6 +32,7 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
  *      Otherwise, it it an input.
  *
  */
+{
   int i,j;
   int status = 0;
   double Info [UMFPACK_INFO];
