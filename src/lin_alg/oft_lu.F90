@@ -17,7 +17,7 @@
 !! @ingroup doxy_oft_lin_alg
 !---------------------------------------------------------------------------
 MODULE oft_lu
-USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr
+USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr, c_f_pointer, c_loc
 USE oft_local
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_graph
@@ -366,7 +366,7 @@ TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting LU solver: ',self%package,self%refactor
-IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'lusolver_apply',__FILE__)
 !---Check call threading for MUMPS
 IF(self%package(1:5)=='mumps')THEN
@@ -609,7 +609,8 @@ CASE("superd")
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
     END IF
-    self%mumps_struct%rhs => vals
+    CALL c_f_pointer(C_LOC(vals),self%mumps_struct%rhs,[nrhs*g%n])
+    ! self%mumps_struct%rhs => vals(1:g%n,1:nrhs)
     self%mumps_struct%lrhs = g%n
     self%mumps_struct%nrhs = nrhs
     !---
@@ -713,6 +714,8 @@ IF(.NOT.self%initialized)THEN
   NULLIFY(self%A)
   RETURN
 END IF
+nrhs=0
+ldb=0
 ALLOCATE(ivals(1),rvals(1))
 SELECT CASE(TRIM(self%package))
 #ifdef HAVE_SUPERLU
@@ -779,7 +782,7 @@ TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting ILU solver: ',self%package,self%refactor
-IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'ilusolver_apply',__FILE__)
 IF(ASSOCIATED(A_native%Mfull))THEN
   mat_vals=>A_native%Mfull

@@ -41,18 +41,18 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
+    [c_void_p, c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int, c_char_p])
 
 # tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
 #     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
 
 # G-S setup function (mesh and such)
 tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
-    [c_int, c_bool, c_int_ptr, c_char_p])
+    [c_void_p, c_int, c_bool, c_int_ptr, c_char_p])
 
 # G-S setup function (mesh and such)
 tokamaker_reset = ctypes_subroutine(oftpy_lib.tokamaker_reset,
-    [c_char_p])
+    [c_void_p, c_char_p])
 
 # G-S settings function
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,

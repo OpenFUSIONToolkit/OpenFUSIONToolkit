@@ -19,12 +19,13 @@ module fem_base
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array, sort_matrix
 USE oft_quadrature
-USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, oft_init_seam
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_stitch_check, destory_seam
 USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
 !---
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_graph, &
-  oft_graph_ptr, oft_matrix, oft_matrix_ptr
+  oft_graph_ptr, oft_matrix, oft_matrix_ptr, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   native_vector_slice_push, native_vector_slice_pop
 USE oft_la_utils, ONLY: create_vector, create_matrix
@@ -35,8 +36,6 @@ PRIVATE
 integer(i4), public, parameter :: fem_max_levels=10 !< Maximum number of FE levels
 integer(i4), public, parameter :: fem_idx_ver=1 !< File version for array indexing
 character(LEN=16), public, parameter :: fem_idx_path="OFT_idx_Version" !< HDF5 field name
-!---------------------------------------------------------------------------
-! TYPE oft_afem_type
 !---------------------------------------------------------------------------
 !> Base FE type
 !---------------------------------------------------------------------------
@@ -104,8 +103,6 @@ ABSTRACT INTERFACE
   end subroutine afem_ncdofs
 END INTERFACE
 !---------------------------------------------------------------------------
-! TYPE oft_bfem_type
-!---------------------------------------------------------------------------
 !> Base FE type for boundary (triangle) meshes
 !---------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_afem_type) :: oft_bfem_type
@@ -121,8 +118,6 @@ CONTAINS
   PROCEDURE :: delete => bfem_delete
 END TYPE oft_bfem_type
 !---------------------------------------------------------------------------
-! TYPE oft_fem_type
-!---------------------------------------------------------------------------
 !> Base FE type
 !---------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_afem_type) :: oft_fem_type
@@ -137,15 +132,11 @@ CONTAINS
   PROCEDURE :: delete => fem_delete
 END TYPE oft_fem_type
 !---------------------------------------------------------------------------
-! TYPE oft_fem_type
-!---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
 type, PUBLIC :: oft_fem_ptr
   CLASS(oft_afem_type), pointer :: fe => NULL() !< Finite element object
 end type oft_fem_ptr
-!---------------------------------------------------------------------------
-! TYPE oft_ml_fem_type
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
@@ -154,8 +145,10 @@ TYPE, PUBLIC :: oft_ml_fem_type
   INTEGER(i4) :: level = 0 !< Current FE level
   INTEGER(i4) :: abs_level = 0 !< Asoblute FE refinement level
   INTEGER(i4) :: blevel = 0 !< FE base level
-  TYPE(oft_fem_ptr) :: levels(fem_max_levels)
+  INTEGER(i4) :: minlev = 1 !< Lowest level
+  TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Structure containing bound ML mesh
   CLASS(oft_afem_type), POINTER :: current_level => NULL()
+  TYPE(oft_fem_ptr) :: levels(fem_max_levels)
   TYPE(oft_graph_ptr) :: interp_graphs(fem_max_levels)
   TYPE(oft_matrix_ptr) :: interp_matrices(fem_max_levels)
 CONTAINS
@@ -165,15 +158,48 @@ CONTAINS
   PROCEDURE :: set_level => ml_fem_set_level
 END TYPE oft_ml_fem_type
 !---------------------------------------------------------------------------
-! TYPE oft_ml_fem_ptr
-!---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
 type, PUBLIC :: oft_ml_fem_ptr
   TYPE(oft_ml_fem_type), pointer :: ml => NULL() !< ML object
 end type oft_ml_fem_ptr
 !---------------------------------------------------------------------------
-! TYPE dof_map
+!> Needs docs
+!---------------------------------------------------------------------------
+type, PUBLIC, extends(oft_ml_vecspace) :: oft_ml_fe_vecspace
+  class(oft_ml_fem_type), pointer :: ML_FE_rep => NULL() !< ML FE representation
+  !> Needs docs
+  PROCEDURE(ml_fe_base_pop), POINTER :: base_pop => NULL()
+  !> Needs docs
+  PROCEDURE(ml_fe_base_push), POINTER :: base_push => NULL()
+contains
+  !> Needs docs
+  PROCEDURE :: vec_create => ml_fe_vecspace_create
+  !> Needs docs
+  PROCEDURE :: interp => ml_fe_vecspace_interp
+  !> Needs docs
+  PROCEDURE :: inject => ml_fe_vecspace_inject
+end type oft_ml_fe_vecspace
+ABSTRACT INTERFACE
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+  SUBROUTINE ml_fe_base_push(self,afine,acors)
+    IMPORT oft_ml_fe_vecspace, oft_vector
+    CLASS(oft_ml_fe_vecspace), INTENT(inout) :: self
+    CLASS(oft_vector), INTENT(inout) :: afine
+    CLASS(oft_vector), INTENT(inout) :: acors
+  END SUBROUTINE ml_fe_base_push
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+  SUBROUTINE ml_fe_base_pop(self,acors,afine)
+    IMPORT oft_ml_fe_vecspace, oft_vector
+    CLASS(oft_ml_fe_vecspace), INTENT(inout) :: self
+    CLASS(oft_vector), INTENT(inout) :: acors
+    CLASS(oft_vector), INTENT(inout) :: afine
+  END SUBROUTINE ml_fe_base_pop
+END INTERFACE
 !---------------------------------------------------------------------------
 !> Cell DOF type information
 !---------------------------------------------------------------------------
@@ -182,8 +208,6 @@ type :: dof_map
   integer(i4) :: el = 0 !< Element id
   integer(i4) :: ind = 0 !< Sub-index
 end type dof_map
-!---------------------------------------------------------------------------
-! TYPE fem_mpi_global
 !---------------------------------------------------------------------------
 !> Global vector information and indicies
 !---------------------------------------------------------------------------
@@ -244,8 +268,6 @@ IF(ASSOCIATED(self%cache_native))THEN
 END IF
 end subroutine afem_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_self_linkage
-!---------------------------------------------------------------------------
 !> Compute element to element linkage for a FE representation
 !!
 !! Creates a CSR graph representing the interaction between elements in a single
@@ -256,12 +278,10 @@ end subroutine afem_delete
 !!
 !! @note The graph is constructed in the @ref fem_base::oft_fem_type::nee "nee",
 !! @ref fem_base::oft_fem_type::kee "kee", and @ref fem_base::oft_fem_type::lee "lee"
-!! fields of \c self.
-!!
-!! @param[in,out] self Finite element representation
+!! fields of `self`
 !---------------------------------------------------------------------------
 subroutine afem_self_linkage(self)
-class(oft_afem_type), intent(inout) :: self
+class(oft_afem_type), intent(inout) :: self !< Finite element representation
 integer(i4) :: i,j,k,offset,stack
 integer(i4) :: jeg,jsg,jee,jse,js,je,jn
 integer(i4) :: mycounts(4)
@@ -340,29 +360,21 @@ deallocate(nr)
 DEBUG_STACK_POP
 end subroutine afem_self_linkage
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_common_linkage
-!---------------------------------------------------------------------------
 !> Compute element to element linkage between two FE representations
 !!
 !! Creates a CSR graph representing the interaction between elements of two different
 !! finite element representations. This listed is constructed as in
 !! @ref fem_base::fem_self_linkage "fem_self_linkage", however in this case
-!! \c self is used as the test functions and \c other is used as the basis set
+!! `self` is used as the test functions and `other` is used as the basis set
 !! in the Galerkin intergral. These correspond to the row and columns of the CSR
-!! graph respectively.
-!!
-!! @param[in] self Finite element representation for test set (rows)
-!! @param[in] other Finite element representation for basis set (columns)
-!! @param[out] nee Number of entries in graph
-!! @param[out] kee Row pointer into column list [self%ne+1]
-!! @param[out] lee Column list [nee]
+!! graph respectively
 !---------------------------------------------------------------------------
 subroutine fem_common_linkage(self,other,nee,kee,lee)
-class(oft_afem_type), intent(in) :: self
-class(oft_afem_type), intent(in) :: other
-integer(i4), intent(out) :: nee
-integer(i4), pointer, intent(out) :: kee(:)
-integer(i4), pointer, intent(out) :: lee(:)
+class(oft_afem_type), intent(in) :: self !< Finite element representation for test set (rows)
+class(oft_afem_type), intent(in) :: other !< Finite element representation for basis set (columns)
+integer(i4), intent(out) :: nee !< Number of entries in graph
+integer(i4), pointer, intent(out) :: kee(:) !< Row pointer into column list [self%ne+1]
+integer(i4), pointer, intent(out) :: lee(:) !< Column list [nee]
 integer(i4) :: i,j,k,offset,stack
 integer(i4) :: jeg,jsg,jee,jse,necmax,js,je,jn
 integer(i4) :: mycounts(4)
@@ -442,27 +454,19 @@ CALL afem_fill_lgraph(self,other,nee,kee,lee)
 DEBUG_STACK_POP
 end subroutine fem_common_linkage
 !------------------------------------------------------------------------------
-! SUBROUTINE: afem_fill_lgraph
-!------------------------------------------------------------------------------
 !> Supplement local graph with interactions from other processors
 !!
 !! Due to domain decomposition not all matrix elements for the local block
 !! may be present in the graph constructed from the local mesh. This subroutine
 !! expands the local matrix graph to include all entries in the local block
-!! (interaction between elements owned by the local processor).
-!!
-!! @param[in] row FE representation for row space
-!! @param[in] col FE representation for column space
-!! @param[in,out] nee Number of entries in graph
-!! @param[in,out] kee Row pointer into column list [self%ne+1]
-!! @param[in,out] lee Column list [nee]
+!! (interaction between elements owned by the local processor)
 !------------------------------------------------------------------------------
 subroutine afem_fill_lgraph(row,col,nee,kee,lee)
-class(oft_afem_type), intent(in) :: row
-class(oft_afem_type), intent(in) :: col
-integer(i4), intent(inout) :: nee
-integer(i4), pointer, intent(inout) :: kee(:)
-integer(i4), pointer, intent(inout) :: lee(:)
+class(oft_afem_type), intent(in) :: row !< FE representation for row space
+class(oft_afem_type), intent(in) :: col !< FE representation for column space
+integer(i4), intent(inout) :: nee !< Number of entries in graph
+integer(i4), pointer, intent(inout) :: kee(:) !< Row pointer into column list [self%ne+1]
+integer(i4), pointer, intent(inout) :: lee(:) !< Column list [nee]
 type :: eout
   integer(i8), pointer, dimension(:,:) :: le => NULL()
 end type eout
@@ -557,17 +561,17 @@ nbemax=nbetmp
 IF(.NOT.row%linkage%full)nbemax=oft_mpi_max(nbetmp)
 IF(oft_debug_print(3))WRITE(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lerecv(0:oft_env%nproc_con),lesend(0:oft_env%nproc_con))
+ALLOCATE(lerecv(0:row%linkage%nproc_con),lesend(0:row%linkage%nproc_con))
 ALLOCATE(lesend(0)%le(nbemax,2))
 !---Setup sorted linkage lists
 IF(.NOT.row%linkage%full)THEN
   !---Row vector space
   ALLOCATE(lle_tmp(row%linkage%nle))
   lle_tmp=row%linkage%lle(1,:)
-  ALLOCATE(row_skips(oft_env%nproc_con,row%ne))
+  ALLOCATE(row_skips(row%linkage%nproc_con,row%ne))
   row_skips=.TRUE.
   !$omp parallel do private(jp,jn,i,jk) schedule(dynamic,1)
-  DO j=1,oft_env%nproc_con
+  DO j=1,row%linkage%nproc_con
     jp=row%linkage%kle(j)
     jn=row%linkage%kle(j+1)-jp
     IF(jn>0)THEN
@@ -582,10 +586,10 @@ IF(.NOT.row%linkage%full)THEN
   !---Column vector space
   ALLOCATE(lle_tmp(col%linkage%nle))
   lle_tmp=col%linkage%lle(1,:)
-  ALLOCATE(col_skips(oft_env%nproc_con,col%ne))
+  ALLOCATE(col_skips(row%linkage%nproc_con,col%ne))
   col_skips=.TRUE.
   !$omp parallel do private(jp,jn,i,jk) schedule(dynamic,1)
-  DO j=1,oft_env%nproc_con
+  DO j=1,row%linkage%nproc_con
     jp=col%linkage%kle(j)
     jn=col%linkage%kle(j+1)-jp
     IF(jn>0)THEN
@@ -599,7 +603,7 @@ IF(.NOT.row%linkage%full)THEN
   DEALLOCATE(lle_tmp)
 END IF
 !---
-ALLOCATE(ncon(0:oft_env%nproc_con),nrecv(0:oft_env%nproc_con))
+ALLOCATE(ncon(0:row%linkage%nproc_con),nrecv(0:row%linkage%nproc_con))
 ncon=0
 DO i=1,row%nbe
   k=row%lbe(i)
@@ -608,7 +612,7 @@ DO i=1,row%nbe
       ncon(0)=ncon(0)+1
       lesend(0)%le(ncon(0),:) = (/row%global%le(k),col%global%le(lee(j))/)
       IF(.NOT.row%linkage%full)THEN
-        DO m=1,oft_env%nproc_con
+        DO m=1,row%linkage%nproc_con
           IF(row_skips(m,k).AND.col_skips(m,lee(j)))CYCLE
           ncon(m)=ncon(m)+1
         END DO
@@ -620,7 +624,7 @@ DO i=1,row%nbe
         ncon(0)=ncon(0)+1
         lesend(0)%le(ncon(0),:) = (/row%global%le(k),col%global%le(lee(j))/)
         IF(.NOT.row%linkage%full)THEN
-          DO m=1,oft_env%nproc_con
+          DO m=1,row%linkage%nproc_con
             IF(row_skips(m,k).OR.col_skips(m,lee(j)))CYCLE
             ncon(m)=ncon(m)+1
           END DO
@@ -638,7 +642,7 @@ IF(periodic)THEN
         ncon(0)=ncon(0)+1
         lesend(0)%le(ncon(0),:) = (/row%global%le(i),col%global%le(lee(j))/)
         IF(.NOT.row%linkage%full)THEN
-          DO m=1,oft_env%nproc_con
+          DO m=1,row%linkage%nproc_con
             IF(row_skips(m,i).AND.col_skips(m,lee(j)))CYCLE
             ncon(m)=ncon(m)+1
           END DO
@@ -650,25 +654,25 @@ END IF
 nrecv(0)=nbemax
 IF(.NOT.row%linkage%full)THEN
 #ifdef HAVE_MPI
-  DO j=1,oft_env%nproc_con
-    CALL MPI_ISEND(ncon(j),1,OFT_MPI_I4,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  DO j=1,row%linkage%nproc_con
+    CALL MPI_ISEND(ncon(j),1,OFT_MPI_I4,row%linkage%proc_con(j),1,oft_env%COMM,row%linkage%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','fem_fill_lgraph',__FILE__)
-    CALL MPI_IRECV(nrecv(j),1,OFT_MPI_I4,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    CALL MPI_IRECV(nrecv(j),1,OFT_MPI_I4,row%linkage%proc_con(j),1,oft_env%COMM,row%linkage%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','fem_fill_lgraph',__FILE__)
   END DO
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%recv,ierr)
-  DO i=1,oft_env%nproc_con
+  CALL oft_mpi_waitall(row%linkage%nproc_con,row%linkage%recv_reqs,ierr)
+  DO i=1,row%linkage%nproc_con
     ALLOCATE(lesend(i)%le(ncon(i),2))
     lesend(i)%le=0
     ALLOCATE(lerecv(i)%le(nrecv(i),2))
   END DO
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(row%linkage%nproc_con,row%linkage%send_reqs,ierr)
   ncon=0
   DO i=1,row%nbe
     k=row%lbe(i)
     IF(glob_irow(k))THEN
       DO j=kee(k),kee(k+1)-1
-        DO m=1,oft_env%nproc_con
+        DO m=1,row%linkage%nproc_con
           IF(row_skips(m,k).AND.col_skips(m,lee(j)))CYCLE
           ncon(m)=ncon(m)+1
           lesend(m)%le(ncon(m),:) = (/row%global%le(k),col%global%le(lee(j))/)
@@ -677,7 +681,7 @@ IF(.NOT.row%linkage%full)THEN
     ELSE
       DO j=kee(k),kee(k+1)-1
         IF(col%be(lee(j)))THEN
-          DO m=1,oft_env%nproc_con
+          DO m=1,row%linkage%nproc_con
             IF(row_skips(m,k).OR.col_skips(m,lee(j)))CYCLE
             ncon(m)=ncon(m)+1
             lesend(m)%le(ncon(m),:) = (/row%global%le(k),col%global%le(lee(j))/)
@@ -692,7 +696,7 @@ IF(.NOT.row%linkage%full)THEN
       IF(row%be(i))CYCLE
       DO j=kee(i),kee(i+1)-1
         IF(glob_icol(lee(j)))THEN
-          DO m=1,oft_env%nproc_con
+          DO m=1,row%linkage%nproc_con
             IF(row_skips(m,i).AND.col_skips(m,lee(j)))CYCLE
             ncon(m)=ncon(m)+1
             lesend(m)%le(ncon(m),:) = (/row%global%le(i),col%global%le(lee(j))/)
@@ -713,16 +717,16 @@ IF(.NOT.row%linkage%full)THEN
 #ifdef HAVE_MPI
   CALL oft_mpi_barrier(ierr) ! Wait for all processes
   !---Create Send and Recv calls
-  do j=1,oft_env%nproc_con
-    call MPI_ISEND(lesend(j)%le,2*ncon(j),OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  do j=1,row%linkage%nproc_con
+    call MPI_ISEND(lesend(j)%le,2*ncon(j),OFT_MPI_I8,row%linkage%proc_con(j),1,oft_env%COMM,row%linkage%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','fem_fill_lgraph',__FILE__)
-    call MPI_IRECV(lerecv(j)%le,2*nrecv(j),OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    call MPI_IRECV(lerecv(j)%le,2*nrecv(j),OFT_MPI_I8,row%linkage%proc_con(j),1,oft_env%COMM,row%linkage%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','fem_fill_lgraph',__FILE__)
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+    IF(oft_mpi_check_reqs(row%linkage%nproc_con,row%linkage%recv_reqs))EXIT ! All recieves have been processed
+    CALL oft_mpi_waitany(row%linkage%nproc_con,row%linkage%recv_reqs,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','fem_fill_lgraph',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array
     netmp=nrecv(j)
@@ -787,7 +791,7 @@ ALLOCATE(lrtmp(nnz_new),new_graph%kr(row%ne+1))
 nnz_new=0
 new_graph%kr=0
 ncon=1
-nproc_con=oft_env%nproc_con
+nproc_con=row%linkage%nproc_con
 IF(row%linkage%full)nproc_con=0
 DO i=1,row%ne
   DO j=kee(i),kee(i+1)-1
@@ -853,10 +857,10 @@ __FILE__)
 DEALLOCATE(lesend(0)%le)
 IF(.NOT.row%linkage%full)THEN
 #ifdef HAVE_MPI
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(row%linkage%nproc_con,row%linkage%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','fem_fill_lgraph',__FILE__)
   CALL oft_mpi_barrier(ierr)
-  DO i=1,oft_env%nproc_con
+  DO i=1,row%linkage%nproc_con
     DEALLOCATE(lesend(i)%le)
     DEALLOCATE(lerecv(i)%le)
   END DO
@@ -876,8 +880,6 @@ NULLIFY(new_graph%lc)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine afem_fill_lgraph
-!---------------------------------------------------------------------------
-! SUBROUTINE: fem_setup
 !---------------------------------------------------------------------------
 !> Constructs a finite element representation on the associated volume mesh
 !!
@@ -1060,8 +1062,6 @@ NULLIFY(self%mesh)
 DEBUG_STACK_POP
 END SUBROUTINE fem_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_global_linkage
-!---------------------------------------------------------------------------
 !> Compute FE global context and stitching information
 !!
 !! Sets up structures and information for distributed meshes. Primarily this
@@ -1097,8 +1097,9 @@ DEBUG_STACK_PUSH
 mesh=>self%mesh
 IF(.NOT.mesh%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 CALL oft_increase_indent
-!---Set MPI transfer arrays
+!---Copy seam information from mesh
 allocate(self%linkage,self%global)
+CALL oft_init_seam(mesh,self%linkage)
 !---Determine global element count
 mycounts=(/mesh%global%np,mesh%global%ne,mesh%global%nf,mesh%global%nc/)
 self%global%ne=sum(self%gstruct*mycounts)
@@ -1154,11 +1155,11 @@ do i=1,mesh%nc
 end do
 !$omp end parallel
 !---
-ALLOCATE(linktmp(2,5*self%nbe,0:oft_env%nproc_con))
+ALLOCATE(linktmp(2,5*self%nbe,0:self%linkage%nproc_con))
 linktmp = 0
-ALLOCATE(ncon(0:oft_env%nproc_con))
+ALLOCATE(ncon(0:self%linkage%nproc_con))
 ncon=0
-ALLOCATE(self%linkage%kle(0:oft_env%nproc_con+1)) ! Allocate point linkage arrays
+ALLOCATE(self%linkage%kle(0:self%linkage%nproc_con+1)) ! Allocate point linkage arrays
 self%linkage%kle=0
 self%linkage%nbe=self%nbe
 self%linkage%lbe=>self%lbe
@@ -1171,10 +1172,10 @@ IF(.NOT.mesh%fullmesh)nbemax=oft_mpi_max(nbetmp)
 if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 self%linkage%nbemax=nbemax
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lesend(oft_env%nproc_con+1),lerecv(oft_env%nproc_con+1))
+ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))
 allocate(lesend(1)%le(nbemax))
 IF(.NOT.mesh%fullmesh)THEN
-  do i=1,oft_env%nproc_con
+  do i=1,self%linkage%nproc_con
     allocate(lerecv(i)%le(nbemax))
   end do
 END IF
@@ -1189,20 +1190,20 @@ IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
   CALL oft_mpi_barrier(ierr) ! Wait for all processes
   !---Point dummy Send arrays to main Send array
-  do i=2,oft_env%nproc_con
+  do i=2,self%linkage%nproc_con
     lesend(i)%le=>lesend(1)%le
   end do
   !---Create Send and Recv calls
-  do j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  do j=1,self%linkage%nproc_con
+    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','fem_global_linkage',__FILE__)
-    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','fem_global_linkage',__FILE__)
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+    IF(oft_mpi_check_reqs(self%linkage%nproc_con,self%linkage%recv_reqs))EXIT ! All recieves have been processed
+    CALL oft_mpi_waitany(self%linkage%nproc_con,self%linkage%recv_reqs,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','fem_global_linkage',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array
     !---Determine location of boundary points on other processors
@@ -1249,20 +1250,20 @@ END IF
 self%linkage%kle(0)=neel
 !---Condense linkage to sparse rep
 self%linkage%nle=sum(self%linkage%kle)
-self%linkage%kle(oft_env%nproc_con+1)=self%linkage%nle+1
-do i=oft_env%nproc_con,0,-1 ! cumulative unique point linkage count
+self%linkage%kle(self%linkage%nproc_con+1)=self%linkage%nle+1
+do i=self%linkage%nproc_con,0,-1 ! cumulative unique point linkage count
   self%linkage%kle(i)=self%linkage%kle(i+1)-self%linkage%kle(i)
 end do
 !---
 if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count','fem_global_linkage',__FILE__)
 !---
 allocate(self%linkage%lle(2,self%linkage%nle))
-allocate(self%linkage%send(0:oft_env%nproc_con),self%linkage%recv(0:oft_env%nproc_con))
+allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
 !---
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
-do i=0,oft_env%nproc_con
+do i=0,self%linkage%nproc_con
   !---
   DO j=1,ncon(i)
     m=linktmp(2,j,i)
@@ -1270,7 +1271,7 @@ do i=0,oft_env%nproc_con
     isort(j)=j
     !---
     IF(i>0)THEN
-      IF(oft_env%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
+      IF(self%linkage%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
     END IF
   END DO
   !---
@@ -1313,10 +1314,10 @@ do i=1,self%nbe
 end do
 IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr) ! Wait for all sends to complete
+  CALL oft_mpi_waitall(self%linkage%nproc_con,self%linkage%send_reqs,ierr) ! Wait for all sends to complete
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','fem_global_linkage',__FILE__)
   !---Deallocate temporary work arrays
-  do i=1,oft_env%nproc_con
+  do i=1,self%linkage%nproc_con
     deallocate(lerecv(i)%le)
   end do
 #else
@@ -1362,29 +1363,19 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine fem_global_linkage
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_gen_legacy
-!---------------------------------------------------------------------------
 !> Compute legacy FE contexts
-!!
-!! @param[in,out] self Finite element representation
 !---------------------------------------------------------------------------
 subroutine fem_gen_legacy(self)
-class(oft_afem_type), intent(inout) :: self
+class(oft_afem_type), intent(inout) :: self !< Finite element representation
 CALL oft_abort("Legacy file formats not supported", "", __FILE__)
 end subroutine fem_gen_legacy
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_ncdofs
-!---------------------------------------------------------------------------
 !> Retrieve the indices of elements beloning to a given cell
-!!
-!! @param[in] self Finite element representation
-!! @param[in] cell Desired cell in mesh
-!! @paran[in,out] dofs Indices of cell elements [self%nce]
 !---------------------------------------------------------------------------
 subroutine fem_ncdofs(self,cell,dofs)
-class(oft_fem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-integer(i4), intent(inout) :: dofs(:)
+class(oft_fem_type), intent(in) :: self !< Finite element representation
+integer(i4), intent(in) :: cell !< Desired cell in mesh
+integer(i4), intent(inout) :: dofs(:) !< Indices of cell elements [self%nce]
 integer(i4) :: coffset,eoffset,boffset,i,j
 DEBUG_STACK_PUSH
 !---Point DOFs
@@ -1423,17 +1414,13 @@ end do
 DEBUG_STACK_POP
 end subroutine fem_ncdofs
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_ncdofs_map
-!---------------------------------------------------------------------------
 !> Construct cell element mapping
 !!
 !! Sets up the structure @ref fem_base::oft_fem_type::cmap "cmap", which defines
-!! the local type, index, and geometric linkage of DOFs in a cell.
-!!
-!! @param[in] self Finite element representation
+!! the local type, index, and geometric linkage of DOFs in a cell
 !---------------------------------------------------------------------------
 subroutine fem_ncdofs_map(self)
-class(oft_fem_type), intent(inout) :: self
+class(oft_fem_type), intent(inout) :: self !< Finite element representation
 integer(i4) :: coffset,boffset,i,j
 DEBUG_STACK_PUSH
 allocate(self%cmap(self%nce))
@@ -1477,20 +1464,13 @@ end do
 DEBUG_STACK_POP
 end subroutine fem_ncdofs_map
 !---------------------------------------------------------------------------
-! SUBROUTINE: fem_vec_create
-!---------------------------------------------------------------------------
 !> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
 !---------------------------------------------------------------------------
 subroutine afem_vec_create(self,new,cache,native)
 class(oft_afem_type), intent(inout) :: self
-class(oft_vector), pointer, intent(out) :: new
-logical, optional, intent(in) :: cache
-logical, optional, intent(in) :: native
+class(oft_vector), pointer, intent(out) :: new !< Vector to create
+logical, optional, intent(in) :: cache !< Allow caching (optional)
+logical, optional, intent(in) :: native !< Force native representation (optional)
 TYPE(map_list) :: maps(1)
 TYPE(seam_list) :: stitches(1)
 logical :: do_cache,force_native
@@ -1500,7 +1480,6 @@ force_native=.FALSE.
 IF(PRESENT(cache))do_cache=cache
 IF(PRESENT(native))force_native=native
 !---
-
 IF(use_petsc.AND.(.NOT.force_native))THEN
   IF(ASSOCIATED(self%cache_PETSc))THEN
     CALL self%cache_PETSc%new(new)
@@ -1525,20 +1504,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine afem_vec_create
 !---------------------------------------------------------------------------
-! SUBROUTINE: afem_vec_save
-!---------------------------------------------------------------------------
-!> Save a Lagrange scalar field to a HDF5 restart file.
-!!
-!! @param[in] source Source field
-!! @param[in] filen Name of destination file
-!! @param[in] tag Field label in file
+!> Save a Lagrange scalar field to a HDF5 restart file
 !---------------------------------------------------------------------------
 subroutine afem_vec_save(self,source,filename,path,append)
 class(oft_afem_type), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: source
-character(*), intent(in) :: filename
-character(*), intent(in) :: path
-logical, optional, intent(in) :: append
+class(oft_vector), target, intent(inout) :: source !< Source field
+character(*), intent(in) :: filename !< Name of destination file
+character(*), intent(in) :: path !< Field label in file
+logical, optional, intent(in) :: append !< Append to file instead of creating?
 real(r8), pointer, dimension(:) :: valtmp
 class(oft_vector), pointer :: outfield
 class(oft_native_vector), pointer :: outvec
@@ -1558,7 +1531,7 @@ NULLIFY(valtmp)
 IF(oft_debug_print(1))WRITE(*,'(6A)')oft_indent,'Writing "',TRIM(path), &
   '" to file "',TRIM(filename),'"'
 CALL self%vec_create(outfield,native=.TRUE.)
-IF(native_vector_cast(outvec,outfield)<0)CALL oft_abort('Failed to create "outfield".', &
+IF(.NOT.native_vector_cast(outvec,outfield))CALL oft_abort('Failed to create "outfield".', &
   'fem_vec_save',__FILE__)
 !---
 CALL source%get_local(valtmp,1)
@@ -1572,19 +1545,13 @@ CALL hdf5_rst_destroy(rst_info)
 DEBUG_STACK_POP
 end subroutine afem_vec_save
 !---------------------------------------------------------------------------
-! SUBROUTINE: afem_vec_load
-!---------------------------------------------------------------------------
-!> Load a Lagrange scalar field from a HDF5 restart file.
-!!
-!! @param[in,out] source Destination field
-!! @param[in] filen Name of source file
-!! @param[in] path Field path in file
+!> Load a Lagrange scalar field from a HDF5 restart file
 !---------------------------------------------------------------------------
 subroutine afem_vec_load(self,source,filename,path)
 class(oft_afem_type), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: source
-character(*), intent(in) :: filename
-character(*), intent(in) :: path
+class(oft_vector), target, intent(inout) :: source !< Destination vector
+character(*), intent(in) :: filename !< Name of source file
+character(*), intent(in) :: path !< Field path in file
 integer(i4) :: version
 integer(i8), pointer, dimension(:) :: lge
 real(r8), pointer, dimension(:) :: valtmp
@@ -1602,7 +1569,7 @@ NULLIFY(valtmp)
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Reading "',TRIM(path), &
   '" from file "',TRIM(filename),'"'
 CALL self%vec_create(infield,native=.TRUE.)
-IF(native_vector_cast(invec,infield)<0)CALL oft_abort('Failed to create "infield".', &
+IF(.NOT.native_vector_cast(invec,infield))CALL oft_abort('Failed to create "infield".', &
   'fem_vec_load',__FILE__)
 !---
 lge=>self%global%le
@@ -1623,18 +1590,11 @@ CALL hdf5_rst_destroy(rst_info)
 DEBUG_STACK_POP
 end subroutine afem_vec_load
 !---------------------------------------------------------------------------
-! SUBROUTINE: afem_mat_create
-!---------------------------------------------------------------------------
-!> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
+!> Create self-matrix for FE representation
 !---------------------------------------------------------------------------
 subroutine afem_mat_create(self,new)
 CLASS(oft_afem_type), INTENT(inout) :: self
-CLASS(oft_matrix), POINTER, INTENT(out) :: new
+CLASS(oft_matrix), POINTER, INTENT(out) :: new !< Matrix to create
 CLASS(oft_vector), POINTER :: tmp_vec
 TYPE(oft_graph_ptr) :: graphs(1,1)
 DEBUG_STACK_PUSH
@@ -1654,21 +1614,14 @@ DEALLOCATE(graphs(1,1)%g,tmp_vec)
 DEBUG_STACK_POP
 end subroutine afem_mat_create
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_fem_vec_create
-!---------------------------------------------------------------------------
 !> Create weight vector for FE representation
-!!
-!! @param[out] new field to create
-!! @param[in] level FE level for init (optional)
-!! @param[in] cache Allow caching (optional)
-!! @param[in] native Force native representation (optional)
 !---------------------------------------------------------------------------
 subroutine ml_fem_vec_create(self,new,level,cache,native)
 class(oft_ml_fem_type), intent(inout) :: self
-class(oft_vector), pointer, intent(out) :: new
-integer(i4), optional, intent(in) :: level
-logical, optional, intent(in) :: cache
-logical, optional, intent(in) :: native
+class(oft_vector), pointer, intent(out) :: new !< Vector to create
+integer(i4), optional, intent(in) :: level !< FE level for init (optional)
+logical, optional, intent(in) :: cache !< Allow caching (optional)
+logical, optional, intent(in) :: native !< Force native representation (optional)
 logical :: do_cache,force_native
 DEBUG_STACK_PUSH
 do_cache=.TRUE.
@@ -1686,41 +1639,98 @@ END IF
 DEBUG_STACK_POP
 end subroutine ml_fem_vec_create
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_fem_set_level
-!---------------------------------------------------------------------------
 !> Set the current level for a ML FE structure
-!!
-!! @param[in] level Desired level
 !---------------------------------------------------------------------------
 subroutine ml_fem_set_level(self,level)
 class(oft_ml_fem_type), intent(inout) :: self
-integer(i4), intent(in) :: level
+integer(i4), intent(in) :: level !< Desired level
 DEBUG_STACK_PUSH
-IF(level>self%nlevels.OR.level<=0)CALL oft_abort('Invalid FE level change requested', &
+IF(level>self%nlevels.OR.level<=0)THEN
+  WRITE(*,*)level,self%nlevels
+  CALL oft_abort('Invalid FE level change requested', &
   'ml_fem_set_level',__FILE__)
+END IF
 !---Update level
 self%level=level
 self%current_level=>self%levels(self%level)%fe
 self%abs_level=self%level
-IF(self%level>self%blevel.AND.self%blevel>0)self%abs_level=self%level-1
+IF((self%level>self%blevel).AND.(self%blevel>0))self%abs_level=self%level-1
+!---Set grid level
+if(level<self%ml_mesh%mgdim)then
+  call multigrid_level(self%ml_mesh,level)
+else
+  call multigrid_level(self%ml_mesh,self%ml_mesh%mgdim)
+end if
 DEBUG_STACK_POP
 end subroutine ml_fem_set_level
 !---------------------------------------------------------------------------
-! SUBROUTINE: bfem_setup
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine ml_fe_vecspace_create(self,new,level,cache,native)
+class(oft_ml_fe_vecspace), intent(inout) :: self
+class(oft_vector), pointer, intent(out) :: new
+integer(i4), optional, intent(in) :: level
+logical, optional, intent(in) :: cache
+logical, optional, intent(in) :: native
+DEBUG_STACK_PUSH
+CALL self%ML_FE_rep%vec_create(new,level=level,cache=cache,native=native)
+DEBUG_STACK_POP
+end subroutine ml_fe_vecspace_create
+!---------------------------------------------------------------------------
+!> Interpolate a coarse level Lagrange scalar field to the next finest level
+!!
+!! @note The global Lagrange level in incremented by one in this subroutine
+!---------------------------------------------------------------------------
+subroutine ml_fe_vecspace_interp(self,acors,afine)
+class(oft_ml_fe_vecspace), intent(inout) :: self
+class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
+DEBUG_STACK_PUSH
+!---Step one level up
+call self%ML_FE_rep%set_level(self%ML_FE_rep%level+1)
+call afine%set(0.d0)
+if(self%ML_FE_rep%level==self%ML_FE_rep%blevel+1)then
+  IF(.NOT.ASSOCIATED(self%base_pop))CALL oft_abort("Base transfer not defined","ml_fe_vecspace_interp",__FILE__)
+  call self%base_pop(acors,afine)
+  DEBUG_STACK_POP
+  return
+end if
+CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level)%m%apply(acors,afine)
+DEBUG_STACK_POP
+end subroutine ml_fe_vecspace_interp
+!---------------------------------------------------------------------------
+!> Interpolate a coarse level Lagrange scalar field to the next finest level
+!!
+!! @note The global Lagrange level in incremented by one in this subroutine
+!---------------------------------------------------------------------------
+subroutine ml_fe_vecspace_inject(self,afine,acors)
+class(oft_ml_fe_vecspace), intent(inout) :: self
+class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
+class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+DEBUG_STACK_PUSH
+! Step down level down
+call self%ML_FE_rep%set_level(self%ML_FE_rep%level-1)
+call acors%set(0.d0)
+if(self%ML_FE_rep%level==self%ML_FE_rep%blevel)then
+  IF(.NOT.ASSOCIATED(self%base_push))CALL oft_abort("Base transfer not defined","ml_fe_vecspace_inject",__FILE__)
+  call self%base_push(afine,acors)
+  DEBUG_STACK_POP
+  return
+end if
+CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
+DEBUG_STACK_POP
+end subroutine ml_fe_vecspace_inject
 !---------------------------------------------------------------------------
 !> Constructs a finite element representation on the associated surface mesh
 !!
 !! This subroutine is the equilivalent of @ref fem_base::fem_setup "fem_setup"
 !! for trangular grids and @ref fem_base::oft_bfem_type. Generally this method
 !! is used to construct a finite element representation for the boundary mesh,
-!! however it may be used with arbitrary triangular grids.
-!!
-!! @param[in,out] self FE representation to construct
-!! @param[in] quad_order Desired quadrature order
+!! however it may be used with arbitrary triangular grids
 !---------------------------------------------------------------------------
 subroutine bfem_setup(self,quad_order)
-class(oft_bfem_type), intent(inout) :: self
-integer(i4), intent(in) :: quad_order
+class(oft_bfem_type), intent(inout) :: self !< FE representation to construct
+integer(i4), intent(in) :: quad_order !< Desired quadrature order
 integer(i4) :: i,j,k,offset,stack
 integer(i4) :: jeg,jsg,jee,jse,nefmax,js,je,jn
 integer(i4) :: mycounts(3)
@@ -1858,8 +1868,6 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine bfem_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: bfem_destroy
-!---------------------------------------------------------------------------
 !> Destroy boundary FE object
 !!
 !! @note Should only be used via class \ref oft_bfem_type or children
@@ -1876,17 +1884,13 @@ NULLIFY(self%mesh)
 DEBUG_STACK_POP
 END SUBROUTINE bfem_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: bfem_global_linkage
-!---------------------------------------------------------------------------
 !> Compute FE global context and stitching information
 !!
 !! This subroutine is the equilivalent of @ref fem_base::fem_global_linkage
-!! "fem_global_linkage" for triangular grids and @ref fem_base::oft_bfem_type.
-!!
-!! @param[in,out] self Finite element representation
+!! "fem_global_linkage" for triangular grids and @ref fem_base::oft_bfem_type
 !---------------------------------------------------------------------------
 subroutine bfem_global_linkage(self)
-class(oft_bfem_type), intent(inout) :: self
+class(oft_bfem_type), intent(inout) :: self !< Finite element representation
 type :: eout
   integer(i8), pointer, dimension(:) :: le => NULL()
 end type eout
@@ -1916,6 +1920,7 @@ mesh=>self%mesh
 has_parent=ASSOCIATED(mesh%parent)
 IF(mesh%skip)THEN
   allocate(self%linkage,self%global)
+  CALL oft_init_seam(mesh,self%linkage)
   IF(.NOT.mesh%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
   self%linkage%skip=.TRUE.
   !---Determine global element count
@@ -1933,17 +1938,17 @@ IF(mesh%skip)THEN
     self%linkage%full=.FALSE.
   END IF
   !---
-  allocate(self%linkage%kle(0:oft_env%nproc_con+1))
+  allocate(self%linkage%kle(0:self%linkage%nproc_con+1))
   self%linkage%kle=0
   nbetmp=0_i4
   nbemax=oft_mpi_max(nbetmp)
   if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
   self%linkage%nbemax=nbemax
   !---Allocate temporary Send/Recv arrays
-  ALLOCATE(lesend(oft_env%nproc_con+1),lerecv(oft_env%nproc_con+1))
+  ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))
   allocate(lesend(1)%le(nbemax))
   IF(.NOT.mesh%fullmesh)THEN
-    do i=1,oft_env%nproc_con
+    do i=1,self%linkage%nproc_con
       allocate(lerecv(i)%le(nbemax))
     end do
   END IF
@@ -1954,20 +1959,20 @@ IF(mesh%skip)THEN
 #ifdef HAVE_MPI
     CALL oft_mpi_barrier(ierr) ! Wait for all processes
     !---Point dummy Send arrays to main Send array
-    do i=2,oft_env%nproc_con
+    do i=2,self%linkage%nproc_con
       lesend(i)%le=>lesend(1)%le
     end do
     !---Create Send and Recv calls
-    do j=1,oft_env%nproc_con
-      CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+    do j=1,self%linkage%nproc_con
+      CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%send_reqs(j),ierr)
       IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','bfem_global_linkage',__FILE__)
-      CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+      CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%recv_reqs(j),ierr)
       IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','bfem_global_linkage',__FILE__)
     end do
     !---Loop over each connected processor
     do while(.TRUE.)
-      IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-      CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+      IF(oft_mpi_check_reqs(self%linkage%nproc_con,self%linkage%recv_reqs))EXIT ! All recieves have been processed
+      CALL oft_mpi_waitany(self%linkage%nproc_con,self%linkage%recv_reqs,j,ierr) ! Wait for completed recieve
       IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','bfem_global_linkage',__FILE__)
     end do
 #else
@@ -1976,24 +1981,24 @@ CALL oft_abort("Distributed linkage requires MPI","bfem_global_linkage",__FILE__
   END IF
   !---Condense linkage to sparse rep
   self%linkage%nle=SUM(self%linkage%kle)
-  self%linkage%kle(oft_env%nproc_con+1)=self%linkage%nle+1
-  do i=oft_env%nproc_con,0,-1 ! cumulative unique point linkage count
+  self%linkage%kle(self%linkage%nproc_con+1)=self%linkage%nle+1
+  do i=self%linkage%nproc_con,0,-1 ! cumulative unique point linkage count
     self%linkage%kle(i)=self%linkage%kle(i+1)-self%linkage%kle(i)
   end do
   !---
   if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count(skip)','bfem_global_linkage',__FILE__)
   !---
-  allocate(self%linkage%send(0:oft_env%nproc_con),self%linkage%recv(0:oft_env%nproc_con))
-  do i=0,oft_env%nproc_con
+  allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
+  do i=0,self%linkage%nproc_con
     !---Allocate permanent stitching arrays
     self%linkage%send(i)%n=0; self%linkage%recv(i)%n=0
   end do
   IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
-    CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr) ! Wait for all sends to complete
+    CALL oft_mpi_waitall(self%linkage%nproc_con,self%linkage%send_reqs,ierr) ! Wait for all sends to complete
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','bfem_global_linkage',__FILE__)
     !---Deallocate temporary work arrays
-    do i=1,oft_env%nproc_con
+    do i=1,self%linkage%nproc_con
       deallocate(lerecv(i)%le)
     end do
 #else
@@ -2020,6 +2025,8 @@ CALL oft_abort("Distributed linkage requires MPI","bfem_global_linkage",__FILE__
 END IF
 !---Set MPI transfer arrays
 allocate(self%linkage,self%global)
+CALL oft_init_seam(mesh,self%linkage)
+!
 IF(has_parent)ALLOCATE(self%parent)
 IF(.NOT.mesh%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !---Determine global element count
@@ -2091,11 +2098,11 @@ do i=1,mesh%nc
   end do
 end do
 !$omp end parallel
-ALLOCATE(linktmp(2,5*self%nbe,0:oft_env%nproc_con))
+ALLOCATE(linktmp(2,5*self%nbe,0:self%linkage%nproc_con))
 linktmp = 0
-ALLOCATE(ncon(0:oft_env%nproc_con))
+ALLOCATE(ncon(0:self%linkage%nproc_con))
 ncon=0
-ALLOCATE(self%linkage%kle(0:oft_env%nproc_con+1)) ! Allocate point linkage arrays
+ALLOCATE(self%linkage%kle(0:self%linkage%nproc_con+1)) ! Allocate point linkage arrays
 self%linkage%kle=0
 self%linkage%nbe=self%nbe
 self%linkage%lbe=>self%lbe
@@ -2108,10 +2115,10 @@ IF(.NOT.mesh%fullmesh)nbemax=oft_mpi_max(nbetmp)
 if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 self%linkage%nbemax=nbemax
 !---Allocate temporary Send/Recv arrays
-ALLOCATE(lesend(oft_env%nproc_con+1),lerecv(oft_env%nproc_con+1))
+ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))
 allocate(lesend(1)%le(nbemax))
 IF(.NOT.mesh%fullmesh)THEN
-  do i=1,oft_env%nproc_con
+  do i=1,self%linkage%nproc_con
     allocate(lerecv(i)%le(nbemax))
   end do
 END IF
@@ -2126,20 +2133,20 @@ IF(.NOT.mesh%fullmesh)THEN
 #ifdef HAVE_MPI
   CALL oft_mpi_barrier(ierr) ! Wait for all processes
   !---Point dummy Send arrays to main Send array
-  do i=2,oft_env%nproc_con
+  do i=2,self%linkage%nproc_con
     lesend(i)%le=>lesend(1)%le
   end do
   !---Create Send and Recv calls
-  do j=1,oft_env%nproc_con
-    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%send(j),ierr)
+  do j=1,self%linkage%nproc_con
+    CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','bfem_global_linkage',__FILE__)
-    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,oft_env%proc_con(j),1,oft_env%COMM,oft_env%recv(j),ierr)
+    CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,self%linkage%proc_con(j),1,oft_env%COMM,self%linkage%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','bfem_global_linkage',__FILE__)
   end do
   !---Loop over each connected processor
   do while(.TRUE.)
-    IF(oft_mpi_check_reqs(oft_env%nproc_con,oft_env%recv))EXIT ! All recieves have been processed
-    CALL oft_mpi_waitany(oft_env%nproc_con,oft_env%recv,j,ierr) ! Wait for completed recieve
+    IF(oft_mpi_check_reqs(self%linkage%nproc_con,self%linkage%recv_reqs))EXIT ! All recieves have been processed
+    CALL oft_mpi_waitany(self%linkage%nproc_con,self%linkage%recv_reqs,j,ierr) ! Wait for completed recieve
     IF(ierr/=0)CALL oft_abort('Error in MPI_WAITANY','bfem_global_linkage',__FILE__)
     letmp=>lerecv(j)%le ! Point dummy input array to current Recv array
     !---Determine location of boundary points on other processors
@@ -2185,20 +2192,20 @@ end do
 self%linkage%kle(0)=neel
 !---Condense linkage to sparse rep
 self%linkage%nle=sum(self%linkage%kle)
-self%linkage%kle(oft_env%nproc_con+1)=self%linkage%nle+1
-do i=oft_env%nproc_con,0,-1 ! cumulative unique point linkage count
+self%linkage%kle(self%linkage%nproc_con+1)=self%linkage%nle+1
+do i=self%linkage%nproc_con,0,-1 ! cumulative unique point linkage count
   self%linkage%kle(i)=self%linkage%kle(i+1)-self%linkage%kle(i)
 end do
 !---
 if(self%linkage%kle(0)/=1)call oft_abort('Bad element linkage count','bfem_global_linkage',__FILE__)
 !---
 allocate(self%linkage%lle(2,self%linkage%nle))
-allocate(self%linkage%send(0:oft_env%nproc_con),self%linkage%recv(0:oft_env%nproc_con))
+allocate(self%linkage%send(0:self%linkage%nproc_con),self%linkage%recv(0:self%linkage%nproc_con))
 !---
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
-do i=0,oft_env%nproc_con
+do i=0,self%linkage%nproc_con
   !---
   DO j=1,ncon(i)
     m=linktmp(2,j,i)
@@ -2206,7 +2213,7 @@ do i=0,oft_env%nproc_con
     isort(j)=j
     !---
     IF(i>0)THEN
-      IF(oft_env%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
+      IF(self%linkage%proc_con(i)<oft_env%rank)lsort(j)=linktmp(1,j,i)
     END IF
   END DO
   !---
@@ -2244,10 +2251,10 @@ do i=1,self%nbe
 end do
 !---Synchronize
 IF(.NOT.mesh%fullmesh)THEN
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr) ! Wait for all sends to complete
+  CALL oft_mpi_waitall(self%linkage%nproc_con,self%linkage%send_reqs,ierr) ! Wait for all sends to complete
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','bfem_global_linkage',__FILE__)
   !---Deallocate temporary work arrays
-  do i=1,oft_env%nproc_con
+  do i=1,self%linkage%nproc_con
     deallocate(lerecv(i)%le)
   end do
 END IF
@@ -2288,18 +2295,12 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine bfem_global_linkage
 !---------------------------------------------------------------------------
-! SUBROUTINE: bfem_ncdofs
-!---------------------------------------------------------------------------
 !> Retrieve the indices of elements beloning to a given face
-!!
-!! @param[in] self Finite element representation
-!! @param[in] face Desired face in mesh
-!! @paran[in,out] dofs Indices of face elements [self%nfe]
 !---------------------------------------------------------------------------
 subroutine bfem_ncdofs(self,cell,dofs)
-class(oft_bfem_type), intent(in) :: self
-integer(i4), intent(in) :: cell
-integer(i4), intent(inout) :: dofs(:)
+class(oft_bfem_type), intent(in) :: self !< Finite element representation
+integer(i4), intent(in) :: cell !< Desired cell in mesh
+integer(i4), intent(inout) :: dofs(:) !< Indices of face elements [self%nfe]
 integer(i4) :: foffset,eoffset,boffset,i,j
 DEBUG_STACK_PUSH
 !---Point DOFs
@@ -2329,17 +2330,13 @@ end do
 DEBUG_STACK_POP
 end subroutine bfem_ncdofs
 !---------------------------------------------------------------------------
-! SUBROUTINE: bfem_nfdofs_map
-!---------------------------------------------------------------------------
 !> Construct face element mapping
 !!
 !! Sets up the structure @ref fem_base::oft_bfem_type::fmap "fmap", which defines
-!! the local type, index, and geometric linkage of DOFs on a face.
-!!
-!! @param[in] self Finite element representation
+!! the local type, index, and geometric linkage of DOFs on a face
 !---------------------------------------------------------------------------
 subroutine bfem_nfdofs_map(self)
-class(oft_bfem_type), intent(inout) :: self
+class(oft_bfem_type), intent(inout) :: self !< Finite element representation
 integer(i4) :: foffset,boffset,i,j
 DEBUG_STACK_PUSH
 !---

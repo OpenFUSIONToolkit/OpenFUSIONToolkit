@@ -7,17 +7,17 @@ This page outlines information helpful for using the Open FUSION Toolkit with PE
 
 ### Run-Time options
 
-* \c -threadcomm_nthreads Number of threads to use per MPI task
-* \c -threadcomm_type Type of threads to use, generally this will be set to \c openmp
+* `-threadcomm_nthreads` Number of threads to use per MPI task
+* `-threadcomm_type` Type of threads to use, generally this will be set to `openmp`
 
 \section doc_petsc_usage_error Error Handling
 
-By default PETSc either returns errors via \c ierr of the calling subroutine or prints an error to
-\c stderr. This is not uniformly implemented and can cause issues with large output files.
+By default PETSc either returns errors via `ierr` of the calling subroutine or prints an error to
+`stderr`. This is not uniformly implemented and can cause issues with large output files.
 
 ### Run-Time options
 
-* \c -on_error_abort Make PETSc internal errors fatal
+* `-on_error_abort` Make PETSc internal errors fatal
 
 \section doc_petsc_usage_threads Threading (not recommended)
 

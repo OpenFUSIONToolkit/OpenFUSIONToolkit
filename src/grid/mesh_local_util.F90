@@ -26,15 +26,10 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: oriented_faces
 !$omp threadprivate(oriented_cell,oriented_edges,oriented_faces)
 contains
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_local_orient
-!------------------------------------------------------------------------------
-!> Create mapping from local points to boundary points.
-!!
-!! @param[in] self Mesh for mapping
-!! @param[in,out] a Mapping array [np]
+!> Needs docs
 !------------------------------------------------------------------------------
 subroutine mesh_local_orient(self,cell)
-class(oft_mesh), intent(in) :: self
+class(oft_mesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell
 integer(i4) :: i
 DEBUG_STACK_PUSH
@@ -54,20 +49,15 @@ oriented_cell=cell
 DEBUG_STACK_POP
 end subroutine mesh_local_orient
 !------------------------------------------------------------------------------
-! FUNCTION: mesh_local_findedge
-!------------------------------------------------------------------------------
 !> Find oriented edge connecting points i1 and i2.
 !!
-!! Orientation is (+,-) if [imin,imax] is [i1,i2] or [i2,i1].
-!!
-!! @param[in] self Mesh to search
-!! @param[in] inds Edge points (ordered)
-!! @result Oriented edge linking inds(1) -> inds(2), zero if no edge exists
+!! Orientation is (+,-) if [imin,imax] is [i1,i2] or [i2,i1]
 !------------------------------------------------------------------------------
 function mesh_local_findedge(self,inds)
-class(oft_amesh), intent(in) :: self
-integer(i4), intent(in) :: inds(2)
-integer(i4) :: mesh_local_findedge,js,je,jp,jn
+class(oft_amesh), intent(in) :: self !< Mesh to search
+integer(i4), intent(in) :: inds(2) !< Edge points (ordered)
+integer(i4) :: mesh_local_findedge !< Oriented edge linking inds(1) -> inds(2), zero if no edge exists
+integer(i4) :: js,je,jp,jn
 DEBUG_STACK_PUSH
 js=minval(inds) ! low point
 je=maxval(inds) ! high point
@@ -79,22 +69,13 @@ mesh_local_findedge=js
 DEBUG_STACK_POP
 end function mesh_local_findedge
 !------------------------------------------------------------------------------
-! FUNCTION: mesh_local_findface
-!------------------------------------------------------------------------------
-!> Find oriented face with corner points i1, i2 and i3.
-!!
-!! Orientation is (+,-) if [imin,imid,imax] is a (cyclic,anticyclic) permutation of [i1,i2,i3].
-!!
-!! @param[in] self Mesh to search
-!! @param[in] i1 Face 1st point
-!! @param[in] i2 Face 2nd point
-!! @param[in] i3 Face 3rd point
-!! @result Oriented face linking i1 -> i2 -> i3, zero if no face exists
+!> Find face with corner points `inds` (no orientation is applied)
 !------------------------------------------------------------------------------
 function mesh_local_findface(self,inds)
-class(oft_mesh), intent(in) :: self
-integer(i4), intent(in) :: inds(:)
-integer(i4) :: mesh_local_findface,ilo,imi,ihi,js,je,jp,jn,etmp(2),jsh(4)
+class(oft_mesh), intent(in) :: self !< Mesh to search
+integer(i4), intent(in) :: inds(:) !< Face points (ordered)
+integer(i4) :: mesh_local_findface !< Face composed of `inds`, zero if no face exists
+integer(i4) :: ilo,imi,ihi,js,je,jp,jn,etmp(2),jsh(4)
 DEBUG_STACK_PUSH
 mesh_local_findface=0
 IF(self%face_np==3)THEN
@@ -124,7 +105,7 @@ ELSE
   END IF
   js=MINVAL(jsh); je=MAXVAL(jsh)
 END IF
-jp=self%klef(js)   ! pointer into low edge list
+jp=self%klef(js)      ! pointer into low edge list
 jn=self%klef(js+1)-jp ! number of shared faces
 js=search_array(je,self%llef(jp:jp+jn-1),jn)
 if(js/=0)js=js+jp-1

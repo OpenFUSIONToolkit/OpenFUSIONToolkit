@@ -16,21 +16,9 @@
 MODULE oft_petsc_la
 USE oft_base
 USE oft_stitching, ONLY: oft_global_dp
-! USE oft_io, ONLY: hdf5_rst
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_map, oft_matrix, oft_cmatrix
 #ifdef HAVE_PETSC
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>5)
-#if PETSC_VERSION_MINOR<8
-#include "petsc/finclude/petscvecdef.h"
-#include "petsc/finclude/petscmatdef.h"
-#define PETSC_NULL_SCALAR PETSC_NULL_OBJECT
-#define PETSC_NULL_VEC PETSC_NULL_OBJECT
-#endif
-#else
-#include "finclude/petscvecdef.h"
-#include "finclude/petscmatdef.h"
-#endif
 USE petscvec
 USE petscmat
 #undef Mat
@@ -40,25 +28,13 @@ IMPLICIT NONE
 #include "local.h"
 private
 !------------------------------------------------------------------------------
-! TYPE oft_petsc_vector
-!------------------------------------------------------------------------------
-!> PETSc vector class
-!!
-!! Used for implementing composite fields in OFT with PETSc backend.
-!! Replacement for oft_vectors::oft_block_field when PETSc backend is being used.
+!> PETSc vector implementation
 !------------------------------------------------------------------------------
 type, public, extends(oft_vector) :: oft_petsc_vector
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-  INTEGER(petsc_addr) :: v !< PETSc vector object
-  INTEGER(petsc_addr) :: vloc !< PETSc local vector object
-  INTEGER(petsc_addr) :: lis !< PETSc local to global mapping
-  INTEGER(petsc_addr) :: get !< PETSc local to global scatter context
-#else
   TYPE(tvec) :: v !< PETSc vector object
   TYPE(tvec) :: vloc !< PETSc local vector object
   TYPE(tis) :: lis !< PETSc local to global mapping
   TYPE(tvecscatter) :: get !< PETSc local to global scatter context
-#endif
   LOGICAL :: loc_store = .FALSE. !< Flag indicating pending local->global sync
   LOGICAL :: loc_current = .FALSE. !< Flag indicating local/global vectors are consistent
 contains
@@ -94,25 +70,13 @@ contains
   procedure :: delete => vec_delete
 end type oft_petsc_vector
 ! !------------------------------------------------------------------------------
-! ! TYPE oft_petsc_cvector
-! !------------------------------------------------------------------------------
-! !> PETSc vector class
-! !!
-! !! Used for implementing composite fields in OFT with PETSc backend.
-! !! Replacement for oft_vectors::oft_block_field when PETSc backend is being used.
+! !> PETSc vector implementation (complex)
 ! !------------------------------------------------------------------------------
 ! type, public, extends(oft_cvector) :: oft_petsc_cvector
-! #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-!   INTEGER(petsc_addr) :: v !< PETSc vector object
-!   INTEGER(petsc_addr) :: vloc !< PETSc local vector object
-!   INTEGER(petsc_addr) :: lis !< PETSc local to global mapping
-!   INTEGER(petsc_addr) :: get !< PETSc local to global scatter context
-! #else
 !   TYPE(tvec) :: v !< PETSc vector object
 !   TYPE(tvec) :: vloc !< PETSc local vector object
 !   TYPE(tis) :: lis !< PETSc local to global mapping
 !   TYPE(tvecscatter) :: get !< PETSc local to global scatter context
-! #endif
 !   LOGICAL :: loc_store = .FALSE. !< Flag indicating pending local->global sync
 !   LOGICAL :: loc_current = .FALSE. !< Flag indicating local/global vectors are consistent
 ! contains
@@ -146,23 +110,18 @@ end type oft_petsc_vector
 !   procedure :: delete => cvec_delete
 ! end type oft_petsc_cvector
 !------------------------------------------------------------------------------
-! CLASS oft_petsc_matrix
-!------------------------------------------------------------------------------
-!> PETSc matrix class
-!!
-!! Implements PETSc matrices in OFT by extending the abstract
-!! oft_matrices::oft_matrix class.
+!> PETSc matrix implementation
 !------------------------------------------------------------------------------
 type, public, extends(oft_matrix) :: oft_petsc_matrix
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-  INTEGER(petsc_addr) :: M !< PETSc matrix object
-  INTEGER(petsc_addr) :: Md !< PETSc matrix diagonal object (unused)
-#else
   TYPE(tmat) :: M !< PETSc matrix object
   TYPE(tvec) :: Md !< PETSc matrix diagonal object (unused)
-#endif
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<21)
   INTEGER(petsc_addr) :: r_lis !< PETSc Local to Global mapping for rows
   INTEGER(petsc_addr) :: c_lis !< PETSc Local to Global mapping for columns
+#else
+  TYPE(tislocaltoglobalmapping) :: r_lis !< PETSc Local to Global mapping for rows
+  TYPE(tislocaltoglobalmapping) :: c_lis !< PETSc Local to Global mapping for columns
+#endif
 contains
   procedure :: apply_real => mat_apply_vec
   procedure :: apply_complex => mat_apply_cvec
@@ -173,7 +132,7 @@ contains
   !> Add values to the matrix
   procedure :: add_values => mat_add_values
   !> Add values atomically to the matrix
-  procedure :: atomic_add_values => mat_add_valuess
+  procedure :: atomic_add_values => mat_add_values
   !> Complete matrix assembly
   procedure :: assemble => mat_assemble
   !> Zero all elements
@@ -184,21 +143,11 @@ contains
   procedure :: delete => mat_delete
 end type oft_petsc_matrix
 ! !------------------------------------------------------------------------------
-! ! CLASS oft_petsc_cmatrix
-! !------------------------------------------------------------------------------
-! !> PETSc matrix class
-! !!
-! !! Implements PETSc matrices in OFT by extending the abstract
-! !! oft_matrices::oft_matrix class.
+! !> PETSc matrix implementation (complex)
 ! !------------------------------------------------------------------------------
 ! type, public, extends(oft_cmatrix) :: oft_petsc_cmatrix
-! #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-!   INTEGER(petsc_addr) :: M !< PETSc matrix object
-!   INTEGER(petsc_addr) :: Md !< PETSc matrix diagonal object (unused)
-! #else
 !   TYPE(tmat) :: M !< PETSc matrix object
 !   TYPE(tvec) :: Md !< PETSc matrix diagonal object (unused)
-! #endif
 !   INTEGER(petsc_addr) :: r_lis !< PETSc Local to Global mapping for rows
 !   INTEGER(petsc_addr) :: c_lis !< PETSc Local to Global mapping for columns
 ! contains
@@ -220,44 +169,34 @@ end type oft_petsc_matrix
 !   procedure :: delete => mat_delete
 ! end type oft_petsc_cmatrix
 !---Declare public entities
-! public oft_petsc_vector_cast, oft_petsc_matrix_cast
+public oft_petsc_vector_cast, oft_petsc_matrix_cast
 contains
-!------------------------------------------------------------------------------
-! FUNCTION: oft_petsc_vector_cast
-!------------------------------------------------------------------------------
-!> Cast oft_vector to oft_petsc_la::oft_petsc_vector
+!---------------------------------------------------------------------------
+!> Cast a vector object to a oft_petsc_vector
 !!
-!! @param[out] self Object of desired type, unassociated if cast fails
-!! @param[in] source Source object to cast
-!! @result Error flag
-!------------------------------------------------------------------------------
-FUNCTION oft_petsc_vector_cast(self,source) result(ierr)
-class(oft_petsc_vector), pointer, intent(out) :: self
-class(oft_vector), target, intent(in) :: source
-integer(i4) :: ierr
+!! The source vector must be @ref oft_petsc_vector or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
+!---------------------------------------------------------------------------
+FUNCTION oft_petsc_vector_cast(self,source) result(success)
+class(oft_petsc_vector), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_vector), target, intent(in) :: source !< Source solver to cast
+logical :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_petsc_vector)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION oft_petsc_vector_cast
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_new_vec
-!------------------------------------------------------------------------------
-!> Create a new vector as a bare copy
-!!
-!! Creates a new vector of the same size and with the same gobal mapping.
-!! The new vector is also initialized to 0.
-!!
-!! @param[out] new New vector
+!> Create a new vector as a bare copy of `self`
 !------------------------------------------------------------------------------
 subroutine vec_new_vec(self,new)
-class(oft_petsc_vector), intent(in) :: self
-class(oft_vector), pointer, intent(out) :: new
+class(oft_petsc_vector), intent(in) :: self !< Vector object
+class(oft_vector), pointer, intent(out) :: new !< New vector
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 ALLOCATE(oft_petsc_vector::new)
@@ -283,18 +222,11 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine vec_new_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_new_cvec
-!------------------------------------------------------------------------------
-!> Create a new vector as a bare copy
-!!
-!! Creates a new vector of the same size and with the same gobal mapping.
-!! The new vector is also initialized to 0.
-!!
-!! @param[out] new New vector
+!> Create a new complex vector as a bare copy of `self`
 !------------------------------------------------------------------------------
 subroutine vec_new_cvec(self,new)
-class(oft_petsc_vector), intent(in) :: self
-class(oft_cvector), pointer, intent(out) :: new
+class(oft_petsc_vector), intent(in) :: self !< Vector object
+class(oft_cvector), pointer, intent(out) :: new !< New vector
 CALL oft_abort('Complex LA not yet supported with PETSc.','vec_new_cvec',__FILE__)
 ! DEBUG_STACK_PUSH
 ! ALLOCATE(oft_petsc_vector::new)
@@ -320,18 +252,13 @@ CALL oft_abort('Complex LA not yet supported with PETSc.','vec_new_cvec',__FILE_
 ! DEBUG_STACK_POP
 end subroutine vec_new_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_set
-!------------------------------------------------------------------------------
-!> Set all elements to a scalar or random number
-!!
-!! @param[in] alpha Updated vector value
-!! @param[in] random Set to random number, if true alpha is ignored (optional)
+!> Set all elements to a scalar
 !------------------------------------------------------------------------------
 subroutine vec_set(self,alpha,iblock,random)
-class(oft_petsc_vector), intent(inout) :: self
-real(r8), intent(in) :: alpha
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: random
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+real(r8), intent(in) :: alpha !< Updated vector value
+integer(i4), optional, intent(in) :: iblock !< Vector sub-block to act on
+logical, optional, intent(in) :: random !< Set to random number, if true alpha is ignored (optional)
 logical :: random_flag
 integer(i4) :: i,ierr
 real(r8), pointer, dimension(:) :: array
@@ -370,19 +297,12 @@ END IF
 DEBUG_STACK_POP
 end subroutine vec_set
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_get_slice
-!------------------------------------------------------------------------------
-!> Set all elements to a scalar
-!!
-!! @param[in] alpha Updated field value
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized fields.
+!> Get values for locally-owned portion of vector (slice)
 !------------------------------------------------------------------------------
 subroutine vec_get_slice(self,array,iblock)
-class(oft_petsc_vector), intent(inout) :: self
-real(r8), pointer, intent(inout) :: array(:)
-integer(i4), optional, intent(in) :: iblock
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+real(r8), pointer, intent(inout) :: array(:) !< Slice values
+integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
 integer(i4) :: i,j,ib,n,nslice,ierr
 real(r8), pointer :: x_array(:)
 logical :: dist
@@ -423,20 +343,13 @@ END IF
 DEBUG_STACK_POP
 end subroutine vec_get_slice
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_restore_slice
-!------------------------------------------------------------------------------
-!> Set all elements to a scalar
-!!
-!! @param[in] alpha Updated field value
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized fields.
+!> Set/add values for locally-owned portion of vector (slice)
 !------------------------------------------------------------------------------
 subroutine vec_restore_slice(self,array,iblock,wait)
-class(oft_petsc_vector), intent(inout) :: self
-real(r8), intent(in) :: array(:)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: wait
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+real(r8), intent(in) :: array(:) !< Slice values
+integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
+logical, optional, intent(in) :: wait !< Wait to perform global sync?
 integer(i4) :: i,j,n,nslice,ierr
 real(r8), pointer :: x_array(:)
 logical :: dist
@@ -471,19 +384,12 @@ END IF
 DEBUG_STACK_POP
 end subroutine vec_restore_slice
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_get_local
-!------------------------------------------------------------------------------
-!> Set all elements to a scalar
-!!
-!! @param[in] alpha Updated field value
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized fields.
+!> Get local values from vector
 !------------------------------------------------------------------------------
 subroutine vec_get_local(self,array,iblock)
-class(oft_petsc_vector), intent(inout) :: self
-real(r8), pointer, intent(inout) :: array(:)
-integer(i4), optional, intent(in) :: iblock
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+real(r8), pointer, intent(inout) :: array(:) !< Local values
+integer(i4), optional, intent(in) :: iblock !< Sub-block to retrieve
 integer(i4) :: i,nslice,ierr
 real(r8), pointer :: x_array(:)
 integer(i4), pointer :: inds(:)
@@ -517,21 +423,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine vec_get_local
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_restore_local
-!------------------------------------------------------------------------------
-!> Set all elements to a scalar
-!!
-!! @param[in] alpha Updated field value
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized fields.
+!> Set/add local values to vector
 !------------------------------------------------------------------------------
 subroutine vec_restore_local(self,array,iblock,add,wait)
-class(oft_petsc_vector), intent(inout) :: self
-real(r8), intent(inout) :: array(:)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: add
-logical, optional, intent(in) :: wait
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+real(r8), intent(in) :: array(:) !< Local values
+integer(i4), optional, intent(in) :: iblock !< Sub-block to restore
+logical, optional, intent(in) :: add !< Add values instead of replace
+logical, optional, intent(in) :: wait !< Wait to perform global sync
 integer(i4) :: i,j,k,nslice,ierr
 real(r8) :: val
 real(r8), pointer :: x_array(:)
@@ -615,50 +514,40 @@ END IF
 DEBUG_STACK_POP
 end subroutine vec_restore_local
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_add
-!------------------------------------------------------------------------------
 !> Add vectors
 !!
 !! self = \f$ \gamma \f$ self + \f$ \alpha \f$ a + \f$ \beta \f$ b
-!! @param[in] gamma Scale of source vector
-!! @param[in] alpha Scale of first vector
-!! @param[in] a First vector to add
-!! @param[in] beta Scale of second vector (optional)
-!! @param[in] b Second vector to add (optional)
 !------------------------------------------------------------------------------
 subroutine vec_add(self,gamma,alpha,a,beta,b)
-class(oft_petsc_vector), intent(inout) :: self
-real(r8), intent(in) :: gamma
-real(r8), intent(in) :: alpha
-class(oft_vector), target, intent(in) :: a
-real(r8), optional, intent(in) :: beta
-class(oft_vector), target, optional, intent(in) :: b
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+real(r8), intent(in) :: gamma !< Scale of source vector
+real(r8), intent(in) :: alpha !< Scale of first vector
+class(oft_vector), target, intent(inout) :: a !< First vector to add
+real(r8), optional, intent(in) :: beta !< Scale of second vector (optional)
+class(oft_vector), target, optional, intent(inout) :: b !< Second vector to add (optional)
 class(oft_petsc_vector), pointer :: av,bv
 integer(i4) :: i,ierr
 DEBUG_STACK_PUSH
 self%loc_current=.FALSE.
 if(present(beta).AND.present(b))then ! Add two vectors to the source
-  IF(oft_petsc_vector_cast(av,a)<0)CALL oft_abort('"a" is not a PETSc vector.','vec_add',__FILE__)
-  IF(oft_petsc_vector_cast(bv,b)<0)CALL oft_abort('"b" is not a PETSc vector.','vec_add',__FILE__)
+  IF(.NOT.oft_petsc_vector_cast(av,a))CALL oft_abort('"a" is not a PETSc vector.','vec_add',__FILE__)
+  IF(.NOT.oft_petsc_vector_cast(bv,b))CALL oft_abort('"b" is not a PETSc vector.','vec_add',__FILE__)
   CALL VecAXPBYPCZ(self%v,alpha,beta,gamma,av%v,bv%v,ierr)
 else ! Add one vector to the source
-  IF(oft_petsc_vector_cast(av,a)<0)CALL oft_abort('"a" is not a PETSc vector.','vec_add',__FILE__)
+  IF(.NOT.oft_petsc_vector_cast(av,a))CALL oft_abort('"a" is not a PETSc vector.','vec_add',__FILE__)
   CALL VecAXPBY(self%v,alpha,gamma,av%v,ierr)
 end if
 DEBUG_STACK_POP
 end subroutine vec_add
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_mult
-!------------------------------------------------------------------------------
-!> Multiply fields element by element
+!> Elementwise multiplication with another vector
 !!
 !! \f$ self_i = self_i * a_i \f$
-!! @param[in] a First field to add
 !------------------------------------------------------------------------------
 subroutine vec_mult(self,a,div_flag)
-class(oft_petsc_vector), intent(inout) :: self
-class(oft_vector), target, intent(in) :: a
-logical, optional, intent(in) :: div_flag
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+class(oft_vector), target, intent(inout) :: a !< vector for multiplication
+logical, optional, intent(in) :: div_flag !< Divide instead of multiply?
 class(oft_petsc_vector), pointer :: av
 integer(i4) :: ierr
 logical :: div
@@ -667,7 +556,7 @@ self%loc_current=.FALSE.
 div=.FALSE.
 if(present(div_flag))div=div_flag
 !---
-IF(oft_petsc_vector_cast(av,a)<0)CALL oft_abort('"a" is not a PETSc vector.','vec_mult',__FILE__)
+IF(.NOT.oft_petsc_vector_cast(av,a))CALL oft_abort('"a" is not a PETSc vector.','vec_mult',__FILE__)
 if(self%n/=av%n)call oft_abort('Vector sizes do not match.','vec_mult',__FILE__)
 !---
 if(div)then
@@ -678,17 +567,11 @@ end if
 DEBUG_STACK_POP
 end subroutine vec_mult
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_scale
-!------------------------------------------------------------------------------
 !> Scale vector by a scalar
-!!
-!! self = \f$ \alpha \f$ self
-!!
-!! @param[in] alpha Factor to scale field
 !------------------------------------------------------------------------------
 subroutine vec_scale(self,alpha)
-class(oft_petsc_vector), intent(inout) :: self
-real(r8), intent(in) :: alpha
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+real(r8), intent(in) :: alpha !< Scale factor
 integer(i4) :: i,ierr
 DEBUG_STACK_PUSH
 self%loc_current=.FALSE.
@@ -696,62 +579,44 @@ CALL VecScale(self%v,alpha,ierr)
 DEBUG_STACK_POP
 end subroutine vec_scale
 !------------------------------------------------------------------------------
-! FUNCTION: vec_dot_vec
-!------------------------------------------------------------------------------
-!> Dot product with a second vector
-!!
-!! @param[in] a Second vector for dot product
-!! @result \f$ \sum_i self_i a_i \f$
+!> Dot product with a vector
 !------------------------------------------------------------------------------
 function vec_dot_vec(self,a) result(dot)
-class(oft_petsc_vector), intent(inout) :: self
-class(oft_vector), target, intent(in) :: a
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
+real(r8) :: dot !< \f$ \sum_i self_i a_i \f$
 class(oft_petsc_vector), pointer :: av
-real(r8) :: dot
 integer(i4) :: i,ierr
 DEBUG_STACK_PUSH
-IF(oft_petsc_vector_cast(av,a)<0)CALL oft_abort('"a" is not a vector.','vec_dot_vec',__FILE__)
+IF(.NOT.oft_petsc_vector_cast(av,a))CALL oft_abort('"a" is not a vector.','vec_dot_vec',__FILE__)
 if(self%n/=av%n)call oft_abort('Vector lengths do not match.','vec_dot_vec',__FILE__)
 CALL VecDot(self%v,av%v,dot,ierr)
 DEBUG_STACK_POP
 end function vec_dot_vec
 !------------------------------------------------------------------------------
-! FUNCTION: vec_dot_cvec
-!------------------------------------------------------------------------------
-!> Dot product with a second vector
-!!
-!! @param[in] a Second vector for dot product
-!! @result \f$ \sum_i self_i a_i \f$
+!> Dot product with a complex vector
 !------------------------------------------------------------------------------
 function vec_dot_cvec(self,a) result(dot)
-class(oft_petsc_vector), intent(inout) :: self
-class(oft_cvector), target, intent(in) :: a
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
+complex(c8) :: dot !< \f$ \sum_i self_i a_i \f$
 CALL oft_abort('Complex LA not yet supported with PETSc.','vec_dot_cvec',__FILE__)
 end function vec_dot_cvec
 !------------------------------------------------------------------------------
-! FUNCTION: vec_mdot_vec
-!------------------------------------------------------------------------------
-!> Dot product with a second vector
-!!
-!! @param[in] a Second vector for dot product
-!! @result \f$ \sum_i self_i a_i \f$
+!> Dot product with an array of vectors
 !------------------------------------------------------------------------------
 function vec_mdot_vec(self,a,n) result(dots)
-class(oft_petsc_vector), intent(inout) :: self
-type(oft_vector_ptr), intent(in) :: a(n)
-integer(i4), intent(in) :: n
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
+integer(i4), intent(in) :: n !< Length of vector array
+real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 class(oft_petsc_vector), pointer :: av
-real(r8) :: dots(n)
 integer(i4) :: i,ierr
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-INTEGER(petsc_addr), ALLOCATABLE, DIMENSION(:) :: vecs
-#else
 TYPE(tvec), ALLOCATABLE, DIMENSION(:) :: vecs
-#endif
 DEBUG_STACK_PUSH
 ALLOCATE(vecs(n))
 DO i=1,n
-  IF(oft_petsc_vector_cast(av,a(i)%f)<0)CALL oft_abort('"a" is not a vector.','vec_mdot_vec',__FILE__)
+  IF(.NOT.oft_petsc_vector_cast(av,a(i)%f))CALL oft_abort('"a" is not a vector.','vec_mdot_vec',__FILE__)
   IF(self%n/=av%n)call oft_abort('Vector lengths do not match.','vec_mdot_vec',__FILE__)
   vecs(i)=av%v
 END DO
@@ -760,48 +625,34 @@ DEALLOCATE(vecs)
 DEBUG_STACK_POP
 end function vec_mdot_vec
 !------------------------------------------------------------------------------
-! FUNCTION: vec_mdot_cvec
-!------------------------------------------------------------------------------
-!> Dot product with a second vector
-!!
-!! @param[in] a Second vector for dot product
-!! @result \f$ \sum_i self_i a_i \f$
+!> Dot product with an array of complex vectors
 !------------------------------------------------------------------------------
 function vec_mdot_cvec(self,a,n) result(dots)
-class(oft_petsc_vector), intent(inout) :: self
-type(oft_vector_ptr), intent(in) :: a(n)
-integer(i4), intent(in) :: n
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
+integer(i4), intent(in) :: n !< Length of vector array
+complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 class(oft_petsc_vector), pointer :: av
-real(r8) :: dots(n)
 CALL oft_abort('Complex LA not yet supported with PETSc.','vec_mdot_cvec',__FILE__)
 end function vec_mdot_cvec
 !------------------------------------------------------------------------------
-! FUNCTION: vec_sum
-!------------------------------------------------------------------------------
-!> Sum reduction over a vector
-!!
-!! @result \f$ \sum_i self_i \f$
+!> Sum reduction over vector
 !------------------------------------------------------------------------------
 function vec_sum(self) result(sum)
-class(oft_petsc_vector), intent(inout) :: self
-real(r8) :: sum
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+real(r8) :: sum !< Sum of vector elements
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 CALL VecSum(self%v,sum,ierr)
 DEBUG_STACK_POP
 end function vec_sum
 !------------------------------------------------------------------------------
-! FUNCTION: vec_norm
-!------------------------------------------------------------------------------
-!> Norm of a vector
-!!
-!! @param[in] itype Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
-!! @result norm(self)
+!> Compute norm of vector
 !------------------------------------------------------------------------------
 function vec_norm(self,itype) result(norm)
-class(oft_petsc_vector), intent(inout) :: self
-integer(i4), intent(in) :: itype
-real(r8) :: norm
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
+real(r8) :: norm !< Specified norm of vector
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 SELECT CASE(itype)
@@ -817,24 +668,18 @@ END SELECT
 DEBUG_STACK_POP
 end function vec_norm
 !------------------------------------------------------------------------------
-! SUBROUTINE: vec_stitch
-!------------------------------------------------------------------------------
 !> Perform global stitching
-!!
-!! @param[in] up_method Type of stitching to perform
 !------------------------------------------------------------------------------
 subroutine vec_stitch(self,up_method)
-class(oft_petsc_vector), intent(inout) :: self
-integer(i4), intent(in) :: up_method
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
+integer(i4), intent(in) :: up_method !< Type of stitching to perform
 CALL oft_abort('Vector stitching is not supported for PETSc vectors.','vec_stitch',__FILE__)
 end subroutine vec_stitch
-!------------------------------------------------------------------------------
-! SUBROUTINE: vec_delete
 !------------------------------------------------------------------------------
 !> Finalize vector
 !------------------------------------------------------------------------------
 subroutine vec_delete(self)
-class(oft_petsc_vector), intent(inout) :: self
+class(oft_petsc_vector), intent(inout) :: self !< Vector object
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 CALL VecDestroy(self%v,ierr)
@@ -845,136 +690,102 @@ self%loc_current=.FALSE.
 self%loc_store=.FALSE.
 DEBUG_STACK_POP
 end subroutine vec_delete
-!------------------------------------------------------------------------------
-! FUNCTION: oft_petsc_matrix_cast
-!------------------------------------------------------------------------------
-!> Attempt to cast a matrix object to a oft_petsc_matrix
+!---------------------------------------------------------------------------
+!> Cast a oft_matrix object to a oft_petsc_matrix
 !!
-!! The source matrix must be oft_petsc_matrix or a child class, otherwise an error will be thrown
-!!
-!! @param[out] self Pointer to cast oft_petsc_matrix
-!! @param[in] source Source matrix to cast
-!------------------------------------------------------------------------------
-FUNCTION oft_petsc_matrix_cast(self,source) result(ierr)
-class(oft_petsc_matrix), pointer, intent(out) :: self
-class(oft_matrix), target, intent(in) :: source
-integer(i4) :: ierr
+!! The source matrix must be @ref oft_petsc_matrix or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
+!---------------------------------------------------------------------------
+FUNCTION oft_petsc_matrix_cast(self,source) result(success)
+class(oft_petsc_matrix), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_matrix), target, intent(in) :: source !< Source solver to cast
+logical :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_petsc_matrix)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 END FUNCTION oft_petsc_matrix_cast
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_apply_vec
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix-vector product
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine mat_apply_vec(self,a,b)
-class(oft_petsc_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Source vector
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 class(oft_petsc_vector), pointer :: av,bv
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','mat_apply_vec',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','mat_apply_vec',__FILE__)
-IF(oft_petsc_vector_cast(av,a)<0)CALL oft_abort('"a" is not a PETSc vector object.','mat_apply_vec',__FILE__)
-IF(oft_petsc_vector_cast(bv,b)<0)CALL oft_abort('"b" is not a PETSc vector object.','mat_apply_vec',__FILE__)
+IF(.NOT.oft_petsc_vector_cast(av,a))CALL oft_abort('"a" is not a PETSc vector object.','mat_apply_vec',__FILE__)
+IF(.NOT.oft_petsc_vector_cast(bv,b))CALL oft_abort('"b" is not a PETSc vector object.','mat_apply_vec',__FILE__)
 !---Apply operator
 CALL MatMult(self%M,av%v,bv%v,ierr)
 bv%loc_current=.FALSE.
 DEBUG_STACK_POP
 end subroutine mat_apply_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_apply_cvec
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix-vector product (complex)
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine mat_apply_cvec(self,a,b)
-class(oft_petsc_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Source vector
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 CALL oft_abort('Complex LA not yet supported with PETSc.','mat_apply_cvec',__FILE__)
 end subroutine mat_apply_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_applyt_vec
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply matrix vector product for matrix transpose
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = self^T * a
 !------------------------------------------------------------------------------
 subroutine mat_applyt_vec(self,a,b)
-class(oft_petsc_matrix), intent(inout) :: self
-class(oft_vector), intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Source vector
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 class(oft_petsc_vector), pointer :: av,bv
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 if(b%n/=self%nc)call oft_abort('Row mismatch','mat_applyt_vec',__FILE__)
 if(a%n/=self%nr)call oft_abort('Col mismatch','mat_applyt_vec',__FILE__)
-IF(oft_petsc_vector_cast(av,a)<0)CALL oft_abort('"a" is not a PETSc vector object.','mat_applyt_vec',__FILE__)
-IF(oft_petsc_vector_cast(bv,b)<0)CALL oft_abort('"b" is not a PETSc vector object.','mat_applyt_vec',__FILE__)
+IF(.NOT.oft_petsc_vector_cast(av,a))CALL oft_abort('"a" is not a PETSc vector object.','mat_applyt_vec',__FILE__)
+IF(.NOT.oft_petsc_vector_cast(bv,b))CALL oft_abort('"b" is not a PETSc vector object.','mat_applyt_vec',__FILE__)
 !---Apply operator
 CALL MatMultTranspose(self%M,av%v,bv%v,ierr)
 bv%loc_current=.FALSE.
 DEBUG_STACK_POP
 end subroutine mat_applyt_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_applyt_cvec
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply matrix vector product for matrix transpose (complex vector)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = self^T * a
 !------------------------------------------------------------------------------
 subroutine mat_applyt_cvec(self,a,b)
-class(oft_petsc_matrix), intent(inout) :: self
-class(oft_cvector), intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Source vector
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 CALL oft_abort('Complex LA not yet supported with PETSc.','mat_applyt_cvec',__FILE__)
 end subroutine mat_applyt_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_set_values
-!------------------------------------------------------------------------------
-!> Set values of a PETSc matrix
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to set [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Set values of a matrix
 !------------------------------------------------------------------------------
 subroutine mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
-class(oft_petsc_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: j,ierr
 DEBUG_STACK_PUSH
 IF(XOR(PRESENT(iblock),PRESENT(jblock)))call oft_abort('Only one block index was supplied', &
@@ -984,39 +795,29 @@ IF(XOR(PRESENT(iblock),PRESENT(jblock)))call oft_abort('Only one block index was
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
   DO j=1,m
     CALL MatSetValuesLocal(self%M,n,self%i_map(iblock)%offset+i_inds-1, &
-      1,self%j_map(jblock)%offset+j_inds(j)-1,b(:,j),INSERT_VALUES,ierr)
+      1,self%j_map(jblock)%offset+j_inds(j:j)-1,b(:,j),INSERT_VALUES,ierr)
   END DO
 ELSE
   DO j=1,m
-    CALL MatSetValuesLocal(self%M,n,i_inds-1,1,j_inds(j)-1,b(:,j),ADD_VALUES,ierr)
+    CALL MatSetValuesLocal(self%M,n,i_inds-1,1,j_inds(j:j)-1,b(:,j),ADD_VALUES,ierr)
   END DO
 END IF
 !$omp end critical (petsc_mat)
 DEBUG_STACK_POP
 end subroutine mat_set_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_add_values
-!------------------------------------------------------------------------------
-!> Add values to a PETSc matrix
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
+!> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_petsc_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: j,ierr
 DEBUG_STACK_PUSH
 IF(XOR(PRESENT(iblock),PRESENT(jblock)))call oft_abort('Only one block index was supplied', &
@@ -1026,28 +827,22 @@ IF(XOR(PRESENT(iblock),PRESENT(jblock)))call oft_abort('Only one block index was
 IF(PRESENT(iblock).AND.PRESENT(jblock))THEN
   DO j=1,m
     CALL MatSetValuesLocal(self%M,n,self%i_map(iblock)%offset+i_inds-1, &
-      1,self%j_map(jblock)%offset+j_inds(j)-1,b(:,j),ADD_VALUES,ierr)
+      1,self%j_map(jblock)%offset+j_inds(j:j)-1,b(:,j),ADD_VALUES,ierr)
   END DO
 ELSE
   DO j=1,m
-    CALL MatSetValuesLocal(self%M,n,i_inds-1,1,j_inds(j)-1,b(:,j),ADD_VALUES,ierr)
+    CALL MatSetValuesLocal(self%M,n,i_inds-1,1,j_inds(j:j)-1,b(:,j),ADD_VALUES,ierr)
   END DO
 END IF
 !$omp end critical (petsc_mat)
 DEBUG_STACK_POP
 end subroutine mat_add_values
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_assemble
-!------------------------------------------------------------------------------
-!> Finish assembly of matrix
-!!
-!! \warning Currently diagonal extraction is not supported for PETSc matrices
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
+!> Finish assembly of matrix and optionally extract diagonals
 !------------------------------------------------------------------------------
 subroutine mat_assemble(self,diag)
-class(oft_petsc_matrix), intent(inout) :: self
-class(oft_vector), optional, target, intent(inout) :: diag
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 integer(i4) :: i,ierr
 INTEGER(petsc_addr) :: Md
 real(r8) :: dmin,dmax
@@ -1069,12 +864,10 @@ end if
 DEBUG_STACK_POP
 end subroutine mat_assemble
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_zero
-!------------------------------------------------------------------------------
 !> Zero all entries in matrix
 !------------------------------------------------------------------------------
 subroutine mat_zero(self)
-class(oft_petsc_matrix), intent(inout) :: self
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
@@ -1083,21 +876,14 @@ CALL MatZeroEntries(self%m,ierr)
 DEBUG_STACK_POP
 end subroutine mat_zero
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_zero_rows
-!------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
 !------------------------------------------------------------------------------
 subroutine mat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_petsc_matrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 integer(i4) :: ierr
 real(r8), parameter :: one = 1.d0
 real(r8), parameter :: zero = 0.d0
@@ -1115,12 +901,10 @@ END IF
 DEBUG_STACK_POP
 end subroutine mat_zero_rows
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_delete
-!------------------------------------------------------------------------------
 !> Delete matrix
 !------------------------------------------------------------------------------
 subroutine mat_delete(self)
-class(oft_petsc_matrix), intent(inout) :: self
+class(oft_petsc_matrix), intent(inout) :: self !< Matrix object
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 CALL MatDestroy(self%M,ierr)

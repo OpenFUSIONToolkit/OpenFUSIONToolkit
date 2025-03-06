@@ -38,7 +38,7 @@ oft_in_template = """
  nu_lop={7}
 /
 
-&h0_op_options
+&h1_op_options
  df_lop={6}
  nu_lop={7}
 /

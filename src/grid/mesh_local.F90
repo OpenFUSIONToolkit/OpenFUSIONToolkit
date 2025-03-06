@@ -20,36 +20,25 @@ IMPLICIT NONE
 #include "local.h"
 INTERFACE
 !---------------------------------------------------------------------------
-! SUBROUTINE oft_metis_partmesh
-!---------------------------------------------------------------------------
 !> Parition a tetrahedral mesh using METIS
-!!
-!! @param[in] nc Number of cells
-!! @param[in] np Number of vertices
-!! @param[in,out] lc Cell list [4,nc]
-!! @param[in] npart Number of partitions
-!! @param[in,out] cpart Partition for each cell [nc]
-!! @param[in,out] info Parition return status
 !---------------------------------------------------------------------------
   SUBROUTINE oft_metis_partmesh(nc,np,ncp,lc,npart,cpart,info) BIND(C,NAME="oft_metis_partMesh")
   IMPORT c_int
-  INTEGER(c_int), INTENT(in) :: nc
-  INTEGER(c_int), INTENT(in) :: np
-  INTEGER(c_int), INTENT(in) :: ncp
-  INTEGER(c_int), DIMENSION(ncp,nc), INTENT(inout) :: lc
-  INTEGER(c_int), INTENT(in) :: npart
-  INTEGER(c_int), DIMENSION(npart), INTENT(inout) :: cpart
-  INTEGER(c_int), INTENT(inout) :: info
+  INTEGER(c_int), INTENT(in) :: nc !< Number of cells
+  INTEGER(c_int), INTENT(in) :: np !< Number of vertices
+  INTEGER(c_int), INTENT(in) :: ncp !< Number of points per cell
+  INTEGER(c_int), DIMENSION(ncp,nc), INTENT(inout) :: lc !< Cell list [ncp,nc]
+  INTEGER(c_int), INTENT(in) :: npart !< Number of partitions
+  INTEGER(c_int), DIMENSION(npart), INTENT(inout) :: cpart !< Partition for each cell [nc]
+  INTEGER(c_int), INTENT(inout) :: info !< Parition return status
   END SUBROUTINE oft_metis_partmesh
 END INTERFACE
 contains
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_local_init
-!------------------------------------------------------------------------------
 !> Driver for grid construction
 !------------------------------------------------------------------------------
 subroutine mesh_local_init(self)
-class(oft_mesh), intent(inout) :: self
+class(oft_mesh), intent(inout) :: self !< Mesh object
 DEBUG_STACK_PUSH
 ALLOCATE(self%ho_info%is_curved(self%nc))
 self%ho_info%is_curved=.FALSE.
@@ -70,55 +59,13 @@ IF(.NOT.ASSOCIATED(self%tloc_c))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine mesh_local_init
-! !------------------------------------------------------------------------------
-! ! SUBROUTINE: mesh_resolution
-! !------------------------------------------------------------------------------
-! !> Compute mesh resolution statistics.
-! !! - hmin Minimum edge length
-! !! - hmax Maximum edge length
-! !! - hrms Average edge length
-! !------------------------------------------------------------------------------
-! subroutine mesh_resolution(self)
-! class(oft_amesh), intent(inout) :: self
-! real(r8) :: hmax,hrms,hmin
-! real(r8), ALLOCATABLE, DIMENSION(:) :: ed_lens
-! integer(i4) :: i,j
-! DEBUG_STACK_PUSH
-! hmin=huge(hmin)
-! hmax=0.d0
-! hrms=0.d0
-! !$omp parallel private(j,ed_lens) &
-! !$omp reduction(min:hmin) reduction(max:hmax) reduction(+:hrms)
-! ALLOCATE(ed_lens(self%cell_ne))
-! !$omp do
-! do i=1,self%nc ! loop over all cells
-!   do j=1,self%cell_ne
-!     ed_lens(j)=sum((self%r(:,self%lc(self%cell_ed(2,j),i)) &
-!                   -self%r(:,self%lc(self%cell_ed(1,j),i)))**2)
-!   end do
-!   hmin = min(hmin,minval(ed_lens))
-!   hmax = max(hmax,maxval(ed_lens))
-!   hrms = hrms+sum(ed_lens)
-! enddo
-! deallocate(ed_lens)
-! !$omp end parallel
-! self%hmin=sqrt(hmin)
-! self%hmax=sqrt(hmax)
-! self%hrms=sqrt(hrms/REAL(self%cell_ne*self%nc,8))
-! write(*,*)'hmin=',sngl(self%hmin)
-! write(*,*)'hrms=',sngl(self%hrms)
-! write(*,*)'hmax=',sngl(self%hmax)
-! DEBUG_STACK_POP
-! end subroutine mesh_resolution
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_volumes
 !------------------------------------------------------------------------------
 !> Compute cell and vertex volumes, rectifying negative volume cells.
 !!
 !! Zero volume cells or vertices are also caught for mesh validation.
 !------------------------------------------------------------------------------
 subroutine mesh_volumes(self)
-class(oft_mesh), intent(inout) :: self
+class(oft_mesh), intent(inout) :: self !< Mesh object
 integer(i4) :: i,j
 real(r8) :: vol,f(4),gop(3,4)
 DEBUG_STACK_PUSH
@@ -148,15 +95,13 @@ CALL bmesh_areas(self%bmesh)
 DEBUG_STACK_POP
 end subroutine mesh_volumes
 !------------------------------------------------------------------------------
-! SUBROUTINE: amesh_edges
-!------------------------------------------------------------------------------
 !> Identify global edges and link to points and cells.
 !! - le List construction
 !! - lce List construction
 !! - klpe, llpe Linkage construction
 !------------------------------------------------------------------------------
 subroutine amesh_edges(self)
-class(oft_amesh), intent(inout) :: self
+class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(i4), allocatable :: nr(:),ir(:),jr(:)
 integer(i4) :: i,j,js,je,jp,jn,k(8)
 DEBUG_STACK_PUSH
@@ -257,8 +202,6 @@ enddo
 DEBUG_STACK_POP
 end subroutine amesh_edges
 !------------------------------------------------------------------------------
-! SUBROUTINE: amesh_to_cell
-!------------------------------------------------------------------------------
 !> Locate point, edge, face and cell neighbor cells.
 !! - lfc List construction
 !! - lcc List construction
@@ -266,7 +209,7 @@ end subroutine amesh_edges
 !! - kec, lec Linkage construction
 !------------------------------------------------------------------------------
 subroutine amesh_to_cell(self)
-class(oft_amesh), intent(inout) :: self
+class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(i4), allocatable :: nr(:)
 integer(i4) :: i,j,k
 DEBUG_STACK_PUSH
@@ -321,15 +264,13 @@ deallocate(nr)
 DEBUG_STACK_POP
 end subroutine amesh_to_cell
 !------------------------------------------------------------------------------
-! SUBROUTINE: amesh_interactions
-!------------------------------------------------------------------------------
 !> Index point to point, point to edge and edge to edge interactions.
 !! - kpp, lpp Linkage construction
 !! - kpe, lpe Linkage construction
 !! - kee, lee Linkage construction
 !------------------------------------------------------------------------------
 subroutine amesh_interactions(self)
-class(oft_amesh), intent(inout) :: self
+class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(i4), allocatable :: lcx(:,:),nr(:)
 integer(i4) :: i,j,js,je,jn,jp,k
 DEBUG_STACK_PUSH
@@ -494,8 +435,6 @@ deallocate(nr,lcx)
 DEBUG_STACK_POP
 end subroutine amesh_interactions
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_faces
-!------------------------------------------------------------------------------
 !> Identify global faces and link to points, edges and cells.
 !! - lf List construction
 !! - lcf List construction
@@ -503,7 +442,7 @@ end subroutine amesh_interactions
 !! - klef, llef Linkage construction
 !------------------------------------------------------------------------------
 subroutine mesh_faces(self)
-class(oft_mesh), intent(inout) :: self
+class(oft_mesh), intent(inout) :: self !< Mesh object
 integer(i4), allocatable :: nr(:),ir(:),jr(:)
 integer(i4) :: i,j,js,je,jp,jn,oflag,k(12)
 DEBUG_STACK_PUSH
@@ -618,8 +557,6 @@ enddo
 DEBUG_STACK_POP
 end subroutine mesh_faces
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_neighbors
-!------------------------------------------------------------------------------
 !> Locate point, edge, face and cell neighbor cells.
 !! - lfc List construction
 !! - lcc List construction
@@ -627,7 +564,7 @@ end subroutine mesh_faces
 !! - kec, lec Linkage construction
 !------------------------------------------------------------------------------
 subroutine mesh_neighbors(self)
-class(oft_mesh), intent(inout) :: self
+class(oft_mesh), intent(inout) :: self !< Mesh object
 integer(i4), allocatable :: nr(:)
 integer(i4) :: i,j,k
 DEBUG_STACK_PUSH
@@ -654,15 +591,13 @@ enddo
 DEBUG_STACK_POP
 end subroutine mesh_neighbors
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_boundary
-!------------------------------------------------------------------------------
 !> Locate and index boundary points, edges, faces and cells.
 !! - nbp, nbe, nbf, nbc Counts
 !! - bp, be, bf, bc Flag construction
 !! - lbp, lbe, lbf, lbc List construction
 !------------------------------------------------------------------------------
 subroutine mesh_boundary(self)
-class(oft_mesh), intent(inout) :: self
+class(oft_mesh), intent(inout) :: self !< Mesh object
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 allocate(self%bp(self%np),self%be(self%ne),self%bf(self%nf),self%bc(self%nc))
@@ -723,21 +658,15 @@ enddo
 DEBUG_STACK_POP
 end subroutine mesh_boundary
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_local_partition
-!------------------------------------------------------------------------------
 !> Perform local mesh decomposition (METIS)
-!!
-!! @param[in,out] self Mesh structure
-!! @param[in,out] tloc_p Point partitioning [self%np]
-!! @param[in,out] tloc_e Edge partitioning [self%ne]
-!! @param[in,out] tloc_f Face partitioning [self%nf]
-!! @param[in,out] tloc_c Cell partitioning [self%nc]
-!! @param[in] nparts Number of partitions
 !------------------------------------------------------------------------------
 SUBROUTINE mesh_local_partition(self,tloc_p,tloc_e,tloc_f,tloc_c,nparts)
-CLASS(oft_mesh), INTENT(inout) :: self
-TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_p,tloc_e,tloc_f,tloc_c
-INTEGER(i4), INTENT(in) :: nparts
+CLASS(oft_mesh), INTENT(inout) :: self !< Mesh to partition
+TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_p !< Point partitioning [self%np]
+TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_e !< Edge partitioning [self%ne]
+TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_f !< Face partitioning [self%nf]
+TYPE(oft_1d_int), DIMENSION(:), INTENT(inout) :: tloc_c !< Cell partitioning [self%nc]
+INTEGER(i4), INTENT(in) :: nparts !< Number of partitions
 INTEGER(i4) :: i,j,k,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cpart,ppart,epart,fpart
 LOGICAL, ALLOCATABLE, DIMENSION(:,:) :: town
@@ -873,14 +802,12 @@ DEALLOCATE(ppart,fpart,cpart,trand,own_tmp)
 DEBUG_STACK_POP
 END SUBROUTINE mesh_local_partition
 !------------------------------------------------------------------------------
-! SUBROUTINE: bmesh_local_init
-!------------------------------------------------------------------------------
 !> Driver for grid construction
 !------------------------------------------------------------------------------
 subroutine bmesh_local_init(self,parent,sync_normals)
-class(oft_bmesh), intent(inout) :: self
-class(oft_mesh), optional, intent(in) :: parent
-LOGICAL, OPTIONAL, INTENT(IN) :: sync_normals
+class(oft_bmesh), intent(inout) :: self !< Mesh object
+class(oft_mesh), optional, intent(in) :: parent !< Parent volume mesh (if present)
+LOGICAL, OPTIONAL, INTENT(IN) :: sync_normals !< Sync unit normal directions between faces?
 REAL(r8) :: f(4),ftmp(4),gop(3,4),vol
 REAL(r8), ALLOCATABLE :: fn(:,:)
 integer(i4) :: i,j,k,l,ind,ed(2)
@@ -982,15 +909,13 @@ END IF
 DEBUG_STACK_POP
 end subroutine bmesh_local_init
 !------------------------------------------------------------------------------
-! SUBROUTINE: bmesh_areas
-!------------------------------------------------------------------------------
 !> Compute cell and vertex volumes, rectifying negative volume cells.
 !!
 !! Zero volume cells or vertices are also caught for mesh validation.
 !------------------------------------------------------------------------------
 subroutine bmesh_areas(self,fn)
-class(oft_bmesh), INTENT(inout) :: self
-REAL(r8), OPTIONAL, INTENT(in) :: fn(:,:)
+class(oft_bmesh), INTENT(inout) :: self !< Mesh object
+REAL(r8), OPTIONAL, INTENT(in) :: fn(:,:) !< Unit normal directions for orientation matching [3,nc]
 integer(i4) :: i,j
 real(r8) :: area,f(3),gop(3,4),norm(3)
 IF(self%nc==0)RETURN
@@ -1029,14 +954,12 @@ endif
 DEBUG_STACK_POP
 end subroutine bmesh_areas
 !------------------------------------------------------------------------------
-! SUBROUTINE: sync_face_normals
-!------------------------------------------------------------------------------
 !> Compute cell and vertex volumes, rectifying negative volume cells.
 !!
 !! Zero volume cells or vertices are also caught for mesh validation.
 !------------------------------------------------------------------------------
 subroutine sync_face_normals(self)
-class(oft_bmesh), INTENT(inout) :: self
+class(oft_bmesh), INTENT(inout) :: self !< Mesh object
 integer(i4) :: i,max_depth=1
 logical, ALLOCATABLE, DIMENSION(:) :: oriented
 IF(self%nc==0)RETURN
@@ -1088,8 +1011,6 @@ END DO
 end subroutine orient_neighbors
 end subroutine sync_face_normals
 !------------------------------------------------------------------------------
-! SUBROUTINE: bmesh_neighbors
-!------------------------------------------------------------------------------
 !> Locate point, edge, face and cell neighbor cells.
 !! - lfc List construction
 !! - lcc List construction
@@ -1097,7 +1018,7 @@ end subroutine sync_face_normals
 !! - kec, lec Linkage construction
 !------------------------------------------------------------------------------
 subroutine bmesh_neighbors(self)
-class(oft_bmesh), INTENT(inout) :: self
+class(oft_bmesh), INTENT(inout) :: self !< Mesh object
 integer(i4), allocatable :: nr(:)
 integer(i4) :: i,j,k
 DEBUG_STACK_PUSH
@@ -1113,15 +1034,13 @@ enddo
 DEBUG_STACK_POP
 end subroutine bmesh_neighbors
 !------------------------------------------------------------------------------
-! SUBROUTINE: bmesh_boundary
-!------------------------------------------------------------------------------
 !> Locate and index boundary points, edges, faces and cells.
 !! - nbp, nbe, nbf, nbc Counts
 !! - bp, be, bf, bc Flag construction
 !! - lbp, lbe, lbf, lbc List construction
 !------------------------------------------------------------------------------
 subroutine bmesh_boundary(self)
-class(oft_bmesh), INTENT(inout) :: self
+class(oft_bmesh), INTENT(inout) :: self !< Mesh object
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 allocate(self%bp(self%np),self%be(self%ne),self%bc(self%nc))

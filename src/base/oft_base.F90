@@ -61,6 +61,7 @@ INTEGER(i4) :: OFT_MPI_CHAR=MPI_CHARACTER !< MPI_CHAR alias
 INTEGER(i4), PARAMETER :: MPI_COMM_WORLD = -1 ! Dummy comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_COMM_NULL = -2 ! Dummy null comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_REQUEST_NULL = -3 ! Dummy null request value for non-MPI runs
+INTEGER(i4), PARAMETER :: MPI_COMM_SELF = -4 ! Dummy self-comm value for non-MPI runs
 #endif
 !---------------------------------------------------------------------------
 !> Perform a SUM/AND reduction over all processors
@@ -116,25 +117,18 @@ TYPE :: oft_env_type
   INTEGER(i4) :: nparts = 1 !< Number of OpenMP paritions
 #ifdef OFT_MPI_F08
   TYPE(mpi_comm) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+  TYPE(mpi_comm) :: NODE_COMM = MPI_COMM_SELF !< Open FUSION Toolkit MPI node-local communicator
 #else
   INTEGER(i4) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+  INTEGER(i4) :: NODE_COMM = MPI_COMM_SELF !< Open FUSION Toolkit MPI node-local communicator
 #endif
   INTEGER(i4) :: nnodes = -1 !< Number of MPI tasks
   INTEGER(i4) :: ppn = 1 !< Number of procs per NUMA node
   INTEGER(i4) :: nprocs = -1 !< Number of MPI tasks
   INTEGER(i4) :: nthreads = -1 !< Number of OpenMP threads
   INTEGER(i4) :: rank = -1 !< MPI rank
-  INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
-  INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
+  INTEGER(i4) :: node_rank = -1 !< MPI node-local rank
   INTEGER(i4) :: debug = 0 !< Debug level (1-3)
-  INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
-#ifdef OFT_MPI_F08
-  TYPE(mpi_request), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
-  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
-#else
-  INTEGER(i4), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
-  INTEGER(i4), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
-#endif
   LOGICAL :: head_proc = .FALSE. !< Lead processor flag
   LOGICAL :: pm = .TRUE. !< Performance monitor (default T=on, F=off)
   LOGICAL :: test_run = .FALSE. !< Test run
@@ -310,6 +304,14 @@ oft_env%debug=debug
 oft_env%test_run=test_run
 oft_env%nparts=nparts
 oft_indent=""
+#ifdef HAVE_MPI
+IF(oft_env%ppn>1)THEN
+  CALL MPI_Comm_split(oft_env%comm,oft_env%rank/oft_env%ppn,oft_env%rank,oft_env%NODE_COMM,ierr)
+  CALL MPI_Comm_rank(oft_env%NODE_COMM,oft_env%node_rank,ierr)
+ELSE
+  oft_env%node_rank=0
+END IF
+#endif
 !---Print runtime information
 IF(oft_env%rank==0)THEN
   WRITE(*,'(A)')    '#----------------------------------------------'
@@ -583,7 +585,7 @@ LOGICAL :: all_null
 all_null=.TRUE.
 #ifdef HAVE_MPI
 DO i=1,n
-  all_null=all_null.AND.(oft_env%recv(i)==MPI_REQUEST_NULL)
+  all_null=all_null.AND.(req(i)==MPI_REQUEST_NULL)
 END DO
 #endif
 END FUNCTION oft_mpi_check_reqs
