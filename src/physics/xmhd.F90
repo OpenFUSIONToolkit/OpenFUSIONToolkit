@@ -403,7 +403,7 @@ CONTAINS
 !---------------------------------------------------------------------------
 !> Read settings for extended MHD model from input files
 !!
-!! Runtime options are set in the main input file using the \c xmhd_options group.
+!! Runtime options are set in the main input file using the `xmhd_options` group.
 !!
 !! @warning Most default physical values in the namelist below will not be appropriate
 !! for new simulations. They are merely placeholders to indicate the type of the input.
@@ -544,7 +544,7 @@ END SUBROUTINE xmhd_read_settings
 !> Main driver subroutine for extended MHD time advance
 !!
 !! Runtime options are set in the main input file using the group
-!! \c xmhd_options group, see \ref xmhd_read_settings.
+!! `xmhd_options` group, see \ref xmhd_read_settings.
 !---------------------------------------------------------------------------
 subroutine xmhd_run(initial_fields,driver,probes,profile_only)
 TYPE(xmhd_sub_fields), INTENT(inout) :: initial_fields !< Initial conditions
@@ -1087,7 +1087,7 @@ end subroutine xmhd_run
 !---------------------------------------------------------------------------
 !> Main driver subroutine for extended MHD time advance
 !!
-!! Runtime options are set in the main input file using the group \c xmhd_options group,
+!! Runtime options are set in the main input file using the group `xmhd_options` group,
 !! see \ref xmhd_run.
 !!
 !! @note This method assumes that [B0, V0, Ne0, Ti0, Te0] constitute an
@@ -4544,8 +4544,8 @@ end subroutine xmhd_probe_flush
 !---------------------------------------------------------------------------
 !> Plotting subroutine for xMHD post-processing
 !!
-!! Runtime options are set in the main input file using the group \c xmhd_plot_options.
-!! Additionally, options from the \c xmhd_options group are also read to get run parameters,
+!! Runtime options are set in the main input file using the group `xmhd_plot_options`.
+!! Additionally, options from the `xmhd_options` group are also read to get run parameters,
 !! see @ref xmhd::xmhd_run "xmhd_run" for a list of options.
 !!
 !! **Option group:** `xmhd_plot_options`

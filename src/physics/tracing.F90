@@ -1463,7 +1463,7 @@ end subroutine tracer_lsode_step
 !---------------------------------------------------------------------------
 ! SUBROUTINE: tracer_lsode_eval_B
 !---------------------------------------------------------------------------
-!> Field evaluation callback used by \c dlsode
+!> Field evaluation callback used by `dlsode`
 !!
 !! See \ref tracing::tracer_lsode_step "tracer_lsode_step"
 !---------------------------------------------------------------------------

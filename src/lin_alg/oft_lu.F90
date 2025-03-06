@@ -17,7 +17,7 @@
 !! @ingroup doxy_oft_lin_alg
 !---------------------------------------------------------------------------
 MODULE oft_lu
-USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr
+USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr, c_f_pointer, c_loc
 USE oft_local
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_graph
@@ -609,7 +609,8 @@ CASE("superd")
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
     END IF
-    self%mumps_struct%rhs => vals
+    CALL c_f_pointer(C_LOC(vals),self%mumps_struct%rhs,[nrhs*g%n])
+    ! self%mumps_struct%rhs => vals(1:g%n,1:nrhs)
     self%mumps_struct%lrhs = g%n
     self%mumps_struct%nrhs = nrhs
     !---

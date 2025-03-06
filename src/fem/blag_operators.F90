@@ -402,8 +402,8 @@ end subroutine zeroe_apply
 !> Construct mass matrix for a boundary Lagrange scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine oft_blag_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
@@ -479,9 +479,9 @@ end subroutine oft_blag_getmop
 !> Construct laplacian matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
-!! - \c 'grnd'  Dirichlet for only groundin point
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
+!! - `'grnd'`  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
 subroutine oft_blag_getlop(fe_rep,mat,bc,parent_geom_flag)
 class(oft_afem_type), target, intent(inout) :: fe_rep

@@ -95,7 +95,7 @@ end type oft_hcurl_cinterp
 !! \nabla \phi \f$, where \f$ \nabla^2 \phi = - \nabla \cdot f \f$. Cleaning
 !! may also be applied to a field which is pre-multiplied by the H(Curl)::MOP
 !! in which case \f$ \nabla^2 \phi = - \nabla^T f \f$ and \f$ f = f + M \nabla
-!! \phi \f$. The mass matrix version is applied if \c mop is associated with the
+!! \phi \f$. The mass matrix version is applied if `mop` is associated with the
 !! corresponding H(Curl)::MOP.
 !!
 !! @note This only removes the 0-th order component, which is sufficient for
@@ -448,8 +448,8 @@ end subroutine zerob_delete
 !> Construct mass matrix for a H(Curl) representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
@@ -547,8 +547,8 @@ end subroutine oft_hcurl_getmop
 !> Construct helicity matrix for a H(Curl) representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_getkop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
@@ -649,8 +649,8 @@ end subroutine oft_hcurl_getkop
 !> Construct energy matrix for a H(Curl) representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_getwop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
@@ -749,8 +749,8 @@ end subroutine oft_hcurl_getwop
 !> Construct force-free response matrix for a H(Curl) representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine oft_hcurl_getjmlb(fe_rep,mat,alam,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep

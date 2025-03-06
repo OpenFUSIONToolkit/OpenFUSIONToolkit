@@ -95,9 +95,9 @@ lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!Solving the Helmholtz eigensystem requires the operators coresponding the general eigenvalue problem
 !!\f$ Ax = \lambda Mx \f$. These operators are the distcretized Laplace operator
 !!\f$ A = \int \nabla u_i^T \cdot \nabla u_j dV \f$ and the finite element mass matrix
-!!\f$ M = \int u_i^T u_j dV \f$. Where \c u and \f$ u^T \f$ are the Lagrange basis and test functions
+!!\f$ M = \int u_i^T u_j dV \f$. Where `u` and \f$ u^T \f$ are the Lagrange basis and test functions
 !!respectively. A vector defining the solution space is also required, to store the solution and to
-!!create worker vectors. In this case a dirichlet boundary condition is used where \c u is 0 everywhere
+!!create worker vectors. In this case a dirichlet boundary condition is used where `u` is 0 everywhere
 !!on the boundary, denoted by the BC flag `'zerob'` used in matrix construction.
 CALL ML_oft_lagrange%vec_create(u)
 !---Create Operators
@@ -108,10 +108,10 @@ CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'zerob')
 !!
 !!This section assembles the solver object by fill the required references. The solver object used here
 !!is the native non-linear Conjugate-Gradient iterative method. It requires the right and left hand side
-!!matrices for the generalized EV problem, \c A and \c M. The convergence tolerance is also specified
+!!matrices for the generalized EV problem, `A` and `M`. The convergence tolerance is also specified
 !!to be double precision convergence of the eigenvalue, see \ref oft_cg::oft_cg_eigsolver
 !!"oft_cg_eigsolver". Preconditioning is supplied by diagonal scaling, which requires identifying the
-!!preconditioner matrix, in this case \c A.
+!!preconditioner matrix, in this case `A`.
 !!
 !!The vector is then initialized with a guess solution and the boundary condition is applied to make sure
 !!the initial guess is consistent with the boundary condition. Finally, the assembled solver is used
@@ -132,8 +132,8 @@ CALL solver%apply(u,lambda)
 !!\ref oft_io::hdf5_spdata "hdf5_spdata" subroutine. When the program has completed
 !!\ref oft_base::oft_finalize "oft_finalize" is called to cleanup the runtime environment and terminate
 !!the process. This subroutine calls any required MPI and PETSc finalize subroutines as well. After
-!!completing the run, the \c build_xdmf script may be used to construct VisIt files and view the solution
-!!field, saved as tag \c T.
+!!completing the run, the `build_xdmf` script may be used to construct VisIt files and view the solution
+!!field, saved as tag `T`.
 CALL u%get_local(vtmp)
 CALL mg_mesh%mesh%save_vertex_scalar(vtmp,plot_file,'T')
 DEALLOCATE(vtmp)
@@ -169,7 +169,7 @@ END PROGRAM example1
 !!\ref doc_input_mesh. To perform a parallel run that is analogous to the serial run shown
 !!above the input file must be modified as below. The choice of nbase is somewhat arbitrary
 !!here, but generally is a function of the number of MPI tasks and the size of the base mesh.
-!!\c nlevels however, must be incremented by 1 in order to account for the additional transfer
+!!`nlevels` however, must be incremented by 1 in order to account for the additional transfer
 !!level create during decomposition.
 !!
 !!\verbatim

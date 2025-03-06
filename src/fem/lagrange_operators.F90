@@ -778,8 +778,8 @@ end subroutine lag_vbc_diag
 !> Construct mass matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine oft_lag_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
@@ -891,9 +891,9 @@ end subroutine oft_lag_getmop
 !> Construct laplacian matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
-!! - \c 'grnd'  Dirichlet for only groundin point
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
+!! - `'grnd'`  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
 subroutine oft_lag_getlop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
@@ -1004,9 +1004,9 @@ end subroutine oft_lag_getlop
 !> Construct parallel diffusion matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
-!! - \c 'grnd'  Dirichlet for only groundin point
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
+!! - `'grnd'`  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
 subroutine oft_lag_getpdop(fe_rep,mat,field,bc,perp,be_flag)
 class(oft_afem_type), target, intent(inout) :: fe_rep
@@ -1235,10 +1235,10 @@ end subroutine oft_lag_project_div
 !> Construct mass matrix for Lagrange vector representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'all' Dirichlet for all components at boundary
-!! - \c 'norm' Dirichlet for normal component at boundary
-!! - \c 'tang' Dirichlet for tangential component at boundary
+!! - `'none'` Full matrix
+!! - `'all'` Dirichlet for all components at boundary
+!! - `'norm'` Dirichlet for normal component at boundary
+!! - `'tang'` Dirichlet for tangential component at boundary
 !---------------------------------------------------------------------------
 subroutine oft_lag_vgetmop(vlag_rep,mat,bc)
 class(oft_fem_comp_type), target, intent(inout) :: vlag_rep

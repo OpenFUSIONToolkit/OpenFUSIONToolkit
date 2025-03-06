@@ -37,15 +37,7 @@ REAL(r8), PARAMETER :: pi=3.141592653589793238462643_r8 !< \f$ \pi \f$
 ! definitions to keep documentation clean and make the real types obvious.
 !------------------------------------------------------------------------------
 #ifdef HAVE_PETSC
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>5)
-#if PETSC_VERSION_MINOR<8
-#include "petsc/finclude/petscsysdef.h"
-#else
 #include "petscconf.h"
-#endif
-#else
-#include "finclude/petscsysdef.h"
-#endif
 #if (PETSC_SIZEOF_VOID_P == 8)
 INTEGER, PARAMETER :: petsc_addr=i8 !< Size of address pointer (32 or 64) bits
 #else

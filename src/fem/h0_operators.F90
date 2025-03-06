@@ -270,8 +270,8 @@ end subroutine zeroi_apply
 !> Construct mass matrix for H0 scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine oft_h0_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
@@ -383,9 +383,9 @@ end subroutine oft_h0_getmop
 !> Construct laplacian matrix for H0 scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
-!! - \c 'grnd'  Dirichlet for only groundin point
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
+!! - `'grnd'`  Dirichlet for only groundin point
 !---------------------------------------------------------------------------
 subroutine oft_h0_getlop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep

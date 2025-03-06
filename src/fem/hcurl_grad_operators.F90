@@ -681,7 +681,7 @@ end subroutine hcurl_grad_bmc
 !> Add the gradient of a H0 scalar field to a H(Curl) + Grad(H^1) vector field
 !!
 !! @note By default the 0-th order gradient subspace is represented on the
-!! H(Curl) DOF, use the \c keep_boundary flag otherwise
+!! H(Curl) DOF, use the `keep_boundary` flag otherwise
 !---------------------------------------------------------------------------
 subroutine hcurl_grad_grad(hcurl_grad_fe,a,b,keep_boundary)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_fe
@@ -958,8 +958,8 @@ end subroutine hcurl_grad_curltp
 !> Construct mass matrix for a H(Curl) + Grad(H^1) representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !---------------------------------------------------------------------------
 subroutine hcurl_grad_getmop(hcurl_grad_rep,mat,bc)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep

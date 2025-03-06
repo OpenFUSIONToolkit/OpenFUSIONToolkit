@@ -825,17 +825,12 @@ end subroutine vec_delete
 !!
 !! Vector data and associated offsets are copied into the restart structure
 !! for use with \ref oft_io::hdf5_rst_write "hdf5_rst_write".
-!!
-!! @param[in] self Source vector
-!! @param[in] ig Global indices for \c self
-!! @param[out] rst_info Restart structure for output
-!! @param[in] alloc_only Allocate and setup data structures only (optional)
 !---------------------------------------------------------------------------
 subroutine native_vector_slice_push(self,ig,rst_info,alloc_only)
-class(oft_native_vector), pointer, intent(in) :: self
-integer(i8), intent(in) :: ig(:)
-type(hdf5_rst), intent(out) :: rst_info
-logical, optional, intent(in) :: alloc_only
+class(oft_native_vector), pointer, intent(in) :: self !< Source vector
+integer(i8), intent(in) :: ig(:) !< Global indices for `self`
+type(hdf5_rst), intent(out) :: rst_info !< Restart structure for output
+logical, optional, intent(in) :: alloc_only !< Allocate and setup data structures only (optional)
 integer(i4) :: nemax,ierr,i,j,k,l,n
 integer(i8) :: ii
 integer(i8), allocatable, dimension(:) :: t1i,t2i,ind
@@ -980,15 +975,11 @@ end subroutine native_vector_slice_push
 !!
 !! @note The restart structure should be setup first using a call to
 !! \ref oft_native_vectors::vector_slice_push "vector_slice_push"
-!!
-!! @param[in,out] self Destination vector
-!! @param[in] ig Global indices for \c self
-!! @param[in,out] rst_info Restart structure for output
 !---------------------------------------------------------------------------
 subroutine native_vector_slice_pop(self,ig,rst_info)
-class(oft_native_vector), pointer, intent(inout) :: self
-integer(i8), intent(in) :: ig(:)
-type(hdf5_rst), intent(inout) :: rst_info
+class(oft_native_vector), pointer, intent(inout) :: self !< Destination vector
+integer(i8), intent(in) :: ig(:) !< Global indices for `self`
+type(hdf5_rst), intent(inout) :: rst_info !< Restart structure for output
 integer(i4) :: nemax,ierr,i,j,k,l
 integer(i8) :: ii,t1i(2),t2i(2)
 real(r8), allocatable, dimension(:) :: t1v,t2v
@@ -1704,19 +1695,14 @@ end select
 DEBUG_STACK_POP
 end FUNCTION native_matrix_cast
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_apply_vec
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix-vector product
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine mat_apply_vec(self,a,b)
-class(oft_native_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Source vector
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
 integer(i4) :: i,j
 real(r8) :: tmp
@@ -1772,19 +1758,14 @@ IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_apply_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_apply_cvec
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Compute matrix-vector product (complex)
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
 !------------------------------------------------------------------------------
 subroutine mat_apply_cvec(self,a,b)
-class(oft_native_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Source vector
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
 integer(i4) :: i,j
 complex(c8) :: tmp
@@ -1840,19 +1821,14 @@ IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_apply_cvec
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_applyt_vec
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply matrix vector product for matrix transpose
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = self^T * a
 !------------------------------------------------------------------------------
 subroutine mat_applyt_vec(self,a,b)
-class(oft_native_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Source vector
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
 integer(i4) :: i,j,k
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
@@ -1907,19 +1883,14 @@ IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_applyt_vec
 !------------------------------------------------------------------------------
-! SUBROUTINE: mat_applyt_cvec
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!> Apply matrix vector product for matrix transpose (complex vector)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
+!! b = self^T * a
 !------------------------------------------------------------------------------
 subroutine mat_applyt_cvec(self,a,b)
-class(oft_native_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Source vector
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 LOGICAL :: dealloc_flags(2)
 integer(i4) :: i,j,k
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp,btmp
@@ -1977,7 +1948,7 @@ end subroutine mat_applyt_cvec
 !> Set values of a matrix
 !------------------------------------------------------------------------------
 subroutine mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
-class(oft_native_matrix), intent(inout) :: self
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
@@ -2017,7 +1988,7 @@ end subroutine mat_set_values
 !> Add values to a matrix
 !------------------------------------------------------------------------------
 subroutine mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_native_matrix), intent(inout) :: self
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
@@ -2143,7 +2114,7 @@ end subroutine mat_atomic_add_values
 !> Finish assembly of matrix and optionally extract diagonals
 !------------------------------------------------------------------------------
 subroutine mat_assemble(self,diag)
-class(oft_native_matrix), intent(inout) :: self
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 integer(i4) :: i,jp,jn,jr
 DEBUG_STACK_PUSH
@@ -2185,7 +2156,7 @@ end subroutine mat_assemble
 !> Zero all entries in matrix
 !------------------------------------------------------------------------------
 subroutine mat_zero(self)
-class(oft_native_matrix), intent(inout) :: self
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
 self%full_current=.FALSE.
 self%M=0.d0
@@ -2195,7 +2166,7 @@ end subroutine mat_zero
 !> Zero all entries in the specified rows
 !------------------------------------------------------------------------------
 subroutine mat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_native_matrix), intent(inout) :: self
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: nrows !< Number of rows to zero
 integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)

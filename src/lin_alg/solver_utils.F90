@@ -25,9 +25,9 @@ USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, oft_petsc_matrix_cast
 USE oft_petsc_solvers, ONLY: oft_petsc_sjacobi_solver, oft_petsc_cg_solver, oft_petsc_gmres_solver, &
-oft_petsc_diagprecond, petsc_cg_solver_cast, petsc_gmres_solver_cast, petsc_sjacobi_solver_cast, &
-petsc_diagprecond_cast, oft_petsc_asprecond, oft_petsc_direct_solver, petsc_direct_solver_cast, &
-oft_petsc_pre_solver, oft_petsc_luprecond
+  oft_petsc_diagprecond, petsc_cg_solver_cast, petsc_gmres_solver_cast, petsc_sjacobi_solver_cast, &
+  petsc_diagprecond_cast, oft_petsc_asprecond, oft_petsc_direct_solver, petsc_direct_solver_cast, &
+  oft_petsc_luprecond
 #endif
 IMPLICIT NONE
 #include "local.h"

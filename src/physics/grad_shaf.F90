@@ -5317,8 +5317,8 @@ end subroutine gs_save_prof
 !> Construct mass matrix for a boundary Lagrange scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
 !!
 !! @param[in,out] mat Matrix object
 !! @param[in] bc Boundary condition
@@ -5399,9 +5399,9 @@ end subroutine build_mrop
 !> Construct laplacian matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
-!! - \c 'none' Full matrix
-!! - \c 'zerob' Dirichlet for all boundary DOF
-!! - \c 'grnd'  Dirichlet for only groundin point
+!! - `'none'` Full matrix
+!! - `'zerob'` Dirichlet for all boundary DOF
+!! - `'grnd'`  Dirichlet for only groundin point
 !!
 !! @param[in,out] mat Matrix object
 !! @param[in] bc Boundary condition

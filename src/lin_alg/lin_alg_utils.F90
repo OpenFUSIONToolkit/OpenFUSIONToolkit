@@ -23,16 +23,7 @@ USE oft_native_la, ONLY: oft_native_vector, oft_native_cvector, &
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
   oft_petsc_matrix_cast
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>5)
-#if PETSC_VERSION_MINOR<8
-#include "petsc/finclude/petscmatdef.h"
-#define PETSC_NULL_MAT PETSC_NULL_OBJECT
-#else
 #include "petsc/finclude/petscmat.h"
-#endif
-#else
-#include "finclude/petscmatdef.h"
-#endif
 #undef IS
 #undef Mat
 use petscmat
@@ -177,11 +168,7 @@ TYPE(oft_petsc_vector), INTENT(inout) :: this
 INTEGER(i4) :: i,j,offset,offset1,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: is0
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: vtmp
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-INTEGER(petsc_addr) :: istemp
-#else
 TYPE(tis) :: istemp
-#endif
 IF(this%stitch_info%full)THEN
   CALL VecCreate(PETSC_COMM_SELF,this%v,ierr)
   CALL VecSetType(this%v,VECSEQ,ierr)
@@ -514,14 +501,14 @@ END SUBROUTINE setup_native
 #ifdef HAVE_PETSC
 SUBROUTINE setup_petsc(this)
 TYPE(oft_petsc_matrix), INTENT(inout) :: this
-INTEGER(i4) :: ii,jj,,m,n,nnz_loc,nnz_max
+INTEGER(i4) :: ii,jj,ierr,m,n,nnz_loc,nnz_max
 INTEGER(i4), ALLOCATABLE :: nnz_dist(:)
 REAL(r8), POINTER :: vals(:) => NULL()
 CLASS(oft_petsc_vector), POINTER :: rowpv,colpv
 CLASS(oft_vector), POINTER :: tmpv
-IF(oft_petsc_vector_cast(rowpv,row_vec)<0)CALL oft_abort('"row_vec" is not a PETSc object.', &
+IF(.NOT.oft_petsc_vector_cast(rowpv,row_vec))CALL oft_abort('"row_vec" is not a PETSc object.', &
   'create_matrix_real',__FILE__)
-IF(oft_petsc_vector_cast(colpv,col_vec)<0)CALL oft_abort('"col_vec" is not a PETSc object.', &
+IF(.NOT.oft_petsc_vector_cast(colpv,col_vec))CALL oft_abort('"col_vec" is not a PETSc object.', &
   'create_matrix_real',__FILE__)
 !---
 ALLOCATE(nnz_dist(this%nrslice))
@@ -559,22 +546,13 @@ IF((this%nr==this%nrg).AND.(this%nc==this%ncg))THEN
   CALL MatCreate(PETSC_COMM_SELF,this%M,ierr)
   CALL MatSetType(this%M,MATSEQAIJ,ierr)
   CALL MatSetSizes(this%M,this%nr,this%nc,PETSC_DETERMINE,PETSC_DETERMINE,ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-  CALL MatSeqAIJSetPreallocation(this%M,PETSC_NULL_INTEGER,MIN(this%ncg,nnz_dist),ierr)
-#else
-  CALL MatSeqAIJSetPreallocation(this%M,PETSC_DEFAULT_INTEGER,MIN(this%ncg,nnz_dist),ierr)
-#endif
+  CALL MatSeqAIJSetPreallocation(this%M,PETSC_DEFAULT_INTEGER,INT(MIN(this%ncg,nnz_dist),4),ierr)
 ELSE
   CALL MatCreate(oft_env%COMM,this%M,ierr)
   CALL MatSetType(this%M,MATMPIAIJ,ierr)
   CALL MatSetSizes(this%M,this%nrslice,this%ncslice,PETSC_DETERMINE,PETSC_DETERMINE,ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-  CALL MatMPIAIJSetPreallocation(this%M,PETSC_NULL_INTEGER,MIN(this%ncslice,nnz_dist), &
-    PETSC_NULL_INTEGER,MIN(this%ncg-this%ncslice,nnz_dist),ierr)
-#else
   CALL MatMPIAIJSetPreallocation(this%M,PETSC_DEFAULT_INTEGER,MIN(this%ncslice,nnz_dist), &
-    PETSC_DEFAULT_INTEGER,MIN(this%ncg-this%ncslice,nnz_dist),ierr)
-#endif
+    PETSC_DEFAULT_INTEGER,INT(MIN(this%ncg-this%ncslice,nnz_dist),4),ierr)
 END IF
 DEALLOCATE(nnz_dist)
 !---
@@ -1036,21 +1014,14 @@ END SUBROUTINE combine_native
 #ifdef HAVE_PETSC
 SUBROUTINE combine_petsc(this)
 TYPE(oft_petsc_matrix), INTENT(inout) :: this
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-INTEGER(petsc_addr) :: mtmp
-INTEGER(petsc_addr), ALLOCATABLE :: pmats(:,:)
-INTEGER(petsc_addr), ALLOCATABLE :: ris(:)
-INTEGER(petsc_addr), ALLOCATABLE :: cis(:)
-#else
-TYPE(tmat) :: mtmp
 TYPE(tmat), ALLOCATABLE :: pmats(:,:)
-TYPE(tis), ALLOCATABLE, DIMENSION(:) :: ris,cis
-#endif
-INTEGER(i4) :: ierr,m,n,offset,proc
+INTEGER(i4) :: i,j,ii,jj,ierr,m,n,offset,proc
 INTEGER(i4) :: mcomm,roffset,coffset,rgoffset,cgoffset,ncols,maxcols,rows(1),ncslice
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rstart,cstart,cols,coltmp
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: goffsets,offsets,tmpoff
 REAL(r8), POINTER :: vals(:),varray(:,:)
+INTEGER(i4), POINTER :: int_tmp(:)
+REAL(r8), POINTER :: real_tmp(:)
 mcomm=oft_env%COMM
 IF(this%nr==this%nrg)mcomm=PETSC_COMM_SELF
 CALL MatGetOwnershipRange(this%m,m,n,ierr)
@@ -1060,15 +1031,17 @@ ALLOCATE(pmats(nr,nc))
 ALLOCATE(rstart(nr),cstart(nc))
 rstart=-1
 cstart=-1
-pmats=PETSC_NULL_MAT
 !---
 DO i=1,nr
   DO j=1,nc
+    pmats(i,j)=PETSC_NULL_MAT
     IF(.NOT.ASSOCIATED(mats(i,j)%m))CYCLE
     SELECT TYPE(pmat=>mats(i,j)%m)
       TYPE IS(oft_petsc_matrix)
         IF(rstart(i)<0)rstart(i)=pmat%i_map(1)%nslice
         IF(cstart(j)<0)cstart(j)=pmat%j_map(1)%nslice
+      CLASS DEFAULT
+        CALL oft_abort("Incorrect matrix type","combine_matrices_real::combine_petsc",__FILE__)
     END SELECT
   END DO
 END DO
@@ -1076,20 +1049,22 @@ END DO
 ALLOCATE(offsets(nc,oft_env%nprocs+1),tmpoff(nc,oft_env%nprocs+1))
 tmpoff=0
 DO i=1,nr
-DO j=1,nc
-  IF(ASSOCIATED(mats(i,j)%m))THEN
-    SELECT TYPE(pmat=>mats(i,j)%m)
-      TYPE IS(oft_petsc_matrix)
-        CALL MatGetOwnershipRangeColumn(pmat%m,m,n,ierr)
-        tmpoff(j,oft_env%rank+1)=m
-    END SELECT
-  END IF
-END DO
+  DO j=1,nc
+    IF(ASSOCIATED(mats(i,j)%m))THEN
+      SELECT TYPE(pmat=>mats(i,j)%m)
+        TYPE IS(oft_petsc_matrix)
+          CALL MatGetOwnershipRangeColumn(pmat%m,m,n,ierr)
+          tmpoff(j,oft_env%rank+1)=m
+        CLASS DEFAULT
+          CALL oft_abort("Incorrect matrix type","combine_matrices_real::combine_petsc",__FILE__)
+      END SELECT
+    END IF
+  END DO
 END DO
 IF(this%nr/=this%nrg)THEN
   CALL MPI_ALLREDUCE(tmpoff,offsets,nc*(oft_env%nprocs+1),OFT_MPI_I4,MPI_SUM,oft_env%COMM,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_ALLREDUCE','combine_matrices_real',__FILE__)
-  offsets(:,oft_env%nprocs+1)=offsets(:,oft_env%nprocs)+this%ncg
+  offsets(:,oft_env%nprocs+1)=offsets(:,oft_env%nprocs)+INT(this%ncg,4)
   DEALLOCATE(tmpoff)
   ALLOCATE(goffsets(nc,oft_env%nprocs),tmpoff(nc,oft_env%nprocs))
   tmpoff=0
@@ -1104,7 +1079,7 @@ IF(this%nr/=this%nrg)THEN
 ELSE
   offsets=-1
   offsets(:,oft_env%rank+1)=tmpoff(:,oft_env%rank+1)
-  offsets(:,oft_env%rank+2)=this%ncg
+  offsets(:,oft_env%rank+2)=INT(this%ncg,4)
   ALLOCATE(goffsets(nc,oft_env%nprocs))
   goffsets(1,:)=0
   DO j=2,nc
@@ -1127,14 +1102,15 @@ DO i=1,nr
         coffset=m
         pmats(i,j)=pmat%m
         maxcols=0
+        NULLIFY(int_tmp,real_tmp)
         DO ii=1,pmat%i_map(1)%nslice
-          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,PETSC_NULL_INTEGER,PETSC_NULL_SCALAR,ierr)
+          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
           maxcols=MAX(ncols,maxcols)
-          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,PETSC_NULL_INTEGER,PETSC_NULL_SCALAR,ierr)
+          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
         END DO
-        ALLOCATE(varray(1,maxcols),cols(maxcols),coltmp(maxcols))
+        ALLOCATE(varray(maxcols,1),cols(maxcols),coltmp(maxcols))
         cols=0
-        vals=>varray(1,:)
+        vals=>varray(:,1)
         m=0
         DO ii=1,pmat%i_map(1)%nslice
           rows=ii-1
@@ -1147,8 +1123,8 @@ DO i=1,nr
             END DO
             coltmp(jj)=cols(jj)-offsets(j,proc)+goffsets(j,proc)
           END DO
-          CALL MatSetValues(this%M,1,rows+rgoffset,ncols,&
-          coltmp,TRANSPOSE(varray),ADD_VALUES,ierr)
+          CALL MatSetValues(this%M,1,rows+rgoffset,ncols, &
+            coltmp,varray,ADD_VALUES,ierr)
           CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,cols,vals,ierr)
         END DO
         DEALLOCATE(varray,cols,coltmp)
@@ -1158,6 +1134,7 @@ DO i=1,nr
   END DO
   rgoffset=rgoffset+rstart(i)
 END DO
+DEALLOCATE(rstart,cstart,goffsets,offsets)
 CALL this%assemble()
 END SUBROUTINE combine_petsc
 #endif

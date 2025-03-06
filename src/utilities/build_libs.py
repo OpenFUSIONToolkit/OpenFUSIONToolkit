@@ -1653,24 +1653,23 @@ class ONURBS(package):
 
 
 class PETSC(package):
-    def __init__(self, debug=False, with_superlu=True, with_umfpack=True, with_mumps=True, version=3.8,
+    def __init__(self, debug=False, with_superlu=True, with_umfpack=True, with_mumps=True, version=3.20,
                  comp_wrapper=False):
         self.name = "PETSC"
+        self.display_name = "PETSc"
         self.version = version
-        if self.version == '3.6':
-            self.url = "http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-3.6.4.tar.gz"
-        elif self.version == '3.7':
-            self.url = "http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-3.7.7.tar.gz"
-        elif self.version == '3.8':
-            self.url = "http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-3.8.4.tar.gz"
-        elif self.version == '3.9':
-            self.url = "http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-3.9.4.tar.gz"
-        elif self.version == '3.10':
-            self.url = "http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-3.10.5.tar.gz"
-        elif self.version == '3.11':
-            self.url = "http://ftp.mcs.anl.gov/pub/petsc/release-snapshots/petsc-3.11.4.tar.gz"
+        if self.version == '3.18':
+            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.18.6.tar.gz"
+        elif self.version == '3.19':
+            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.19.6.tar.gz"
+        elif self.version == '3.20':
+            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.20.6.tar.gz"
+        elif self.version == '3.21':
+            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.21.6.tar.gz"
+        elif self.version == '3.22':
+            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.22.4.tar.gz"
         else:
-            error_exit('Invalid PETSc version requested')
+            error_exit('Invalid PETSc version requested (3.18 <= version <= 3.22)')
         self.debug = debug
         self.with_superlu = with_superlu
         self.with_umfpack = with_umfpack
@@ -1720,17 +1719,8 @@ class PETSC(package):
             self.config_dict['PETSC_LIBS'] += " -lumfpack -lamd"
             self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libumfpack.a'))
         if self.with_superlu:
-            if self.version == '3.6':
-                self.config_dict['PETSC_LIBS'] += " -lsuperlu_4.3 -lsuperlu_dist_4.1"
-                self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu_4.3.a'))
-            elif not ver_lt(self.version,'3.7'):
-                self.config_dict['PETSC_LIBS'] += " -lsuperlu"
-                if ver_lt(self.version,'3.10'):
-                    self.config_dict['PETSC_LIBS'] += " -lsuperlu_dist"
-                self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu.a'))
-            else:
-                self.config_dict['PETSC_LIBS'] += " -lsuperlu_4.3 -lsuperlu_dist_3.3"
-                self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu_4.3.a'))
+            self.config_dict['PETSC_LIBS'] += " -lsuperlu -lsuperlu_dist"
+            self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu.a'))
         if self.with_mumps:
             self.config_dict['PETSC_LIBS'] += " -ldmumps -lmumps_common -lpord -lscalapack"
             self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libdmumps.a'))
@@ -1754,21 +1744,20 @@ class PETSC(package):
             options += ['--with-mpi-dir={MPI_ROOT}']
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
             options.append('--FFLAGS="-fallow-argument-mismatch"')
-        options += ['--download-metis', '--download-parmetis', '--with-x=no', '--with-shared-libraries=0']
-        if not ver_lt(self.version,'3.5'):
-            options += [' --with-ssl=0']
-            if not ver_lt(self.version,'3.8'):
-                options += ['--with-cmake-exec={CMAKE}']
-            else:
-                options += ['--with-cmake={CMAKE}']
+        options += [
+            '--download-metis',
+            '--download-parmetis',
+            '--with-x=no',
+            '--with-shared-libraries=0',
+            '--with-ssl=0',
+            '--with-cmake-exec={CMAKE}'
+        ]
         if self.with_superlu:
             # Fix SDK issue on MacOS "Catalina" (10.15)
             if (self.config_dict['OS_TYPE'] == 'Darwin') and (not ver_lt(self.config_dict['OS_VER'], '10.15')):
                 result, _ = run_command("{0} -print-sysroot".format(self.config_dict['CC']))
                 def_lines.append('export SDKROOT={0}'.format(result.strip()))
             options += ['--download-superlu']
-            if ver_lt(self.version,'3.10'):
-                options += ['--download-superlu_dist']
         if self.with_umfpack:
             options += ['--download-umfpack']
         if self.with_mumps:
@@ -1877,10 +1866,10 @@ group = parser.add_argument_group("PETSc", "PETSc package options")
 group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library? (default: 0)")
 group.add_argument("--petsc_debug", default=1, type=int, choices=(0,1), help="Build PETSc with debugging information (default: 1)")
 group.add_argument("--petsc_superlu", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU (default: 1)")
-group.add_argument("--petsc_mumps", default=1, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 1)")
+group.add_argument("--petsc_mumps", default=0, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 0)")
 group.add_argument("--petsc_umfpack", default=0, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 0)")
-group.add_argument("--petsc_version", default="3.8", type=str,
-    help="Use different version of PETSc [3.6,3.7,3.8,3.9,3.10] (default: 3.8)")
+group.add_argument("--petsc_version", default="3.20", type=str,
+    help="Use different version of PETSc [3.18,3.19,3.20,3.21,3.22] (default: 3.20)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
 #
 options = parser.parse_args()
@@ -1945,10 +1934,11 @@ else:
             packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch,options.oblas_no_avx))
 # MPI
 if use_mpi:
+    mpi_force_headers = options.mpi_use_headers or ((options.build_petsc == 1) or options.petsc_wrapper)
     if options.build_openmpi:
-        packages.append(OpenMPI(options.mpi_use_headers))
+        packages.append(OpenMPI(mpi_force_headers))
     elif options.build_mpich:
-        packages.append(MPICH(options.mpi_use_headers,options.mpich_version))
+        packages.append(MPICH(mpi_force_headers,options.mpich_version))
     else:
         parser.exit(-1, 'Invalid MPI package')
 else:

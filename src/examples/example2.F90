@@ -67,9 +67,9 @@ TYPE(oft_ml_fe_vecspace) :: ml_vecspace
 !!\subsection doc_ex2_code_fem Setup Lagrange FE
 !!
 !!When MG is used it is also desirable to construct field caches for each FE representation to be used. This is done with
-!!the \c *_vcache subroutines in each of the corresponding FE \c *_fields modules. These subroutines create a field cache which
+!!the `*_vcache` subroutines in each of the corresponding FE `*_fields` modules. These subroutines create a field cache which
 !!prevents the recreation of internal field lists, which are otherwise recreated each time a new vector is created using
-!!\c *_create routines. See \ref mat_vec_vconst for more information.
+!!`*_create` routines. See \ref mat_vec_vconst for more information.
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
@@ -136,9 +136,9 @@ END PROGRAM example2
 !!\section doc_ex2_input Input file
 !!
 !!Below is an input file which can be used with this example in a serial environment. The
-!!\c lag_op_options group has been added over the groups in \ref ex1 to set parameters used
-!!by the multigrid preconditioner. In this case we are setting the smoother coefficient \c df
-!!and number of iterations \c nu used by the Jacobi smoother on each level.
+!!`lag_op_options` group has been added over the groups in \ref ex1 to set parameters used
+!!by the multigrid preconditioner. In this case we are setting the smoother coefficient `df`
+!!and number of iterations `nu` used by the Jacobi smoother on each level.
 !!
 !!\verbatim
 !!&runtime_options

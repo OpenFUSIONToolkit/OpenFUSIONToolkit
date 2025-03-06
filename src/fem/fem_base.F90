@@ -278,7 +278,7 @@ end subroutine afem_delete
 !!
 !! @note The graph is constructed in the @ref fem_base::oft_fem_type::nee "nee",
 !! @ref fem_base::oft_fem_type::kee "kee", and @ref fem_base::oft_fem_type::lee "lee"
-!! fields of \c self
+!! fields of `self`
 !---------------------------------------------------------------------------
 subroutine afem_self_linkage(self)
 class(oft_afem_type), intent(inout) :: self !< Finite element representation
@@ -365,7 +365,7 @@ end subroutine afem_self_linkage
 !! Creates a CSR graph representing the interaction between elements of two different
 !! finite element representations. This listed is constructed as in
 !! @ref fem_base::fem_self_linkage "fem_self_linkage", however in this case
-!! \c self is used as the test functions and \c other is used as the basis set
+!! `self` is used as the test functions and `other` is used as the basis set
 !! in the Galerkin intergral. These correspond to the row and columns of the CSR
 !! graph respectively
 !---------------------------------------------------------------------------
