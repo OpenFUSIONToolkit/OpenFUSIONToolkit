@@ -39,7 +39,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
   taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, taylor_htor, &
-  taylor_tag_size, ML_oft_hcurl, ML_oft_h0, &
+  taylor_tag_size, ML_oft_hcurl, ML_oft_h1, &
   ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 !---Tracing
 USE tracing, ONLY: oft_tracer, create_tracer, tracing_poincare
@@ -85,15 +85,15 @@ CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
 CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0)
-CALL h1_setup_interp(ML_oft_h0)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1)
+CALL h1_setup_interp(ML_oft_h1)
 CALL h1_mloptions
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
 CALL hcurl_setup_interp(ML_oft_hcurl)
 CALL hcurl_mloptions(ML_oft_hcurl)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad)
 !!\subsection doc_ex4_code_taylor Compute Taylor state
 !!
 !!For composite Taylor states the lowest eigenmode is used used in addition to the injector fields. This
@@ -162,7 +162,7 @@ CALL create_diag_pre(lminv%pre) ! Setup Preconditioner
 CALL ML_oft_vlagrange%vec_create(u)
 CALL ML_oft_vlagrange%vec_create(v)
 !---Setup field interpolation
-CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
+CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h1%current_level)
 !---Project field
 CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
 CALL u%set(0.d0)

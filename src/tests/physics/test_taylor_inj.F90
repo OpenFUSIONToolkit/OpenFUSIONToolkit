@@ -28,7 +28,7 @@ USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_mloptions, h1_setup_interp
 USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
   taylor_minlev, taylor_jtol, taylor_tag_size, taylor_hvac, taylor_hcur, &
-  taylor_gffa, oft_taylor_rinterp, ML_oft_hcurl, ML_oft_h0, &
+  taylor_gffa, oft_taylor_rinterp, ML_oft_hcurl, ML_oft_h1, &
   ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 implicit none
 INTEGER(i4) :: ierr,io_unit
@@ -60,14 +60,14 @@ END IF
 !---
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=taylor_minlev)
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=taylor_minlev)
-CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,minlev=taylor_minlev)
-CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,taylor_minlev)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=taylor_minlev)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,taylor_minlev)
 IF(mg_test)THEN
   CALL lag_setup_interp(ML_oft_lagrange)
   CALL lag_mloptions
   CALL hcurl_setup_interp(ML_oft_hcurl)
   CALL hcurl_mloptions(ML_oft_hcurl)
-  CALL h1_setup_interp(ML_oft_h0)
+  CALL h1_setup_interp(ML_oft_h1)
   CALL h1_mloptions
 END IF
 !---Define jumps
@@ -117,7 +117,7 @@ CALL ML_oft_vlagrange%current_level%vec_create(v)
 !---Plot solution
 Bfield%uvac=>taylor_hvac(1,ML_hcurl_grad%level)%f
 Bfield%ua=>taylor_gffa(1,ML_hcurl_grad%level)%f
-CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
+CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h1%current_level)
 !---Project field
 CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
 CALL u%set(0.d0)

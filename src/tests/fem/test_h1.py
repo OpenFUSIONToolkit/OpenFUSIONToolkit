@@ -47,7 +47,7 @@ def h1_setup(nbase, nlevels, order, grid_type, mg='F', df='', nu='', petsc_flag=
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg, df, nu, petsc_flag))
-    return run_OFT("./test_h0", nproc, 120)
+    return run_OFT("./test_h1", nproc, 120)
 
 def validate_result(iteration_count,converged_error):
     fid = open('h1.results','r')

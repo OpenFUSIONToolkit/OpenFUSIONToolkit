@@ -71,7 +71,7 @@ CLASS(oft_tracer), POINTER :: tracer
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_oft_bh1,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 REAL(r8), PARAMETER :: vel_scale = 1.d3
@@ -144,18 +144,18 @@ SELECT CASE(type)
     CALL Bfield_lag%setup(ML_oft_lagrange%current_level)
   CASE(2) ! H(Curl) + Grad(H^1) field
     CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
-    CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,-1)
-    CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,-1)
+    CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,ML_oft_bh1,-1)
+    CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(x1)
-    CALL ML_oft_h0%vec_create(x2)
+    CALL ML_oft_h1%vec_create(x2)
     CALL ML_hcurl_grad%vec_create(u)
     !---Load Curl component
     CALL ML_oft_hcurl%current_level%vec_load(x1,rst_file,fields(1))
     CALL x1%get_local(valtmp)
     CALL u%restore_local(valtmp,1)
     !---Load Grad component
-    CALL ML_oft_h0%current_level%vec_load(x2,rst_file,fields(2))
+    CALL ML_oft_h1%current_level%vec_load(x2,rst_file,fields(2))
     CALL x2%get_local(valtmp)
     CALL u%restore_local(valtmp,2)
     !---Setup interplolation

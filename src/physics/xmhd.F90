@@ -387,7 +387,7 @@ CLASS(multigrid_mesh), POINTER :: mg_mesh
 CLASS(oft_mesh), POINTER :: mesh
 !
 TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange
-TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_h0,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_h1,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_hcurl
 TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_hcurl_grad,ML_oft_vlagrange
 !
@@ -573,7 +573,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,tmpint(2)
 character(LEN=XMHD_RST_LEN) :: rst_char
 LOGICAL :: force_refactor,exists,rst
-TYPE(oft_h1_zeroi), TARGET :: h0_zeroi
+TYPE(oft_h1_zeroi), TARGET :: h1_zeroi
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -748,8 +748,8 @@ IF(.NOT.xmhd_bnorm_force)THEN
   IF(.NOT.xmhd_monitor_div)CALL oft_xmhd_pop(u,sub_fields)
   CALL ML_h1grad%vec_create(divout%bnorm)
   CALL hcurl_grad_div(ML_hcurl_grad%current_level,sub_fields%B,divout%bnorm)
-  h0_zeroi%ML_H1_rep=>ML_h1grad
-  CALL h0_zeroi%apply(divout%bnorm)
+  h1_zeroi%ML_H1_rep=>ML_h1grad
+  CALL h1_zeroi%apply(divout%bnorm)
 END IF
 !---------------------------------------------------------------------------
 ! Print run information

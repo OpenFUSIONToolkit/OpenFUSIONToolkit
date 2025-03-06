@@ -85,7 +85,7 @@ type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_hcur => NULL() !< Inhomo
 type(oft_vector_ptr), pointer, dimension(:,:) :: taylor_gffa => NULL() !< Inhomogeneous force-free fields
 !---
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad,ML_oft_vlagrange
 !---General
@@ -404,14 +404,14 @@ IF(.NOT.rst)THEN
 !---------------------------------------------------------------------------
 ! Setup H0::LOP preconditioner
 !---------------------------------------------------------------------------
-  if(taylor_minlev==ML_oft_h0%nlevels-1)then ! Lowest level uses diag precond
-    CALL oft_h1_getlop(ML_oft_h0%current_level,lop,'grnd')
+  if(taylor_minlev==ML_oft_h1%nlevels-1)then ! Lowest level uses diag precond
+    CALL oft_h1_getlop(ML_oft_h1%current_level,lop,'grnd')
     CALL create_cg_solver(linv)
     CALL create_diag_pre(linv%pre)
   else ! Nested levels use MG
     CALL create_cg_solver(linv, force_native=.TRUE.)
-    CALL h1_getlop_pre(ML_oft_h0,linv%pre,ml_lop,'grnd',nlevels=ML_oft_h0%nlevels-taylor_minlev+1)
-      lop=>ml_lop(ML_oft_h0%nlevels-taylor_minlev+1)%M
+    CALL h1_getlop_pre(ML_oft_h1,linv%pre,ml_lop,'grnd',nlevels=ML_oft_h1%nlevels-taylor_minlev+1)
+      lop=>ml_lop(ML_oft_h1%nlevels-taylor_minlev+1)%M
   end if
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
@@ -961,7 +961,7 @@ SELECT TYPE(this=>hcurl_grad_rep%fields(2)%fe)
   CLASS DEFAULT
     CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup1",__FILE__)
 END SELECT
-! self%hgrad_rep=>oft_h0
+! self%hgrad_rep=>oft_h1
 ! self%hcurl_rep=>oft_hcurl
 DEBUG_STACK_POP
 end subroutine taylor_rinterp_setup1
@@ -994,7 +994,7 @@ SELECT TYPE(hgrad_rep)
   CLASS DEFAULT
     CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup2",__FILE__)
 END SELECT
-! self%hgrad_rep=>oft_h0
+! self%hgrad_rep=>oft_h1
 ! self%hcurl_rep=>oft_hcurl
 DEBUG_STACK_POP
 end subroutine taylor_rinterp_setup2

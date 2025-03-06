@@ -737,8 +737,8 @@ end subroutine hcurl_grad_grad
 !---------------------------------------------------------------------------
 !> Apply the transposed gradient operator to a H(Curl) + Grad(H^1) vector field
 !---------------------------------------------------------------------------
-subroutine hcurl_grad_gradtp(h0_fe,a,b)
-class(oft_afem_type), intent(inout) :: h0_fe
+subroutine hcurl_grad_gradtp(h1_fe,a,b)
+class(oft_afem_type), intent(inout) :: h1_fe
 class(oft_vector), intent(inout) :: a !< Input field
 class(oft_vector), intent(inout) :: b !< \f$ G^{T} a \f$
 real(r8), pointer, dimension(:) :: agrad,acurl
@@ -749,7 +749,7 @@ real(r8) :: reg
 CLASS(oft_h1_fem), POINTER :: grad_rep
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
-IF(.NOT.oft_3D_h1_cast(grad_rep,h0_fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_gradtp",__FILE__)
+IF(.NOT.oft_3D_h1_cast(grad_rep,h1_fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_gradtp",__FILE__)
 mesh=>grad_rep%mesh
 NULLIFY(acurl,agrad,bloc)
 !---Cast local values
@@ -1393,9 +1393,9 @@ end subroutine zerograd_delete
 !---------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
 !---------------------------------------------------------------------------
-SUBROUTINE hcurl_grad_setup_interp(ML_hcurl_aug_rep,ML_h0_rep,create_full)
+SUBROUTINE hcurl_grad_setup_interp(ML_hcurl_aug_rep,ML_h1_rep,create_full)
 CLASS(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_aug_rep
-CLASS(oft_ml_fem_type), intent(inout) :: ML_h0_rep
+CLASS(oft_ml_fem_type), intent(inout) :: ML_h1_rep
 LOGICAL, OPTIONAL, INTENT(in) :: create_full
 TYPE(oft_graph_ptr) :: graphs(2,2)
 TYPE(oft_matrix_ptr) :: mats(2,2)
@@ -1418,9 +1418,9 @@ DO i=ML_hcurl_aug_rep%minlev+1,ML_hcurl_aug_rep%nlevels
     CALL hgrad_ginterpmatrix(ML_grad%interp_matrices(ML_grad%level)%m)
     CALL ML_grad%interp_matrices(ML_grad%level)%m%assemble
   ELSE
-    CALL ML_h0_rep%set_level(ML_hcurl_aug_rep%level+1)
-    ML_grad%interp_graphs(ML_grad%level)%g=>ML_h0_rep%interp_graphs(ML_hcurl_aug_rep%level+1)%g
-    ML_grad%interp_matrices(ML_grad%level)%m=>ML_h0_rep%interp_matrices(ML_hcurl_aug_rep%level+1)%m
+    CALL ML_h1_rep%set_level(ML_hcurl_aug_rep%level+1)
+    ML_grad%interp_graphs(ML_grad%level)%g=>ML_h1_rep%interp_graphs(ML_hcurl_aug_rep%level+1)%g
+    ML_grad%interp_matrices(ML_grad%level)%m=>ML_h1_rep%interp_matrices(ML_hcurl_aug_rep%level+1)%m
   END IF
 END DO
 !---Create full H(Curl) + Grad(H^1) interpolation operator

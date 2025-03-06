@@ -38,7 +38,7 @@ USE oft_vector_inits, ONLY: uniform_field
 USE diagnostic, ONLY: vec_energy
 USE mhd_utils, ONLY: mu0, proton_mass
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, xmhd_lin_run, &
-  xmhd_sub_fields, ML_oft_hcurl, ML_oft_h0, &
+  xmhd_sub_fields, ML_oft_hcurl, ML_oft_h1, &
   ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 USE test_phys_helpers, ONLY: alfven_eig
 IMPLICIT NONE
@@ -89,14 +89,14 @@ CALL multigrid_construct(mg_mesh)
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=minlev)
 CALL lag_setup_interp(ML_oft_lagrange)
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,minlev=minlev)
-CALL h1_setup_interp(ML_oft_h0)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=minlev)
+CALL h1_setup_interp(ML_oft_h1)
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=minlev)
 CALL hcurl_setup_interp(ML_oft_hcurl)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,minlev)
-CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h0)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,minlev)
+CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1)
 hcurl_grad_gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
 !---------------------------------------------------------------------------
 ! Create Full H(Curl) space mass matrix solver

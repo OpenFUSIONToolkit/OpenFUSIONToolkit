@@ -1,7 +1,7 @@
 !---------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
-!> @file oft_h0_basis.F90
+!> @file oft_h1_basis.F90
 !
 !> @defgroup doxy_oft_h1 H^1 FE for conforming FE sequence
 !! Scalar H^1 finite element implementation for the Open FUSION Toolkit

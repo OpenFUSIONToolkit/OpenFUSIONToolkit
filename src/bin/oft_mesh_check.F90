@@ -43,7 +43,7 @@ TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_oft_bh1,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 INTEGER(i4) :: order=1
@@ -73,11 +73,11 @@ IF(order>0)THEN
   !---Lagrange
   CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,minlev)
   !---H^1 (Grad(H^1) subspace)
-  CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,ML_oft_bh0,minlev)
+  CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,ML_oft_bh1,minlev)
   !---H(Curl) subspace
   CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,minlev)
   !---H(Curl) + Grad(H^1) space
-  CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,minlev)
+  CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,minlev)
 !---------------------------------------------------------------------------
 ! Compute smoother coefficients
 !---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ IF(order>0)THEN
   END IF
   oft_env%pm=.FALSE.
   CALL lag_lop_eigs(ML_oft_lagrange,minlev)
-  CALL h1_lop_eigs(ML_oft_h0,minlev)
+  CALL h1_lop_eigs(ML_oft_h1,minlev)
   CALL hcurl_wop_eigs(ML_oft_hcurl,minlev)
   CALL hcurl_grad_mop_eigs(ML_hcurl_grad,minlev)
 END IF

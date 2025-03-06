@@ -46,7 +46,7 @@ USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
 !---Physics
 USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
 USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields, &
-  ML_oft_hcurl, ML_oft_h0, ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
+  ML_oft_hcurl, ML_oft_h1, ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex1_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
@@ -89,11 +89,11 @@ CALL multigrid_construct(mg_mesh)
 !--- Lagrange
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0,minlev=-1)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=-1)
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,-1)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,-1)
 h0_zerogrnd%ML_H1_rep=>ML_h1grad
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
@@ -141,7 +141,7 @@ CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
 NULLIFY(lop)
-CALL oft_h1_getlop(ML_oft_h0%current_level,lop,"grnd")
+CALL oft_h1_getlop(ML_oft_h1%current_level,lop,"grnd")
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2

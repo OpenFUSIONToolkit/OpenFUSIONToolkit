@@ -5,8 +5,8 @@ set( FEM_OBJS
   lagrange_basis.F90
   lagrange_operators.F90
   blag_operators.F90
-  h0_basis.F90
-  h0_operators.F90
+  h1_basis.F90
+  h1_operators.F90
   hcurl_basis.F90
   hcurl_operators.F90
   hcurl_grad_operators.F90

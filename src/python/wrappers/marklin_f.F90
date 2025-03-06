@@ -42,7 +42,7 @@ USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, oft_hcurl_grad_zeroi,
   hcurl_grad_setup_interp, oft_hcurl_grad_rinterp
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
-  taylor_rst, taylor_hlam, ML_oft_hcurl, ML_oft_h0, &
+  taylor_rst, taylor_hlam, ML_oft_hcurl, ML_oft_h1, &
   ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 USE mhd_utils, ONLY: mu0
 !---Wrappers
@@ -58,7 +58,7 @@ TYPE :: marklin_obj
   TYPE(xdmf_plot_file) :: xdmf_plot
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL()
   ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_lagrange => NULL()
-  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_h0 => NULL()
+  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_h1 => NULL()
   ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_hgrad => NULL()
   ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_hcurl => NULL()
   ! TYPE(oft_ml_fem_comp_type), POINTER :: ML_oft_h1 => NULL()
@@ -253,8 +253,8 @@ CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_hcurl_grad_divout) :: divout
 CLASS(oft_matrix), POINTER :: lop => NULL()
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
-TYPE(oft_h1_zerogrnd), TARGET :: h0_zerogrnd
-TYPE(oft_h1_zerob), TARGET :: h0_zerob
+TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
+TYPE(oft_h1_zerob), TARGET :: h1_zerob
 CALL copy_string('',error_str)
 IF(.NOT.c_associated(marklin_ptr))THEN
   CALL copy_string('Marklin object not associated',error_str)
@@ -263,20 +263,20 @@ END IF
 CALL c_f_pointer(marklin_ptr,self)
 IF(ML_hcurl_grad%nlevels==0)THEN
   !---Grad(H^1) subspace
-  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h0,minlev=ML_oft_hcurl%minlev+1)
-  CALL h1_setup_interp(ML_oft_h0)
+  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h1,minlev=ML_oft_hcurl%minlev+1)
+  CALL h1_setup_interp(ML_oft_h1)
   !---Full H(Curl) + Grad(H^1) space
-  CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad,ML_oft_hcurl%minlev)
-  CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h0)
+  CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,ML_oft_hcurl%minlev)
+  CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1)
 END IF
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
 NULLIFY(lop,tmp)
 IF(zero_norm)THEN
-  CALL oft_h1_getlop(ML_oft_h0%current_level,lop,"grnd")
+  CALL oft_h1_getlop(ML_oft_h1%current_level,lop,"grnd")
 ELSE
-  CALL oft_h1_getlop(ML_oft_h0%current_level,lop,"zerob")
+  CALL oft_h1_getlop(ML_oft_h1%current_level,lop,"zerob")
 END IF
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -284,12 +284,12 @@ linv%its=-2
 CALL create_diag_pre(linv%pre) ! Setup Preconditioner
 divout%solver=>linv
 IF(zero_norm)THEN
-  h0_zerogrnd%ML_H1_rep=>ML_h1grad
-  divout%bc=>h0_zerogrnd
+  h1_zerogrnd%ML_H1_rep=>ML_h1grad
+  divout%bc=>h1_zerogrnd
   divout%keep_boundary=.TRUE.
 ELSE
-  h0_zerob%ML_H1_rep=>ML_h1grad
-  divout%bc=>h0_zerob
+  h1_zerob%ML_H1_rep=>ML_h1grad
+  divout%bc=>h1_zerob
 END IF
 !---------------------------------------------------------------------------
 ! Setup initial conditions
@@ -301,7 +301,7 @@ CALL interp_obj%u%restore_local(tmp,1)
 IF(zero_norm)WRITE(*,*)'Setting gauge'
 divout%pm=.TRUE.
 CALL divout%apply(interp_obj%u)
-CALL interp_obj%setup(ML_oft_hcurl%current_level,ML_oft_h0%current_level)
+CALL interp_obj%setup(ML_oft_hcurl%current_level,ML_oft_h1%current_level)
 int_obj=C_LOC(interp_obj)
 !---Cleanup
 CALL divout%delete()

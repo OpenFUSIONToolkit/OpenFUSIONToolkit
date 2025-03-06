@@ -38,7 +38,7 @@ USE oft_hcurl_grad_operators, ONLY: hcurl_grad_getmop, hcurl_grad_setup_interp, 
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h0,ML_oft_bh0,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_oft_bh1,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 TYPE(oft_hcurl_grad_gzerop), TARGET :: hcurl_grad_gzerop
@@ -57,16 +57,16 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 ! Build FE structures
 !---------------------------------------------------------------------------
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h0)
-IF(mg_test)CALL h1_setup_interp(ML_oft_h0)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1)
+IF(mg_test)CALL h1_setup_interp(ML_oft_h1)
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
 IF(mg_test)CALL hcurl_setup_interp(ML_oft_hcurl)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h0,ML_hcurl_grad,ML_h1grad)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad)
 hcurl_grad_gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
 IF(mg_test)THEN
-  CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h0,create_full=.TRUE.)
+  CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1,create_full=.TRUE.)
   CALL hcurl_grad_mloptions
 END IF
 !---Run tests

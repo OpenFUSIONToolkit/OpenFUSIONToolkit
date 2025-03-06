@@ -10,8 +10,8 @@ if( OFT_BUILD_TESTS )
   configure_file( test_lag_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # Nedelec tests
-  oft_add_test( test_h0.F90 )
-  configure_file( test_h0.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  oft_add_test( test_h1.F90 )
+  configure_file( test_h1.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   oft_add_test( test_hcurl.F90 )
   configure_file( test_hcurl.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   oft_add_test( test_hcurl_sop.F90 )
