@@ -1517,15 +1517,8 @@ end subroutine lag_div
 SUBROUTINE lag_setup_interp(ML_lag_rep,ML_vlag_rep)
 CLASS(oft_ml_fem_type), intent(inout) :: ML_lag_rep
 CLASS(oft_ml_fem_comp_type), optional, intent(inout) :: ML_vlag_rep
-!---
-class(oft_vector), pointer :: fvec,cvec
-type(oft_graph_ptr) :: graphs(3,3)
-type(oft_matrix_ptr) :: mats(3,3)
 INTEGER(i4) :: i
-! LOGICAL :: vec_interp
 DEBUG_STACK_PUSH
-! vec_interp=.FALSE.
-! IF(PRESENT(create_vec))vec_interp=create_vec
 !---
 DO i=ML_lag_rep%minlev+1,ML_lag_rep%nlevels
   CALL ML_lag_rep%set_level(i)
@@ -1536,25 +1529,14 @@ DO i=ML_lag_rep%minlev+1,ML_lag_rep%nlevels
   !---Setup interpolation
   if(ML_lag_rep%current_level%order==1)then
     CALL lag_ginterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m)
-    ! oft_lagrange_ops%interp=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m
-    CALL ML_lag_rep%interp_matrices(ML_lag_rep%level)%m%assemble
   else
     CALL lag_pinterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m)
-    ! oft_lagrange_ops%interp=>ML_lag_rep%interp_matrices(ML_lag_rep%level)%m
-    CALL ML_lag_rep%interp_matrices(ML_lag_rep%level)%m%assemble
   end if
+  CALL ML_lag_rep%interp_matrices(ML_lag_rep%level)%m%assemble
 END DO
 !---Create vector interpolation operator
 IF(PRESENT(ML_vlag_rep))THEN
   CALL ML_vlag_rep%build_interp
-  ! DO i=ML_oft_lagrange%minlev+1,ML_oft_lagrange%nlevels
-  !   CALL oft_lag_set_level(i)
-  !   !---
-  !   if(ML_oft_lagrange%level==ML_oft_lagrange%blevel+1)then
-  !     CYCLE
-  !   end if
-  !   ! oft_lagrange_ops%vinterp=>ML_oft_vlagrange%interp_matrices(i)%m
-  ! END DO
 END IF
 DEBUG_STACK_POP
 CONTAINS
@@ -1569,16 +1551,14 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 REAL(r8) :: f(4),val,mop(1)
 REAL(r8), POINTER, DIMENSION(:,:) :: ed_nodes,fc_nodes,c_nodes
 CLASS(oft_afem_type), POINTER :: lag_cors => NULL()
+CLASS(oft_scalar_fem), POINTER :: lag_fine => NULL()
 class(oft_mesh), pointer :: cmesh
-CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
+CLASS(oft_vector), POINTER :: lag_vec_fine,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
-CLASS(oft_scalar_fem), POINTER :: lag_fine
 DEBUG_STACK_PUSH
 !---
-if(ML_lag_rep%ml_mesh%level<1)then
-  call oft_abort('Invalid mesh level','lag_ginterpmatrix',__FILE__)
-end if
+if(ML_lag_rep%ml_mesh%level<1)call oft_abort('Invalid mesh level','lag_ginterpmatrix',__FILE__)
 cmesh=>ML_lag_rep%ml_mesh%meshes(ML_lag_rep%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
   "lag_ginterpmatrix", __FILE__)
@@ -1586,7 +1566,6 @@ IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("
 if(lag_fine%order/=1)then
   call oft_abort('Attempted geometric interpolation for pd > 1','lag_ginterpmatrix',__FILE__)
 end if
-! ops=>oft_lagrange_ops
 lag_cors=>ML_lag_rep%levels(ML_lag_rep%level-1)%fe
 ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
 interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
@@ -1628,16 +1607,17 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL ML_lag_rep%vec_create(lag_vec)
+NULLIFY(lag_vec_fine,lag_vec_cors)
+CALL ML_lag_rep%vec_create(lag_vec_fine)
 CALL ML_lag_rep%vec_create(lag_vec_cors,ML_lag_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
 !---
-CALL create_matrix(mat,graphs,lag_vec,lag_vec_cors)
-CALL lag_vec%delete
+CALL create_matrix(mat,graphs,lag_vec_fine,lag_vec_cors)
+CALL lag_vec_fine%delete
 CALL lag_vec_cors%delete
-DeALLOCATE(graphs,lag_vec,lag_vec_cors)
+DeALLOCATE(graphs,lag_vec_fine,lag_vec_cors)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
@@ -1688,16 +1668,16 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap,jcors,ftmp,fetmp,ctmp
 REAL(r8) :: f(4),val,mop(1)
 REAL(r8), POINTER, DIMENSION(:,:) :: ed_nodes,fc_nodes,c_nodes
 CLASS(oft_scalar_fem), POINTER :: lag_cors => NULL()
-CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
+CLASS(oft_scalar_fem), POINTER :: lag_fine => NULL()
+CLASS(oft_vector), POINTER :: lag_vec_fine,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
 class(oft_mesh), pointer :: mesh
-CLASS(oft_scalar_fem), POINTER :: lag_fine
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("Incorrect fine FE type","lag_pinterpmatrix",__FILE__)
 mesh=>lag_fine%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
-!---\
+!---
 IF(.NOT.oft_3D_lagrange_cast(lag_cors,ML_lag_rep%levels(ML_lag_rep%level-1)%fe))CALL oft_abort("Incorrect coarse FE type","lag_pinterpmatrix",__FILE__)
 CALL oft_lag_nodes(lag_fine%order,ed_nodes,fc_nodes,c_nodes)
 ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
@@ -1848,16 +1828,17 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL ML_lag_rep%vec_create(lag_vec)
+NULLIFY(lag_vec_fine,lag_vec_cors)
+CALL ML_lag_rep%vec_create(lag_vec_fine)
 CALL ML_lag_rep%vec_create(lag_vec_cors,ML_lag_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
 !---
-CALL create_matrix(mat,graphs,lag_vec,lag_vec_cors)
-CALL lag_vec%delete
+CALL create_matrix(mat,graphs,lag_vec_fine,lag_vec_cors)
+CALL lag_vec_fine%delete
 CALL lag_vec_cors%delete
-DeALLOCATE(graphs,lag_vec,lag_vec_cors)
+DeALLOCATE(graphs,lag_vec_fine,lag_vec_cors)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
@@ -2183,7 +2164,7 @@ NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"lagrange",lag_node,ierr)
-  IF(ierr==0)CALL xml_get_element(lag_node,"jmlb",pre_node,ierr)
+  IF(ierr==0)CALL xml_get_element(lag_node,"lop",pre_node,ierr)
 END IF
 #endif
 !---------------------------------------------------------------------------

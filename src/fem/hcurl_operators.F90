@@ -1139,7 +1139,7 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 CLASS(oft_hcurl_fem), POINTER :: hcurl_cors => NULL()
 CLASS(oft_hcurl_fem), POINTER :: hcurl_fine => NULL()
 class(oft_mesh), pointer :: cmesh
-CLASS(oft_vector), POINTER :: hcurl_vec,hcurl_vec_cors
+CLASS(oft_vector), POINTER :: hcurl_vec_fine,hcurl_vec_cors
 integer(i4) :: jfe(3),jce(6)
 integer(i4), pointer :: lcdg(:),lfde(:,:),lede(:,:),lcde(:,:)
 real(r8) :: f(4),incr,val,d(3),goptmp(3,4),v,mop(1),h_rop(3,6)
@@ -1237,16 +1237,17 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL ML_hcurl_rep%vec_create(hcurl_vec)
+NULLIFY(hcurl_vec_fine,hcurl_vec_cors)
+CALL ML_hcurl_rep%vec_create(hcurl_vec_fine)
 CALL ML_hcurl_rep%vec_create(hcurl_vec_cors,ML_hcurl_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
 !---
-CALL create_matrix(mat,graphs,hcurl_vec,hcurl_vec_cors)
-CALL hcurl_vec%delete
+CALL create_matrix(mat,graphs,hcurl_vec_fine,hcurl_vec_cors)
+CALL hcurl_vec_fine%delete
 CALL hcurl_vec_cors%delete
-DEALLOCATE(graphs,hcurl_vec,hcurl_vec_cors)
+DEALLOCATE(graphs,hcurl_vec_fine,hcurl_vec_cors)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
@@ -1344,7 +1345,7 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 REAL(r8) :: f(4),val,mop(1)
 TYPE(oft_fem_type), POINTER :: hcurl_cors => NULL()
 CLASS(oft_hcurl_fem), POINTER :: hcurl_fine => NULL()
-CLASS(oft_vector), POINTER :: hcurl_vec,hcurl_vec_cors
+CLASS(oft_vector), POINTER :: hcurl_vec_fine,hcurl_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
 CLASS(oft_mesh), POINTER :: mesh
@@ -1429,16 +1430,17 @@ end do
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
-CALL ML_hcurl_rep%vec_create(hcurl_vec)
+NULLIFY(hcurl_vec_fine,hcurl_vec_cors)
+CALL ML_hcurl_rep%vec_create(hcurl_vec_fine)
 CALL ML_hcurl_rep%vec_create(hcurl_vec_cors,ML_hcurl_rep%level-1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
 !---
-CALL create_matrix(mat,graphs,hcurl_vec,hcurl_vec_cors)
-CALL hcurl_vec%delete
+CALL create_matrix(mat,graphs,hcurl_vec_fine,hcurl_vec_cors)
+CALL hcurl_vec_fine%delete
 CALL hcurl_vec_cors%delete
-DEALLOCATE(graphs,hcurl_vec,hcurl_vec_cors)
+DEALLOCATE(graphs,hcurl_vec_fine,hcurl_vec_cors)
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------

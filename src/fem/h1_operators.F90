@@ -642,6 +642,7 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
+NULLIFY(h1_vec_fine,h1_vec_cors)
 CALL ML_h1_rep%vec_create(h1_vec_fine)
 CALL ML_h1_rep%vec_create(h1_vec_cors,ML_h1_rep%level-1)
 !---
@@ -787,6 +788,7 @@ end do
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
+NULLIFY(h1_vec_fine,h1_vec_cors)
 CALL ML_h1_rep%vec_create(h1_vec_fine)
 CALL ML_h1_rep%vec_create(h1_vec_cors,ML_h1_rep%level-1)
 !---

@@ -1397,9 +1397,6 @@ SUBROUTINE hcurl_grad_setup_interp(ML_hcurl_aug_rep,ML_h1_rep,create_full)
 CLASS(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_aug_rep
 CLASS(oft_ml_fem_type), intent(inout) :: ML_h1_rep
 LOGICAL, OPTIONAL, INTENT(in) :: create_full
-TYPE(oft_graph_ptr) :: graphs(2,2)
-TYPE(oft_matrix_ptr) :: mats(2,2)
-CLASS(oft_vector), POINTER :: fvec,cvec
 INTEGER(i4) :: i
 LOGICAL :: full_interp
 CLASS(oft_ml_fem_type), POINTER :: ML_grad,ML_curl
@@ -1435,7 +1432,8 @@ class(oft_matrix), pointer, intent(inout) :: mat !< Interpolation matrix
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),ftmp(3),fetmp(3),ctmp(4),fc,ed
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
-CLASS(oft_afem_type), POINTER :: hgrad_cors,hgrad_fine
+CLASS(oft_afem_type), POINTER :: hgrad_cors => NULL()
+CLASS(oft_afem_type), POINTER :: hgrad_fine => NULL()
 class(oft_mesh), pointer :: cmesh,mesh
 CLASS(oft_vector), POINTER :: hgrad_vec,hgrad_vec_cors
 integer(i4) :: jcp(4),jfe(3),jce(6)
@@ -1445,9 +1443,7 @@ type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), pointer :: interp_graph
 DEBUG_STACK_PUSH
 !---
-if(ML_grad%ml_mesh%level<1)then
-  call oft_abort('Invalid mesh level','hgrad_ginterpmatrix',__FILE__)
-end if
+if(ML_grad%ml_mesh%level<1)call oft_abort('Invalid mesh level','hgrad_ginterpmatrix',__FILE__)
 mesh=>ML_grad%ml_mesh%mesh
 cmesh=>ML_grad%ml_mesh%meshes(ML_grad%ml_mesh%level-1)
 if(cmesh%type/=1)CALL oft_abort("Only supported with tet meshes", &
@@ -1542,6 +1538,7 @@ END DO
 !---------------------------------------------------------------------------
 ! Construct matrix
 !---------------------------------------------------------------------------
+NULLIFY(hgrad_vec,hgrad_vec_cors)
 CALL ML_grad%vec_create(hgrad_vec)
 CALL ML_grad%vec_create(hgrad_vec_cors,ML_hcurl_aug_rep%level-1)
 !---
