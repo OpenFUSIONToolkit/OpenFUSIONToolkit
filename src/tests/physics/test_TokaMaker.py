@@ -298,12 +298,6 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
         mp_q.put(None)
         return
 
-    import matplotlib.pyplot as plt
-    fig,ax = plt.subplots()
-    mygs.plot_machine(fig,ax,coil_colormap='seismic',coil_symmap=True)
-    mygs.plot_psi(fig,ax,psi=psi0)
-    plt.show()
-
     # Get analytic result
     green1, psi1 = masked_err(mygs.r[:,1]==1.0,mygs,psi0,0)
     green2, psi2 = masked_err(mygs.r[:,0]==1.0,mygs,psi0,1)
@@ -330,32 +324,41 @@ def validate_coil(results,psi_err_exp):
 
 
 # Test runners for vacuum coil cases
+def coil_dist(r,z):
+    return r-z
+
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h1(order):
-    errs = [0.010702389576304984, 0.00028240755964702516, 1.7930442330763583e-05]
-    results = mp_run(run_coil_case,(0.1,order,None))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h1(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.01840042334178343, 0.003450061648683903, 0.0008471927795560409]
+        results = mp_run(run_coil_case,(0.1,order,coil_dist))
+    else:
+        errs = np.r_[0.010702389576304984, 0.00028240755964702516, 1.7930442330763583e-05]
+        results = mp_run(run_coil_case,(0.1,order,None))
+    print('Err = ',results[0])
     assert validate_coil(results,errs[order-2])
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h2(order):
-    errs = [0.0032680822197860876, 2.7032824967342426e-05, 8.560758830069598e-07]
-    results = mp_run(run_coil_case,(0.1/2.0,order,None))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h2(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.0036698088466649878, 0.00021755100020083888, 1.736479174843997e-05]
+        results = mp_run(run_coil_case,(0.1/2.0,order,coil_dist))
+    else:
+        errs = np.r_[0.0032680822197860876, 2.7032824967342426e-05, 8.560758830069598e-07]
+        results = mp_run(run_coil_case,(0.1/2.0,order,None))
     assert validate_coil(results,errs[order-2])
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h3(order):
-    errs = [0.0008094155097004184, 1.8949323808351823e-06, 4.4169705023586007e-07]
-    results = mp_run(run_coil_case,(0.1/4.0,order,None))
-    assert validate_coil(results,errs[order-2])
-
-def coil_dist(r,z):
-    return r-z
-    #return np.ones_like(r)
-@pytest.mark.coverage
-@pytest.mark.parametrize("order",(2,))
-def test_dist_coil(order):
-    errs = [0.0107]
-    results = mp_run(run_coil_case,(0.1,order,coil_dist))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h3(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.001364423661608862, 1.5953386454257285e-05, 9.158565258919996e-07]
+        results = mp_run(run_coil_case,(0.1/4.0,order,coil_dist))
+    else:
+        errs = np.r_[0.0008094155097004184, 1.8949323808351823e-06, 4.4169705023586007e-07]
+        results = mp_run(run_coil_case,(0.1/4.0,order,None))
     assert validate_coil(results,errs[order-2])
 
 
@@ -675,5 +678,3 @@ def test_LTX_eq(order):
     results = mp_run(run_LTX_case,(order,False,False))
     assert validate_dict(results,exp_dict)
 
-if __name__=="__main__":
-    test_dist_coil(2)
