@@ -481,8 +481,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine global_stitch_c8
 ! !------------------------------------------------------------------------------
-! ! SUBROUTINE: oft_global_stitch_begin
-! !------------------------------------------------------------------------------
 ! !> Begin stitch operation and return while transfers complete
 ! !!
 ! !! @param[in,out] self Stitching information
@@ -558,8 +556,6 @@ end subroutine global_stitch_c8
 ! #endif
 ! DEBUG_STACK_POP
 ! end subroutine oft_global_stitch_begin
-! !------------------------------------------------------------------------------
-! ! SUBROUTINE: oft_global_stitch_end
 ! !------------------------------------------------------------------------------
 ! !> Complete stitch operation by processing transfers
 ! !!

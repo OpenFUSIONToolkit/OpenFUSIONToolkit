@@ -1569,7 +1569,6 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap
 REAL(r8) :: f(4),val,mop(1)
 REAL(r8), POINTER, DIMENSION(:,:) :: ed_nodes,fc_nodes,c_nodes
 CLASS(oft_afem_type), POINTER :: lag_cors => NULL()
-! TYPE(oft_lag_ops), POINTER :: ops
 class(oft_mesh), pointer :: cmesh
 CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
@@ -1689,7 +1688,6 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap,jcors,ftmp,fetmp,ctmp
 REAL(r8) :: f(4),val,mop(1)
 REAL(r8), POINTER, DIMENSION(:,:) :: ed_nodes,fc_nodes,c_nodes
 CLASS(oft_scalar_fem), POINTER :: lag_cors => NULL()
-! TYPE(oft_lag_ops), POINTER :: ops
 CLASS(oft_vector), POINTER :: lag_vec,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
@@ -1699,12 +1697,8 @@ DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("Incorrect fine FE type","lag_pinterpmatrix",__FILE__)
 mesh=>lag_fine%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
-!---
-! ops=>oft_lagrange_ops
+!---\
 IF(.NOT.oft_3D_lagrange_cast(lag_cors,ML_lag_rep%levels(ML_lag_rep%level-1)%fe))CALL oft_abort("Incorrect coarse FE type","lag_pinterpmatrix",__FILE__)
-! lag_cors=>ML_lag_rep%levels(ML_lag_rep%level-1)%fe
-!WRITE(*,*)lag_cors%gstruct
-!WRITE(*,*)lag_fine%gstruct
 CALL oft_lag_nodes(lag_fine%order,ed_nodes,fc_nodes,c_nodes)
 ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
 interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g

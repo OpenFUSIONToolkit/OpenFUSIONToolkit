@@ -200,8 +200,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine mesh_sphere_reffix
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_sphere_add_quad
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points
 !------------------------------------------------------------------------------
 subroutine mesh_sphere_add_quad(mesh)

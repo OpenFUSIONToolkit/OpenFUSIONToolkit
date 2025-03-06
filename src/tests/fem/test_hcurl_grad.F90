@@ -38,8 +38,8 @@ USE oft_hcurl_grad_operators, ONLY: hcurl_grad_getmop, hcurl_grad_setup_interp, 
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_oft_bh1,ML_h1grad
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 TYPE(oft_hcurl_grad_gzerop), TARGET :: hcurl_grad_gzerop
 LOGICAL :: mg_test

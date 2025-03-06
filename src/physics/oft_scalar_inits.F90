@@ -15,8 +15,6 @@ use oft_mesh_type, only: oft_mesh
 use fem_utils, only: fem_interp
 implicit none
 !---------------------------------------------------------------------------
-! CLASS oft_scalar_torus
-!---------------------------------------------------------------------------
 !> Interpolation class for an axisymmetric gaussian source in toroidal geometry
 !!
 !! In toroidal coordinates defined by the class the scalar field is defined

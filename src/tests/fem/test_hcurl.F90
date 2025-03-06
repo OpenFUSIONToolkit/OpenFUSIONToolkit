@@ -29,7 +29,7 @@ IMPLICIT NONE
 INTEGER(i4) :: minlev
 INTEGER(i4) :: order,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
 TYPE(oft_hcurl_zerob), TARGET :: hcurl_zerob
 LOGICAL :: mg_test
 NAMELIST/test_hcurl_options/order,mg_test

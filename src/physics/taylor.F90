@@ -44,8 +44,6 @@ USE diagnostic, ONLY: tfluxfun
 implicit none
 #include "local.h"
 !---------------------------------------------------------------------------
-! CLASS oft_taylor_interp
-!---------------------------------------------------------------------------
 !> Interpolate a Taylor state field
 !!
 !! Taylor state fields consist of a gradient component, the vacuum field, and

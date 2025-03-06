@@ -898,7 +898,6 @@ INTEGER(i4) :: m,mm,netmp,nbemax,ll(2),neel
 INTEGER(i4) :: ierr,i,j,js,jn
 LOGICAL :: etest,set_gbe
 LOGICAL, ALLOCATABLE :: echeck(:,:)
-! TYPE(oft_seam) :: estitch
 DEBUG_STACK_PUSH
 !---
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Edge linkage'
@@ -1223,7 +1222,6 @@ INTEGER(i4) :: m,mm,nftmp,nbfmax,ll(4)
 INTEGER(i4) :: ierr,i,j,js,jn,nffl
 LOGICAL :: ftest
 LOGICAL, ALLOCATABLE :: fcheck(:,:)
-! TYPE(oft_seam) :: fstitch
 DEBUG_STACK_PUSH
 !---
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Face linkage'

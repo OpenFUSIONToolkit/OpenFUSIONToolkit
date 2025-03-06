@@ -69,10 +69,10 @@ TYPE(oft_hcurl_grad_rinterp), TARGET :: Bfield_Hcurl_grad
 TYPE(oft_hcurl_cinterp), TARGET :: Bfield_HCurl
 CLASS(oft_tracer), POINTER :: tracer
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_oft_bh1,ML_h1grad
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 REAL(r8), PARAMETER :: vel_scale = 1.d3
 !---Input options
@@ -127,7 +127,7 @@ END IF
 !---Setup necessary FE space
 SELECT CASE(type)
   CASE(1) ! Vector Lagrange field
-    CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
+    CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
     !---Create field structure
     CALL ML_oft_lagrange%current_level%vec_create(x1)
     CALL ML_oft_lagrange%current_level%vec_create(u)
@@ -143,8 +143,8 @@ SELECT CASE(type)
     tracer%B=>Bfield_lag
     CALL Bfield_lag%setup(ML_oft_lagrange%current_level)
   CASE(2) ! H(Curl) + Grad(H^1) field
-    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
-    CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,ML_oft_bh1,-1)
+    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
+    CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=-1)
     CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(x1)
@@ -164,7 +164,7 @@ SELECT CASE(type)
     tracer%B=>Bfield_Hcurl_grad
     CALL Bfield_Hcurl_grad%setup(ML_hcurl_grad%current_level)
   CASE(3) ! H(Curl) potential field
-    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
+    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(u)
     !---Load H(Curl) field
@@ -201,18 +201,16 @@ CLOSE(pt_file_unit)
 CALL oft_finalize
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE: particle_lorentz
-!---------------------------------------------------------------------------
 !> ODE function for Lorentz force particle advance
 !!
 !! F = q * cross(V,B) / m_i
 !---------------------------------------------------------------------------
 SUBROUTINE particle_lorentz(t,y,B,n,ydot)
-REAL(r8), INTENT(in) :: t
-REAL(r8), INTENT(in) :: y(n)
-REAL(r8), INTENT(in) :: B(3)
-INTEGER(i4), INTENT(in) :: n
-REAL(r8), INTENT(out) :: ydot(n)
+REAL(r8), INTENT(in) :: t !< Time (unused)
+REAL(r8), INTENT(in) :: y(n) !< Current position/velocity
+REAL(r8), INTENT(in) :: B(3) !< B-field at current position
+INTEGER(i4), INTENT(in) :: n !< Number of spatial dimensions (3)
+REAL(r8), INTENT(out) :: ydot(n) !< New velocity/acceleration at current point
 ydot(1:3)=y(4:6)*vel_scale
 ydot(4:6)=elec_charge*cross_product(y(4:6),B)/(proton_mass*mu_ion)
 END SUBROUTINE particle_lorentz

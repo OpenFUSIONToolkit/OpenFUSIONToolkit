@@ -60,7 +60,7 @@ INTEGER(i4) :: ierr,io_unit
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(xmhd_sub_fields) :: ic_fields,pert_fields
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_h1_zerogrnd), TARGET :: h0_zerogrnd
+TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 !---Runtime options
 INTEGER(i4) :: order = 2
 REAL(r8) :: b0_scale = 1.E-1_r8
@@ -94,7 +94,7 @@ CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=-1)
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
 !--- Full H(Curl) space
 CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,-1)
-h0_zerogrnd%ML_H1_rep=>ML_h1grad
+h1_zerogrnd%ML_H1_rep=>ML_h1grad
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
 !! To visualize the solution fields once a simulation has completed, the \ref xmhd::xmhd_plot
@@ -149,7 +149,7 @@ CALL create_bjacobi_pre(linv%pre,-1)
 DEALLOCATE(linv%pre%pre)
 CALL create_ilu_pre(linv%pre%pre)
 divout%solver=>linv
-divout%bc=>h0_zerogrnd
+divout%bc=>h1_zerogrnd
 divout%pm=.TRUE.
 !---------------------------------------------------------------------------
 ! Setup initial conditions

@@ -12,8 +12,6 @@ USE fem_utils, ONLY: fem_interp
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
 !---------------------------------------------------------------------------
-! CLASS sound_eig
-!---------------------------------------------------------------------------
 !> Interpolation class for sound wave initialization
 !---------------------------------------------------------------------------
 type, extends(fem_interp) :: sound_eig
@@ -28,8 +26,6 @@ contains
   procedure :: interp => sound_eig_interp
 end type sound_eig
 !---------------------------------------------------------------------------
-! CLASS alfven_eig
-!---------------------------------------------------------------------------
 !> Interpolation class for alfven wave initialization
 !---------------------------------------------------------------------------
 type, extends(fem_interp) :: alfven_eig
@@ -42,8 +38,6 @@ contains
   procedure :: interp => alfven_eig_interp
 end type alfven_eig
 CONTAINS
-!---------------------------------------------------------------------------
-! SUBROUTINE: sound_eig_interp
 !---------------------------------------------------------------------------
 !> Interpolate the desired component of a traveling sound wave
 !---------------------------------------------------------------------------
@@ -68,8 +62,6 @@ ELSE
   CALL oft_abort('Unknown field component','sound_eig_interp',__FILE__)
 END IF
 end subroutine sound_eig_interp
-!---------------------------------------------------------------------------
-! SUBROUTINE: alfven_eig_interp
 !---------------------------------------------------------------------------
 !> Interpolate the vector perturbation of a traveling alfven wave
 !---------------------------------------------------------------------------

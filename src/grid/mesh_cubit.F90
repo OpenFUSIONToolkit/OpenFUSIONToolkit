@@ -124,9 +124,6 @@ LOGICAL :: have_ho = .FALSE.
 INTEGER(i4) :: np_ho = 0
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: lc_ho
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: r_ho
-!
-! TYPE(oft_1d_int), allocatable, target :: cubit_nsets(:)
-! TYPE(oft_1d_int), allocatable, target :: cubit_ssets(:)
 CONTAINS
 !------------------------------------------------------------------------------
 !> Read in Exodus mesh and geometry information

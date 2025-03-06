@@ -898,8 +898,6 @@ deallocate(xloc)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_project
 !------------------------------------------------------------------------------
-! SUBROUTINE: oft_hcurl_bcurl
-!
 !> Compute the boundary term for integration by parts of the curl operator using
 !! a HCurl basis
 !------------------------------------------------------------------------------

@@ -20,8 +20,6 @@ USE fem_utils, ONLY: fem_interp, bfem_interp
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
-! CLASS field_probe
-!
 !> Synthetic field diagnostic
 !!
 !! Provides setup and driver for sampling a n-vector at specified locations.
@@ -51,8 +49,6 @@ CONTAINS
   PROCEDURE :: save => field_probe_save
 END TYPE field_probe
 !------------------------------------------------------------------------------
-! CLASS flux_probe
-!
 !> Synthetic flux diagnostic
 !!
 !! Provides setup and driver for computing the flux of a 3-vector at a specified
@@ -83,8 +79,6 @@ CONTAINS
 END TYPE flux_probe
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE field_probe_setup
-!
 !> Initialize point list and setup ownership
 !!
 !! Sampling locations may be set in the code directly, via `pts`, or loaded
@@ -173,8 +167,6 @@ END DO
 DEALLOCATE(ptmp,pown,fout)
 END SUBROUTINE field_probe_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE field_probe_eval
-!
 !> Evalute field at all probe locations
 !---------------------------------------------------------------------------
 SUBROUTINE field_probe_eval(self,vals)
@@ -201,8 +193,6 @@ vals=vtmp
 DEALLOCATE(vtmp)
 END SUBROUTINE field_probe_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE field_probe_setup_save
-!
 !> Setup history file for repeated saves
 !---------------------------------------------------------------------------
 SUBROUTINE field_probe_setup_save(self,filename)
@@ -227,8 +217,6 @@ IF(oft_env%head_proc)THEN
 END IF
 END SUBROUTINE field_probe_setup_save
 !---------------------------------------------------------------------------
-! SUBROUTINE field_probe_save
-!
 !> Sample and save the result to the history file
 !---------------------------------------------------------------------------
 SUBROUTINE field_probe_save(self,time)
@@ -251,8 +239,6 @@ END IF
 DEALLOCATE(vals,output)
 END SUBROUTINE field_probe_save
 !---------------------------------------------------------------------------
-! SUBROUTINE flux_probe_setup
-!
 !> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE flux_probe_setup(self)
@@ -318,8 +304,6 @@ END IF
 deallocate(fmap)
 END SUBROUTINE flux_probe_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE flux_probe_eval
-!
 !> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE flux_probe_eval(self,tflux)
@@ -354,8 +338,6 @@ tflux=oft_mpi_sum(reg)
 CALL quad%delete
 END SUBROUTINE flux_probe_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE project_points_to_boundary
-!
 !> Project a set of points to the mesh boundary
 !!
 !! Projection is performed by finding the closest point to a set of known points
@@ -443,8 +425,6 @@ CALL quad%delete
 DEALLOCATE(ptstmp,dist,distin,distout)
 END SUBROUTINE project_points_to_boundary
 !---------------------------------------------------------------------------
-! FUNCTION: tfluxfun
-!
 !> Evaluate the toroidally averaged toroidal flux of a 3-vector
 !!
 !! @note This requires your geometry is oriented with one of the principle axes
@@ -487,8 +467,6 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION tfluxfun
 !---------------------------------------------------------------------------
-! FUNCTION: scal_int
-!
 !> Evaluate the volume integral of a scalar
 !---------------------------------------------------------------------------
 FUNCTION scal_int(mesh,field,quad_order) RESULT(energy)
@@ -519,8 +497,6 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_int
 !---------------------------------------------------------------------------
-! FUNCTION: scal_energy
-!
 !> Evaluate the field energy of a scalar
 !---------------------------------------------------------------------------
 FUNCTION scal_energy(mesh,field,quad_order) RESULT(energy)
@@ -551,8 +527,6 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_energy
 !---------------------------------------------------------------------------
-! FUNCTION: vec_energy
-!
 !> Evaluate the field energy of a 3-vector
 !---------------------------------------------------------------------------
 FUNCTION vec_energy(mesh,field,quad_order) RESULT(energy)
@@ -583,8 +557,6 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION vec_energy
 !---------------------------------------------------------------------------
-! FUNCTION: weighted_vec_energy
-!
 !> Evaluate the field energy of a 3-vector with a scalar weight field
 !---------------------------------------------------------------------------
 FUNCTION weighted_vec_energy(mesh,field,weight,quad_order) RESULT(energy)
@@ -617,8 +589,6 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION weighted_vec_energy
 !---------------------------------------------------------------------------
-! FUNCTION: scal_surf_int
-!
 !> Evaluate the boundary integral of a scalar field
 !---------------------------------------------------------------------------
 FUNCTION scal_surf_int(mesh,field,quad_order) RESULT(energy)
@@ -685,8 +655,6 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION bscal_surf_int
 !---------------------------------------------------------------------------
-! FUNCTION: vec_surf_int
-!
 !> Evaluate the boundary flux of a vector field
 !---------------------------------------------------------------------------
 FUNCTION vec_surf_int(mesh,field,quad_order) RESULT(energy)

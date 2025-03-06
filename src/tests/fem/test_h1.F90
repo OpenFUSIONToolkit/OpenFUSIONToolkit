@@ -31,7 +31,7 @@ USE oft_h1_operators, ONLY: h1_setup_interp, h1_mloptions, &
 IMPLICIT NONE
 INTEGER(i4) :: minlev
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_oft_bh1
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1
 TYPE(oft_h1_zerob), TARGET :: h1_zerob
 INTEGER(i4) :: order,ierr,io_unit
 LOGICAL :: mg_test

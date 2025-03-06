@@ -68,10 +68,10 @@ TYPE(oft_hcurl_grad_rinterp), TARGET :: Bfield_HCurl_grad
 TYPE(oft_hcurl_cinterp), TARGET :: Bfield_HCurl
 CLASS(oft_tracer), POINTER :: tracer
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_oft_bh1,ML_h1grad
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl,ML_oft_bhcurl
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 !---Input options
 INTEGER(i4) :: order = 2
@@ -112,7 +112,7 @@ tracer%maxtrans=INT(tracer_maxtrans)
 !---Setup necessary FE space
 SELECT CASE(type)
   CASE(1) ! Vector Lagrange field
-    CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
+    CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
     !---Create field structure
     CALL ML_oft_lagrange%vec_create(x1)
     CALL ML_oft_lagrange%vec_create(u)
@@ -120,8 +120,8 @@ SELECT CASE(type)
     tracer%B=>Bfield_lag
     CALL Bfield_lag%setup(ML_oft_lagrange%current_level)
   CASE(2) ! H(Curl) + Grad(H^1) field
-    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
-    CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,ML_oft_bh1,-1)
+    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
+    CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=-1)
     CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(x1)
@@ -131,7 +131,7 @@ SELECT CASE(type)
     tracer%B=>Bfield_HCurl_grad
     CALL Bfield_HCurl_grad%setup(ML_hcurl_grad%current_level)
   CASE(3) ! H(Curl) potential field
-    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,ML_oft_bhcurl,-1)
+    CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
     !---Create field structure
     CALL ML_oft_hcurl%vec_create(u)
     Bfield_HCurl%u=>u

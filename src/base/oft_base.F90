@@ -61,6 +61,7 @@ INTEGER(i4) :: OFT_MPI_CHAR=MPI_CHARACTER !< MPI_CHAR alias
 INTEGER(i4), PARAMETER :: MPI_COMM_WORLD = -1 ! Dummy comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_COMM_NULL = -2 ! Dummy null comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_REQUEST_NULL = -3 ! Dummy null request value for non-MPI runs
+INTEGER(i4), PARAMETER :: MPI_COMM_SELF = -4 ! Dummy self-comm value for non-MPI runs
 #endif
 !---------------------------------------------------------------------------
 !> Perform a SUM/AND reduction over all processors
