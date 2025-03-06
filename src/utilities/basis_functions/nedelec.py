@@ -2,7 +2,7 @@
 # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #---------------------------------------------------------------------------
 #
-# Python construction of Nedelec elements for simplectic elements in 2D and
+# Python construction of H^1, H(Curl) elements for simplectic elements in 2D and
 # 3D. Designed to be used for FE basis definition in the Open FUSION Toolkit (OFT)
 #
 #---------------------------------------------------------------------------
@@ -30,11 +30,11 @@ def ls(s,t,i):
 def Ls(s,t,i):
     return (t**i)*integrate(legendre(i-1,x),(x,-1,s/t))
 #----------------------------------------------------------------
-# Basis functions for the Nedelec H0 space
+# Basis functions for the H^1 space
 #----------------------------------------------------------------
-def H0(n):
+def H1(n):
     if n>0:
-        fp, fe, ff, fc = H0(n-1)
+        fp, fe, ff, fc = H1(n-1)
     else:
         fp = []
         fe = []
@@ -199,13 +199,13 @@ if __name__ == '__main__':
     order = 1
     #
     import argparse
-    parser = argparse.ArgumentParser(description='Generate Nedelec basis functions for Tetrahedra.')
+    parser = argparse.ArgumentParser(description='Generate conforming element basis functions for Tetrahedra.')
     parser.add_argument('-o', '--order', help='Desired interpolation order.', default=1)
     args=parser.parse_args()
     order=int(args.order)
     #
     print("\n====== Scalar Functions ======")
-    fp, fe, ff, fc = H0(order)
+    fp, fe, ff, fc = H1(order)
     print("Point Functions")
     for i in range(len(fp)):
         f = fp[i]

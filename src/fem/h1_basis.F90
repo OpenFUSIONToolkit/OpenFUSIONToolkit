@@ -7,7 +7,7 @@
 !! Scalar H^1 finite element implementation for the Open FUSION Toolkit
 !! @ingroup doxy_oft_fem
 !
-!> Base Nedelec H^1 FE class and basis evaluation
+!> Base scalar H^1 FE class and basis evaluation
 !! - FE Construction
 !! - Basis evaluation
 !!   - Interpolation
@@ -290,7 +290,7 @@ end subroutine oft_h1_setup_surf
 !! vector in physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h1_eval(self,cell,dof,f,val)
-class(oft_h1_fem), intent(in) :: self !< Nedelec type for evaluation
+class(oft_h1_fem), intent(in) :: self !< H^1 type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
 integer(i4), intent(in) :: dof !< Element to evaluate
 real(r8), intent(in) :: f(:) !< Position in cell in logical space
@@ -353,7 +353,7 @@ end subroutine oft_h1_eval
 !! vector in physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_bh1_eval(self,face,dof,f,val)
-class(oft_bfem_type), intent(in) :: self !< Nedelec type for evaluation (bfem)
+class(oft_bfem_type), intent(in) :: self !< H^1 type for evaluation (bfem)
 integer(i4), intent(in) :: face !< Face for evaluation
 integer(i4), intent(in) :: dof !< Element to evaluate
 real(r8), intent(in) :: f(:) !< Position on face in logical space [4]
@@ -674,11 +674,11 @@ end subroutine oft_h1_eval_all
 !! vector in, and gradient with respect to, physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_h1_geval(self,cell,dof,f,val,gop)
-class(oft_h1_fem), intent(in) :: self !< Nedelec type for evaluation
+class(oft_h1_fem), intent(in) :: self !< H^1 type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
 integer(i4), intent(in) :: dof !< Element to evaluate
 real(r8), intent(in) :: f(:) !< Position in cell in logical space
-real(r8), intent(out) :: val(:) !< Curl of nedelec element (dof) at point (f) [3]
+real(r8), intent(out) :: val(:) !< Gradient of H^1 element (dof) at point (f) [3]
 real(r8), intent(in) :: gop(:,:) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i,j,ind,finds(9),fhtmp(4)
 real(r8) :: cofs(4),fhex(6),gbary(3,6),dtmp,vtmp(4)
@@ -774,11 +774,11 @@ end subroutine oft_h1_geval
 !! vector in, and gradient with respect to, physical coordinates
 !---------------------------------------------------------------------------
 subroutine oft_bh1_geval(self,face,dof,f,val,gop)
-class(oft_bfem_type), intent(in) :: self !< Nedelec type for evaluation (bfem)
+class(oft_bfem_type), intent(in) :: self !< H^1 type for evaluation (bfem)
 integer(i4), intent(in) :: face !< Face for evaluation
 integer(i4), intent(in) :: dof !< Element to evaluate
 real(r8), intent(in) :: f(:) !< Position on face in logical space [4]
-real(r8), intent(out) :: val(3) !< Curl of nedelec element (dof) at point (f) [3]
+real(r8), intent(out) :: val(3) !< Gradient of H^1 element (dof) at point (f) [3]
 real(r8), optional, intent(in) :: gop(:,:) !< Face Jacobian matrix at point (f) [3,3]
 real(r8) :: grads(3,4),cofs(4)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i

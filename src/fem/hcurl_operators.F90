@@ -154,8 +154,8 @@ IF(ierr>0)THEN
 END IF
 IF(df_wop(1)<-1.d90)THEN
   IF(oft_env%head_proc)THEN
-    WRITE(*,*)'No H(Curl) MG smoother settings found:'
-    WRITE(*,*)'  Using default values, which may result in convergence failure.'
+    CALL oft_warn("No H(Curl) MG smoother settings found:")
+    CALL oft_warn("  Using default values, which may result in convergence failure.")
   END IF
   DO i=ML_hcurl_obj%minlev,ML_hcurl_obj%nlevels
     CALL ML_hcurl_obj%set_level(i)
@@ -982,15 +982,21 @@ ELSE
   CALL create_diag_pre(self%solver%pre)
   self%internal_solver=.TRUE.
 END IF
-IF(TRIM(bc)=='grnd')THEN
+!
+SELECT CASE(TRIM(bc)) 
+CASE('grnd')
   ALLOCATE(bc_zerogrnd)
   bc_zerogrnd%ML_lag_rep=>ML_lag_rep
   self%bc=>bc_zerogrnd
-ELSE
+CASE('zero')
   ALLOCATE(bc_zerob)
   bc_zerob%ML_lag_rep=>ML_lag_rep
   self%bc=>bc_zerob
-END IF
+CASE('none')
+  NULLIFY(self%bc)
+CASE DEFAULT
+  CALL oft_abort("Invalid BC","hcurl_divout_setup",__FILE__)
+END SELECT
 DEBUG_STACK_POP
 end subroutine hcurl_divout_setup
 !---------------------------------------------------------------------------

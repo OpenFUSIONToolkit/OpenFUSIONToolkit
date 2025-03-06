@@ -282,7 +282,7 @@ CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
 CALL create_diag_pre(linv%pre) ! Setup Preconditioner
-divout%solver=>linv
+CALL divout%setup(ML_hcurl_grad,'none',solver=linv)
 IF(zero_norm)THEN
   h1_zerogrnd%ML_H1_rep=>ML_h1grad
   divout%bc=>h1_zerogrnd
@@ -304,8 +304,15 @@ CALL divout%apply(interp_obj%u)
 CALL interp_obj%setup(ML_oft_hcurl%current_level,ML_oft_h1%current_level)
 int_obj=C_LOC(interp_obj)
 !---Cleanup
+CALL lop%delete()
+DEALLOCATE(lop)
+CALL linv%pre%delete()
+DEALLOCATE(linv%pre)
+CALL linv%delete()
+DEALLOCATE(linv,tmp)
+CALL divout%bc%delete()
+NULLIFY(divout%bc)
 CALL divout%delete()
-DEALLOCATE(tmp)
 END SUBROUTINE marklin_get_aint
 !------------------------------------------------------------------------------
 !> Needs docs

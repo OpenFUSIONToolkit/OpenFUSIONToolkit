@@ -104,7 +104,7 @@ type, extends(oft_solver_bc) :: oft_hcurl_grad_divout
   logical :: keep_boundary = .FALSE. !< Flag for keeping boundary gradients
   logical :: pm = .FALSE. !< Flag for solver convergence monitor
   logical :: internal_solver = .FALSE. !< Solver was constructed internally?
-  class(oft_solver), pointer :: solver => NULL() !< Solver object for H0::LOP operator
+  class(oft_solver), pointer :: solver => NULL() !< Solver object for H^1::LOP operator
   class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   class(oft_matrix), pointer :: mop => NULL() !< Mass matrix, applies divoutm if associated
   class(oft_vector), pointer :: bnorm => NULL() !< Normal field source on boundary
@@ -188,8 +188,8 @@ IF(ierr>0)THEN
 END IF
 IF(df_mop(1)<-1.d90)THEN
   IF(oft_env%head_proc)THEN
-    WRITE(*,*)'No H(Curl) + Grad(H^1) MG smoother settings found:'
-    WRITE(*,*)'  Using default values, which may result in convergence failure.'
+    CALL oft_warn("No H(Curl) + Grad(H^1) MG smoother settings found:")
+    CALL oft_warn("  Using default values, which may result in convergence failure.")
   END IF
   nu_mop=2
   df_mop=.2d0
@@ -678,7 +678,7 @@ DEALLOCATE(acurl)
 DEBUG_STACK_POP
 end subroutine hcurl_grad_bmc
 !---------------------------------------------------------------------------
-!> Add the gradient of a H0 scalar field to a H(Curl) + Grad(H^1) vector field
+!> Add the gradient of a H^1 scalar field to a H(Curl) + Grad(H^1) vector field
 !!
 !! @note By default the 0-th order gradient subspace is represented on the
 !! H(Curl) DOF, use the `keep_boundary` flag otherwise
@@ -1279,15 +1279,21 @@ ELSE
   self%solver=>linv
   self%internal_solver=.TRUE.
 END IF
-IF(TRIM(bc)=='grnd')THEN
-  ALLOCATE(bc_zerogrnd)
-  bc_zerogrnd%ML_H1_rep=>self%ML_grad
-  self%bc=>bc_zerogrnd
-ELSE
-  ALLOCATE(bc_zerob)
-  bc_zerob%ML_H1_rep=>self%ML_grad
-  self%bc=>bc_zerob
-END IF
+!
+SELECT CASE(TRIM(bc)) 
+  CASE('grnd')
+    ALLOCATE(bc_zerogrnd)
+    bc_zerogrnd%ML_H1_rep=>self%ML_grad
+    self%bc=>bc_zerogrnd
+  CASE('zero')
+    ALLOCATE(bc_zerob)
+    bc_zerob%ML_H1_rep=>self%ML_grad
+    self%bc=>bc_zerob
+  CASE('none')
+    NULLIFY(self%bc)
+  CASE DEFAULT
+    CALL oft_abort("Invalid BC","divout_setup",__FILE__)
+END SELECT
 DEBUG_STACK_POP
 end subroutine divout_setup
 !---------------------------------------------------------------------------

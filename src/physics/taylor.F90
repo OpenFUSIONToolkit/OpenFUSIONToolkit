@@ -400,7 +400,7 @@ END IF
 IF(taylor_minlev<0)taylor_minlev=ML_oft_hcurl%nlevels
 IF(.NOT.rst)THEN
 !---------------------------------------------------------------------------
-! Setup H0::LOP preconditioner
+! Setup H^1::LOP preconditioner
 !---------------------------------------------------------------------------
   if(taylor_minlev==ML_oft_h1%nlevels-1)then ! Lowest level uses diag precond
     CALL oft_h1_getlop(ML_oft_h1%current_level,lop,'grnd')
@@ -959,8 +959,6 @@ SELECT TYPE(this=>hcurl_grad_rep%fields(2)%fe)
   CLASS DEFAULT
     CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup1",__FILE__)
 END SELECT
-! self%hgrad_rep=>oft_h1
-! self%hcurl_rep=>oft_hcurl
 DEBUG_STACK_POP
 end subroutine taylor_rinterp_setup1
 !---------------------------------------------------------------------------
@@ -992,8 +990,6 @@ SELECT TYPE(hgrad_rep)
   CLASS DEFAULT
     CALL oft_abort("Invalid HGrad space","taylor_rinterp_setup2",__FILE__)
 END SELECT
-! self%hgrad_rep=>oft_h1
-! self%hcurl_rep=>oft_hcurl
 DEBUG_STACK_POP
 end subroutine taylor_rinterp_setup2
 !---------------------------------------------------------------------------

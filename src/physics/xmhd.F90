@@ -3,7 +3,7 @@
 !---------------------------------------------------------------------------
 !> @file xmhd.F90
 !
-!> Module for modeling extended MHD with a mixed Nedelec/lagrange basis set.
+!> Module for modeling extended MHD with a mixed conforming/lagrange basis set.
 !!
 !! The equations currently solved are the equations of extended xMHD with
 !! scalar temperature and pressure.

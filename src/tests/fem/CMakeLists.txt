@@ -1,5 +1,5 @@
 if( OFT_BUILD_TESTS )
-  # Lagrange tests
+  # Lagrange FE tests
   oft_add_test( test_lag.F90 )
   configure_file( test_lag.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   oft_add_test( test_vlag.F90 )
@@ -9,7 +9,7 @@ if( OFT_BUILD_TESTS )
   oft_add_test( test_lag_2d.F90 )
   configure_file( test_lag_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
-  # Nedelec tests
+  # Conforming FE sequence tests
   oft_add_test( test_h1.F90 )
   configure_file( test_h1.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   oft_add_test( test_hcurl.F90 )

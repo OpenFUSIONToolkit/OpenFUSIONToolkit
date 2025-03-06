@@ -96,22 +96,22 @@ are supported.
 
 ## H^1
 
-This group is used to specify the common smoother settings for common H0 scalar
+This group is used to specify the common smoother settings for common H^1 scalar
 operators. Currently only the isotropic Laplacian operator is supported.
 
 **Option group:** `h1_op_options`
 |  Option  |  Description  | Type |
 |------------|------------|-----|
-| `df_lop=1`   | Smoothing factors for H0::LOP | real [nlevels] |
-| `nu_lop=1`   | Number of smoother iterations for H0::LOP | int [nlevels] |
+| `df_lop=1`   | Smoothing factors for H^1::LOP | real [nlevels] |
+| `nu_lop=1`   | Number of smoother iterations for H^1::LOP | int [nlevels] |
 
 ## H(Curl)
 
-This group is used to specify the common smoother settings for common H1(Curl) vector
+This group is used to specify the common smoother settings for common H(Curl) vector
 operators. Currently only the \f$ \nabla \times \nabla \times \f$ operator is supported.
 
 **Option group:** `hcurl_op_options`
 |  Option  |  Description  | Type |
 |------------|------------|-----|
-| `df_wop=1`   | Smoothing factors for H1(Curl)::WOP | real [nlevels] |
-| `nu_wop=1`   | Number of smoother iterations for H1(Curl)::WOP | int [nlevels] |
+| `df_wop=1`   | Smoothing factors for H(Curl)::WOP | real [nlevels] |
+| `nu_wop=1`   | Number of smoother iterations for H(Curl)::WOP | int [nlevels] |

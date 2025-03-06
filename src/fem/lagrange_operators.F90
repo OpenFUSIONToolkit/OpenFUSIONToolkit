@@ -167,8 +167,8 @@ IF(ierr>0)THEN
 END IF
 IF(df_lop(1)<-1.d90)THEN
   IF(oft_env%head_proc)THEN
-    WRITE(*,*)'No Lagrange MG smoother settings found:'
-    WRITE(*,*)'  Using default values, which may result in convergence failure.'
+    CALL oft_warn("No Lagrange MG smoother settings found:")
+    CALL oft_warn("  Using default values, which may result in convergence failure.")
   END IF
   nu_lop=2
   df_lop=.2d0

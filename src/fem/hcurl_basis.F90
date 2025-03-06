@@ -3,11 +3,11 @@
 !---------------------------------------------------------------------------
 !> @file oft_hcurl_basis.F90
 !
-!> @defgroup doxy_oft_hcurl Nedelec H(Curl)
-!! Nedelec H(Curl) finite element implementation for the Open FUSION Toolkit
+!> @defgroup doxy_oft_hcurl H(Curl) FE space
+!! H(Curl) finite element implementation for the Open FUSION Toolkit
 !! @ingroup doxy_oft_fem
 !
-!> Base Nedelec H(Curl) FE class and basis evaluation
+!> Base H(Curl) FE class and basis evaluation
 !! - FE Construction
 !! - Basis evaluation
 !!   - Interpolation
@@ -93,7 +93,7 @@ END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_hcurl_cast
 !---------------------------------------------------------------------------
-!> Construct Nedelec H(Curl) FE on each mesh level
+!> Construct H(Curl) FE basis on each mesh level
 !!
 !! @note Highest supported representation is quadratic.
 !!
@@ -111,7 +111,7 @@ minlev_out=1
 IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
-  WRITE(*,'(A)')'**** Creating Nedelec H(Curl) FE space'
+  WRITE(*,'(A)')'**** Creating H(Curl) FE space'
   WRITE(*,'(2X,A,I4)')'Order  = ',order
   WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
 END IF
@@ -392,7 +392,7 @@ DO k=1,order
 END DO
 end subroutine hcurl_3d_grid
 !---------------------------------------------------------------------------
-!> Evaluate Nedelec H(Curl) interpolation function in the interior
+!> Evaluate H(Curl) interpolation function in the interior
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in physical coordinates
@@ -495,7 +495,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_eval
 !---------------------------------------------------------------------------
-!> Evaluate Nedelec H(Curl) interpolation function on the boundary
+!> Evaluate H(Curl) interpolation function on the boundary
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in physical coordinates
@@ -1005,7 +1005,7 @@ DEBUG_STACK_POP
 end subroutine oft_hcurl_eval_all4
 end subroutine oft_hcurl_eval_all
 !---------------------------------------------------------------------------
-!> Evaluate Nedelec H(Curl) curl function in the interior
+!> Evaluate H(Curl) curl function in the interior
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in, and curl with respect to, physical coordinates
@@ -1015,7 +1015,7 @@ class(oft_hcurl_fem), intent(in) :: self
 integer(i4), intent(in) :: cell !< Cell for evaluation
 integer(i4), intent(in) :: dof !< Element to evaluate
 real(r8), intent(in) :: f(:) !< Position in cell in logical space [4]
-real(r8), intent(out) :: val(:) !< Curl of nedelec element (dof) at point (f) [3]
+real(r8), intent(out) :: val(:) !< Curl of H(Curl) elements (dof) at point (f) [3]
 real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
 integer(i4) :: i,j,ed,etmp(2),fc,ftmp(3),fhtmp(4),ind,form
 real(r8) :: fhex(6),gbary(3,6),dtmp,hcgop(3,3)
@@ -1167,7 +1167,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_ceval
 !---------------------------------------------------------------------------
-!> Evaluate Nedelec H(Curl) curl function on the boundary
+!> Evaluate H(Curl) curl function on the boundary
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in, and curl with respect to, physical coordinates
@@ -1177,7 +1177,7 @@ class(oft_bfem_type), intent(in) :: self
 integer(i4), intent(in) :: face !< Cell for evaluation
 integer(i4), intent(in) :: dof !< Element to evaluate
 real(r8), intent(in) :: f(:) !< Position on face in logical space [4]
-real(r8), intent(out) :: val(3) !< Curl of nedelec element (dof) at point (f) [3]
+real(r8), intent(out) :: val(3) !< Curl of H(Curl) element (dof) at point (f) [3]
 real(r8), optional, intent(in) :: gop(:,:) !< Face Jacobian matrix at point (f) [3,3]
 real(r8) :: grads(3,4)
 integer(i4) :: ed,etmp(2),fc,ftmp(3)
