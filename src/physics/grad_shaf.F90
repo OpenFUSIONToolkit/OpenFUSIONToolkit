@@ -1680,12 +1680,12 @@ end subroutine gs_gen_source
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_coil_source
 !---------------------------------------------------------------------------
-!> Calculates field contribution due to coil
+!> Calculates coil current source
 !---------------------------------------------------------------------------
 subroutine gs_coil_source(self,iCoil,b)
 class(gs_eq), intent(inout) :: self !< G-S Object
 integer(4), intent(in) :: iCoil !< Coil index
-CLASS(oft_vector), intent(inout) :: b !< Coil field
+CLASS(oft_vector), intent(inout) :: b !< Coil current source
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,nturns
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
@@ -1736,13 +1736,13 @@ DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_coil_source
 !---------------------------------------------------------------------------
-!> Calculates field contribution due to coil with non-uniform conductivity
+!> Calculates field contribution due to coil with non-uniform current distribution
 !---------------------------------------------------------------------------
 subroutine gs_coil_source_distributed(self,iCoil,b,a)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
-CLASS(oft_vector), intent(inout) :: b !< Coil field
-REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Normalized local conductivity
+CLASS(oft_vector), intent(inout) :: b !< Coil current source
+REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Relative current density
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns
 real(8), allocatable :: rhs_loc(:),rop(:)
@@ -1979,7 +1979,7 @@ subroutine gs_coil_mutual_distributed(self, iCoil, b, a, mutual)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
-REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Normalized local conductivity
+REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Relative current density
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns,j_phi
