@@ -1680,16 +1680,12 @@ end subroutine gs_gen_source
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_coil_source
 !---------------------------------------------------------------------------
-!> Needs Docs
-!!
-!! @param[in,out] self G-S object
-!! @param[in,out] a Psi field
-!! @param[in,out] b Source field
+!> Calculates coil current source
 !---------------------------------------------------------------------------
 subroutine gs_coil_source(self,iCoil,b)
-class(gs_eq), intent(inout) :: self
-integer(4), intent(in) :: iCoil
-CLASS(oft_vector), intent(inout) :: b
+class(gs_eq), intent(inout) :: self !< G-S Object
+integer(4), intent(in) :: iCoil !< Coil index
+CLASS(oft_vector), intent(inout) :: b !< Coil current source
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,nturns
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
@@ -1739,6 +1735,61 @@ CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_coil_source
+!---------------------------------------------------------------------------
+!> Calculates field contribution due to coil with non-uniform current distribution
+!---------------------------------------------------------------------------
+subroutine gs_coil_source_distributed(self,iCoil,b,curr_dist)
+class(gs_eq), intent(inout) :: self !< G-S object
+integer(4), intent(in) :: iCoil !< Coil index
+CLASS(oft_vector), intent(inout) :: b !< Coil current source
+REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
+real(r8), pointer, dimension(:) :: btmp
+real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns
+real(8), allocatable :: rhs_loc(:),rop(:)
+integer(4) :: j,m,l,k
+integer(4), allocatable :: j_lag(:)
+! t1=omp_get_wtime()
+!---
+
+NULLIFY(btmp)
+CALL b%set(0.d0)
+CALL b%get_local(btmp)
+
+!$omp parallel private(j,rhs_loc,j_lag,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
+allocate(rhs_loc(oft_blagrange%nce))
+allocate(rop(oft_blagrange%nce))
+allocate(j_lag(oft_blagrange%nce))
+!$omp do schedule(static,1)
+DO j=1,smesh%nc
+  nturns=self%coil_nturns(smesh%reg(j),iCoil)
+  IF(ABS(nturns)<1.d-10)CYCLE
+  call oft_blagrange%ncdofs(j,j_lag)
+  rhs_loc=0.d0
+  do m=1,oft_blagrange%quad%np
+    call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    det=v*oft_blagrange%quad%wts(m)
+    DO l=1,oft_blagrange%nce
+      CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l)) 
+    END DO
+    !$omp simd
+    do l=1,oft_blagrange%nce
+      rhs_loc(l)=rhs_loc(l)+rop(l)*det*curr_dist(j_lag(l))
+    end do
+  end do
+  !---Get local to global DOF mapping
+  do l=1,oft_blagrange%nce
+    m = j_lag(l)
+    !$omp atomic
+    btmp(m)=btmp(m)+rhs_loc(l)*nturns
+  end do
+
+END DO
+
+deallocate(rhs_loc,j_lag,rop)
+!$omp end parallel
+CALL b%restore_local(btmp,add=.TRUE.)
+DEALLOCATE(btmp)
+end subroutine gs_coil_source_distributed
 !---------------------------------------------------------------------------
 ! SUBROUTINE gs_cond_source
 !---------------------------------------------------------------------------
@@ -1878,9 +1929,10 @@ end subroutine gs_wall_source
 !> Compute inductance between coil and given poloidal flux
 !---------------------------------------------------------------------------
 subroutine gs_coil_mutual(self,iCoil,b,mutual)
-class(gs_eq), intent(inout) :: self !< G-S solver object
-integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
+class(gs_eq), intent(inout) :: self !< G-S object
+integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
+
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns
@@ -1920,6 +1972,55 @@ mutual=mu0*2.d0*pi*mutual!/self%coil_regions(iCoil)%area
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_coil_mutual
+!---------------------------------------------------------------------------
+!> Compute inductance between a coil with non-uniform current distribution and given poloidal flux
+!---------------------------------------------------------------------------
+subroutine gs_coil_mutual_distributed(self, iCoil, b, curr_dist, mutual)
+class(gs_eq), intent(inout) :: self !< G-S object
+integer(4), intent(in) :: iCoil !< Coil index
+CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
+REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
+real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
+real(r8), pointer, dimension(:) :: btmp
+real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns,j_phi
+real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
+integer(4) :: j,m,l,k
+integer(4), allocatable :: j_lag(:)
+logical :: curved
+! t1=omp_get_wtime()
+!---
+NULLIFY(btmp)
+CALL b%get_local(btmp)
+!---
+mutual=0.d0
+!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,l,rop,nturns,j_phi,psi_tmp) reduction(+:mutual)
+allocate(rop(oft_blagrange%nce))
+allocate(j_lag(oft_blagrange%nce))
+!$omp do schedule(static,1)
+DO j=1,smesh%nc
+  nturns=self%coil_nturns(smesh%reg(j),iCoil)
+  IF(ABS(nturns)<1.d-10)CYCLE
+  call oft_blagrange%ncdofs(j,j_lag)
+
+  do m=1,oft_blagrange%quad%np
+    call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    det=v*oft_blagrange%quad%wts(m)
+    psi_tmp=0.d0
+    j_phi=0.d0
+    DO l=1,oft_blagrange%nce
+      CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
+      psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
+      j_phi=j_phi+curr_dist(j_lag(l))*rop(l)
+    END DO
+    mutual = mutual + psi_tmp*det*nturns*j_phi
+  end do
+end do
+deallocate(j_lag,rop)
+!$omp end parallel
+mutual=mu0*2.d0*pi*mutual!/self%coil_regions(iCoil)%area
+DEALLOCATE(btmp)
+! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
+end subroutine gs_coil_mutual_distributed
 !---------------------------------------------------------------------------
 !> Compute inductance between plasma current and given poloidal flux
 !---------------------------------------------------------------------------
