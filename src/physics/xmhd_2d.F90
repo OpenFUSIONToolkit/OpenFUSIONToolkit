@@ -6,28 +6,28 @@
 !> Solve time-dependent MHD equations with lagrange basis
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
-  USE oft_base
-  USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
-    hdf5_field_exist, oft_bin_file, xdmf_plot_file
-  USE oft_quadrature
-  USE oft_mesh_type, ONLY: smesh, cell_is_curved
-  !
-  USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_local_mat, oft_vector_ptr, &
-    vector_extrapolate
-  USE oft_solver_utils, ONLY: create_solver_xml, create_diag_pre
-  USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
-  USE oft_solver_base, ONLY: oft_solver
-  USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
-  !
-  USE fem_composite, ONLY: oft_fem_comp_type
-  USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
-  USE oft_lag_basis, ONLY: oft_lag_setup, oft_blagrange, oft_blag_eval, oft_blag_geval
-  IMPLICIT NONE
-  #include "local.h"
-  #if !defined(TDIFF_RST_LEN)
-  #define TDIFF_RST_LEN 5
-  #endif
-  PRIVATE
+USE oft_base
+USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
+  hdf5_field_exist, oft_bin_file, xdmf_plot_file
+USE oft_quadrature
+USE oft_mesh_type, ONLY: smesh, cell_is_curved
+!
+USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_local_mat, oft_vector_ptr, &
+  vector_extrapolate
+USE oft_solver_utils, ONLY: create_solver_xml, create_diag_pre
+USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
+USE oft_solver_base, ONLY: oft_solver
+USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
+!
+USE fem_composite, ONLY: oft_fem_comp_type
+USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_blagrange, oft_blag_eval, oft_blag_geval
+IMPLICIT NONE
+#include "local.h"
+#if !defined(TDIFF_RST_LEN)
+#define TDIFF_RST_LEN 5
+#endif
+PRIVATE
 
 TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: dt = -1.d0 !< Time step
@@ -426,11 +426,11 @@ DO i=1,smesh%nc
         + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*jac_det*quad%wts(m)/(2*mu_0*m_i*n**2) &
         + 2*self%dt*k_boltz*n*basis_vals(jr)*dT*jac_det*quad%wts(m)&
         + 2*self%dt*k_boltz*T*basis_vals(jr)*dn*jac_det*quad%wts(m)
-      DO n=1,3
+      DO k=1,3
         res_loc(jr,2:4) = res_loc(jr, 2:4) &
-          + basis_vals(jr)*self%dt*vel(n)*dvel(:,n)*jac_det*quad%wts(m) &
-          + nu*self%dt*basis_grads(n,jr)*dvel(:,n)*jac_det*quad%wts(m)/(m_i*n) &
-          - basis_vals(jr)*self%dt*dn(n)*dvel(:,n)*jac_det*quad%wts(m)/(m_i*n**2)
+          + basis_vals(jr)*self%dt*vel(k)*dvel(:,k)*jac_det*quad%wts(m) &
+          + nu*self%dt*basis_grads(k,jr)*dvel(:,k)*jac_det*quad%wts(m)/(m_i*n) &
+          - basis_vals(jr)*self%dt*dn(k)*dvel(:,k)*jac_det*quad%wts(m)/(m_i*n**2)
       END DO
       !---Temperature
       res_loc(jr,5) = res_loc(jr, 5) &
@@ -480,12 +480,12 @@ CALL fem_dirichlet_vec(oft_blagrange,psi_weights,psi_res,self%psi_bc)
 CALL fem_dirichlet_vec(oft_blagrange,by_weights,by_res,self%by_bc)
 !---Put results into full vector
 CALL b%restore_local(n_res,1,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(T_res,2,add=.TRUE.)
 CALL b%restore_local(vel_res(1,:),2,add=.TRUE.)
-CALL b%restore_local(vel_res(2,:),2,add=.TRUE.)
-CALL b%restore_local(vel_res(3,:),2,add=.TRUE.)
-CALL b%restore_local(psi_res,2,add=.TRUE.)
-CALL b%restore_local(by_res,2,add=.TRUE.)
+CALL b%restore_local(vel_res(2,:),3,add=.TRUE.)
+CALL b%restore_local(vel_res(3,:),4,add=.TRUE.)
+CALL b%restore_local(T_res,5,add=.TRUE.)
+CALL b%restore_local(psi_res,6,add=.TRUE.)
+CALL b%restore_local(by_res,7,add=.TRUE.)
 !TODO: adjust diagonal vals
 self%diag_vals=oft_mpi_sum(diag_vals,2)
 !---Cleanup remaining storage
@@ -499,7 +499,7 @@ subroutine build_approx_jacobian(self,a)
 class(oft_xmhd_2d_sim), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Solution for computing jacobian
 LOGICAL :: curved
-INTEGER(i4) :: i,m,jr,jc
+INTEGER(i4) :: i,m,jr,jc, k
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
 REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz, m_i
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
@@ -577,57 +577,55 @@ DO i=1,smesh%nc
     if(curved.OR.(m==1))call smesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
     !---Evaluate value and gradients of basis functions at current point
     DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
-    CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
-    CALL oft_blag_geval(oft_blagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
+      CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
+      CALL oft_blag_geval(oft_blagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
     END DO
     !---Reconstruct values of solution fields
     n = 0.d0; dn = 0.d0; vel = 0.d0; dvel = 0.d0
     T = 0.d0; dT = 0.d0; psi = 0.d0; dpsi=0.d0
     by = 0.d0; dby = 0.d0
     DO jr=1,oft_blagrange%nce
-    n = n + n_weights_loc(jr)*basis_vals(jr)
-    vel = vel + vel_weights_loc(:, jr)*basis_vals(jr)
-    T = T + T_weights_loc(jr)*basis_vals(jr)
-    psi = psi + psi_weights_loc(jr)*basis_vals(jr)
-    by = by + by_weights_loc(jr)*basis_vals(jr)
-    dn = dn + n_weights_loc(jr)*basis_vals(jr)
-    dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
-    dvel(:, 2) = 0.d0
-    dvel(:, 3) = dvel(:, 2) + vel_weights_loc(:, jr)*basis_grads(3, jr)
-    dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
-    dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
-    dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
+      n = n + n_weights_loc(jr)*basis_vals(jr)
+      vel = vel + vel_weights_loc(:, jr)*basis_vals(jr)
+      T = T + T_weights_loc(jr)*basis_vals(jr)
+      psi = psi + psi_weights_loc(jr)*basis_vals(jr)
+      by = by + by_weights_loc(jr)*basis_vals(jr)
+      dn = dn + n_weights_loc(jr)*basis_vals(jr)
+      dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
+      dvel(:, 2) = 0.d0
+      dvel(:, 3) = dvel(:, 2) + vel_weights_loc(:, jr)*basis_grads(3, jr)
+      dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
+      dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
+      dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
     END DO
     div_vel = dvel(1,1) + dvel(2,2) + dvel(3,3)
-    btmp = cross_product(dpsi, [0,1,0]) + by*[0,1,0]
+    btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0]
     !---Compute local matrix contributions
     DO jr=1,oft_blagrange%nce
       DO jc=1,oft_blagrange%nce
         ! Diffusion
         ! dx = jac_det*quad%wts(m)
-        ! delta_n=basis_vals(:, jc)
         jac_loc(1, 1)%m(jr,jc) = jac_loc(1, 1)%m(jr, jc) &
-        + basis_vals(jr)*basis_vals(:, jc)*jac_det*quad%wts(m) &
-        + self%dt*basis_vals(jr)*dn*DOT_PRODUCT(basis_grads(:, jc), div_vel)*jac_det*quad%wts(m) & !delta_n*div(u)
-        + self%dt*basis_vals(jr)*vel*basis_grads(:, jc)*jac_det*quad%wts(m) & ! u dot grad(delta_n)
+        + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
+        + self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), vel)*jac_det*quad%wts(m) & !delta_n*div(u)
+        + self%dt*basis_vals(jr)*basis_vals(jc)*div_vel*jac_det*quad%wts(m) & ! u dot grad(delta_n)
         + self%dt*D_diff*DOT_PRODUCT(basis_grads(:, jr),basis_grads(:, jc))*jac_det*quad%wts(m)
-        ! delta_u=basis_vals(:, jc)
-        jac_loc(1, 2)%m(jr,jc) = jac_loc(1, 2)%m(jr, jc) &
-        + basis_vals(:, jr)*self%dt*n*SUM(basis_grads(: jc))*jac_det*quad%wts(m) & ! n*div(delta_u) = n*SUM(basis_grads)?
-        + basis_vals(:, jr)*self%dt*DOT_PRODUCT(basis_vals(:, jc),dn) ! u dot grad(n)
+        jac_loc(1, 2:4)%m(jr,jc) = jac_loc(1, 2:4)%m(jr, jc) &
+        + basis_vals(jr)*self%dt*n*SUM(basis_grads(: jc))*jac_det*quad%wts(m) & ! n*div(delta_u) = n*SUM(basis_grads)?
+        + basis_vals(jr)*self%dt*basis_vals(jc)*SUM(dn)*jac_det*quad%wts(m) ! u dot grad(n)
         !--Momentum rows
         !--Momentum,density
         jac_loc(2:4,1)%m(jr,jc) = jac_loc(2:4,1)%m(jr,jc) &
-        + self%dt*basis_vals(jr)*2*k_boltz*basis_vals(jc)*dT*jac_det*quad%wts(m)/(n*m_i) &
-        + self%dt*basis_vals(jr)*2*k_boltz*T*basis_grads(:,jc)*jac_det*quad%wts(m)/(n*m_i) &
-        - self%dt*basis_vals(jr)*2*k_boltz*basis_vals(jc)*n*dT*jac_det*quad%wts(m)/(n**2*m_i) &
-        - self%dt*basis_vals(jr)*2*k_boltz*basis_vals(jc)*dn*T*jac_det*quad%wts(m)/(n**2*m_i) &
-        - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
-        - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
-        + self%dt*basis_vals(jr)*2*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**3*mu0) &
-        + self%dt*basis_vals(jc)*basis_grads(:,jr)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2*m_i*n**2*mu0) &
-        + self%dt*basis_vals(jr)*basis_grads(:,jc)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2*m_i*n**2*mu0) &
-        - self%dt*basis_vals(jr)*basis_vals(jc)*dn*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(m_i*n**3*mu0) &
+        + self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT*jac_det*quad%wts(m)/(n*m_i) &
+        + self%dt*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(:,jc)*jac_det*quad%wts(m)/(n*m_i) &
+        - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT*jac_det*quad%wts(m)/(n**2.d0*m_i) &
+        - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn*T*jac_det*quad%wts(m)/(n**2.d0*m_i) &
+        - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**2.d0*mu0) &
+        - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**2.d0*mu0) &
+        + self%dt*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp*jac_det*quad%wts(m)/(m_i*n**3.d0*mu0) &
+        + self%dt*basis_vals(jc)*basis_grads(:,jr)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*m_i*n**2.d0*mu0) &
+        + self%dt*basis_vals(jr)*basis_grads(:,jc)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*m_i*n**2.d0*mu0) &
+        - self%dt*basis_vals(jr)*basis_vals(jc)*dn*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(m_i*n**3.d0*mu0) &
         DO k=1,3
           jac_loc(k+1,1)%m(jr,jc) = jac_loc(k+1,1)%m(jr,jc) &
           - self%dt*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(:,k))*jac_det*quad%wts(m)/(m_i*n**2) & !-- not sure if indexing on dvel is right here
@@ -708,11 +706,11 @@ DO i=1,smesh%nc
       END DO
     END DO
   END DO
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%T_bc(cell_dofs),1)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%n_bc(cell_dofs),2)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%vel_bc(cell_dofs),2)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),2)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs),2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%n_bc(cell_dofs),1)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%vel_bc(cell_dofs), 2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%T_bc(cell_dofs),3)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),4)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs), 5)
   CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
 END DO
 !---Cleanup thread-local storage
@@ -768,7 +766,7 @@ subroutine mfnk_update(uin)
   IF(ASSOCIATED(oft_blagrange))CALL oft_abort("FE space already built","setup",__FILE__)
   
   !---Look for XML defintion elements
-  #ifdef HAVE_XML
+#ifdef HAVE_XML
   IF(ASSOCIATED(oft_env%xml))THEN
     CALL xml_get_element(oft_env%xml,"tdiff",self%xml_root,ierr)
     IF(ierr==0)THEN
@@ -779,7 +777,7 @@ subroutine mfnk_update(uin)
       NULLIFY(self%xml_root)
     END IF
   END IF
-  #endif
+#endif
   
   !---Setup FE representation
   IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
