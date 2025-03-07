@@ -1699,3 +1699,4 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
             raise TypeError('H-mode equilibrium solve did not converge')
     
     return flag, j_BS
+

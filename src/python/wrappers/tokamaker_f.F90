@@ -1055,3 +1055,4 @@ DO i=1,gs_global%ncoils
 END DO
 END SUBROUTINE tokamaker_set_coil_current_dist
 END MODULE tokamaker_f
+

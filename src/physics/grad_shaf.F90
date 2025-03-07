@@ -2000,7 +2000,7 @@ allocate(j_lag(oft_blagrange%nce))
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
-  call oft_blagrange%ncdofs(j,j_lag) !Load map onto j_lag
+  call oft_blagrange%ncdofs(j,j_lag)
 
   do m=1,oft_blagrange%quad%np
     call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
