@@ -41,7 +41,6 @@ def mp_run(target,args,timeout=30):
         print("Failed to get output")
         return None
     p.join()
-    print(test_result)
     return test_result
 
 

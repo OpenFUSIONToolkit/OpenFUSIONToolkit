@@ -1760,29 +1760,27 @@ allocate(rhs_loc(oft_blagrange%nce))
 allocate(rop(oft_blagrange%nce))
 allocate(j_lag(oft_blagrange%nce))
 !$omp do schedule(static,1)
-DO j=1,smesh%nc !For each cell
-  nturns=self%coil_nturns(smesh%reg(j),iCoil) !Read number of iCoil's turns associated with this cell
-  IF(ABS(nturns)<1.d-10)CYCLE !Only execute for nonzero turns
-  call oft_blagrange%ncdofs(j,j_lag) !Load weight indices for cell j into j_lag
+DO j=1,smesh%nc
+  nturns=self%coil_nturns(smesh%reg(j),iCoil)
+  IF(ABS(nturns)<1.d-10)CYCLE
+  call oft_blagrange%ncdofs(j,j_lag)
   rhs_loc=0.d0
-  do m=1,oft_blagrange%quad%np !For each point in the quad corresponding to cell j
-    call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v) !Writes to goptmp and v
-    det=v*oft_blagrange%quad%wts(m) !Multiply det of jacobian (volume) by quad point weight
-    DO l=1,oft_blagrange%nce !For each element in cell j
-      !Evaluate contribution from point m by lagrange interpolation, Write the value to rop(l)
+  do m=1,oft_blagrange%quad%np
+    call smesh%jacobian(j,oft_blagrange%quad%pts(:,m),goptmp,v)
+    det=v*oft_blagrange%quad%wts(m)
+    DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l)) 
     END DO
     !$omp simd
-    do l=1,oft_blagrange%nce !For each element in cell j
-      !Add the interpolated contribution, scaled by determinant and current distribution
+    do l=1,oft_blagrange%nce
       rhs_loc(l)=rhs_loc(l)+rop(l)*det*a(j_lag(l))
     end do
   end do
   !---Get local to global DOF mapping
-  do l=1,oft_blagrange%nce !For each element
-    m = j_lag(l) !Convert local index to global index (remember, j_lag is changed every cell)
+  do l=1,oft_blagrange%nce
+    m = j_lag(l)
     !$omp atomic
-    btmp(m)=btmp(m)+rhs_loc(l)*nturns !Add the field contribution due to this cell element to the global field
+    btmp(m)=btmp(m)+rhs_loc(l)*nturns
   end do
 
 END DO
