@@ -1738,11 +1738,11 @@ end subroutine gs_coil_source
 !---------------------------------------------------------------------------
 !> Calculates field contribution due to coil with non-uniform current distribution
 !---------------------------------------------------------------------------
-subroutine gs_coil_source_distributed(self,iCoil,b,a)
+subroutine gs_coil_source_distributed(self,iCoil,b,curr_dist)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< Coil current source
-REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Relative current density
+REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns
 real(8), allocatable :: rhs_loc(:),rop(:)
@@ -1773,7 +1773,7 @@ DO j=1,smesh%nc
     END DO
     !$omp simd
     do l=1,oft_blagrange%nce
-      rhs_loc(l)=rhs_loc(l)+rop(l)*det*a(j_lag(l))
+      rhs_loc(l)=rhs_loc(l)+rop(l)*det*curr_dist(j_lag(l))
     end do
   end do
   !---Get local to global DOF mapping
@@ -1975,11 +1975,11 @@ end subroutine gs_coil_mutual
 !---------------------------------------------------------------------------
 !> Compute inductance between a coil with non-uniform current distribution and given poloidal flux
 !---------------------------------------------------------------------------
-subroutine gs_coil_mutual_distributed(self, iCoil, b, a, mutual)
+subroutine gs_coil_mutual_distributed(self, iCoil, b, curr_dist, mutual)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
-REAL(8), POINTER, DIMENSION(:), intent(in) :: a !< Relative current density
+REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns,j_phi
@@ -2010,7 +2010,7 @@ DO j=1,smesh%nc
     DO l=1,oft_blagrange%nce
       CALL oft_blag_eval(oft_blagrange,j,l,oft_blagrange%quad%pts(:,m),rop(l))
       psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
-      j_phi=j_phi+a(j_lag(l))*rop(l)
+      j_phi=j_phi+curr_dist(j_lag(l))*rop(l)
     END DO
     mutual = mutual + psi_tmp*det*nturns*j_phi
   end do

@@ -1423,19 +1423,19 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_coil_current_dist(self,iCoil,a):
+    def set_coil_current_dist(self,iCoil,curr_dist):
         '''! Overwrite coil with non-uniform current distribution.
 
         @param iCoil Coil index
-        @param a Relative current density
+        @param curr_dist Relative current density
         '''
-        if curr_vals.shape[0] != self.np:
+        if curr_dist.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi0", should be [np]')
         if iCoil <= 0:
             raise IndexError("iCoil must be between 1 and ncoils")
-        self.dist_coils[iCoil] = a
-        a = numpy.ascontiguousarray(a, dtype=numpy.float64)
-        tokamaker_set_coil_current_dist(c_int(iCoil),a)
+        self.dist_coils[iCoil] = curr_dist
+        curr_dist = numpy.ascontiguousarray(curr_dist, dtype=numpy.float64)
+        tokamaker_set_coil_current_dist(c_int(iCoil),curr_dist)
 
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures

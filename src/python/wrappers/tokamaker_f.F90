@@ -1027,13 +1027,13 @@ END SUBROUTINE tokamaker_save_eqdsk
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !---------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_current_dist(iCoil,curr_vals) BIND(C,NAME="tokamaker_set_coil_current_dist")
+SUBROUTINE tokamaker_set_coil_current_dist(iCoil,curr_dist) BIND(C,NAME="tokamaker_set_coil_current_dist")
 INTEGER(c_int), VALUE, INTENT(in) :: iCoil
-TYPE(c_ptr), VALUE, INTENT(in) :: curr_vals
+TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
 class(oft_vector), pointer :: tmp_vec
-CALL c_f_pointer(curr_vals, vals_tmp, [gs_global%psi%n]) ! Maps curr_vals from C into fortran array
+CALL c_f_pointer(curr_dist, vals_tmp, [gs_global%psi%n])
 ! Update coil flux to overwrite old uniform distribution
 NULLIFY(tmp_vec)
 call gs_global%psi%new(tmp_vec)
