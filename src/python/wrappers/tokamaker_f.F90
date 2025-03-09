@@ -27,7 +27,8 @@ USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
-  gs_plasma_mutual, gs_source, gs_err_reason
+  gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
+  gs_coil_mutual, gs_coil_mutual_distributed
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
@@ -1043,4 +1044,35 @@ ELSE
 END IF
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_eqdsk
+!---------------------------------------------------------------------------
+!> Overwrites default coil flux contribution to non-uniform current distribution
+!---------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_coil_current_dist(iCoil,curr_dist) BIND(C,NAME="tokamaker_set_coil_current_dist")
+INTEGER(c_int), VALUE, INTENT(in) :: iCoil
+TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+INTEGER(4) :: i
+class(oft_vector), pointer :: tmp_vec
+CALL c_f_pointer(curr_dist, vals_tmp, [gs_global%psi%n])
+! Update coil flux to overwrite old uniform distribution
+NULLIFY(tmp_vec)
+call gs_global%psi%new(tmp_vec)
+
+CALL gs_coil_source_distributed(gs_global,iCoil,tmp_vec,vals_tmp)
+
+CALL gs_global%zerob_bc%apply(tmp_vec)
+CALL gs_vacuum_solve(gs_global,gs_global%psi_coil(iCoil)%f,tmp_vec)
+! Update coil mutual inductances
+DO i=1,gs_global%ncoils
+  CALL gs_coil_mutual(gs_global,i,gs_global%psi_coil(iCoil)%f,gs_global%Lcoils(i,iCoil))
+  gs_global%Lcoils(iCoil,i)=gs_global%Lcoils(i,iCoil)
+  IF(i==iCoil)THEN
+    CALL gs_coil_mutual_distributed(gs_global,i,gs_global%psi_coil(iCoil)%f,vals_tmp,gs_global%Lcoils(i,iCoil))
+  ELSE
+    CALL gs_coil_mutual(gs_global,i,gs_global%psi_coil(iCoil)%f,gs_global%Lcoils(i,iCoil))
+    gs_global%Lcoils(iCoil,i)=gs_global%Lcoils(i,iCoil)
+  END IF
+END DO
+END SUBROUTINE tokamaker_set_coil_current_dist
 END MODULE tokamaker_f
+

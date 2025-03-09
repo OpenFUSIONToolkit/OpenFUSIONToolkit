@@ -244,13 +244,15 @@ READ(io_unit,runtime_options,IOSTAT=ierr)
 CLOSE(io_unit)
 IF(ierr<0)CALL oft_abort('No runtime options found in input file.','oft_init',__FILE__)
 IF(ierr>0)CALL oft_abort('Error parsing runtime options.','oft_init',__FILE__)
-!---Seed pRNG if test run for repeatability
+!---Seed pRNG if test run for repeatability (does not work on < GCC 9)
+#if !defined(__GNUC__) || (__GNUC__ > 9)
 IF(test_run)THEN
   CALL random_seed(size=nargs)
   IF(nargs>SIZE(oft_test_seed))CALL oft_abort('pRNG seed size exceeds built in values', &
     'oft_init',__FILE__)
   CALL random_seed(put=oft_test_seed)
 END IF
+#endif
 !---Initialize PETSc or exit if requested but not available
 IF(use_petsc)THEN
 #ifdef HAVE_PETSC

@@ -204,6 +204,9 @@ tokamaker_get_limiter = ctypes_subroutine(oftpy_lib.tokamaker_get_limiter, #(np,
 tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk, #(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,lcfs_press,error_str)
     [c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p,
      c_double, c_double, c_bool, c_char_p, c_double, c_char_p])
+
+tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,
+    [c_int, ctypes_numpy_array(numpy.float64,1)])
 ## @endcond
 
 
@@ -239,3 +242,4 @@ class TokaMaker_field_interpolator():
         pt_eval[:2] = pt
         tokamaker_apply_field_eval(self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
         return self.val
+
