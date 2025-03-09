@@ -2128,7 +2128,7 @@ IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
-IF(minlev<1)CALL oft_abort('Minimum level is < 0','lag_getlop_pre',__FILE__)
+IF(minlev<ML_lag_rep%minlev)CALL oft_abort('Minimum level is < minlev','lag_getlop_pre',__FILE__)
 IF(toplev>ML_lag_rep%nlevels)CALL oft_abort('Maximum level is > lag_nlevels','lag_getlop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices

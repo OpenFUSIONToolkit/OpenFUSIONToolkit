@@ -1657,7 +1657,7 @@ IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
-IF(minlev<1)CALL oft_abort('Minimum level is < 0','hcurl_getwop_pre',__FILE__)
+IF(minlev<ML_hcurl_rep%minlev)CALL oft_abort('Minimum level is < minlev','hcurl_getwop_pre',__FILE__)
 IF(toplev>ML_hcurl_rep%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getwop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
@@ -1751,7 +1751,7 @@ IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
-IF(minlev<1)CALL oft_abort('Minimum level is < 0','hcurl_getjmlb_pre',__FILE__)
+IF(minlev<ML_hcurl_rep%minlev)CALL oft_abort('Minimum level is < minlev','hcurl_getjmlb_pre',__FILE__)
 IF(toplev>ML_hcurl_rep%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getjmlb_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices

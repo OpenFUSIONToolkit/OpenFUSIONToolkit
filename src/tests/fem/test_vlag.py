@@ -72,9 +72,13 @@ def single_level(nlevels,order,exp_error=1.,grid_type=1,mpi=False,petsc_flag='F'
     assert vec_lagrange_setup(nbase, nlev, order, grid_type, petsc_flag=petsc_flag)
     assert validate_result(exp_error)
 # Multi-level test function
-df_string='1.,1.,1.,.826,.645,.491'
-nu_string='10,64,8,4,2,1'
 def multi_level(nlevels,order,exp_error,grid_type=1,petsc_flag='F'):
+    if grid_type==1:
+        df_string='1.0, 1.0, 1.0, 0.82, 0.64, 0.49'
+        nu_string='0, 64, 8, 4, 2, 1'
+    else:
+        df_string='0.0, 0.0, 1.48, 1.40, 0.78, 0.40'
+        nu_string='0, 0, 32, 4, 2, 1'
     assert vec_lagrange_setup(nlevels, nlevels, order, grid_type, mg='T', df=df_string, nu=nu_string, petsc_flag=petsc_flag)
     assert validate_result(exp_error)
 
@@ -153,9 +157,9 @@ def test_hex_r2_p2(petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p2(mpi, petsc_flag):
     single_level(3, 2, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
-# @pytest.mark.parametrize("petsc_flag", ('F','T'))
-# def test_hex_r3_p2_mg(petsc_flag):
-#     multi_level(3, 2, grid_type=2, 3.*(0.63752436752392194), petsc_flag=petsc_flag)
+@pytest.mark.parametrize("petsc_flag", ('F','T'))
+def test_hex_r3_p2_mg(petsc_flag):
+    multi_level(3, 2, 3.*(0.31784865062629630), grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=3
@@ -166,9 +170,9 @@ def test_hex_r2_p3(petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p3(mpi, petsc_flag):
     single_level(3, 3, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
-# @pytest.mark.parametrize("petsc_flag", ('F','T'))
-# def test_hex_r3_p3_mg(petsc_flag):
-#     multi_level(3, 3, grid_type=2, 3.*(2.1575632982055652), petsc_flag=petsc_flag)
+@pytest.mark.parametrize("petsc_flag", ('F','T'))
+def test_hex_r3_p3_mg(petsc_flag):
+    multi_level(3, 3, 3.*(1.0791049645224631), grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=4
@@ -180,6 +184,6 @@ def test_hex_r2_p4(petsc_flag):
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p4(mpi, petsc_flag):
     single_level(3, 4, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
-# @pytest.mark.parametrize("petsc_flag", ('F','T'))
-# def test_hex_r3_p4_mg(petsc_flag):
-#     multi_level(3, 4, grid_type=2, 3.*(5.1147216970434615), petsc_flag=petsc_flag)
+@pytest.mark.parametrize("petsc_flag", ('F','T'))
+def test_hex_r3_p4_mg(petsc_flag):
+    multi_level(3, 4, 3.*(2.5568335937210307), grid_type=2, petsc_flag=petsc_flag)

@@ -36,7 +36,7 @@ USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 USE oft_hcurl_grad_operators, ONLY: hcurl_grad_getmop, hcurl_grad_setup_interp, hcurl_grad_getmop_pre, hcurl_grad_mloptions, &
   oft_hcurl_grad_rinterp, oft_hcurl_grad_gzerop
 IMPLICIT NONE
-INTEGER(i4) :: order,ierr,io_unit
+INTEGER(i4) :: order,ierr,io_unit,minlev
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
@@ -56,14 +56,16 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
+minlev=1
+IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgdim
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1)
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=minlev)
 IF(mg_test)CALL h1_setup_interp(ML_oft_h1)
 !--- H(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=minlev)
 IF(mg_test)CALL hcurl_setup_interp(ML_oft_hcurl)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad)
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,minlev=minlev)
 hcurl_grad_gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
 IF(mg_test)THEN
   CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1,create_full=.TRUE.)
@@ -128,7 +130,8 @@ END SUBROUTINE test_mop
 !------------------------------------------------------------------------------
 SUBROUTINE test_mopmg
 !---Create solver objects
-TYPE(oft_native_gmres_solver) :: winv
+! TYPE(oft_native_gmres_solver) :: winv
+CLASS(oft_solver), POINTER :: winv => NULL()
 CLASS(oft_solver), POINTER :: pre
 TYPE(oft_matrix_ptr), POINTER :: mats(:) => NULL()
 !---Local variables
@@ -145,13 +148,17 @@ CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
 CALL ML_hcurl_grad%vec_create(u)
 CALL ML_hcurl_grad%vec_create(v)
 !---Setup matrix solver
-nlevels=ML_hcurl_grad%nlevels-1
+nlevels=ML_hcurl_grad%nlevels-ML_hcurl_grad%minlev
+CALL create_cg_solver(winv)
 CALL hcurl_grad_getmop_pre(ML_hcurl_grad,winv%pre,mats,nlevels=nlevels)
 mop=>mats(nlevels)%M
 winv%A=>mop
-winv%nrits=20
 winv%its=-3
-winv%rtol=1.d-9
+winv%rtol=1.d-10
+! winv%A=>mop
+! winv%nrits=20
+! winv%its=-3
+! winv%rtol=1.d-9
 !---Solve
 CALL u%set(1.d0)
 CALL hcurl_grad_gzerop%apply(u)

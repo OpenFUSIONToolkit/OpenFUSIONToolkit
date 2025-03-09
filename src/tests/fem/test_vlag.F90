@@ -29,8 +29,7 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_la_utils, ONLY: create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre
 IMPLICIT NONE
-INTEGER(i4), PARAMETER :: minlev=2
-INTEGER(i4) :: order,ierr,io_unit
+INTEGER(i4) :: order,ierr,io_unit,minlev
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
@@ -47,6 +46,8 @@ CLOSE(io_unit)
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
+minlev=2
+IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=minlev)
 vlag_zerob%ML_vlag_rep=>ML_oft_vlagrange
 IF(mg_test)THEN

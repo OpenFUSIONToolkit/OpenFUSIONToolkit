@@ -78,11 +78,11 @@ def single_level(nlevels,order,exp_its,exp_error,grid_type=1,mpi=False, petsc_fl
 # Multi-level test function
 def multi_level(nlevels,order,exp_its,exp_error,grid_type=1, petsc_flag='F'):
     if grid_type==1:
-        df_string='0.,.65,.65,.374,.323,.295'
-        nu_string='0,64,8,4,2,1'
+        df_string='0.0, 0.65, 0.65, 0.37, 0.32, 0.29'
+        nu_string='0, 64, 8, 4, 2, 1'
     else:
-        df_string='0.,0.,0.74,0.56,0.56,0.56'
-        nu_string='0,0,8,2,2,2,2'
+        df_string='0.0, 0.0, 0.74, 0.56, 0.56, 0.56'
+        nu_string='0, 0, 32, 8, 4, 2, 1'
     assert hcurl_setup(nlevels, nlevels, order, grid_type, mg='T', df=df_string, nu=nu_string, petsc_flag=petsc_flag)
     assert validate_result(exp_its, exp_error)
 
@@ -163,7 +163,7 @@ def test_hex_r3_p2(mpi, petsc_flag):
     single_level(3, 2, 72, 2.4107779811264456E-005, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p2_mg(petsc_flag):
-    multi_level(3, 2, 30, 2.4107779811264456E-005, grid_type=2, petsc_flag=petsc_flag)
+    multi_level(3, 2, 14, 2.4107779811264456E-005, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=3
@@ -176,7 +176,7 @@ def test_hex_r3_p3(mpi, petsc_flag):
     single_level(3, 3, 111, -1.1574898861854135E-004, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p3_mg(petsc_flag):
-    multi_level(3, 3, 43, -1.1574898861854135E-004, grid_type=2, petsc_flag=petsc_flag)
+    multi_level(3, 3, 30, -1.1574898861854135E-004, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=4
@@ -190,4 +190,4 @@ def test_hex_r3_p4(mpi, petsc_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p4_mg(petsc_flag):
-    multi_level(3, 4, 65, -1.6139281906695047E-004, grid_type=2, petsc_flag=petsc_flag)
+    multi_level(3, 4, 64, -1.6139281906695047E-004, grid_type=2, petsc_flag=petsc_flag)

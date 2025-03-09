@@ -52,8 +52,8 @@ def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg='F', df='', nu='', pet
 def validate_result(iteration_count,converged_error):
     fid = open('hcurl_grad.results','r')
     its_test = int(fid.readline())
-    if iteration_count != None:
-        if abs(iteration_count-its_test) >= max(2,.05*iteration_count):
+    if iteration_count is not None:
+        if abs(iteration_count-its_test) >= max(2,0.05*iteration_count):
             print("FAILED: Iteration count incorrect!")
             print("  Expected = {0}".format(iteration_count))
             print("  Actual =   {0}".format(its_test))
@@ -77,118 +77,118 @@ def single_level(nlevels,order,exp_its,exp_error,grid_type=1,mpi=False,petsc_fla
     assert hcurl_grad_setup(nbase, nlev, order, grid_type, petsc_flag=petsc_flag)
     assert validate_result(exp_its, exp_error)
 # Multi-level test function
-df_string='0.,.39,.36,.217,.172,.142'
-nu_string='0,80,16,8,4,2'
 def multi_level(nlevels,order,exp_its,exp_error,grid_type=1,petsc_flag='F'):
+    if grid_type == 1:
+        df_string='0.0, 0.39, 0.36, 0.217, 0.172, 0.142'
+        nu_string='0, 80, 16, 8, 4, 2'
+    else:
+        df_string='0.000, 0.000, 0.41, 0.25, 0.24, 0.21'
+        nu_string='0, 0, 40, 8, 4, 2'
     assert hcurl_grad_setup(nlevels, nlevels, order, grid_type, mg='T', df=df_string, nu=nu_string, petsc_flag=petsc_flag)
     assert validate_result(exp_its, exp_error)
 
 #============================================================================
 # Test runners for NP=1
-iteration_count = None
-converged_error = 1.
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p1(petsc_flag):
-    single_level(2, 1, iteration_count, converged_error, petsc_flag=petsc_flag)
+    single_level(2, 1, 57, 1.0, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p1(mpi, petsc_flag):
-    single_level(3, 1, iteration_count, converged_error, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 1, 61, 1.0, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p1_mg(petsc_flag):
-    multi_level(3, 1, iteration_count, converged_error, petsc_flag=petsc_flag)
+    multi_level(3, 1, 9, 1.0, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=2
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p2(petsc_flag):
-    single_level(2, 2, iteration_count, converged_error, petsc_flag=petsc_flag)
+    single_level(2, 2, 167, 1.0, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p2(mpi, petsc_flag):
-    single_level(3, 2, iteration_count, converged_error, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 2, 181, 1.0, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p2_mg(petsc_flag):
-    multi_level(3, 2, iteration_count, converged_error, petsc_flag=petsc_flag)
+    multi_level(3, 2, 29, 1.0, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=3
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p3(petsc_flag):
-    single_level(2, 3, iteration_count, converged_error, petsc_flag=petsc_flag)
+    single_level(2, 3, 361, 1.0, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p3(mpi, petsc_flag):
-    single_level(3, 3, iteration_count, converged_error, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 3, 379, 1.0, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p3_mg(petsc_flag):
-    multi_level(3, 3, iteration_count, converged_error, petsc_flag=petsc_flag)
+    multi_level(3, 3, 64, 1.0, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=4
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r2_p4(petsc_flag):
-    single_level(2, 4, iteration_count, converged_error, petsc_flag=petsc_flag)
+    single_level(2, 4, 712, 1.0, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p4(mpi, petsc_flag):
-    single_level(3, 4, iteration_count, converged_error, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 4, 743, 1.0, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_r3_p4_mg(petsc_flag):
-    multi_level(3, 4, iteration_count, converged_error, petsc_flag=petsc_flag)
+    multi_level(3, 4, 156, 1.0, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=1
-iteration_count = None
-converged_error = 1.
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r2_p1(petsc_flag):
-    single_level(2, 1, iteration_count, converged_error, grid_type=2, petsc_flag=petsc_flag)
+    single_level(2, 1, 7, 1.0, grid_type=2, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p1(mpi, petsc_flag):
-    single_level(3, 1, iteration_count, converged_error, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 1, 8, 1.0, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
 # @pytest.mark.parametrize("petsc_flag", ('F','T'))
 # def test_hex_r3_p1_mg(petsc_flag):
-#     multi_level(3, 1, iteration_count, converged_error, grid_type=2, petsc_flag=petsc_flag)
+#     multi_level(3, 1, 1, 1.0, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=2
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r2_p2(petsc_flag):
-    single_level(2, 2, iteration_count, converged_error, grid_type=2, petsc_flag=petsc_flag)
+    single_level(2, 2, 192, 1.0, grid_type=2, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p2(mpi, petsc_flag):
-    single_level(3, 2, iteration_count, converged_error, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
-# @pytest.mark.parametrize("petsc_flag", ('F','T'))
-# def test_hex_r3_p2_mg(petsc_flag):
-#     multi_level(3, 2, iteration_count, converged_error, grid_type=2, petsc_flag=petsc_flag)
+    single_level(3, 2, 278, 1.0, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
+@pytest.mark.parametrize("petsc_flag", ('F','T'))
+def test_hex_r3_p2_mg(petsc_flag):
+    multi_level(3, 2, 55, 1.0, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=3
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r2_p3(petsc_flag):
-    single_level(2, 3, iteration_count, converged_error, grid_type=2, petsc_flag=petsc_flag)
+    single_level(2, 3, 456, 1.0, grid_type=2, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p3(mpi, petsc_flag):
-    single_level(3, 3, iteration_count, converged_error, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
-# @pytest.mark.parametrize("petsc_flag", ('F','T'))
-# def test_r3_p3_mg(petsc_flag):
-#     multi_level(3, 3, iteration_count, converged_error, grid_type=2, petsc_flag=petsc_flag)
+    single_level(3, 3, 580, 1.0, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
+@pytest.mark.parametrize("petsc_flag", ('F','T'))
+def test_hex_r3_p3_mg(petsc_flag):
+    multi_level(3, 3, 122, 1.0, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=4
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r2_p4(petsc_flag):
-    single_level(2, 4, iteration_count, converged_error, grid_type=2, petsc_flag=petsc_flag)
+    single_level(2, 4, 903, 1.0, grid_type=2, petsc_flag=petsc_flag)
 @pytest.mark.coverage
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p4(mpi, petsc_flag):
-    single_level(3, 4, iteration_count, converged_error, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
-# @pytest.mark.parametrize("petsc_flag", ('F','T'))
-# def test_hex_r3_p4_mg(petsc_flag):
-#     multi_level(3, 4, iteration_count, converged_error, grid_type=2, petsc_flag=petsc_flag)
+    single_level(3, 4, 1035, 1.0, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
+@pytest.mark.parametrize("petsc_flag", ('F','T'))
+def test_hex_r3_p4_mg(petsc_flag):
+    multi_level(3, 4, 248, 1.0, grid_type=2, petsc_flag=petsc_flag)

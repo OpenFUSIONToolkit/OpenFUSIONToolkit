@@ -1902,7 +1902,7 @@ IF(PRESENT(level))toplev=level
 IF(PRESENT(nlevels))minlev=toplev-nlevels+1
 nl=toplev-minlev+1
 !---
-IF(minlev<1)CALL oft_abort('Minimum level is < 0','hcurl_grad_getmop_pre',__FILE__)
+IF(minlev<ML_hcurl_aug_obj%minlev)CALL oft_abort('Minimum level is < minlev','hcurl_grad_getmop_pre',__FILE__)
 IF(toplev>ML_hcurl_aug_obj%nlevels)CALL oft_abort('Maximum level is > nlevels','hcurl_grad_getmop_pre',__FILE__)
 !---------------------------------------------------------------------------
 ! Create ML Matrices
