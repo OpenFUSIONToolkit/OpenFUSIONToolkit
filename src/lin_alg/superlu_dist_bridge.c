@@ -70,8 +70,6 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 				double *values, int_t *colind, int_t *rowptr,
 				double *b, int ldb, gridinfo_t **grid_handle,
 				factors_dist_t **f_factors, int perm_spec, bool iter_refine, int *info)
-
-{
 /*
  * Purpose
  * =======
@@ -116,6 +114,7 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
  * info (output) int
  *
  */
+{
 	superlu_dist_options_t options;
 	SuperLUStat_t stat;
 	SuperMatrix A;
@@ -128,7 +127,6 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 #endif
 	gridinfo_t *grid;
 	factors_dist_t *LUfactors;
-	double *berr;
 
 	/* Locate the process grid. */
 	grid = *grid_handle;
@@ -222,6 +220,7 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 		PStatInit(&stat);
 
 		/* Call global routine with nrhs=0 to perform the factorization. */
+		double *berr = NULL;
 		pdgssvx_ABglobal(&options, &A, ScalePermstruct, NULL, ldb, 0,
 						grid, LUstruct, berr, &stat, info);
 
@@ -260,7 +259,7 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 		//
 		options.Fact = FACTORED;
 
-		berr = (double *) malloc(nrhs * sizeof(double));
+		double *berr = (double *) malloc(nrhs * sizeof(double));
 
 		/* Solve the system A*X=B, overwriting B with X. */
 		pdgssvx_ABglobal(&options, &A, ScalePermstruct, b, ldb, nrhs,

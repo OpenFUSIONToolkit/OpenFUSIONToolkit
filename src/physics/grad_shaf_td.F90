@@ -12,7 +12,7 @@
 MODULE oft_gs_td
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array
-USE oft_mesh_type, ONLY: smesh, bmesh_findcell
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
 USE oft_quadrature, ONLY: oft_quad_type
 USE oft_gauss_quadrature, ONLY: set_quad_1d
@@ -28,11 +28,12 @@ USE oft_lu, ONLY: oft_lusolver
 USE oft_arpack, ONLY: oft_iram_eigsolver
 #endif
 USE fem_utils, ONLY: bfem_map_flag
-USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_geval, oft_blag_eval, oft_blag_npos
-USE oft_blag_operators, ONLY: blag_zerob, oft_lag_brinterp
+USE oft_lag_basis, ONLY: oft_blag_geval, oft_blag_eval, oft_blag_npos, &
+  oft_scalar_bfem
+USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE axi_green, ONLY: green, grad_green
 USE oft_gs, ONLY: gs_epsilon, flux_func, gs_eq, gs_update_bounds, &
-    gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, gs_zerob, build_dels
+    gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, build_dels
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
 #include "local.h"
@@ -151,16 +152,16 @@ CALL self%mfop%setup(eq_in)
 !---------------------------------------------------------------------------
 NULLIFY(vals_out)
 self%psi_sol=>self%mfop%gs_eq%psi
-call oft_blagrange%vec_create(self%rhs)
-call oft_blagrange%vec_create(self%psi_tmp)
-call oft_blagrange%vec_create(self%tmp_vec)
+call eq_in%fe_rep%vec_create(self%rhs)
+call eq_in%fe_rep%vec_create(self%psi_tmp)
+call eq_in%fe_rep%vec_create(self%tmp_vec)
 !---------------------------------------------------------------------------
 ! Create extrapolation fields (Unused)
 !---------------------------------------------------------------------------
 IF(maxextrap>0)THEN
     ALLOCATE(self%extrap_fields(maxextrap),self%extrapt(maxextrap))
     DO i=1,maxextrap
-        CALL oft_blagrange%vec_create(self%extrap_fields(i)%f)
+        CALL eq_in%fe_rep%vec_create(self%extrap_fields(i)%f)
         self%extrapt(i)=0.d0
     END DO
     self%nextrap=0
@@ -279,7 +280,7 @@ END IF
 !
 CALL self%psi_tmp%add(0.d0,1.d0,self%psi_sol)
 CALL apply_rhs(self%mfop,self%psi_sol,self%rhs)
-CALL blag_zerob(self%rhs)
+CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
 ! ! Extrapolate solution (linear)
 ! DO j=maxextrap,2,-1
 !   CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
@@ -299,7 +300,7 @@ DO j=1,4
         IF(ASSOCIATED(self%adv_op))CALL build_jop(self%mfop,self%adv_op,self%psi_sol)
         CALL self%vac_pre%update(.TRUE.)
         CALL apply_rhs(self%mfop,self%psi_sol,self%rhs)
-        CALL blag_zerob(self%rhs)
+        CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
         CYCLE
     ELSE
         EXIT
@@ -362,7 +363,7 @@ arsolver%A=>wrap_mat
 arsolver%tol=1.E-8_r8
 arsolver%nev=neigs
 arsolver%which='LM'
-CALL oft_blagrange%vec_create(eig_vec)
+CALL eq_in%fe_rep%vec_create(eig_vec)
 CALL arsolver%apply(eig_vec,lam0)
 
 IF(arsolver%info>=0)THEN
@@ -411,7 +412,11 @@ real(8) :: max_tmp,lim_tmp
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),vals_loc(:),reg_source(:)
 real(r8), pointer, dimension(:) :: pol_vals,rhs_vals
 logical :: curved
+CLASS(oft_bmesh), POINTER :: mesh
+CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+mesh=>self%gs_eq%mesh
+lag_rep=>self%gs_eq%fe_rep
 !---------------------------------------------------------------------------
 ! Get local vector values
 !---------------------------------------------------------------------------
@@ -420,10 +425,10 @@ CALL a%get_local(pol_vals)
 CALL b%set(0.d0)
 CALL b%get_local(rhs_vals)
 !
-ALLOCATE(reg_source(smesh%nreg))
+ALLOCATE(reg_source(mesh%nreg))
 reg_source=0.d0
 IF(ASSOCIATED(self%gs_eq%region_info%nonaxi_vals))THEN
-    DO i=1,smesh%nreg
+    DO i=1,mesh%nreg
         IF(self%gs_eq%region_info%reg_map(i)==0)CYCLE
         reg_source(i)=DOT_PRODUCT(pol_vals,self%gs_eq%region_info%nonaxi_vals(:,i))
     END DO
@@ -432,44 +437,44 @@ END IF
 ! Operator integration
 !---------------------------------------------------------------------------
 !$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt,eta_tmp,psi_tmp,eta_source)
-allocate(j(oft_blagrange%nce),vals_loc(oft_blagrange%nce)) ! Local DOF and matrix indices
-allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
+allocate(j(lag_rep%nce),vals_loc(lag_rep%nce)) ! Local DOF and matrix indices
+allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
 !$omp do schedule(static,1)
-do i=1,oft_blagrange%mesh%nc
-    IF(smesh%reg(i)==1)CYCLE
+do i=1,mesh%nc
+    IF(mesh%reg(i)==1)CYCLE
     !---Get local to global DOF mapping
-    call oft_blagrange%ncdofs(i,j)
+    call lag_rep%ncdofs(i,j)
     !---Get local reconstructed operators
     vals_loc=0.d0
-    do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-        call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-        det=vol*oft_blagrange%quad%wts(m)
-        pt=oft_blagrange%mesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+    do m=1,lag_rep%quad%np ! Loop over quadrature points
+        call mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+        det=vol*lag_rep%quad%wts(m)
+        pt=mesh%log2phys(i,lag_rep%quad%pts(:,m))
         psi_tmp=0.d0
-        do jr=1,oft_blagrange%nce ! Loop over degrees of freedom
-            call oft_blag_eval(oft_blagrange,i,jr,oft_blagrange%quad%pts(:,m),rop(jr))
+        do jr=1,lag_rep%nce ! Loop over degrees of freedom
+            call oft_blag_eval(lag_rep,i,jr,lag_rep%quad%pts(:,m),rop(jr))
             psi_tmp = psi_tmp + pol_vals(j(jr))*rop(jr)
         end do
         eta_source=0.d0
-        eta_tmp=self%eta_reg(smesh%reg(i))
+        eta_tmp=self%eta_reg(mesh%reg(i))
         IF(eta_tmp>0.d0)THEN
-            eta_source=(psi_tmp/eta_tmp/(pt(1)+gs_epsilon) + reg_source(smesh%reg(i)))*det
+            eta_source=(psi_tmp/eta_tmp/(pt(1)+gs_epsilon) + reg_source(mesh%reg(i)))*det
         ELSE
-            eta_source=self%dt*self%curr_reg(smesh%reg(i))*det
+            eta_source=self%dt*self%curr_reg(mesh%reg(i))*det
         END IF
-        do jr=1,oft_blagrange%nce
+        do jr=1,lag_rep%nce
             vals_loc(jr) = vals_loc(jr) + rop(jr)*eta_source
         end do
     end do
-    do jr=1,oft_blagrange%nce
+    do jr=1,lag_rep%nce
         !$omp atomic
         rhs_vals(j(jr)) = rhs_vals(j(jr)) + vals_loc(jr)
     end do
 end do
 deallocate(j,vals_loc,rop,gop)
 !$omp end parallel
-DO i=1,oft_blagrange%nbe
-    rhs_vals(oft_blagrange%lbe(i))=pol_vals(oft_blagrange%lbe(i))
+DO i=1,lag_rep%nbe
+    rhs_vals(lag_rep%lbe(i))=pol_vals(lag_rep%lbe(i))
 END DO
 CALL b%restore_local(rhs_vals,add=.TRUE.)
 DEALLOCATE(pol_vals,rhs_vals,reg_source)
@@ -527,7 +532,7 @@ end subroutine apply_rhs
 ! allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
 ! !$omp do schedule(static,1)
 ! do i=1,oft_blagrange%mesh%nc
-!     IF(smesh%reg(i)/=1)CYCLE
+!     IF(oft_blagrange%mesh%reg(i)/=1)CYCLE
 !     !---Get local to global DOF mapping
 !     call oft_blagrange%ncdofs(i,j)
 !     !---Get local reconstructed operators
@@ -542,7 +547,7 @@ end subroutine apply_rhs
 !         psi_tmp = psi_tmp + pol_vals(j(jr))*rop(jr)
 !     end do
 !     !---Compute local matrix contributions
-!     ! IF(smesh%reg(i)==1.AND.psi_tmp>psi_lim)THEN
+!     ! IF(oft_blagrange%mesh%reg(i)==1.AND.psi_tmp>psi_lim)THEN
 !     ! IF(self%allow_xpoints)THEN
 !         in_bounds=gs_test_bounds(self%gs_eq,pt).AND.(psi_tmp>self%gs_eq%plasma_bounds(1))
 !     ! ELSE
@@ -611,13 +616,13 @@ self%p_scale=self%gs_eq%pnorm
 self%F=>self%gs_eq%I
 self%P=>self%gs_eq%P
 !
-ALLOCATE(self%eta_reg(smesh%nreg))
+ALLOCATE(self%eta_reg(eq_in%mesh%nreg))
 self%eta_reg=-1.d0
 DO i=1,self%gs_eq%ncond_regs
     j=self%gs_eq%cond_regions(i)%id
     self%eta_reg(j)=self%gs_eq%cond_regions(i)%eta
 END DO
-ALLOCATE(self%curr_reg(smesh%nreg))
+ALLOCATE(self%curr_reg(eq_in%mesh%nreg))
 self%curr_reg=0.d0
 DO i=1,self%gs_eq%ncoils
     DO k=1,self%gs_eq%ncoil_regs
@@ -698,7 +703,11 @@ class(oft_vector), pointer :: ptmp
 type(oft_lag_brinterp) :: psi_interp
 logical :: curved,in_bounds
 type(oft_timer) :: mytimer
+CLASS(oft_bmesh), POINTER :: mesh
+CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+mesh=>self%gs_eq%mesh
+lag_rep=>self%gs_eq%fe_rep
 CALL mytimer%tick()
 !---------------------------------------------------------------------------
 ! Get local vector values
@@ -723,24 +732,24 @@ diag=0.d0
 !$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt, &
 !$omp psi_tmp,dpsi_tmp,p_source,f_source,eta_source,in_bounds) &
 !$omp reduction(+:diag)
-allocate(j(oft_blagrange%nce),vals_loc(oft_blagrange%nce,2)) ! Local DOF and matrix indices
-allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
+allocate(j(lag_rep%nce),vals_loc(lag_rep%nce,2)) ! Local DOF and matrix indices
+allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
 !$omp do schedule(static,1)
 !ordered
-do i=1,oft_blagrange%mesh%nc
-    IF(smesh%reg(i)/=1)CYCLE
+do i=1,mesh%nc
+    IF(mesh%reg(i)/=1)CYCLE
     !---Get local to global DOF mapping
-    call oft_blagrange%ncdofs(i,j)
+    call lag_rep%ncdofs(i,j)
     !---Get local reconstructed operators
     vals_loc=0.d0
-    do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-        call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-        det=vol*oft_blagrange%quad%wts(m)
-        pt=oft_blagrange%mesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+    do m=1,lag_rep%quad%np ! Loop over quadrature points
+        call mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+        det=vol*lag_rep%quad%wts(m)
+        pt=mesh%log2phys(i,lag_rep%quad%pts(:,m))
         IF(.NOT.gs_test_bounds(self%gs_eq,pt))CYCLE
         psi_tmp=0.d0!; dpsi_tmp=0.d0
-        do jr=1,oft_blagrange%nce ! Loop over degrees of freedom
-            call oft_blag_eval(oft_blagrange,i,jr,oft_blagrange%quad%pts(:,m),rop(jr))
+        do jr=1,lag_rep%nce ! Loop over degrees of freedom
+            call oft_blag_eval(lag_rep,i,jr,lag_rep%quad%pts(:,m),rop(jr))
             psi_tmp = psi_tmp + pol_vals(j(jr))*rop(jr)
         end do
         IF(psi_tmp<self%gs_eq%plasma_bounds(1))CYCLE
@@ -748,13 +757,13 @@ do i=1,oft_blagrange%mesh%nc
         p_source=self%p_scale*pt(1)*self%P%Fp(psi_tmp)
         f_source=self%f_scale*0.5d0*self%F%fp(psi_tmp)/(pt(1)+gs_epsilon)
         diag=diag+[f_source,p_source,self%p_scale*self%P%F(psi_tmp)*pt(1)]*det
-        do jr=1,oft_blagrange%nce
+        do jr=1,lag_rep%nce
             vals_loc(jr,1) = vals_loc(jr,1) - rop(jr)*self%dt*p_source*det
             vals_loc(jr,2) = vals_loc(jr,2) - rop(jr)*self%dt*f_source*det
         end do
     end do !eta_source=psi_tmp*det/eta_tmp/(pt(1)+gs_epsilon)
     !!$omp ordered
-    do jr=1,oft_blagrange%nce
+    do jr=1,lag_rep%nce
         !$omp atomic
         rhs_vals(j(jr)) = rhs_vals(j(jr)) + vals_loc(jr,1)
         !$omp atomic
@@ -764,9 +773,9 @@ do i=1,oft_blagrange%mesh%nc
 end do
 deallocate(j,vals_loc,rop,gop)
 !$omp end parallel
-DO i=1,oft_blagrange%nbe
-    rhs_vals(oft_blagrange%lbe(i))=0.d0
-    alam_vals(oft_blagrange%lbe(i))=0.d0
+DO i=1,lag_rep%nbe
+    rhs_vals(lag_rep%lbe(i))=0.d0
+    alam_vals(lag_rep%lbe(i))=0.d0
 END DO
 IF(self%ip_target>0.d0.AND.diag(1)>1.d-8)THEN
     IF(self%ip_ratio_target>-1.d98)THEN
@@ -812,14 +821,15 @@ subroutine apply_gs_mat(self,a,b)
 class(tMaker_td_mat), intent(inout) :: self !< NL operator object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
-integer(4) :: i
+integer(4) :: i,n
 real(8), pointer, dimension(:) :: avals,bvals
 CALL self%mat%apply(a,b)
 NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%get_local(bvals)
 ! bvals=bvals+self%lim_vals*avals(self%lim_node)
-DO i=1,oft_blagrange%nce
+n=SIZE(self%lim_vals,DIM=2)
+DO i=1,n
     bvals=bvals+self%lim_vals(:,i)*avals(self%lim_nodes(i))
     bvals=bvals+self%ax_vals(:,i)*avals(self%ax_nodes(i))
 END DO
@@ -878,8 +888,8 @@ end subroutine delete_gs_mat
 ! max_tmp=-1.d99; lim_tmp=1.d99
 ! itmp=0
 ! !$omp do
-! DO i=1,smesh%nc
-!     IF(smesh%reg(i)==1)THEN
+! DO i=1,oft_blagrange%mesh%nc
+!     IF(oft_blagrange%mesh%reg(i)==1)THEN
 !     call oft_blagrange%ncdofs(i,j)
 !     do jr=1,oft_blagrange%nce
 !         IF(pol_vals(j(jr))>max_tmp)THEN
@@ -903,8 +913,8 @@ end subroutine delete_gs_mat
 !     itmp=self%gs_eq%limiter_nds(i)
 !     END IF
 ! END DO
-! !DO i=1,smesh%nc
-! !  IF(smesh%reg(i)==8)THEN
+! !DO i=1,oft_blagrange%mesh%nc
+! !  IF(oft_blagrange%mesh%reg(i)==8)THEN
 ! !    call oft_blagrange%ncdofs(i,j)
 ! !    do jr=1,oft_blagrange%nce
 ! !      IF(ABS(psi_max-pol_vals(j(jr)))<ABS(psi_max-lim_tmp))lim_tmp=pol_vals(j(jr))
@@ -966,9 +976,13 @@ logical :: curved,in_bounds
 real(r8), pointer, dimension(:) :: pol_vals
 CLASS(oft_vector), POINTER :: oft_lag_vec
 type(oft_timer) :: mytimer
+CLASS(oft_bmesh), POINTER :: mesh
+CLASS(oft_scalar_bfem), POINTER :: lag_rep
+DEBUG_STACK_PUSH
 !CALL build_vac_op(mat)
 !RETURN
-DEBUG_STACK_PUSH
+mesh=>self%gs_eq%mesh
+lag_rep=>self%gs_eq%fe_rep
 IF(oft_debug_print(1))THEN
     WRITE(*,'(2X,A)')'Constructing Toroidal flux time-advance operator'
     CALL mytimer%tick()
@@ -977,9 +991,9 @@ END IF
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat%mat))THEN
-    CALL gs_mat_create(mat%mat)
-    ALLOCATE(mat%lim_nodes(oft_blagrange%nce),mat%lim_vals(a%n,oft_blagrange%nce))
-    ALLOCATE(mat%ax_nodes(oft_blagrange%nce),mat%ax_vals(a%n,oft_blagrange%nce))
+    CALL gs_mat_create(self%gs_eq%fe_rep,mat%mat)
+    ALLOCATE(mat%lim_nodes(lag_rep%nce),mat%lim_vals(a%n,lag_rep%nce))
+    ALLOCATE(mat%ax_nodes(lag_rep%nce),mat%ax_vals(a%n,lag_rep%nce))
 ELSE
     CALL mat%mat%zero
     mat%lim_vals=0.d0
@@ -990,28 +1004,28 @@ CALL a%get_local(pol_vals)
 !---Update plasma boundary
 self%gs_eq%psi=>a
 CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
-allocate(lim_weights(oft_blagrange%nce))
+allocate(lim_weights(lag_rep%nce))
 cell=0
-CALL bmesh_findcell(smesh,cell,self%gs_eq%lim_point,ftmp)
-call oft_blagrange%ncdofs(cell,mat%lim_nodes)
-do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-  call oft_blag_eval(oft_blagrange,cell,jc,ftmp,lim_weights(jc))
+CALL bmesh_findcell(mesh,cell,self%gs_eq%lim_point,ftmp)
+call lag_rep%ncdofs(cell,mat%lim_nodes)
+do jc=1,lag_rep%nce ! Loop over degrees of freedom
+  call oft_blag_eval(lag_rep,cell,jc,ftmp,lim_weights(jc))
 end do
-allocate(ax_weights(oft_blagrange%nce))
+allocate(ax_weights(lag_rep%nce))
 cell=0
-CALL bmesh_findcell(smesh,cell,self%gs_eq%o_point,ftmp)
-call oft_blagrange%ncdofs(cell,mat%ax_nodes)
-do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-  call oft_blag_eval(oft_blagrange,cell,jc,ftmp,ax_weights(jc))
+CALL bmesh_findcell(mesh,cell,self%gs_eq%o_point,ftmp)
+call lag_rep%ncdofs(cell,mat%ax_nodes)
+do jc=1,lag_rep%nce ! Loop over degrees of freedom
+  call oft_blag_eval(lag_rep,cell,jc,ftmp,ax_weights(jc))
 end do
 ! !---
 ! self%gs_eq%psi=>a !psi_sol
 ! CALL gs_update_bounds(self%gs_eq)
 ! lim_tmp=1.d99
-! DO i=1,smesh%np
-!     IF(SQRT(SUM((self%gs_eq%lim_point-smesh%r(1:2,i))**2))<lim_tmp)THEN
+! DO i=1,mesh%np
+!     IF(SQRT(SUM((self%gs_eq%lim_point-mesh%r(1:2,i))**2))<lim_tmp)THEN
 !         mat%lim_node=i
-!         lim_tmp=SQRT(SUM((self%gs_eq%lim_point-smesh%r(1:2,i))**2))
+!         lim_tmp=SQRT(SUM((self%gs_eq%lim_point-mesh%r(1:2,i))**2))
 !     END IF
 ! END DO
 ! WRITE(*,*)mat%lim_node
@@ -1023,52 +1037,52 @@ psi_norm=self%gs_eq%plasma_bounds(2)-self%gs_eq%plasma_bounds(1)
 !---------------------------------------------------------------------------
 !$omp parallel private(j,rop,gop,det,lop,curved,goptmp,m,vol,jc,jr,pt,psi_tmp, &
 !$omp in_bounds,eta_tmp,eta_source,gs_source,lim_loc,ax_loc)
-allocate(j(oft_blagrange%nce)) ! Local DOF and matrix indices
-allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
-allocate(lop(oft_blagrange%nce,oft_blagrange%nce),lim_loc(oft_blagrange%nce),ax_loc(oft_blagrange%nce))
+allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
+allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
+allocate(lop(lag_rep%nce,lag_rep%nce),lim_loc(lag_rep%nce),ax_loc(lag_rep%nce))
 !$omp do schedule(static,1)
 !ordered
-do i=1,oft_blagrange%mesh%nc
-    ! IF(smesh%reg(i)==1)CYCLE
+do i=1,mesh%nc
+    ! IF(mesh%reg(i)==1)CYCLE
     !---Get local to global DOF mapping
-    call oft_blagrange%ncdofs(i,j)
+    call lag_rep%ncdofs(i,j)
     !---Get local reconstructed operators
     lop=0.d0; lim_loc=0.d0; ax_loc=0.d0
-    do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-        call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-        det=vol*oft_blagrange%quad%wts(m)
-        pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+    do m=1,lag_rep%quad%np ! Loop over quadrature points
+        call mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+        det=vol*lag_rep%quad%wts(m)
+        pt=mesh%log2phys(i,lag_rep%quad%pts(:,m))
         eta_tmp=0.d0; psi_tmp=0.d0
-        do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-            call oft_blag_eval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),rop(jc))
-            call oft_blag_geval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),gop(:,jc),goptmp)
+        do jc=1,lag_rep%nce ! Loop over degrees of freedom
+            call oft_blag_eval(lag_rep,i,jc,lag_rep%quad%pts(:,m),rop(jc))
+            call oft_blag_geval(lag_rep,i,jc,lag_rep%quad%pts(:,m),gop(:,jc),goptmp)
             psi_tmp=psi_tmp+pol_vals(j(jc))*rop(jc)
         end do
         eta_source=0.d0; gs_source=0.d0
-        IF(smesh%reg(i)==1)THEN
+        IF(mesh%reg(i)==1)THEN
             in_bounds=gs_test_bounds(self%gs_eq,pt).AND.(psi_tmp>self%gs_eq%plasma_bounds(1))
             IF(in_bounds)THEN
                 gs_source=self%dt*(self%p_scale*pt(1)*pt(1)*self%P%Fpp(psi_tmp) &
                 + self%f_scale*0.5d0*self%F%fpp(psi_tmp))
             END IF
-        ELSE IF(smesh%reg(i)>1.AND.(self%eta_reg(smesh%reg(i))>0.d0))THEN
-            eta_source=1.d0/self%eta_reg(smesh%reg(i)) !eta_tmp
+        ELSE IF(mesh%reg(i)>1.AND.(self%eta_reg(mesh%reg(i))>0.d0))THEN
+            eta_source=1.d0/self%eta_reg(mesh%reg(i)) !eta_tmp
         END IF
         !---Compute local matrix contributions
-        do jr=1,oft_blagrange%nce
+        do jr=1,lag_rep%nce
             ax_loc(jr) = ax_loc(jr) + &
               rop(jr)*gs_source*(psi_tmp-self%gs_eq%plasma_bounds(1))/psi_norm*det/(pt(1)+gs_epsilon)
             lim_loc(jr) = lim_loc(jr) + &
               rop(jr)*gs_source*(1.d0-(psi_tmp-self%gs_eq%plasma_bounds(1))/psi_norm)*det/(pt(1)+gs_epsilon)
-            do jc=1,oft_blagrange%nce
+            do jc=1,lag_rep%nce
             lop(jr,jc) = lop(jr,jc) + (self%dt*DOT_PRODUCT(gop(1:2,jr),gop(1:2,jc)) &
                 + rop(jr)*rop(jc)*(eta_source-gs_source))*det/(pt(1)+gs_epsilon)
             end do
         end do
     end do
     !---Apply bc to local matrix
-    DO jr=1,oft_blagrange%nce
-        IF(oft_blagrange%be(j(jr)))THEN
+    DO jr=1,lag_rep%nce
+        IF(lag_rep%be(j(jr)))THEN
             lop(jr,:)=0.d0
             lim_loc(jr)=0.d0
             ax_loc(jr)=0.d0
@@ -1076,9 +1090,9 @@ do i=1,oft_blagrange%mesh%nc
     END DO
     !---Add local values to global matrix
     !!$omp ordered
-    call mat%mat%atomic_add_values(j,j,lop,oft_blagrange%nce,oft_blagrange%nce)
-    DO jc=1,oft_blagrange%nce
-    DO jr=1,oft_blagrange%nce
+    call mat%mat%atomic_add_values(j,j,lop,lag_rep%nce,lag_rep%nce)
+    DO jc=1,lag_rep%nce
+    DO jr=1,lag_rep%nce
         !$omp atomic
         mat%lim_vals(j(jr),jc)=mat%lim_vals(j(jr),jc)+lim_loc(jr)*lim_weights(jc)
         !$omp atomic
@@ -1094,14 +1108,14 @@ CALL set_bcmat(self%gs_eq,mat%mat)
 ! !---Set diagonal entries for dirichlet rows
 ! ALLOCATE(lop(1,1),j(1))
 ! lop(1,1)=1.d0
-! DO i=1,oft_blagrange%nbe
-!   IF(.NOT.oft_blagrange%linkage%leo(i))CYCLE
-!   j=oft_blagrange%lbe(i)
+! DO i=1,lag_rep%nbe
+!   IF(.NOT.lag_rep%linkage%leo(i))CYCLE
+!   j=lag_rep%lbe(i)
 !   call mat%add_values(j,j,lop,1,1)
 ! END DO
 ! DEALLOCATE(j,lop)
 !---Assemble matrix
-CALL oft_blagrange%vec_create(oft_lag_vec)
+CALL lag_rep%vec_create(oft_lag_vec)
 CALL mat%mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
@@ -1145,7 +1159,11 @@ CLASS(oft_vector), POINTER :: oft_lag_vec
 TYPE(oft_graph_ptr) :: graphs(1,1)
 TYPE(oft_graph), TARGET :: graph1,graph2
 type(oft_timer) :: mytimer
+CLASS(oft_bmesh), POINTER :: smesh
+CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
+smesh=>self%gs_eq%mesh
+lag_rep=>self%gs_eq%fe_rep
 IF(oft_debug_print(1))THEN
     WRITE(*,'(2X,A)')'Constructing Toroidal flux time-advance operator'
     CALL mytimer%tick()
@@ -1153,19 +1171,19 @@ END IF
 !---Update plasma boundary
 self%gs_eq%psi=>a
 CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
-allocate(bnd_nodes(2*oft_blagrange%nce),lim_weights(oft_blagrange%nce),ax_weights(oft_blagrange%nce))
+allocate(bnd_nodes(2*lag_rep%nce),lim_weights(lag_rep%nce),ax_weights(lag_rep%nce))
 IF(include_bounds)THEN
     cell=0
     CALL bmesh_findcell(smesh,cell,self%gs_eq%lim_point,ftmp)
-    call oft_blagrange%ncdofs(cell,bnd_nodes(1:oft_blagrange%nce))
-    do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-    call oft_blag_eval(oft_blagrange,cell,jc,ftmp,lim_weights(jc))
+    call lag_rep%ncdofs(cell,bnd_nodes(1:lag_rep%nce))
+    do jc=1,lag_rep%nce ! Loop over degrees of freedom
+    call oft_blag_eval(lag_rep,cell,jc,ftmp,lim_weights(jc))
     end do
     cell=0
     CALL bmesh_findcell(smesh,cell,self%gs_eq%o_point,ftmp)
-    call oft_blagrange%ncdofs(cell,bnd_nodes(oft_blagrange%nce+1:2*oft_blagrange%nce))
-    do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-    call oft_blag_eval(oft_blagrange,cell,jc,ftmp,ax_weights(jc))
+    call lag_rep%ncdofs(cell,bnd_nodes(lag_rep%nce+1:2*lag_rep%nce))
+    do jc=1,lag_rep%nce ! Loop over degrees of freedom
+    call oft_blag_eval(lag_rep,cell,jc,ftmp,ax_weights(jc))
     end do
 END IF
 !---
@@ -1174,19 +1192,19 @@ nnonaxi=self%gs_eq%region_info%nnonaxi
 ! Allocate matrix
 !---------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(lhs_mat))THEN
-    CALL oft_blagrange%vec_create(oft_lag_vec)
+    CALL lag_rep%vec_create(oft_lag_vec)
     !---
-    graph1%nr=oft_blagrange%ne
-    graph1%nrg=oft_blagrange%global%ne
-    graph1%nc=oft_blagrange%ne
-    graph1%ncg=oft_blagrange%global%ne
-    graph1%nnz=oft_blagrange%nee
-    graph1%kr=>oft_blagrange%kee
-    graph1%lc=>oft_blagrange%lee
+    graph1%nr=lag_rep%ne
+    graph1%nrg=lag_rep%global%ne
+    graph1%nc=lag_rep%ne
+    graph1%ncg=lag_rep%global%ne
+    graph1%nnz=lag_rep%nee
+    graph1%kr=>lag_rep%kee
+    graph1%lc=>lag_rep%lee
     !---Add dense blocks for non-contiguous regions
     IF(nnonaxi>0)THEN
         !---Add dense blocks
-        ALLOCATE(dense_flag(oft_blagrange%ne))
+        ALLOCATE(dense_flag(lag_rep%ne))
         dense_flag=0
         DO m=1,self%gs_eq%region_info%nnonaxi
             dense_flag(self%gs_eq%region_info%noaxi_nodes(m)%v)=m
@@ -1205,9 +1223,9 @@ IF(.NOT.ASSOCIATED(lhs_mat))THEN
     !---Add dense block for boundary
     IF(self%gs_eq%free)THEN
         ALLOCATE(bc_nodes(1))
-        bc_nodes(1)%n=oft_blagrange%nbe
-        bc_nodes(1)%v=>oft_blagrange%lbe
-        ALLOCATE(dense_flag(oft_blagrange%ne))
+        bc_nodes(1)%n=lag_rep%nbe
+        bc_nodes(1)%v=>lag_rep%lbe
+        ALLOCATE(dense_flag(lag_rep%ne))
         dense_flag=0
         dense_flag(bc_nodes(1)%v)=1
         !---Add dense blocks
@@ -1220,7 +1238,7 @@ IF(.NOT.ASSOCIATED(lhs_mat))THEN
     END IF
     !---Add dense blocks
     IF(include_bounds)THEN
-        CALL graph_add_full_col(graph1,graph2,2*oft_blagrange%nce,bnd_nodes)
+        CALL graph_add_full_col(graph1,graph2,2*lag_rep%nce,bnd_nodes)
         NULLIFY(graph1%kr,graph1%lc)
         graph1%nnz=graph2%nnz
         graph1%kr=>graph2%kr
@@ -1257,28 +1275,28 @@ IF(nnonaxi>0)THEN
 END IF
 !$omp parallel private(j,rop,gop,det,lhs_vals,rhs_vals,curved,goptmp,m,vol,jc,jr,pt,psi_tmp, &
 !$omp in_bounds,eta_source,gs_source,lim_loc,lim_source,ax_source,ax_loc,nonaxi_tmp)
-allocate(j(oft_blagrange%nce)) ! Local DOF and matrix indices
-allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
-allocate(lhs_vals(oft_blagrange%nce,oft_blagrange%nce),lim_loc(oft_blagrange%nce))
-allocate(rhs_vals(oft_blagrange%nce,oft_blagrange%nce),ax_loc(oft_blagrange%nce))
-IF(nnonaxi>0)allocate(nonaxi_tmp(oft_blagrange%nce))
+allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
+allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
+allocate(lhs_vals(lag_rep%nce,lag_rep%nce),lim_loc(lag_rep%nce))
+allocate(rhs_vals(lag_rep%nce,lag_rep%nce),ax_loc(lag_rep%nce))
+IF(nnonaxi>0)allocate(nonaxi_tmp(lag_rep%nce))
 !$omp do schedule(static,1)
 !ordered
-do i=1,oft_blagrange%mesh%nc
+do i=1,lag_rep%mesh%nc
     ! IF(smesh%reg(i)==1)CYCLE
     !---Get local to global DOF mapping
-    call oft_blagrange%ncdofs(i,j)
+    call lag_rep%ncdofs(i,j)
     !---Get local reconstructed operators
     lhs_vals=0.d0; lim_loc=0.d0; ax_loc=0.d0; rhs_vals=0.d0
     IF(nnonaxi>0)nonaxi_tmp=0.d0
-    do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-        call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-        det=vol*oft_blagrange%quad%wts(m)
-        pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+    do m=1,lag_rep%quad%np ! Loop over quadrature points
+        call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+        det=vol*lag_rep%quad%wts(m)
+        pt=smesh%log2phys(i,lag_rep%quad%pts(:,m))
         psi_tmp=0.d0
-        do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-            call oft_blag_eval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),rop(jc))
-            call oft_blag_geval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),gop(:,jc),goptmp)
+        do jc=1,lag_rep%nce ! Loop over degrees of freedom
+            call oft_blag_eval(lag_rep,i,jc,lag_rep%quad%pts(:,m),rop(jc))
+            call oft_blag_geval(lag_rep,i,jc,lag_rep%quad%pts(:,m),gop(:,jc),goptmp)
             psi_tmp=psi_tmp+pol_vals(j(jc))*rop(jc)
         end do
         eta_source=0.d0; gs_source=0.d0; lim_source=0.d0; ax_source=0.d0
@@ -1295,10 +1313,10 @@ do i=1,oft_blagrange%mesh%nc
             eta_source=1.d0/self%eta_reg(smesh%reg(i))
         END IF
         !---Compute local matrix contributions
-        do jr=1,oft_blagrange%nce
+        do jr=1,lag_rep%nce
             lim_loc(jr) = lim_loc(jr) + rop(jr)*lim_source*det/(pt(1)+gs_epsilon)
             ax_loc(jr) = ax_loc(jr) + rop(jr)*ax_source*det/(pt(1)+gs_epsilon)
-            do jc=1,oft_blagrange%nce
+            do jc=1,lag_rep%nce
                 lhs_vals(jr,jc) = lhs_vals(jr,jc) + (DOT_PRODUCT(gop(1:2,jr),gop(1:2,jc)) &
                     - rop(jr)*rop(jc)*gs_source)*det/(pt(1)+gs_epsilon)
                 rhs_vals(jr,jc) = rhs_vals(jr,jc) + rop(jr)*rop(jc)*eta_source*det/(pt(1)+gs_epsilon)
@@ -1314,8 +1332,8 @@ do i=1,oft_blagrange%mesh%nc
         END IF
     end do
     !---Apply bc to local matrix
-    DO jr=1,oft_blagrange%nce
-        IF(oft_blagrange%be(j(jr)))THEN
+    DO jr=1,lag_rep%nce
+        IF(lag_rep%be(j(jr)))THEN
             rhs_vals(jr,:)=0.d0
             rhs_vals(:,jr)=0.d0
             lhs_vals(jr,:)=0.d0
@@ -1327,16 +1345,16 @@ do i=1,oft_blagrange%mesh%nc
     lhs_vals=lhs_vals-sigma*rhs_vals
     !---Add local values to global matrix
     !!$omp ordered
-    call rhs_mat%atomic_add_values(j,j,rhs_vals,oft_blagrange%nce,oft_blagrange%nce)
-    call lhs_mat%atomic_add_values(j,j,lhs_vals,oft_blagrange%nce,oft_blagrange%nce)
-    DO jr=1,oft_blagrange%nce
+    call rhs_mat%atomic_add_values(j,j,rhs_vals,lag_rep%nce,lag_rep%nce)
+    call lhs_mat%atomic_add_values(j,j,lhs_vals,lag_rep%nce,lag_rep%nce)
+    DO jr=1,lag_rep%nce
         !$omp atomic
         lim_vals(j(jr))=lim_vals(j(jr))+lim_loc(jr)
         !$omp atomic
         ax_vals(j(jr))=ax_vals(j(jr))+ax_loc(jr)
     END DO
     IF(nnonaxi>0.AND.self%gs_eq%region_info%reg_map(smesh%reg(i))>0)THEN
-        DO jr=1,oft_blagrange%nce
+        DO jr=1,lag_rep%nce
           !$omp atomic
           nonaxi_vals(self%gs_eq%region_info%node_mark(smesh%reg(i),j(jr)),self%gs_eq%region_info%reg_map(smesh%reg(i))) = &
             nonaxi_vals(self%gs_eq%region_info%node_mark(smesh%reg(i),j(jr)),self%gs_eq%region_info%reg_map(smesh%reg(i))) &
@@ -1348,17 +1366,17 @@ end do
 IF(nnonaxi>0)THEN
     !$omp do schedule(dynamic,1)
     !ordered
-    do i=1,oft_blagrange%mesh%nc
+    do i=1,lag_rep%mesh%nc
         IF(self%gs_eq%region_info%reg_map(smesh%reg(i))==0)CYCLE
         !---Get local to global DOF mapping
-        call oft_blagrange%ncdofs(i,j)
+        call lag_rep%ncdofs(i,j)
         !---Get local reconstructed operators
         lim_loc=0.d0
-        do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-            call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-            det=vol*oft_blagrange%quad%wts(m)
-            do jc=1,oft_blagrange%nce ! Loop over degrees of freedom
-                call oft_blag_eval(oft_blagrange,i,jc,oft_blagrange%quad%pts(:,m),rop(jc))
+        do m=1,lag_rep%quad%np ! Loop over quadrature points
+            call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
+            det=vol*lag_rep%quad%wts(m)
+            do jc=1,lag_rep%nce ! Loop over degrees of freedom
+                call oft_blag_eval(lag_rep,i,jc,lag_rep%quad%pts(:,m),rop(jc))
                 lim_loc(jc) = lim_loc(jc) + rop(jc)*det
             end do
         end do
@@ -1366,7 +1384,7 @@ IF(nnonaxi>0)THEN
         !---Add local values to global matrix
         m=self%gs_eq%region_info%reg_map(smesh%reg(i))
         !!$omp ordered
-        do jc=1,oft_blagrange%nce
+        do jc=1,lag_rep%nce
             call rhs_mat%atomic_add_values(j(jc:jc),self%gs_eq%region_info%noaxi_nodes(m)%v, &
               lim_loc(jc)*nonaxi_vals(:,m),1,self%gs_eq%region_info%noaxi_nodes(m)%n)
             call lhs_mat%atomic_add_values(j(jc:jc),self%gs_eq%region_info%noaxi_nodes(m)%v, &
@@ -1382,15 +1400,15 @@ DEALLOCATE(pol_vals)
 IF(nnonaxi>0)DEALLOCATE(nonaxi_vals)
 IF(include_bounds)THEN
   ALLOCATE(j(1),lhs_vals(1,1))
-  DO jr=1,oft_blagrange%nce
+  DO jr=1,lag_rep%nce
     j=bnd_nodes(jr)
-    DO i=1,oft_blagrange%ne
+    DO i=1,lag_rep%ne
         lhs_vals=lim_vals(i)*lim_weights(jr)
         rowtmp=i
         CALL lhs_mat%add_values(rowtmp,j,lhs_vals,1,1)
     END DO
-    j=bnd_nodes(oft_blagrange%nce+jr)
-    DO i=1,oft_blagrange%ne
+    j=bnd_nodes(lag_rep%nce+jr)
+    DO i=1,lag_rep%ne
         lhs_vals=ax_vals(i)*ax_weights(jr)
         rowtmp=i
         CALL lhs_mat%add_values(rowtmp,j,lhs_vals,1,1)
@@ -1402,7 +1420,7 @@ DEALLOCATE(bnd_nodes,lim_weights,ax_weights)
 DEALLOCATE(lim_vals,ax_vals)
 CALL set_bcmat(self%gs_eq,lhs_mat)
 !---Assemble matrix
-CALL oft_blagrange%vec_create(oft_lag_vec)
+CALL lag_rep%vec_create(oft_lag_vec)
 CALL rhs_mat%assemble(oft_lag_vec)
 CALL lhs_mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
@@ -1422,7 +1440,7 @@ class(eig_wrapper), intent(inout) :: self !< NL operator object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 class(oft_vector), pointer :: tmp_vec
-CALL oft_blagrange%vec_create(tmp_vec)
+CALL a%new(tmp_vec)
 CALL self%rhs_mat%apply(a,tmp_vec)
 CALL self%lhs_inv%apply(b,tmp_vec)
 CALL tmp_vec%delete()

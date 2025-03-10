@@ -2976,7 +2976,7 @@ END IF
 !---
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,'(6A)')oft_indent,'Writting "',TRIM(path), &
   '" to restart file "',TRIM(filename),'"'
-IF(native_vector_cast(outvec,u)<0)CALL oft_abort('Failed to cast "source".', &
+IF(.NOT.native_vector_cast(outvec,u))CALL oft_abort('Failed to cast "source".', &
   'tw_rst_save',__FILE__)
 !---
 ALLOCATE(global_le(u%n))
@@ -3009,7 +3009,7 @@ type(hdf5_rst) :: rst_info
 DEBUG_STACK_PUSH
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Reading "',TRIM(path), &
   '" from restart file "',TRIM(filename),'"'
-IF(native_vector_cast(invec,u)<0)CALL oft_abort('Failed to cast "source".', &
+IF(.NOT.native_vector_cast(invec,u))CALL oft_abort('Failed to cast "source".', &
   'tw_rst_load',__FILE__)
 !
 ALLOCATE(global_le(u%n))

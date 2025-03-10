@@ -37,15 +37,7 @@ REAL(r8), PARAMETER :: pi=3.141592653589793238462643_r8 !< \f$ \pi \f$
 ! definitions to keep documentation clean and make the real types obvious.
 !------------------------------------------------------------------------------
 #ifdef HAVE_PETSC
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>5)
-#if PETSC_VERSION_MINOR<8
-#include "petsc/finclude/petscsysdef.h"
-#else
 #include "petscconf.h"
-#endif
-#else
-#include "finclude/petscsysdef.h"
-#endif
 #if (PETSC_SIZEOF_VOID_P == 8)
 INTEGER, PARAMETER :: petsc_addr=i8 !< Size of address pointer (32 or 64) bits
 #else
@@ -57,22 +49,18 @@ INTEGER, PARAMETER :: petsc_addr=i4
 INTERFACE
 !---------------------------------------------------------------------------
 !> Interface to C sleep function
-!!
-!! @result Error code on return
 !---------------------------------------------------------------------------
   FUNCTION oft_sleep(seconds)  BIND(C,name="sleep")
     IMPORT c_int
-    INTEGER(c_int) :: oft_sleep 
+    INTEGER(c_int) :: oft_sleep !< Error code on return
     INTEGER(c_int), INTENT(in), VALUE :: seconds !< Length of time to pause in seconds
   END FUNCTION oft_sleep
 !---------------------------------------------------------------------------
 !> Simple in-memory hashing function for dataset checksumming
-!!
-!! @result Checksum of data
 !---------------------------------------------------------------------------
   FUNCTION oft_simple_hash(key,length)  BIND(C)
     IMPORT c_int, c_long, c_ptr
-    INTEGER(c_int) :: oft_simple_hash
+    INTEGER(c_int) :: oft_simple_hash !< Hash of data
     TYPE(c_ptr), VALUE, INTENT(in) :: key !< Location of data
     INTEGER(c_long), VALUE, INTENT(in) :: length !< Length of data to hash in bytes
   END FUNCTION oft_simple_hash
@@ -109,24 +97,20 @@ END INTERFACE get_inverse_map
 ABSTRACT INTERFACE
 !---------------------------------------------------------------------------
 !> Generic interface for 1D function
-!!
-!! @returns Function value
 !---------------------------------------------------------------------------
   FUNCTION oft_1d_func(x) result(f)
     IMPORT r8
     REAL(r8), INTENT(in) :: x !< Parameter 1
-    REAL(r8) :: f
+    REAL(r8) :: f !< Function value
   END FUNCTION oft_1d_func
 !---------------------------------------------------------------------------
 !> Generic interface for 2D function
-!!
-!! @returns Function value
 !---------------------------------------------------------------------------
   FUNCTION oft_2d_func(x,y) result(f)
     IMPORT r8
     REAL(r8), INTENT(in) :: x !< Parameter 1
     REAL(r8), INTENT(in) :: y !< Parameter 2
-    REAL(r8) :: f
+    REAL(r8) :: f !< Function value
   END FUNCTION oft_2d_func
 END INTERFACE
 !------------------------------------------------------------------------------
@@ -146,11 +130,15 @@ CONTAINS
 END TYPE oft_timer
 PRIVATE oft_timer_start, oft_timer_elapsed, oft_timer_intelapsed, oft_timer_timeout
 #ifdef HAVE_XML
-!
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
 TYPE :: xml_node_ptr
   TYPE(xml_node), POINTER :: this => NULL()
 END TYPE xml_node_ptr
-!
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
 TYPE :: xml_nodelist
   INTEGER(i4) :: n = 0
   TYPE(xml_node_ptr), POINTER, DIMENSION(:) :: nodes => NULL()
@@ -192,23 +180,46 @@ DO i=1,LEN(c)
 END DO
 END SUBROUTINE string_to_lower
 !------------------------------------------------------------------------------
-!> Start or reset timer
+!> Returns the corresponding uppercase letter, if `c` is an lowercase
+!! ASCII character, otherwise `c` itself.
 !!
-!! @param[in,out] self Calling timer class
+!! Reproduced from the [Fortran stdlib](https://stdlib.fortran-lang.org/index.html)
+!------------------------------------------------------------------------------
+ELEMENTAL FUNCTION char_to_upper(c) result(t)
+CHARACTER(len=1), INTENT(in) :: c !< Input character
+CHARACTER(len=1) :: t !< Uppercase version
+INTEGER(i4), PARAMETER :: wp=iachar('A')-iachar('a')
+INTEGER(i4), PARAMETER :: BA=iachar('a')
+INTEGER(i4), PARAMETER :: BZ=iachar('z')
+INTEGER(i4) :: k
+k = ichar(c) 
+IF(k>=BA.and.k<=BZ)k = k + wp 
+t = char(k)
+END FUNCTION char_to_upper
+!------------------------------------------------------------------------------
+!> Converts a string to all uppercase characters
+!------------------------------------------------------------------------------
+SUBROUTINE string_to_upper(c)
+CHARACTER(len=*), INTENT(inout) :: c !< Input/output string
+INTEGER(i4) :: i
+DO i=1,LEN(c)
+  c(i:i)=char_to_upper(c(i:i))
+END DO
+END SUBROUTINE string_to_upper
+!------------------------------------------------------------------------------
+!> Start or reset timer
 !------------------------------------------------------------------------------
 SUBROUTINE oft_timer_start(self)
-CLASS(oft_timer), INTENT(inout) :: self
+CLASS(oft_timer), INTENT(inout) :: self !< Calling timer class
 self%count=oft_time_i8()
 END SUBROUTINE oft_timer_start
 !------------------------------------------------------------------------------
 !> Set elapsed time since last tick/tock
-!!
-!! @param[in,out] self Calling timer class
 !------------------------------------------------------------------------------
 FUNCTION oft_timer_elapsed(self) RESULT(time)
-CLASS(oft_timer), INTENT(inout) :: self
+CLASS(oft_timer), INTENT(inout) :: self !< Calling timer class
+REAL(r8) :: time !< Time since last tick/tock
 INTEGER(i8) :: countnew,crate,cmax,dt
-REAL(r8) :: time
 CALL system_clock(countnew,crate,cmax)
 dt=countnew-self%count
 IF(dt<0)dt=dt+cmax
@@ -222,8 +233,9 @@ END FUNCTION oft_timer_elapsed
 !! @return Number of integer counts since last tick/tock
 !------------------------------------------------------------------------------
 FUNCTION oft_timer_intelapsed(self) result(dt)
-CLASS(oft_timer), INTENT(inout) :: self
-INTEGER(i8) :: countnew,crate,cmax,dt
+CLASS(oft_timer), INTENT(inout) :: self !< Calling timer class
+INTEGER(i8) :: dt !< Number of integer counts since last tick/tock
+INTEGER(i8) :: countnew,crate,cmax
 CALL system_clock(countnew,crate,cmax)
 dt=countnew-self%count
 IF(dt<0)dt=dt+cmax
@@ -231,11 +243,9 @@ self%count=countnew
 END FUNCTION oft_timer_intelapsed
 !------------------------------------------------------------------------------
 !> Check if time since last tick/tock exceeds a limit
-!!
-!! @param[in,out] self Calling timer class
 !------------------------------------------------------------------------------
 FUNCTION oft_timer_timeout(self,timeout) result(test)
-CLASS(oft_timer), INTENT(inout) :: self
+CLASS(oft_timer), INTENT(inout) :: self !< Calling timer class
 REAL(r8), INTENT(in) :: timeout !< Length of timeout (seconds)
 INTEGER(i8) :: countnew,crate,cmax,dt
 REAL(r8) :: time
@@ -248,18 +258,14 @@ test=(time>timeout)
 END FUNCTION oft_timer_timeout
 !------------------------------------------------------------------------------
 !> Get current system time in integer counts
-!!
-!! @return System time in integer counts
 !------------------------------------------------------------------------------
 FUNCTION oft_time_i8() RESULT(time)
-INTEGER(i8) :: time,crate,cmax
+INTEGER(i8) :: time !< System time in integer counts
+INTEGER(i8) :: crate,cmax
 CALL system_clock(time,crate,cmax)
 END FUNCTION oft_time_i8
 !------------------------------------------------------------------------------
-!> Get elapsed time since a given integer time
-!!
-!! @param[in,out] self Calling timer class
-!! @return Number of integer counts since last tick/tock
+!> Get difference between timestamps, including wrapping
 !------------------------------------------------------------------------------
 FUNCTION oft_time_diff(timein) RESULT(dt)
 INTEGER(i8), intent(in) :: timein !< Previous time in integer counts
@@ -270,12 +276,11 @@ IF(dt<0)dt=dt+cmax
 END FUNCTION oft_time_diff
 !------------------------------------------------------------------------------
 !> Skip comment lines in open file
-!!
-!! @result IOSTAT from last read or -1 if io_unit is not open
 !------------------------------------------------------------------------------
 function skip_comment_lines(io_unit) result(status)
 integer(i4), intent(in) :: io_unit !< I/O unit to advance
-integer(i4) :: i,status
+integer(i4) :: status !< IOSTAT from last read or -1 if io_unit is not open
+integer(i4) :: i
 logical :: io_open
 CHARACTER(LEN=1) :: test_char
 INQUIRE(unit=io_unit,opened=io_open)
@@ -329,35 +334,29 @@ end do
 end subroutine get_inverse_map_i8
 !------------------------------------------------------------------------------
 !> Compute the cross product of two 3 dimensional vectors
-!!
-!! @result \f$ a \times b \f$ [3]
 !------------------------------------------------------------------------------
 PURE FUNCTION cross_product(a,b) RESULT(c)
 REAL(r8), INTENT(in) :: a(3) !< Vector 1 [3]
 REAL(r8), INTENT(in) :: b(3) !< Vector 2 [3]
-REAL(r8) :: c(3)
+REAL(r8) :: c(3) !< \f$ a \times b \f$ [3]
 INTEGER(i4), PARAMETER :: i2(3)=[2,3,1],i3(3)=[3,1,2]
 c=a(i2)*b(i3)-a(i3)*b(i2)
 END FUNCTION cross_product
 !------------------------------------------------------------------------------
 !> Compute the 2-norm of an array
-!!
-!! @result \f$ \sum_i a^2_i \f$
 !------------------------------------------------------------------------------
 PURE FUNCTION magnitude(a) RESULT(c)
 REAL(r8), INTENT(in) :: a(:) !< Array
-REAL(r8) :: c
+REAL(r8) :: c !< \f$ \sum_i a^2_i \f$
 c=SQRT(SUM(a**2))
 END FUNCTION magnitude
 !------------------------------------------------------------------------------
 !> Compute the 2-norm of an array
-!!
-!! @result \f$ \sum_i a^2_i \f$
 !------------------------------------------------------------------------------
 PURE FUNCTION time_to_string(a) RESULT(c)
 REAL(r8), INTENT(in) :: a !< Array
+CHARACTER(LEN=13) :: c !< \f$ \sum_i a^2_i \f$
 INTEGER(4) :: hours,minutes,seconds
-CHARACTER(LEN=13) :: c
 hours = FLOOR(a/3600.d0)
 minutes = FLOOR((a-hours*3600.d0)/60.d0)
 seconds = FLOOR((a-hours*3600.d0-minutes*60.d0))

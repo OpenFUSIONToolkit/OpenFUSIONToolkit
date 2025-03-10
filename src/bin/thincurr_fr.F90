@@ -23,11 +23,11 @@
 PROGRAM thincurr_fr
 USE oft_base
 USE oft_io, ONLY: oft_bin_file
-USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
 USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
 USE oft_la_base, ONLY: oft_vector
@@ -40,6 +40,7 @@ IMPLICIT NONE
 INTEGER(4) :: nsensors = 0
 TYPE(tw_type), TARGET :: tw_sim,mode_source
 TYPE(tw_sensors) :: sensors
+TYPE(multigrid_mesh) :: mg_mesh
 !
 INTEGER(4) :: i,n,ierr,io_unit
 REAL(8), POINTER, contiguous, DIMENSION(:,:) :: mode_driver,fr_driver,fr_sensor,driver_tmp
@@ -74,14 +75,14 @@ if(ierr<0)call oft_abort('No thin-wall options found in input file.', &
 if(ierr>0)call oft_abort('Error parsing thin-wall options in input file.', &
   'thincurr_fr',__FILE__)
 !---Setup mesh
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 ! ALLOCATE(mg_mesh)
 ! mg_mesh%mgmax=1
 ! mg_mesh%nbase=1
 ! oft_env%nbase=1
 ! mg_mesh%mgdim=mg_mesh%mgmax
 ! CALL smesh_cubit_load
-SELECT CASE(smesh%cad_type)
+SELECT CASE(mg_mesh%smesh%cad_type)
 CASE(0)
   CALL native_read_nodesets(mesh_nsets)
   CALL native_read_sidesets(mesh_ssets)
@@ -100,7 +101,7 @@ IF(ASSOCIATED(mesh_ssets))THEN
     tw_sim%closures=mesh_ssets(1)%v
   END IF
 END IF
-tw_sim%mesh=>smesh
+tw_sim%mesh=>mg_mesh%smesh
 IF(jumper_start>0)THEN
   n=SIZE(mesh_nsets)
   hole_nsets=>mesh_nsets(1:jumper_start-1)
@@ -116,7 +117,7 @@ END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
 CALL tw_sim%xdmf%setup("thincurr")
-CALL smesh%setup_io(tw_sim%xdmf,1)
+CALL mg_mesh%smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
 ! Frequency-response run

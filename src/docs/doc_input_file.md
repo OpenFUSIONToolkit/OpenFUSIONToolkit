@@ -5,7 +5,7 @@ Input File Settings    {#doc_input_file}
 
 # Introduction {#doc_input_intro}
 
-The Open FUSION Toolkit uses a input file to provide run-time information about different parameters, ex. the input mesh and number of refinements. By default OFT looks uses the file \c oft.in in the working directory, a different input file may be specified by passing its name as the first argument.
+The Open FUSION Toolkit uses a input file to provide run-time information about different parameters, ex. the input mesh and number of refinements. By default OFT looks uses the file `oft.in` in the working directory, a different input file may be specified by passing its name as the first argument.
 
 \verbatim
 ~$ oft_check_mesh myinput
@@ -21,14 +21,14 @@ Physics modules with settings groups:
 
 # Runtime Settings {#doc_input_runtime}
 
- This group contains options which are common to the basic runtime environment for OFT. The \c debug variable can be used to control the
+ This group contains options which are common to the basic runtime environment for OFT. The `debug` variable can be used to control the
  level of output produced by debugging statements. Higher values for this variable indicated more verbose status output during execution. The
- \c stack_disabled variable can be used in conjuction with OFT's \ref doc_stack functionality to disable profiling until a specific point in
+ `stack_disabled` variable can be used in conjuction with OFT's \ref doc_stack functionality to disable profiling until a specific point in
  execution. This allows you to exclude setup code from profiling and provide results only on the operations of interest.
 
- The \c ppn variable is used to indicated the number of processors on a given NUMA node, who share a common and lower latency communication
- link. Setting this to a value above 1 causes the decomposition to take two steps: First, the mesh is decomposed into \c nprocs/ppn domains
- using METIS. Second each domain is further decomposed into \c ppn subdomains, which are then distributed. In principle this could provide
+ The `ppn` variable is used to indicated the number of processors on a given NUMA node, who share a common and lower latency communication
+ link. Setting this to a value above 1 causes the decomposition to take two steps: First, the mesh is decomposed into `nprocs/ppn` domains
+ using METIS. Second each domain is further decomposed into `ppn` subdomains, which are then distributed. In principle this could provide
  better communication balancing by ignoring the lower latency intra-node communication, however in practice no improvement is seen.
 
 **Option group:** `runtime_options`
@@ -45,18 +45,18 @@ This group contains options which are common to the OFT hierarchical mesh enviro
 CAD respresentation, used as well as the number of multi-grid levels to be constructed and refinement parameters. Additional mesh settings specific
 to a given CAD representation are specified as part of their documentation: \ref doc_t3d, \ref doc_cubit
 
-The number of mesh levels can be set using the \c nlevels variable. This variable sets the total number of grid levels including the transfer
-level which is created by domain decomposition. The variable \c nbase is used in conjunction with this setting to create a certain number of grid
+The number of mesh levels can be set using the `nlevels` variable. This variable sets the total number of grid levels including the transfer
+level which is created by domain decomposition. The variable `nbase` is used in conjunction with this setting to create a certain number of grid
 refinements before parallel decomposition is performed. For example using `nlevels = 2` and `nbase = 1` will produce 2 grid levels with no refinement,
 one shared memory level of the original mesh and one level with a distributed mesh.  
 
-\note OFT distinguishes between shared memory and distributed levels using the \c nbase setting. A run using multiple MPI tasks must have
-\c nlevels > \c nbase, otherwise an error will be thrown at run time. For shared memory runs \c nbase and \c nlevels should always be
+\note OFT distinguishes between shared memory and distributed levels using the `nbase` setting. A run using multiple MPI tasks must have
+`nlevels > nbase`, otherwise an error will be thrown at run time. For shared memory runs `nbase` and `nlevels` should always be
 equal.
 
-Two additional variables control the use of CAD geometry during grid construction. The \c grid_order variable sets the order of the geometry
+Two additional variables control the use of CAD geometry during grid construction. The `grid_order` variable sets the order of the geometry
 representation on the finest grid level, coarse grid levels always use linear tetrahedra. This allows the representation of curved surfaces in
-OFT with quadratic or cubic tetrahedra. The \c fix_boundary variable can be used to enable/disable boundary adjustment during grid refinement.
+OFT with quadratic or cubic tetrahedra. The `fix_boundary` variable can be used to enable/disable boundary adjustment during grid refinement.
 By default OFT uses CAD information to place new mesh vertices on the true surface during grid refinement, when `fix_boundary = false` vertices
 created by edge division will remain at the mid point of the coarse level edge resulting in a boundary which matches the coarse mesh.
 
@@ -94,24 +94,24 @@ are supported.
 | `df_pdop=1`  | Smoothing factors for LAG::PDOP | real [nlevels] |
 | `nu_pdop=1`  | Number of smoother iterations for LAG::PDOP | int [nlevels] |
 
-## Nedelec H0
+## H^1
 
-This group is used to specify the common smoother settings for common H0 scalar
+This group is used to specify the common smoother settings for common H^1 scalar
 operators. Currently only the isotropic Laplacian operator is supported.
 
-**Option group:** `h0_op_options`
+**Option group:** `h1_op_options`
 |  Option  |  Description  | Type |
 |------------|------------|-----|
-| `df_lop=1`   | Smoothing factors for H0::LOP | real [nlevels] |
-| `nu_lop=1`   | Number of smoother iterations for H0::LOP | int [nlevels] |
+| `df_lop=1`   | Smoothing factors for H^1::LOP | real [nlevels] |
+| `nu_lop=1`   | Number of smoother iterations for H^1::LOP | int [nlevels] |
 
-## Nedelec HCurl
+## H(Curl)
 
-This group is used to specify the common smoother settings for common H1(Curl) vector
+This group is used to specify the common smoother settings for common H(Curl) vector
 operators. Currently only the \f$ \nabla \times \nabla \times \f$ operator is supported.
 
 **Option group:** `hcurl_op_options`
 |  Option  |  Description  | Type |
 |------------|------------|-----|
-| `df_wop=1`   | Smoothing factors for H1(Curl)::WOP | real [nlevels] |
-| `nu_wop=1`   | Number of smoother iterations for H1(Curl)::WOP | int [nlevels] |
+| `df_wop=1`   | Smoothing factors for H(Curl)::WOP | real [nlevels] |
+| `nu_wop=1`   | Number of smoother iterations for H(Curl)::WOP | int [nlevels] |

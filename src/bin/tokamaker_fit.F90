@@ -11,12 +11,11 @@
 !---------------------------------------------------------------------------
 PROGRAM tokamaker_fit
 USE oft_base
-USE oft_mesh_type, ONLY: smesh
-USE multigrid_build, ONLY: multigrid_construct_surf
-USE fem_base, ONLY: oft_afem_type
+USE multigrid_build, ONLY: multigrid_mesh, multigrid_construct_surf
+USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_la_base, ONLY: oft_vector
-USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
-  oft_lag_setup
+USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
   gs_fixed_vflux, gs_load_regions, oft_indent
@@ -30,6 +29,9 @@ LOGICAL :: file_exists
 REAL(8), ALLOCATABLE :: pts(:,:)
 TYPE(gs_eq) :: mygs
 CLASS(oft_vector), POINTER :: xv
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 !---GS input options
 INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30
@@ -130,13 +132,14 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup Mesh
 !---------------------------------------------------------------------------
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 CALL mygs%xdmf%setup("TokaMaker")
-CALL smesh%setup_io(mygs%xdmf,order)
+CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
-CALL oft_lag_setup(order, -1)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
+CALL mygs%setup(ML_oft_blagrange)
 !---------------------------------------------------------------------------
 ! Compute optimized smoother coefficients
 !---------------------------------------------------------------------------
@@ -173,7 +176,7 @@ WRITE(*,'(2A)')oft_indent,'*** Initializing GS solution ***'
 INQUIRE(EXIST=file_exists,FILE='tokamaker_psi_in.rst')
 CALL mygs%init()!compute=(.NOT.file_exists),r0=init_r0,a=init_a,kappa=init_kappa,delta=init_delta)
 IF(file_exists)THEN
-  CALL oft_blagrange%vec_load(mygs%psi,'tokamaker_psi_in.rst','psi')
+  CALL ML_oft_blagrange%current_level%vec_load(mygs%psi,'tokamaker_psi_in.rst','psi')
 ELSE
   CALl mygs%init_psi(ierr,r0=init_r0,a=init_a,kappa=init_kappa,delta=init_delta)
   IF(ierr/=0)CALL oft_abort("Flux initialization failed","tokamaker_fit",__FILE__)
@@ -200,10 +203,10 @@ ELSE
 END IF
 mygs%has_plasma=has_plasma
 IF(.NOT.mygs%has_plasma)mygs%I%ncofs=0
-! mygs%spatial_bounds(1,1)=MAX(MINVAL(smesh%r(1,:)),rbounds(1))
-! mygs%spatial_bounds(2,1)=MIN(MAXVAL(smesh%r(1,:)),rbounds(2))
-! mygs%spatial_bounds(1,2)=MAX(MINVAL(smesh%r(2,:)),zbounds(1))
-! mygs%spatial_bounds(2,2)=MIN(MAXVAL(smesh%r(2,:)),zbounds(2))
+! mygs%spatial_bounds(1,1)=MAX(MINVAL(mg_mesh%smesh%r(1,:)),rbounds(1))
+! mygs%spatial_bounds(2,1)=MIN(MAXVAL(mg_mesh%smesh%r(1,:)),rbounds(2))
+! mygs%spatial_bounds(1,2)=MAX(MINVAL(mg_mesh%smesh%r(2,:)),zbounds(1))
+! mygs%spatial_bounds(2,2)=MIN(MAXVAL(mg_mesh%smesh%r(2,:)),zbounds(2))
 mygs%lim_zmax=lim_zmax
 mygs%rmin=rmin
 mygs%estore_target=estore_target*mu0
@@ -227,7 +230,7 @@ WRITE(*,'(2A)')oft_indent,'*** Post-solution analysis ***'
 CALL gs_analyze(mygs)
 !---Save equilibrium and flux function
 CALL gs_save(mygs,'tokamaker_fit.rst')
-CALL oft_blagrange%vec_save(mygs%psi,'tokamaker_psi.rst','psi')
+CALL ML_oft_blagrange%current_level%vec_save(mygs%psi,'tokamaker_psi.rst','psi')
 !---Save profile specifications
 CALL gs_profile_save('f_prof.out',mygs%I)
 CALL gs_profile_save('p_prof.out',mygs%P)
@@ -235,7 +238,7 @@ CALL gs_profile_save('p_prof.out',mygs%P)
 CALL gs_save_prof(mygs,'fit.prof')
 !---Save output grid
 IF(save_mug)THEN
-  CALL smesh%save_to_file('gs_trans_mesh.dat')
+  CALL mg_mesh%smesh%save_to_file('gs_trans_mesh.dat')
   CALL gs_save_fgrid(mygs,'gs_trans_fields.dat')
 ELSE
   CALL gs_save_fgrid(mygs)

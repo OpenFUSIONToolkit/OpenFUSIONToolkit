@@ -2495,7 +2495,6 @@ INTEGER(4) :: i,j
 REAL(8) :: xs
 ! INTEGER(4), ALLOCATABLE, DIMENSION(:) :: child_inds
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: active_pts
-
 !------------------------------------------------------------------------------
 !> Need docs
 !------------------------------------------------------------------------------
@@ -2512,8 +2511,6 @@ TYPE :: tw_oct_tree
   TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: children => NULL()
   TYPE(tw_oct_tree), POINTER :: parent => NULL()
 END TYPE tw_oct_tree
-!------------------------------------------------------------------------------
-! CLASS tw_oct_tree_list
 !------------------------------------------------------------------------------
 !> Need docs
 !------------------------------------------------------------------------------
@@ -2859,16 +2856,12 @@ IF(INFO/=0)CALL oft_abort("QR factorization failed","tw_Lmat_MF_setup::get_qr",_
 DEALLOCATE(WORK,TAU)
 END SUBROUTINE get_qr
 !---------------------------------------------------------------------------
-! SUBROUTINE: bjprecond_apply
-!---------------------------------------------------------------------------
-!> Precondition a linear system using a Block-Jacobi method
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
+!> Precondition a linear system using a Block-Jacobi method (complex)
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE bjprecond_apply(self,u,g)
-CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self
-CLASS(oft_cvector), INTENT(inout) :: u,g
+CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self !< Solver object
+CLASS(oft_cvector), INTENT(inout) :: u !< Guess/Solution field
+CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(4) :: i,j,k,l,n,info,level,iblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap
@@ -3004,16 +2997,12 @@ NULLIFY(self%mf_obj)
 DEBUG_STACK_POP
 end subroutine bjprecond_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: bjprecond_apply
-!---------------------------------------------------------------------------
-!> Precondition a linear system using a Block-Jacobi method
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
+!> Precondition a linear system using a Block-Jacobi method (real)
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE rbjprecond_apply(self,u,g)
-CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self
-CLASS(oft_vector), INTENT(inout) :: u,g
+CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
+CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
+CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(4) :: i,j,k,l,n,info,level,iblock,jblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap

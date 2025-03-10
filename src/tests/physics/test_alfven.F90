@@ -13,7 +13,7 @@
 PROGRAM test_alfven
 USE oft_base
 !--Grid
-USE oft_mesh_type, ONLY: mesh, rgrnd
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -21,33 +21,30 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 USE fem_utils, ONLY: diff_interp
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, &
   oft_lag_vgetmop, oft_lag_vrinterp
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions, hcurl_zerob
-!---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp, oft_h0_getlop, h0_zerogrnd
-!---H1 FE space
+!---H1 FE space (Grad(H^1) subspace)
 USE oft_h1_basis, ONLY: oft_h1_setup
-USE oft_h1_fields, ONLY: oft_h1_create
-USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project, &
-  h1grad_zerop, oft_h1_rinterp
+USE oft_h1_operators, ONLY: h1_setup_interp
+!---Full H(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
+USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, oft_hcurl_grad_project, &
+  oft_hcurl_grad_gzerop, oft_hcurl_grad_rinterp
 !---Physics
 USE oft_vector_inits, ONLY: uniform_field
 USE diagnostic, ONLY: vec_energy
 USE mhd_utils, ONLY: mu0, proton_mass
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, xmhd_taxis, xmhd_lin_run, &
-  xmhd_sub_fields
+  xmhd_sub_fields, ML_oft_hcurl, ML_oft_h1, &
+  ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 USE test_phys_helpers, ONLY: alfven_eig
 IMPLICIT NONE
-!---H1 metric solver
+!---Full H(Curl) space mass matrix solver
 CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
-!---Lagrange metric solver
+!---Lagrange mass matrix solver
 CLASS(oft_solver), POINTER :: lag_minv => NULL()
 CLASS(oft_matrix), POINTER :: lag_mop => NULL()
 !---Local variables
@@ -56,9 +53,11 @@ CLASS(oft_vector), POINTER :: den,temp,dden,dtemp
 TYPE(xmhd_sub_fields) :: equil_fields,pert_fields
 TYPE(uniform_field) :: z_field
 TYPE(alfven_eig), TARGET :: alf_field
-TYPE(oft_h1_rinterp), TARGET :: bfield
+TYPE(oft_hcurl_grad_rinterp), TARGET :: bfield
 TYPE(oft_lag_vrinterp), TARGET :: vfield
 TYPE(diff_interp) :: err_field
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_hcurl_grad_gzerop), TARGET :: hcurl_grad_gzerop
 INTEGER(i4) :: io_unit
 REAL(r8) :: B0,verr,vierr,berr,bierr
 REAL(r8), POINTER :: tmp(:),bvals(:),uvals(:)
@@ -80,46 +79,46 @@ CLOSE(io_unit)
 !---------------------------------------------------------------------------
 ! Setup grid
 !---------------------------------------------------------------------------
-rgrnd=(/2.d0,0.d0,0.d0/)
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
-!---Lagrange
-CALL oft_lag_setup(order,minlev)
-CALL lag_setup_interp
-!---H1(Curl) subspace
-CALL oft_hcurl_setup(order,minlev)
-CALL hcurl_setup_interp
-!---H1(Grad) subspace
-CALL oft_h0_setup(order+1,minlev)
-CALL h0_setup_interp
-!---H1 full space
-CALL oft_h1_setup(order,minlev)
-CALL h1_setup_interp
+!--- Lagrange
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=minlev)
+CALL lag_setup_interp(ML_oft_lagrange)
+!--- Grad(H^1) subspace
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=minlev)
+CALL h1_setup_interp(ML_oft_h1)
+!--- H(Curl) subspace
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=minlev)
+CALL hcurl_setup_interp(ML_oft_hcurl)
+!--- Full H(Curl) space
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,minlev)
+CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1)
+hcurl_grad_gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
 !---------------------------------------------------------------------------
-! Create H1 metric solver
+! Create Full H(Curl) space mass matrix solver
 !---------------------------------------------------------------------------
 NULLIFY(mop)
-CALL h1_getmop(mop,"none")
+CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,"none")
 CALL create_cg_solver(minv)
 minv%A=>mop
 minv%its=-3
 minv%atol=1.d-10
 CALL create_diag_pre(minv%pre)
 !---
-CALL oft_h1_create(u)
-CALL oft_h1_create(v)
-CALL oft_h1_create(b)
-CALL oft_h1_create(db)
-CALL oft_h1_create(be)
-CALL oft_h1_create(bi)
+CALL ML_hcurl_grad%vec_create(u)
+CALL ML_hcurl_grad%vec_create(v)
+CALL ML_hcurl_grad%vec_create(b)
+CALL ML_hcurl_grad%vec_create(db)
+CALL ML_hcurl_grad%vec_create(be)
+CALL ML_hcurl_grad%vec_create(bi)
 !---------------------------------------------------------------------------
 ! Set uniform B0 = zhat
 !---------------------------------------------------------------------------
 z_field%val=(/0.d0,0.d0,1.d0/)
-CALL oft_h1_project(z_field,v)
-CALL h1grad_zerop(v)
+CALL oft_hcurl_grad_project(ML_hcurl_grad%current_level,z_field,v)
+CALL hcurl_grad_gzerop%apply(v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL b%add(0.d0,1.d0,u)
@@ -127,8 +126,9 @@ CALL be%add(0.d0,1.d0,u)
 !---------------------------------------------------------------------------
 ! Set dB from alfven wave init
 !---------------------------------------------------------------------------
-CALL oft_h1_project(alf_field,v)
-CALL h1grad_zerop(v)
+alf_field%mesh=>mg_mesh%mesh
+CALL oft_hcurl_grad_project(ML_hcurl_grad%current_level,alf_field,v)
+CALL hcurl_grad_gzerop%apply(v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL db%add(0.d0,delta,u)
@@ -138,22 +138,22 @@ CALL bi%add(0.d0,1.d0,u)
 ! Create Lagrange metric solver
 !---------------------------------------------------------------------------
 NULLIFY(lag_mop)
-CALL oft_lag_vgetmop(lag_mop,"none")
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lag_mop,"none")
 CALL create_cg_solver(lag_minv)
 lag_minv%A=>lag_mop
 lag_minv%its=-3
 lag_minv%atol=1.d-10
 CALL create_diag_pre(lag_minv%pre)
 !---
-CALL oft_lag_vcreate(lag_u)
-CALL oft_lag_vcreate(lag_v)
-CALL oft_lag_vcreate(vel)
-CALL oft_lag_vcreate(dvel)
-CALL oft_lag_vcreate(vi)
+CALL ML_oft_vlagrange%vec_create(lag_u)
+CALL ML_oft_vlagrange%vec_create(lag_v)
+CALL ML_oft_vlagrange%vec_create(vel)
+CALL ML_oft_vlagrange%vec_create(dvel)
+CALL ML_oft_vlagrange%vec_create(vi)
 !---------------------------------------------------------------------------
 ! Set dB from alfven wave init
 !---------------------------------------------------------------------------
-CALL oft_lag_vproject(alf_field,lag_v)
+CALL oft_lag_vproject(ML_oft_lagrange%current_level,alf_field,lag_v)
 CALL lag_u%set(0.d0)
 CALL lag_minv%apply(lag_u,lag_v)
 CALL dvel%add(0.d0,delta,lag_u)
@@ -169,10 +169,10 @@ IF(linear)THEN
   CALL db%scale(B0)
   CALL dvel%scale(v_alf)
   !
-  CALL oft_lag_create(den)
-  CALL oft_lag_create(temp)
-  CALL oft_lag_create(dden)
-  CALL oft_lag_create(dtemp)
+  CALL ML_oft_lagrange%vec_create(den)
+  CALL ML_oft_lagrange%vec_create(temp)
+  CALL ML_oft_lagrange%vec_create(dden)
+  CALL ML_oft_lagrange%vec_create(dtemp)
   CALL den%set(1.d19)
   CALL temp%set(1.d1)
   equil_fields%B=>b
@@ -197,8 +197,8 @@ ELSE
   CALL vel%add(0.d0,1.d0,dvel)
   CALL vel%scale(v_alf)
   !
-  CALL oft_lag_create(den)
-  CALL oft_lag_create(temp)
+  CALL ML_oft_lagrange%vec_create(den)
+  CALL ML_oft_lagrange%vec_create(temp)
   CALL den%set(1.d19)
   CALL temp%set(1.d1)
   equil_fields%B=>b
@@ -211,7 +211,7 @@ ELSE
   DEALLOCATE(den,temp)
 END IF
 !---Check magnetic field waveform
-bierr=vec_energy(alf_field,order*2)
+bierr=vec_energy(mg_mesh%mesh,alf_field,order*2)
 err_field%dim=3
 err_field%a=>alf_field
 err_field%b=>bfield
@@ -219,17 +219,17 @@ CALL b%scale(1.d0/B0)
 CALL b%add(-1.d0,1.d0,be)
 CALL b%scale(1.d0/delta)
 bfield%u=>b
-CALL bfield%setup
-berr=vec_energy(err_field,order*2)
+CALL bfield%setup(ML_hcurl_grad%current_level)
+berr=vec_energy(mg_mesh%mesh,err_field,order*2)
 !---Check velocity field waveform
-vierr=vec_energy(alf_field,order*2)
+vierr=vec_energy(mg_mesh%mesh,alf_field,order*2)
 err_field%dim=3
 err_field%a=>alf_field
 err_field%b=>vfield
 CALL vel%scale(-1.d0/(delta*v_alf))
 vfield%u=>vel
-CALL vfield%setup
-verr=vec_energy(err_field,order*2)
+CALL vfield%setup(ML_oft_lagrange%current_level)
+verr=vec_energy(mg_mesh%mesh,err_field,order*2)
 !---Output wave comparisons
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='alfven.results')

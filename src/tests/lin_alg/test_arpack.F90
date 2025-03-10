@@ -17,8 +17,8 @@ PROGRAM test_arpack
 #if defined( HAVE_ARPACK )
 USE oft_base
 !--Grid
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -26,11 +26,14 @@ USE oft_deriv_matrices, ONLY: create_diagmatrix
 USE oft_solver_utils, ONLY: create_native_pre
 USE oft_arpack, ONLY: oft_irlm_eigsolver, oft_iram_eigsolver
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lag_set_level, oft_lagrange_nlevels
-USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, lag_zerob
+USE fem_base, ONLY: oft_ml_fem_type
+USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_lag_operators, ONLY: lag_lop_eigs, oft_lag_getlop, oft_lag_zerob
 IMPLICIT NONE
 INTEGER(i4) :: iounit,ierr
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
+TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: order=1
 INTEGER(i4) :: minlev=1
 NAMELIST/test_arpack_options/order,minlev
@@ -43,19 +46,18 @@ OPEN(NEWUNIT=iounit,FILE=oft_env%ifile)
 READ(iounit,test_arpack_options,IOSTAT=ierr)
 CLOSE(iounit)
 !---Setup grid
-CALL multigrid_construct
-IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+CALL multigrid_construct(mg_mesh)
+IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---------------------------------------------------------------------------
 ! Run tests
 !---------------------------------------------------------------------------
 oft_env%pm=.FALSE.
-CALL oft_lag_setup(order,minlev)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=minlev)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 CALL test_lop_eig()
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
-! SUBROUTINE: test_lop_eig
 !---------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator LAG::LOP
 !---------------------------------------------------------------------------
@@ -71,12 +73,12 @@ TYPE(oft_iram_eigsolver) :: arsolver2
 ! Compute optimal smoother coefficients
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)OPEN(NEWUNIT=iounit,FILE='arpack.results')
-DO i=oft_lagrange_nlevels-order+1,oft_lagrange_nlevels
-  CALL oft_lag_set_level(i)
+DO i=ML_oft_lagrange%nlevels-order+1,ML_oft_lagrange%nlevels
+  CALL ML_oft_lagrange%set_level(i)
   !---Create fields
-  CALL oft_lag_create(u)
+  CALL ML_oft_lagrange%vec_create(u)
   !---Create matrices
-  CALL oft_lag_getlop(lop,'zerob')
+  CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
   CALL create_diagmatrix(md,lop%D)
   !---Test Lanzcos solver
   arsolver1%A=>lop

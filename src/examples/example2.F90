@@ -27,19 +27,19 @@ PROGRAM example2
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_mlpre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, &
-  oft_lag_set_level, oft_lagrange_ops, oft_lagrange_blevel
-USE oft_lag_fields, ONLY: oft_lag_create
+USE fem_base, ONLY: oft_ml_fem_type, oft_ml_fe_vecspace
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
-  oft_lag_getmop, oft_lag_getlop, df_lop, nu_lop, lag_zerob, &
-  lag_interp, lag_inject
+  oft_lag_getmop, oft_lag_getlop, df_lop, nu_lop, oft_lag_zerob, &
+  lag_base_pop, lag_base_push
 IMPLICIT NONE
 !!\subsection ex2_code_vars Variable Definitions
 !---Solver objects
@@ -59,66 +59,74 @@ REAL(r8), POINTER, DIMENSION(:) :: vtmp => NULL()
 INTEGER(i4) :: i,nlevels
 INTEGER(i4), PARAMETER :: order = 3
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
+TYPE(oft_lag_zerob) :: lag_zerob
+TYPE(oft_ml_fe_vecspace) :: ml_vecspace
 !!\subsection doc_ex2_code_fem Setup Lagrange FE
 !!
 !!When MG is used it is also desirable to construct field caches for each FE representation to be used. This is done with
-!!the \c *_vcache subroutines in each of the corresponding FE \c *_fields modules. These subroutines create a field cache which
+!!the `*_vcache` subroutines in each of the corresponding FE `*_fields` modules. These subroutines create a field cache which
 !!prevents the recreation of internal field lists, which are otherwise recreated each time a new vector is created using
-!!\c *_create routines. See \ref mat_vec_vconst for more information.
+!!`*_create` routines. See \ref mat_vec_vconst for more information.
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Example2")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---Construct FE levels
-CALL oft_lag_setup(order)
-CALL lag_setup_interp
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
+CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!\subsection doc_ex2_code_ml Construct ML structures
 !!
 !!To form a MG preconditioner the approximate matrices corresponding to each level must be
 !!constructed and passed to form the preconditioner. The transfer level is skipped by setting
 !!the level to the negative of the true FE level. This causes the preconditioner to skip smoothing
 !!and only interpolate/inject on this level.
-nlevels=oft_lagrange_nlevels
+nlevels=ML_oft_lagrange%nlevels
 ALLOCATE(ml_lop(nlevels),ml_int(nlevels-1))
 ALLOCATE(df(nlevels),nu(nlevels),levels(nlevels))
 DO i=1,nlevels
-  CALL oft_lag_set_level(i)
+  CALL ML_oft_lagrange%set_level(i)
   levels(i)=i
-  IF(i==oft_lagrange_blevel+1)levels(i)=-levels(i)
+  IF(i==ML_oft_lagrange%blevel+1)levels(i)=-levels(i)
   df(i)=df_lop(i)
   nu(i)=nu_lop(i)
   !---
   NULLIFY(ml_lop(i)%M)
-  CALL oft_lag_getlop(ml_lop(i)%M,'zerob')
-  IF(i>1)ml_int(i-1)%M=>oft_lagrange_ops%interp
+  CALL oft_lag_getlop(ML_oft_lagrange%current_level,ml_lop(i)%M,'zerob')
+  IF(i>1)ml_int(i-1)%M=>ML_oft_lagrange%interp_matrices(i)%m !oft_lagrange_ops%interp
 END DO
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !!\subsection doc_ex2_code_fields Setup solver fields
 !---Create solver fields
-CALL oft_lag_create(u)
-CALL oft_lag_create(v)
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(v)
 !---Get FE operators
 lop=>ml_lop(nlevels)%M
-CALL oft_lag_getmop(mop,'none')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 !!\subsection doc_ex2_code_solver Setup linear solver
 CALL create_cg_solver(linv)
 linv%its=-3
 linv%A=>lop
 !---Setup MG preconditioner
-CALL create_mlpre(linv%pre,ml_lop,levels, &
-nlevels=nlevels,create_vec=oft_lag_create,interp=lag_interp,inject=lag_inject, &
-bc=lag_zerob,stype=1,df=df,nu=nu)
+ml_vecspace%ML_FE_rep=>ML_oft_lagrange
+ml_vecspace%base_pop=>lag_base_pop
+ml_vecspace%base_push=>lag_base_push
+CALL create_mlpre(linv%pre,ml_lop,levels,nlevels=nlevels,ml_vecspace=ml_vecspace, &
+       bc=lag_zerob,stype=1,df=df,nu=nu)
 !!\subsection doc_ex2_code_compute Solve linear system
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL lag_zerob(v)
+CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vtmp)
-CALL mesh%save_vertex_scalar(vtmp,plot_file,'T')
+CALL mg_mesh%mesh%save_vertex_scalar(vtmp,plot_file,'T')
 DEALLOCATE(vtmp)
 !---Finalize enviroment
 CALL oft_finalize
@@ -128,9 +136,9 @@ END PROGRAM example2
 !!\section doc_ex2_input Input file
 !!
 !!Below is an input file which can be used with this example in a serial environment. The
-!!\c lag_op_options group has been added over the groups in \ref ex1 to set parameters used
-!!by the multigrid preconditioner. In this case we are setting the smoother coefficient \c df
-!!and number of iterations \c nu used by the Jacobi smoother on each level.
+!!`lag_op_options` group has been added over the groups in \ref ex1 to set parameters used
+!!by the multigrid preconditioner. In this case we are setting the smoother coefficient `df`
+!!and number of iterations `nu` used by the Jacobi smoother on each level.
 !!
 !!\verbatim
 !!&runtime_options

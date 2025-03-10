@@ -92,6 +92,8 @@ class TokaMaker():
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_eq "gs_eq")
         self.gs_obj = c_void_p()
         tokamaker_alloc(ctypes.byref(self.gs_obj))
+        ## Internal mesh object
+        self.mesh_obj = c_void_p()
         ## General settings object
         self.settings = tokamaker_default_settings(self._oft_env)
         ## Conductor definition dictionary
@@ -158,7 +160,7 @@ class TokaMaker():
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_reset(error_string)
+        tokamaker_reset(self.mesh_obj,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self.nregs = -1
@@ -218,7 +220,7 @@ class TokaMaker():
             self._oft_env.oft_in_groups['mesh_options'] = {'cad_type': "0"}
             self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
             self._oft_env.update_oft_in()
-            oft_setup_smesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
+            oft_setup_smesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs),ctypes.byref(self.mesh_obj))
         elif r is not None:
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)
             lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
@@ -230,7 +232,7 @@ class TokaMaker():
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
             else:
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
-            oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs))
+            oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self.mesh_obj))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
@@ -287,7 +289,10 @@ class TokaMaker():
             for sub_coil in self.coil_sets[key]['sub_coils']:
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
         cstring = self._oft_env.path2c('none')
-        tokamaker_setup_regions(cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_setup_regions(self.mesh_obj,cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
     
     def setup(self,order=2,F0=0.0,full_domain=False):
         r'''! Setup G-S solver
@@ -301,7 +306,7 @@ class TokaMaker():
         #
         ncoils = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(order,full_domain,ctypes.byref(ncoils),error_string)
+        tokamaker_setup(self.mesh_obj,order,full_domain,ctypes.byref(ncoils),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         ## Number of coils in mesh
@@ -1670,7 +1675,12 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
 
         self.set_profiles(ffp_prof=init_ffp_prof,pp_prof=init_pp_prof)
 
-        flag = self.solve()
+        try:
+            self.solve()
+            flag = 0
+        except ValueError:
+            flag = -1
+        print('  Solve flag: ', flag)
 
     ### Specify original H-mode profiles, iterate on bootstrap contribution until reasonably converged
     n = 0
@@ -1689,8 +1699,12 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
 
         self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
 
-        flag = self.solve()
-        print('Solve flag: ', flag)
+        try:
+            self.solve()
+            flag = 0
+        except ValueError:
+            flag = -1
+        print('  Solve flag: ', flag)
 
         n += 1
         if (n > 2) and (flag >= 0):

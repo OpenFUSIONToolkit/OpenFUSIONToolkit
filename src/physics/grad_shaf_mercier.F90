@@ -11,10 +11,10 @@
 !---------------------------------------------------------------------------
 module oft_gs_mercier
 use oft_base
-use oft_mesh_type, only: smesh, bmesh_findcell
+use oft_mesh_type, only: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
-use oft_lag_basis, only: oft_blagrange, oft_blag_d2eval, oft_blag_geval
+use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp
 use oft_gs, only: gs_eq, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp
@@ -30,7 +30,7 @@ implicit none
 !---------------------------------------------------------------------------
 type, extends(gsinv_interp) :: mercierinv_interp
 contains
-  procedure :: setup => minterpinv_setup
+  ! procedure :: setup => minterpinv_setup
   !> Reconstruct the gradient of a Lagrange scalar field
   procedure :: interp => minterpinv_apply
 end type mercierinv_interp
@@ -90,7 +90,7 @@ IF(oft_debug_print(2))THEN
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi
-CALL psi_int%setup()
+CALL psi_int%setup(gseq%fe_rep)
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
 IF(oft_debug_print(2))WRITE(*,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
@@ -104,7 +104,7 @@ rmax=raxis
 cell=0
 DO j=1,100
   pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(smesh,cell,pt,f)
+  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
   IF( psi_surf(1) < x1)EXIT
@@ -116,7 +116,7 @@ call set_tracer(1)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 field%u=>gseq%psi
-CALL field%setup()
+CALL field%setup(gseq%fe_rep)
 active_tracer%neq=8
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -135,7 +135,7 @@ do j=1,self%npsi-1
     !$omp critical
     CALL gs_psi2r(gseq,psi_surf(1),pt)
     !$omp end critical
-    call tracinginv_fs(pt(1:2))
+    call tracinginv_fs(gseq%mesh,pt(1:2))
     !---Exit if trace fails
     if(active_tracer%status/=1)THEN
       WRITE(*,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
@@ -146,8 +146,8 @@ do j=1,self%npsi-1
     !---------------------------------------------------------------------------
     !---Compute poloidal flux
     pt(1:2)=active_tracer%y
-    call bmesh_findcell(smesh,active_tracer%cell,pt,active_tracer%f)
-    call smesh%jacobian(active_tracer%cell,active_tracer%f,gop,vol)
+    call bmesh_findcell(gseq%mesh,active_tracer%cell,pt,active_tracer%f)
+    call gseq%mesh%jacobian(active_tracer%cell,active_tracer%f,gop,vol)
     call psi_int%interp(active_tracer%cell,active_tracer%f,gop,psi_surf)
     !---Get flux variables
     I=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
@@ -189,16 +189,18 @@ self%xmin=self%funcp%xs(0)
 self%xmax=self%funcp%xs(self%npsi)
 IF(oft_debug_print(2))CALL oft_decrease_indent
 end subroutine mercier_update
-!---------------------------------------------------------------------------
-! SUBROUTINE minterpinv_setup
-!---------------------------------------------------------------------------
-!> Needs Docs
-!---------------------------------------------------------------------------
-subroutine minterpinv_setup(self)
-class(mercierinv_interp), intent(inout) :: self
-NULLIFY(self%uvals)
-CALL self%u%get_local(self%uvals)
-end subroutine minterpinv_setup
+! !---------------------------------------------------------------------------
+! ! SUBROUTINE minterpinv_setup
+! !---------------------------------------------------------------------------
+! !> Needs Docs
+! !---------------------------------------------------------------------------
+! subroutine minterpinv_setup(self,mesh)
+! class(mercierinv_interp), intent(inout) :: self
+! class(oft_bmesh), target, intent(inout) :: mesh
+! NULLIFY(self%uvals)
+! CALL self%u%get_local(self%uvals)
+! self%mesh=>mesh
+! end subroutine minterpinv_setup
 !---------------------------------------------------------------------------
 ! SUBROUTINE minterpinv_apply
 !---------------------------------------------------------------------------
@@ -216,21 +218,21 @@ real(8) :: rop(3),d2op(6),pt(3),grad(3),d2(3),d2_tmp(6),tmp
 real(8) :: g2op(6,6),s,c
 real(8) :: K(6,3)
 !---Get dofs
-allocate(j(oft_blagrange%nce))
-call oft_blagrange%ncdofs(cell,j)
+allocate(j(self%lag_rep%nce))
+call self%lag_rep%ncdofs(cell,j)
 !---Reconstruct gradient
-call smesh%hessian(cell,f,g2op,K)
+call self%mesh%hessian(cell,f,g2op,K)
 grad=0.d0
 d2_tmp=0.d0
-do jc=1,oft_blagrange%nce
-  call oft_blag_geval(oft_blagrange,cell,jc,f,rop,gop)
-  call oft_blag_d2eval(oft_blagrange,cell,jc,f,d2op,g2op)
+do jc=1,self%lag_rep%nce
+  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
+  call oft_blag_d2eval(self%lag_rep,cell,jc,f,d2op,g2op)
   grad=grad+self%uvals(j(jc))*rop
   d2_tmp=d2_tmp+self%uvals(j(jc))*(d2op-MATMUL(g2op,MATMUL(K,rop)))
 end do
 d2=d2_tmp([1,2,4]) ! Map from 3D to 2D
 !---Get radial position
-pt=smesh%log2phys(cell,f)
+pt=self%mesh%log2phys(cell,f)
 !---
 s=SIN(self%t)
 c=COS(self%t)

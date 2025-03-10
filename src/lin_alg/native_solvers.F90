@@ -32,18 +32,16 @@ USE oft_local
 USE oft_base
 USE oft_stitching, ONLY: oft_seam
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
-  oft_matrix, oft_cmatrix, oft_graph
+  oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
   partition_graph, native_matrix_setup_full, oft_native_submatrix
-USE oft_solver_base, ONLY: oft_solver, oft_bc_proto, oft_orthog, oft_solver_ptr, &
-  oft_csolver, oft_cbc_proto, oft_corthog, oft_eigsolver, solver_setup, csolver_setup, &
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
+  oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
   eigsolver_setup
 IMPLICIT NONE
 #include "local.h"
 private
-!---------------------------------------------------------------------------
-! TYPE oft_native_cg_solver
 !---------------------------------------------------------------------------
 !> CG solver class
 !!
@@ -51,8 +49,8 @@ private
 !---------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_native_cg_solver
   logical :: precond=.FALSE. !< Solver as preconditioner
-  class(oft_orthog), pointer :: orthog => NULL() !< Orthogonalization
-  class(oft_orthog), pointer :: cleaner => NULL() !< Null-Space cleaner
+  class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
 contains
   !> Solve system
   procedure :: apply => cg_solver_apply
@@ -62,15 +60,13 @@ contains
   PROCEDURE :: delete => cg_delete
 end type oft_native_cg_solver
 !---------------------------------------------------------------------------
-! TYPE oft_native_gmres_solver
-!---------------------------------------------------------------------------
 !> GMRES solver class
 !---------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_native_gmres_solver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
   integer(i4) :: nrits=10 !< Convergence specification
-  class(oft_orthog), pointer :: orthog => NULL() !< Orthogonalization
-  class(oft_orthog), pointer :: cleaner => NULL() !< Null-Space cleaner
+  class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
   class(oft_vector), private, pointer :: r => NULL() !< Temporary storage vector
   class(oft_vector), private, pointer :: w => NULL() !< Temporary storage vector
   type(oft_vector_ptr), private, pointer, dimension(:) :: v => NULL() !< Search directions
@@ -84,15 +80,13 @@ contains
   PROCEDURE :: delete => gmres_delete
 end type oft_native_gmres_solver
 !---------------------------------------------------------------------------
-! TYPE oft_native_gmres_csolver
-!---------------------------------------------------------------------------
-!> GMRES solver class
+!> GMRES solver class (complex)
 !---------------------------------------------------------------------------
 type, public, extends(oft_csolver) :: oft_native_gmres_csolver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
   integer(i4) :: nrits=10 !< Convergence specification
-  class(oft_corthog), pointer :: orthog => NULL() !< Orthogonalization
-  class(oft_corthog), pointer :: cleaner => NULL() !< Null-Space cleaner
+  class(oft_csolver_bc), pointer :: orthog => NULL() !< Orthogonalization
+  class(oft_csolver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
   class(oft_cvector), private, pointer :: r => NULL() !< Temporary storage vector
   class(oft_cvector), private, pointer :: w => NULL() !< Temporary storage vector
   type(oft_cvector_ptr), private, pointer, dimension(:) :: v => NULL() !< Search directions
@@ -106,8 +100,6 @@ contains
   PROCEDURE :: delete => cgmres_delete
 end type oft_native_gmres_csolver
 !---------------------------------------------------------------------------
-! TYPE oft_native_cg_eigsolver
-!---------------------------------------------------------------------------
 !> CG eigensolver class
 !!
 !! @note Matrix system must be SPD, otherwise solver will fail.
@@ -115,17 +107,14 @@ end type oft_native_gmres_csolver
 type, public, extends(oft_eigsolver) :: oft_native_cg_eigsolver
   integer(i4) :: nrestarts = 2
   integer(i4) :: ninner = -1
-  !> Boundary condition
-  procedure(oft_bc_proto), pointer, nopass :: bc => NULL()
-  class(oft_orthog), pointer :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
+  class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
 contains
   !> Solve system
   procedure :: apply => cg_eigsolver_apply
   !> Clean-up internal storage
   PROCEDURE :: delete => cg_eig_delete
 end type oft_native_cg_eigsolver
-!---------------------------------------------------------------------------
-! TYPE oft_nksolver
 !---------------------------------------------------------------------------
 !> Native Newton solver
 !!
@@ -146,16 +135,14 @@ TYPE, PUBLIC :: oft_nksolver
   CLASS(oft_vector), POINTER :: du => NULL() !< Storage for non-linear corrections
   CLASS(oft_matrix), POINTER :: A => NULL() !< Metric matrix
   CLASS(oft_solver), POINTER :: J_inv => NULL() !< Jacobian inverse solver
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   PROCEDURE(oft_update_jacobian), POINTER, NOPASS :: J_update => NULL() !< Jacobian update subroutine
-  PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL() !< Boundary condition
 CONTAINS
   !> Solve non-linear system
   PROCEDURE :: apply => nksolver_apply
   !> Clean-up internal storage
   PROCEDURE :: delete => nksolver_delete
 END TYPE oft_nksolver
-!---------------------------------------------------------------------------
-! TYPE oft_identity_inv
 !---------------------------------------------------------------------------
 !> Identity matrix inversion
 !---------------------------------------------------------------------------
@@ -167,8 +154,6 @@ CONTAINS
   PROCEDURE :: delete => identity_inv_delete
 END TYPE oft_identity_inv
 !---------------------------------------------------------------------------
-! TYPE oft_diag_scale
-!---------------------------------------------------------------------------
 !> Diagonal preconditioner
 !---------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_diag_scale
@@ -179,8 +164,6 @@ contains
   procedure :: delete => diag_scale_delete
 end type oft_diag_scale
 !---------------------------------------------------------------------------
-! TYPE oft_diag_cscale
-!---------------------------------------------------------------------------
 !> Diagonal preconditioner
 !---------------------------------------------------------------------------
 type, public, extends(oft_csolver) :: oft_diag_cscale
@@ -190,8 +173,6 @@ contains
   !> Clean-up internal smoother storage
   procedure :: delete => cdiag_scale_delete
 end type oft_diag_cscale
-!---------------------------------------------------------------------------
-! TYPE oft_jblock_precond
 !---------------------------------------------------------------------------
 !> Symmetric Jacobi smoother
 !---------------------------------------------------------------------------
@@ -212,8 +193,6 @@ contains
   procedure :: delete => jblock_precond_delete
 end type oft_jblock_precond
 !---------------------------------------------------------------------------
-! TYPE oft_ml_precond
-!---------------------------------------------------------------------------
 !> Multi-level preconditioner level
 !!
 !! @note This class acts as a driver/container for separate solver objects
@@ -231,12 +210,7 @@ type, public, extends(oft_solver) :: oft_ml_precond
   class(oft_vector), pointer :: r => NULL() !< Temporary vector
   class(oft_vector), pointer :: ucors => NULL() !< Temporary coarse vector
   class(oft_vector), pointer :: gcors => NULL() !< Temporary coarse vector
-  !> Interpolate field to high level
-  procedure(oft_interp_proto), pointer, nopass :: interp => NULL()
-  !> Inject field to lower level
-  procedure(oft_interp_proto), pointer, nopass :: inject => NULL()
-  !> Create a new field on a specified level
-  procedure(oft_veccreate_proto), pointer, nopass :: vec_create => NULL()
+  class(oft_ml_vecspace), pointer :: ml_vecspace => NULL() !< Multi-level vector space 
 contains
   !> Apply smoother
   procedure :: apply => ml_precond_apply
@@ -248,8 +222,6 @@ contains
   procedure :: delete => ml_precond_delete
 end type oft_ml_precond
 !---------------------------------------------------------------------------
-! TYPE oft_ml_trans
-!---------------------------------------------------------------------------
 !> Multi-level transfer level
 !---------------------------------------------------------------------------
 type, public, extends(oft_ml_precond) :: oft_ml_trans
@@ -259,8 +231,6 @@ contains
   !> Clean-up internal smoother storage
   procedure :: delete => ml_trans_delete
 end type oft_ml_trans
-!---------------------------------------------------------------------------
-! TYPE oft_bjprecond
 !---------------------------------------------------------------------------
 !> Block-Jacobi preconditioner
 !---------------------------------------------------------------------------
@@ -285,108 +255,48 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => bjprecond_delete
 END TYPE oft_bjprecond
-!---------------------------------------------------------------------------
-! TYPE oft_bc_ptr
-!---------------------------------------------------------------------------
-!> Boundary condition container
-!---------------------------------------------------------------------------
-type, public :: oft_bc_ptr
-  !> Apply boundary condition to vector
-  PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
-end type oft_bc_ptr
 !---Interfaces
 ABSTRACT INTERFACE
-!---------------------------------------------------------------------------
-! INTERFACE oft_interp_proto
-!---------------------------------------------------------------------------
-!> Abstract interpolation prototype
-!!
-!! @param[in] a Temp doc
-!! @param[in,out] b Temp doc
-!---------------------------------------------------------------------------
-  SUBROUTINE oft_interp_proto(a,b)
-    IMPORT oft_vector
-    CLASS(oft_vector), INTENT(inout) :: a
-    CLASS(oft_vector), INTENT(inout) :: b
-  END SUBROUTINE oft_interp_proto
-!---------------------------------------------------------------------------
-! INTERFACE oft_getop_proto
-!---------------------------------------------------------------------------
-!> Abstract operator retrieval prototype
-!!
-!! @param[in] a Temp doc
-!---------------------------------------------------------------------------
-  SUBROUTINE oft_getop_proto(a)
-    IMPORT oft_matrix
-    CLASS(oft_matrix), INTENT(in) :: a
-  END SUBROUTINE oft_getop_proto
-!---------------------------------------------------------------------------
-! INTERFACE oft_veccreate_proto
-!---------------------------------------------------------------------------
-!> Abstract field creation prototype
-!!
-!! @param[out] new Temp doc
-!! @param[in] level Temp doc
-!---------------------------------------------------------------------------
-  SUBROUTINE oft_veccreate_proto(new,level,cache,native)
-    IMPORT oft_vector, i4
-    CLASS(oft_vector), POINTER, INTENT(out) :: new
-    INTEGER(i4), OPTIONAL, INTENT(in) :: level
-    LOGICAL, OPTIONAL, INTENT(in) :: cache
-    LOGICAL, OPTIONAL, INTENT(in) :: native
-  END SUBROUTINE oft_veccreate_proto
-!---------------------------------------------------------------------------
-! INTERFACE oft_update_jacobian
-!---------------------------------------------------------------------------
-!> Abstract operator retrieval prototype
-!!
-!! @param[in] a Temp doc
-!---------------------------------------------------------------------------
+  !---------------------------------------------------------------------------
+  !> Needs docs
+  !---------------------------------------------------------------------------
   SUBROUTINE oft_update_jacobian(a)
     IMPORT oft_vector
-    CLASS(oft_vector), TARGET, INTENT(inout) :: a
+    CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Needs docs
   END SUBROUTINE oft_update_jacobian
 END INTERFACE
 !---Make classes and prototypes public
 PUBLIC native_cg_solver_cast, native_gmres_solver_cast
 PUBLIC jblock_precond_cast, ml_precond_cast
-PUBLIC ml_trans_cast, diag_scale_cast, oft_veccreate_proto, oft_interp_proto
+PUBLIC ml_trans_cast, diag_scale_cast!, oft_veccreate_proto, oft_interp_proto
 CONTAINS
 !---------------------------------------------------------------------------
-! FUNCTION: native_cg_solver_cast
-!---------------------------------------------------------------------------
-!> Cast oft_solver to oft_native_cg_solver
+!> Cast a solver object to a oft_native_cg_solver
 !!
-!! The source solver must be cg_solver or a child class, otherwise an error will be thrown.
-!!
-!! @param[out] self Pointer to cast cg_solver
-!! @param[in] source Source solver to cast
+!! The source matrix must be @ref oft_native_cg_solver or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !---------------------------------------------------------------------------
-FUNCTION native_cg_solver_cast(self,source) result(ierr)
-type(oft_native_cg_solver), pointer, intent(out) :: self
-class(oft_solver), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION native_cg_solver_cast(self,source) result(success)
+type(oft_native_cg_solver), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_solver), target, intent(in) :: source !< Source solver to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_native_cg_solver)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 END FUNCTION native_cg_solver_cast
 !---------------------------------------------------------------------------
-! SUBROUTINE: cg_solver_apply
-!---------------------------------------------------------------------------
 !> Solve a linear system using the Conjugate-Gradient method
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
 !---------------------------------------------------------------------------
 recursive subroutine cg_solver_apply(self,u,g)
-class(oft_native_cg_solver), intent(inout) :: self
-CLASS(oft_vector), intent(inout) :: u,g
+class(oft_native_cg_solver), intent(inout) :: self !< Solver object
+CLASS(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+CLASS(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 logical :: pm_save
 integer(i4) :: k,its,max_its
 real(r8) :: alfa,beta,uu,gg,ggold,f,fold,pdq,ggin,ggnew
@@ -406,7 +316,7 @@ if(self%precond)then
   call r%add(0.d0,1.d0,g)
 end if
 if(associated(self%pre))call u%new(s)
-if(associated(self%bc))call self%bc(g)
+if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
 gg = g%dot(u)
 if(gg==0.d0)then
@@ -414,7 +324,7 @@ if(gg==0.d0)then
   call q%set(0.d0)
 else
   call A%apply(u,q)
-  if(associated(self%bc))call self%bc(q)
+  if(associated(self%bc))call self%bc%apply(q)
   pdq = u%dot(q)
   alfa=1.d0; f=pdq/2.d0-gg
 endif
@@ -424,7 +334,7 @@ if(associated(self%pre))then
   pm_save=oft_env%pm; oft_env%pm=self%pre%pm
   call self%pre%apply(s,p)
   oft_env%pm=pm_save
-  if(associated(self%bc))call self%bc(s)
+  if(associated(self%bc))call self%bc%apply(s)
   call p%add(0.d0,1.d0,s)
 end if
 gg = g%dot(p)
@@ -450,7 +360,7 @@ do k=1,max_its
   if(associated(self%orthog))call self%orthog%apply(p)
   call A%apply(p,q)
   pdq = p%dot(q)
-  if(associated(self%bc))call self%bc(q)
+  if(associated(self%bc))call self%bc%apply(q)
   alfa=gg/pdq
   fold=f; f=f-alfa*gg/2
   call u%add(1.d0,alfa,p)
@@ -461,7 +371,7 @@ do k=1,max_its
     pm_save=oft_env%pm; oft_env%pm=self%pre%pm
     call self%pre%apply(s,q)
     oft_env%pm=pm_save
-    if(associated(self%bc))call self%bc(s)
+    if(associated(self%bc))call self%bc%apply(s)
     call q%add(0.d0,1.d0,s)
   end if
   if(associated(self%orthog))call self%orthog%apply(q)
@@ -496,17 +406,12 @@ self%cits=k
 DEBUG_STACK_POP
 end subroutine cg_solver_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: cg_setup_xml
-!---------------------------------------------------------------------------
-!> Setup solver from XML definition
-!!
-!! @param[in] solver_node XML node containing solver definition
-!! @param[in] level Level in MG hierarchy (optional)
+!> Setup CG solver from XML definition
 !---------------------------------------------------------------------------
 subroutine cg_setup_xml(self,solver_node,level)
-CLASS(oft_native_cg_solver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+CLASS(oft_native_cg_solver), INTENT(inout) :: self !< Solver object
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node
@@ -564,51 +469,40 @@ CALL oft_abort('OFT not compiled with xml support.','cg_setup_xml',__FILE__)
 #endif
 end subroutine cg_setup_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: cg_delete
-!---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine cg_delete(self)
-class(oft_native_cg_solver), intent(inout) :: self
+class(oft_native_cg_solver), intent(inout) :: self !< Solver object
 NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine cg_delete
 !---------------------------------------------------------------------------
-! FUNCTION: native_gmres_solver_cast
-!---------------------------------------------------------------------------
-!> Cast oft_solver to oft_native_gmres_solver
+!> Cast a solver object to a oft_native_gmres_solver
 !!
-!! The source solver must be gmres_solver or a child class, otherwise an error will be thrown.
-!!
-!! @param[out] self Pointer to cast gmres_solver
-!! @param[in] source Source solver to cast
+!! The source matrix must be @ref oft_native_gmres_solver or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !---------------------------------------------------------------------------
-FUNCTION native_gmres_solver_cast(self,source) result(ierr)
-type(oft_native_gmres_solver), pointer, intent(out) :: self
-class(oft_solver), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION native_gmres_solver_cast(self,source) result(success)
+type(oft_native_gmres_solver), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_solver), target, intent(in) :: source !< Source solver to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_native_gmres_solver)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION native_gmres_solver_cast
 !---------------------------------------------------------------------------
-! SUBROUTINE: gmres_solver_apply
-!---------------------------------------------------------------------------
-!> Temp doc
-!!
-!! @param[in,out] self Temp doc
-!! @param[in,out] u Temp doc
-!! @param[in,out] g Temp doc
+!> Solve a linear system using the flexible GMRES method
 !---------------------------------------------------------------------------
 recursive subroutine gmres_solver_apply(self,u,g)
-class(oft_native_gmres_solver), intent(inout) :: self
-class(oft_vector), intent(inout) :: u,g
+class(oft_native_gmres_solver), intent(inout) :: self !< Solver object
+class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_matrix), pointer :: A
 logical :: pm_save
 integer(i4) :: i,j,k,nits,its,nrits
@@ -634,7 +528,7 @@ END IF
 if((oft_env%pm.AND.oft_env%head_proc))write(*,'(A)')'Starting GMRES solver'
 if(u%n/=g%n)call oft_abort('Vectors are not the same length','gmres_solver_apply',__FILE__)
 !
-if(associated(self%bc))call self%bc(g)
+if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%cleaner))call self%cleaner%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
 !
@@ -648,7 +542,7 @@ c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
 uu = u%dot(u)
 IF(uu>0.d0)call A%apply(u,w)
-if(associated(self%bc))call self%bc(w)
+if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add(0.d0,1.d0,g,-1.d0,w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
@@ -677,10 +571,10 @@ do j=1,INT(u%ng,4)
     else
       call z(i)%f%add(0.d0,1.d0,v(i)%f)
     end if
-    if(associated(self%bc))call self%bc(z(i)%f)
+    if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
     call A%apply(z(i)%f,w)
-    if(associated(self%bc))call self%bc(w)
+    if(associated(self%bc))call self%bc%apply(w)
     !---Arnoldi iteration
     h(1:i,i)=w%mdot(v(1:i),i)
     do k=1,i
@@ -724,7 +618,7 @@ do j=1,INT(u%ng,4)
   enddo
   IF(((nits==its).OR.(k<nrits)).AND.(.NOT.self%full_residual))EXIT
   call A%apply(u,w)
-  IF(associated(self%bc))call self%bc(w)
+  IF(associated(self%bc))call self%bc%apply(w)
   call r%add(0.d0,1.d0,g,-1.d0,w)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
@@ -750,17 +644,12 @@ IF(nits==its)self%cits=-1
 DEBUG_STACK_POP
 end subroutine gmres_solver_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: gmres_setup_xml
-!---------------------------------------------------------------------------
-!> Setup solver from XML definition
-!!
-!! @param[in] solver_node XML node containing solver definition
-!! @param[in] level Level in MG hierarchy (optional)
+!> Setup GMRES solver from XML definition
 !---------------------------------------------------------------------------
 subroutine gmres_setup_xml(self,solver_node,level)
-CLASS(oft_native_gmres_solver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+CLASS(oft_native_gmres_solver), INTENT(inout) :: self !< Solver object
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
@@ -833,12 +722,10 @@ CALL oft_abort('OFT not compiled with xml support.','gmres_setup_xml',__FILE__)
 #endif
 end subroutine gmres_setup_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: gmres_delete
-!---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine gmres_delete(self)
-class(oft_native_gmres_solver), intent(inout) :: self
+class(oft_native_gmres_solver), intent(inout) :: self !< Solver object
 integer(i4) :: i
 NULLIFY(self%A)
 IF(self%initialized)THEN
@@ -855,17 +742,12 @@ END IF
 self%initialized=.FALSE.
 end subroutine gmres_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: cgmres_solver_apply
-!---------------------------------------------------------------------------
-!> Temp doc
-!!
-!! @param[in,out] self Temp doc
-!! @param[in,out] u Temp doc
-!! @param[in,out] g Temp doc
+!> Solve a linear system using the flexible GMRES method (complex)
 !---------------------------------------------------------------------------
 recursive subroutine cgmres_solver_apply(self,u,g)
-class(oft_native_gmres_csolver), intent(inout) :: self
-class(oft_cvector), intent(inout) :: u,g
+class(oft_native_gmres_csolver), intent(inout) :: self !< Solver object
+class(oft_cvector), intent(inout) :: u !< Guess (input), Solution (output)
+class(oft_cvector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_cmatrix), pointer :: A
 logical :: pm_save
 integer(i4) :: i,j,k,nits,its,nrits
@@ -892,7 +774,7 @@ END IF
 if((oft_env%pm.AND.oft_env%head_proc))write(*,'(A)')'Starting GMRES solver'
 if(u%n/=g%n)call oft_abort('Vectors are not the same length','gmres_solver_apply',__FILE__)
 !
-if(associated(self%bc))call self%bc(g)
+if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%cleaner))call self%cleaner%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
 !
@@ -906,7 +788,7 @@ c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
 uu = REAL(u%dot(u))
 IF(uu>0.d0)call A%apply(u,w)
-if(associated(self%bc))call self%bc(w)
+if(associated(self%bc))call self%bc%apply(w)
 !if(associated(self%cleaner))call self%cleaner%apply(g)
 call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
 !if(associated(self%cleaner))call self%cleaner%apply(r)
@@ -935,10 +817,10 @@ do j=1,INT(u%ng,4)
     else
       call z(i)%f%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
     end if
-    if(associated(self%bc))call self%bc(z(i)%f)
+    if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
     call A%apply(z(i)%f,w)
-    if(associated(self%bc))call self%bc(w)
+    if(associated(self%bc))call self%bc%apply(w)
     !---Arnoldi iteration
     ! h(1:i,i)=w%mdot(v,i)
     do k=1,i
@@ -983,7 +865,7 @@ do j=1,INT(u%ng,4)
   enddo
   IF((nits==its).AND.(.NOT.self%full_residual))EXIT
   call A%apply(u,w)
-  IF(associated(self%bc))call self%bc(w)
+  IF(associated(self%bc))call self%bc%apply(w)
   call r%add((0.d0,0.d0),(1.d0,0.d0),g,(-1.d0,0.d0),w)
   !if(associated(self%cleaner))call self%cleaner%apply(r)
   IF(nits==its)EXIT
@@ -1008,17 +890,12 @@ IF(nits==its)self%cits=-1
 DEBUG_STACK_POP
 end subroutine cgmres_solver_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: cgmres_setup_xml
-!---------------------------------------------------------------------------
-!> Setup solver from XML definition
-!!
-!! @param[in] solver_node XML node containing solver definition
-!! @param[in] level Level in MG hierarchy (optional)
+!> Setup GMRES solver from XML definition
 !---------------------------------------------------------------------------
 subroutine cgmres_setup_xml(self,solver_node,level)
-CLASS(oft_native_gmres_csolver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+CLASS(oft_native_gmres_csolver), INTENT(inout) :: self !< Solver object
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
@@ -1091,12 +968,10 @@ CALL oft_abort('OFT not compiled with xml support.','cgmres_setup_xml',__FILE__)
 #endif
 end subroutine cgmres_setup_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: cgmres_delete
-!---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine cgmres_delete(self)
-class(oft_native_gmres_csolver), intent(inout) :: self
+class(oft_native_gmres_csolver), intent(inout) :: self !< Solver object
 integer(i4) :: i
 NULLIFY(self%A)
 IF(self%initialized)THEN
@@ -1113,44 +988,35 @@ END IF
 self%initialized=.FALSE.
 end subroutine cgmres_delete
 !---------------------------------------------------------------------------
-! FUNCTION: native_cg_eigsolver_cast
-!---------------------------------------------------------------------------
-!> Cast oft_solver to oft_native_cg_solver
+!> Cast an eigensolver object to a oft_native_cg_eigsolver
 !!
-!! The source eigsolver must be cg_eigsolver or a child class, otherwise an error will be thrown.
-!!
-!! @param[out] self Pointer to cast cg_eigsolver
-!! @param[in] source Source eigsolver to cast
+!! The source matrix must be @ref oft_native_cg_eigsolver or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !---------------------------------------------------------------------------
-FUNCTION native_cg_eigsolver_cast(self,source) result(ierr)
-type(oft_native_cg_eigsolver), pointer, intent(out) :: self
-class(oft_eigsolver), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION native_cg_eigsolver_cast(self,source) result(success)
+type(oft_native_cg_eigsolver), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_eigsolver), target, intent(in) :: source !< Source solver to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_native_cg_eigsolver)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION native_cg_eigsolver_cast
-!---------------------------------------------------------------------------
-! SUBROUTINE: cg_eigsolver_apply
 !---------------------------------------------------------------------------
 !> Solve a general eigenvalue system using the Conjugate-Gradient method.
 !!
 !! This solver uses a Non-Linear Conjugate-Gradient method to minimize the
 !! Rayleigh Quotient (\f$ R = \frac{x*A*x}{x*M*x} \f$).
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] alam Eigenvalue
 !---------------------------------------------------------------------------
 subroutine cg_eigsolver_apply(self,u,alam)
-class(oft_native_cg_eigsolver), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
-real(r8), intent(inout) :: alam
+class(oft_native_cg_eigsolver), intent(inout) :: self !< Solver object
+class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+real(r8), intent(inout) :: alam !< Eigenvalue
 logical :: pm_save
 integer(i4) :: n,ir,ninner,its
 real(r8) :: e0,h0,ev,sf,gg,e1,h1,e2,h2,qa,qb,qc,qd,qq,alfa1,alfa2
@@ -1170,12 +1036,12 @@ call u%new(e)
 call u%new(f)
 call u%new(g)
 if(associated(self%pre))call u%new(s)
-if(associated(self%bc))call self%bc(u)
+if(associated(self%bc))call self%bc%apply(u)
 if(associated(self%orthog))call self%orthog%apply(u)
 call A%apply(u,c)
 call M%apply(u,b)
-if(associated(self%bc))call self%bc(b)
-if(associated(self%bc))call self%bc(c)
+if(associated(self%bc))call self%bc%apply(b)
+if(associated(self%bc))call self%bc%apply(c)
 h0 = u%dot(b)
 if(h0==0.d0)call oft_abort('Metric is Zero','cgeigsolver_apply',__FILE__)
 e0 = u%dot(c)
@@ -1194,7 +1060,7 @@ if(associated(self%pre))then
   pm_save=oft_env%pm; oft_env%pm=self%pre%pm
   call self%pre%apply(s,f)
   oft_env%pm=pm_save
-  if(associated(self%bc))call self%bc(s)
+  if(associated(self%bc))call self%bc%apply(s)
   call f%add(0.d0,1.d0,s)
 end if
 gg = g%dot(f)
@@ -1226,8 +1092,8 @@ do n=1,ninner
   call A%apply(e,g)
   call M%apply(e,f)
   if(associated(self%bc))then
-    call self%bc(f)
-    call self%bc(g)
+    call self%bc%apply(f)
+    call self%bc%apply(g)
   end if
   h1 = u%dot(f)+e%dot(b)
   e1 = u%dot(g)+e%dot(c)
@@ -1259,7 +1125,7 @@ do n=1,ninner
     pm_save=oft_env%pm; oft_env%pm=self%pre%pm
     call self%pre%apply(s,f)
     oft_env%pm=pm_save
-    if(associated(self%bc))call self%bc(s)
+    if(associated(self%bc))call self%bc%apply(s)
     call f%add(0.d0,1.d0,s)
   end if
   gg = g%dot(f)
@@ -1289,27 +1155,20 @@ self%cits=n
 DEBUG_STACK_POP
 end subroutine cg_eigsolver_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: cg_eig_delete
-!---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine cg_eig_delete(self)
-class(oft_native_cg_eigsolver), intent(inout) :: self
+class(oft_native_cg_eigsolver), intent(inout) :: self !< Solver object
 NULLIFY(self%A,self%M)
 self%initialized=.FALSE.
 end subroutine cg_eig_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: nksolver_apply
-!---------------------------------------------------------------------------
-!> Apply Newton's method to compute \f$ F(u) = g\f$
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
+!> Solve a nonlinear system Newton's method
 !---------------------------------------------------------------------------
 subroutine nksolver_apply(self,u,g)
-class(oft_nksolver), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
-class(oft_vector), intent(inout) :: g
+class(oft_nksolver), intent(inout) :: self !< Solver object
+class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_vector), pointer :: v
 logical :: pm_save
 integer(i4) :: i,its
@@ -1329,7 +1188,7 @@ CALL u%new(v)
 self%lits=0
 self%nlits=-1
 self%cits=1
-!IF(ASSOCIATED(self%bc))call self%bc(g)
+!IF(ASSOCIATED(self%bc))call self%bc%apply(g)
 !---Initialize Newton loop
 res=1.d99 ! Set residual to a large number
 its=100
@@ -1343,7 +1202,7 @@ outer: do i=0,its
     !---Compute current residual
     call self%A%apply(u,v)
     call v%add(1.d0,-1.d0,g)
-    IF(ASSOCIATED(self%bc))call self%bc(v)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(v)
     res=v%dot(v)
     uu=u%dot(u)
     if(oft_env%head_proc)met_time=met_time+mytimer%tock()
@@ -1399,12 +1258,10 @@ DEALLOCATE(v)
 DEBUG_STACK_POP
 end subroutine nksolver_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: nksolver_delete
-!---------------------------------------------------------------------------
 !> Destroy Newton solver and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine nksolver_delete(self)
-class(oft_nksolver), intent(inout) :: self
+class(oft_nksolver), intent(inout) :: self !< Solver object
 IF(ASSOCIATED(self%du))THEN
   CALL self%du%delete
   DEALLOCATE(self%du)
@@ -1415,69 +1272,53 @@ IF(ASSOCIATED(self%J_update))NULLIFY(self%J_update)
 IF(ASSOCIATED(self%bc))NULLIFY(self%bc)
 end subroutine nksolver_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: identity_inv_apply
-!---------------------------------------------------------------------------
-!> Solver container for trivial inverse of the identity matrix
+!> Solve the trivial linear system for the identity matrix
 !!
-!! @note Used for simple cases when a solver wrapper is required but the trivial
+!! @note Typically used for simple cases when a solver wrapper is required but the trivial
 !! case of \f$ u = g \f$ is the desired result
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
 !---------------------------------------------------------------------------
 subroutine identity_inv_apply(self,u,g)
-class(oft_identity_inv), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
-class(oft_vector), intent(inout) :: g
+class(oft_identity_inv), intent(inout) :: self !< Solver object
+CLASS(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+CLASS(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 DEBUG_STACK_PUSH
 if(g%n/=u%n)call oft_abort('Size mismatch','identity_inv_apply',__FILE__)
 call u%add(0.d0,1.d0,g)
 DEBUG_STACK_POP
 end subroutine identity_inv_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: identity_inv_delete
-!---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine identity_inv_delete(self)
-class(oft_identity_inv), intent(inout) :: self
+class(oft_identity_inv), intent(inout) :: self !< Solver object
 end subroutine identity_inv_delete
 !---------------------------------------------------------------------------
-! FUNCTION: diag_scale_cast
-!---------------------------------------------------------------------------
-!> Cast @ref oft_native_solvers::oft_solver "oft_solver" to @ref oft_native_solvers::oft_diag_scale
-!! "oft_diag_scale"
+!> Cast a solver object to a oft_diag_scale
 !!
-!! @param[out] self Object of desired type, unassociated if cast fails
-!! @param[in] source Source object to cast
-!! @result Error flag
+!! The source matrix must be @ref oft_diag_scale or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !---------------------------------------------------------------------------
-FUNCTION diag_scale_cast(self,source) result(ierr)
-type(oft_diag_scale), pointer, intent(out) :: self
-class(oft_solver), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION diag_scale_cast(self,source) result(success)
+type(oft_diag_scale), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_solver), target, intent(in) :: source !< Source solver to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   type is(oft_diag_scale)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION diag_scale_cast
 !---------------------------------------------------------------------------
-! SUBROUTINE: diag_scale_apply
-!---------------------------------------------------------------------------
-!> Apply diagonal scaling
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
+!> Solve the linear system for a diagonal matrix
 !---------------------------------------------------------------------------
 subroutine diag_scale_apply(self,u,g)
-class(oft_diag_scale), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
-class(oft_vector), intent(inout) :: g
+class(oft_diag_scale), intent(inout) :: self !< Solver object
+class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 DEBUG_STACK_PUSH
 if(g%n/=self%A%nr)call oft_abort('Row mismatch.','diag_scale_apply',__FILE__)
 if(u%n/=self%A%nc)call oft_abort('Col mismatch.','diag_scale_apply',__FILE__)
@@ -1488,26 +1329,19 @@ call u%mult(self%A%D,div_flag=.TRUE.)
 DEBUG_STACK_POP
 end subroutine diag_scale_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: diag_scale_delete
-!---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine diag_scale_delete(self)
-class(oft_diag_scale), intent(inout) :: self
+class(oft_diag_scale), intent(inout) :: self !< Solver object
 NULLIFY(self%A)
 end subroutine diag_scale_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: cdiag_scale_apply
-!---------------------------------------------------------------------------
-!> Apply diagonal scaling
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
+!> Solve the linear system for a diagonal matrix (complex)
 !---------------------------------------------------------------------------
 subroutine cdiag_scale_apply(self,u,g)
-class(oft_diag_cscale), intent(inout) :: self
-class(oft_cvector), intent(inout) :: u
-class(oft_cvector), intent(inout) :: g
+class(oft_diag_cscale), intent(inout) :: self !< Solver object
+class(oft_cvector), intent(inout) :: u !< Guess (input), Solution (output)
+class(oft_cvector), intent(inout) :: g !< RHS (input), Residual (output)
 DEBUG_STACK_PUSH
 if(g%n/=self%A%nr)call oft_abort('Row mismatch.','cdiag_scale_apply',__FILE__)
 if(u%n/=self%A%nc)call oft_abort('Col mismatch.','cdiag_scale_apply',__FILE__)
@@ -1518,66 +1352,55 @@ call u%mult(self%A%D,div_flag=.TRUE.)
 DEBUG_STACK_POP
 end subroutine cdiag_scale_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: cdiag_scale_delete
-!---------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine cdiag_scale_delete(self)
-class(oft_diag_cscale), intent(inout) :: self
+class(oft_diag_cscale), intent(inout) :: self !< Solver object
 NULLIFY(self%A)
 end subroutine cdiag_scale_delete
 !---------------------------------------------------------------------------
-! FUNCTION: jblock_precond_cast
-!---------------------------------------------------------------------------
-!> Cast @ref oft_native_solvers::oft_solver "oft_solver" to @ref oft_native_solvers::oft_jblock_precond
-!! "oft_jblock_precond"
+!> Cast a solver object to a jblock_precond_cast
 !!
-!! @param[out] self Object of desired type, unassociated if cast fails
-!! @param[in] source Source object to cast
-!! @result Error flag
+!! The source matrix must be @ref jblock_precond_cast or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !---------------------------------------------------------------------------
-FUNCTION jblock_precond_cast(self,source) result(ierr)
-type(oft_jblock_precond), pointer, intent(out) :: self
-class(oft_solver), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION jblock_precond_cast(self,source) result(success)
+type(oft_jblock_precond), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_solver), target, intent(in) :: source !< Source solver to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   type is(oft_jblock_precond)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION jblock_precond_cast
 !---------------------------------------------------------------------------
-! SUBROUTINE: jblock_precond_apply
-!---------------------------------------------------------------------------
 !> Apply 1-step of a symmetric Jacobi smoother with native CRS matrices
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
 !---------------------------------------------------------------------------
 subroutine jblock_precond_apply(self,u,g)
-class(oft_jblock_precond), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
-class(oft_vector), intent(inout) :: g
+class(oft_jblock_precond), intent(inout) :: self !< Solver object
+class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_vector), pointer :: p,q
 class(oft_native_vector), pointer :: uv,gv,md
 integer(i4) :: i,k,ierr
 DEBUG_STACK_PUSH
 IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','jblock_precond_apply',__FILE__)
 IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','jblock_precond_apply',__FILE__)
-IF(native_vector_cast(uv,u)<0)CALL oft_abort('"u" is not a vector object.','jblock_precond_apply',__FILE__)
-IF(native_vector_cast(gv,g)<0)CALL oft_abort('"g" is not a vector object.','jblock_precond_apply',__FILE__)
-IF(native_vector_cast(md,self%A%D)<0)CALL oft_abort('"A%D" is not a vector object.','jblock_precond_apply',__FILE__)
+IF(.NOT.native_vector_cast(uv,u))CALL oft_abort('"u" is not a vector object.','jblock_precond_apply',__FILE__)
+IF(.NOT.native_vector_cast(gv,g))CALL oft_abort('"g" is not a vector object.','jblock_precond_apply',__FILE__)
+IF(.NOT.native_vector_cast(md,self%A%D))CALL oft_abort('"A%D" is not a vector object.','jblock_precond_apply',__FILE__)
 !---Initialize solver
 IF(.NOT.self%initialized)THEN
   ALLOCATE(self%u_save(u%n),self%g_save(u%n))
   CALL u%new(p)
-  ierr=native_vector_cast(self%p,p)
+  IF(.NOT.native_vector_cast(self%p,p))CALL oft_abort('"p" is not a vector object.','jblock_precond_apply',__FILE__)
   CALL u%new(q)
-  ierr=native_vector_cast(self%q,q)
+  IF(.NOT.native_vector_cast(self%q,q))CALL oft_abort('"q" is not a vector object.','jblock_precond_apply',__FILE__)
   NULLIFY(p,q)
   CALL solver_setup(self)
 END IF
@@ -1593,17 +1416,17 @@ if(self%down) then ! Down smoother
     uv%v(i)=0.d0
     self%p%v(i)=self%df*gv%v(i)/md%v(i)
   end do
-  IF(ASSOCIATED(self%bc))call self%bc(self%p)
+  IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   do k=1,self%its
     call self%A%apply(self%p,self%q)
-    IF(ASSOCIATED(self%bc))call self%bc(self%q)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
     !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
     do i=1,u%n
       uv%v(i)=uv%v(i)+self%p%v(i)
       gv%v(i)=gv%v(i)-self%q%v(i)
       self%p%v(i)=self%df*gv%v(i)/md%v(i)
     end do
-    IF(ASSOCIATED(self%bc))call self%bc(self%p)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   end do
   !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
   do i=1,u%n
@@ -1617,16 +1440,16 @@ else ! Up smoother
     self%p%v(i)=uv%v(i)-self%u_save(i)
     gv%v(i)=self%g_save(i)
   end do
-  IF(ASSOCIATED(self%bc))call self%bc(self%p)
+  IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   do k=1,self%its
     call self%A%apply(self%p,self%q)
-    IF(ASSOCIATED(self%bc))call self%bc(self%q)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
     !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
     do i=1,u%n
       gv%v(i)=gv%v(i)-self%q%v(i)
       self%p%v(i)=self%df*gv%v(i)/md%v(i)
     end do
-    IF(ASSOCIATED(self%bc))call self%bc(self%p)
+    IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
     !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
     do i=1,u%n
       uv%v(i)=uv%v(i)+self%p%v(i)
@@ -1637,17 +1460,12 @@ end if
 DEBUG_STACK_POP
 end subroutine jblock_precond_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: jblock_setup_xml
-!---------------------------------------------------------------------------
-!> Setup solver from XML definition
-!!
-!! @param[in] solver_node XML node containing solver definition
-!! @param[in] level Level in MG hierarchy (optional)
+!> Setup symmetric Jacobi smoother from XML definition
 !---------------------------------------------------------------------------
 subroutine jblock_setup_xml(self,solver_node,level)
-CLASS(oft_jblock_precond), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+CLASS(oft_jblock_precond), INTENT(inout) :: self !< Solver object
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node
@@ -1694,12 +1512,10 @@ CALL oft_abort('OFT not compiled with xml support.','jblock_setup_xml',__FILE__)
 #endif
 end subroutine jblock_setup_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: jblock_precond_delete
-!---------------------------------------------------------------------------
 !> Destroy symmetric Jacobi preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine jblock_precond_delete(self)
-class(oft_jblock_precond), intent(inout) :: self
+class(oft_jblock_precond), intent(inout) :: self !< Solver object
 DEBUG_STACK_PUSH
 IF(self%initialized)THEN
   DEALLOCATE(self%u_save,self%g_save)
@@ -1714,39 +1530,30 @@ self%initialized=.FALSE.
 DEBUG_STACK_POP
 end subroutine jblock_precond_delete
 !---------------------------------------------------------------------------
-! FUNCTION: ml_precond_cast
-!---------------------------------------------------------------------------
-!> Cast @ref oft_native_solvers::oft_solver "oft_solver" to @ref oft_native_solvers::oft_ml_precond
-!! "oft_ml_precond"
+!> Cast a solver object to a oft_ml_precond
 !!
-!! @param[out] self Object of desired type, unassociated if cast fails
-!! @param[in] source Source object to cast
-!! @result Error flag
+!! The source matrix must be @ref oft_ml_precond or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !---------------------------------------------------------------------------
-FUNCTION ml_precond_cast(self,source) result(ierr)
-class(oft_ml_precond), pointer, intent(out) :: self
-class(oft_solver), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION ml_precond_cast(self,source) result(success)
+class(oft_ml_precond), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_solver), target, intent(in) :: source !< Source solver to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_ml_precond)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION ml_precond_cast
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_precond_view
-!---------------------------------------------------------------------------
 !> Print solver configuration
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized solvers
 !---------------------------------------------------------------------------
 recursive subroutine ml_precond_view(self)
-class(oft_ml_precond), intent(inout) :: self
+class(oft_ml_precond), intent(inout) :: self !< Solver object
 !---
 IF(ASSOCIATED(self%base_solve))THEN
   CALL self%base_solve%view
@@ -1764,17 +1571,12 @@ IF(ASSOCIATED(self%smooth_up))THEN
 END IF
 end subroutine ml_precond_view
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_precond_apply
-!---------------------------------------------------------------------------
-!> Apply 1-step of a Multi-Level preconditioner
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
+!> Apply 1-step of a multi-level preconditioner
 !---------------------------------------------------------------------------
 recursive subroutine ml_precond_apply(self,u,g)
-class(oft_ml_precond), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
-class(oft_vector), intent(inout) :: g
+class(oft_ml_precond), intent(inout) :: self !< Solver object
+class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !---Get RHS
@@ -1782,8 +1584,8 @@ IF(.NOT.self%initialized)THEN
   CALL u%new(self%r)
   IF(ASSOCIATED(self%base_solve))THEN
     CALL u%new(self%p)
-    CALL self%vec_create(self%ucors,self%level-1)
-    CALL self%vec_create(self%gcors,self%level-1)
+    CALL self%ml_vecspace%vec_create(self%ucors,self%level-1)
+    CALL self%ml_vecspace%vec_create(self%gcors,self%level-1)
   END IF
   CALL solver_setup(self)
 END IF
@@ -1798,7 +1600,7 @@ if(associated(self%base_solve))then
   CALL mytimer%tick
   !---Inject RHS
   call self%ucors%set(0.d0)
-  call self%inject(g,self%gcors)
+  CALL self%ml_vecspace%inject(g,self%gcors)
   self%timings(2)=self%timings(2)+mytimer%tock()
   CALL mytimer%tick
   !---Apply lower level smoother
@@ -1808,8 +1610,8 @@ if(associated(self%base_solve))then
   self%timings(3)=self%timings(3)+mytimer%tock()
   CALL mytimer%tick
   !---Interpolate Solution
-  call self%interp(self%ucors,self%p)
-  if(associated(self%bc))call self%bc(self%p)
+  CALL self%ml_vecspace%interp(self%ucors,self%p)
+  if(associated(self%bc))call self%bc%apply(self%p)
   !---Add coarse correction
   call u%add(1.d0,1.d0,self%p)
   self%timings(4)=self%timings(4)+mytimer%tock()
@@ -1828,12 +1630,10 @@ end if
 DEBUG_STACK_POP
 end subroutine ml_precond_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_precond_update
-!---------------------------------------------------------------------------
 !> Update solver after changing settings/operators
 !---------------------------------------------------------------------------
 recursive subroutine ml_precond_update(self,new_pattern)
-class(oft_ml_precond), intent(inout) :: self
+class(oft_ml_precond), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: new_pattern
 !---
 IF(ASSOCIATED(self%smooth_up))CALL self%smooth_up%update(new_pattern)
@@ -1841,12 +1641,10 @@ IF(ASSOCIATED(self%smooth_down))CALL self%smooth_down%update(new_pattern)
 IF(ASSOCIATED(self%base_solve))CALL self%base_solve%update(new_pattern)
 end subroutine ml_precond_update
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_precond_delete
-!---------------------------------------------------------------------------
 !> Destroy Multi-Level preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 recursive subroutine ml_precond_delete(self)
-class(oft_ml_precond), intent(inout) :: self
+class(oft_ml_precond), intent(inout) :: self !< Solver object
 DEBUG_STACK_PUSH
 if(ASSOCIATED(self%smooth_up))then
   call self%smooth_up%delete
@@ -1864,9 +1662,10 @@ if(associated(self%base_solve))then
   call self%base_solve%delete
   DEALLOCATE(self%base_solve)
 end if
-IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
-IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
-IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
+! IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
+! IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
+! IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
+IF(ASSOCIATED(self%ml_vecspace))NULLIFY(self%ml_vecspace)
 IF(ASSOCIATED(self%bc))NULLIFY(self%bc)
 IF(self%initialized)THEN
   CALL self%r%delete
@@ -1882,53 +1681,44 @@ END IF
 DEBUG_STACK_POP
 end subroutine ml_precond_delete
 !---------------------------------------------------------------------------
-! FUNCTION: ml_trans_cast
-!---------------------------------------------------------------------------
-!> Cast @ref oft_native_solvers::oft_solver "oft_solver" to @ref oft_native_solvers::oft_ml_trans
-!! "oft_ml_trans"
+!> Cast a solver object to a oft_ml_trans
 !!
-!! @param[out] self Object of desired type, unassociated if cast fails
-!! @param[in] source Source object to cast
-!! @result Error flag
+!! The source matrix must be @ref oft_ml_trans or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !---------------------------------------------------------------------------
-FUNCTION ml_trans_cast(self,source) result(ierr)
-class(oft_ml_trans), pointer, intent(out) :: self
-class(oft_solver), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION ml_trans_cast(self,source) result(success)
+class(oft_ml_trans), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_solver), target, intent(in) :: source !< Source solver to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_ml_trans)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION ml_trans_cast
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_trans_apply
-!---------------------------------------------------------------------------
 !> Transfer solution between distributed and shared levels as part of a ML
 !! preconditioner
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
 !---------------------------------------------------------------------------
 recursive subroutine ml_trans_apply(self,u,g)
-class(oft_ml_trans), intent(inout) :: self
-class(oft_vector), intent(inout) :: u
-class(oft_vector), intent(inout) :: g
+class(oft_ml_trans), intent(inout) :: self !< Solver object
+class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
+class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_vector), pointer :: ucors,gcors
 DEBUG_STACK_PUSH
 !---Create base level fields
-call self%vec_create(ucors,self%level-1)
-call self%vec_create(gcors,self%level-1)
+CALL self%ml_vecspace%vec_create(ucors,self%level-1)
+CALL self%ml_vecspace%vec_create(gcors,self%level-1)
 !---Push RHS to base level
-call self%inject(g,gcors)
+call self%ml_vecspace%inject(g,gcors)
 !---Solve on base levels
 call self%base_solve%apply(ucors,gcors)
 !---Pop solution from base level
-call self%interp(ucors,u)
+call self%ml_vecspace%interp(ucors,u)
 !---Delete base level fields
 call ucors%delete()
 call gcors%delete()
@@ -1936,12 +1726,10 @@ call gcors%delete()
 DEBUG_STACK_POP
 end subroutine ml_trans_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: ml_trans_delete
-!---------------------------------------------------------------------------
 !> Destroy Multi-Level preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine ml_trans_delete(self)
-class(oft_ml_trans), intent(inout) :: self
+class(oft_ml_trans), intent(inout) :: self !< Solver object
 DEBUG_STACK_PUSH
 if(associated(self%smooth_up))then
   call self%smooth_up%delete
@@ -1955,23 +1743,20 @@ if(associated(self%base_solve))then
   call self%base_solve%delete
   nullify(self%base_solve)
 end if
-IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
-IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
-IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
+! IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
+! IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
+! IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
+IF(ASSOCIATED(self%ml_vecspace))NULLIFY(self%ml_vecspace)
 IF(ASSOCIATED(self%bc))NULLIFY(self%bc)
 DEBUG_STACK_POP
 end subroutine ml_trans_delete
 !---------------------------------------------------------------------------
-! SUBROUTINE: bjprecond_apply
-!---------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method
-!!
-!! @param[in,out] u Guess/Solution field
-!! @param[in,out] g RHS/Residual field
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE bjprecond_apply(self,u,g)
-CLASS(oft_bjprecond), INTENT(inout) :: self
-CLASS(oft_vector), INTENT(inout) :: u,g
+CLASS(oft_bjprecond), INTENT(inout) :: self !< Solver object
+CLASS(oft_vector), INTENT(inout) :: u !< Guess (input), Solution (output)
+CLASS(oft_vector), INTENT(inout) :: g !< RHS (input), Residual (output)
 !---
 LOGICAL :: thread_safe,color_avail
 LOGICAL, POINTER, DIMENSION(:) :: eflag
@@ -1985,7 +1770,7 @@ CLASS(oft_solver), POINTER :: pretmp
 TYPE(oft_1d_int), pointer, dimension(:) :: parts_tmp => NULL()
 DEBUG_STACK_PUSH
 !---
-IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'bjprecond_apply',__FILE__)
 !---Initialize local matrix
 IF(.NOT.self%initialized)THEN
@@ -2289,15 +2074,11 @@ self%update_slice=.FALSE.
 DEBUG_STACK_POP
 END SUBROUTINE bjprecond_apply
 !---------------------------------------------------------------------------
-! SUBROUTINE: bjprecond_update
-!---------------------------------------------------------------------------
 !> Update solver after changing settings/operators
-!!
-!! @param[in] new_pattern Update matrix pattern (optional)
 !---------------------------------------------------------------------------
 recursive subroutine bjprecond_update(self,new_pattern)
-class(oft_bjprecond), intent(inout) :: self
-LOGICAL, optional, intent(in) :: new_pattern
+class(oft_bjprecond), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: new_pattern !< Update matrix non-zero pattern (optional)
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 self%update_slice=.TRUE.
@@ -2309,17 +2090,12 @@ END IF
 DEBUG_STACK_POP
 end subroutine bjprecond_update
 !---------------------------------------------------------------------------
-! SUBROUTINE: bjprecond_setup_xml
-!---------------------------------------------------------------------------
-!> Setup solver from XML definition
-!!
-!! @param[in] solver_node XML node containing solver definition
-!! @param[in] level Level in MG hierarchy (optional)
+!> Setup block-Jacobi smoother from XML definition
 !---------------------------------------------------------------------------
 subroutine bjprecond_setup_xml(self,solver_node,level)
-CLASS(oft_bjprecond), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+CLASS(oft_bjprecond), INTENT(inout) :: self !< Solver object
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node,sub_node
@@ -2373,12 +2149,10 @@ CALL oft_abort('OFT not compiled with xml support.','bjprecond_setup_xml',__FILE
 #endif
 end subroutine bjprecond_setup_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: bjprecond_delete
-!---------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
 !---------------------------------------------------------------------------
 subroutine bjprecond_delete(self)
-class(oft_bjprecond), intent(inout) :: self
+class(oft_bjprecond), intent(inout) :: self !< Solver object
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers

@@ -18,8 +18,8 @@ OFT includes subroutines and supporting infrastructure to export plot files for 
 package. During a run subroutines are used to output the plotting mesh \ref oft_io::hdf5_mesh "hdf5_mesh",
 add time steps \ref oft_io::hdf5_create_timestep "hdf5_create_timestep", and output solution fields ex. \ref
 oft_io::hdf5_spdata "hdf5_spdata". Mesh and field information created during these calls are stored in <code>*.h5</code>
-files in the run directory along with a text file \c dump.dat which contains metadata describing the fields. After
-a run has completed the script \c build_xdmf.py can be used to build XML descriptor files which can be read by VisIt
+files in the run directory along with a text file `dump.dat` which contains metadata describing the fields. After
+a run has completed the script `build_xdmf.py` can be used to build XML descriptor files which can be read by VisIt
 to produce visualization.
 
 \subsection doc_oft_io_plotting_representation Field Representation
@@ -50,7 +50,7 @@ oft_vectors::vector_slice_pop "vector_slice_pop"
 
 Small I/O should be conducted using the native READ/WRITE routines provided within FORTRAN. If formatted time series
 or similar data is being output, as with history files in \ref xmhd::xmhd_run "xMHD", OFT includes a Python module
-\c oft_io to aide in structured output. This module parses FORTRAN binary files with a specific structure
+`oft_io` to aide in structured output. This module parses FORTRAN binary files with a specific structure
 to facilitate plotting and transfer to MATLAB. In order to use this library files must be structured with a
 set of header lines, followed by a sequence of data lines. An example is provided below.
 
@@ -94,7 +94,7 @@ IF(psi%head_proc)CALL hist_file%close ! Close history file
 ~~~~~~~~~
 
 For the example above the header lines will contain the following. Binary data starts after
-the `--- BEGIN DATA ---` marker and can be read using the \c oft_io python module.
+the `--- BEGIN DATA ---` marker and can be read using the `oft_io` python module.
 
 \verbatim
 # OFT binary output

@@ -78,11 +78,11 @@ def single_level(nlevels,order,exp_its,exp_error,grid_type=1,mpi=False,petsc_fla
 # Multi-level test function
 def multi_level(nlevels,order,exp_its,exp_error,grid_type=1,petsc_flag='F'):
     if grid_type==1:
-        df_string='1.,1.,1.,.826,.645,.491'
-        nu_string='0,64,8,4,2,1'
+        df_string='1.0, 1.0, 1.0, 0.82, 0.64, 0.49'
+        nu_string='0, 64, 8, 4, 2, 1'
     else:
-        df_string='0.,0.,1.48,1.40,0.78,0.40'
-        nu_string='0,0,16,2,2,2'
+        df_string='0.0, 0.0, 1.48, 1.40, 0.78, 0.40'
+        nu_string='0, 0, 32, 4, 2, 1'
     assert lagrange_setup(nlevels, nlevels, order, grid_type, mg='T', df=df_string, nu=nu_string, petsc_flag=petsc_flag)
     assert validate_result(exp_its, exp_error)
 
@@ -163,7 +163,7 @@ def test_hex_r3_p2(mpi, petsc_flag):
     single_level(3, 2, 18, 0.31784865062629630, grid_type=2, mpi=mpi, petsc_flag=petsc_flag)
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p2_mg(petsc_flag):
-    multi_level(3, 2, 13, 0.31784865062629630, grid_type=2, petsc_flag=petsc_flag)
+    multi_level(3, 2, 9, 0.31784865062629630, grid_type=2, petsc_flag=petsc_flag)
 
 #============================================================================
 # Test runners for NP=3
@@ -190,4 +190,4 @@ def test_hex_r3_p4(mpi, petsc_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", ('F','T'))
 def test_hex_r3_p4_mg(petsc_flag):
-    multi_level(3, 4, 15, 2.5568335937210307, grid_type=2, petsc_flag=petsc_flag)
+    multi_level(3, 4, 20, 2.5568335937210307, grid_type=2, petsc_flag=petsc_flag)

@@ -15,41 +15,42 @@
 !------------------------------------------------------------------------------
 MODULE oft_mesh_cube
 USE oft_base
-USE oft_mesh_type, ONLY: oft_mesh, mesh, oft_bmesh, smesh
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
 USE oft_mesh_local_util, ONLY: mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_hexmesh_type, ONLY: oft_hexmesh
 USE oft_quadmesh_type, ONLY: oft_quadmesh
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 IMPLICIT NONE
 #include "local.h"
-private
+PRIVATE
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_cube_id = 92
-INTEGER(i4) :: mesh_type = 1
-INTEGER(i4) :: ni(3) = 1
-REAL(r8) :: rscale(3) = 1.d0
-REAL(r8) :: shift(3) = 0.d0
 LOGICAL :: ref_per(3) = .FALSE. !< Character flag for periodic reflections
 public mesh_cube_load, mesh_cube_cadlink, mesh_cube_set_periodic
 public smesh_square_load, smesh_square_cadlink
 public smesh_square_set_periodic
 contains
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cube_load
-!------------------------------------------------------------------------------
 !> Setup a 1x1x1 cube test mesh
 !! The mesh is initialized with a basic set of cells
 !! - 9 Points
 !! - 12 Cells
 !------------------------------------------------------------------------------
-subroutine mesh_cube_load
-INTEGER(i4) :: i,j,k,ierr,io_unit
+subroutine mesh_cube_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+INTEGER(i4) :: i,j,k,ierr,io_unit,mesh_type,ni(3)
 INTEGER(i4), ALLOCATABLE :: pmap(:,:,:)
+REAL(r8) :: rscale(3),shift(3)
+class(oft_mesh), pointer :: mesh
+class(oft_bmesh), pointer :: smesh
 namelist/cube_options/mesh_type,ni,rscale,shift,ref_per
 DEBUG_STACK_PUSH
 mesh_type=1
+ni=1
+rscale=1.d0
+shift=0.d0
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)
@@ -83,6 +84,7 @@ IF(mesh_type==1)THEN
     CALL mg_mesh%smeshes(i)%setup(mesh_cube_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
   END DO
+  CALL multigrid_level(mg_mesh,1)
   mesh=>mg_mesh%meshes(1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
@@ -126,6 +128,7 @@ ELSE
     CALL mg_mesh%smeshes(i)%setup(mesh_cube_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
   END DO
+  CALL multigrid_level(mg_mesh,1)
   mesh=>mg_mesh%meshes(1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
@@ -166,11 +169,10 @@ call mesh_global_resolution(mesh)
 DEBUG_STACK_POP
 end subroutine mesh_cube_load
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cube_cadlink
-!------------------------------------------------------------------------------
 !> Setup surface IDs
 !------------------------------------------------------------------------------
-subroutine mesh_cube_cadlink
+subroutine mesh_cube_cadlink(mesh)
+class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j
 DO i=1,mesh%nbf
   j=mesh%lbf(i)
@@ -190,11 +192,10 @@ DO i=1,mesh%nbf
 END DO
 end subroutine mesh_cube_cadlink
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cube_set_periodic
-!------------------------------------------------------------------------------
 !>
 !------------------------------------------------------------------------------
-subroutine mesh_cube_set_periodic
+subroutine mesh_cube_set_periodic(mesh)
+class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,jj,k,kk,l,m,n,iper
 real(r8) :: pt_i(3),pt_j(3),d_plane,per_dir(3),i_cc(3),j_cc(3)
 real(r8), parameter :: tol=1.d-6
@@ -301,20 +302,24 @@ END DO
 DEBUG_STACK_POP
 end subroutine mesh_cube_set_periodic
 !------------------------------------------------------------------------------
-! SUBROUTINE: smesh_square_load
-!------------------------------------------------------------------------------
 !> Setup a 1x1x1 cube test mesh
 !! The mesh is initialized with a basic set of cells
 !! - 9 Points
 !! - 12 Cells
 !------------------------------------------------------------------------------
-subroutine smesh_square_load
-INTEGER(i4) :: i,j,k,ierr,io_unit,nptmp,nctmp
+subroutine smesh_square_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+INTEGER(i4) :: i,j,k,ierr,io_unit,nptmp,nctmp,mesh_type,ni(3)
 INTEGER(i4), ALLOCATABLE :: pmap(:,:),lctmp(:,:)
+REAL(r8) :: rscale(3),shift(3)
 REAL(r8), ALLOCATABLE :: rtmp(:,:)
+class(oft_bmesh), pointer :: smesh
 namelist/cube_options/mesh_type,ni,rscale,shift,ref_per
 DEBUG_STACK_PUSH
 mesh_type=1
+ni=1
+rscale=1.d0
+shift=0.d0
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)
@@ -349,6 +354,7 @@ END IF
 DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_cube_id,.FALSE.)
 END DO
+CALL multigrid_level(mg_mesh,1)
 smesh=>mg_mesh%smeshes(1)
 smesh%dim=2
 !---Create mesh as quads
@@ -427,11 +433,10 @@ call mesh_global_resolution(smesh)
 DEBUG_STACK_POP
 end subroutine smesh_square_load
 !------------------------------------------------------------------------------
-! SUBROUTINE: smesh_cube_cadlink
-!------------------------------------------------------------------------------
 !> Setup surface IDs
 !------------------------------------------------------------------------------
-subroutine smesh_square_cadlink
+subroutine smesh_square_cadlink(smesh)
+class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j
 DO i=1,smesh%nbe
   j=smesh%lbe(i)
@@ -450,7 +455,8 @@ end subroutine smesh_square_cadlink
 !> Add quadratic mesh node points
 !! @note All edges are straight so construction is trivial
 !------------------------------------------------------------------------------
-subroutine smesh_square_add_quad
+subroutine smesh_square_add_quad(smesh)
+class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
@@ -461,9 +467,9 @@ CALL smesh%set_order(2)
 !$omp parallel do
 do i=1,smesh%ne
   smesh%ho_info%lep(1,i)=i
-  mesh%ho_info%r(:,i)=(smesh%r(:,smesh%le(1,i))+smesh%r(:,smesh%le(2,i)))/2.d0
+  smesh%ho_info%r(:,i)=(smesh%r(:,smesh%le(1,i))+smesh%r(:,smesh%le(2,i)))/2.d0
 enddo
-IF(mesh%ho_info%ncp>0)THEN
+IF(smesh%ho_info%ncp>0)THEN
   !---Locate cell vertices and place daughter node
   !$omp parallel do
   do i=1,smesh%nc
@@ -481,7 +487,8 @@ end subroutine smesh_square_add_quad
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine smesh_square_set_periodic
+subroutine smesh_square_set_periodic(smesh)
+class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j,jj,k,kk,l,m,n,iper
 real(r8) :: pt_i(3),pt_j(3),d_plane,per_dir(3),i_cc(3),j_cc(3)
 real(r8), parameter :: tol=1.d-6

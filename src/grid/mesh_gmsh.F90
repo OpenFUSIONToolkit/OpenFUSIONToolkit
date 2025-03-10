@@ -21,19 +21,17 @@
 !------------------------------------------------------------------------------
 MODULE oft_mesh_gmsh
 USE oft_base
-USE oft_mesh_type, ONLY: oft_mesh, mesh, oft_bmesh, smesh
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_mesh_local, ONLY: bmesh_local_init
 USE oft_mesh_local_util, ONLY: mesh_local_findedge, mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 !---End include modules
 IMPLICIT NONE
 #include "local.h"
-private
-!------------------------------------------------------------------------------
-! TYPE GMSH_cadlink
+PRIVATE
 !------------------------------------------------------------------------------
 !> GMSH CAD linkage structure
 !! - Linkage of mesh entities to CAD model
@@ -53,24 +51,43 @@ real(r8) :: active_wts(3) = 0. !< Active constraint weights for MINPACK fitting
 !$omp threadprivate(active_endpts,active_wts,active_face)
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_gmsh_id = 3
 public mesh_gmsh_load, mesh_gmsh_cadlink, mesh_gmsh_reffix
-public mesh_gmsh_add_quad
+public mesh_gmsh_add_quad, gmsh_finalize_setup
 contains
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_gmsh_load
+!> Finalize setup/load-in of GMSH mesh and destroy temporaries created
+!! for grid construction (eg. high-order input nodes, in-memory data)
+!------------------------------------------------------------------------------
+subroutine gmsh_finalize_setup
+integer(i4) :: i,n
+CALL cad_mesh%delete()
+!
+IF(ASSOCIATED(ML_cad_link))THEN
+  n=SIZE(ML_cad_link)
+  DO i=1,n
+    IF(ASSOCIATED(ML_cad_link(i)%lbfg))DEALLOCATE(ML_cad_link(i)%lbfg)
+  END DO
+  DEALLOCATE(ML_cad_link)
+END IF
+NULLIFY(cad_link)
+end subroutine gmsh_finalize_setup
 !------------------------------------------------------------------------------
 !> Read in GMSH mesh file from file "filename"
 !! - Read in GMSH options from input file
 !! - Read in mesh points and cells
 !------------------------------------------------------------------------------
-subroutine mesh_gmsh_load
+subroutine mesh_gmsh_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,ed,nptmp,id,ierr,io_unit
 integer(i4) :: np_cad,ne_cad,nf_cad,nep,nfp,ncp
 integer(i4), allocatable, dimension(:) :: cad_ptmp,ptmp,ctmp
 integer(i4), allocatable, dimension(:,:) :: lftmp
 real(r8), allocatable, dimension(:,:) :: rtmp
+class(oft_mesh), pointer :: mesh
+class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
 namelist/gmsh_options/filename,order
 DEBUG_STACK_PUSH
+filename = 'none'
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,gmsh_options,IOSTAT=ierr)
@@ -98,6 +115,7 @@ DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_gmsh_id,.TRUE.)
   mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
 END DO
+CALL multigrid_level(mg_mesh,1)
 mesh=>mg_mesh%meshes(1)
 smesh=>mg_mesh%smeshes(1)
 !---Setup geometry information
@@ -215,11 +233,10 @@ call mesh_global_resolution(mesh)
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_load
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_gmsh_cadlink
-!------------------------------------------------------------------------------
 !> Link GMSH CAD objects to mesh entities for use in refinement.
 !------------------------------------------------------------------------------
-subroutine mesh_gmsh_cadlink
+subroutine mesh_gmsh_cadlink(mesh)
+class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,ind,fp(3)
 integer(i4), allocatable :: fmap(:)
 DEBUG_STACK_PUSH
@@ -241,16 +258,15 @@ do i=1,cad_mesh%nc
 end do
 !---Destroy mapping arrays
 deallocate(fmap)
-CALL mesh_gmsh_hobase
+CALL mesh_gmsh_hobase(mesh)
 if(oft_debug_print(2))write(*,*)'  Complete'
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_cadlink
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_gmsh_hobase
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points from high order import
 !------------------------------------------------------------------------------
-subroutine mesh_gmsh_hobase
+subroutine mesh_gmsh_hobase(mesh)
+class(oft_mesh), intent(inout) :: mesh
 real(r8) :: pt(3)
 integer(i4) :: i,j,k,etmp(2),ind
 DEBUG_STACK_PUSH
@@ -278,19 +294,19 @@ if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_hobase
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_gmsh_reffix
-!------------------------------------------------------------------------------
 !> Adjust boundary points to CAD boundary.
 !------------------------------------------------------------------------------
-subroutine mesh_gmsh_reffix
+subroutine mesh_gmsh_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8) :: pt(3)
 integer(i4) :: i,ierr,j,k,ind,ed,fp(3),npcors,edge,face
 integer(i4), pointer :: tmp(:)
 integer(i4), allocatable :: fmap(:)
-class(oft_mesh), pointer :: pmesh
+class(oft_mesh), pointer :: pmesh,mesh
 type(GMSH_cadlink), pointer :: pmesh_cad_link
 DEBUG_STACK_PUSH
 !---Get parent mesh
+mesh=>mg_mesh%mesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 !---If only one level do nothing
 if(mg_mesh%level==1)THEN
@@ -368,16 +384,17 @@ if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_reffix
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_gmsh_add_quad
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points using CAD model
 !------------------------------------------------------------------------------
-subroutine mesh_gmsh_add_quad
+subroutine mesh_gmsh_add_quad(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+class(oft_mesh), pointer :: mesh
 real(r8) :: pt(3)
 integer(i4) :: i,ierr,j,k,edge,face
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,*)'Setting GMSH quadratic nodes'
 !---Get CAD representation alias
+mesh=>mg_mesh%mesh
 cad_link=>ML_cad_link(mg_mesh%level)
 !---Locate edge end points and place daughter node
 do i=1,mesh%ne
@@ -402,31 +419,21 @@ if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_add_quad
 !---------------------------------------------------------------------------
-! SUBROUTINE: gmsh_surf_midpoint
-!---------------------------------------------------------------------------
 !> Compute the weighted midpoint of a surface edge
 !!
 !! Locates the point on a given face of the imported GMSH boundary mesh by
 !! minimizing the weighted sum of distances to 2 constraint points.
 !!
 !! \f[ \sum_i w_i*(r_n - p_i)^2 \f]
-!!
-!! @param[in] face Face index
-!! @param[in,out] pt Solution point
-!! @param[in] pt1 Constraint point 1
-!! @param[in] pt2 Constraint point 2
-!! @param[in] wt1 Constraint weight 1
-!! @param[in] wt2 Constraint weight 2
-!! @param[out] ierr Error flag
 !---------------------------------------------------------------------------
 subroutine gmsh_surf_midpoint(face,pt,pt1,pt2,wt1,wt2,ierr)
-integer(i4), intent(in) :: face
-real(r8), intent(inout) :: pt(3)
-real(r8), intent(in) :: pt1(3)
-real(r8), intent(in) :: pt2(3)
-real(r8), intent(in) :: wt1
-real(r8), intent(in) :: wt2
-integer(i4), intent(out) :: ierr
+integer(i4), intent(in) :: face !< Face index
+real(r8), intent(inout) :: pt(3) !< Solution point
+real(r8), intent(in) :: pt1(3) !< Constraint point 1
+real(r8), intent(in) :: pt2(3) !< Constraint point 2
+real(r8), intent(in) :: wt1 !< Constraint weight 1
+real(r8), intent(in) :: wt2 !< Constraint weight 2
+integer(i4), intent(out) :: ierr !< Error flag
 !---
 integer(i4), parameter :: nerr=3
 integer(i4), parameter :: neq=2
@@ -478,25 +485,18 @@ pt=cad_mesh%log2phys(active_face,f)
 DEBUG_STACK_POP
 end subroutine gmsh_surf_midpoint
 !---------------------------------------------------------------------------
-! SUBROUTINE: gmsh_spt_error
-!---------------------------------------------------------------------------
 !> Evalute the error between a surface point and the current active point
 !! used in a 1 point minimization.
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref mesh_gmsh::gmsh_surf_midpoint "gmsh_surf_midpoint"
-!!
-!! @param[in] m Number of spatial dimensions (3)
-!! @param[in] n Number of parametric dimensions (2)
-!! @param[in] uv Parametric possition [n]
-!! @param[out] err Error vector between current and desired point [3]
-!! @param[in,out] iflag Unused flag
 !---------------------------------------------------------------------------
 subroutine gmsh_spt_error(m,n,uv,err,iflag)
-integer(i4), intent(in) :: m,n
-real(r8), intent(in) :: uv(n)
-real(r8), intent(out) :: err(m)
-integer(i4), intent(inout) :: iflag
+integer(i4), intent(in) :: m !< Number of spatial dimensions [3]
+integer(i4), intent(in) :: n !< Number of parametric dimensions [2]
+real(r8), intent(in) :: uv(n) !< Parametric possition [n]
+real(r8), intent(out) :: err(m) !< Error vector between current and desired point [3]
+integer(i4), intent(inout) :: iflag !< Unused flag
 real(r8) :: pt(3),f(3)
 DEBUG_STACK_PUSH
 f(1)=uv(1)

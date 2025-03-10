@@ -14,15 +14,13 @@
 !------------------------------------------------------------------------------
 module tracing
 use oft_base
-use oft_mesh_type, only: mesh, mesh_findcell
-use multigrid, only: mg_mesh
+use oft_mesh_type, only: mesh_findcell
+use multigrid, only: multigrid_mesh
 USE oft_io, only: hdf5_write
 !---
 use fem_utils, only: fem_interp
 implicit none
 #include "local.h"
-!------------------------------------------------------------------------------
-! CLASS oft_tracer
 !------------------------------------------------------------------------------
 !> Abstract class for OFT tracers
 !------------------------------------------------------------------------------
@@ -49,6 +47,7 @@ type, abstract :: oft_tracer
   real(r8), pointer, dimension(:) :: dy !< Change from previous trace point
   real(r8), pointer, dimension(:) :: dyp !< Previous derivative
   real(r8) :: f(4) = 0.d0 !< Logical cell position of last/current trace point
+  type(multigrid_mesh), pointer :: ml_mesh => NULL() !< Muli-grid mesh
   class(fem_interp), pointer :: B => NULL() !< Interpolation operator for trace field
   procedure(tracer_ydot), pointer, nopass :: ydot => NULL() !< General ODE function
 contains
@@ -68,15 +67,11 @@ contains
   procedure(tracer_step), deferred :: delete
 end type oft_tracer
 !------------------------------------------------------------------------------
-! TYPE oft_tracer_ptr
-!------------------------------------------------------------------------------
 !> Tracer pointer
 !------------------------------------------------------------------------------
 type, public :: oft_tracer_ptr
   class(oft_tracer), pointer :: t => NULL() !< Pointer to tracer object
 end type oft_tracer_ptr
-!------------------------------------------------------------------------------
-! CLASS oft_tracer_euler
 !------------------------------------------------------------------------------
 !> Tracer implementation using an Euler method
 !------------------------------------------------------------------------------
@@ -99,8 +94,6 @@ contains
   !> Clean-up internal storage
   procedure :: delete => tracer_euler_delete
 end type oft_tracer_euler
-!------------------------------------------------------------------------------
-! CLASS oft_tracer_lsode
 !------------------------------------------------------------------------------
 !> Tracer implementation using LSODE as the ODE solver package
 !------------------------------------------------------------------------------
@@ -139,93 +132,69 @@ contains
 end type oft_tracer_lsode
 !---Abstract procedure prototypes
 abstract interface
-!------------------------------------------------------------------------------
-! INTERFACE tracer_setup
-!------------------------------------------------------------------------------
-!> Abstract interface for tracer setup with a new start point
-!!
-!! @param[in] y New start point [3]
-!! @param[in] cell Guess cell for use in \ref tetmesh_mapping::tetmesh_findcell
-!! "tetmesh_findcell" (optional)
-!! @param[in] init Flag indicating tracer is starting a new trace and all counts
-!! should be set to zero (optional)
-!------------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
+  !> Abstract interface for tracer setup with a new start point
+  !------------------------------------------------------------------------------
   subroutine tracer_setup(self,y,cell,init)
   import oft_tracer, i4, r8
-  class(oft_tracer), intent(inout) :: self
-  real(r8), intent(in) :: y(:)
-  integer(i4), optional, intent(in) :: cell
-  logical, optional, intent(in) :: init
+  class(oft_tracer), intent(inout) :: self !< Tracer object
+  real(r8), intent(in) :: y(:) !< New start point [3]
+  integer(i4), optional, intent(in) :: cell !< Guess cell for use in \ref oft_mesh_type::mesh_findcell
+  !! "mesh_findcell" (optional)
+  logical, optional, intent(in) :: init !< Flag indicating tracer is starting a new trace and all counts
+  !! should be set to zero (optional)
   end subroutine tracer_setup
-!---------------------------------------------------------------------------
-! INTERFACE tracer_copy
-!---------------------------------------------------------------------------
-!> Abstract interface for creating bare copies of a tracer object
-!!
-!! @param[out] new Copy of tracer object with same type, tolerances and field
-!! interpolation object
-!---------------------------------------------------------------------------
+  !---------------------------------------------------------------------------
+  !> Abstract interface for creating bare copies of a tracer object
+  !---------------------------------------------------------------------------
   subroutine tracer_copy(self,new)
   import oft_tracer
-  class(oft_tracer), intent(in) :: self
-  class(oft_tracer), pointer, intent(out) :: new
+  class(oft_tracer), intent(in) :: self !< Tracer object
+  class(oft_tracer), pointer, intent(out) :: new !< Copy of tracer object with same type, tolerances and field
+  !! interpolation object
   end subroutine tracer_copy
-!---------------------------------------------------------------------------
-! INTERFACE tracer_send
-!---------------------------------------------------------------------------
-!> Abstract interface for sending tracer information to a new domain
-!!
-!! @param[in] proc Processor ID to send tracer information to
-!! @result MPI request IDs for transfer of real and integer data (2)
-!---------------------------------------------------------------------------
+  !---------------------------------------------------------------------------
+  !> Abstract interface for sending tracer information to a new domain
+  !---------------------------------------------------------------------------
   function tracer_send(self,proc) result(sid)
   import oft_tracer, i4
 #ifdef OFT_MPI_F08
   import mpi_request
 #endif
-  class(oft_tracer), intent(inout) :: self
-  integer(i4), intent(in) :: proc
+  class(oft_tracer), intent(inout) :: self !< Tracer object
+  integer(i4), intent(in) :: proc !< Processor ID to send tracer information to
 #ifdef OFT_MPI_F08
   type(mpi_request) :: sid(2)
 #else
-  integer(i4) :: sid(2)
+  integer(i4) :: sid(2) !< MPI request IDs for transfer of real and integer data (2)
 #endif
   end function tracer_send
-!---------------------------------------------------------------------------
-! INTERFACE tracer_recv
-!---------------------------------------------------------------------------
-!> Abstract interface for recieving tracer information from a different domain
-!!
-!! @param[in] proc Processor ID to recieve tracer information from
-!! @result MPI request IDs for transfer of real and integer data (2)
-!---------------------------------------------------------------------------
+  !---------------------------------------------------------------------------
+  !> Abstract interface for recieving tracer information from a different domain
+  !---------------------------------------------------------------------------
   function tracer_recv(self,proc) result(rid)
   import oft_tracer, i4
 #ifdef OFT_MPI_F08
   import mpi_request
 #endif
-  class(oft_tracer), intent(inout) :: self
-  integer(i4), intent(in) :: proc
+  class(oft_tracer), intent(inout) :: self !< Tracer object
+  integer(i4), intent(in) :: proc !< Processor ID to recieve tracer information from
 #ifdef OFT_MPI_F08
   type(mpi_request) :: rid(2)
 #else
-  integer(i4) :: rid(2)
+  integer(i4) :: rid(2) !< MPI request IDs for transfer of real and integer data (2)
 #endif
   end function tracer_recv
-!------------------------------------------------------------------------------
-! INTERFACE tracer_step
-!------------------------------------------------------------------------------
-!> Abstract interface for advancing a tracer by one step
-!------------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
+  !> Abstract interface for advancing a tracer by one step
+  !------------------------------------------------------------------------------
   subroutine tracer_step(self)
   import oft_tracer
-  class(oft_tracer), intent(inout) :: self
+  class(oft_tracer), intent(inout) :: self !< Tracer object
   end subroutine tracer_step
-!------------------------------------------------------------------------------
-! INTERFACE tracer_ydot
-!------------------------------------------------------------------------------
-!> Abstract interface for general tracer ODE function
-!------------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
+  !> Abstract interface for general tracer ODE function
+  !------------------------------------------------------------------------------
   subroutine tracer_ydot(t,y,B,n,ydot)
   IMPORT i4, r8
   real(r8), intent(in) :: t
@@ -263,8 +232,6 @@ INTEGER(i4), PRIVATE, PARAMETER :: TRACER_RECV_READY   = 20 !< Tracer is ready t
 INTEGER(i4), PRIVATE, PARAMETER :: TRACER_RECV_ACTIVE  = 21 !< Tracer is waiting for recv to complete
 contains
 !---------------------------------------------------------------------------
-! SUBROUTINE: set_timeout
-!---------------------------------------------------------------------------
 !> Set timeout for tracing calls
 !!
 !! @param[in] timeout New timeout (seconds)
@@ -273,8 +240,6 @@ subroutine set_timeout(new_timeout)
 real(r8), intent(in) :: new_timeout
 timeout=new_timeout
 end subroutine set_timeout
-!---------------------------------------------------------------------------
-! SUBROUTINE: create_tracer
 !---------------------------------------------------------------------------
 !> Create tracer object
 !!
@@ -285,13 +250,10 @@ end subroutine set_timeout
 !! BDF method
 !! - (3) \ref tracing::oft_tracer_euler "EULER tracer", using an adaptive
 !! step size
-!!
-!! @param[out] tracer Tracer object
-!! @param[in] type Tracer type key
 !---------------------------------------------------------------------------
 subroutine create_tracer(tracer,type)
-class(oft_tracer), pointer, intent(out) :: tracer
-integer(i4), intent(in) :: type
+class(oft_tracer), pointer, intent(out) :: tracer !< Tracer object
+integer(i4), intent(in) :: type !< Tracer type key
 DEBUG_STACK_PUSH
 SELECT CASE(type)
   CASE(1)
@@ -310,16 +272,11 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine create_tracer
 !---------------------------------------------------------------------------
-! FUNCTION: termination_reason
-!---------------------------------------------------------------------------
 !> Get string describing tracer exit reason
-!!
-!! @param[in] status_flag Tracer exit status
-!! @returns Tracer exit reason
 !---------------------------------------------------------------------------
 function termination_reason(status_flag) result(reason_str)
-INTEGER(i4), INTENT(IN) :: status_flag
-CHARACTER(LEN=40) :: reason_str
+INTEGER(i4), INTENT(IN) :: status_flag !< Tracer exit status
+CHARACTER(LEN=40) :: reason_str !< Tracer exit reason
 SELECT CASE(status_flag)
   CASE(TRACER_ERROR_EXIT)
     reason_str = "Tracer exited mesh"
@@ -338,18 +295,12 @@ SELECT CASE(status_flag)
 END SELECT
 end function termination_reason
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracing_line
-!---------------------------------------------------------------------------
 !> Advance tracer from a single point and save field line to specified file
-!!
-!! @param[in] tracer Tracer for stream line advance
-!! @param[in] pt Starting point for trace [3]
-!! @param[in] filename Filename to save field line data to
 !---------------------------------------------------------------------------
 subroutine tracing_line(tracer,pt,filename)
-class(oft_tracer), TARGET, intent(in) :: tracer
-real(r8), intent(in) :: pt(:)
-character(LEN=*), intent(in) :: filename
+class(oft_tracer), TARGET, intent(in) :: tracer !< Tracer to use for field line trace
+real(r8), intent(in) :: pt(:) !< Starting point for trace [3]
+character(LEN=*), intent(in) :: filename !< Filename to save field line data to
 integer(i4) :: i,j,ierr,cell,proc,nsteps,io_unit
 #ifdef OFT_MPI_F08
 type(mpi_request) :: tid(2)
@@ -377,10 +328,10 @@ send_reqi=MPI_REQUEST_NULL
 !---
 do while(active_tracer%ntrans<active_tracer%maxtrans)
     cell=0
-    IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
-      call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,active_tracer%y(1:3),f)
+    IF(active_tracer%ml_mesh%nbase<active_tracer%ml_mesh%mgdim)THEN
+      call mesh_findcell(active_tracer%ml_mesh%meshes(active_tracer%ml_mesh%nbase),cell,active_tracer%y(1:3),f)
     ELSE
-      call mesh_findcell(mesh,cell,active_tracer%y(1:3),f)
+      call mesh_findcell(active_tracer%ml_mesh%mesh,cell,active_tracer%y(1:3),f)
     END IF
     fmin=MINVAL(f); fmax=MAXVAL(f)
     !---Disable point if off mesh
@@ -395,8 +346,8 @@ do while(active_tracer%ntrans<active_tracer%maxtrans)
     IF(active_tracer%status<0)EXIT
     IF(timeout_timer%timeout(timeout))EXIT
     !---Get new processor
-    IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
-      active_tracer%proc=mg_mesh%meshes(mg_mesh%nbase+1)%base%lcpart(cell)-1
+    IF(active_tracer%ml_mesh%nbase<active_tracer%ml_mesh%mgdim)THEN
+      active_tracer%proc=active_tracer%ml_mesh%meshes(active_tracer%ml_mesh%nbase+1)%base%lcpart(cell)-1
       active_tracer%cell=(cell-1)*8+1
     ELSE
       active_tracer%proc=oft_env%rank
@@ -465,8 +416,6 @@ deallocate(send_reqr,send_reqi,pt_list)
 DEBUG_STACK_POP
 end subroutine tracing_line
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracing_poincare
-!---------------------------------------------------------------------------
 !> Advance a group of tracers while accumulating crossing of the yz-plane into
 !! a poincare section.
 !!
@@ -476,24 +425,16 @@ end subroutine tracing_line
 !!
 !! @note When the local buffer for point crossings is exceeded tracing will
 !! exit. The size of the point buffer is set by the private module variable
-!! @ref tracing::nlocpts "nlocpts".
-!!
-!! @param[in] tracer Base tracer for stream line advance
-!! @param[in] pts Launch points for field lines [3,n]
-!! @param[in] n Number of launch points
-!! @param[in] filename Filename for section data
-!! @param[in] offset X-intercept of section plane (optional, default: 1)
-!! @param[in] pcoord Coordinate index orthogonal to section plane (optional, default: 1)
-!! @param[in] qfile Filename for approximate safety factor, must be z-axis oriented (optional)
+!! @ref tracing::nlocpts "nlocpts"
 !---------------------------------------------------------------------------
 subroutine tracing_poincare(tracer,pts,n,filename,offset,pcoord,qfile)
-class(oft_tracer), intent(in) :: tracer
-real(r8), intent(in) :: pts(3,n)
-integer(i4), intent(in) :: n
-character(LEN=*), intent(in) :: filename
-real(r8), optional, intent(in) :: offset
-integer(i4), optional, intent(in) :: pcoord
-character(LEN=*), optional, intent(in) :: qfile
+class(oft_tracer), intent(in) :: tracer !< Base tracer for field line advance
+real(r8), intent(in) :: pts(3,n) !< Launch points for field lines [3,n]
+integer(i4), intent(in) :: n !< Number of launch points
+character(LEN=*), intent(in) :: filename !< Filename for section data
+real(r8), optional, intent(in) :: offset !< X-intercept of section plane (optional, default: 0.0)
+integer(i4), optional, intent(in) :: pcoord !< Coordinate index orthogonal to section plane (optional, default: 1)
+character(LEN=*), optional, intent(in) :: qfile !< Filename for approximate safety factor, must be z-axis oriented (optional)
 integer(i4) :: i,j,ierr,nloc,nthread,io_unit,counts(6),icoord
 integer(i4), allocatable, dimension(:) :: ibuff
 real(r8) :: xcross,ntime,elapsed_time
@@ -624,16 +565,11 @@ DEALLOCATE(tracers)
 DEBUG_STACK_POP
 end subroutine tracing_poincare
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracing_poincare_master
-!---------------------------------------------------------------------------
-!> Manage tracer communication and status for parallel tracing.
-!!
-!! @param[in] tracers Array of all active tracers [n]
-!! @param[in] n Number of active tracers
+!> Manage tracer communication and status for parallel tracing
 !---------------------------------------------------------------------------
 subroutine tracing_poincare_master(tracers,n)
-type(oft_tracer_ptr), target, intent(inout) :: tracers(n)
-integer(i4), intent(in) :: n
+type(oft_tracer_ptr), target, intent(inout) :: tracers(n) !< Array of all active tracers [n]
+integer(i4), intent(in) :: n !< Number of active tracers
 integer(i4) :: i,j,ierr,cell
 #ifdef OFT_MPI_F08
 type(mpi_request) :: tid(2)
@@ -647,7 +583,9 @@ integer(i4), allocatable, dimension(:,:) :: send_reqr,send_reqi
 logical :: testr,testi,testc
 real(r8) :: f(4),fmin,fmax,tol_ratio
 class(oft_tracer), pointer :: loc_tracer
+type(multigrid_mesh), pointer :: mg_mesh
 DEBUG_STACK_PUSH
+mg_mesh=>tracers(1)%t%ml_mesh
 !---Setup send/recv arrays
 allocate(send_reqr(oft_env%nprocs,n),send_reqi(oft_env%nprocs,n))
 allocate(recv_reqr(n),recv_reqi(n))
@@ -673,9 +611,9 @@ DO
         cell=0
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
           call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
-          tol_ratio=mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
+          tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
         ELSE
-          call mesh_findcell(mesh,cell,loc_tracer%y,f)
+          call mesh_findcell(mg_mesh%mesh,cell,loc_tracer%y,f)
           tol_ratio=.1d0
         END IF
         fmin=minval(f)
@@ -738,9 +676,9 @@ DO
         cell=0
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
           call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
-          tol_ratio=mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
+          tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
         ELSE
-          call mesh_findcell(mesh,cell,loc_tracer%y,f)
+          call mesh_findcell(mg_mesh%mesh,cell,loc_tracer%y,f)
           tol_ratio=.1d0
         END IF
         fmin=minval(f)
@@ -792,9 +730,9 @@ DO
         cell=0
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
           call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
-          tol_ratio=mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
+          tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
         ELSE
-          call mesh_findcell(mesh,cell,loc_tracer%y,f)
+          call mesh_findcell(mg_mesh%mesh,cell,loc_tracer%y,f)
           tol_ratio=.1d0
         END IF
         fmin=minval(f)
@@ -829,9 +767,9 @@ DO
       cell=0
       IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
         call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
-        tol_ratio=mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
+        tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
       ELSE
-        call mesh_findcell(mesh,cell,loc_tracer%y,f)
+        call mesh_findcell(mg_mesh%mesh,cell,loc_tracer%y,f)
         tol_ratio=.1d0
       END IF
       fmin=minval(f)
@@ -867,28 +805,19 @@ deallocate(recv_reqr,recv_reqi)
 DEBUG_STACK_POP
 end subroutine tracing_poincare_master
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracing_poincare_worker
-!---------------------------------------------------------------------------
 !> Advance a group of tracers on the local domain while accumulating crossings
-!! of the yz-plane into a buffer array.
-!!
-!! @param[in] tracers Array of all active tracers [n]
-!! @param[in] n Number of active tracers
-!! @param[in,out] ibuff Local buffer of tracer indices [nbuff]
-!! @param[in,out] outbuff Local buffer of plane crossings [3,nbuff]
-!! @param[in] nbuff Size of local buffer
-!! @param[in] offset X-intercept of section plane (optional)
+!! of the yz-plane into a buffer array
 !---------------------------------------------------------------------------
 subroutine tracing_poincare_worker(tracers,n,ibuff,outbuff,nbuff,nloc,xcross,icoord,qbuff)
-type(oft_tracer_ptr), target, intent(inout) :: tracers(n)
-integer(i4), intent(in) :: n
-integer(i4), intent(inout) :: ibuff(nbuff)
-real(r8), intent(inout) :: outbuff(3,nbuff)
-integer(i4), intent(in) :: nbuff
-integer(i4), intent(inout) :: nloc
-real(r8), optional, intent(in) :: xcross
-integer(i4), optional, intent(in) :: icoord
-real(r8), optional, intent(inout) :: qbuff(2,n)
+type(oft_tracer_ptr), target, intent(inout) :: tracers(n) !< Array of all active tracers [n]
+integer(i4), intent(in) :: n !< Number of active tracers
+integer(i4), intent(inout) :: ibuff(nbuff) !< Local buffer of tracer indices [nbuff]
+real(r8), intent(inout) :: outbuff(3,nbuff) !< Local buffer of plane crossings [3,nbuff]
+integer(i4), intent(in) :: nbuff !< Size of local buffer
+integer(i4), intent(inout) :: nloc !< Number of crossings on local task
+real(r8), optional, intent(in) :: xcross !< X-intercept of section plane (optional, default: 0.0)
+integer(i4), optional, intent(in) :: icoord !< Coordinate index orthogonal to section plane (optional, default: 1)
+real(r8), optional, intent(inout) :: qbuff(2,n) !< Buffer for q information
 integer(i4) :: i,j,cell
 logical :: testc
 real(r8) :: yp(3),y_plane,yp_plane,dtheta,dphi
@@ -979,21 +908,15 @@ IF(ABS(dtor)>pi)dtor = dtor - 2*pi*SIGN(1.d0,dtor)
 end subroutine approx_angle_change
 end subroutine tracing_poincare_worker
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_euler_setup
-!---------------------------------------------------------------------------
-!> Setup a LSODE tracer with a new starting point
-!!
-!! @param[in] y New start point [3]
-!! @param[in] cell Guess cell for use in \ref tetmesh_mapping::tetmesh_findcell
-!! "tetmesh_findcell" (optional)
-!! @param[in] init Flag indicating tracer is starting a new trace and all counts
-!! should be set to zero (optional)
+!> Setup a EULER tracer with a new starting point
 !---------------------------------------------------------------------------
 subroutine tracer_euler_setup(self,y,cell,init)
-class(oft_tracer_euler), intent(inout) :: self
-real(r8), intent(in) :: y(:)
-integer(i4), optional, intent(in) :: cell
-logical, optional, intent(in) :: init
+class(oft_tracer_euler), intent(inout) :: self !< Tracer object
+real(r8), intent(in) :: y(:) !< New start point [3]
+integer(i4), optional, intent(in) :: cell !< Guess cell for use in \ref oft_mesh_type::mesh_findcell
+!! "mesh_findcell" (optional)
+logical, optional, intent(in) :: init !< Flag indicating tracer is starting a new trace and all counts
+!! should be set to zero (optional)
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%y))THEN
   ALLOCATE(self%y(self%neq))
@@ -1014,12 +937,10 @@ END IF
 self%cell=0
 if(present(cell))self%cell=cell
 self%y=y
-call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 self%initialized=.TRUE.
 DEBUG_STACK_POP
 end subroutine tracer_euler_setup
-!---------------------------------------------------------------------------
-! SUBROUTINE: tracer_euler_copy
 !---------------------------------------------------------------------------
 !> Create a bare copy of the LSODE tracer object
 !!
@@ -1027,8 +948,8 @@ end subroutine tracer_euler_setup
 !! object
 !---------------------------------------------------------------------------
 subroutine tracer_euler_copy(self,new)
-class(oft_tracer_euler), intent(in) :: self
-class(oft_tracer), pointer, intent(out) :: new
+class(oft_tracer_euler), intent(in) :: self !< Tracer object
+class(oft_tracer), pointer, intent(out) :: new !< Copy of object with same tolerances and referenced interpolator
 DEBUG_STACK_PUSH
 allocate(oft_tracer_euler::new)
 new%B=>self%B
@@ -1040,35 +961,28 @@ IF(ASSOCIATED(self%ydot))new%ydot=>self%ydot
 DEBUG_STACK_POP
 end subroutine tracer_euler_copy
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_euler_save
-!---------------------------------------------------------------------------
 !> Advancing tracer by one step using LSODE
 !---------------------------------------------------------------------------
 subroutine tracer_euler_save(self)
-class(oft_tracer_euler), intent(inout) :: self
+class(oft_tracer_euler), intent(inout) :: self !< Tracer object
 end subroutine tracer_euler_save
-!---------------------------------------------------------------------------
-! FUNCTION: tracer_euler_send
 !---------------------------------------------------------------------------
 !> Send tracer information to a new domain
 !!
-!! This subroutine transfers the number of steps, tracer position and LSODE
-!! working arrays. Data is packed into a single array for each real and integer
-!! data types and non-blocking MPI sends are created to transfer each array.
-!!
-!! @param[in] proc Processor ID to send tracer information to
-!! @result MPI request IDs for transfer of real and integer data (2)
+!! This subroutine transfers the number of steps and tracer position. Data
+!! is packed into a single array for each real and integer data types and
+!! non-blocking MPI sends are created to transfer each array
 !---------------------------------------------------------------------------
 function tracer_euler_send(self,proc) result(sid)
-class(oft_tracer_euler), intent(inout) :: self
-integer(i4), intent(in) :: proc
-integer(i4) :: ierr
+class(oft_tracer_euler), intent(inout) :: self !< Tracer object
+integer(i4), intent(in) :: proc !< Processor ID to send tracer information to
 #ifdef OFT_MPI_F08
 type(mpi_request) :: sid(2)
 #else
-integer(i4) :: sid(2)
+integer(i4) :: sid(2) !< MPI request IDs for transfer of real and integer data (2)
 #endif
 #ifdef HAVE_MPI
+integer(i4) :: ierr
 DEBUG_STACK_PUSH
 !---Pack info
 self%isend(1)=self%nsteps
@@ -1091,26 +1005,21 @@ CALL oft_abort("Send requested without MPI","tracer_euler_send",__FILE__)
 #endif
 end function tracer_euler_send
 !---------------------------------------------------------------------------
-! FUNCTION: tracer_euler_recv
-!---------------------------------------------------------------------------
 !> Recieve tracer information from a different domain
 !!
 !! This subroutine sets up non-blocking MPI recieve requests and unpacks the
-!! resulting data sent by \ref tracing::tracer_euler_send "tracer_euler_send".
-!!
-!! @param[in] proc Processor ID to recieve tracer information from
-!! @result MPI request IDs for transfer of real and integer data (2)
+!! resulting data sent by \ref tracing::tracer_euler_send "tracer_euler_send"
 !---------------------------------------------------------------------------
 function tracer_euler_recv(self,proc) result(rid)
-class(oft_tracer_euler), intent(inout) :: self
-integer(i4), intent(in) :: proc
-integer(i4) :: ierr
+class(oft_tracer_euler), intent(inout) :: self !< Tracer object
+integer(i4), intent(in) :: proc !< Processor ID to receive tracer information from
 #ifdef OFT_MPI_F08
 type(mpi_request) :: rid(2)
 #else
-integer(i4) :: rid(2)
+integer(i4) :: rid(2) !< MPI request IDs for transfer of real and integer data (2)
 #endif
 #ifdef HAVE_MPI
+integer(i4) :: ierr
 logical :: testr,testi
 DEBUG_STACK_PUSH
 IF(oft_mpi_check_reqs(2,self%rids))THEN
@@ -1144,22 +1053,20 @@ CALL oft_abort("Recieve requested without MPI","tracer_euler_recv",__FILE__)
 #endif
 end function tracer_euler_recv
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_euler_step
-!---------------------------------------------------------------------------
-!> Advancing tracer by one step using LSODE
+!> Advancing tracer by one step using EULER
 !---------------------------------------------------------------------------
 subroutine tracer_euler_step(self)
-class(oft_tracer_euler), intent(inout) :: self
+class(oft_tracer_euler), intent(inout) :: self !< Tracer object
 real(r8), ALLOCATABLE, DIMENSION(:) :: ydot
 real(r8) :: B(3),goptmp(3,4),v,fmin,fmax
 DEBUG_STACK_PUSH
 ALLOCATE(ydot(self%neq))
 !---Prediction
-call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
 IF(self%cell==0)RETURN
-CALL mesh%jacobian(self%cell,self%f,goptmp,v)
+CALL self%ml_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
 CALL self%B%interp(self%cell,self%f,goptmp,B)
 self%dyp=self%dy
 IF(ASSOCIATED(active_tracer%ydot))THEN
@@ -1171,11 +1078,11 @@ IF(self%nsteps==0)self%dt=1.d-3/SQRT(SUM(self%dy**2))
 !---Step
 self%y=self%y+self%dt*self%dy
 !---Compute second derivative for error approximation
-call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
 IF(self%cell==0)RETURN
-CALL mesh%jacobian(self%cell,self%f,goptmp,v)
+CALL self%ml_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
 CALL self%B%interp(self%cell,self%f,goptmp,B)
 IF(ASSOCIATED(active_tracer%ydot))THEN
   CALL self%ydot(0.d0,self%y,B,self%neq,ydot)
@@ -1195,12 +1102,10 @@ DEALLOCATE(ydot)
 DEBUG_STACK_POP
 end subroutine tracer_euler_step
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_euler_delete
-!---------------------------------------------------------------------------
 !> Delete internal storage and reset counters
 !---------------------------------------------------------------------------
 subroutine tracer_euler_delete(self)
-class(oft_tracer_euler), intent(inout) :: self
+class(oft_tracer_euler), intent(inout) :: self !< Tracer object
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y,self%dy,self%rsend)
 self%nsteps=0
@@ -1211,45 +1116,35 @@ NULLIFY(self%ydot)
 DEBUG_STACK_POP
 end subroutine tracer_euler_delete
 !------------------------------------------------------------------------------
-! FUNCTION: tracer_lsode_cast
-!------------------------------------------------------------------------------
-!> Cast \ref tracing::oft_tracer "oft_tracer" to \ref tracing::oft_tracer_lsode
-!! "oft_tracer_lsode"
+!> Cast a tracer object to a oft_tracer_lsode
 !!
-!! @param[out] self Object of desired type, unassociated if cast fails
-!! @param[in] source Source object to cast
-!! @result Error flag
+!! The source matrix must be @ref oft_tracer_lsode or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
-FUNCTION tracer_lsode_cast(self,source) result(ierr)
-class(oft_tracer_lsode), pointer, intent(out) :: self
-class(oft_tracer), target, intent(in) :: source
-integer(i4) :: ierr
+FUNCTION tracer_lsode_cast(self,source) result(success)
+class(oft_tracer_lsode), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_tracer), target, intent(in) :: source !< Source tracer to cast
+logical :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_tracer_lsode)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION tracer_lsode_cast
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_lsode_setup
-!---------------------------------------------------------------------------
 !> Setup a LSODE tracer with a new starting point
-!!
-!! @param[in] y New start point [3]
-!! @param[in] cell Guess cell for use in \ref tetmesh_mapping::tetmesh_findcell
-!! "tetmesh_findcell" (optional)
-!! @param[in] init Flag indicating tracer is starting a new trace and all counts
-!! should be set to zero (optional)
 !---------------------------------------------------------------------------
 subroutine tracer_lsode_setup(self,y,cell,init)
-class(oft_tracer_lsode), intent(inout) :: self
-real(r8), intent(in) :: y(:)
-integer(i4), optional, intent(in) :: cell
-logical, optional, intent(in) :: init
+class(oft_tracer_lsode), intent(inout) :: self !< Tracer object
+real(r8), intent(in) :: y(:) !< New start point [3]
+integer(i4), optional, intent(in) :: cell !< Guess cell for use in \ref oft_mesh_type::mesh_findcell
+!! "mesh_findcell" (optional)
+logical, optional, intent(in) :: init !< Flag indicating tracer is starting a new trace and all counts
+!! should be set to zero (optional)
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%rwork))THEN
   IF(self%mf==10)THEN
@@ -1284,7 +1179,7 @@ END IF
 self%cell=0
 if(present(cell))self%cell=cell
 self%y=y
-call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 self%initialized=.TRUE.
 IF(self%comm_load)THEN
   call dsrcom(self%rsav,self%isav,2)
@@ -1293,20 +1188,15 @@ END IF
 DEBUG_STACK_POP
 end subroutine tracer_lsode_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_lsode_copy
-!---------------------------------------------------------------------------
 !> Create a bare copy of the LSODE tracer object
-!!
-!! @param[out] new Copy of object with same tolerances and field interpolation
-!! object
 !---------------------------------------------------------------------------
 subroutine tracer_lsode_copy(self,new)
-class(oft_tracer_lsode), intent(in) :: self
-class(oft_tracer), pointer, intent(out) :: new
+class(oft_tracer_lsode), intent(in) :: self !< Tracer object
+class(oft_tracer), pointer, intent(out) :: new !< Copy of object with same tolerances and referenced interpolator
 class(oft_tracer_lsode), pointer :: newtmp
 DEBUG_STACK_PUSH
 allocate(oft_tracer_lsode::new)
-IF(tracer_lsode_cast(newtmp,new)<0)CALL oft_abort('Failure to allocate LSODE.', &
+IF(.NOT.tracer_lsode_cast(newtmp,new))CALL oft_abort('Failure to allocate LSODE.', &
   'tracer_lsode_copy',__FILE__)
 new%B=>self%B
 new%maxsteps=self%maxsteps
@@ -1318,39 +1208,32 @@ newtmp%mf=self%mf
 DEBUG_STACK_POP
 end subroutine tracer_lsode_copy
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_lsode_save
-!---------------------------------------------------------------------------
-!> Advancing tracer by one step using LSODE
+!> Save LSODE common block data to arrays
 !---------------------------------------------------------------------------
 subroutine tracer_lsode_save(self)
-class(oft_tracer_lsode), intent(inout) :: self
+class(oft_tracer_lsode), intent(inout) :: self !< Tracer object
 DEBUG_STACK_PUSH
 call dsrcom(self%rsav,self%isav,1)
 self%comm_load=.TRUE.
 DEBUG_STACK_POP
 end subroutine tracer_lsode_save
 !---------------------------------------------------------------------------
-! FUNCTION: tracer_lsode_send
-!---------------------------------------------------------------------------
 !> Send tracer information to a new domain
 !!
 !! This subroutine transfers the number of steps, tracer position and LSODE
 !! working arrays. Data is packed into a single array for each real and integer
-!! data types and non-blocking MPI sends are created to transfer each array.
-!!
-!! @param[in] proc Processor ID to send tracer information to
-!! @result MPI request IDs for transfer of real and integer data (2)
+!! data types and non-blocking MPI sends are created to transfer each array
 !---------------------------------------------------------------------------
 function tracer_lsode_send(self,proc) result(sid)
-class(oft_tracer_lsode), intent(inout) :: self
-integer(i4), intent(in) :: proc
-integer(i4) :: ierr
+class(oft_tracer_lsode), intent(inout) :: self !< Tracer object
+integer(i4), intent(in) :: proc !< Processor ID to send tracer information to
 #ifdef OFT_MPI_F08
 type(mpi_request) :: sid(2)
 #else
-integer(i4) :: sid(2)
+integer(i4) :: sid(2) !< MPI request IDs for transfer of real and integer data (2)
 #endif
 #ifdef HAVE_MPI
+integer(i4) :: ierr
 DEBUG_STACK_PUSH
 !---Pack info
 self%isend(1)=self%nsteps
@@ -1378,26 +1261,21 @@ CALL oft_abort("Send requested without MPI","tracer_lsode_send",__FILE__)
 #endif
 end function tracer_lsode_send
 !---------------------------------------------------------------------------
-! FUNCTION: tracer_lsode_recv
-!---------------------------------------------------------------------------
 !> Recieve tracer information from a different domain
 !!
 !! This subroutine sets up non-blocking MPI recieve requests and unpacks the
-!! resulting data sent by \ref tracing::tracer_lsode_send "tracer_lsode_send".
-!!
-!! @param[in] proc Processor ID to recieve tracer information from
-!! @result MPI request IDs for transfer of real and integer data (2)
+!! resulting data sent by \ref tracing::tracer_lsode_send "tracer_lsode_send"
 !---------------------------------------------------------------------------
 function tracer_lsode_recv(self,proc) result(rid)
-class(oft_tracer_lsode), intent(inout) :: self
-integer(i4), intent(in) :: proc
-integer(i4) :: ierr
+class(oft_tracer_lsode), intent(inout) :: self !< Tracer object
+integer(i4), intent(in) :: proc !< Processor ID to receive tracer information from
 #ifdef OFT_MPI_F08
 type(mpi_request) :: rid(2)
 #else
-integer(i4) :: rid(2)
+integer(i4) :: rid(2) !< MPI request IDs for transfer of real and integer data (2)
 #endif
 #ifdef HAVE_MPI
+integer(i4) :: ierr
 logical :: testr,testi
 DEBUG_STACK_PUSH
 IF(oft_mpi_check_reqs(2,self%rids))THEN
@@ -1437,12 +1315,10 @@ CALL oft_abort("Receive requested without MPI","tracer_lsode_recv",__FILE__)
 #endif
 end function tracer_lsode_recv
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_lsode_step
-!---------------------------------------------------------------------------
 !> Advancing tracer by one step using LSODE
 !---------------------------------------------------------------------------
 subroutine tracer_lsode_step(self)
-class(oft_tracer_lsode), intent(inout) :: self
+class(oft_tracer_lsode), intent(inout) :: self !< Tracer object
 real(r8) :: fmin,fmax
 DEBUG_STACK_PUSH
 self%dyp=self%dy
@@ -1454,7 +1330,7 @@ IF(self%istate<0.OR.ANY(self%y(1:3)>1.d20))THEN
   self%estatus=TRACER_ERROR_FAIL
 END IF
 IF(self%cell/=0)THEN ! Check for exit mesh
-  call mesh_findcell(mesh,self%cell,self%y(1:3),self%f)
+  call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
   fmin=minval(self%f)
   fmax=maxval(self%f)
   IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
@@ -1462,9 +1338,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine tracer_lsode_step
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_lsode_eval_B
-!---------------------------------------------------------------------------
-!> Field evaluation callback used by \c dlsode
+!> Field evaluation callback used by `dlsode`
 !!
 !! See \ref tracing::tracer_lsode_step "tracer_lsode_step"
 !---------------------------------------------------------------------------
@@ -1475,9 +1349,9 @@ real(r8), intent(out) :: ydot(neq)
 real(r8) :: goptmp(3,4),v,B(3)
 DEBUG_STACK_PUSH
 ydot=active_tracer%dy
-call mesh_findcell(mesh,active_tracer%cell,y(1:3),active_tracer%f)
+call mesh_findcell(active_tracer%ml_mesh%mesh,active_tracer%cell,y(1:3),active_tracer%f)
 IF(active_tracer%cell==0)RETURN
-CALL mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+CALL active_tracer%ml_mesh%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 CALL active_tracer%B%interp(active_tracer%cell,active_tracer%f,goptmp,B)
 IF(ASSOCIATED(active_tracer%ydot))THEN
   CALL active_tracer%ydot(t,y,B,neq,ydot)
@@ -1488,12 +1362,10 @@ active_tracer%dy=ydot
 DEBUG_STACK_POP
 end subroutine tracer_lsode_eval_B
 !---------------------------------------------------------------------------
-! SUBROUTINE: tracer_lsode_delete
-!---------------------------------------------------------------------------
 !> Delete internal storage and reset counters
 !---------------------------------------------------------------------------
 subroutine tracer_lsode_delete(self)
-class(oft_tracer_lsode), intent(inout) :: self
+class(oft_tracer_lsode), intent(inout) :: self !< Tracer object
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%rwork))THEN
   DEALLOCATE(self%y,self%dy,self%dyp)
