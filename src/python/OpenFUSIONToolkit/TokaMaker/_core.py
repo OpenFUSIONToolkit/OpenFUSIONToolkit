@@ -1163,12 +1163,14 @@ class TokaMaker():
             mesh_currents = numpy.zeros((self.lc.shape[0],))
             if self.ncoils >0:
                 mesh_currents = region_currents[self.reg-1]
+            # Adjust current in coils with non-uniform distribution
             if len(self.dist_coils)>0:
-                for _, coil_dict in self._coil_dict.items():
-                    if (coil_id:=coil_dict["coil_id"]+1) in self.dist_coils.keys():
-                        mask = self.reg==coil_dict["reg_id"]
-                        face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
-                        mesh_currents[mask] *= face_currents[mask]
+                for _, coil_obj in self.coil_sets.items():
+                    if (coil_id:=coil_obj["id"]) in self.dist_coils.keys():
+                        for sub_coil in coil_obj["sub_coils"]:
+                            mask = (self.reg==sub_coil["reg_id"])
+                            face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
+                            mesh_currents[mask] *= face_currents[mask]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:
                 mesh_currents *= coil_scale
@@ -1428,19 +1430,20 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_coil_current_dist(self,iCoil,curr_dist):
+    def set_coil_current_dist(self,coil_name,curr_dist):
         '''! Overwrite coil with non-uniform current distribution.
 
-        @param iCoil Coil index
-        @param curr_dist Relative current density
+        @param coil_name Name of coil to modify
+        @param curr_dist Relative current density [self.np]
         '''
         if curr_dist.shape[0] != self.np:
-            raise IndexError('Incorrect shape of "psi0", should be [np]')
-        if iCoil <= 0:
-            raise IndexError("iCoil must be between 1 and ncoils")
+            raise IndexError('Incorrect shape of "curr_dist", should be [np]')
+        if coil_name not in self.coil_sets:
+            raise KeyError('Unknown coil "{0}"'.format(coil_name))
+        iCoil = self.coil_sets[coil_name]['id']
         self.dist_coils[iCoil] = curr_dist
         curr_dist = numpy.ascontiguousarray(curr_dist, dtype=numpy.float64)
-        tokamaker_set_coil_current_dist(c_int(iCoil),curr_dist)
+        tokamaker_set_coil_current_dist(c_int(iCoil+1),curr_dist)
 
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures

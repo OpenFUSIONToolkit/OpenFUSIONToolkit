@@ -290,7 +290,7 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     mygs.setup(order=fe_order)
     mygs.set_coil_currents({'COIL': cdx*cdy})
     if dist is not None:
-        mygs.set_coil_current_dist(1,dist(mygs.r[:,0],mygs.r[:,1]))
+        mygs.set_coil_current_dist('COIL',dist(mygs.r[:,0],mygs.r[:,1]))
     try:
         psi0 = mygs.vac_solve()
     except ValueError:

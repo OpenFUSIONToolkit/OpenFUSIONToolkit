@@ -57,7 +57,7 @@ type :: multigrid_mesh
 #endif
   class(oft_mesh), pointer :: mesh => NULL() !< Structure containing current mesh
   class(oft_bmesh), pointer :: smesh => NULL() !< Structure containing current mesh
-  TYPE(mesh_seam), POINTER :: seam => NULL()
+  TYPE(mesh_seam), POINTER :: seam => NULL() !< Global domain-domain connectivity information
   class(oft_mesh), pointer, dimension(:) :: meshes => NULL() !< Structure containing all meshes
   class(oft_bmesh), pointer, dimension(:) :: smeshes => NULL() !< Structure containing current mesh
   type(multigrid_inter), pointer, dimension(:) :: inter => NULL() !< Structure containing linkages
