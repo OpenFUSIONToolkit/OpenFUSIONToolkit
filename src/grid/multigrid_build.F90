@@ -573,7 +573,7 @@ CALL multigrid_level(mg_mesh,nlevels)
 select case(mg_mesh%mesh%cad_type)
 case(mesh_native_id)
   CALL native_finalize_setup
-case(mesh_cube_id)
+case(mesh_cubit_id)
 #ifdef HAVE_NCDF
   CALL cubit_finalize_setup
 #else
@@ -1038,7 +1038,7 @@ CALL multigrid_level(mg_mesh,nlevels)
 select case(mg_mesh%smesh%cad_type)
 case(mesh_native_id)
   CALL native_finalize_setup
-case(mesh_cube_id)
+case(mesh_cubit_id)
 #ifdef HAVE_NCDF
   CALL cubit_finalize_setup
 #else
