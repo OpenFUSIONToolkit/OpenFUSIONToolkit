@@ -73,7 +73,7 @@ END TYPE Exodus_cadlink
 PRIVATE
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_cubit_id = 2
 PUBLIC mesh_cubit_load, mesh_cubit_reffix, mesh_cubit_add_quad
-PUBLIC mesh_cubit_hobase, mesh_cubit_cadlink
+PUBLIC mesh_cubit_hobase, mesh_cubit_cadlink, cubit_finalize_setup
 PUBLIC mesh_cubit_test_edge, mesh_cubit_set_periodic
 PUBLIC smesh_cubit_load, cubit_read_nodesets, cubit_read_sidesets
 !---Cubit "exodus" indexing maps

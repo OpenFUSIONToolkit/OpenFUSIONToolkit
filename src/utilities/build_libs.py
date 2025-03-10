@@ -329,8 +329,10 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
     if config_dict['OS_TYPE'] == 'Darwin':
         result, errcode = run_command('sw_vers -productVersion')
         config_dict['OS_VER'] = result
+        config_dict['DYN_EXT'] = '.dylib'
     else:
         config_dict['OS_VER'] = platform.uname()[2]
+        config_dict['DYN_EXT'] = '.so'
     # Return dictionary
     return config_dict
 
@@ -761,7 +763,7 @@ class METIS(package):
 
 
 class MPICH(package):
-    def __init__(self,use_headers,ver_major):
+    def __init__(self, use_headers, ver_major, shared_libs=True):
         self.name = "MPI"
         self.display_name = "MPICH"
         self.ver_major = ver_major
@@ -773,6 +775,7 @@ class MPICH(package):
             raise ValueError("Unknown MPICH version")
         self.build_timeout = 30
         self.use_headers = use_headers
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -808,12 +811,20 @@ class MPICH(package):
         config_options = [
             "--prefix={MPI_ROOT}",
             "--enable-fortran=yes",
-            "--enable-shared=yes",
-            "--enable-static=no",
-            "--with-pic",
             "--without-hip",
             "--without-cuda"
         ]
+        if self.shared_libs:
+            config_options += [
+                "--enable-shared=yes",
+                "--enable-static=no",
+                "--with-pic"
+            ]
+        else:
+            config_options += [
+                "--enable-shared=no",
+                "--enable-static=yes"
+            ]
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
@@ -822,12 +833,12 @@ class MPICH(package):
                 hwloc_path = result.strip()
                 print("    Using hwloc from homebrew: {0}".format(hwloc_path))
                 config_options.append('--with-hwloc={0}'.format(hwloc_path))
-        #     # Search for PMIx
-        #     result, errcode = run_command("brew --prefix pmix")
-        #     if errcode == 0:
-        #         pmix_path = result.strip()
-        #         print("    Using pmix from homebrew: {0}".format(pmix_path))
-        #         config_options.append('--with-pmix={0}'.format(pmix_path))
+            # # Search for PMIx (If external PMIx is used mpiexec is not built)
+            # result, errcode = run_command("brew --prefix pmix")
+            # if errcode == 0:
+            #     pmix_path = result.strip()
+            #     print("    Using pmix from homebrew: {0}".format(pmix_path))
+            #     config_options.append('--with-pmix={0}'.format(pmix_path))
         build_lines += [
             "../configure " + " ".join(config_options),
             "make -j{MAKE_THREADS}",
@@ -842,12 +853,13 @@ class MPICH(package):
 
 
 class OpenMPI(package):
-    def __init__(self,use_headers):
+    def __init__(self, use_headers, shared_libs=True):
         self.name = "MPI"
         self.display_name = "OpenMPI"
-        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.5.tar.gz"
+        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.7.tar.gz"
         self.use_headers = use_headers
         self.build_timeout = 30
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -884,13 +896,21 @@ class OpenMPI(package):
         config_options = [
             "--prefix={MPI_ROOT}",
             "--enable-mpi-fortran=yes",
-            "--enable-shared=yes",
-            "--enable-static=no",
-            "--with-pic",
             "--disable-sphinx",
             "--without-rocm",
             "--without-cuda"
         ]
+        if self.shared_libs:
+            config_options += [
+                "--enable-shared=yes",
+                "--enable-static=no",
+                "--with-pic"
+            ]
+        else:
+            config_options += [
+                "--enable-shared=no",
+                "--enable-static=yes"
+            ]
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
@@ -931,12 +951,13 @@ class OpenMPI(package):
 
 
 class HDF5(package):
-    def __init__(self, parallel=False, cmake_build=False, build_hl=False):
+    def __init__(self, parallel=False, cmake_build=False, build_hl=False, shared_libs=True):
         self.name = "HDF5"
-        self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.5/hdf5-1.14.5.tar.gz"
+        self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.6/hdf5-1.14.6.tar.gz"
         self.parallel = parallel
         self.cmake_build = cmake_build
         self.build_hl = build_hl
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -967,25 +988,41 @@ class HDF5(package):
         if self.cmake_build:
             cmake_options = [
                 '-DCMAKE_INSTALL_PREFIX:PATH="{HDF5_ROOT}"',
-                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
                 '-DHDF5_BUILD_FORTRAN:BOOL=ON',
-                '-DBUILD_SHARED_LIBS:BOOL=ON',
-                '-DBUILD_STATIC_LIBS:BOOL=OFF',
                 '-DHDF5_BUILD_CPP_LIB=OFF',
                 '-DBUILD_TESTING=OFF',
                 '-DHDF5_BUILD_EXAMPLES=OFF'
             ]
+            if self.shared_libs:
+                cmake_options += [
+                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                    '-DBUILD_SHARED_LIBS:BOOL=ON',
+                    '-DBUILD_STATIC_LIBS:BOOL=OFF'
+                ]
+            else:
+                cmake_options += [
+                    '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                    '-DBUILD_STATIC_LIBS:BOOL=ON'
+                ]
         else:
             configure_options = [
                 "--prefix={HDF5_ROOT}",
                 "--enable-fortran",
                 "--enable-hl=no",
-                "--enable-shared=no",
-                "--enable-static=yes",
                 "--enable-tests=no",
-                # "--enable-examples=no",
-                "--with-pic"
+                # "--enable-examples=no"
             ]
+            if self.shared_libs:
+                configure_options += [
+                    "--enable-shared=yes",
+                    "--enable-static=no",
+                    "--with-pic"
+                ]
+            else:
+                configure_options += [
+                    "--enable-shared=no",
+                    "--enable-static=yes"
+                ]
         if self.build_hl:
             if self.cmake_build:
                 cmake_options.append("HDF5_BUILD_HL_LIB:BOOL=ON")
@@ -1034,14 +1071,15 @@ class HDF5(package):
 
 
 class NETCDF(package):
-    def __init__(self, comp_wrapper=False, cmake_build=True):
+    def __init__(self, comp_wrapper=False, cmake_build=True, shared_libs=True):
         self.name = "NETCDF"
-        self.url = "https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.7.4.tar.gz"
-        self.build_dir = "netcdf-c-4.7.4"
-        self.install_dir = "netcdf-4_7_4"
+        self.url = "https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz" # 4.9.3 has a CMAKE build bug
+        self.build_dir = "netcdf-c-4.9.2"
+        self.install_dir = "netcdf-4_9_2"
         self.comp_wrapper = comp_wrapper
         self.cmake_build = cmake_build
         self.children = [NETCDF_Fortran(comp_wrapper)]
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1052,7 +1090,10 @@ class NETCDF(package):
         self.setup_root_struct()
         self.config_dict['NETCDF_C_LIBS'] = "-lnetcdf"
         # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['NETCDF_LIB'], 'libnetcdf.a')]
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['NETCDF_LIB'], 'libnetcdf'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['NETCDF_LIB'], 'libnetcdf.a')]
         #
         return self.config_dict
 
@@ -1067,20 +1108,52 @@ class NETCDF(package):
 
     def build(self):
         if self.cmake_build:
-            configure_lines = [
-                '{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={NETCDF_ROOT} -DHDF5_ROOT:PATH={HDF5_ROOT} -DBUILD_SHARED_LIBS:BOOL=OFF -DENABLE_DAP:BOOL=OFF ..'
+            cmake_options = [
+                '-DCMAKE_INSTALL_PREFIX:PATH={NETCDF_ROOT}',
+                '-DHDF5_ROOT:PATH={HDF5_ROOT}',
+                '-DNETCDF_ENABLE_HDF5:BOOL=ON',
+                '-DNETCDF_ENABLE_DAP:BOOL=OFF'
             ]
+            if self.shared_libs:
+                cmake_options += [
+                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                    '-DBUILD_SHARED_LIBS:BOOL=ON',
+                    '-DBUILD_STATIC_LIBS:BOOL=OFF'
+                ]
+            else:
+                cmake_options += [
+                    '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                    '-DBUILD_STATIC_LIBS:BOOL=ON'
+                ]
         else:
-            configure_lines = [
-                "../configure --prefix={NETCDF_ROOT} --enable-netcdf-4 --enable-shared=no --with-pic --disable-dap"
+            configure_options = [
+                '--prefix={NETCDF_ROOT}',
+                '--enable-netcdf-4',
+                '--disable-dap'
             ]
+            if self.shared_libs:
+                configure_options += [
+                    "--enable-shared=yes",
+                    "--enable-static=no",
+                    "--with-pic"
+                ]
+            else:
+                configure_options += [
+                    "--enable-shared=no",
+                    "--enable-static=yes"
+                ]
         build_lines = [
             "rm -rf build",
             "mkdir build",
             "cd build",
             "export CC={CC}",
             "export FC={FC}"
-        ] + configure_lines + [
+        ]
+        if self.cmake_build:
+            build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
+        else:
+            build_lines.append("../configure " + " ".join(configure_options))
+        build_lines += [
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1088,13 +1161,14 @@ class NETCDF(package):
 
 
 class NETCDF_Fortran(package):
-    def __init__(self, comp_wrapper=False, cmake_build=True):
+    def __init__(self, comp_wrapper=False, cmake_build=True, shared_libs=True):
         self.name = "NETCDF_Fortran"
-        self.url = "https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.5.4.tar.gz"
-        self.build_dir = "netcdf-fortran-4.5.4"
-        self.install_dir = "netcdf-4_7_4"
+        self.url = "https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz"
+        self.build_dir = "netcdf-fortran-4.6.1"
+        self.install_dir = "netcdf-4_9_2"
         self.comp_wrapper = comp_wrapper
         self.cmake_build = cmake_build
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1104,10 +1178,43 @@ class NETCDF_Fortran(package):
         self.setup_root_struct()
         self.config_dict['NETCDF_Fortran_LIBS'] = "-lnetcdff"
         # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['NETCDF_Fortran_LIB'], 'libnetcdff.a')]
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['NETCDF_Fortran_LIB'], 'libnetcdff'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['NETCDF_Fortran_LIB'], 'libnetcdff.a')]
         return self.config_dict
 
     def build(self):
+        if self.cmake_build:
+            cmake_options = [
+                '-DCMAKE_INSTALL_PREFIX:PATH={NETCDF_Fortran_ROOT}',
+                '-DHDF5_ROOT:PATH={HDF5_ROOT}',
+                '-DNETCDF_ENABLE_HDF5:BOOL=ON'
+            ]
+            if self.shared_libs:
+                cmake_options += [
+                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                    '-DBUILD_SHARED_LIBS:BOOL=ON',
+                    '-DBUILD_STATIC_LIBS:BOOL=OFF'
+                ]
+            else:
+                cmake_options += [
+                    '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                    '-DBUILD_STATIC_LIBS:BOOL=ON'
+                ]
+        else:
+            configure_options = ["--prefix={NETCDF_Fortran_ROOT}"]
+            if self.shared_libs:
+                configure_options += [
+                    "--enable-shared=yes",
+                    "--enable-static=no",
+                    "--with-pic"
+                ]
+            else:
+                configure_options += [
+                    "--enable-shared=no",
+                    "--enable-static=yes"
+                ]
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -1123,14 +1230,10 @@ class NETCDF_Fortran(package):
         else:
             build_lines.append('export FCFLAGS="-I{NETCDF_INCLUDE}"')
         if self.cmake_build:
-            configure_lines = [
-                '{CMAKE} -DCMAKE_INSTALL_PREFIX:PATH={NETCDF_Fortran_ROOT} -DHDF5_ROOT:PATH={HDF5_ROOT} -DBUILD_SHARED_LIBS:BOOL=OFF ..'
-            ]
+            build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
         else:
-            configure_lines = [
-                "../configure --prefix={NETCDF_Fortran_ROOT} --enable-shared=no --with-pic"
-            ]
-        build_lines += configure_lines + [
+            build_lines.append("../configure " + " ".join(configure_options))
+        build_lines += [
             "make -j{MAKE_THREADS}",
             "make install"
         ]
@@ -1138,14 +1241,15 @@ class NETCDF_Fortran(package):
 
 
 class OpenBLAS(package):
-    def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False):
+    def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False, shared_libs=True):
         self.name = "OpenBLAS"
-        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.23.tar.gz"
-        self.build_dir = "OpenBLAS-0.3.23"
-        self.install_dir = "OpenBLAS-0_3_23"
+        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.29.tar.gz"
+        self.build_dir = "OpenBLAS-0.3.29"
+        self.install_dir = "OpenBLAS-0_3_29"
         self.threaded = build_threaded
         self.dynamic_arch = dynamic_arch
         self.no_avx = no_avx
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1155,7 +1259,10 @@ class OpenBLAS(package):
         self.config_dict['BLAS_VENDOR'] = "OpenBLAS"
         self.config_dict['LAPACK_LIB'] = self.config_dict[self.name + '_LIB']
         self.config_dict['LAPACK_LIBS'] = "-lopenblas"
-        self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'libopenblas.a')
+        if self.shared_libs:
+            self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'libopenblas'+self.config_dict['DYN_EXT'])
+        else:
+            self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'libopenblas.a')
         self.config_dict['LAPACK_LIB_PATH'] = self.config_dict['BLAS_LIB_PATH']
         if self.threaded:
             self.config_dict['OpenBLAS_THREADS'] = True
@@ -1185,7 +1292,11 @@ int main(int argc, char** argv) {
 }
         """
         tmp_dict = self.config_dict.copy()
-        oblas_options = ['NO_CBLAS=1', 'NO_LAPACKE=1', 'NO_SHARED=1']
+        oblas_options = ['NO_CBLAS=1', 'NO_LAPACKE=1']
+        if self.shared_libs:
+            oblas_options.append('NO_STATIC=1')
+        else:
+            oblas_options.append('NO_SHARED=1')
         if self.config_dict['MAKE_THREADS'] == 1:
             make_thread = ['NO_PARALLEL_MAKE=1']
         else:
@@ -1232,7 +1343,7 @@ class MKL(package):
             print("  Intel compiler flag = {0}".format("-mkl"))
             self.config_dict['MKL_FLAGS'] = "-mkl"
         else:
-            iomp_path = os.path.normpath(os.path.join(self.mkl_root, "../lib"))
+            # iomp_path = os.path.normpath(os.path.join(self.mkl_root, "../lib"))
             mkl_libs = ("libmkl_intel_lp64.a", "libmkl_intel_thread.a", "libmkl_core.a")
             flag_string = ""
             for mkl_lib in mkl_libs:
@@ -1248,7 +1359,7 @@ class MKL(package):
 class BLAS_LAPACK(package):
     def __init__(self, comp_wrapper=False, blas_lib_path=None, lapack_lib_path=None):
         self.name = "BLAS_LAPACK"
-        self.url = "https://www.netlib.org/lapack/lapack-3.5.0.tgz"
+        self.url = "https://www.netlib.org/lapack/lapack-3.12.1.tgz"
         self.comp_wrapper = comp_wrapper
         self.blas_lib_path = blas_lib_path
         self.lapack_lib_path = lapack_lib_path
@@ -1286,7 +1397,6 @@ class BLAS_LAPACK(package):
         return self.config_dict
 
     def build(self):
-        # -DBLAS_LIBRARIES:PATH=
         fflags = []
         if (config_dict['CC_VENDOR'] == 'gnu') and (int(config_dict['CC_VERSION'].split(".")[0]) > 9):
             fflags.append("-fallow-argument-mismatch")
@@ -1319,12 +1429,13 @@ class BLAS_LAPACK(package):
 
 
 class ARPACK(package):
-    def __init__(self, parallel=False, link_omp=False):
+    def __init__(self, parallel=False, link_omp=False, shared_libs=True):
         self.name = "ARPACK"
-        self.url = "https://github.com/opencollab/arpack-ng/archive/refs/tags/3.5.0.tar.gz"
-        self.build_dir = "arpack-ng-3.5.0"
+        self.url = "https://github.com/opencollab/arpack-ng/archive/refs/tags/3.9.1.tar.gz"
+        self.build_dir = "arpack-ng-3.9.1"
         self.parallel = parallel
         self.link_omp = link_omp
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1334,7 +1445,10 @@ class ARPACK(package):
         else:
             self.config_dict['ARPACK_LIBS'] = "-larpack"
         # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['ARPACK_LIB'], 'libarpack.a')]
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['ARPACK_LIB'], 'libarpack'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['ARPACK_LIB'], 'libarpack.a')]
         #
         return self.config_dict
 
@@ -1343,10 +1457,19 @@ class ARPACK(package):
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={ARPACK_ROOT}",
             "-DCMAKE_INSTALL_LIBDIR=lib",
-            "-DEXAMPLES=OFF",
-            "-DBUILD_SHARED_LIBS=OFF",
-            "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
+            "-DEXAMPLES=OFF"
         ]
+        if self.shared_libs:
+            cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON',
+                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+            ]
+        else:
+            cmake_options += [
+                '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                '-DBUILD_STATIC_LIBS:BOOL=ON'
+            ]
         if "BLAS_LIB_PATH" in self.config_dict:
             cmake_options += [
                 '-DBLAS_LIBRARIES:PATH={BLAS_LIB_PATH}',
@@ -1400,13 +1523,12 @@ class ARPACK(package):
 
 
 class SUPERLU(package):
-    def __init__(self, comp_wrapper=False):
+    def __init__(self, comp_wrapper=False, shared_libs=True):
         self.name = "SUPERLU"
-        self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v5.3.0.tar.gz"
-        self.build_dir = 'superlu-5.3.0'
-        self.libname = '-lsuperlu'
-        self.libpath = 'libsuperlu.a'
+        self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v7.0.0.tar.gz"
+        self.build_dir = 'superlu-7.0.0'
         self.comp_wrapper = comp_wrapper
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1416,19 +1538,32 @@ class SUPERLU(package):
             return self.config_dict
         self.setup_root_struct()
         self.config_dict['SUPERLU_LIB'] = self.config_dict[self.name + '_LIB']
-        self.config_dict['SUPERLU_LIBS'] = self.libname
-        self.config_dict["SUPERLU_VER_MAJOR"] = 5
+        self.config_dict['SUPERLU_LIBS'] = '-lsuperlu'
+        # self.config_dict["SUPERLU_VER_MAJOR"] = 7
         # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_LIB'], self.libpath)]
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_LIB'], 'libsuperlu'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_LIB'], 'libsuperlu.a')]
         #
         return self.config_dict
 
     def build(self):
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT}",
-            "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-Denable_blaslib:BOOL=TRUE",
         ]
+        if self.shared_libs:
+            cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON',
+                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+            ]
+        else:
+            cmake_options += [
+                '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                '-DBUILD_STATIC_LIBS:BOOL=ON'
+            ]
         if "BLAS_LIB_PATH" in self.config_dict:
             cmake_options.append("-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}")
         if 'MACOS_SDK_PATH' in self.config_dict:
@@ -1448,12 +1583,13 @@ class SUPERLU(package):
 
 
 class SUPERLU_DIST(package):
-    def __init__(self, build_openmp, comp_wrapper=False):
+    def __init__(self, build_openmp, comp_wrapper=False, shared_libs=True):
         self.name = "SUPERLU_DIST"
-        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v6.3.0.tar.gz"
-        self.build_dir = "superlu_dist-6.3.0"
+        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v8.1.0.tar.gz"
+        self.build_dir = "superlu_dist-8.1.0"
         self.build_openmp = build_openmp
         self.comp_wrapper = comp_wrapper
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1464,7 +1600,10 @@ class SUPERLU_DIST(package):
         self.setup_root_struct()
         self.config_dict['SUPERLU_DIST_LIBS'] = "-lsuperlu_dist"
         #
-        self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_DIST_LIB'], "libsuperlu_dist.a")]
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_DIST_LIB'], 'libsuperlu_dist'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_DIST_LIB'], "libsuperlu_dist.a")]
         return self.config_dict
 
     def build(self):
@@ -1474,13 +1613,22 @@ class SUPERLU_DIST(package):
             "-DTPL_ENABLE_PARMETISLIB:BOOL=FALSE",
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT}",
             "-Denable_tests=OFF -Denable_examples=OFF",
-            "-DBUILD_SHARED_LIBS:BOOL=FALSE",
             "-DMPI_Fortran_COMPILER={MPI_FC}",
             "-DMPI_C_COMPILER={MPI_CC}",
             "-DMPI_CXX_COMPILER={MPI_CXX}",
-            "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-DCMAKE_INSTALL_LIBDIR=lib",
         ]
+        if self.shared_libs:
+            cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON',
+                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+            ]
+        else:
+            cmake_options += [
+                '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                '-DBUILD_STATIC_LIBS:BOOL=ON'
+            ]
         if "BLAS_LIB_PATH" in self.config_dict:
             cmake_options += [
                 "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
@@ -1507,12 +1655,13 @@ class SUPERLU_DIST(package):
 
 
 class UMFPACK(package):
-    def __init__(self, comp_wrapper=False):
+    def __init__(self, comp_wrapper=False, shared_libs=True):
         self.name = "UMFPACK"
-        self.url = "https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/refs/tags/v7.0.1.tar.gz"
-        self.build_dir = "SuiteSparse-7.0.1"
-        self.install_dir = "UMFPACK-7_0_1"
+        self.url = "https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/refs/tags/v7.10.1.tar.gz"
+        self.build_dir = "SuiteSparse-7.10.1"
+        self.install_dir = "UMFPACK-6_3_5"
         self.comp_wrapper = comp_wrapper
+        self.shared_libs = shared_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1523,7 +1672,10 @@ class UMFPACK(package):
         self.setup_root_struct()
         self.config_dict['UMFPACK_LIBS'] = "-lumfpack -lamd -lsuitesparseconfig"
         # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['UMFPACK_LIB'], 'libumfpack.a')]
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['UMFPACK_LIB'], 'libumfpack'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['UMFPACK_LIB'], 'libumfpack.a')]
         #
         return self.config_dict
 
@@ -1532,9 +1684,19 @@ class UMFPACK(package):
             error_exit('CMAKE >= 3.22 required for UMFPACK', ('Update or retry with "--build_cmake=1" to build a compatible version',))
         AMD_CMAKE_options = [
             "-DCMAKE_INSTALL_PREFIX={UMFPACK_ROOT}",
-            "-DCMAKE_POSITION_INDEPENDENT_CODE=TRUE",
             "-DCMAKE_INSTALL_LIBDIR=lib"
         ]
+        if self.shared_libs:
+            AMD_CMAKE_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON',
+                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+            ]
+        else:
+            AMD_CMAKE_options += [
+                '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                '-DBUILD_STATIC_LIBS:BOOL=ON'
+            ]
         if self.config_dict.get('OpenBLAS_THREADS',False):
             AMD_CMAKE_options.append("-DCMAKE_EXE_LINKER_FLAGS={0}".format(self.config_dict['OMP_FLAGS']))
         if 'MACOS_SDK_PATH' in self.config_dict:
@@ -1544,7 +1706,7 @@ class UMFPACK(package):
             "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
         ]
         UMFPACK_CMAKE_options = config_CMAKE_options.copy() + [
-            "-DNCHOLMOD=TRUE"
+            "-DUMFPACK_USE_CHOLMOD:BOOL=OFF"
         ]
         if (config_dict['CC_VENDOR'] == 'gnu') and (self.config_dict['OS_TYPE'] == 'Darwin'):
             UMFPACK_CMAKE_options.append("-DCMAKE_SHARED_LINKER_FLAGS:STRING=-lgfortran")
@@ -1573,10 +1735,11 @@ class UMFPACK(package):
             'make library CMAKE_OPTIONS="{0}"'.format(' '.join(UMFPACK_CMAKE_options)),
             "make install"
         ]
-        if self.config_dict['OS_TYPE'] == 'Darwin':
-            build_lines += ["rm -f {UMFPACK_ROOT}/lib/lib*.dylib*"]
-        else:
-            build_lines += ["rm -f {UMFPACK_ROOT}/lib/lib*.so*"]
+        if not self.shared_libs:
+            if self.config_dict['OS_TYPE'] == 'Darwin':
+                build_lines += ["rm -f {UMFPACK_ROOT}/lib/lib*.dylib*"]
+            else:
+                build_lines += ["rm -f {UMFPACK_ROOT}/lib/lib*.so*"]
         self.run_build(build_lines, self.config_dict)
 
 
@@ -1654,7 +1817,7 @@ class ONURBS(package):
 
 class PETSC(package):
     def __init__(self, debug=False, with_superlu=True, with_umfpack=True, with_mumps=True, version=3.20,
-                 comp_wrapper=False):
+                 comp_wrapper=False, shared_libs=False):
         self.name = "PETSC"
         self.display_name = "PETSc"
         self.version = version
@@ -1675,6 +1838,7 @@ class PETSC(package):
         self.with_umfpack = with_umfpack
         self.with_mumps = with_mumps
         self.comp_wrapper = comp_wrapper
+        self.shared_libs = shared_libs
 
     def detect_version(self):
         print("  Testing PETSc version")
@@ -1712,21 +1876,24 @@ class PETSC(package):
             return self.config_dict
         self.setup_root_struct()
         # Setup libraries
+        libsuffix = '.a'
+        if self.shared_libs:
+            libsuffix = self.config_dict['DYN_EXT']
         self.config_dict['METIS_ROOT'] = self.config_dict["PETSC_ROOT"]
         self.config_dict['PETSC_LIB'] = self.config_dict[self.name + '_LIB']
         self.config_dict['PETSC_LIBS'] = "-lpetsc"
         if self.with_umfpack:
             self.config_dict['PETSC_LIBS'] += " -lumfpack -lamd"
-            self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libumfpack.a'))
+            self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libumfpack'+libsuffix))
         if self.with_superlu:
             self.config_dict['PETSC_LIBS'] += " -lsuperlu -lsuperlu_dist"
-            self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu.a'))
+            self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu'+libsuffix))
         if self.with_mumps:
             self.config_dict['PETSC_LIBS'] += " -ldmumps -lmumps_common -lpord -lscalapack"
-            self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libdmumps.a'))
+            self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libdmumps'+libsuffix))
         self.config_dict['PETSC_LIBS'] += " -lparmetis -lmetis"
         # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['PETSC_LIB'], 'libpetsc.a')]
+        self.install_chk_files = [os.path.join(self.config_dict['PETSC_LIB'], 'libpetsc'+libsuffix)]
         #
         ver_string = self.version.split('.')
         ver_major = ver_string[0]
@@ -1748,10 +1915,19 @@ class PETSC(package):
             '--download-metis',
             '--download-parmetis',
             '--with-x=no',
-            '--with-shared-libraries=0',
             '--with-ssl=0',
             '--with-cmake-exec={CMAKE}'
         ]
+        if self.shared_libs:
+            options += [
+                '--with-shared-libraries=1',
+                '--with-static-libraries=0'
+            ]
+        else:
+            options += [
+                '--with-shared-libraries=0',
+                '--with-static-libraries=1'
+            ]
         if self.with_superlu:
             # Fix SDK issue on MacOS "Catalina" (10.15)
             if (self.config_dict['OS_TYPE'] == 'Darwin') and (not ver_lt(self.config_dict['OS_VER'], '10.15')):

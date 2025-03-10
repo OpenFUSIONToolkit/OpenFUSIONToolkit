@@ -1,7 +1,7 @@
 # FindOFT_PETSc.cmake
 #
 # Finds the PETSc library for use with the Open FUSION Toolkit
-# as installed by versions 3.6 - 3.11 of PETSc.
+# as installed by versions 3.18 - 3.22 of PETSc using OFT's `build_libs.py` script
 #
 # This will define the following variables
 #

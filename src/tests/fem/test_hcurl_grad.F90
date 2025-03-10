@@ -149,16 +149,12 @@ CALL ML_hcurl_grad%vec_create(u)
 CALL ML_hcurl_grad%vec_create(v)
 !---Setup matrix solver
 nlevels=ML_hcurl_grad%nlevels-ML_hcurl_grad%minlev
-CALL create_cg_solver(winv)
+CALL create_cg_solver(winv,force_native=.TRUE.)
+winv%its=-3
+winv%rtol=1.d-10
 CALL hcurl_grad_getmop_pre(ML_hcurl_grad,winv%pre,mats,nlevels=nlevels)
 mop=>mats(nlevels)%M
 winv%A=>mop
-winv%its=-3
-winv%rtol=1.d-10
-! winv%A=>mop
-! winv%nrits=20
-! winv%its=-3
-! winv%rtol=1.d-9
 !---Solve
 CALL u%set(1.d0)
 CALL hcurl_grad_gzerop%apply(u)
