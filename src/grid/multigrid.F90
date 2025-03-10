@@ -15,7 +15,6 @@ USE oft_sort, ONLY: sort_array, sort_matrix
 use oft_mesh_type, only: oft_mesh, oft_bmesh, mesh_seam
 use oft_mesh_local_util, only: mesh_local_findedge, mesh_local_findface
 use oft_mesh_global_util, only: mesh_global_set_curved
-use oft_hexmesh_type, only: hex_fe
 implicit none
 #define MOD_NAME "multigrid"
 #include "local.h"
@@ -43,7 +42,7 @@ end type multigrid_inter
 type :: multigrid_mesh
   integer(i4) :: mgmax = 0 !< Maximum MG level
   integer(i4) :: level = 0 !< Current mesh level
-  integer(i4) :: lev = 0 !< Current structure level
+  integer(i4) :: lev = 0 !< Current structure level (doesn't increment on `nbase+1`)
   integer(i4) :: mgdim = 0 !< Size of MG structure
   integer(i4) :: nbase = 0 !< Number of local base refinements
   INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
@@ -65,10 +64,6 @@ type :: multigrid_mesh
   type(multigrid_inter), pointer, dimension(:) :: sinter => NULL() !< Structure containing linkages
   character(2) :: rlevel !< Character rep of refinement level
 end type multigrid_mesh
-!---Global variables
-integer(i4), parameter :: mgdim=10 !< Dimension of MG mesh (decrecated)
-character(4) :: clevel(mgdim)=(/'.L01','.L02','.L03','.L04','.L05','.L06','.L07','.L08','.L09','.L10'/)
-! type(multigrid_mesh), pointer :: mg_mesh => NULL() !< Global ML Mesh
 contains
 !---------------------------------------------------------------------------
 !> Set mesh level in ML mesh
@@ -1451,7 +1446,7 @@ do i=1,self%nc ! loop over coarse faces & find daughter faces
   DO j=1,12
     lfecors(1:2)=0
     DO k=1,6
-      IF(ANY(ABS(hex_fe(:,k))==j))THEN
+      IF(ANY(ABS(fmesh%cell_fe(:,k))==j))THEN
         IF(lfecors(1)==0)THEN
           lfecors(1)=ABS(self%lcf(k,i)) + self%ne + self%np
         ELSE

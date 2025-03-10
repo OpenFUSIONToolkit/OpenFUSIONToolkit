@@ -13,7 +13,6 @@
 PROGRAM test_alfven
 USE oft_base
 !--Grid
-USE oft_mesh_type, ONLY: rgrnd
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
@@ -66,7 +65,6 @@ CLOSE(io_unit)
 !---------------------------------------------------------------------------
 ! Setup grid
 !---------------------------------------------------------------------------
-rgrnd=(/2.d0,0.d0,0.d0/)
 CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures

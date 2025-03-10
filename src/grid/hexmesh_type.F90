@@ -16,6 +16,7 @@ USE oft_lag_poly
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 IMPLICIT NONE
 #include "local.h"
+PRIVATE
 !------------------------------------------------------------------------------
 !> Hexahedral volume mesh type
 !!
@@ -25,7 +26,7 @@ IMPLICIT NONE
 !! - Global mesh information
 !! - Linkage of geometric primatives
 !------------------------------------------------------------------------------
-TYPE, EXTENDS(oft_mesh) :: oft_hexmesh
+TYPE, PUBLIC, EXTENDS(oft_mesh) :: oft_hexmesh
   INTEGER(i4) :: inodesp(3,8) !< Needs docs
   INTEGER(i4), POINTER, DIMENSION(:,:) :: inodesc => NULL() !< Needs docs
   INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodese => NULL() !< Needs docs
@@ -94,6 +95,9 @@ CLASS(oft_hexmesh), PRIVATE, POINTER :: active_mesh => NULL() !< Active mesh for
 INTEGER(i4), PRIVATE :: active_cell = 0 !< Active cell for high order find_cell
 REAL(r8), PRIVATE :: active_pt(3) = 0.d0 !< Active point for high order find_cell
 !$omp threadprivate(active_mesh,active_cell,active_pt)
+!
+PUBLIC hex_3d_grid, hex_grid_forient, hex_get_bary, hex_get_bary_gop, hex_get_bary_cgop
+PUBLIC hex_bary_pfcoords, hex_bary_efcoords, hex_bary_ecoords, hex_bary_fcoords
 CONTAINS
 !---------------------------------------------------------------------------
 !> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)

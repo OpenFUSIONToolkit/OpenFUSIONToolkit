@@ -25,12 +25,8 @@ USE oft_quadmesh_type, ONLY: oft_quadmesh
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 IMPLICIT NONE
 #include "local.h"
-private
+PRIVATE
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_cube_id = 92
-INTEGER(i4) :: mesh_type = 1
-INTEGER(i4) :: ni(3) = 1
-REAL(r8) :: rscale(3) = 1.d0
-REAL(r8) :: shift(3) = 0.d0
 LOGICAL :: ref_per(3) = .FALSE. !< Character flag for periodic reflections
 public mesh_cube_load, mesh_cube_cadlink, mesh_cube_set_periodic
 public smesh_square_load, smesh_square_cadlink
@@ -44,13 +40,17 @@ contains
 !------------------------------------------------------------------------------
 subroutine mesh_cube_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
-INTEGER(i4) :: i,j,k,ierr,io_unit
+INTEGER(i4) :: i,j,k,ierr,io_unit,mesh_type,ni(3)
 INTEGER(i4), ALLOCATABLE :: pmap(:,:,:)
+REAL(r8) :: rscale(3),shift(3)
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
 namelist/cube_options/mesh_type,ni,rscale,shift,ref_per
 DEBUG_STACK_PUSH
 mesh_type=1
+ni=1
+rscale=1.d0
+shift=0.d0
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)
@@ -309,13 +309,17 @@ end subroutine mesh_cube_set_periodic
 !------------------------------------------------------------------------------
 subroutine smesh_square_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
-INTEGER(i4) :: i,j,k,ierr,io_unit,nptmp,nctmp
+INTEGER(i4) :: i,j,k,ierr,io_unit,nptmp,nctmp,mesh_type,ni(3)
 INTEGER(i4), ALLOCATABLE :: pmap(:,:),lctmp(:,:)
+REAL(r8) :: rscale(3),shift(3)
 REAL(r8), ALLOCATABLE :: rtmp(:,:)
 class(oft_bmesh), pointer :: smesh
 namelist/cube_options/mesh_type,ni,rscale,shift,ref_per
 DEBUG_STACK_PUSH
 mesh_type=1
+ni=1
+rscale=1.d0
+shift=0.d0
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)

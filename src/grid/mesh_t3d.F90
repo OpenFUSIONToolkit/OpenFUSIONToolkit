@@ -17,7 +17,7 @@
 MODULE oft_mesh_t3d
 USE oft_base
 USE bezier_cad, ONLY: cad_vertex, cad_curve, cad_surf, cad_entity_ptr, &
-cad_curve_midpoint, cad_surf_midpoint, cad_surf_center, cad_curve_cast, cad_surf_cast
+  cad_curve_midpoint, cad_surf_midpoint, cad_surf_center, cad_curve_cast, cad_surf_cast
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
@@ -27,6 +27,7 @@ USE multigrid, ONLY: multigrid_mesh, multigrid_level
 !---End include modules
 IMPLICIT NONE
 #include "local.h"
+PRIVATE
 !------------------------------------------------------------------------------
 !> T3D CAD boundary structure
 !! - CAD entity counts
@@ -75,7 +76,6 @@ type :: T3D_cad
   real(r8), pointer, dimension(:,:) :: lgwv => NULL() !< List of CAD wireframe vertices
   real(r8), pointer, dimension(:,:) :: lgww => NULL() !< List of CAD wireframe weight points
 end type T3D_cad
-private
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_t3d_id = 1
 PUBLIC mesh_t3d_load, mesh_t3d_reffix, mesh_t3d_cadsync, mesh_t3d_set_periodic
 PUBLIC mesh_t3d_cadlink, mesh_t3d_add_quad, smesh_t3d_load

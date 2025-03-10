@@ -27,7 +27,6 @@ IMPLICIT NONE
 #include "local.h"
 private
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_sphere_id = 91
-INTEGER(i4) :: mesh_type = 1
 public mesh_sphere_load, mesh_sphere_cadlink, mesh_sphere_reffix
 public mesh_sphere_add_quad, smesh_circle_load, smesh_circle_cadlink
 public smesh_circle_reffix, smesh_circle_add_quad
@@ -40,11 +39,12 @@ contains
 !------------------------------------------------------------------------------
 subroutine mesh_sphere_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
-INTEGER(i4) :: i,ierr,io_unit
+INTEGER(i4) :: i,ierr,io_unit,mesh_type
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
 namelist/sphere_options/mesh_type
 DEBUG_STACK_PUSH
+mesh_type = 1
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,sphere_options,IOSTAT=ierr)
@@ -260,10 +260,11 @@ end subroutine mesh_sphere_add_quad
 !------------------------------------------------------------------------------
 subroutine smesh_circle_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
-INTEGER(i4) :: i,ierr,io_unit
+INTEGER(i4) :: i,ierr,io_unit,mesh_type
 class(oft_bmesh), pointer :: smesh
 namelist/sphere_options/mesh_type
 DEBUG_STACK_PUSH
+mesh_type = 1
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,sphere_options,IOSTAT=ierr)

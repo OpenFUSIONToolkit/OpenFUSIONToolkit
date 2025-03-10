@@ -18,9 +18,9 @@
 !------------------------------------------------------------------------------
 MODULE oft_mesh_global_util
 USE oft_base
-USE oft_mesh_type, ONLY: oft_amesh, oft_mesh, oft_bmesh, rgrnd
+USE oft_mesh_type, ONLY: oft_amesh, oft_mesh, oft_bmesh
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
-USE oft_stitching, ONLY: oft_global_stitch !mesh_global_pstitch, mesh_global_estitch
+USE oft_stitching, ONLY: oft_global_stitch
 IMPLICIT NONE
 #include "local.h"
 contains
@@ -434,9 +434,10 @@ end subroutine mesh_global_save
 !------------------------------------------------------------------------------
 !> Determine location of grounding point on mesh.
 !------------------------------------------------------------------------------
-SUBROUTINE mesh_global_igrnd(self)
+SUBROUTINE mesh_global_igrnd(self,grnd_pt)
 class(oft_amesh), intent(inout) :: self !< Mesh object
-REAL(r8) :: c,r2min,r2
+real(r8), optional, intent(in) :: grnd_pt(3)
+REAL(r8) :: c,r2min,r2,rgrnd(3)
 INTEGER(i4) :: i,j,k,l,ierr
 INTEGER(i8) :: grnd_global
 LOGICAL :: owned
@@ -448,6 +449,8 @@ integer(i4) :: stat(MPI_STATUS_SIZE)
 #endif
 #endif
 DEBUG_STACK_PUSH
+rgrnd=[1.d0,0.d0,0.d0]
+IF(PRESENT(grnd_pt))rgrnd=grnd_pt
 !---Locate local surface ground point
 self%igrnd=-1
 r2min=1.d99

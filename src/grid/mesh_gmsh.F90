@@ -31,7 +31,7 @@ USE multigrid, ONLY: multigrid_mesh, multigrid_level
 !---End include modules
 IMPLICIT NONE
 #include "local.h"
-private
+PRIVATE
 !------------------------------------------------------------------------------
 !> GMSH CAD linkage structure
 !! - Linkage of mesh entities to CAD model
@@ -51,8 +51,25 @@ real(r8) :: active_wts(3) = 0. !< Active constraint weights for MINPACK fitting
 !$omp threadprivate(active_endpts,active_wts,active_face)
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_gmsh_id = 3
 public mesh_gmsh_load, mesh_gmsh_cadlink, mesh_gmsh_reffix
-public mesh_gmsh_add_quad
+public mesh_gmsh_add_quad, gmsh_finalize_setup
 contains
+!------------------------------------------------------------------------------
+!> Finalize setup/load-in of GMSH mesh and destroy temporaries created
+!! for grid construction (eg. high-order input nodes, in-memory data)
+!------------------------------------------------------------------------------
+subroutine gmsh_finalize_setup
+integer(i4) :: i,n
+CALL cad_mesh%delete()
+!
+IF(ASSOCIATED(ML_cad_link))THEN
+  n=SIZE(ML_cad_link)
+  DO i=1,n
+    IF(ASSOCIATED(ML_cad_link(i)%lbfg))DEALLOCATE(ML_cad_link(i)%lbfg)
+  END DO
+  DEALLOCATE(ML_cad_link)
+END IF
+NULLIFY(cad_link)
+end subroutine gmsh_finalize_setup
 !------------------------------------------------------------------------------
 !> Read in GMSH mesh file from file "filename"
 !! - Read in GMSH options from input file
@@ -70,6 +87,7 @@ class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
 namelist/gmsh_options/filename,order
 DEBUG_STACK_PUSH
+filename = 'none'
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,gmsh_options,IOSTAT=ierr)

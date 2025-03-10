@@ -96,8 +96,6 @@ TYPE, PUBLIC :: mesh_global
   INTEGER(i8) :: ne = 0 !< Global edge count
   INTEGER(i8) :: nf = 0 !< Global face count
   INTEGER(i8) :: nc = 0 !< Global cell count
-  ! INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
-  ! INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
   LOGICAL, POINTER, DIMENSION(:) :: gbp => NULL() !< Global boundary point flag (np)
   LOGICAL, POINTER, DIMENSION(:) :: gbe => NULL() !< Global boundary edge flag (ne)
   LOGICAL, POINTER, DIMENSION(:) :: gbf => NULL() !< Global boundary face flag (nf)
@@ -106,15 +104,7 @@ TYPE, PUBLIC :: mesh_global
   INTEGER(i8), POINTER, DIMENSION(:) :: le => NULL() !< Global index of edges (ne) [oriented]
   INTEGER(i8), POINTER, DIMENSION(:) :: lf => NULL() !< Global index of faces (nf)
   INTEGER(i8), POINTER, DIMENSION(:) :: lc => NULL() !< Global index of cells (nc)
-  TYPE(mesh_seam), POINTER :: seam => NULL()
-!   INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
-! #ifdef OFT_MPI_F08
-!   TYPE(mpi_request), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
-!   TYPE(mpi_request), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
-! #else
-!   INTEGER(i4), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
-!   INTEGER(i4), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
-! #endif
+  TYPE(mesh_seam), POINTER :: seam => NULL() !< Global domain-domain connectivity information
 END TYPE mesh_global
 !------------------------------------------------------------------------------
 !> Base mesh information and indicies
@@ -726,7 +716,6 @@ ABSTRACT INTERFACE
   end function mesh_tessellated_sizes
 END INTERFACE
 !---
-REAL(r8), PUBLIC :: rgrnd(3)=(/1.d0,0.d0,0.d0/) !< Grounding point position
 INTEGER(i4), PRIVATE, PARAMETER :: ho_find_retry=20 !< Number of retry attempts during high order find_cell
 #ifdef OFT_PLOT_DOUBLE
 LOGICAL, PARAMETER :: PLOT_R4_FLAG=.FALSE.

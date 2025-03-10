@@ -38,7 +38,7 @@ use oft_mesh_cubit, only: mesh_cubit_load, mesh_cubit_reffix, mesh_cubit_cadlink
 use oft_mesh_cubit, only: mesh_cubit_id
 #endif
 use oft_mesh_gmsh, only: mesh_gmsh_load, mesh_gmsh_reffix, mesh_gmsh_cadlink, &
-  mesh_gmsh_add_quad, mesh_gmsh_id
+  mesh_gmsh_add_quad, mesh_gmsh_id, gmsh_finalize_setup
 use oft_mesh_sphere, only: mesh_sphere_load, mesh_sphere_reffix, mesh_sphere_cadlink, &
   mesh_sphere_add_quad, smesh_circle_load, smesh_circle_cadlink, smesh_circle_reffix, &
   smesh_circle_add_quad, mesh_sphere_id
@@ -428,8 +428,9 @@ end subroutine multigrid_corners
 !! - Decompose mesh
 !! - Setup distributed meshes
 !---------------------------------------------------------------------------
-subroutine multigrid_construct(mg_mesh)
-type(multigrid_mesh), intent(inout) :: mg_mesh
+subroutine multigrid_construct(mg_mesh,grnd_pt)
+type(multigrid_mesh), intent(inout) :: mg_mesh !< Multi-level mesh object
+real(r8), optional, intent(in) :: grnd_pt(3) !< Reference location for global grounding point (default: [1,0,0])
 integer(i4) :: i,level,io_unit
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
@@ -518,7 +519,7 @@ CALL bmesh_global_orient(smesh,mesh)
 call multigrid_corners(mg_mesh)
 !---
 call mesh_global_stats(mesh)
-call mesh_global_igrnd(mesh)
+call mesh_global_igrnd(mesh,grnd_pt)
 !---
 i=MAXVAL(mesh%reg)
 mesh%nreg=oft_mpi_max(i)
@@ -579,6 +580,8 @@ case(mesh_cubit_id)
 #else
     CALL oft_abort('CUBIT interface requires NETCDF','multigrid_construct',__FILE__)
 #endif
+case(mesh_gmsh_id)
+  CALL gmsh_finalize_setup
 end select
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
@@ -669,7 +672,7 @@ CALL bmesh_global_orient(smesh,mesh)
 call multigrid_corners(mg_mesh)
 !---Print mesh statistics
 call mesh_global_stats(mesh)
-call mesh_global_igrnd(mesh)
+call mesh_global_igrnd(mesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_shared_level
 !---------------------------------------------------------------------------
@@ -721,7 +724,7 @@ CALL bmesh_global_orient(smesh,mesh)
 call multigrid_corners(mg_mesh)
 !---Print mesh statistics
 call mesh_global_stats(mesh)
-call mesh_global_igrnd(mesh)
+call mesh_global_igrnd(mesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_decomp
 !---------------------------------------------------------------------------
@@ -776,7 +779,7 @@ CALL bmesh_global_orient(smesh,mesh)
 call multigrid_corners(mg_mesh)
 !---Print mesh statistics
 call mesh_global_stats(mesh)
-call mesh_global_igrnd(mesh)
+call mesh_global_igrnd(mesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_dist_level
 end subroutine multigrid_construct
@@ -920,15 +923,16 @@ end select
 DEBUG_STACK_POP
 end subroutine multigrid_add_quad_surf
 !---------------------------------------------------------------------------
-!> Construct multi-level mesh.
+!> Construct multi-level surface mesh
 !! - Read in mesh options
 !! - Load base mesh
 !! - Setup local meshes
 !! - Decompose mesh
 !! - Setup distributed meshes
 !---------------------------------------------------------------------------
-subroutine multigrid_construct_surf(mg_mesh)
-type(multigrid_mesh), intent(inout) :: mg_mesh
+subroutine multigrid_construct_surf(mg_mesh,grnd_pt)
+type(multigrid_mesh), intent(inout) :: mg_mesh !< Multi-level mesh object
+real(r8), optional, intent(in) :: grnd_pt(3) !< Reference location for global grounding point (default: [1,0,0])
 integer(i4) :: i,level,io_unit
 class(oft_bmesh), pointer :: smesh
 character(LEN=20) :: meshname
@@ -995,7 +999,7 @@ CALL mesh_global_save(smesh)
 call bmesh_global_orient(smesh)
 !---
 call bmesh_global_stats(smesh)
-call mesh_global_igrnd(smesh)
+call mesh_global_igrnd(smesh,grnd_pt)
 !---
 i=MAXVAL(smesh%reg)
 smesh%nreg=oft_mpi_max(i)
@@ -1044,6 +1048,8 @@ case(mesh_cubit_id)
 #else
     CALL oft_abort('CUBIT interface requires NETCDF','multigrid_construct_surf',__FILE__)
 #endif
+case(mesh_gmsh_id)
+  CALL gmsh_finalize_setup
 end select
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
@@ -1108,7 +1114,7 @@ call bmesh_areas(smesh)
 CALL bmesh_global_orient(smesh)
 !---Print mesh statistics
 call bmesh_global_stats(smesh)
-call mesh_global_igrnd(smesh)
+call mesh_global_igrnd(smesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_shared_level
 !---------------------------------------------------------------------------
@@ -1151,7 +1157,7 @@ call bmesh_areas(smesh)
 CALL bmesh_global_orient(smesh)
 !---Print mesh statistics
 call bmesh_global_stats(smesh)
-call mesh_global_igrnd(smesh)
+call mesh_global_igrnd(smesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_decomp
 !---------------------------------------------------------------------------
@@ -1195,7 +1201,7 @@ call bmesh_areas(smesh)
 CALL bmesh_global_orient(smesh)
 !---Print mesh statistics
 call bmesh_global_stats(smesh)
-call mesh_global_igrnd(smesh)
+call mesh_global_igrnd(smesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_dist_level
 end subroutine multigrid_construct_surf

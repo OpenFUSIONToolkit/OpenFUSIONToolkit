@@ -16,6 +16,7 @@ USE oft_lag_poly
 USE oft_mesh_type, ONLY: oft_bmesh
 IMPLICIT NONE
 #include "local.h"
+PRIVATE
 !------------------------------------------------------------------------------
 !> Quadralateral surface mesh type
 !!
@@ -25,7 +26,7 @@ IMPLICIT NONE
 !! - Global mesh information
 !! - Linkage of geometric primatives
 !------------------------------------------------------------------------------
-TYPE, EXTENDS(oft_bmesh) :: oft_quadmesh
+TYPE, PUBLIC, EXTENDS(oft_bmesh) :: oft_quadmesh
   INTEGER(i4) :: inodesp(2,4)
   INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodese => NULL()
   INTEGER(i4), POINTER, DIMENSION(:,:) :: inodesf => NULL()
@@ -49,9 +50,7 @@ CONTAINS
   PROCEDURE :: tessellated_sizes => quadmesh_tessellated_sizes
 END TYPE oft_quadmesh
 INTEGER(i4), PARAMETER :: quad_ed(2,4)=RESHAPE((/1,2, 2,3, 3,4, 4,1/),(/2,4/)) !< Quad edge list
-!
 INTEGER(i4), PARAMETER :: quad_bary_map(4) = [-2,1,2,-1]
-!---
 INTEGER(i4), PARAMETER :: inodesp_base(2,4) = RESHAPE((/ &
   0,0, 1,0, 1,1, 0,1/),(/2,4/))
 INTEGER(i4), PARAMETER :: inodes1p(2,4) = RESHAPE((/ &
@@ -61,6 +60,8 @@ INTEGER(i4), PARAMETER :: inodes2p(2,4) = RESHAPE((/ &
 INTEGER(i4), PARAMETER :: inodes2e(2,4) = RESHAPE((/ &
   2,1, 3,2, 2,3, 1,2/),(/2,4/))
 INTEGER(i4), PARAMETER :: inodes2f(2) = (/2,2/)
+!
+PUBLIC quad_2d_grid, quad_grid_orient
 CONTAINS
 !---------------------------------------------------------------------------
 !> Load trimesh from transfer file
