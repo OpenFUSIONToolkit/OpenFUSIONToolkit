@@ -126,6 +126,42 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: lc_ho
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: r_ho
 CONTAINS
 !------------------------------------------------------------------------------
+!> Finalize setup/load-in of CUBIT mesh and destroy temporaries created
+!! for grid construction (eg. high-order input nodes, in-memory data)
+!------------------------------------------------------------------------------
+subroutine cubit_finalize_setup
+lf_file = .TRUE.
+tor_mesh = .FALSE.
+reflect = .FALSE.
+per_ns = -1
+zstretch = 1.d0
+tor_rmin = 0.d0
+!
+#ifdef HAVE_ONURBS
+ngmc = 0
+ngms = 0
+ngwc = 0
+ngws = 0
+! TYPE(Exodus_curve), POINTER, DIMENSION(:) :: model_curves => NULL() !< List of model curves
+! TYPE(Exodus_surf), POINTER, DIMENSION(:) :: model_surfaces => NULL() !< List of model surfaces
+! TYPE(nurbs_curve), POINTER, DIMENSION(:) :: wf_curves => NULL() !< List of CAD wireframe curves
+! TYPE(nurbs_surf), POINTER, DIMENSION(:) :: wf_surfs => NULL() !< List of CAD wireframe surfaces
+! TYPE(Exodus_cadlink), POINTER :: cad_link => NULL() !< Linkage of mesh to CAD geometry
+! TYPE(Exodus_cadlink), POINTER, DIMENSION(:) :: ML_cad_link => NULL() !< ML CAD linkage
+#endif
+!
+ncid=0
+nblks=0
+nregions=0
+np_per=0
+IF(ALLOCATED(per_nodes))DEALLOCATE(per_nodes)
+!
+have_ho=.FALSE.
+np_ho=0
+IF(ALLOCATED(r_ho))DEALLOCATE(r_ho)
+IF(ALLOCATED(lc_ho))DEALLOCATE(lc_ho)
+end subroutine cubit_finalize_setup
+!------------------------------------------------------------------------------
 !> Read in Exodus mesh and geometry information
 !! - Read in Cubit options from input file
 !! - Read in mesh points and cells
@@ -147,6 +183,8 @@ namelist/cubit_options/filename,inpname,lf_file,tor_mesh, &
   reflect,per_ns,zstretch,tor_rmin
 DEBUG_STACK_PUSH
 IF(oft_env%head_proc)THEN
+  filename = 'none'
+  inpname = 'none'
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cubit_options,IOSTAT=ierr)
   CLOSE(io_unit)
@@ -469,6 +507,8 @@ class(oft_bmesh), pointer :: smesh
 namelist/cubit_options/filename,inpname,lf_file,tor_mesh, &
   reflect,per_ns,zstretch,tor_rmin
 IF(oft_env%head_proc)THEN
+  filename = 'none'
+  inpname = 'none'
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cubit_options,IOSTAT=ierr)
   CLOSE(io_unit)

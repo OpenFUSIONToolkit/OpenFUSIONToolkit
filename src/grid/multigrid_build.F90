@@ -26,14 +26,14 @@ use multigrid, only: multigrid_mesh, multigrid_refine, multigrid_hybrid_base, &
   multigrid_level, trimesh_mg_globals, quadmesh_mg_globals, multigrid_reffix_ho, &
   multigrid_reffix_ho_surf
 use oft_mesh_native, only: native_load_vmesh, native_load_smesh, mesh_native_id, &
-  native_hobase, native_set_periodic
+  native_hobase, native_set_periodic, native_finalize_setup
 use oft_mesh_t3d, only: mesh_t3d_load, mesh_t3d_cadsync, mesh_t3d_cadlink, &
   mesh_t3d_add_quad, mesh_t3d_reffix, mesh_t3d_add_quad, &
   mesh_t3d_set_periodic, smesh_t3d_load, mesh_t3d_id
 #ifdef HAVE_NCDF
 use oft_mesh_cubit, only: mesh_cubit_load, mesh_cubit_reffix, mesh_cubit_cadlink, &
   mesh_cubit_add_quad, mesh_cubit_hobase, mesh_cubit_set_periodic, &
-  mesh_cubit_id, smesh_cubit_load
+  mesh_cubit_id, smesh_cubit_load, cubit_finalize_setup
 #else
 use oft_mesh_cubit, only: mesh_cubit_id
 #endif
@@ -569,6 +569,17 @@ do level=1,mg_mesh%nbase
   mg_mesh%smesh%global%seam=>mg_mesh%seam
 end do
 CALL multigrid_level(mg_mesh,nlevels)
+!---Finalize mesh setup for given interface
+select case(mg_mesh%mesh%cad_type)
+case(mesh_native_id)
+  CALL native_finalize_setup
+case(mesh_cube_id)
+#ifdef HAVE_NCDF
+  CALL cubit_finalize_setup
+#else
+    CALL oft_abort('CUBIT interface requires NETCDF','multigrid_construct',__FILE__)
+#endif
+end select
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 CONTAINS
@@ -1016,13 +1027,24 @@ SELECT CASE(grid_order)
   CASE(2)
     CALL multigrid_add_quad_surf(mg_mesh%smesh)
   CASE DEFAULT
-    CALL oft_abort('Requested invalid grid order.','multigrid_construct',__FILE__)
+    CALL oft_abort('Requested invalid grid order.','multigrid_construct_surf',__FILE__)
 END SELECT
 do level=1,mg_mesh%nbase
   CALL multigrid_level(mg_mesh,level)
   mg_mesh%smesh%global%seam=>mg_mesh%seam
 end do
 CALL multigrid_level(mg_mesh,nlevels)
+!---Finalize mesh setup for given interface
+select case(mg_mesh%smesh%cad_type)
+case(mesh_native_id)
+  CALL native_finalize_setup
+case(mesh_cube_id)
+#ifdef HAVE_NCDF
+  CALL cubit_finalize_setup
+#else
+    CALL oft_abort('CUBIT interface requires NETCDF','multigrid_construct_surf',__FILE__)
+#endif
+end select
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 CONTAINS

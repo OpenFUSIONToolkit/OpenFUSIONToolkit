@@ -28,11 +28,28 @@ INTEGER(i4), PARAMETER, PUBLIC :: mesh_native_id = 0
 REAL(r8), ALLOCATABLE, PUBLIC :: r_mem(:,:)
 INTEGER(i4), ALLOCATABLE, PUBLIC :: lc_mem(:,:)
 INTEGER(i4), ALLOCATABLE, PUBLIC :: reg_mem(:)
-INTEGER(i4) :: np_ho
+!---
+INTEGER(i4) :: np_ho = 0
 REAL(r8), ALLOCATABLE :: r_ho(:,:)
 INTEGER(i4), ALLOCATABLE :: le_ho(:,:),lf_ho(:,:)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: per_nodes
 CONTAINS
+!------------------------------------------------------------------------------
+!> Finalize setup/load-in of native mesh and destroy temporaries created
+!! for grid construction (eg. high-order input nodes, in-memory data)
+!------------------------------------------------------------------------------
+subroutine native_finalize_setup
+!
+np_ho=0
+IF(ALLOCATED(r_ho))DEALLOCATE(r_ho)
+IF(ALLOCATED(le_ho))DEALLOCATE(le_ho)
+IF(ALLOCATED(lf_ho))DEALLOCATE(lf_ho)
+IF(ALLOCATED(per_nodes))DEALLOCATE(per_nodes)
+!
+IF(ALLOCATED(r_mem))DEALLOCATE(r_mem)
+IF(ALLOCATED(lc_mem))DEALLOCATE(lc_mem)
+IF(ALLOCATED(reg_mem))DEALLOCATE(reg_mem)
+end subroutine native_finalize_setup
 !------------------------------------------------------------------------------
 !> Read in t3d mesh file from file "filename"
 !! - Read in T3D options from input file
@@ -52,6 +69,7 @@ class(oft_bmesh), pointer :: smesh
 namelist/native_mesh_options/filename,reflect,ref_periodic!,zstretch
 DEBUG_STACK_PUSH
 np_mem=-1
+filename='none'
 IF(oft_env%head_proc)THEN
     IF(ALLOCATED(r_mem).AND.ALLOCATED(lc_mem).AND.ALLOCATED(reg_mem))THEN
         np_mem=SIZE(r_mem,DIM=2)
@@ -138,7 +156,8 @@ ELSE
     CALL hdf5_read(mesh%lc,TRIM(filename),"mesh/LC",success)
     IF(.NOT.success)CALL oft_abort('Error reading cells','native_load_vmesh',__FILE__)
 END IF
-!---Read in region list
+!---Read in region list and other information
+mesh_order=1
 ALLOCATE(mesh%reg(mesh%nc))
 IF(np_mem>0)THEN
     mesh%reg=reg_mem
@@ -146,37 +165,35 @@ IF(np_mem>0)THEN
 ELSE
     CALL hdf5_read(mesh%reg,TRIM(filename),"mesh/REG",success)
     IF(.NOT.success)CALL oft_abort('Error reading region list','native_load_vmesh',__FILE__)
-END IF
-!---Read high-order mesh information
-IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
-    mesh_order=2
-    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/R",ndims,dim_sizes)
-    IF(ndims==-1)CALL oft_abort('"mesh/ho_info/R" field does not exist in input file', 'native_load_vmesh', __FILE__)
-    np_ho=dim_sizes(2)
-    ALLOCATE(r_ho(3,np_ho))
-    CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
-    IF(.NOT.success)CALL oft_abort('Error reading quadratic points','native_load_vmesh',__FILE__)
-    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/LE",ndims,dim_sizes)
-    ALLOCATE(le_ho(2,dim_sizes(2)))
-    CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
-    IF(.NOT.success)CALL oft_abort('Error reading quadratic edges','native_load_vmesh',__FILE__)
-    IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LF"))THEN
-        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/LF",ndims,dim_sizes)
-        ALLOCATE(lf_ho(4,dim_sizes(2)))
-        CALL hdf5_read(lf_ho,TRIM(filename),"mesh/ho_info/LF",success)
-        IF(.NOT.success)CALL oft_abort('Error reading quadratic faces','native_load_vmesh',__FILE__)
+    !---Read high-order mesh information
+    IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
+        mesh_order=2
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/R",ndims,dim_sizes)
+        IF(ndims==-1)CALL oft_abort('"mesh/ho_info/R" field does not exist in input file', 'native_load_vmesh', __FILE__)
+        np_ho=dim_sizes(2)
+        ALLOCATE(r_ho(3,np_ho))
+        CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
+        IF(.NOT.success)CALL oft_abort('Error reading quadratic points','native_load_vmesh',__FILE__)
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/LE",ndims,dim_sizes)
+        ALLOCATE(le_ho(2,dim_sizes(2)))
+        CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
+        IF(.NOT.success)CALL oft_abort('Error reading quadratic edges','native_load_vmesh',__FILE__)
+        IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LF"))THEN
+            CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/LF",ndims,dim_sizes)
+            ALLOCATE(lf_ho(4,dim_sizes(2)))
+            CALL hdf5_read(lf_ho,TRIM(filename),"mesh/ho_info/LF",success)
+            IF(.NOT.success)CALL oft_abort('Error reading quadratic faces','native_load_vmesh',__FILE__)
+        END IF
     END IF
-ELSE
-    mesh_order=1
-END IF
-!---Read periodicity information
-IF(ref_periodic)THEN
-    IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
-      "Periodic nodeset not found in file","native_load_vmesh",__FILE__)
-    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
-    ALLOCATE(per_nodes(dim_sizes(1)))
-    CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
-    WRITE(*,*)'Found periodic points',dim_sizes(1)
+    !---Read periodicity information
+    IF(ref_periodic)THEN
+        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
+        "Periodic nodeset not found in file","native_load_vmesh",__FILE__)
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+        ALLOCATE(per_nodes(dim_sizes(1)))
+        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+        WRITE(*,*)'Found periodic points',dim_sizes(1)
+    END IF
 END IF
 !
 IF(oft_debug_print(2))WRITE(*,*)'  Complete'
@@ -208,6 +225,7 @@ namelist/native_mesh_options/filename,reflect,ref_periodic!,zstretch
 DEBUG_STACK_PUSH
 !---
 np_mem=-1
+filename='none'
 IF(oft_env%head_proc)THEN
     IF(ALLOCATED(r_mem).AND.ALLOCATED(lc_mem).AND.ALLOCATED(reg_mem))THEN
         np_mem=SIZE(r_mem,DIM=2)
@@ -307,44 +325,43 @@ ELSE
     CALL hdf5_read(smesh%lc,TRIM(filename),"mesh/LC",success)
     IF(.NOT.success)CALL oft_abort('Error reading cells','native_load_smesh',__FILE__)
 END IF
-!---Read in region list
+!---Read in region list and other information
 ALLOCATE(smesh%reg(smesh%nc))
+mesh_order=1
 IF(np_mem>0)THEN
     smesh%reg=reg_mem
     DEALLOCATE(reg_mem)
 ELSE
     CALL hdf5_read(smesh%reg,TRIM(filename),"mesh/REG",success)
     IF(.NOT.success)CALL oft_abort('Error reading region list','native_load_smesh',__FILE__)
-END IF
-!---Read high-order mesh information
-IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
-    mesh_order=2
-    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/R",ndims,dim_sizes)
-    IF(ndims==-1)CALL oft_abort('"mesh/ho_info/R" field does not exist in input file', 'native_load_smesh', __FILE__)
-    np_ho=dim_sizes(2)
-    ALLOCATE(r_ho(3,np_ho))
-    IF(dim_sizes(1)==2)THEN
-        ALLOCATE(rtmp(2,np_ho))
-        CALL hdf5_read(rtmp,TRIM(filename),"mesh/ho_info/R",success)
-        r_ho(1:2,:)=rtmp
-        DEALLOCATE(rtmp)
-    ELSE
-        CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
+    !---Read high-order mesh information
+    IF(hdf5_field_exist(TRIM(filename),"mesh/ho_info/LE"))THEN
+        mesh_order=2
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/ho_info/R",ndims,dim_sizes)
+        IF(ndims==-1)CALL oft_abort('"mesh/ho_info/R" field does not exist in input file', 'native_load_smesh', __FILE__)
+        np_ho=dim_sizes(2)
+        ALLOCATE(r_ho(3,np_ho))
+        IF(dim_sizes(1)==2)THEN
+            ALLOCATE(rtmp(2,np_ho))
+            CALL hdf5_read(rtmp,TRIM(filename),"mesh/ho_info/R",success)
+            r_ho(1:2,:)=rtmp
+            DEALLOCATE(rtmp)
+        ELSE
+            CALL hdf5_read(r_ho,TRIM(filename),"mesh/ho_info/R",success)
+        END IF
+        IF(.NOT.success)CALL oft_abort('Error reading quadratic points','native_load_smesh',__FILE__)
+        ALLOCATE(le_ho(2,np_ho))
+        CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
+        IF(.NOT.success)CALL oft_abort('Error reading quadratic edges','native_load_smesh',__FILE__)
     END IF
-    IF(.NOT.success)CALL oft_abort('Error reading quadratic points','native_load_smesh',__FILE__)
-    ALLOCATE(le_ho(2,np_ho))
-    CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
-    IF(.NOT.success)CALL oft_abort('Error reading quadratic edges','native_load_smesh',__FILE__)
-ELSE
-    mesh_order=1
-END IF
-!---Read periodicity information
-IF(ref_periodic)THEN
-    IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
-      "Periodic nodeset not found in file","native_load_smesh",__FILE__)
-    CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
-    ALLOCATE(per_nodes(dim_sizes(1)))
-    CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+    !---Read periodicity information
+    IF(ref_periodic)THEN
+        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
+        "Periodic nodeset not found in file","native_load_smesh",__FILE__)
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+        ALLOCATE(per_nodes(dim_sizes(1)))
+        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+    END IF
 END IF
 IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
