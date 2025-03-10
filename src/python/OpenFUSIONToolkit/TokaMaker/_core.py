@@ -1675,7 +1675,12 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
 
         self.set_profiles(ffp_prof=init_ffp_prof,pp_prof=init_pp_prof)
 
-        flag = self.solve()
+        try:
+            self.solve()
+            flag = 0
+        except ValueError:
+            flag = -1
+        print('  Solve flag: ', flag)
 
     ### Specify original H-mode profiles, iterate on bootstrap contribution until reasonably converged
     n = 0
@@ -1694,8 +1699,12 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
 
         self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
 
-        flag = self.solve()
-        print('Solve flag: ', flag)
+        try:
+            self.solve()
+            flag = 0
+        except ValueError:
+            flag = -1
+        print('  Solve flag: ', flag)
 
         n += 1
         if (n > 2) and (flag >= 0):
