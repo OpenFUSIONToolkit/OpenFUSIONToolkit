@@ -27,12 +27,10 @@ def mp_run(target,args,timeout=180):
         p.join()
         return None
     # Completed successfully?
-    print("Done {0}".format(time.time() - start))
     test_results = []
     try:
-        for i in range(3):
+        for _ in range(3):
             result = mp_q.get(timeout=5)
-            print(i, result)
             test_results.append(result)
     except:
         print("Failed to get output")
