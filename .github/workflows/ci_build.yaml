@@ -29,7 +29,7 @@ jobs:
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
             build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
+            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
@@ -37,7 +37,7 @@ jobs:
             cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3",
             build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
+            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 Intel",
@@ -53,7 +53,7 @@ jobs:
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3.12",
             build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
           }
         - {
@@ -62,7 +62,7 @@ jobs:
             cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
             python: "python3.12",
             build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
         exclude:
