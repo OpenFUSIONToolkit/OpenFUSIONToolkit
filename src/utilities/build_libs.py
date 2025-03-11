@@ -1022,8 +1022,7 @@ class HDF5(package):
                 "--prefix={HDF5_ROOT}",
                 "--enable-fortran",
                 "--enable-hl=no",
-                "--enable-tests=no",
-                # "--enable-examples=no"
+                "--enable-tests=no"
             ]
             if self.shared_libs:
                 configure_options += [
@@ -1276,7 +1275,7 @@ class OpenBLAS(package):
         self.config_dict['BLAS_ROOT'] = self.config_dict['OpenBLAS_ROOT']
         self.config_dict['LAPACK_ROOT'] = self.config_dict['OpenBLAS_ROOT']
         self.config_dict['BLAS_VENDOR'] = "OpenBLAS"
-        self.config_dict['LAPACK_LIB'] = self.config_dict[self.name + '_LIB']
+        self.config_dict['LAPACK_LIB'] = self.config_dict['OpenBLAS_LIB']
         self.config_dict['LAPACK_LIBS'] = "-lopenblas"
         if self.shared_libs:
             self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'libopenblas'+self.config_dict['DYN_EXT'])
@@ -1407,7 +1406,7 @@ class BLAS_LAPACK(package):
         self.config_dict['BLAS_ROOT'] = self.config_dict['BLAS_LAPACK_ROOT']
         self.config_dict['LAPACK_ROOT'] = self.config_dict['BLAS_LAPACK_ROOT']
         self.config_dict['BLAS_VENDOR'] = "Generic"
-        self.config_dict['LAPACK_LIB'] = self.config_dict[self.name + '_LIB']
+        self.config_dict['LAPACK_LIB'] = self.config_dict['BLAS_LAPACK_LIB']
         self.config_dict['LAPACK_LIBS'] = "-llapack -lblas"
         self.config_dict['BLAS_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'libblas.a')
         self.config_dict['LAPACK_LIB_PATH'] = os.path.join(self.config_dict['LAPACK_LIB'], 'liblapack.a')
@@ -1435,6 +1434,7 @@ class BLAS_LAPACK(package):
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={BLAS_LAPACK_ROOT}",
             "-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON",
+            "-DBUILD_SHARED_LIBS:BOOL=OFF",
             "-Wno-dev",
             "-DCMAKE_BUILD_TYPE=Release"
         ]
@@ -1477,19 +1477,18 @@ class ARPACK(package):
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={ARPACK_ROOT}",
             "-DCMAKE_INSTALL_LIBDIR=lib",
-            "-DEXAMPLES=OFF"
+            "-DEXAMPLES=OFF",
+            "-DTESTS=OFF"
         ]
         if self.shared_libs:
             cmake_options += [
                 '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-                '-DBUILD_SHARED_LIBS:BOOL=ON',
-                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+                '-DBUILD_SHARED_LIBS:BOOL=ON'
             ]
         else:
             cmake_options += [
                 '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-                '-DBUILD_SHARED_LIBS:BOOL=OFF',
-                '-DBUILD_STATIC_LIBS:BOOL=ON'
+                '-DBUILD_SHARED_LIBS:BOOL=OFF'
             ]
         if "BLAS_LIB_PATH" in self.config_dict:
             cmake_options += [
@@ -1544,7 +1543,7 @@ class ARPACK(package):
 
 
 class SUPERLU(package):
-    def __init__(self, comp_wrapper=False, shared_libs=True):
+    def __init__(self, comp_wrapper=False, shared_libs=False):
         self.name = "SUPERLU"
         self.url = "https://github.com/xiaoyeli/superlu/archive/refs/tags/v7.0.0.tar.gz"
         self.build_dir = 'superlu-7.0.0'
@@ -1558,9 +1557,7 @@ class SUPERLU(package):
             print("SUPERLU provided by compiler wrappers: Skipping build")
             return self.config_dict
         self.setup_root_struct()
-        self.config_dict['SUPERLU_LIB'] = self.config_dict[self.name + '_LIB']
         self.config_dict['SUPERLU_LIBS'] = '-lsuperlu'
-        # self.config_dict["SUPERLU_VER_MAJOR"] = 7
         # Installation check files
         if self.shared_libs:
             self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_LIB'], 'libsuperlu'+self.config_dict['DYN_EXT'])]
@@ -1573,18 +1570,18 @@ class SUPERLU(package):
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT}",
             "-Denable_blaslib:BOOL=TRUE",
+            "-Denable_examples:BOOL=OFF",
+            "-Denable_tests:BOOL=OFF",
         ]
         if self.shared_libs:
             cmake_options += [
                 '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-                '-DBUILD_SHARED_LIBS:BOOL=ON',
-                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+                '-DBUILD_SHARED_LIBS:BOOL=ON'
             ]
         else:
             cmake_options += [
                 '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-                '-DBUILD_SHARED_LIBS:BOOL=OFF',
-                '-DBUILD_STATIC_LIBS:BOOL=ON'
+                '-DBUILD_SHARED_LIBS:BOOL=OFF'
             ]
         if "BLAS_LIB_PATH" in self.config_dict:
             cmake_options.append("-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}")
@@ -1605,7 +1602,7 @@ class SUPERLU(package):
 
 
 class SUPERLU_DIST(package):
-    def __init__(self, build_openmp, comp_wrapper=False, shared_libs=True):
+    def __init__(self, build_openmp, comp_wrapper=False, shared_libs=False):
         self.name = "SUPERLU_DIST"
         self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v8.1.0.tar.gz"
         self.build_dir = "superlu_dist-8.1.0"
@@ -1678,7 +1675,7 @@ class SUPERLU_DIST(package):
 
 
 class UMFPACK(package):
-    def __init__(self, comp_wrapper=False, shared_libs=True):
+    def __init__(self, comp_wrapper=False, shared_libs=False):
         self.name = "UMFPACK"
         self.url = "https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/refs/tags/v7.10.1.tar.gz"
         self.build_dir = "SuiteSparse-7.10.1"
@@ -1910,7 +1907,6 @@ class PETSC(package):
         if self.shared_libs:
             libsuffix = self.config_dict['DYN_EXT']
         self.config_dict['METIS_ROOT'] = self.config_dict["PETSC_ROOT"]
-        self.config_dict['PETSC_LIB'] = self.config_dict[self.name + '_LIB']
         self.config_dict['PETSC_LIBS'] = "-lpetsc"
         if self.with_umfpack:
             self.config_dict['PETSC_LIBS'] += " -lumfpack -lamd"
