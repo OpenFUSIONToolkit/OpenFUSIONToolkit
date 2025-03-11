@@ -42,7 +42,7 @@ def fetch_file(url, file):
         if old_len > 0:
             print(" "*old_len, end="\r")
         if final_update:
-            line = "    Total size: {0}".format(format_bytes(total_size))
+            line = "    Total size: {0}".format(format_bytes(max(curr_size,total_size)))
             print(line)
         else:
             line = "    ({0}/{1})".format(format_bytes(curr_size), format_bytes(total_size))
@@ -51,13 +51,19 @@ def fetch_file(url, file):
             sys.stdout.flush()
         return len(line)
     # Download file from url
+    original_url = url
     try:
         if PY3K:
             req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"}) 
             response = urllib.request.urlopen(req)
             resolved_url = response.geturl()
-            if resolved_url != url: # Handle redirects
-                response = urllib.request.urlopen(resolved_url)
+            for _ in range(10): # Handle redirects
+                if resolved_url == url:
+                    break
+                url = resolved_url
+                redirect_req = urllib.request.Request(resolved_url, headers={'User-Agent' : "Magic Browser"}) 
+                response = urllib.request.urlopen(redirect_req)
+                resolved_url = response.geturl()
             try:
                 file_size = int(response.headers["content-length"])
             except:
@@ -66,18 +72,22 @@ def fetch_file(url, file):
             req = urllib.Request(url, headers={'User-Agent' : "Magic Browser"})
             response = urllib.urlopen(req)
             resolved_url = response.geturl()
-            if resolved_url != url: # Handle redirects
-                response = urllib.request.urlopen(resolved_url)
+            for _ in range(10): # Handle redirects
+                if resolved_url == url:
+                    break
+                redirect_req = urllib.Request(resolved_url, headers={'User-Agent' : "Magic Browser"})
+                response = urllib.request.urlopen(redirect_req)
+                resolved_url = response.geturl()
             try:
                 file_size = int(response.info().getheaders("Content-Length")[0])
             except:
                 file_size = -1
     except ValueError:
-        error_exit('Invalid download URL: "{0}"'.format(url))
+        error_exit('Invalid download URL: "{0}"'.format(original_url))
     except:
-        error_exit('Download failed for file: "{0}"'.format(url))
+        error_exit('Download failed for file: "{0}"'.format(original_url))
     else:
-        line = "  Downloading: {0}".format(url)
+        line = "  Downloading: {0}".format(original_url)
         print(line)
         if fetch_progress:
             old_len = update_progress(0, file_size, 0)
@@ -97,7 +107,7 @@ def fetch_file(url, file):
         with open(file, "wb") as handle:
             handle.write(full_buf)
         if fetch_progress:
-            update_progress(file_size, file_size, old_len, final_update=True)
+            update_progress(size, file_size, old_len, final_update=True)
 
 
 def extract_archive(file):
@@ -823,7 +833,8 @@ class MPICH(package):
         else:
             config_options += [
                 "--enable-shared=no",
-                "--enable-static=yes"
+                "--enable-static=yes",
+                "--with-pic"
             ]
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
@@ -909,7 +920,8 @@ class OpenMPI(package):
         else:
             config_options += [
                 "--enable-shared=no",
-                "--enable-static=yes"
+                "--enable-static=yes",
+                "--with-pic"
             ]
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
@@ -1001,6 +1013,7 @@ class HDF5(package):
                 ]
             else:
                 cmake_options += [
+                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
                     '-DBUILD_SHARED_LIBS:BOOL=OFF',
                     '-DBUILD_STATIC_LIBS:BOOL=ON'
                 ]
@@ -1021,7 +1034,8 @@ class HDF5(package):
             else:
                 configure_options += [
                     "--enable-shared=no",
-                    "--enable-static=yes"
+                    "--enable-static=yes",
+                    "--with-pic"
                 ]
         if self.build_hl:
             if self.cmake_build:
@@ -1112,7 +1126,8 @@ class NETCDF(package):
                 '-DCMAKE_INSTALL_PREFIX:PATH={NETCDF_ROOT}',
                 '-DHDF5_ROOT:PATH={HDF5_ROOT}',
                 '-DNETCDF_ENABLE_HDF5:BOOL=ON',
-                '-DNETCDF_ENABLE_DAP:BOOL=OFF'
+                '-DENABLE_DAP:BOOL=OFF',
+                '-DENABLE_BYTERANGE:BOOL=OFF'
             ]
             if self.shared_libs:
                 cmake_options += [
@@ -1122,6 +1137,7 @@ class NETCDF(package):
                 ]
             else:
                 cmake_options += [
+                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
                     '-DBUILD_SHARED_LIBS:BOOL=OFF',
                     '-DBUILD_STATIC_LIBS:BOOL=ON'
                 ]
@@ -1140,7 +1156,8 @@ class NETCDF(package):
             else:
                 configure_options += [
                     "--enable-shared=no",
-                    "--enable-static=yes"
+                    "--enable-static=yes",
+                    "--with-pic"
                 ]
         build_lines = [
             "rm -rf build",
@@ -1199,6 +1216,7 @@ class NETCDF_Fortran(package):
                 ]
             else:
                 cmake_options += [
+                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
                     '-DBUILD_SHARED_LIBS:BOOL=OFF',
                     '-DBUILD_STATIC_LIBS:BOOL=ON'
                 ]
@@ -1213,7 +1231,8 @@ class NETCDF_Fortran(package):
             else:
                 configure_options += [
                     "--enable-shared=no",
-                    "--enable-static=yes"
+                    "--enable-static=yes",
+                    "--with-pic"
                 ]
         build_lines = [
             "rm -rf build",
@@ -1241,7 +1260,7 @@ class NETCDF_Fortran(package):
 
 
 class OpenBLAS(package):
-    def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False, shared_libs=True):
+    def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False, shared_libs=False):
         self.name = "OpenBLAS"
         self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.29.tar.gz"
         self.build_dir = "OpenBLAS-0.3.29"
@@ -1430,7 +1449,7 @@ class BLAS_LAPACK(package):
 
 
 class ARPACK(package):
-    def __init__(self, parallel=False, link_omp=False, shared_libs=True):
+    def __init__(self, parallel=False, link_omp=False, shared_libs=False):
         self.name = "ARPACK"
         self.url = "https://github.com/opencollab/arpack-ng/archive/refs/tags/3.9.1.tar.gz"
         self.build_dir = "arpack-ng-3.9.1"
@@ -1468,6 +1487,7 @@ class ARPACK(package):
             ]
         else:
             cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
                 '-DBUILD_SHARED_LIBS:BOOL=OFF',
                 '-DBUILD_STATIC_LIBS:BOOL=ON'
             ]
@@ -1562,6 +1582,7 @@ class SUPERLU(package):
             ]
         else:
             cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
                 '-DBUILD_SHARED_LIBS:BOOL=OFF',
                 '-DBUILD_STATIC_LIBS:BOOL=ON'
             ]
@@ -1627,6 +1648,7 @@ class SUPERLU_DIST(package):
             ]
         else:
             cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
                 '-DBUILD_SHARED_LIBS:BOOL=OFF',
                 '-DBUILD_STATIC_LIBS:BOOL=ON'
             ]
@@ -1695,6 +1717,7 @@ class UMFPACK(package):
             ]
         else:
             AMD_CMAKE_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
                 '-DBUILD_SHARED_LIBS:BOOL=OFF',
                 '-DBUILD_STATIC_LIBS:BOOL=ON'
             ]
@@ -1818,7 +1841,7 @@ class ONURBS(package):
 
 class PETSC(package):
     def __init__(self, debug=False, with_superlu=True, with_umfpack=True, with_mumps=True, version=3.20,
-                 comp_wrapper=False, shared_libs=False):
+                 comp_wrapper=False, shared_libs=None):
         self.name = "PETSC"
         self.display_name = "PETSc"
         self.version = version
@@ -1876,6 +1899,12 @@ class PETSC(package):
                 sys.exit(1)
             return self.config_dict
         self.setup_root_struct()
+        # Setup library build type
+        if self.shared_libs is None:
+            if self.config_dict['OS_TYPE'] == 'Darwin':
+                self.shared_libs = False
+            else:
+                self.shared_libs = True
         # Setup libraries
         libsuffix = '.a'
         if self.shared_libs:
@@ -1920,15 +1949,9 @@ class PETSC(package):
             '--with-cmake-exec={CMAKE}'
         ]
         if self.shared_libs:
-            options += [
-                '--with-shared-libraries=1',
-                '--with-static-libraries=0'
-            ]
+            options += ['--with-shared-libraries=1']
         else:
-            options += [
-                '--with-shared-libraries=0',
-                '--with-static-libraries=1'
-            ]
+            options += ['--with-shared-libraries=0']
         if self.with_superlu:
             # Fix SDK issue on MacOS "Catalina" (10.15)
             if (self.config_dict['OS_TYPE'] == 'Darwin') and (not ver_lt(self.config_dict['OS_VER'], '10.15')):
