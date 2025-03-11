@@ -36,7 +36,7 @@ def mp_run(target,args,timeout=30):
         return None
     # Completed successfully
     try:
-        test_result = mp_q.get(timeout=10)
+        test_result = mp_q.get(timeout=5)
     except:
         print("Failed to get output")
         return None
