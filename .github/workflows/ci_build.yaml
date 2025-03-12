@@ -144,7 +144,7 @@ jobs:
       run: mkdir libs
 
     - name: Build external (OpenMP)
-      if: startsWith(matrix.parallel, 'openmp')
+      if: ${{ matrix.parallel == 'openmp' }}
       shell: bash
       timeout-minutes: 30
       working-directory: libs
