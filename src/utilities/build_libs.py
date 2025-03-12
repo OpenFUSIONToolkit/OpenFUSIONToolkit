@@ -108,6 +108,9 @@ def fetch_file(url, file):
             handle.write(full_buf)
         if fetch_progress:
             update_progress(size, file_size, old_len, final_update=True)
+        else:
+            if file_size < 0:
+                update_progress(size, file_size, 0, final_update=True)
 
 
 def extract_archive(file):

@@ -73,9 +73,9 @@ jobs:
         include:
           - parallel: mpich_petsc
             config: {
-              name: "Ubuntu 24.04 GCC 14",
-              os: ubuntu-24.04,
-              cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
+              name: "Ubuntu 22.04 GCC 12",
+              os: ubuntu-22.04,
+              cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
               python: "python3",
               mpi_build_flags: "--build_petsc=1 --petsc_superlu=1 --petsc_mumps=1 --petsc_version=3.20"
             }
