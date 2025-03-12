@@ -70,6 +70,15 @@ jobs:
             config: {os: macos-14}
           - parallel: openmpi
             config: {cc: icx}
+        include:
+          - parallel: mpich_petsc
+            config: {
+              name: "Ubuntu 24.04 GCC 14",
+              os: ubuntu-24.04,
+              cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
+              python: "python3",
+              mpi_build_flags: "--build_petsc=1 --petsc_superlu=1 --petsc_mumps=1 --petsc_version=3.20"
+            }
 
     steps:
     - name: Checkout repo
@@ -135,7 +144,7 @@ jobs:
       run: mkdir libs
 
     - name: Build external (OpenMP)
-      if: ${{ matrix.parallel == 'openmp' }}
+      if: startsWith(matrix.parallel, 'openmp')
       shell: bash
       timeout-minutes: 30
       working-directory: libs
@@ -144,7 +153,7 @@ jobs:
         python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1
     
     - name: Build external (MPICH+OpenMP)
-      if: ${{ matrix.parallel == 'mpich' }}
+      if: startsWith(matrix.parallel, 'mpich')
       shell: bash
       timeout-minutes: 60
       working-directory: libs
@@ -153,7 +162,7 @@ jobs:
         python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 
     - name: Build external (OpenMPI+OpenMP)
-      if: ${{ matrix.parallel == 'openmpi' }}
+      if: startsWith(matrix.parallel, 'openmpi')
       shell: bash
       timeout-minutes: 60
       working-directory: libs
