@@ -1840,7 +1840,7 @@ class ONURBS(package):
 
 
 class PETSC(package):
-    def __init__(self, debug=False, with_superlu=True, with_umfpack=True, with_mumps=True, version=3.20,
+    def __init__(self, debug=False, with_superlu=False, with_superlu_dist=False, with_umfpack=False, with_mumps=False, version=3.20,
                  comp_wrapper=False, shared_libs=None):
         self.name = "PETSC"
         self.display_name = "PETSc"
@@ -1859,6 +1859,7 @@ class PETSC(package):
             error_exit('Invalid PETSc version requested (3.18 <= version <= 3.22)')
         self.debug = debug
         self.with_superlu = with_superlu
+        self.with_superlu_dist = with_superlu_dist
         self.with_umfpack = with_umfpack
         self.with_mumps = with_mumps
         self.comp_wrapper = comp_wrapper
@@ -1915,8 +1916,11 @@ class PETSC(package):
             self.config_dict['PETSC_LIBS'] += " -lumfpack -lamd"
             self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libumfpack'+libsuffix))
         if self.with_superlu:
-            self.config_dict['PETSC_LIBS'] += " -lsuperlu -lsuperlu_dist"
+            self.config_dict['PETSC_LIBS'] += " -lsuperlu"
             self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu'+libsuffix))
+        if self.with_superlu_dist:
+            self.config_dict['PETSC_LIBS'] += " -lsuperlu_dist"
+            self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libsuperlu_dist'+libsuffix))
         if self.with_mumps:
             self.config_dict['PETSC_LIBS'] += " -ldmumps -lmumps_common -lpord -lscalapack"
             self.install_chk_files.append(os.path.join(self.config_dict['PETSC_LIB'], 'libdmumps'+libsuffix))
@@ -1933,7 +1937,7 @@ class PETSC(package):
     def build(self):
         #
         def_lines = []
-        options = ['--with-cxx=0']
+        options = []
         if 'MPI_CC' in self.config_dict:
             options += ['--CC={MPI_CC}', '--FC={MPI_FC}']
         else:
@@ -1951,14 +1955,18 @@ class PETSC(package):
             options += ['--with-shared-libraries=1']
         else:
             options += ['--with-shared-libraries=0']
+        need_cxx = False
         if self.with_superlu:
-            # Fix SDK issue on MacOS "Catalina" (10.15)
-            if (self.config_dict['OS_TYPE'] == 'Darwin') and (not ver_lt(self.config_dict['OS_VER'], '10.15')):
-                result, _ = run_command("{0} -print-sysroot".format(self.config_dict['CC']))
-                def_lines.append('export SDKROOT={0}'.format(result.strip()))
+            # # Fix SDK issue on MacOS "Catalina" (10.15)
+            # if (self.config_dict['OS_TYPE'] == 'Darwin') and (not ver_lt(self.config_dict['OS_VER'], '10.15')):
+            #     result, _ = run_command("{0} -print-sysroot".format(self.config_dict['CC']))
+            #     def_lines.append('export SDKROOT={0}'.format(result.strip()))
             options += ['--download-superlu']
+        if self.with_superlu_dist:
+            options += ['--download-superlu_dist']
+            need_cxx = True
         if self.with_umfpack:
-            options += ['--download-umfpack']
+            options += ['--download-suitesparse']
         if self.with_mumps:
             options += ['--download-mumps', '--download-scalapack', '--download-blacs']
         #
@@ -1970,7 +1978,15 @@ class PETSC(package):
         if self.debug:
             options += ['--with-debugging=yes']
         else:
-            options += ['--with-debugging=no', '--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
+            options += ['--with-debugging=no']
+            if config_dict['CC_VENDOR'] == 'gnu':
+                options += ['--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
+            # elif config_dict['CC_VENDOR'] == 'intel':
+            #     options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
+        if need_cxx:
+            options += ['--with-cxx={MPI_CXX}']
+        else:
+            options += ['--with-cxx=0']
         build_lines = def_lines + [
             "./configure --prefix={PETSC_ROOT} " + " ".join(options),
             "make MAKE_NP={MAKE_THREADS} all",
@@ -2063,10 +2079,11 @@ group.add_argument("--umfpack_wrapper", action="store_true", default=False, help
 #
 group = parser.add_argument_group("PETSc", "PETSc package options")
 group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library? (default: 0)")
-group.add_argument("--petsc_debug", default=1, type=int, choices=(0,1), help="Build PETSc with debugging information (default: 1)")
-group.add_argument("--petsc_superlu", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU (default: 1)")
+group.add_argument("--petsc_debug", default=0, type=int, choices=(0,1), help="Build PETSc with debugging information (default: 0)")
+group.add_argument("--petsc_superlu", default=0, type=int, choices=(0,1), help="Build PETSc with SuperLU (default: 0)")
+group.add_argument("--petsc_superlu_dist", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU-DIST (default: 1)")
 group.add_argument("--petsc_mumps", default=0, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 0)")
-group.add_argument("--petsc_umfpack", default=0, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 0)")
+group.add_argument("--petsc_umfpack", default=1, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 1)")
 group.add_argument("--petsc_version", default="3.20", type=str,
     help="Use different version of PETSc [3.18,3.19,3.20,3.21,3.22] (default: 3.20)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
@@ -2167,7 +2184,7 @@ if (options.build_netcdf == 1) or options.netcdf_wrapper:
     packages.append(NETCDF(options.netcdf_wrapper))
 # Are we building PETSc?
 if (options.build_petsc == 1) or options.petsc_wrapper:
-    packages.append(PETSC(debug=options.petsc_debug, with_superlu=options.petsc_superlu,
+    packages.append(PETSC(debug=options.petsc_debug, with_superlu=options.petsc_superlu, with_superlu_dist=options.petsc_superlu_dist,
                           with_umfpack=options.petsc_umfpack, with_mumps=options.petsc_mumps,
                           version=options.petsc_version, comp_wrapper=options.petsc_wrapper))
 else:

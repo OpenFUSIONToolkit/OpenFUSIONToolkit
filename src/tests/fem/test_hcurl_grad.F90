@@ -56,7 +56,8 @@ IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
-minlev=1
+minlev=2
+IF(oft_env%nprocs>1)minlev=mg_mesh%nbase+1
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgdim
 !--- Grad(H^1) subspace
 CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=minlev)

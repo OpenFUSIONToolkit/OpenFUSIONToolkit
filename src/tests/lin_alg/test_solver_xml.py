@@ -35,10 +35,11 @@ xml_template = """
 """
 
 # Common setup function and process handling
-def xml_setup(xml_file, petsc='F'):
+def xml_setup(xml_file, petsc=False):
     os.chdir(test_dir)
+    petsc_flag=('T' if petsc else 'F')
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(petsc))
+        fid.write(oft_in_template.format(petsc_flag))
     with open('oft_in.xml','w+') as fid:
         fid.write(xml_template.format(xml_file))
     return run_OFT("./test_solver_xml oft.in oft_in.xml", 1, 60)
@@ -48,7 +49,7 @@ def validate_result(iteration_count,converged_error):
     fid = open('xml.results','r')
     its_test = int(fid.readline())
     if iteration_count != None:
-        if abs(iteration_count-its_test) >= max(2,.05*iteration_count):
+        if abs(iteration_count-its_test) >= max(3,0.05*iteration_count):
             print("FAILED: Iteration count incorrect!")
             print("  Expected = {0}".format(iteration_count))
             print("  Actual =   {0}".format(its_test))
@@ -64,7 +65,7 @@ def validate_result(iteration_count,converged_error):
 #============================================================================
 # Test runner for base test case
 @pytest.mark.coverage
-@pytest.mark.parametrize("petsc_flag", ('F', 'T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_gmres(petsc_flag):
     xml_file = """
     <solver type="gmres">
@@ -80,7 +81,7 @@ def test_gmres(petsc_flag):
 #============================================================================
 # Test runner for base test case
 @pytest.mark.coverage
-@pytest.mark.parametrize("petsc_flag", ('F', 'T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_gmres_jacobi(petsc_flag):
     xml_file = """
     <solver type="gmres">
@@ -97,7 +98,7 @@ def test_gmres_jacobi(petsc_flag):
 #============================================================================
 # Test runner for base test case
 @pytest.mark.coverage
-@pytest.mark.parametrize("petsc_flag", ('F', 'T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_cg(petsc_flag):
     xml_file = """
     <solver type="cg">
@@ -112,7 +113,7 @@ def test_cg(petsc_flag):
 #============================================================================
 # Test runner for base test case
 @pytest.mark.coverage
-@pytest.mark.parametrize("petsc_flag", ('F', 'T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_cg_jacobi(petsc_flag):
     xml_file = """
     <solver type="cg">

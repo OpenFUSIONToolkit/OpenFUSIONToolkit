@@ -47,6 +47,7 @@ CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 minlev=2
+IF(oft_env%nprocs>1)minlev=mg_mesh%nbase+1
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgmax
 CALL oft_h1_setup(mg_mesh,order,ML_oft_h1,minlev=minlev)
 h1_zerob%ML_H1_rep=>ML_oft_h1

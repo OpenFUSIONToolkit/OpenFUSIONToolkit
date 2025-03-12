@@ -38,6 +38,7 @@ CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_sphere_id)CALL oft_abort('Wrong mesh type, test for SPHERE only.','main',__FILE__)
 IF(mg_test)THEN
   taylor_minlev=2
+  IF(oft_env%nprocs>1)taylor_minlev=mg_mesh%nbase+1
   IF(mg_mesh%mesh%type==3)taylor_minlev=mg_mesh%mgmax
 ELSE
   taylor_minlev=mg_mesh%mgmax+order-1
