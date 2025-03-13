@@ -61,6 +61,7 @@ INTEGER(i4) :: OFT_MPI_CHAR=MPI_CHARACTER !< MPI_CHAR alias
 INTEGER(i4), PARAMETER :: MPI_COMM_WORLD = -1 ! Dummy comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_COMM_NULL = -2 ! Dummy null comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_REQUEST_NULL = -3 ! Dummy null request value for non-MPI runs
+INTEGER(i4), PARAMETER :: MPI_COMM_SELF = -4 ! Dummy self-comm value for non-MPI runs
 #endif
 !---------------------------------------------------------------------------
 !> Perform a SUM/AND reduction over all processors
@@ -100,7 +101,7 @@ PRIVATE oft_random_number_r8
 !> Dummy shadow type for Fox XML node
 !---------------------------------------------------------------------------
 #if !defined(HAVE_XML)
-TYPE :: fox_node
+TYPE :: xml_node
   INTEGER(i4) :: dummy = 0
 END TYPE
 #endif
@@ -116,25 +117,18 @@ TYPE :: oft_env_type
   INTEGER(i4) :: nparts = 1 !< Number of OpenMP paritions
 #ifdef OFT_MPI_F08
   TYPE(mpi_comm) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+  TYPE(mpi_comm) :: NODE_COMM = MPI_COMM_SELF !< Open FUSION Toolkit MPI node-local communicator
 #else
   INTEGER(i4) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+  INTEGER(i4) :: NODE_COMM = MPI_COMM_SELF !< Open FUSION Toolkit MPI node-local communicator
 #endif
   INTEGER(i4) :: nnodes = -1 !< Number of MPI tasks
   INTEGER(i4) :: ppn = 1 !< Number of procs per NUMA node
   INTEGER(i4) :: nprocs = -1 !< Number of MPI tasks
   INTEGER(i4) :: nthreads = -1 !< Number of OpenMP threads
   INTEGER(i4) :: rank = -1 !< MPI rank
-  INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
-  INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
+  INTEGER(i4) :: node_rank = -1 !< MPI node-local rank
   INTEGER(i4) :: debug = 0 !< Debug level (1-3)
-  INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
-#ifdef OFT_MPI_F08
-  TYPE(mpi_request), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
-  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
-#else
-  INTEGER(i4), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
-  INTEGER(i4), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
-#endif
   LOGICAL :: head_proc = .FALSE. !< Lead processor flag
   LOGICAL :: pm = .TRUE. !< Performance monitor (default T=on, F=off)
   LOGICAL :: test_run = .FALSE. !< Test run
@@ -142,7 +136,7 @@ TYPE :: oft_env_type
   CHARACTER(LEN=OFT_PATH_SLEN) :: ifile = 'none' !< Name of input file
   CHARACTER(LEN=OFT_PATH_SLEN) :: xml_file = 'none' !< Name of XML input file
 #ifdef HAVE_XML
-  TYPE(fox_node), POINTER :: xml => NULL()
+  TYPE(xml_node), POINTER :: xml => NULL()
 #endif
 END TYPE oft_env_type
 !---Global variables
@@ -193,7 +187,7 @@ CONTAINS
 !! Also calls MPI_INIT
 !---------------------------------------------------------------------------
 SUBROUTINE oft_init(nthreads)
-INTEGER(i4), INTENT(in), OPTIONAL :: nthreads
+INTEGER(i4), INTENT(in), OPTIONAL :: nthreads !< Number for threads to use (negative for default)
 INTEGER(i4) :: ierr,thrdtype,nargs,io_unit
 REAL(r8) :: elapsed_time
 INTEGER(i4) :: ppn=1
@@ -204,7 +198,7 @@ LOGICAL :: test_run=.FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
 #ifdef HAVE_XML
-TYPE(fox_node), POINTER :: doc
+TYPE(xml_node), POINTER :: doc
 #endif
 LOGICAL :: rst
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,stack_disabled,use_petsc,test_run,nparts
@@ -250,13 +244,15 @@ READ(io_unit,runtime_options,IOSTAT=ierr)
 CLOSE(io_unit)
 IF(ierr<0)CALL oft_abort('No runtime options found in input file.','oft_init',__FILE__)
 IF(ierr>0)CALL oft_abort('Error parsing runtime options.','oft_init',__FILE__)
-!---Seed pRNG if test run for repeatability
+!---Seed pRNG if test run for repeatability (does not work on < GCC 9)
+#if !defined(__GNUC__) || (__GNUC__ > 9)
 IF(test_run)THEN
   CALL random_seed(size=nargs)
   IF(nargs>SIZE(oft_test_seed))CALL oft_abort('pRNG seed size exceeds built in values', &
     'oft_init',__FILE__)
   CALL random_seed(put=oft_test_seed)
 END IF
+#endif
 !---Initialize PETSc or exit if requested but not available
 IF(use_petsc)THEN
 #ifdef HAVE_PETSC
@@ -292,8 +288,10 @@ IF(oft_env%xml_file(1:4)/='none')THEN
   !---Test for existence of XML file
   INQUIRE(FILE=TRIM(oft_env%xml_file),exist=rst)
   IF(.NOT.rst)CALL oft_abort('XML file specified but does not exist.','oft_init',__FILE__)
-  doc=>fox_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
-  oft_env%xml=>fox_item(fox_getElementsByTagname(doc,"oft"),0)
+  doc=>xml_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
+  IF(ierr/=0)CALL oft_abort('Error parsing XML input file','oft_init',__FILE__)
+  CALL xml_get_element(doc,"oft",oft_env%xml,ierr)
+  IF(ierr/=0)CALL oft_abort('Error finding "oft" XML root element','oft_init',__FILE__)
 #else
   CALL oft_warn("Open FUSION Toolkit not built wit xml support, ignoring xml input.")
 #endif
@@ -306,6 +304,14 @@ oft_env%debug=debug
 oft_env%test_run=test_run
 oft_env%nparts=nparts
 oft_indent=""
+#ifdef HAVE_MPI
+IF(oft_env%ppn>1)THEN
+  CALL MPI_Comm_split(oft_env%comm,oft_env%rank/oft_env%ppn,oft_env%rank,oft_env%NODE_COMM,ierr)
+  CALL MPI_Comm_rank(oft_env%NODE_COMM,oft_env%node_rank,ierr)
+ELSE
+  oft_env%node_rank=0
+END IF
+#endif
 !---Print runtime information
 IF(oft_env%rank==0)THEN
   WRITE(*,'(A)')    '#----------------------------------------------'
@@ -579,7 +585,7 @@ LOGICAL :: all_null
 all_null=.TRUE.
 #ifdef HAVE_MPI
 DO i=1,n
-  all_null=all_null.AND.(oft_env%recv(i)==MPI_REQUEST_NULL)
+  all_null=all_null.AND.(req(i)==MPI_REQUEST_NULL)
 END DO
 #endif
 END FUNCTION oft_mpi_check_reqs

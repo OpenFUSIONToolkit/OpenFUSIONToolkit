@@ -16,30 +16,33 @@
 !---------------------------------------------------------------------------
 PROGRAM test_solver_xml
 USE oft_base
-USE oft_mesh_type, ONLY: mesh
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_solver_xml
 !
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, &
-oft_lag_set_level
-USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, lag_inject, &
-lag_interp, lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
+USE fem_base, ONLY: oft_ml_fem_type
+USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
+  oft_lag_zerob, df_lop, nu_lop, oft_lag_getlop, oft_lag_getmop, lag_getlop_pre
 IMPLICIT NONE
 INTEGER(i4), PARAMETER :: order=4
 INTEGER(i4) :: io_unit,ierr
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
+TYPE(oft_lag_zerob), TARGET :: lag_zerob
 #if defined(HAVE_XML)
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
-IF(mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+CALL multigrid_construct(mg_mesh)
+IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=-1)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---Run tests
 oft_env%pm=.FALSE.
 CALL test_lap
@@ -49,8 +52,6 @@ CALL oft_finalize
 WRITE(*,*)'SKIP TEST'
 #endif
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE: test_lap
 !------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
@@ -66,23 +67,20 @@ CLASS(oft_matrix), POINTER :: mop => NULL()
 !---
 #ifdef HAVE_XML
 integer(i4) :: nnodes
-TYPE(fox_node), POINTER :: solver_node
-TYPE(fox_nodelist), POINTER :: current_nodes
+TYPE(xml_node), POINTER :: solver_node
 #endif
 !---Set FE level
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields
-CALL oft_lag_create(u)
-CALL oft_lag_create(v)
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(v)
 !---Get FE operators
-CALL oft_lag_getlop(lop,'zerob')
-CALL oft_lag_getmop(mop,'none')
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 !---Setup matrix solver
 #ifdef HAVE_XML
-current_nodes=>fox_getElementsByTagName(oft_env%xml,"solver")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes>0)THEN
-  solver_node=>fox_item(current_nodes,0)
+CALL xml_get_element(oft_env%xml,"solver",solver_node,ierr)
+IF(ierr==0)THEN
   CALL create_solver_xml(linv,solver_node)
 ELSE
   CALL oft_abort('Could not find XML node.','test_lap',__FILE__)
@@ -92,7 +90,7 @@ linv%A=>lop
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL lag_zerob(v)
+CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 uu=u%dot(u)

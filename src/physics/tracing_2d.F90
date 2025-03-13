@@ -11,10 +11,10 @@
 !------------------------------------------------------------------------------
 module tracing_2d
 USE oft_base
-USE oft_mesh_type, ONLY: smesh, bmesh_findcell
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
-USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_eval, oft_blag_geval
+USE oft_lag_basis, ONLY: oft_blag_eval, oft_blag_geval
 implicit none
 !------------------------------------------------------------------------------
 !> Abstract tracer class for 2D grids
@@ -38,6 +38,7 @@ type, abstract :: tracer
   real(r8), pointer :: v(:) => NULL() !< Current ODE solution vector
   real(r8), pointer :: dv(:) => NULL() !< Change in ODE solution over last step
   class(bfem_interp), pointer :: B => NULL() !< Interpolation object for field evaluation
+  class(oft_bmesh), pointer :: mesh => NULL()
 contains
   !> Setup tracer and initialize ODE solver
   procedure(tracer_setup), deferred :: setup
@@ -142,7 +143,8 @@ end subroutine set_tracer
 !---------------------------------------------------------------------------
 !> Trace field line for one flux surface transit in inverse coordinates
 !---------------------------------------------------------------------------
-subroutine tracinginv_fs(pt,ptout)
+subroutine tracinginv_fs(mesh,pt,ptout)
+class(oft_bmesh), target, intent(in) :: mesh !< Mesh for tracing
 real(8), intent(in) :: pt(2) !< Starting point [2]
 real(8), optional, intent(inout) :: ptout(:,:) !< Points on surface [3,:]
 real(8) :: z,tp,yp(2)
@@ -154,6 +156,7 @@ IF(present(ptout))THEN
 END IF
 !---
 ncross=0
+active_tracer%mesh=>mesh
 call active_tracer%setup(pt)
 z=pt(2)
 active_tracer%status=0
@@ -311,11 +314,11 @@ active_tracer%v=y
 ydot=active_tracer%dv
 if(active_tracer%cell==0)return
 pttmp=[active_tracer%y(1),active_tracer%y(2),0.d0]
-call bmesh_findcell(smesh,active_tracer%cell,pttmp,active_tracer%f)
+call bmesh_findcell(active_tracer%mesh,active_tracer%cell,pttmp,active_tracer%f)
 if(active_tracer%cell==0)return
 fmin=minval(active_tracer%f)
 fmax=maxval(active_tracer%f)
-call smesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+call active_tracer%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 call active_tracer%B%interp(active_tracer%cell,active_tracer%f,goptmp,ydot)
 active_tracer%dy=ydot(1:2)
 active_tracer%dv=ydot
@@ -342,12 +345,12 @@ active_tracer%v=y
 ydot=active_tracer%dv
 if(active_tracer%cell==0)return
 pttmp=[active_tracer%y(1),active_tracer%y(2),0.d0]
-call bmesh_findcell(smesh,active_tracer%cell,pttmp,active_tracer%f)
+call bmesh_findcell(active_tracer%mesh,active_tracer%cell,pttmp,active_tracer%f)
 if(active_tracer%cell==0)return
 fmin=minval(active_tracer%f)
 fmax=maxval(active_tracer%f)
 !---
-call smesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
+call active_tracer%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 !---
 SELECT TYPE(this=>active_tracer%B)
 CLASS IS(cylinv_interp)
@@ -405,7 +408,7 @@ END IF
 !---
 self%y=y
 pttmp=[self%y(1),self%y(2),0.d0]
-call bmesh_findcell(smesh,self%cell,pttmp,self%f)
+call bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
 self%initialized=.TRUE.
 active_tracer%status=0
 end subroutine trace_setup_lsode

@@ -17,20 +17,21 @@ PROGRAM test_gmsh
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, smesh
 USE oft_mesh_native, ONLY: mesh_native_id
 USE oft_mesh_gmsh, ONLY: mesh_gmsh_id
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 IMPLICIT NONE
 INTEGER(i4) :: io_unit
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
-IF(ALL(mesh%cad_type/=[mesh_gmsh_id,mesh_native_id]))CALL oft_abort('Wrong mesh type.','main',__FILE__)
+CALL multigrid_construct(mg_mesh)
+IF(ALL(mg_mesh%mesh%cad_type/=[mesh_gmsh_id,mesh_native_id]))CALL oft_abort('Wrong mesh type.','main',__FILE__)
 CALL plot_file%setup("Test")
-CALL mesh%setup_io(plot_file,1)
+CALL mg_mesh%mesh%setup_io(plot_file,1)
 IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='gmsh.results')
 CALL compute_volume
 CALL compute_area
@@ -38,8 +39,6 @@ IF(oft_env%head_proc)CLOSE(io_unit)
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
-! SUBROUTINE compute_volume
 !---------------------------------------------------------------------------
 !> Compute volume of the current mesh and output
 !---------------------------------------------------------------------------
@@ -49,12 +48,12 @@ REAL(r8) :: v,det,goptmp(3,4),volume
 LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 volume=0._r8
-CALL mesh%quad_rule(8,quad)
+CALL mg_mesh%mesh%quad_rule(8,quad)
 !---
-DO i=1,mesh%nc
+DO i=1,mg_mesh%mesh%nc
   !---Get local reconstructed operators
   DO m=1,quad%np ! Loop over quadrature points
-    CALL mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
     det=v*quad%wts(m)
     volume=volume+det
   END DO
@@ -67,8 +66,6 @@ IF(oft_env%head_proc)THEN
 END IF
 END SUBROUTINE compute_volume
 !---------------------------------------------------------------------------
-! SUBROUTINE compute_area
-!---------------------------------------------------------------------------
 !> Compute surface area of the current mesh and output
 !---------------------------------------------------------------------------
 SUBROUTINE compute_area
@@ -77,12 +74,12 @@ REAL(r8) :: a,det,goptmp(3,4),area
 LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 area=0._r8
-CALL smesh%quad_rule(8,quad)
+CALL mg_mesh%smesh%quad_rule(8,quad)
 !---
-DO i=1,smesh%nc
+DO i=1,mg_mesh%smesh%nc
   !---Get local reconstructed operators
   DO m=1,quad%np ! Loop over quadrature points
-    CALL smesh%jacobian(i,quad%pts(:,m),goptmp,a)
+    CALL mg_mesh%smesh%jacobian(i,quad%pts(:,m),goptmp,a)
     det=a*quad%wts(m)
     area=area+det
   END DO

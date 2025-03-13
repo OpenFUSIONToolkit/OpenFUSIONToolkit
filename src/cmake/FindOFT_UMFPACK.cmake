@@ -29,6 +29,7 @@ find_library(UMFPACK_SSC_LIBRARY
 
 find_path(UMFPACK_INCLUDE_DIR
   NAMES umfpack.h
+  PATH_SUFFIXES suitesparse
 )
 
 include(FindPackageHandleStandardArgs)

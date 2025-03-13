@@ -36,7 +36,7 @@ def mp_run(target,args,timeout=30):
         return None
     # Completed successfully
     try:
-        test_result = mp_q.get(timeout=10)
+        test_result = mp_q.get(timeout=5)
     except:
         print("Failed to get output")
         return None
@@ -254,9 +254,14 @@ def test_spheromak_h3(order):
 
 
 #============================================================================
-def run_coil_case(mesh_resolution,fe_order,mp_q):
+def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
+    px1,py1,pdx,pdy = 0.4,0.4,0.2,0.2
+    cx1,cy1,cdx,cdy = 0.8,0.8,0.1,0.1
     def coil_green(rc,zc,r,z):
-        return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
+        if dist is None:
+            return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
+        else:
+            return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]*dist(rc,zc)
     def masked_err(point_mask,gs_obj,psi,sort_ind):
         bdry_points = gs_obj.r[point_mask,:]
         sort_ind = bdry_points[:,sort_ind].argsort()
@@ -265,15 +270,15 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
         bdry_points = bdry_points[sort_ind]
         green = np.zeros((bdry_points.shape[0],))
         for i in range(bdry_points.shape[0]):
-            green[i], _ = dblquad(coil_green,0.75,0.85,0.75,0.85,args=(bdry_points[i,0],bdry_points[i,1]))
+            green[i], _ = dblquad(coil_green,cx1-cdx/2,cx1+cdx/2,cy1-cdy/2,cy1+cdy/2,args=(bdry_points[i,0],bdry_points[i,1]))
         return green, psi_bdry
     # Build mesh
     gs_mesh = gs_Domain(rextent=1.0,zextents=[0.0,1.0])
     gs_mesh.define_region('air',mesh_resolution,'boundary')
     gs_mesh.define_region('plasma',mesh_resolution,'plasma')
     gs_mesh.define_region('coil',0.01,'coil')
-    gs_mesh.add_rectangle(0.4,0.4,0.2,0.2,'plasma')
-    gs_mesh.add_rectangle(0.8,0.8,0.1,0.1,'coil')
+    gs_mesh.add_rectangle(px1,py1,pdx,pdy,'plasma')
+    gs_mesh.add_rectangle(cx1,cy1,cdx,cdy,'coil')
     mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
@@ -283,16 +288,19 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
-    mygs.set_coil_currents({'COIL': 1.E-2})
+    mygs.set_coil_currents({'COIL': cdx*cdy})
+    if dist is not None:
+        mygs.set_coil_current_dist('COIL',dist(mygs.r[:,0],mygs.r[:,1]))
     try:
         psi0 = mygs.vac_solve()
     except ValueError:
         mp_q.put(None)
         return
+
     # Get analytic result
     green1, psi1 = masked_err(mygs.r[:,1]==1.0,mygs,psi0,0)
     green2, psi2 = masked_err(mygs.r[:,0]==1.0,mygs,psi0,1)
-    green3, psi3 = masked_err(mygs.r[:,1]==-1.0,mygs,psi0,0)
+    green3, psi3 = masked_err(mygs.r[:,1]==0.0,mygs,psi0,0)
     # Compute error in psi
     green_full = np.hstack((green1[1:], green2, green3[1:]))
     psi_full = np.hstack((psi1[1:], psi2, psi3[1:]))
@@ -315,27 +323,46 @@ def validate_coil(results,psi_err_exp):
 
 
 # Test runners for vacuum coil cases
+def coil_dist(r,z):
+    return r-z
+
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h1(order):
-    errs = [0.010800921782063938, 0.0002851010669736233, 1.8185396736818836e-05]
-    results = mp_run(run_coil_case,(0.1,order))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h1(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.01840042334178343, 0.003450061648683903, 0.0008471927795560409]
+        results = mp_run(run_coil_case,(0.1,order,coil_dist))
+    else:
+        errs = np.r_[0.010702389576304984, 0.00028240755964702516, 1.7930442330763583e-05]
+        results = mp_run(run_coil_case,(0.1,order,None))
+    print('Err = ',results[0])
     assert validate_coil(results,errs[order-2])
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h2(order):
-    errs = [0.0032993582771277, 2.725546769847347e-05, 8.670511127765199e-07]
-    results = mp_run(run_coil_case,(0.1/2.0,order))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h2(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.0036698088466649878, 0.00021755100020083888, 1.736479174843997e-05]
+        results = mp_run(run_coil_case,(0.1/2.0,order,coil_dist))
+    else:
+        errs = np.r_[0.0032680822197860876, 2.7032824967342426e-05, 8.560758830069598e-07]
+        results = mp_run(run_coil_case,(0.1/2.0,order,None))
     assert validate_coil(results,errs[order-2])
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h3(order):
-    errs = [0.0008175212508035045, 1.921137561342415e-06, 4.4282752350112954e-07]
-    results = mp_run(run_coil_case,(0.1/4.0,order))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h3(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.001364423661608862, 1.5953386454257285e-05, 9.158565258919996e-07]
+        results = mp_run(run_coil_case,(0.1/4.0,order,coil_dist))
+    else:
+        errs = np.r_[0.0008094155097004184, 1.8949323808351823e-06, 4.4169705023586007e-07]
+        results = mp_run(run_coil_case,(0.1/4.0,order,None))
     assert validate_coil(results,errs[order-2])
 
 
 #============================================================================
-def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
+def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,mp_q):
     def create_mesh():
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
@@ -375,80 +402,88 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
             mp_q.put(None)
             return
     # Run EQ
+    mygs = None
     myOFT = OFT_env(nthreads=-1)
-    mygs = TokaMaker(myOFT)
-    mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=fe_order,F0=5.3*6.2)
-    #
-    if eig_test:
-        eig_vals, _ = mygs.eig_wall(10)
-        mp_q.put([{'Tau_w': eig_vals[:5,0]}])
-        return
-    #
-    mygs.set_coil_vsc({'VS': 1.0})
-    #
-    coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}
-    mygs.set_coil_bounds(coil_bounds)
-    #
-    Ip_target=15.6E6
-    P0_target=6.2E5
-    mygs.set_targets(Ip=Ip_target, pax=P0_target)
-    isoflux_pts = np.array([
-        [ 8.20,  0.41],
-        [ 8.06,  1.46],
-        [ 7.51,  2.62],
-        [ 6.14,  3.78],
-        [ 4.51,  3.02],
-        [ 4.26,  1.33],
-        [ 4.28,  0.08],
-        [ 4.49, -1.34],
-        [ 7.28, -1.89],
-        [ 8.00, -0.68]
-    ])
-    x_point = np.array([[5.125, -3.4],])
-    mygs.set_isoflux(np.vstack((isoflux_pts,x_point)))
-    mygs.set_saddles(x_point)
-    # Set regularization weights
-    regularization_terms = []
-    for name in mygs.coil_sets:
-        if name.startswith('CS'):
-            if name.startswith('CS1'):
-                regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=2.E-2))
-            else:
+    for fe_order in fe_orders:
+        mygs_last = mygs
+        mygs = TokaMaker(myOFT)
+        mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
+        mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
+        mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
+        mygs.setup(order=fe_order,F0=5.3*6.2)
+        #
+        if eig_test:
+            eig_vals, _ = mygs.eig_wall(10)
+            mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+            return
+        #
+        mygs.set_coil_vsc({'VS': 1.0})
+        #
+        coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}
+        mygs.set_coil_bounds(coil_bounds)
+        #
+        Ip_target=15.6E6
+        P0_target=6.2E5
+        mygs.set_targets(Ip=Ip_target, pax=P0_target)
+        isoflux_pts = np.array([
+            [ 8.20,  0.41],
+            [ 8.06,  1.46],
+            [ 7.51,  2.62],
+            [ 6.14,  3.78],
+            [ 4.51,  3.02],
+            [ 4.26,  1.33],
+            [ 4.28,  0.08],
+            [ 4.49, -1.34],
+            [ 7.28, -1.89],
+            [ 8.00, -0.68]
+        ])
+        x_point = np.array([[5.125, -3.4],])
+        mygs.set_isoflux(np.vstack((isoflux_pts,x_point)))
+        mygs.set_saddles(x_point)
+        # Set regularization weights
+        regularization_terms = []
+        for name in mygs.coil_sets:
+            if name.startswith('CS'):
+                if name.startswith('CS1'):
+                    regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=2.E-2))
+                else:
+                    regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-2))
+            elif name.startswith('PF'):
                 regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-2))
-        elif name.startswith('PF'):
-            regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-2))
-        elif name.startswith('VS'):
-            regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-2))
-    regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E2))
-    mygs.set_coil_reg(reg_terms=regularization_terms)
-    #
-    ffp_prof = create_power_flux_fun(40,1.5,2.0)
-    pp_prof = create_power_flux_fun(40,4.0,1.0)
-    mygs.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
-    #
-    R0 = 6.3
-    Z0 = 0.5
-    a = 2.0
-    kappa = 1.4
-    delta = 0.0
-    try:
-        mygs.init_psi(R0, Z0, a, kappa, delta)
-        mygs.solve()
-    except ValueError:
-        mp_q.put(None)
-        return
-    if stability_test:
-        eig_vals, _ = mygs.eig_td(-1.E2,10,False)
-        mp_q.put([{'gamma': eig_vals[:5,0]}])
-        return
-    eq_info = mygs.get_stats(li_normalization='ITER')
-    Lmat = mygs.get_coil_Lmat()
-    eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
-    eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
-    eq_info['Lplasma'] = Lmat[-1,-1]
+            elif name.startswith('VS'):
+                regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=0.0,weight=1.E-2))
+        regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E2))
+        mygs.set_coil_reg(reg_terms=regularization_terms)
+        #
+        ffp_prof = create_power_flux_fun(40,1.5,2.0)
+        pp_prof = create_power_flux_fun(40,4.0,1.0)
+        mygs.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
+        #
+        R0 = 6.3
+        Z0 = 0.5
+        a = 2.0
+        kappa = 1.4
+        delta = 0.0
+        try:
+            mygs.init_psi(R0, Z0, a, kappa, delta)
+            mygs.solve()
+        except ValueError:
+            mp_q.put(None)
+            return
+        if stability_test:
+            eig_vals, _ = mygs.eig_td(-1.E2,10,False)
+            mp_q.put([{'gamma': eig_vals[:5,0]}])
+            return
+        mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
+        eq_info = mygs.get_stats(li_normalization='ITER')
+        Lmat = mygs.get_coil_Lmat()
+        eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
+        eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
+        eq_info['Lplasma'] = Lmat[-1,-1]
+    # Test deletion if multiple cases
+    if mygs_last is not None:
+        del mygs_last
+    # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
 
@@ -460,7 +495,7 @@ def test_ITER_eig(order):
     exp_dict = {
         'Tau_w': [1.51083009, 2.87431718, 3.91493237, 5.23482507, 5.61049374]
     }
-    results = mp_run(run_ITER_case,(1.0,order,True,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),True,False))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
@@ -469,7 +504,7 @@ def test_ITER_stability(order):
     exp_dict = {
         'gamma': [-12.3620, 1.83981, 3.41613, 5.12470, 6.53393]
     }
-    results = mp_run(run_ITER_case,(1.0,order,False,True))
+    results = mp_run(run_ITER_case,(1.0,(order,),False,True))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
@@ -499,7 +534,35 @@ def test_ITER_eq(order):
         'MCS1_plasma': 8.930926092661585e-07,
         'Lplasma': 1.1899835061690724e-05
     }
-    results = mp_run(run_ITER_case,(1.0,order,False,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),False,False))
+    assert validate_dict(results,exp_dict)
+
+def test_ITER_concurrent():
+    exp_dict = {
+        'Ip': 15599996.700479196,
+        'Ip_centroid': [6.20274133, 0.5296048],
+        'kappa': 1.86799695311941,
+        'kappaU': 1.7388335731481432,
+        'kappaL': 1.997160333090677,
+        'delta': 0.4642130933423834,
+        # 'deltaU': 0.3840631923067706, # Disable for now
+        'deltaL': 0.5443629943779958,
+        'vol': 820.0973897169655,
+        'q_0': 0.8234473499435633,
+        'q_95': 2.76048354704068,
+        'P_ax': 619225.0167519478,
+        'W_MHD': 242986888.67690986,
+        'beta_pol': 39.73860565406112,
+        'dflux': 1.5402746036620532,
+        'tflux': 121.86870301036512,
+        'l_i': 0.9048845463517069,
+        'beta_tor': 1.7816206668692283,
+        'beta_n': 1.1868590722509704,
+        'LCS1': 2.485860941880887e-06,
+        'MCS1_plasma': 8.930926092661585e-07,
+        'Lplasma': 1.1899835061690724e-05
+    }
+    results = mp_run(run_ITER_case,(1.0,(2,3),False,False))
     assert validate_dict(results,exp_dict)
 
 #============================================================================
@@ -598,6 +661,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     Ip_target = 9.0E4
     mygs.set_targets(Ip=Ip_target,Ip_ratio=2.0)
     mygs.solve()
+    mygs.save_eqdsk('test.eqdsk')
     #
     mp_q.put([mygs.get_stats()])
     oftpy_dump_cov()
@@ -647,3 +711,9 @@ def test_LTX_eq(order):
     }
     results = mp_run(run_LTX_case,(order,False,False))
     assert validate_dict(results,exp_dict)
+
+# Example of how to run single test without pytest
+# if __name__ == '__main__':
+#     multiprocessing.freeze_support()
+#     mp_q = multiprocessing.Queue()
+#     run_sph_case(0.05,2,mp_q)
