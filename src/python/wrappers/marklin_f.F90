@@ -68,6 +68,24 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
+FUNCTION marklin_ccast(marklin_cptr,marklin_fptr,error_str) RESULT(success)
+TYPE(c_ptr), INTENT(in) :: marklin_cptr !< C pointer to TokaMaker object
+TYPE(marklin_obj), POINTER, INTENT(out) :: marklin_fptr
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+!---Clear error flag
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.c_associated(marklin_cptr))THEN
+  IF(PRESENT(error_str))CALL copy_string('TokaMaker object not associated',error_str)
+  success=.FALSE.
+  RETURN
+END IF
+CALL c_f_pointer(marklin_cptr,marklin_fptr)
+success=.TRUE.
+END FUNCTION marklin_ccast
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 SUBROUTINE marklin_setup(marklin_ptr,mesh_ptr,order,minlev,error_str) BIND(C,NAME="marklin_setup")
 TYPE(c_ptr), INTENT(out) :: marklin_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
@@ -127,13 +145,7 @@ CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(marklin_obj), POINTER :: self
 CHARACTER(LEN=3) :: pltnum
-!---Clear error flag
-CALL copy_string('',error_str)
-IF(.NOT.c_associated(marklin_ptr))THEN
-  CALL copy_string('Marklin object not associated',error_str)
-  RETURN
-END IF
-CALL c_f_pointer(marklin_ptr,self)
+IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 IF(taylor_nm>0)THEN
   CALL copy_string('Eigenstates already computed',error_str)
   RETURN
@@ -151,15 +163,9 @@ SUBROUTINE marklin_setup_io(marklin_ptr,basepath,error_str) BIND(C,NAME="marklin
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
-!
 TYPE(marklin_obj), POINTER :: self
 CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix = ''
-CALL copy_string('',error_str)
-IF(.NOT.c_associated(marklin_ptr))THEN
-  CALL copy_string('Marklin object not associated',error_str)
-  RETURN
-END IF
-CALL c_f_pointer(marklin_ptr,self)
+IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
@@ -191,12 +197,7 @@ CLASS(oft_vector), POINTER :: u,v
 TYPE(oft_hcurl_grad_rinterp), POINTER :: ainterp_obj
 TYPE(oft_hcurl_cinterp), POINTER :: binterp_obj
 CHARACTER(LEN=80) :: name_tmp = ''
-CALL copy_string('',error_str)
-IF(.NOT.c_associated(marklin_ptr))THEN
-  CALL copy_string('Marklin object not associated',error_str)
-  RETURN
-END IF
-CALL c_f_pointer(marklin_ptr,self)
+IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 CALL copy_string_rev(key,name_tmp)
 !---Construct operator
 NULLIFY(lmop)
@@ -255,12 +256,7 @@ CLASS(oft_matrix), POINTER :: lop => NULL()
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 TYPE(oft_h1_zerob), TARGET :: h1_zerob
-CALL copy_string('',error_str)
-IF(.NOT.c_associated(marklin_ptr))THEN
-  CALL copy_string('Marklin object not associated',error_str)
-  RETURN
-END IF
-CALL c_f_pointer(marklin_ptr,self)
+IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 IF(ML_hcurl_grad%nlevels==0)THEN
   !---Grad(H^1) subspace
   CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h1,minlev=ML_oft_hcurl%minlev+1)
@@ -324,12 +320,7 @@ TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 TYPE(marklin_obj), POINTER :: self
 TYPE(oft_hcurl_cinterp), POINTER :: interp_obj
-CALL copy_string('',error_str)
-IF(.NOT.c_associated(marklin_ptr))THEN
-  CALL copy_string('Marklin object not associated',error_str)
-  RETURN
-END IF
-CALL c_f_pointer(marklin_ptr,self)
+IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 ALLOCATE(interp_obj)
 interp_obj%u=>taylor_hffa(imode,ML_oft_hcurl%level)%f
 CALL interp_obj%setup(ML_oft_hcurl%current_level)
