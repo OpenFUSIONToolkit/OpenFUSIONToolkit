@@ -14,3 +14,6 @@ coverage:
 # GitHub specific settings
 github_checks:
   annotations: false # Disable code annotations
+# Skip bundled 3rd party libraries
+ignore:
+  - "src/ext_libs"
