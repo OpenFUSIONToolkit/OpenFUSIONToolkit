@@ -15,35 +15,36 @@
 !------------------------------------------------------------------------------
 MODULE oft_mesh_sphere
 USE oft_base
-USE oft_mesh_type, ONLY: oft_mesh, mesh, oft_bmesh, smesh
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
 USE oft_mesh_local_util, ONLY: mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_hexmesh_type, ONLY: oft_hexmesh
 USE oft_quadmesh_type, ONLY: oft_quadmesh
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 IMPLICIT NONE
 #include "local.h"
 private
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_sphere_id = 91
-INTEGER(i4) :: mesh_type = 1
 public mesh_sphere_load, mesh_sphere_cadlink, mesh_sphere_reffix
 public mesh_sphere_add_quad, smesh_circle_load, smesh_circle_cadlink
 public smesh_circle_reffix, smesh_circle_add_quad
 contains
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_sphere_load
 !------------------------------------------------------------------------------
 !> Setup a spherical test mesh
 !! The mesh is initialized with a minimal "wheel" of cells
 !! - 7 Points
 !! - 8 Cells
 !------------------------------------------------------------------------------
-subroutine mesh_sphere_load
-INTEGER(i4) :: i,ierr,io_unit
+subroutine mesh_sphere_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+INTEGER(i4) :: i,ierr,io_unit,mesh_type
+class(oft_mesh), pointer :: mesh
+class(oft_bmesh), pointer :: smesh
 namelist/sphere_options/mesh_type
 DEBUG_STACK_PUSH
+mesh_type = 1
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,sphere_options,IOSTAT=ierr)
@@ -68,6 +69,7 @@ IF(mesh_type==1)THEN
     CALL mg_mesh%smeshes(i)%setup(mesh_sphere_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
   END DO
+  CALL multigrid_level(mg_mesh,1)
   mesh=>mg_mesh%meshes(1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
@@ -111,6 +113,7 @@ ELSE
     CALL mg_mesh%smeshes(i)%setup(mesh_sphere_id,.TRUE.)
     mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
   END DO
+  CALL multigrid_level(mg_mesh,1)
   mesh=>mg_mesh%meshes(1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
@@ -158,18 +161,21 @@ end subroutine mesh_sphere_load
 !------------------------------------------------------------------------------
 !> Setup surface IDs
 !------------------------------------------------------------------------------
-subroutine mesh_sphere_cadlink
+subroutine mesh_sphere_cadlink(mesh)
+class(oft_mesh), intent(inout) :: mesh
 mesh%bfs=1
 end subroutine mesh_sphere_cadlink
 !------------------------------------------------------------------------------
 !> Refine boundary points onto the sphere
 !------------------------------------------------------------------------------
-subroutine mesh_sphere_reffix
+subroutine mesh_sphere_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j
 real(r8) :: u1,v1,u2,v2,u,v,pt(3),r
-class(oft_mesh), pointer :: pmesh
+class(oft_mesh), pointer :: pmesh,mesh
 DEBUG_STACK_PUSH
 !---Get parent mesh
+mesh=>mg_mesh%mesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN
   ! Do nothing
@@ -194,11 +200,10 @@ END IF
 DEBUG_STACK_POP
 end subroutine mesh_sphere_reffix
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_sphere_add_quad
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points
 !------------------------------------------------------------------------------
-subroutine mesh_sphere_add_quad
+subroutine mesh_sphere_add_quad(mesh)
+class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,k
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
@@ -253,10 +258,13 @@ end subroutine mesh_sphere_add_quad
 !! - 7 Points
 !! - 8 Cells
 !------------------------------------------------------------------------------
-subroutine smesh_circle_load
-INTEGER(i4) :: i,ierr,io_unit
+subroutine smesh_circle_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
+INTEGER(i4) :: i,ierr,io_unit,mesh_type
+class(oft_bmesh), pointer :: smesh
 namelist/sphere_options/mesh_type
 DEBUG_STACK_PUSH
+mesh_type = 1
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,sphere_options,IOSTAT=ierr)
@@ -278,53 +286,55 @@ IF(mesh_type==1)THEN
   DO i=1,mg_mesh%mgdim
     CALL mg_mesh%smeshes(i)%setup(mesh_sphere_id,.FALSE.)
   END DO
+  CALL multigrid_level(mg_mesh,1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
     !---Setup points
-    mesh%np=5
-    allocate(mesh%r(3,mesh%np))
-    mesh%r(:,1)=[0.d0,0.d0,0.d0]
-    mesh%r(:,2)=[1.d0,0.d0,0.d0]
-    mesh%r(:,3)=[0.d0,1.d0,0.d0]
-    mesh%r(:,4)=[-1.d0,0.d0,0.d0]
-    mesh%r(:,5)=[0.d0,-1.d0,0.d0]
+    smesh%np=5
+    allocate(smesh%r(3,smesh%np))
+    smesh%r(:,1)=[0.d0,0.d0,0.d0]
+    smesh%r(:,2)=[1.d0,0.d0,0.d0]
+    smesh%r(:,3)=[0.d0,1.d0,0.d0]
+    smesh%r(:,4)=[-1.d0,0.d0,0.d0]
+    smesh%r(:,5)=[0.d0,-1.d0,0.d0]
     !---Setup cells
-    mesh%nc=4
-    allocate(mesh%lc(3,mesh%nc),mesh%reg(mesh%nc))
-    mesh%reg=1
-    mesh%lc(:,1)=[2,3,1]
-    mesh%lc(:,2)=[3,4,1]
-    mesh%lc(:,3)=[4,5,1]
-    mesh%lc(:,4)=[5,2,1]
+    smesh%nc=4
+    allocate(smesh%lc(3,smesh%nc),smesh%reg(smesh%nc))
+    smesh%reg=1
+    smesh%lc(:,1)=[2,3,1]
+    smesh%lc(:,2)=[3,4,1]
+    smesh%lc(:,3)=[4,5,1]
+    smesh%lc(:,4)=[5,2,1]
   END IF
 ELSE
   allocate(oft_quadmesh::mg_mesh%smeshes(mg_mesh%mgdim))
   DO i=1,mg_mesh%mgdim
     CALL mg_mesh%smeshes(i)%setup(mesh_sphere_id,.FALSE.)
   END DO
+  CALL multigrid_level(mg_mesh,1)
   smesh=>mg_mesh%smeshes(1)
   IF(oft_env%rank==0)THEN
     !---Setup points
-    mesh%np=8
-    allocate(mesh%r(3,mesh%np))
-    mesh%r(:,1)=[1.d0,1.d0,0.d0]*0.5d0/SQRT(2.d0)
-    mesh%r(:,2)=[-1.d0,1.d0,0.d0]*0.5d0/SQRT(2.d0)
-    mesh%r(:,3)=[-1.d0,-1.d0,0.d0]*0.5d0/SQRT(2.d0)
-    mesh%r(:,4)=[1.d0,-1.d0,0.d0]*0.5d0/SQRT(2.d0)
-    mesh%r(:,5)=[1.d0,1.d0,0.d0]/SQRT(2.d0)
-    mesh%r(:,6)=[-1.d0,1.d0,0.d0]/SQRT(2.d0)
-    mesh%r(:,7)=[-1.d0,-1.d0,0.d0]/SQRT(2.d0)
-    mesh%r(:,8)=[1.d0,-1.d0,0.d0]/SQRT(2.d0)
+    smesh%np=8
+    allocate(smesh%r(3,smesh%np))
+    smesh%r(:,1)=[1.d0,1.d0,0.d0]*0.5d0/SQRT(2.d0)
+    smesh%r(:,2)=[-1.d0,1.d0,0.d0]*0.5d0/SQRT(2.d0)
+    smesh%r(:,3)=[-1.d0,-1.d0,0.d0]*0.5d0/SQRT(2.d0)
+    smesh%r(:,4)=[1.d0,-1.d0,0.d0]*0.5d0/SQRT(2.d0)
+    smesh%r(:,5)=[1.d0,1.d0,0.d0]/SQRT(2.d0)
+    smesh%r(:,6)=[-1.d0,1.d0,0.d0]/SQRT(2.d0)
+    smesh%r(:,7)=[-1.d0,-1.d0,0.d0]/SQRT(2.d0)
+    smesh%r(:,8)=[1.d0,-1.d0,0.d0]/SQRT(2.d0)
     !---Setup cells
-    mesh%nc=5
-    allocate(mesh%lc(4,mesh%nc),mesh%reg(mesh%nc))
-    mesh%reg=1
+    smesh%nc=5
+    allocate(smesh%lc(4,smesh%nc),smesh%reg(smesh%nc))
+    smesh%reg=1
     !---
-    mesh%lc(:,1)=[1,2,3,4]
-    mesh%lc(:,2)=[1,2,6,5]
-    mesh%lc(:,3)=[2,3,7,6]
-    mesh%lc(:,4)=[3,4,8,7]
-    mesh%lc(:,5)=[4,1,5,8]
+    smesh%lc(:,1)=[1,2,3,4]
+    smesh%lc(:,2)=[1,2,6,5]
+    smesh%lc(:,3)=[2,3,7,6]
+    smesh%lc(:,4)=[3,4,8,7]
+    smesh%lc(:,5)=[4,1,5,8]
   END IF
 END IF
 call mesh_global_resolution(smesh)
@@ -333,20 +343,23 @@ end subroutine smesh_circle_load
 !------------------------------------------------------------------------------
 !> Setup surface IDs
 !------------------------------------------------------------------------------
-subroutine smesh_circle_cadlink
+subroutine smesh_circle_cadlink(smesh)
+class(oft_bmesh), intent(inout) :: smesh
 smesh%bes=1
 end subroutine smesh_circle_cadlink
 !------------------------------------------------------------------------------
 !> Refine boundary points onto the sphere
 !------------------------------------------------------------------------------
-subroutine smesh_circle_reffix
+subroutine smesh_circle_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j
 real(r8) :: u1,v1,u2,v2,u,v,pt(3),r
-class(oft_bmesh), pointer :: pmesh
+class(oft_bmesh), pointer :: pmesh,smesh
 DEBUG_STACK_PUSH
 !---Get parent mesh
+smesh=>mg_mesh%smesh
 pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
-IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN
+IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN
   ! Do nothing
 ELSE
   if(oft_debug_print(1))write(*,*)'Adjusting points to circle boundary'
@@ -365,7 +378,8 @@ end subroutine smesh_circle_reffix
 !------------------------------------------------------------------------------
 !> Add quadratic mesh node points
 !------------------------------------------------------------------------------
-subroutine smesh_circle_add_quad
+subroutine smesh_circle_add_quad(smesh)
+class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j,k
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH

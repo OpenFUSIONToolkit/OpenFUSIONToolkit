@@ -11,10 +11,11 @@ from ..io import build_XDMF
 
 class Marklin_field_interpolator():
     '''! Interpolation class for force-free eigenstate vector fields'''
-    def __init__(self,int_obj,int_type,dim,fbary_tol=1.E-8):
+    def __init__(self,marklin_obj,int_ptr,int_type,dim,fbary_tol=1.E-8):
         '''! Initialize interpolation object
 
-        @param int_obj Address of FORTRAN interpolation class
+        @param marklin_obj Marklin instance for interpolator
+        @param int_ptr Address of FORTRAN interpolation class
         @param int_type Interpolation type (1: vector potential; 2: magnetic field)
         @param dim Dimension of vector field
         @param fbary_tol Tolerance for physical to logical mapping
@@ -23,13 +24,14 @@ class Marklin_field_interpolator():
         self.int_type = int_type
         self.dim = dim
         self.val = numpy.zeros((self.dim,), dtype=numpy.float64)
-        self.int_obj = int_obj
+        self.marklin_obj = marklin_obj
+        self._int_ptr = int_ptr
         self.fbary_tol = fbary_tol
     
     def __del__(self):
         '''Destroy underlying interpolation object'''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
-        marklin_apply_int(self.int_obj,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.val)
+        marklin_apply_int(self.marklin_obj._marklin_ptr,self._int_ptr,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.val)
 
     def eval(self,pt):
         '''! Evaluate field at a given location
@@ -37,7 +39,7 @@ class Marklin_field_interpolator():
         @param pt Location for evaluation [3]
         @result Field at evaluation point [self.dim]
         '''
-        marklin_apply_int(self.int_obj,self.int_type,pt,self.fbary_tol,ctypes.byref(self.cell),self.val)
+        marklin_apply_int(self.marklin_obj._marklin_ptr,self._int_ptr,self.int_type,pt,self.fbary_tol,ctypes.byref(self.cell),self.val)
         return self.val
 
 
@@ -50,6 +52,10 @@ class Marklin():
         '''
         # Create OFT execution environment
         self._oft_env = OFT_env
+        ## Internal Marklin solver object
+        self._marklin_ptr = c_void_p()
+        ## Internal mesh object
+        self._mesh_ptr = c_void_p()
         ## Number of regions in mesh
         self.nregs = -1
         ## Number of points in mesh
@@ -93,7 +99,7 @@ class Marklin():
             }
             self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
             self._oft_env.update_oft_in()
-            oft_setup_vmesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
+            oft_setup_vmesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         elif r is not None:
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)
             lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
@@ -105,10 +111,18 @@ class Marklin():
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
             else:
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
-            oft_setup_vmesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs))
+            oft_setup_vmesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
+    
+    def setup(self,order=2,minlev=-1):
+        '''! Needs docs
+        '''
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_setup(ctypes.byref(self._marklin_ptr),self._mesh_ptr,order,minlev,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
     
     def setup_io(self,basepath=None):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
@@ -124,7 +138,7 @@ class Marklin():
             self._io_basepath = basepath[:-1]
             basepath_c = self._oft_env.path2c(basepath)
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_setup_io(basepath_c,error_string)
+        marklin_setup_io(self._marklin_ptr,basepath_c,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
     
@@ -136,12 +150,10 @@ class Marklin():
         '''
         return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
 
-    def compute(self,nmodes=1,order=2,minlev=-1,save_rst=True):
+    def compute(self,nmodes=1,save_rst=True):
         r'''! Compute force-free eigenmodes
 
         @param nmodes Number of eigenmodes to compute
-        @param order Order of FE representation
-        @param minlev Minimum level for multigrid solve
         @param save_rst Save restart files? 
         '''
         if self._nm != -1:
@@ -149,7 +161,7 @@ class Marklin():
         #
         eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_compute(order,nmodes,minlev,save_rst,eig_vals,error_string)
+        marklin_compute(self._marklin_ptr,nmodes,save_rst,eig_vals,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self._nm = nmodes
@@ -164,7 +176,7 @@ class Marklin():
         #
         error_string = self._oft_env.get_c_errorbuff()
         ctag = self._oft_env.path2c(tag)
-        marklin_save_visit(field.int_obj,field.int_type,ctag,error_string)
+        marklin_save_visit(self._marklin_ptr,field._int_ptr,field.int_type,ctag,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -177,12 +189,12 @@ class Marklin():
         '''
         if imode > self._nm:
             raise ValueError("Requested mode number exceeds number of available modes")
-        int_obj = c_void_p()
+        interpolation_ptr = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_get_aint(imode,ctypes.byref(int_obj),bn_gauge,error_string)
+        marklin_get_aint(self._marklin_ptr,imode,ctypes.byref(interpolation_ptr),bn_gauge,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return Marklin_field_interpolator(int_obj,1,3)
+        return Marklin_field_interpolator(self,interpolation_ptr,1,3)
 
     def get_binterp(self,imode):
         r'''! Create field interpolator for magnetic field
@@ -192,9 +204,9 @@ class Marklin():
         '''
         if imode > self._nm:
             raise ValueError("Requested mode number exceeds number of available modes")
-        int_obj = c_void_p()
+        interpolation_ptr = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_get_bint(imode,ctypes.byref(int_obj),error_string)
+        marklin_get_bint(self._marklin_ptr,imode,ctypes.byref(interpolation_ptr),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return Marklin_field_interpolator(int_obj,2,3)
+        return Marklin_field_interpolator(self,interpolation_ptr,2,3)

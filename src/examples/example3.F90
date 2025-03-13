@@ -162,7 +162,7 @@
 !!
 !!\subsection doc_ex3_code_inc Module Includes
 !!
-!!The \ref taylor "Taylor" module requires the \ref lag_group "Lagrange" and \ref hcurl_group "H1(Curl)"
+!!The \ref taylor "Taylor" module requires the \ref lag_group "Lagrange" and \ref hcurl_group "H(Curl)"
 !!finite element representations.
 ! START SOURCE
 PROGRAM example3
@@ -170,23 +170,23 @@ PROGRAM example3
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels
-USE oft_lag_fields, ONLY: oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level
+!---H(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
-USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa
+USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, ML_oft_hcurl, &
+  ML_oft_lagrange, ML_oft_vlagrange
 IMPLICIT NONE
 #include "local.h"
 !!\subsection ex3_code_vars Variable Definitions
@@ -208,6 +208,7 @@ REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !!\subsection doc_ex3_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting files must be setup
@@ -215,21 +216,21 @@ TYPE(xdmf_plot_file) :: plot_file
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Example3")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!\subsection doc_ex3_code_fem Setup FE Types
 !!
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
 !---Lagrange
-CALL oft_lag_setup(order)
-CALL lag_setup_interp
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
+CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
-!---H1(Curl) subspace
-CALL oft_hcurl_setup(order)
-CALL hcurl_setup_interp
-CALL hcurl_mloptions
+!---H(Curl) space
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
+CALL hcurl_setup_interp(ML_oft_hcurl)
+CALL hcurl_mloptions(ML_oft_hcurl)
 !!\subsection doc_ex3_code_taylor Compute Taylor state
 !!
 !!The eigenstate is now computed using the \ref taylor::taylor_hmodes "taylor_hmodes" subroutine. The
@@ -256,25 +257,25 @@ CALL taylor_hmodes(1)
 !!Integration is performed by the \ref oft_lag_operators::oft_lag_vproject "oft_lag_vproject"
 !!subroutine, which takes a general \ref fem_utils::oft_fem_interp "interpolation" object that is
 !!used to evaluate the field. The result of \ref taylor::taylor_hmodes "taylor_hmodes" is the vector
-!!potential \ref taylor::taylor_hffa "taylor_hffa" in H1(Curl) form so the \ref
+!!potential \ref taylor::taylor_hffa "taylor_hffa" in H(Curl) form so the \ref
 !!oft_hcurl_operators::oft_hcurl_cinterp "oft_hcurl_cinterp" object is used to provide evaluation of
 !!\f$ B = \nabla \times A \f$.
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(lmop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre) ! Setup Preconditioner
 !---Create solver fields
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
 !---Setup field interpolation
-Bfield%u=>taylor_hffa(1,oft_hcurl_level)%f
-CALL Bfield%setup
+Bfield%u=>taylor_hffa(1,ML_oft_hcurl%level)%f
+CALL Bfield%setup(ML_oft_hcurl%current_level)
 !---Project field
-CALL oft_lag_vproject(Bfield,v)
+CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save
@@ -285,7 +286,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-call mesh%save_vertex_vector(bvout,plot_file,'B')
+call mg_mesh%mesh%save_vertex_vector(bvout,plot_file,'B')
 !---Finalize enviroment
 CALL oft_finalize
 END PROGRAM example3

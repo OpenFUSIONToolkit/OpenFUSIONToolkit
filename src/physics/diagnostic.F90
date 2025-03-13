@@ -14,14 +14,12 @@
 MODULE diagnostic
 USE oft_base
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, smesh, mesh_findcell2, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, mesh_findcell2, cell_is_curved
 USE oft_io, ONLY: oft_bin_file
 USE fem_utils, ONLY: fem_interp, bfem_interp
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
-! CLASS field_probe
-!
 !> Synthetic field diagnostic
 !!
 !! Provides setup and driver for sampling a n-vector at specified locations.
@@ -38,6 +36,7 @@ TYPE :: field_probe
   LOGICAL :: project = .FALSE. !< Project points to mesh boundary
   CHARACTER(LEN=OFT_PATH_SLEN) :: filename = '' !< History file name
   CLASS(fem_interp), POINTER :: B => NULL() !< Interpolation operator for field
+  CLASS(oft_mesh), POINTER :: mesh => NULL() !< Mesh containing field
   TYPE(oft_bin_file) :: hist_file
 CONTAINS
   !> Initialize point list and setup ownership
@@ -50,8 +49,6 @@ CONTAINS
   PROCEDURE :: save => field_probe_save
 END TYPE field_probe
 !------------------------------------------------------------------------------
-! CLASS flux_probe
-!
 !> Synthetic flux diagnostic
 !!
 !! Provides setup and driver for computing the flux of a 3-vector at a specified
@@ -73,6 +70,7 @@ TYPE :: flux_probe
   REAL(r8) :: hcpv(3) = 0.d0 !< Normal vector for circular cut plane
   REAL(r8), POINTER, DIMENSION(:,:) :: norm => NULL() !< List of face normals
   CLASS(fem_interp), POINTER :: B => NULL() !< Interpolation operator for field
+  CLASS(oft_mesh), POINTER :: mesh => NULL() !< Mesh containing field
 CONTAINS
   !> Determine surface and setup mappings
   PROCEDURE :: setup => flux_probe_setup
@@ -81,8 +79,6 @@ CONTAINS
 END TYPE flux_probe
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE field_probe_setup
-!
 !> Initialize point list and setup ownership
 !!
 !! Sampling locations may be set in the code directly, via `pts`, or loaded
@@ -122,15 +118,15 @@ ELSE IF(PRESENT(filename))THEN
 ELSE
   CALL oft_abort('Neither locations nor a probe file were specified.','field_probe_setup',__FILE__)
 END IF
-IF(self%project)CALL project_points_to_boundary(self%nprobes,self%pts)
+IF(self%project)CALL project_points_to_boundary(self%mesh,self%nprobes,self%pts)
 !---
 ALLOCATE(self%cells(self%nprobes),self%pts_log(4,self%nprobes))
 ALLOCATE(ptmp(self%nprobes),pown(self%nprobes),fout(self%nprobes))
 ptmp=-1
 self%cells=0
 DO i=1,self%nprobes
-  CALL mesh_findcell2(mesh,self%cells(i),self%pts(:,i),4,f)
-  minf=mesh%in_cell(f, self%tol)
+  CALL mesh_findcell2(self%mesh,self%cells(i),self%pts(:,i),4,f)
+  minf=self%mesh%in_cell(f, self%tol)
   ! fmin=MINVAL(f)
   ! fmax=MAXVAL(f)
   ! fout(i)=MAX(-fmin,fmax-1.d0)
@@ -171,8 +167,6 @@ END DO
 DEALLOCATE(ptmp,pown,fout)
 END SUBROUTINE field_probe_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE field_probe_eval
-!
 !> Evalute field at all probe locations
 !---------------------------------------------------------------------------
 SUBROUTINE field_probe_eval(self,vals)
@@ -187,7 +181,7 @@ ALLOCATE(vtmp(self%dim,self%nprobes))
 vtmp=0.d0
 DO i=1,self%nprobes
   IF(self%cells(i)>0)THEN
-    CALL mesh%jacobian(self%cells(i),self%pts_log(:,i),goptmp,v)
+    CALL self%mesh%jacobian(self%cells(i),self%pts_log(:,i),goptmp,v)
     CALL self%B%interp(self%cells(i),self%pts_log(:,i),goptmp,vtmp(:,i))
   END IF
 END DO
@@ -199,8 +193,6 @@ vals=vtmp
 DEALLOCATE(vtmp)
 END SUBROUTINE field_probe_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE field_probe_setup_save
-!
 !> Setup history file for repeated saves
 !---------------------------------------------------------------------------
 SUBROUTINE field_probe_setup_save(self,filename)
@@ -225,8 +217,6 @@ IF(oft_env%head_proc)THEN
 END IF
 END SUBROUTINE field_probe_setup_save
 !---------------------------------------------------------------------------
-! SUBROUTINE field_probe_save
-!
 !> Sample and save the result to the history file
 !---------------------------------------------------------------------------
 SUBROUTINE field_probe_save(self,time)
@@ -249,8 +239,6 @@ END IF
 DEALLOCATE(vals,output)
 END SUBROUTINE field_probe_save
 !---------------------------------------------------------------------------
-! SUBROUTINE flux_probe_setup
-!
 !> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE flux_probe_setup(self)
@@ -259,7 +247,9 @@ CLASS(flux_probe), INTENT(inout) :: self
 INTEGER(i4) :: i,j,cell
 INTEGER(i4), ALLOCATABLE :: fmap(:)
 REAL(r8) :: r(3),rcc(3),rdv(3)
+CLASS(oft_mesh), POINTER :: mesh
 !---
+mesh=>self%mesh
 allocate(fmap(mesh%nf))
 CALL get_inverse_map(mesh%lbf,mesh%nbf,fmap,mesh%nf)
 self%nf=0
@@ -314,8 +304,6 @@ END IF
 deallocate(fmap)
 END SUBROUTINE flux_probe_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE flux_probe_eval
-!
 !> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE flux_probe_eval(self,tflux)
@@ -326,7 +314,7 @@ INTEGER(i4) :: i,j,m,fmap(3)
 REAL(r8) :: goptmp(3,4),v,bcc(3),f(4),reg
 TYPE(oft_quad_type) :: quad
 !---Set quadrature order
-CALL mesh%bmesh%quad_rule(self%order,quad)
+CALL self%mesh%bmesh%quad_rule(self%order,quad)
 !---
 reg=0.d0
 DO i=1,self%nf
@@ -339,7 +327,7 @@ DO i=1,self%nf
   f=0.d0
   DO m=1,quad%np
     f(fmap)=quad%pts(:,m)
-    CALL mesh%jacobian(self%cells(i),f,goptmp,v)
+    CALL self%mesh%jacobian(self%cells(i),f,goptmp,v)
     CALL self%B%interp(self%cells(i),f,goptmp,bcc)
     reg=reg+DOT_PRODUCT(bcc,self%norm(:,i))*quad%wts(m)
   END DO
@@ -350,8 +338,6 @@ tflux=oft_mpi_sum(reg)
 CALL quad%delete
 END SUBROUTINE flux_probe_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE project_points_to_boundary
-!
 !> Project a set of points to the mesh boundary
 !!
 !! Projection is performed by finding the closest point to a set of known points
@@ -359,7 +345,8 @@ END SUBROUTINE flux_probe_eval
 !! rule. This provides a relatively evenly spaced set of points over each boundary
 !! triangle.
 !---------------------------------------------------------------------------
-SUBROUTINE project_points_to_boundary(npts,pts,order)
+SUBROUTINE project_points_to_boundary(mesh,npts,pts,order)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 INTEGER(i4), INTENT(in) :: npts !< Number of points
 REAL(r8), INTENT(inout) :: pts(:,:) !< List of points [3,npts]
 INTEGER(i4), OPTIONAL, INTENT(in) :: order !< Order of 2D quadrature rule used (optional)
@@ -438,14 +425,13 @@ CALL quad%delete
 DEALLOCATE(ptstmp,dist,distin,distout)
 END SUBROUTINE project_points_to_boundary
 !---------------------------------------------------------------------------
-! FUNCTION: tfluxfun
-!
 !> Evaluate the toroidally averaged toroidal flux of a 3-vector
 !!
 !! @note This requires your geometry is oriented with one of the principle axes
 !! as the axis of toroidal symmetry.
 !---------------------------------------------------------------------------
-FUNCTION tfluxfun(field,quad_order,axis) RESULT(tflux)
+FUNCTION tfluxfun(mesh,field,quad_order,axis) RESULT(tflux)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 INTEGER(i4), OPTIONAL, INTENT(in) :: axis !< Index of axis coordinate (optional)
@@ -481,11 +467,10 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION tfluxfun
 !---------------------------------------------------------------------------
-! FUNCTION: scal_int
-!
 !> Evaluate the volume integral of a scalar
 !---------------------------------------------------------------------------
-FUNCTION scal_int(field,quad_order) RESULT(energy)
+FUNCTION scal_int(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u dV \f$
@@ -512,11 +497,10 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_int
 !---------------------------------------------------------------------------
-! FUNCTION: scal_energy
-!
 !> Evaluate the field energy of a scalar
 !---------------------------------------------------------------------------
-FUNCTION scal_energy(field,quad_order) RESULT(energy)
+FUNCTION scal_energy(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u^2 dV \f$
@@ -543,11 +527,10 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_energy
 !---------------------------------------------------------------------------
-! FUNCTION: vec_energy
-!
 !> Evaluate the field energy of a 3-vector
 !---------------------------------------------------------------------------
-FUNCTION vec_energy(field,quad_order) RESULT(energy)
+FUNCTION vec_energy(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int \left| \textbf{u} \right|^2 dV \f$
@@ -574,11 +557,10 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION vec_energy
 !---------------------------------------------------------------------------
-! FUNCTION: weighted_vec_energy
-!
 !> Evaluate the field energy of a 3-vector with a scalar weight field
 !---------------------------------------------------------------------------
-FUNCTION weighted_vec_energy(field,weight,quad_order) RESULT(energy)
+FUNCTION weighted_vec_energy(mesh,field,weight,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field \f$ (u) \f$
 CLASS(fem_interp), INTENT(inout) :: weight !< Weight field \f$ (\omega) \f$
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
@@ -607,11 +589,10 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION weighted_vec_energy
 !---------------------------------------------------------------------------
-! FUNCTION: scal_surf_int
-!
 !> Evaluate the boundary integral of a scalar field
 !---------------------------------------------------------------------------
-FUNCTION scal_surf_int(field,quad_order) RESULT(energy)
+FUNCTION scal_surf_int(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u dS \f$
@@ -643,7 +624,8 @@ END FUNCTION scal_surf_int
 !---------------------------------------------------------------------------
 !> Evaluate the boundary integral of a boundary scalar field
 !---------------------------------------------------------------------------
-FUNCTION bscal_surf_int(field,quad_order,reg_mask) RESULT(energy)
+FUNCTION bscal_surf_int(mesh,field,quad_order,reg_mask) RESULT(energy)
+CLASS(oft_bmesh), INTENT(inout) :: mesh
 CLASS(bfem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 INTEGER(i4), OPTIONAL, INTENT(in) :: reg_mask !< Region to integrate over
@@ -653,16 +635,16 @@ REAL(r8) :: area,etmp(1),sgop(3,3)
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
-CALL smesh%quad_rule(quad_order,quad)
+CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
 !$omp parallel do default(firstprivate) shared(field,quad,reg_mask) reduction(+:energy)
-do i=1,smesh%nc
+do i=1,mesh%nc
   IF(PRESENT(reg_mask))THEN
-    IF(smesh%reg(i)/=reg_mask)CYCLE
+    IF(mesh%reg(i)/=reg_mask)CYCLE
   END IF
   !---Loop over quadrature points
   do m=1,quad%np
-    call smesh%jacobian(i,quad%pts(:,m),sgop,area)
+    call mesh%jacobian(i,quad%pts(:,m),sgop,area)
     call field%interp(i,quad%pts(:,m),sgop,etmp)
     energy = energy + etmp(1)*area*quad%wts(m)
   end do
@@ -673,11 +655,10 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION bscal_surf_int
 !---------------------------------------------------------------------------
-! FUNCTION: vec_surf_int
-!
 !> Evaluate the boundary flux of a vector field
 !---------------------------------------------------------------------------
-FUNCTION vec_surf_int(field,quad_order) RESULT(energy)
+FUNCTION vec_surf_int(mesh,field,quad_order) RESULT(energy)
+CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int \textbf{u} \cdot \textbf{dS} \f$

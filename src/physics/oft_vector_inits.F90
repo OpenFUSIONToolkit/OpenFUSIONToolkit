@@ -11,12 +11,10 @@
 !---------------------------------------------------------------------------
 module oft_vector_inits
 use oft_base
-use oft_mesh_type, only: mesh
+use oft_mesh_type, only: oft_mesh
 use fem_utils, only: fem_interp
 use mhd_utils, only: mu0
 implicit none
-!---------------------------------------------------------------------------
-! CLASS uniform_field
 !---------------------------------------------------------------------------
 !> Interpolation class for a uniform vector field
 !---------------------------------------------------------------------------
@@ -28,8 +26,6 @@ contains
   procedure :: interp => uniform_field_interp
 end type uniform_field
 !---------------------------------------------------------------------------
-! CLASS poss_vec_field
-!---------------------------------------------------------------------------
 !> Interpolation class for a uniform vector field
 !---------------------------------------------------------------------------
 type, extends(fem_interp) :: poss_vec_field
@@ -39,8 +35,6 @@ contains
   !> Reconstruct magnetic field
   procedure :: interp => poss_vec_interp
 end type poss_vec_field
-!---------------------------------------------------------------------------
-! CLASS cyl_taylor
 !---------------------------------------------------------------------------
 !> Evaluate analytic fields for the tuna can spheromak
 !---------------------------------------------------------------------------
@@ -61,8 +55,6 @@ contains
   procedure :: interp => cyl_taylor_interp
 end type cyl_taylor
 !---------------------------------------------------------------------------
-! CLASS inf_coils
-!---------------------------------------------------------------------------
 !> Evaluate analytic fields for a set of straight infinite coils
 !---------------------------------------------------------------------------
 type, extends(fem_interp) :: inf_coils
@@ -76,8 +68,6 @@ contains
   !> Evalute cummulative field from all coils
   procedure :: interp => inf_coils_interp
 end type inf_coils
-!---------------------------------------------------------------------------
-! CLASS tor_radial
 !---------------------------------------------------------------------------
 !> Field corresponding to a poloidal circulation in toroidal corrdinates
 !---------------------------------------------------------------------------
@@ -104,8 +94,6 @@ INTERFACE
 END INTERFACE
 contains
 !---------------------------------------------------------------------------
-! SUBROUTINE: uniform_field_interp
-!---------------------------------------------------------------------------
 !> Return a uniform vector field
 !---------------------------------------------------------------------------
 subroutine uniform_field_interp(self,cell,f,gop,val)
@@ -116,8 +104,6 @@ real(r8), intent(in) :: gop(3,4)
 real(r8), intent(out) :: val(:)
 val(1:self%n)=self%val(1:self%n)
 end subroutine uniform_field_interp
-!---------------------------------------------------------------------------
-! SUBROUTINE: uniform_field_interp
 !---------------------------------------------------------------------------
 !> Return a uniform vector field
 !---------------------------------------------------------------------------
@@ -130,29 +116,29 @@ real(r8), intent(out) :: val(:)
 real(r8) :: pt(3)
 IF(.NOT.ASSOCIATED(self%func))CALL oft_abort("No eval function specified", &
   "poss_vec_interp", __FILE__)
-pt=mesh%log2phys(cell,f)
+pt=self%mesh%log2phys(cell,f)
 CALL self%func(pt,val,self%n)
 end subroutine poss_vec_interp
 !---------------------------------------------------------------------------
-! SUBROUTINE: cyl_taylor_setup
-!---------------------------------------------------------------------------
 !> Setup analytic Taylor state interpolator for a cylindrical geometry
 !---------------------------------------------------------------------------
-subroutine cyl_taylor_setup(self)
+subroutine cyl_taylor_setup(self,mesh)
 class(cyl_taylor), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
 integer(i4) :: i,ierr
 real(r8) :: zmin,zmax,rmax,pt(3),val(3)
 !---
 IF(self%zaxis>3.OR.self%zaxis<0)CALL oft_abort('Invalid z-axis','cyl_taylor_setup',__FILE__)
 IF(ANY(self%rplane>3).OR.ANY(self%rplane<0))CALL oft_abort('Invalid xy-plane','cyl_taylor_setup',__FILE__)
+self%mesh=>mesh
 !---
 zmin=1.d99
 zmax=-1.d99; rmax=-1.d99
 !$omp parallel do reduction(min:zmin) reduction(max:zmax) reduction(max:rmax)
-DO i=1,mesh%np
-  zmin=MIN(zmin,mesh%r(self%zaxis,i))
-  zmax=MAX(zmax,mesh%r(self%zaxis,i))
-  rmax=MAX(rmax,SQRT(SUM(mesh%r(self%rplane,i)**2)))
+DO i=1,self%mesh%np
+  zmin=MIN(zmin,self%mesh%r(self%zaxis,i))
+  zmax=MAX(zmax,self%mesh%r(self%zaxis,i))
+  rmax=MAX(rmax,SQRT(SUM(self%mesh%r(self%rplane,i)**2)))
 END DO
 #ifdef HAVE_MPI
 CALL MPI_ALLREDUCE(zmin,self%zmin,1,OFT_MPI_R8,MPI_MIN,oft_env%COMM,ierr)
@@ -172,8 +158,6 @@ CALL cyl_taylor_eval(self,pt,val)
 self%scale=1.d0/SUM(val**2)
 end subroutine cyl_taylor_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE: cyl_taylor_interp
-!---------------------------------------------------------------------------
 !> Evalute analytic Taylor state fields for a cylindrical geometry
 !---------------------------------------------------------------------------
 subroutine cyl_taylor_interp(self,cell,f,gop,val)
@@ -184,7 +168,7 @@ real(r8), intent(in) :: gop(3,4)
 real(r8), intent(out) :: val(:)
 real(r8) :: pt(3),i,ar,az,s,c
 !---
-pt=mesh%log2phys(cell,f)
+pt=self%mesh%log2phys(cell,f)
 CALL cyl_taylor_eval(self,pt,val)
 val=val*self%scale
 ! !---
@@ -201,8 +185,6 @@ val=val*self%scale
 ! val(self%rplane(1))=-(self%alm*pt(self%rplane(2))*s+self%akz*pt(self%rplane(1))*c)*i
 ! val(self%zaxis)=dbesj0(ar)*s
 end subroutine cyl_taylor_interp
-!---------------------------------------------------------------------------
-! SUBROUTINE: cyl_taylor_eval
 !---------------------------------------------------------------------------
 !> Evalute analytic Taylor state fields for a cylindrical geometry
 !---------------------------------------------------------------------------
@@ -226,24 +208,22 @@ val(self%rplane(1))=-(self%alm*pt(self%rplane(2))*s+self%akz*pt(self%rplane(1))*
 val(self%zaxis)=dbesj0(ar)*s
 end subroutine cyl_taylor_eval
 !---------------------------------------------------------------------------
-! SUBROUTINE: inf_coils_setup
-!---------------------------------------------------------------------------
 !> Setup infinite coil interpolation class
 !---------------------------------------------------------------------------
-subroutine inf_coils_setup(self)
+subroutine inf_coils_setup(self,mesh)
 class(inf_coils), intent(inout) :: self
+class(oft_mesh), target, intent(inout) :: mesh
 integer(i4) :: i
 !---
 IF(.NOT.ASSOCIATED(self%axis))CALL oft_abort('No axes set.','inf_coils_setup',__FILE__)
 IF(.NOT.ASSOCIATED(self%center))CALL oft_abort('No centers set.','inf_coils_setup',__FILE__)
 IF(.NOT.ASSOCIATED(self%current))CALL oft_abort('No currents set.','inf_coils_setup',__FILE__)
+self%mesh=>mesh
 !---
 DO i=1,self%ncoils
   self%axis(:,i) = self%axis(:,i)/magnitude(self%axis(:,i))
 END DO
 end subroutine inf_coils_setup
-!---------------------------------------------------------------------------
-! SUBROUTINE: inf_coils_interp
 !---------------------------------------------------------------------------
 !> Evalute cummulative field from all coils
 !---------------------------------------------------------------------------
@@ -256,7 +236,7 @@ real(r8), intent(out) :: val(:)
 integer(i4) :: i
 real(r8) :: pt(3),r(3)
 !---
-pt=mesh%log2phys(cell,f)
+pt=self%mesh%log2phys(cell,f)
 !---
 val=0.d0
 DO i=1,self%ncoils
@@ -265,8 +245,6 @@ DO i=1,self%ncoils
 END DO
 val = val*mu0/(4.d0*pi)
 end subroutine inf_coils_interp
-!---------------------------------------------------------------------------
-! SUBROUTINE: tor_radial_interp
 !---------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------
@@ -279,7 +257,7 @@ real(r8), intent(out) :: val(:)
 integer(i4) :: i
 real(r8) :: pt(3),r,rhat(3),that(3),phi,theta
 !---Get position in physical coordinates
-pt=mesh%log2phys(cell,f)
+pt=self%mesh%log2phys(cell,f)
 !---Convert to toroidal coordinates
 r=magnitude(pt(1:2))
 phi=ATAN2(pt(2),pt(1))
