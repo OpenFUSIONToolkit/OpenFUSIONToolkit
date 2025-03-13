@@ -58,8 +58,9 @@ def tokamaker_recon_default_settings(oft_env):
     return settings
 
 ## @cond
+# tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag)
 tokamaker_recon_run = ctypes_subroutine(oftpy_lib.tokamaker_recon_run,
-    [c_bool, ctypes.POINTER(tokamaker_recon_settings_struct), c_int_ptr])
+    [c_void_p, c_bool, ctypes.POINTER(tokamaker_recon_settings_struct), c_int_ptr])
 ## @endcond
 
 Mirnov_con_id = 1
@@ -333,17 +334,17 @@ con_map = {
 
 class reconstruction():
     '''! TokaMaker equilibrium reconstruction class'''
-    def __init__(self,gs_obj,in_filename='fit.in',out_filename='fit.out'):
+    def __init__(self,tMaker_obj,in_filename='fit.in',out_filename='fit.out'):
         '''! Create equilibrium reconstruction object
         
-        @param gs_obj TokaMaker object used for computing G-S equilibria
+        @param tMaker_obj TokaMaker object used for computing G-S equilibria
         @param in_filename Filename to use for reconstruction input
         @param out_filename Filename to use for reconstruction outputs
         '''
         ## Grad-Shafranov object for reconstruction
-        self._gs_obj = gs_obj
+        self._tMaker_obj = tMaker_obj
         ## Reconstruction specific settings object
-        self.settings = tokamaker_recon_default_settings(self._gs_obj._oft_env)
+        self.settings = tokamaker_recon_default_settings(self._tMaker_obj._oft_env)
         ## Plasma current constraint
         self._Ip_con = None
         ## Diamagnetic flux constraint 
@@ -361,12 +362,12 @@ class reconstruction():
         ## Name of reconstruction output file
         self.out_file = out_filename
         # Update settings
-        self.settings.infile = self._gs_obj._oft_env.path2c(self.con_file)
-        self.settings.outfile = self._gs_obj._oft_env.path2c(self.out_file)
+        self.settings.infile = self._tMaker_obj._oft_env.path2c(self.con_file)
+        self.settings.outfile = self._tMaker_obj._oft_env.path2c(self.out_file)
     
     def __del__(self):
         '''! Destroy reconstruction object'''
-        self._gs_obj = None
+        self._tMaker_obj = None
         self.settings = None
         self._Ip_con = None
         self._Dflux_con = None
@@ -482,5 +483,5 @@ class reconstruction():
         '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.'''
         self.write_fit_in()
         error_flag = c_int()
-        tokamaker_recon_run(c_bool(vacuum),self.settings,ctypes.byref(error_flag))
+        tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings,ctypes.byref(error_flag))
         return error_flag.value

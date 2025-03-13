@@ -70,22 +70,55 @@ TYPE, BIND(C) :: tokamaker_recon_settings_type
   TYPE(c_ptr) :: infile !< Needs docs
   TYPE(c_ptr) :: outfile !< Needs docs
 END TYPE tokamaker_recon_settings_type
-!
-TYPE(oft_ml_fem_type), TARGET :: ML_oft_blagrange
-TYPE(gs_eq), POINTER :: gs_global => NULL() !< Global G-S object
-TYPE(oft_tmaker_td), POINTER :: gs_td_global => NULL() !< Global time-dependent object
-integer(i4), POINTER :: lc_plot(:,:) => NULL() !< Needs docs
-integer(i4), POINTER :: reg_plot(:) => NULL() !< Needs docs
-real(r8), POINTER :: r_plot(:,:) => NULL() !< Needs docs
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+TYPE :: tokamaker_instance
+  INTEGER(i4), POINTER, DIMENSION(:) :: reg_plot => NULL() !< Needs docs
+  INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_plot => NULL() !< Needs docs
+  REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Needs docs
+  TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Mesh container
+  TYPE(oft_ml_fem_type), POINTER :: ML_oft_blagrange => NULL() !< Finite element container
+  TYPE(gs_eq), POINTER :: gs => NULL() !< G-S object
+  TYPE(oft_tmaker_td), POINTER :: gs_td => NULL() !< Time-dependent G-S object
+END TYPE tokamaker_instance
 CONTAINS
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_alloc(gs_obj) BIND(C,NAME="tokamaker_alloc")
-TYPE(c_ptr), INTENT(out) :: gs_obj !< Needs docs
-IF(.NOT.ASSOCIATED(gs_global))ALLOCATE(gs_global)
-gs_obj=c_loc(gs_global) ! Do nothing with this for now
+SUBROUTINE tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str) BIND(C,NAME="tokamaker_alloc")
+TYPE(c_ptr), INTENT(out) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+CALL copy_string('',error_str)
+IF(.NOT.c_associated(mesh_ptr))THEN
+  CALL copy_string('Mesh object not associated',error_str)
+  RETURN
+END IF
+ALLOCATE(tMaker_obj)
+ALLOCATE(tMaker_obj%gs,tMaker_obj%gs_td,tMaker_obj%ML_oft_blagrange)
+tMaker_ptr=C_LOC(tMaker_obj)
+CALL c_f_pointer(mesh_ptr,tMaker_obj%ml_mesh)
 END SUBROUTINE tokamaker_alloc
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+FUNCTION tokamaker_ccast(tMaker_cptr,tMaker_obj,error_str) RESULT(success)
+TYPE(c_ptr), INTENT(in) :: tMaker_cptr !< C pointer to TokaMaker object
+TYPE(tokamaker_instance), POINTER, INTENT(out) :: tMaker_obj
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+!---Clear error flag
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.c_associated(tMaker_cptr))THEN
+  IF(PRESENT(error_str))CALL copy_string('TokaMaker object not associated',error_str)
+  success=.FALSE.
+  RETURN
+END IF
+CALL c_f_pointer(tMaker_cptr,tMaker_obj)
+success=.TRUE.
+END FUNCTION tokamaker_ccast
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -109,149 +142,136 @@ END SUBROUTINE tokamaker_eval_green
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_regions(mesh_ptr,coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils,error_str) BIND(C,NAME="tokamaker_setup_regions")
-TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
+SUBROUTINE tokamaker_setup_regions(tMaker_ptr,coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils,error_str) BIND(C,NAME="tokamaker_setup_regions")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(i4), POINTER :: contig_tmp(:)
 INTEGER(4) :: i
 INTEGER(4), POINTER :: xpoint_tmp(:)
-TYPE(multigrid_mesh), POINTER :: mg_mesh
+! TYPE(multigrid_mesh), POINTER :: mg_mesh
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
 CLASS(oft_bmesh), POINTER :: smesh
-CALL copy_string('',error_str)
-IF(.NOT.c_associated(mesh_ptr))THEN
-  CALL copy_string('Mesh object not associated',error_str)
-  RETURN
-END IF
-CALL c_f_pointer(mesh_ptr,mg_mesh)
-smesh=>mg_mesh%smesh
-CALL copy_string_rev(coil_file,gs_global%coil_file)
-IF(TRIM(gs_global%coil_file)=='none')THEN
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+smesh=>tMaker_obj%ml_mesh%smesh
+CALL copy_string_rev(coil_file,tMaker_obj%gs%coil_file)
+IF(TRIM(tMaker_obj%gs%coil_file)=='none')THEN
   !
   CALL c_f_pointer(xpoint_mask, xpoint_tmp, [smesh%nreg])
-  ALLOCATE(gs_global%saddle_rmask(smesh%nreg))
-  gs_global%saddle_rmask=LOGICAL(xpoint_tmp==0)
+  ALLOCATE(tMaker_obj%gs%saddle_rmask(smesh%nreg))
+  tMaker_obj%gs%saddle_rmask=LOGICAL(xpoint_tmp==0)
   !
   CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
-  gs_global%ncoil_regs=0
-  gs_global%ncond_regs=0
+  tMaker_obj%gs%ncoil_regs=0
+  tMaker_obj%gs%ncond_regs=0
   DO i=2,smesh%nreg
     IF(eta_tmp(i)>0.d0)THEN
-      gs_global%ncond_regs=gs_global%ncond_regs+1
+      tMaker_obj%gs%ncond_regs=tMaker_obj%gs%ncond_regs+1
     ELSE
-      gs_global%ncoil_regs=gs_global%ncoil_regs+1
+      tMaker_obj%gs%ncoil_regs=tMaker_obj%gs%ncoil_regs+1
     END IF
   END DO
   !
-  gs_global%ncoils=ncoils
-  ALLOCATE(gs_global%coil_vcont(ncoils),gs_global%coil_currs(ncoils))
-  gs_global%coil_vcont = 0.d0
-  gs_global%coil_currs = 0.d0
+  tMaker_obj%gs%ncoils=ncoils
+  ALLOCATE(tMaker_obj%gs%coil_vcont(ncoils),tMaker_obj%gs%coil_currs(ncoils))
+  tMaker_obj%gs%coil_vcont = 0.d0
+  tMaker_obj%gs%coil_currs = 0.d0
   CALL c_f_pointer(coil_nturns, nturns_tmp, [smesh%nreg,ncoils])
-  ALLOCATE(gs_global%coil_nturns(smesh%nreg,ncoils))
-  gs_global%coil_nturns=0.d0
-  gs_global%coil_nturns=nturns_tmp
+  ALLOCATE(tMaker_obj%gs%coil_nturns(smesh%nreg,ncoils))
+  tMaker_obj%gs%coil_nturns=0.d0
+  tMaker_obj%gs%coil_nturns=nturns_tmp
   !
   CALL c_f_pointer(contig_flag, contig_tmp, [smesh%nreg])
-  ALLOCATE(gs_global%cond_regions(gs_global%ncond_regs))
-  ALLOCATE(gs_global%coil_regions(gs_global%ncoil_regs))
-  gs_global%ncond_regs=0
-  gs_global%ncoil_regs=0
+  ALLOCATE(tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs))
+  ALLOCATE(tMaker_obj%gs%coil_regions(tMaker_obj%gs%ncoil_regs))
+  tMaker_obj%gs%ncond_regs=0
+  tMaker_obj%gs%ncoil_regs=0
   DO i=2,smesh%nreg
     IF(eta_tmp(i)>0.d0)THEN
-      gs_global%ncond_regs=gs_global%ncond_regs+1
+      tMaker_obj%gs%ncond_regs=tMaker_obj%gs%ncond_regs+1
       IF(eta_tmp(i)<1.d9)THEN
-        gs_global%cond_regions(gs_global%ncond_regs)%eta=eta_tmp(i)
+        tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%eta=eta_tmp(i)
       END IF
-      gs_global%cond_regions(gs_global%ncond_regs)%id=i
-      gs_global%cond_regions(gs_global%ncond_regs)%continuous=(contig_tmp(i)==1)
+      tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%id=i
+      tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%continuous=(contig_tmp(i)==1)
     ELSE
-      gs_global%ncoil_regs=gs_global%ncoil_regs+1
-      gs_global%coil_regions(gs_global%ncoil_regs)%id=i
+      tMaker_obj%gs%ncoil_regs=tMaker_obj%gs%ncoil_regs+1
+      tMaker_obj%gs%coil_regions(tMaker_obj%gs%ncoil_regs)%id=i
     END IF
   END DO
 ELSE
-  CALL gs_load_regions(gs_global)
+  CALL gs_load_regions(tMaker_obj%gs)
 END IF
 END SUBROUTINE tokamaker_setup_regions
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_reset(mesh_ptr,error_str) BIND(C,NAME="tokamaker_reset")
-TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+SUBROUTINE tokamaker_reset(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_reset")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
 LOGICAL :: file_exists
 real(r8), POINTER :: vals_tmp(:)
-TYPE(multigrid_mesh), POINTER :: mg_mesh
-! CHARACTER(LEN=OFT_ERROR_SLEN) :: tmp_str
-!---Clear error flag
-CALL copy_string('',error_str)
-!---
-IF(ASSOCIATED(r_plot))DEALLOCATE(r_plot)
-IF(ASSOCIATED(lc_plot))DEALLOCATE(lc_plot)
-IF(ASSOCIATED(reg_plot))DEALLOCATE(reg_plot)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 !---Destroy objects
-CALL gs_global%delete()
-DEALLOCATE(gs_global)
-CALL ML_oft_blagrange%current_level%delete()
-IF(.NOT.c_associated(mesh_ptr))THEN
-  CALL copy_string('Mesh object not associated',error_str)
-  RETURN
+IF(ASSOCIATED(tMaker_obj%r_plot))DEALLOCATE(tMaker_obj%r_plot)
+IF(ASSOCIATED(tMaker_obj%lc_plot))DEALLOCATE(tMaker_obj%lc_plot)
+IF(ASSOCIATED(tMaker_obj%reg_plot))DEALLOCATE(tMaker_obj%reg_plot)
+IF(ASSOCIATED(tMaker_obj%gs))THEN
+  CALL tMaker_obj%gs%delete()
+  DEALLOCATE(tMaker_obj%gs)
 END IF
-CALL c_f_pointer(mesh_ptr,mg_mesh)
-CALL multigrid_reset(mg_mesh)
-DEALLOCATE(mg_mesh)
-ALLOCATE(gs_global)
+IF(ASSOCIATED(tMaker_obj%ML_oft_blagrange))THEN
+  CALL tMaker_obj%ML_oft_blagrange%current_level%delete()
+END IF
+IF(ASSOCIATED(tMaker_obj%ml_mesh))THEN
+  CALL multigrid_reset(tMaker_obj%ml_mesh)
+  DEALLOCATE(tMaker_obj%ml_mesh)
+END IF
+DEALLOCATE(tMaker_obj)
 END SUBROUTINE tokamaker_reset
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(mesh_ptr,order,full_domain,ncoils,error_str) BIND(C,NAME="tokamaker_setup")
-TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
+SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,error_str) BIND(C,NAME="tokamaker_setup")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
 LOGICAL :: file_exists
 real(r8), POINTER :: vals_tmp(:)
-TYPE(multigrid_mesh), POINTER :: mg_mesh
-! CHARACTER(LEN=80) :: tmp_str
-!---Clear error flag
-CALL copy_string('',error_str)
-IF(.NOT.c_associated(mesh_ptr))THEN
-  CALL copy_string('Mesh object not associated',error_str)
-  RETURN
-END IF
-CALL c_f_pointer(mesh_ptr,mg_mesh)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 !---------------------------------------------------------------------------
 ! Check input files
 !---------------------------------------------------------------------------
-IF(TRIM(gs_global%coil_file)/='none')THEN
-    INQUIRE(EXIST=file_exists,FILE=TRIM(gs_global%coil_file))
+IF(TRIM(tMaker_obj%gs%coil_file)/='none')THEN
+    INQUIRE(EXIST=file_exists,FILE=TRIM(tMaker_obj%gs%coil_file))
     IF(.NOT.file_exists)THEN
         CALL copy_string('Specified "coil_file" cannot be found',error_str)
         RETURN
     END IF
 END IF
-IF(TRIM(gs_global%limiter_file)/='none')THEN
-    INQUIRE(EXIST=file_exists,FILE=TRIM(gs_global%limiter_file))
+IF(TRIM(tMaker_obj%gs%limiter_file)/='none')THEN
+    INQUIRE(EXIST=file_exists,FILE=TRIM(tMaker_obj%gs%limiter_file))
     IF(.NOT.file_exists)THEN
         CALL copy_string('Specified "limiter_file" cannot be found',error_str)
         RETURN
     END IF
 END IF
-! IF(TRIM(gs_global%eqdsk_limiter_file)/='none')THEN
-!     INQUIRE(EXIST=file_exists,FILE=TRIM(gs_global%eqdsk_limiter_file))
+! IF(TRIM(tMaker_obj%gs%eqdsk_limiter_file)/='none')THEN
+!     INQUIRE(EXIST=file_exists,FILE=TRIM(tMaker_obj%gs%eqdsk_limiter_file))
 !     IF(.NOT.file_exists)THEN
 !         CALL copy_string('Specified "eqdsk_limiter_file" cannot be found',error_str)
 !         RETURN
@@ -260,101 +280,111 @@ END IF
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
-mg_mesh%smesh%tess_order=order
-CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
-CALL gs_global%setup(ML_oft_blagrange)
+tMaker_obj%ml_mesh%smesh%tess_order=order
+CALL oft_lag_setup(tMaker_obj%ml_mesh,order,ML_blag_obj=tMaker_obj%ML_oft_blagrange,minlev=-1)
+CALL tMaker_obj%gs%setup(tMaker_obj%ML_oft_blagrange)
 !---------------------------------------------------------------------------
 ! Setup experimental geometry
 !---------------------------------------------------------------------------
-gs_global%save_visit=.FALSE.
-gs_global%full_domain=full_domain
-CALL gs_setup_walls(gs_global)
-CALL gs_global%load_limiters
-CALL gs_global%init()
-ncoils=gs_global%ncoils
+tMaker_obj%gs%save_visit=.FALSE.
+tMaker_obj%gs%full_domain=full_domain
+CALL gs_setup_walls(tMaker_obj%gs)
+CALL tMaker_obj%gs%load_limiters
+CALL tMaker_obj%gs%init()
+ncoils=tMaker_obj%gs%ncoils
 END SUBROUTINE tokamaker_setup
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_load_profiles(f_file,f_offset,p_file,eta_file,f_NI_file) BIND(C,NAME="tokamaker_load_profiles")
+SUBROUTINE tokamaker_load_profiles(tMaker_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str) BIND(C,NAME="tokamaker_load_profiles")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 CHARACTER(KIND=c_char), INTENT(in) :: f_file(OFT_PATH_SLEN) !< F*F' prof.in file
 CHARACTER(KIND=c_char), INTENT(in) :: p_file(OFT_PATH_SLEN) !< P' prof.in file
 CHARACTER(KIND=c_char), INTENT(in) :: eta_file(OFT_PATH_SLEN) !< Resistivity (eta) prof.in file
 CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive F*F' prof.in file
 REAL(c_double), VALUE, INTENT(in) :: f_offset !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL copy_string_rev(f_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%I)
-IF(f_offset>-1.d98)gs_global%I%f_offset=f_offset
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%I)
+IF(f_offset>-1.d98)tMaker_obj%gs%I%f_offset=f_offset
 CALL copy_string_rev(p_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%P)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%P)
 CALL copy_string_rev(eta_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%eta)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%eta)
 CALL copy_string_rev(f_NI_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,gs_global%I_NI)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%I_NI)
 END SUBROUTINE tokamaker_load_profiles
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_init_psi(r0,z0,a,kappa,delta,rhs_source,error_str) BIND(C,NAME="tokamaker_init_psi")
+SUBROUTINE tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str) BIND(C,NAME="tokamaker_init_psi")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 REAL(c_double), VALUE, INTENT(in) :: r0 !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: z0 !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: a !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: kappa !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: delta !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
 REAL(8), POINTER, DIMENSION(:) :: rhs_tmp
-CALL copy_string('',error_str)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(c_associated(rhs_source))THEN
-  CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
-  CALL gs_global%init_psi(ierr,curr_source=rhs_tmp)
+  CALL c_f_pointer(rhs_source, rhs_tmp, [tMaker_obj%gs%psi%n])
+  CALL tMaker_obj%gs%init_psi(ierr,curr_source=rhs_tmp)
 ELSE
-  CALL gs_global%init_psi(ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
+  CALL tMaker_obj%gs%init_psi(ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
 END IF
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_init_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(error_str) BIND(C,NAME="tokamaker_solve")
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
+SUBROUTINE tokamaker_solve(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_solve")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
-CALL copy_string('',error_str)
-gs_global%timing=0.d0
-CALL gs_global%solve(ierr)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+tMaker_obj%gs%timing=0.d0
+CALL tMaker_obj%gs%solve(ierr)
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_solve
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_vac_solve(psi_in,rhs_source,error_str) BIND(C,NAME="tokamaker_vac_solve")
+SUBROUTINE tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str) BIND(C,NAME="tokamaker_vac_solve")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Input: BCs for \f$ \psi \f$, Output: solution
 TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Error string (empty if no error)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rhs_tmp
 CLASS(oft_vector), POINTER :: psi_tmp,rhs_vec
 TYPE(oft_lag_brinterp) :: source_field
-CALL copy_string('',error_str)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 NULLIFY(psi_tmp)
-CALL gs_global%psi%new(psi_tmp)
-CALL c_f_pointer(psi_in, vals_tmp, [gs_global%psi%n])
+CALL tMaker_obj%gs%psi%new(psi_tmp)
+CALL c_f_pointer(psi_in, vals_tmp, [tMaker_obj%gs%psi%n])
 CALL psi_tmp%restore_local(vals_tmp)
 IF(c_associated(rhs_source))THEN
   NULLIFY(rhs_tmp)
-  CALL gs_global%psi%new(rhs_vec)
-  CALL c_f_pointer(rhs_source, rhs_tmp, [gs_global%psi%n])
+  CALL tMaker_obj%gs%psi%new(rhs_vec)
+  CALL c_f_pointer(rhs_source, rhs_tmp, [tMaker_obj%gs%psi%n])
   CALL rhs_vec%restore_local(rhs_tmp)
   source_field%u=>rhs_vec
-  CALL source_field%setup(gs_global%fe_rep)
-  CALL gs_global%vac_solve(psi_tmp,rhs_source=source_field,ierr=ierr)
+  CALL source_field%setup(tMaker_obj%gs%fe_rep)
+  CALL tMaker_obj%gs%vac_solve(psi_tmp,rhs_source=source_field,ierr=ierr)
   CALL source_field%delete()
   CALL rhs_vec%delete()
   DEALLOCATE(rhs_vec)
 ELSE
-  CALL gs_global%vac_solve(psi_tmp,ierr=ierr)
+  CALL tMaker_obj%gs%vac_solve(psi_tmp,ierr=ierr)
 END IF
 CALL psi_tmp%get_local(vals_tmp)
 CALL psi_tmp%delete()
@@ -363,21 +393,31 @@ END SUBROUTINE tokamaker_vac_solve
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_analyze() BIND(C,NAME="tokamaker_analyze")
-CALL gs_analyze(gs_global)
+SUBROUTINE tokamaker_analyze(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_analyze")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL gs_analyze(tMaker_obj%gs)
 END SUBROUTINE tokamaker_analyze
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_recon_run(vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_run")
+SUBROUTINE tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_run")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
 LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))THEN
+  error_flag=-100
+  RETURN
+END IF
 error_flag=0
-IF(vacuum)gs_global%has_plasma=.FALSE.
+IF(vacuum)tMaker_obj%gs%has_plasma=.FALSE.
 fitI=settings%fitI
 fitP=settings%fitP
 fitPnorm=settings%fitPnorm
@@ -392,31 +432,36 @@ CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
 CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(infile_c,infile)
 CALL copy_string_rev(outfile_c,outfile)
-gs_global%timing=0.d0
-CALL fit_gs(gs_global,infile,outfile,fitI,fitP,fitPnorm,&
+tMaker_obj%gs%timing=0.d0
+CALL fit_gs(tMaker_obj%gs,infile,outfile,fitI,fitP,fitPnorm,&
             fitAlam,fitR0,fitV0,fitCoils,fitF0, &
             fixedCentering)
-gs_global%has_plasma=.TRUE.
+tMaker_obj%gs%has_plasma=.TRUE.
 END SUBROUTINE tokamaker_recon_run
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_td(dt,lin_tol,nl_tol,pre_plasma) BIND(C,NAME="tokamaker_setup_td")
+SUBROUTINE tokamaker_setup_td(tMaker_ptr,dt,lin_tol,nl_tol,pre_plasma,error_str) BIND(C,NAME="tokamaker_setup_td")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 REAL(c_double), VALUE, INTENT(in) :: dt !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: lin_tol !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: nl_tol !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: pre_plasma !< Needs docs
-IF(ASSOCIATED(gs_td_global))THEN
-  CALL gs_td_global%delete()
-  DEALLOCATE(gs_td_global)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs_td))THEN
+  CALL tMaker_obj%gs_td%delete()
+  DEALLOCATE(tMaker_obj%gs_td)
 END IF
-ALLOCATE(gs_td_global)
-CALL gs_td_global%setup(gs_global,dt,lin_tol,nl_tol,LOGICAL(pre_plasma))
+ALLOCATE(tMaker_obj%gs_td)
+CALL tMaker_obj%gs_td%setup(tMaker_obj%gs,dt,lin_tol,nl_tol,LOGICAL(pre_plasma))
 END SUBROUTINE tokamaker_setup_td
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_eig_td(omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm) BIND(C,NAME="tokamaker_eig_td")
+SUBROUTINE tokamaker_eig_td(tMaker_ptr,omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm,error_str) BIND(C,NAME="tokamaker_eig_td")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 REAL(c_double), VALUE, INTENT(in) :: omega !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: neigs !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Needs docs
@@ -424,130 +469,157 @@ TYPE(c_ptr), VALUE, INTENT(in) :: eig_vecs !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: include_bounds !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: eta_plasma !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER :: eigs_tmp(:,:),eig_vecs_tmp(:,:)
 LOGICAL :: pm_save
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL c_f_pointer(eigs, eigs_tmp, [2,neigs])
-CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [gs_global%psi%n,neigs])
+CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs%psi%n,neigs])
 pm_save=oft_env%pm; oft_env%pm=pm
-CALL eig_gs_td(gs_global,neigs,eigs_tmp,eig_vecs_tmp,omega,LOGICAL(include_bounds),eta_plasma)
+CALL eig_gs_td(tMaker_obj%gs,neigs,eigs_tmp,eig_vecs_tmp,omega,LOGICAL(include_bounds),eta_plasma)
 oft_env%pm=pm_save
 END SUBROUTINE tokamaker_eig_td
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_eig_wall(neigs,eigs,eig_vecs,pm) BIND(C,NAME="tokamaker_eig_wall")
+SUBROUTINE tokamaker_eig_wall(tMaker_ptr,neigs,eigs,eig_vecs,pm,error_str) BIND(C,NAME="tokamaker_eig_wall")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), VALUE, INTENT(in) :: neigs !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eig_vecs !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8) :: alam_save,pnorm_save
 REAL(8), POINTER :: eigs_tmp(:,:),eig_vecs_tmp(:,:)
 LOGICAL :: pm_save
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL c_f_pointer(eigs, eigs_tmp, [2,neigs])
-CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [gs_global%psi%n,neigs])
-alam_save=gs_global%alam; gs_global%alam=0.d0
-pnorm_save=gs_global%pnorm; gs_global%pnorm=0.d0
+CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs%psi%n,neigs])
+alam_save=tMaker_obj%gs%alam; tMaker_obj%gs%alam=0.d0
+pnorm_save=tMaker_obj%gs%pnorm; tMaker_obj%gs%pnorm=0.d0
 pm_save=oft_env%pm; oft_env%pm=pm
-CALL eig_gs_td(gs_global,neigs,eigs_tmp,eig_vecs_tmp,0.d0,.FALSE.,-1.d0)
+CALL eig_gs_td(tMaker_obj%gs,neigs,eigs_tmp,eig_vecs_tmp,0.d0,.FALSE.,-1.d0)
 oft_env%pm=pm_save
-gs_global%alam=alam_save
-gs_global%pnorm=pnorm_save
+tMaker_obj%gs%alam=alam_save
+tMaker_obj%gs%pnorm=pnorm_save
 END SUBROUTINE tokamaker_eig_wall
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_step_td(time,dt,nl_its,lin_its,nretry) BIND(C,NAME="tokamaker_step_td")
+SUBROUTINE tokamaker_step_td(tMaker_ptr,time,dt,nl_its,lin_its,nretry,error_str) BIND(C,NAME="tokamaker_step_td")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 REAL(c_double), INTENT(inout) :: time !< Needs docs
 REAL(c_double), INTENT(inout) :: dt !< Needs docs
 INTEGER(c_int), INTENT(out) :: nl_its !< Needs docs
 INTEGER(c_int), INTENT(out) :: lin_its !< Needs docs
 INTEGER(c_int), INTENT(out) :: nretry !< Needs docs
-CALL gs_td_global%step(time,dt,nl_its,lin_its,nretry)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL tMaker_obj%gs_td%step(time,dt,nl_its,lin_its,nretry)
 END SUBROUTINE tokamaker_step_td
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_mesh(np,r_loc,nc,lc_loc,reg_loc) BIND(C,NAME="tokamaker_get_mesh")
+SUBROUTINE tokamaker_get_mesh(tMaker_ptr,np,r_loc,nc,lc_loc,reg_loc,error_str) BIND(C,NAME="tokamaker_get_mesh")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), INTENT(out) :: lc_loc !< Needs docs
 TYPE(c_ptr), INTENT(out) :: r_loc !< Needs docs
 TYPE(c_ptr), INTENT(out) :: reg_loc !< Needs docs
 INTEGER(c_int), INTENT(out) :: np !< Needs docs
 INTEGER(c_int), INTENT(out) :: nc !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,j,k,id
-CALL gs_global%mesh%tessellate(r_plot, lc_plot, gs_global%mesh%tess_order)
-np=SIZE(r_plot,DIM=2,KIND=c_int)
-nc=SIZE(lc_plot,DIM=2,KIND=c_int)
-r_loc=c_loc(r_plot)
-lc_loc=c_loc(lc_plot)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL tMaker_obj%gs%mesh%tessellate(tMaker_obj%r_plot, tMaker_obj%lc_plot, tMaker_obj%gs%mesh%tess_order)
+np=SIZE(tMaker_obj%r_plot,DIM=2,KIND=c_int)
+nc=SIZE(tMaker_obj%lc_plot,DIM=2,KIND=c_int)
+r_loc=c_loc(tMaker_obj%r_plot)
+lc_loc=c_loc(tMaker_obj%lc_plot)
 !
-ALLOCATE(reg_plot(nc))
-k=nc/gs_global%mesh%nc
-IF(ASSOCIATED(gs_global%mesh%reg))THEN
+ALLOCATE(tMaker_obj%reg_plot(nc))
+k=nc/tMaker_obj%gs%mesh%nc
+IF(ASSOCIATED(tMaker_obj%gs%mesh%reg))THEN
   !$omp parallel do private(j,id)
-  DO i=1,gs_global%mesh%nc
-    id=gs_global%mesh%reg(i)
+  DO i=1,tMaker_obj%gs%mesh%nc
+    id=tMaker_obj%gs%mesh%reg(i)
     DO j=1,k
-      reg_plot((i-1)*k+j)=id
+      tMaker_obj%reg_plot((i-1)*k+j)=id
     END DO
   END DO
 ELSE
-  reg_plot=0
+  tMaker_obj%reg_plot=0
 END IF
-reg_loc=c_loc(reg_plot)
+reg_loc=c_loc(tMaker_obj%reg_plot)
 END SUBROUTINE tokamaker_get_mesh
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_limiter(np,r_loc,nloops,loop_ptr) BIND(C,NAME="tokamaker_get_limiter")
+SUBROUTINE tokamaker_get_limiter(tMaker_ptr,np,r_loc,nloops,loop_ptr,error_str) BIND(C,NAME="tokamaker_get_limiter")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), INTENT(out) :: r_loc !< Needs docs
 TYPE(c_ptr), INTENT(out) :: loop_ptr !< Needs docs
 INTEGER(c_int), INTENT(out) :: np !< Needs docs
 INTEGER(c_int), INTENT(out) :: nloops !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
 REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
-np=gs_global%nlim_con
-ALLOCATE(r_tmp(2,gs_global%nlim_con))
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+np=tMaker_obj%gs%nlim_con
+ALLOCATE(r_tmp(2,tMaker_obj%gs%nlim_con))
 r_loc=C_LOC(r_tmp)
-DO i=1,gs_global%nlim_con
-  r_tmp(:,i)=gs_global%mesh%r(1:2,gs_global%lim_con(i))
+DO i=1,tMaker_obj%gs%nlim_con
+  r_tmp(:,i)=tMaker_obj%gs%mesh%r(1:2,tMaker_obj%gs%lim_con(i))
 END DO
-nloops=gs_global%lim_nloops
-loop_ptr=C_LOC(gs_global%lim_ptr)
+nloops=tMaker_obj%gs%lim_nloops
+loop_ptr=C_LOC(tMaker_obj%gs%lim_ptr)
 END SUBROUTINE tokamaker_get_limiter
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_psi(psi_vals,psi_lim,psi_max) BIND(C,NAME="tokamaker_get_psi")
+SUBROUTINE tokamaker_get_psi(tMaker_ptr,psi_vals,psi_lim,psi_max,error_str) BIND(C,NAME="tokamaker_get_psi")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
 REAL(c_double), INTENT(out) :: psi_lim !< Needs docs
 REAL(c_double), INTENT(out) :: psi_max !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-CALL c_f_pointer(psi_vals, vals_tmp, [gs_global%psi%n])
-CALL gs_global%psi%get_local(vals_tmp)
-psi_lim = gs_global%plasma_bounds(1)
-psi_max = gs_global%plasma_bounds(2)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL tMaker_obj%gs%psi%get_local(vals_tmp)
+psi_lim = tMaker_obj%gs%plasma_bounds(1)
+psi_max = tMaker_obj%gs%plasma_bounds(2)
 END SUBROUTINE tokamaker_get_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_dels_curr(psi_vals) BIND(C,NAME="tokamaker_get_dels_curr")
+SUBROUTINE tokamaker_get_dels_curr(tMaker_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_get_dels_curr")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_solver), POINTER :: minv
-IF(.NOT.ASSOCIATED(gs_global%dels_full))CALL build_dels(gs_global%dels_full,gs_global,"none")
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_obj%gs%dels_full))CALL build_dels(tMaker_obj%gs%dels_full,tMaker_obj%gs,"none")
 !
-CALL gs_global%psi%new(u)
-CALL gs_global%psi%new(v)
-CALL c_f_pointer(psi_vals, vals_tmp, [gs_global%psi%n])
+CALL tMaker_obj%gs%psi%new(u)
+CALL tMaker_obj%gs%psi%new(v)
+CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
 CALL u%restore_local(vals_tmp)
 !
 NULLIFY(minv)
 CALL create_cg_solver(minv)
-minv%A=>gs_global%mop
+minv%A=>tMaker_obj%gs%mop
 minv%its=-2
 CALL create_diag_pre(minv%pre) ! Setup Preconditioner
-CALL gs_global%dels_full%apply(u,v)
+CALL tMaker_obj%gs%dels_full%apply(u,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%get_local(vals_tmp)
@@ -561,24 +633,28 @@ END SUBROUTINE tokamaker_get_dels_curr
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_area_int(vec_vals,reg_ind,result) BIND(C,NAME="tokamaker_area_int")
+SUBROUTINE tokamaker_area_int(tMaker_ptr,vec_vals,reg_ind,result,error_str) BIND(C,NAME="tokamaker_area_int")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: vec_vals !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: reg_ind !< Needs docs
 REAL(c_double), INTENT(out) :: result !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,m
 real(8) :: goptmp(3,3),v,pt(3),valtmp(1)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 CLASS(oft_vector), POINTER :: u
 TYPE(oft_lag_brinterp) :: field
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 NULLIFY(field%u)
-CALL gs_global%psi%new(field%u)
-CALL c_f_pointer(vec_vals, vals_tmp, [gs_global%psi%n])
+CALL tMaker_obj%gs%psi%new(field%u)
+CALL c_f_pointer(vec_vals, vals_tmp, [tMaker_obj%gs%psi%n])
 CALL field%u%restore_local(vals_tmp)
-CALL field%setup(gs_global%fe_rep)
+CALL field%setup(tMaker_obj%gs%fe_rep)
 IF(reg_ind>0)THEN
-  result = bscal_surf_int(gs_global%mesh,field,gs_global%fe_rep%quad%order,reg_ind)
+  result = bscal_surf_int(tMaker_obj%gs%mesh,field,tMaker_obj%gs%fe_rep%quad%order,reg_ind)
 ELSE
-  result = bscal_surf_int(gs_global%mesh,field,gs_global%fe_rep%quad%order)
+  result = bscal_surf_int(tMaker_obj%gs%mesh,field,tMaker_obj%gs%fe_rep%quad%order)
 END IF
 CALL field%u%delete
 DEALLOCATE(field%u)
@@ -587,64 +663,73 @@ END SUBROUTINE tokamaker_area_int
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_coil_currents(currents,reg_currents) BIND(C,NAME="tokamaker_get_coil_currents")
+SUBROUTINE tokamaker_get_coil_currents(tMaker_ptr,currents,reg_currents,error_str) BIND(C,NAME="tokamaker_get_coil_currents")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,j
 REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,coil_regs
-CALL c_f_pointer(reg_currents, coil_regs, [gs_global%mesh%nreg])
-CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoils])
-vals_tmp=(gs_global%coil_currs + gs_global%coil_vcont*gs_global%vcontrol_val)/mu0
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL c_f_pointer(reg_currents, coil_regs, [tMaker_obj%gs%mesh%nreg])
+CALL c_f_pointer(currents, vals_tmp, [tMaker_obj%gs%ncoils])
+vals_tmp=(tMaker_obj%gs%coil_currs + tMaker_obj%gs%coil_vcont*tMaker_obj%gs%vcontrol_val)/mu0
 coil_regs = 0.d0
-DO j=1,gs_global%ncoil_regs
-  DO i=1,gs_global%ncoils
-    coil_regs(gs_global%coil_regions(j)%id) = coil_regs(gs_global%coil_regions(j)%id) &
-      + vals_tmp(i)*gs_global%coil_nturns(gs_global%coil_regions(j)%id,i)
+DO j=1,tMaker_obj%gs%ncoil_regs
+  DO i=1,tMaker_obj%gs%ncoils
+    coil_regs(tMaker_obj%gs%coil_regions(j)%id) = coil_regs(tMaker_obj%gs%coil_regions(j)%id) &
+      + vals_tmp(i)*tMaker_obj%gs%coil_nturns(tMaker_obj%gs%coil_regions(j)%id,i)
   END DO
-  coil_regs(gs_global%coil_regions(j)%id) = coil_regs(gs_global%coil_regions(j)%id)*gs_global%coil_regions(j)%area
+  coil_regs(tMaker_obj%gs%coil_regions(j)%id) = coil_regs(tMaker_obj%gs%coil_regions(j)%id)*tMaker_obj%gs%coil_regions(j)%area
 END DO
 END SUBROUTINE tokamaker_get_coil_currents
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_coil_Lmat(Lmat) BIND(C,NAME="tokamaker_get_coil_Lmat")
+SUBROUTINE tokamaker_get_coil_Lmat(tMaker_ptr,Lmat,error_str) BIND(C,NAME="tokamaker_get_coil_Lmat")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: Lmat !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
 REAL(8) :: tmp1,tmp2,tmp3,itor
 CLASS(oft_vector), POINTER :: rhs,vec1,vec2
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 !---Update plasma row/column
-IF(gs_global%has_plasma)THEN
-  DO i=1,gs_global%ncoils
-    CALL gs_plasma_mutual(gs_global,gs_global%psi_coil(i)%f,gs_global%Lcoils(i,gs_global%ncoils+1),itor)
-    gs_global%Lcoils(gs_global%ncoils+1,i)=gs_global%Lcoils(i,gs_global%ncoils+1)
+IF(tMaker_obj%gs%has_plasma)THEN
+  DO i=1,tMaker_obj%gs%ncoils
+    CALL gs_plasma_mutual(tMaker_obj%gs,tMaker_obj%gs%psi_coil(i)%f,tMaker_obj%gs%Lcoils(i,tMaker_obj%gs%ncoils+1),itor)
+    tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,i)=tMaker_obj%gs%Lcoils(i,tMaker_obj%gs%ncoils+1)
   END DO
   !
-  CALL gs_global%psi%new(rhs)
-  CALL gs_global%psi%new(vec1)
-  CALL gs_global%psi%new(vec2)
-  CALL gs_source(gs_global,gs_global%psi,rhs,vec1,vec2,tmp1,tmp2,tmp3)
+  CALL tMaker_obj%gs%psi%new(rhs)
+  CALL tMaker_obj%gs%psi%new(vec1)
+  CALL tMaker_obj%gs%psi%new(vec2)
+  CALL gs_source(tMaker_obj%gs,tMaker_obj%gs%psi,rhs,vec1,vec2,tmp1,tmp2,tmp3)
   CALL vec1%set(0.d0)
-  CALL gs_global%lu_solver%apply(vec1,rhs)
-  CALL gs_plasma_mutual(gs_global,vec1,gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1),itor)
-  gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1)=gs_global%Lcoils(gs_global%ncoils+1,gs_global%ncoils+1)/itor
+  CALL tMaker_obj%gs%lu_solver%apply(vec1,rhs)
+  CALL gs_plasma_mutual(tMaker_obj%gs,vec1,tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,tMaker_obj%gs%ncoils+1),itor)
+  tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,tMaker_obj%gs%ncoils+1)=tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,tMaker_obj%gs%ncoils+1)/itor
   CALL rhs%delete()
   CALL vec1%delete()
   CALL vec2%delete()
   DEALLOCATE(rhs,vec1,vec2)
 ELSE
-  gs_global%Lcoils(gs_global%ncoils+1,:)=0.d0
-  gs_global%Lcoils(:,gs_global%ncoils+1)=0.d0
+  tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,:)=0.d0
+  tMaker_obj%gs%Lcoils(:,tMaker_obj%gs%ncoils+1)=0.d0
 END IF
 !---Copy out inductance matrix
-CALL c_f_pointer(Lmat, vals_tmp, [gs_global%ncoils+1,gs_global%ncoils+1])
-vals_tmp=gs_global%Lcoils
+CALL c_f_pointer(Lmat, vals_tmp, [tMaker_obj%gs%ncoils+1,tMaker_obj%gs%ncoils+1])
+vals_tmp=tMaker_obj%gs%Lcoils
 END SUBROUTINE tokamaker_get_coil_Lmat
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_refs(o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm) BIND(C,NAME="tokamaker_get_refs")
+SUBROUTINE tokamaker_get_refs(tMaker_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm,error_str) BIND(C,NAME="tokamaker_get_refs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), INTENT(out) :: o_point !< Needs docs
 TYPE(c_ptr), INTENT(out) :: lim_point !< Needs docs
 TYPE(c_ptr), INTENT(out) :: x_points !< Needs docs
@@ -652,23 +737,30 @@ TYPE(c_ptr), INTENT(out) :: diverted !< Needs docs
 TYPE(c_ptr), INTENT(out) :: plasma_bounds !< Needs docs
 TYPE(c_ptr), INTENT(out) :: alam !< Needs docs
 TYPE(c_ptr), INTENT(out) :: pnorm !< Needs docs
-o_point=c_loc(gs_global%o_point)
-lim_point=c_loc(gs_global%lim_point)
-x_points=c_loc(gs_global%x_points)
-diverted=c_loc(gs_global%diverted)
-plasma_bounds=c_loc(gs_global%plasma_bounds)
-alam=c_loc(gs_global%alam)
-pnorm=c_loc(gs_global%pnorm)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+o_point=c_loc(tMaker_obj%gs%o_point)
+lim_point=c_loc(tMaker_obj%gs%lim_point)
+x_points=c_loc(tMaker_obj%gs%x_points)
+diverted=c_loc(tMaker_obj%gs%diverted)
+plasma_bounds=c_loc(tMaker_obj%gs%plasma_bounds)
+alam=c_loc(tMaker_obj%gs%alam)
+pnorm=c_loc(tMaker_obj%gs%pnorm)
 END SUBROUTINE tokamaker_get_refs
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_trace_surf(psi_surf,points,npoints) BIND(C,NAME="tokamaker_trace_surf")
+SUBROUTINE tokamaker_trace_surf(tMaker_ptr,psi_surf,points,npoints,error_str) BIND(C,NAME="tokamaker_trace_surf")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 REAL(c_double), VALUE, INTENT(in) :: psi_surf !< Needs docs
 TYPE(c_ptr), INTENT(out) ::  points !< Needs docs
 INTEGER(c_int), INTENT(out) :: npoints !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:,:) :: pts_tmp
-CALL gs_trace_surf(gs_global,psi_surf,pts_tmp,npoints)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL gs_trace_surf(tMaker_obj%gs,psi_surf,pts_tmp,npoints)
 IF(npoints>0)THEN
   points = c_loc(pts_tmp)
 ELSE
@@ -678,7 +770,8 @@ END SUBROUTINE tokamaker_trace_surf
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_q(npsi,psi_q,qvals,ravgs,dl,rbounds,zbounds) BIND(C,NAME="tokamaker_get_q")
+SUBROUTINE tokamaker_get_q(tMaker_ptr,npsi,psi_q,qvals,ravgs,dl,rbounds,zbounds,error_str) BIND(C,NAME="tokamaker_get_q")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 REAL(c_double), INTENT(in) :: psi_q(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: qvals(npsi) !< Needs docs
@@ -686,23 +779,31 @@ REAL(c_double), INTENT(out) :: ravgs(npsi,2) !< Needs docs
 REAL(c_double), INTENT(out) :: dl !< Needs docs
 REAL(c_double), INTENT(out) :: rbounds(2,2) !< Needs docs
 REAL(c_double), INTENT(out) :: zbounds(2,2) !< Needs docs
-CALL gs_get_qprof(gs_global,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL gs_get_qprof(tMaker_obj%gs,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
 END SUBROUTINE tokamaker_get_q
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_sauter_fc(npsi,psi_saut,fc,r_avgs,modb_avgs) BIND(C,NAME="tokamaker_sauter_fc")
+SUBROUTINE tokamaker_sauter_fc(tMaker_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,error_str) BIND(C,NAME="tokamaker_sauter_fc")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 REAL(c_double), INTENT(in) :: psi_saut(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: fc(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Needs docs
 REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Needs docs
-CALL sauter_fc(gs_global,npsi,psi_saut,fc,r_avgs,modb_avgs)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL sauter_fc(tMaker_obj%gs,npsi,psi_saut,fc,r_avgs,modb_avgs)
 END SUBROUTINE tokamaker_sauter_fc
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_globals(Itor,centroid,vol,pvol,dflux,tflux,bp_vol) BIND(C,NAME="tokamaker_get_globals")
+SUBROUTINE tokamaker_get_globals(tMaker_ptr,Itor,centroid,vol,pvol,dflux,tflux,bp_vol,error_str) BIND(C,NAME="tokamaker_get_globals")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 REAL(c_double), INTENT(out) :: Itor !< Needs docs
 REAL(c_double), INTENT(out) :: centroid(2) !< Needs docs
 REAL(c_double), INTENT(out) :: vol !< Needs docs
@@ -710,7 +811,10 @@ REAL(c_double), INTENT(out) :: pvol !< Needs docs
 REAL(c_double), INTENT(out) :: dflux !< Needs docs
 REAL(c_double), INTENT(out) :: tflux !< Needs docs
 REAL(c_double), INTENT(out) :: bp_vol !< Needs docs
-CALL gs_comp_globals(gs_global,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL gs_comp_globals(tMaker_obj%gs,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
 Itor=Itor/mu0
 vol=vol*2.d0*pi
 pvol=pvol*2.d0*pi/mu0
@@ -718,52 +822,64 @@ END SUBROUTINE tokamaker_get_globals
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_gs_calc_vloop(vloop) BIND(C,NAME="tokamaker_gs_calc_vloop")
+SUBROUTINE tokamaker_gs_calc_vloop(tMaker_ptr,vloop,error_str) BIND(C,NAME="tokamaker_gs_calc_vloop")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 REAL(c_double), INTENT(out) :: vloop
-IF(.NOT.ASSOCIATED(gs_global%eta))THEN
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_obj%gs%eta))THEN
   vloop=-1.d0
   RETURN
 END IF
-CALL gs_calc_vloop(gs_global,vloop)
+CALL gs_calc_vloop(tMaker_obj%gs,vloop)
 END SUBROUTINE tokamaker_gs_calc_vloop
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_profs(npsi,psi_in,f,fp,p,pp) BIND(C,NAME="tokamaker_get_profs")
+SUBROUTINE tokamaker_get_profs(tMaker_ptr,npsi,psi_in,f,fp,p,pp,error_str) BIND(C,NAME="tokamaker_get_profs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 REAL(c_double), INTENT(in) :: psi_in(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: f(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: fp(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: p(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: pp(npsi) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
 REAL(8) :: x1,x2,r
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 x1=0.d0; x2=1.d0
-IF(gs_global%plasma_bounds(1)>-1.d98)THEN
-  x1=gs_global%plasma_bounds(1); x2=gs_global%plasma_bounds(2)
+IF(tMaker_obj%gs%plasma_bounds(1)>-1.d98)THEN
+  x1=tMaker_obj%gs%plasma_bounds(1); x2=tMaker_obj%gs%plasma_bounds(2)
 END IF
 DO i=1,npsi
   r=psi_in(i)*(x2-x1) + x1
-  IF(gs_global%mode==0)THEN
-    fp(i)=gs_global%alam*gs_global%I%fp(r)
-    f(i)=gs_global%psiscale*gs_global%alam*gs_global%I%f(r) + gs_global%I%f_offset
+  IF(tMaker_obj%gs%mode==0)THEN
+    fp(i)=tMaker_obj%gs%alam*tMaker_obj%gs%I%fp(r)
+    f(i)=tMaker_obj%gs%psiscale*tMaker_obj%gs%alam*tMaker_obj%gs%I%f(r) + tMaker_obj%gs%I%f_offset
   ELSE
-    f(i)=SQRT(gs_global%psiscale*gs_global%alam*gs_global%I%f(r) + gs_global%I%f_offset**2)
-    fp(i)=gs_global%alam*gs_global%I%fp(r)/(2.d0*f(i))
+    f(i)=SQRT(tMaker_obj%gs%psiscale*tMaker_obj%gs%alam*tMaker_obj%gs%I%f(r) + tMaker_obj%gs%I%f_offset**2)
+    fp(i)=tMaker_obj%gs%alam*tMaker_obj%gs%I%fp(r)/(2.d0*f(i))
   END IF
-  pp(i)=gs_global%psiscale*gs_global%pnorm*gs_global%P%fp(r)
-  p(i)=gs_global%psiscale*gs_global%psiscale*gs_global%pnorm*gs_global%P%f(r)
+  pp(i)=tMaker_obj%gs%psiscale*tMaker_obj%gs%pnorm*tMaker_obj%gs%P%fp(r)
+  p(i)=tMaker_obj%gs%psiscale*tMaker_obj%gs%psiscale*tMaker_obj%gs%pnorm*tMaker_obj%gs%P%f(r)
 END DO
 END SUBROUTINE tokamaker_get_profs
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_vfixed(npts,pts,fluxes) BIND(C,NAME="tokamaker_get_vfixed")
+SUBROUTINE tokamaker_get_vfixed(tMaker_ptr,npts,pts,fluxes,error_str) BIND(C,NAME="tokamaker_get_vfixed")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), INTENT(out) :: npts !< Needs docs
 TYPE(c_ptr), INTENT(out) :: pts !< Needs docs
 TYPE(c_ptr), INTENT(out) :: fluxes !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER :: pts_tmp(:,:),fluxes_tmp(:)
-CALL gs_fixed_vflux(gs_global,pts_tmp,fluxes_tmp)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL gs_fixed_vflux(tMaker_obj%gs,pts_tmp,fluxes_tmp)
 pts=C_LOC(pts_tmp)
 fluxes=C_LOC(fluxes_tmp)
 npts=SIZE(fluxes_tmp,DIM=1)
@@ -771,23 +887,25 @@ END SUBROUTINE tokamaker_get_vfixed
 !------------------------------------------------------------------------------
 !> Create an interpolation object for tokamaker fields
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_field_eval(imode,int_obj,error_str) BIND(C,NAME="tokamaker_get_field_eval")
+SUBROUTINE tokamaker_get_field_eval(tMaker_ptr,imode,int_obj,error_str) BIND(C,NAME="tokamaker_get_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
 TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (unused)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
-CALL copy_string('',error_str)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(imode==1)THEN
   ALLOCATE(b_interp_obj)
-  b_interp_obj%gs=>gs_global
-  CALL b_interp_obj%setup(gs_global)
+  b_interp_obj%gs=>tMaker_obj%gs
+  CALL b_interp_obj%setup(tMaker_obj%gs)
   int_obj=C_LOC(b_interp_obj)
 ELSE
   ALLOCATE(prof_interp_obj)
-  prof_interp_obj%gs=>gs_global
+  prof_interp_obj%gs=>tMaker_obj%gs
   prof_interp_obj%mode=imode-1
-  CALL prof_interp_obj%setup(gs_global)
+  CALL prof_interp_obj%setup(tMaker_obj%gs)
   int_obj=C_LOC(prof_interp_obj)
 END IF
 END SUBROUTINE tokamaker_get_field_eval
@@ -795,7 +913,8 @@ END SUBROUTINE tokamaker_get_field_eval
 !> Evaluate a TokaMaker field with an interpolation object created by
 !! \ref tokamaker_f::tokamaker_get_field_eval
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_apply_field_eval(int_obj,int_type,pt,fbary_tol,cell,dim,field) BIND(C,NAME="tokamaker_apply_field_eval")
+SUBROUTINE tokamaker_apply_field_eval(tMaker_ptr,int_obj,int_type,pt,fbary_tol,cell,dim,field) BIND(C,NAME="tokamaker_apply_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to interpolation object
 INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Field type (negative to destroy)
 REAL(c_double), INTENT(in) :: pt(3) !< Location for evaluation [R,Z,0]
@@ -806,6 +925,8 @@ REAL(c_double), INTENT(out) :: field(dim) !< Field at `pt`
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))CALL oft_abort("TokaMaker object not associated","tokamaker_apply_field_eval",__FILE__)
 IF(int_type<0)THEN
   IF(int_type==-1)THEN
     CALL c_f_pointer(int_obj, b_interp_obj)
@@ -816,14 +937,14 @@ IF(int_type<0)THEN
   END IF
   RETURN
 END IF
-call bmesh_findcell(gs_global%mesh,cell,pt,f)
+call bmesh_findcell(tMaker_obj%gs%mesh,cell,pt,f)
 IF(cell==0)RETURN
 fmin=MINVAL(f); fmax=MAXVAL(f)
 IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
   cell=-ABS(cell)
   RETURN
 END IF
-CALL gs_global%mesh%jacobian(cell,f,goptmp,vol)
+CALL tMaker_obj%gs%mesh%jacobian(cell,f,goptmp,vol)
 IF(int_type==1)THEN
   CALL c_f_pointer(int_obj, b_interp_obj)
   CALL b_interp_obj%interp(cell,f,goptmp,field)
@@ -835,188 +956,233 @@ END SUBROUTINE tokamaker_apply_field_eval
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi(psi_vals) BIND(C,NAME="tokamaker_set_psi")
+SUBROUTINE tokamaker_set_psi(tMaker_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_set_psi")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-CALL c_f_pointer(psi_vals, vals_tmp, [gs_global%psi%n])
-CALL gs_global%psi%restore_local(vals_tmp)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL tMaker_obj%gs%psi%restore_local(vals_tmp)
 END SUBROUTINE tokamaker_set_psi
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi_dt(psi_vals,dt) BIND(C,NAME="tokamaker_set_psi_dt")
+SUBROUTINE tokamaker_set_psi_dt(tMaker_ptr,psi_vals,dt,error_str) BIND(C,NAME="tokamaker_set_psi_dt")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: dt !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-gs_global%dt=dt
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+tMaker_obj%gs%dt=dt
 IF(dt>0.d0)THEN
-  IF(.NOT.ASSOCIATED(gs_global%psi_dt))CALL gs_global%psi%new(gs_global%psi_dt)
-  CALL c_f_pointer(psi_vals, vals_tmp, [gs_global%psi%n])
-  CALL gs_global%psi_dt%restore_local(vals_tmp)
+  IF(.NOT.ASSOCIATED(tMaker_obj%gs%psi_dt))CALL tMaker_obj%gs%psi%new(tMaker_obj%gs%psi_dt)
+  CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
+  CALL tMaker_obj%gs%psi_dt%restore_local(vals_tmp)
 ELSE
-  IF(ASSOCIATED(gs_global%psi_dt))THEN
-    CALL gs_global%psi_dt%delete()
-    DEALLOCATE(gs_global%psi_dt)
+  IF(ASSOCIATED(tMaker_obj%gs%psi_dt))THEN
+    CALL tMaker_obj%gs%psi_dt%delete()
+    DEALLOCATE(tMaker_obj%gs%psi_dt)
   END IF
 END IF
 END SUBROUTINE tokamaker_set_psi_dt
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_settings(settings) BIND(C,NAME="tokamaker_set_settings")
+SUBROUTINE tokamaker_set_settings(tMaker_ptr,settings,error_str) BIND(C,NAME="tokamaker_set_settings")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(tokamaker_settings_type), INTENT(in) :: settings !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 oft_env%pm=settings%pm
-gs_global%free=settings%free_boundary
-gs_global%lim_zmax=settings%lim_zmax
-gs_global%rmin=settings%rmin
-gs_global%mode=settings%mode
-gs_global%urf=settings%urf
-gs_global%maxits=settings%maxits
-gs_global%nl_tol=settings%nl_tol
-gs_global%limited_only=settings%limited_only
+tMaker_obj%gs%free=settings%free_boundary
+tMaker_obj%gs%lim_zmax=settings%lim_zmax
+tMaker_obj%gs%rmin=settings%rmin
+tMaker_obj%gs%mode=settings%mode
+tMaker_obj%gs%urf=settings%urf
+tMaker_obj%gs%maxits=settings%maxits
+tMaker_obj%gs%nl_tol=settings%nl_tol
+tMaker_obj%gs%limited_only=settings%limited_only
 CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
-CALL copy_string_rev(limfile_c,gs_global%limiter_file)
+CALL copy_string_rev(limfile_c,tMaker_obj%gs%limiter_file)
 END SUBROUTINE tokamaker_set_settings
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_targets(ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target) BIND(C,NAME="tokamaker_set_targets")
+SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 REAL(c_double), VALUE, INTENT(in) :: ip_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: ip_ratio_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: pax_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: estore_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: R0_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: V0_target !< Needs docs
-gs_global%R0_target=R0_target
-gs_global%V0_target=V0_target
-gs_global%pax_target=pax_target*mu0
-gs_global%estore_target=estore_target*mu0
-gs_global%itor_target=ip_target*mu0
-gs_global%ip_ratio_target=ip_ratio_target
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+tMaker_obj%gs%R0_target=R0_target
+tMaker_obj%gs%V0_target=V0_target
+tMaker_obj%gs%pax_target=pax_target*mu0
+tMaker_obj%gs%estore_target=estore_target*mu0
+tMaker_obj%gs%itor_target=ip_target*mu0
+tMaker_obj%gs%ip_ratio_target=ip_ratio_target
 END SUBROUTINE tokamaker_set_targets
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_isoflux(targets,weights,ntargets,grad_wt_lim) BIND(C,NAME="tokamaker_set_isoflux")
+SUBROUTINE tokamaker_set_isoflux(tMaker_ptr,targets,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_isoflux")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
-IF(ASSOCIATED(gs_global%isoflux_targets))DEALLOCATE(gs_global%isoflux_targets)
-gs_global%isoflux_ntargets=ntargets
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs%isoflux_targets))DEALLOCATE(tMaker_obj%gs%isoflux_targets)
+tMaker_obj%gs%isoflux_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(gs_global%isoflux_targets(3,gs_global%isoflux_ntargets))
-  gs_global%isoflux_targets(1:2,:)=targets
-  gs_global%isoflux_targets(3,:)=weights
-  gs_global%isoflux_grad_wt_lim=1.d0/grad_wt_lim
+  ALLOCATE(tMaker_obj%gs%isoflux_targets(3,tMaker_obj%gs%isoflux_ntargets))
+  tMaker_obj%gs%isoflux_targets(1:2,:)=targets
+  tMaker_obj%gs%isoflux_targets(3,:)=weights
+  tMaker_obj%gs%isoflux_grad_wt_lim=1.d0/grad_wt_lim
 ELSE
-  gs_global%isoflux_grad_wt_lim=-1.d0
+  tMaker_obj%gs%isoflux_grad_wt_lim=-1.d0
 END IF
 END SUBROUTINE tokamaker_set_isoflux
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_flux(locations,targets,weights,ntargets,grad_wt_lim) BIND(C,NAME="tokamaker_set_flux")
+SUBROUTINE tokamaker_set_flux(tMaker_ptr,locations,targets,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_flux")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 REAL(c_double), INTENT(in) :: locations(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: targets(ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
-IF(ASSOCIATED(gs_global%flux_targets))DEALLOCATE(gs_global%flux_targets)
-gs_global%flux_ntargets=ntargets
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs%flux_targets))DEALLOCATE(tMaker_obj%gs%flux_targets)
+tMaker_obj%gs%flux_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(gs_global%flux_targets(4,gs_global%flux_ntargets))
-  gs_global%flux_targets(1:2,:)=locations
-  gs_global%flux_targets(3,:)=targets
-  gs_global%flux_targets(4,:)=weights
-  ! gs_global%isoflux_grad_wt_lim=1.d0/grad_wt_lim
+  ALLOCATE(tMaker_obj%gs%flux_targets(4,tMaker_obj%gs%flux_ntargets))
+  tMaker_obj%gs%flux_targets(1:2,:)=locations
+  tMaker_obj%gs%flux_targets(3,:)=targets
+  tMaker_obj%gs%flux_targets(4,:)=weights
+  ! tMaker_obj%gs%isoflux_grad_wt_lim=1.d0/grad_wt_lim
 ! ELSE
-  ! gs_global%isoflux_grad_wt_lim=-1.d0
+  ! tMaker_obj%gs%isoflux_grad_wt_lim=-1.d0
 END IF
 END SUBROUTINE tokamaker_set_flux
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_saddles(targets,weights,ntargets) BIND(C,NAME="tokamaker_set_saddles")
+SUBROUTINE tokamaker_set_saddles(tMaker_ptr,targets,weights,ntargets,error_str) BIND(C,NAME="tokamaker_set_saddles")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
-IF(ASSOCIATED(gs_global%saddle_targets))DEALLOCATE(gs_global%saddle_targets)
-gs_global%saddle_ntargets=ntargets
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs%saddle_targets))DEALLOCATE(tMaker_obj%gs%saddle_targets)
+tMaker_obj%gs%saddle_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(gs_global%saddle_targets(3,gs_global%saddle_ntargets))
-  gs_global%saddle_targets(1:2,:)=targets
-  gs_global%saddle_targets(3,:)=weights
+  ALLOCATE(tMaker_obj%gs%saddle_targets(3,tMaker_obj%gs%saddle_ntargets))
+  tMaker_obj%gs%saddle_targets(1:2,:)=targets
+  tMaker_obj%gs%saddle_targets(3,:)=weights
 END IF
 END SUBROUTINE tokamaker_set_saddles
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_currents(currents) BIND(C,NAME="tokamaker_set_coil_currents")
+SUBROUTINE tokamaker_set_coil_currents(tMaker_ptr,currents,error_str) BIND(C,NAME="tokamaker_set_coil_currents")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 INTEGER(4) :: i
 REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-CALL c_f_pointer(currents, vals_tmp, [gs_global%ncoils])
-gs_global%coil_currs = vals_tmp*mu0
-gs_global%vcontrol_val = 0.d0
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL c_f_pointer(currents, vals_tmp, [tMaker_obj%gs%ncoils])
+tMaker_obj%gs%coil_currs = vals_tmp*mu0
+tMaker_obj%gs%vcontrol_val = 0.d0
 END SUBROUTINE tokamaker_set_coil_currents
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_regmat(nregularize,coil_reg_mat,coil_reg_targets,coil_reg_weights) BIND(C,NAME="tokamaker_set_coil_regmat")
+SUBROUTINE tokamaker_set_coil_regmat(tMaker_ptr,nregularize,coil_reg_mat,coil_reg_targets,coil_reg_weights,error_str) BIND(C,NAME="tokamaker_set_coil_regmat")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 INTEGER(c_int), VALUE, INTENT(in) :: nregularize !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_mat !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_targets !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_weights !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
-IF(ASSOCIATED(gs_global%coil_reg_mat))DEALLOCATE(gs_global%coil_reg_mat,gs_global%coil_reg_targets)
-gs_global%nregularize=nregularize
-ALLOCATE(gs_global%coil_reg_mat(gs_global%nregularize,gs_global%ncoils+1))
-ALLOCATE(gs_global%coil_reg_targets(gs_global%nregularize))
-CALL c_f_pointer(coil_reg_mat, vals_tmp, [gs_global%nregularize,gs_global%ncoils+1])
-gs_global%coil_reg_mat=vals_tmp
-CALL c_f_pointer(coil_reg_targets, vals_tmp, [gs_global%nregularize,1])
-gs_global%coil_reg_targets=vals_tmp(:,1)*mu0
-CALL c_f_pointer(coil_reg_weights, vals_tmp, [gs_global%nregularize,1])
-DO i=1,gs_global%nregularize
-  gs_global%coil_reg_targets(i)=gs_global%coil_reg_targets(i)*vals_tmp(i,1)
-  gs_global%coil_reg_mat(i,:)=gs_global%coil_reg_mat(i,:)*vals_tmp(i,1)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs%coil_reg_mat))DEALLOCATE(tMaker_obj%gs%coil_reg_mat,tMaker_obj%gs%coil_reg_targets)
+tMaker_obj%gs%nregularize=nregularize
+ALLOCATE(tMaker_obj%gs%coil_reg_mat(tMaker_obj%gs%nregularize,tMaker_obj%gs%ncoils+1))
+ALLOCATE(tMaker_obj%gs%coil_reg_targets(tMaker_obj%gs%nregularize))
+CALL c_f_pointer(coil_reg_mat, vals_tmp, [tMaker_obj%gs%nregularize,tMaker_obj%gs%ncoils+1])
+tMaker_obj%gs%coil_reg_mat=vals_tmp
+CALL c_f_pointer(coil_reg_targets, vals_tmp, [tMaker_obj%gs%nregularize,1])
+tMaker_obj%gs%coil_reg_targets=vals_tmp(:,1)*mu0
+CALL c_f_pointer(coil_reg_weights, vals_tmp, [tMaker_obj%gs%nregularize,1])
+DO i=1,tMaker_obj%gs%nregularize
+  tMaker_obj%gs%coil_reg_targets(i)=tMaker_obj%gs%coil_reg_targets(i)*vals_tmp(i,1)
+  tMaker_obj%gs%coil_reg_mat(i,:)=tMaker_obj%gs%coil_reg_mat(i,:)*vals_tmp(i,1)
 END DO
 END SUBROUTINE tokamaker_set_coil_regmat
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_bounds(coil_bounds) BIND(C,NAME="tokamaker_set_coil_bounds")
+SUBROUTINE tokamaker_set_coil_bounds(tMaker_ptr,coil_bounds,error_str) BIND(C,NAME="tokamaker_set_coil_bounds")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_bounds !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
-CALL c_f_pointer(coil_bounds, vals_tmp, [2,gs_global%ncoils+1])
-IF(.NOT.ASSOCIATED(gs_global%coil_bounds))THEN
-  ALLOCATE(gs_global%coil_bounds(2,gs_global%ncoils+1))
-  gs_global%coil_bounds(1,:)=-1.d98; gs_global%coil_bounds(2,:)=1.d98
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL c_f_pointer(coil_bounds, vals_tmp, [2,tMaker_obj%gs%ncoils+1])
+IF(.NOT.ASSOCIATED(tMaker_obj%gs%coil_bounds))THEN
+  ALLOCATE(tMaker_obj%gs%coil_bounds(2,tMaker_obj%gs%ncoils+1))
+  tMaker_obj%gs%coil_bounds(1,:)=-1.d98; tMaker_obj%gs%coil_bounds(2,:)=1.d98
 END IF
-DO i=1,gs_global%ncoils
-  gs_global%coil_bounds([2,1],i)=-vals_tmp(:,i)*mu0
+DO i=1,tMaker_obj%gs%ncoils
+  tMaker_obj%gs%coil_bounds([2,1],i)=-vals_tmp(:,i)*mu0
 END DO
-gs_global%coil_bounds([2,1],gs_global%ncoils+1)=-vals_tmp(:,gs_global%ncoils+1)*mu0
+tMaker_obj%gs%coil_bounds([2,1],tMaker_obj%gs%ncoils+1)=-vals_tmp(:,tMaker_obj%gs%ncoils+1)*mu0
 END SUBROUTINE tokamaker_set_coil_bounds
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_vsc(coil_gains) BIND(C,NAME="tokamaker_set_coil_vsc")
+SUBROUTINE tokamaker_set_coil_vsc(tMaker_ptr,coil_gains,error_str) BIND(C,NAME="tokamaker_set_coil_vsc")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_gains !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
-CALL c_f_pointer(coil_gains, vals_tmp, [gs_global%ncoils])
-gs_global%coil_vcont=vals_tmp
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL c_f_pointer(coil_gains, vals_tmp, [tMaker_obj%gs%ncoils])
+tMaker_obj%gs%coil_vcont=vals_tmp
 END SUBROUTINE tokamaker_set_coil_vsc
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
+SUBROUTINE tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nr !< Needs docs
@@ -1028,18 +1194,20 @@ REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(OFT_PATH_SLEN) !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=40) :: run_info_f
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp,lim_file
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL copy_string_rev(run_info,run_info_f)
 CALL copy_string_rev(filename,filename_tmp)
 CALL copy_string_rev(lim_filename,lim_file)
 IF(rcentr>0.d0)THEN
-  CALL gs_save_eqdsk(gs_global,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
+  CALL gs_save_eqdsk(tMaker_obj%gs,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
     rcentr_in=rcentr,trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,error_str=error_flag)
 ELSE
-  CALL gs_save_eqdsk(gs_global,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
+  CALL gs_save_eqdsk(tMaker_obj%gs,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
     trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,error_str=error_flag)
 END IF
 CALL copy_string(TRIM(error_flag),error_str)
@@ -1047,30 +1215,34 @@ END SUBROUTINE tokamaker_save_eqdsk
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !---------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_current_dist(iCoil,curr_dist) BIND(C,NAME="tokamaker_set_coil_current_dist")
+SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 INTEGER(c_int), VALUE, INTENT(in) :: iCoil
 TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
 class(oft_vector), pointer :: tmp_vec
-CALL c_f_pointer(curr_dist, vals_tmp, [gs_global%psi%n])
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL c_f_pointer(curr_dist, vals_tmp, [tMaker_obj%gs%psi%n])
 ! Update coil flux to overwrite old uniform distribution
 NULLIFY(tmp_vec)
-call gs_global%psi%new(tmp_vec)
+call tMaker_obj%gs%psi%new(tmp_vec)
 
-CALL gs_coil_source_distributed(gs_global,iCoil,tmp_vec,vals_tmp)
+CALL gs_coil_source_distributed(tMaker_obj%gs,iCoil,tmp_vec,vals_tmp)
 
-CALL gs_global%zerob_bc%apply(tmp_vec)
-CALL gs_vacuum_solve(gs_global,gs_global%psi_coil(iCoil)%f,tmp_vec)
+CALL tMaker_obj%gs%zerob_bc%apply(tmp_vec)
+CALL gs_vacuum_solve(tMaker_obj%gs,tMaker_obj%gs%psi_coil(iCoil)%f,tmp_vec)
 ! Update coil mutual inductances
-DO i=1,gs_global%ncoils
-  CALL gs_coil_mutual(gs_global,i,gs_global%psi_coil(iCoil)%f,gs_global%Lcoils(i,iCoil))
-  gs_global%Lcoils(iCoil,i)=gs_global%Lcoils(i,iCoil)
+DO i=1,tMaker_obj%gs%ncoils
+  CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
+  tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
   IF(i==iCoil)THEN
-    CALL gs_coil_mutual_distributed(gs_global,i,gs_global%psi_coil(iCoil)%f,vals_tmp,gs_global%Lcoils(i,iCoil))
+    CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,vals_tmp,tMaker_obj%gs%Lcoils(i,iCoil))
   ELSE
-    CALL gs_coil_mutual(gs_global,i,gs_global%psi_coil(iCoil)%f,gs_global%Lcoils(i,iCoil))
-    gs_global%Lcoils(iCoil,i)=gs_global%Lcoils(i,iCoil)
+    CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
+    tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
   END IF
 END DO
 END SUBROUTINE tokamaker_set_coil_current_dist
