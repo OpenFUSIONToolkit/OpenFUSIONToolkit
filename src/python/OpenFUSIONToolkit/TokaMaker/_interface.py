@@ -41,18 +41,18 @@ tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr])
 
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
-    [c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int])
+    [c_void_p, c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int, c_char_p])
 
 # tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
 #     [c_int, ctypes_numpy_array(float64,1), ctypes_numpy_array(float64,1), c_double, c_double, ctypes_numpy_array(float64,1)])
 
 # G-S setup function (mesh and such)
 tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
-    [c_int, c_bool, c_int_ptr, c_char_p])
+    [c_void_p, c_int, c_bool, c_int_ptr, c_char_p])
 
 # G-S setup function (mesh and such)
 tokamaker_reset = ctypes_subroutine(oftpy_lib.tokamaker_reset,
-    [c_char_p])
+    [c_void_p, c_char_p])
 
 # G-S settings function
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
@@ -201,8 +201,12 @@ tokamaker_get_vfixed = ctypes_subroutine(oftpy_lib.tokamaker_get_vfixed, #(npts,
 tokamaker_get_limiter = ctypes_subroutine(oftpy_lib.tokamaker_get_limiter, #(np,r_loc)
     [c_int_ptr,c_double_ptr_ptr,c_int_ptr,c_int_ptr_ptr])
 
-tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk, #(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,error_str)
-    [c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p, c_double, c_double, c_bool, c_char_p, c_char_p])
+tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk, #(filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,lcfs_press,error_str)
+    [c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p,
+     c_double, c_double, c_bool, c_char_p, c_double, c_char_p])
+
+tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,
+    [c_int, ctypes_numpy_array(numpy.float64,1)])
 ## @endcond
 
 
@@ -238,3 +242,4 @@ class TokaMaker_field_interpolator():
         pt_eval[:2] = pt
         tokamaker_apply_field_eval(self.int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
         return self.val
+

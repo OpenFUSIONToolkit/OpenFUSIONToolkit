@@ -14,8 +14,6 @@ USE oft_local
 IMPLICIT NONE
 PRIVATE
 !---------------------------------------------------------------------------
-! CLASS oft_quad_type
-!---------------------------------------------------------------------------
 !> Quadrature point definition structure
 !---------------------------------------------------------------------------
 TYPE, PUBLIC :: oft_quad_type
@@ -29,8 +27,6 @@ CONTAINS
   PROCEDURE :: delete => delete_quad
 END TYPE oft_quad_type
 CONTAINS
-!---------------------------------------------------------------------------
-! SUBROUTINE: delete_quadrature
 !---------------------------------------------------------------------------
 !> Delete quadrature object
 !---------------------------------------------------------------------------
@@ -151,18 +147,11 @@ REAL(r8), PARAMETER :: gauss_w19(19) = [0.01946178822972895d0, &
     0.06904454273764106d0, 0.044814226765700516d0, 0.01946178822972895d0]
 contains
 !---------------------------------------------------------------------------
-! FUNCTION: set_quad_1d
-!---------------------------------------------------------------------------
-!> @brief Get 1D quadrature rule for specified order.
-!!
-!! Get 1D quadrature rule for specified order (max = 7).
-!!
-!! @param[in,out] quad Quadrature rule
-!! @param[in] order Quadrature order
+!> Get 1D quadrature rule for specified order (max = 7)
 !---------------------------------------------------------------------------
 subroutine set_quad_1d(quad,order)
-type(oft_quad_type), intent(inout) :: quad
-integer, intent(in) :: order
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
+integer, intent(in) :: order !< Desired quadrature order
 DEBUG_STACK_PUSH
 ! Select quadrature rule from requested order
 select case(order)
@@ -211,15 +200,12 @@ end select
 DEBUG_STACK_POP
 end subroutine set_quad_1d
 !---------------------------------------------------------------------------
-! SUBROUTINE quad_change_domain
-!---------------------------------------------------------------------------
-!> @brief Set 1D quadrature rule for 1st order.
-!!
-!! @result quad Quadrature rule
+!> Change domain of integration from [-1,1] to [0,1]
 !---------------------------------------------------------------------------
 subroutine quad_change_domain(x,w,n)
-real(r8), intent(inout) :: x(n),w(n)
-integer(i4), INTENT(IN) :: n
+real(r8), intent(inout) :: x(n) !< Quadrature points
+real(r8), intent(inout) :: w(n) !< Quadrature weights
+integer(i4), INTENT(IN) :: n !< Number of quadrature points
 integer(i4) :: i
 DO i=1,n
     w(i)=w(i)/2.d0
@@ -227,16 +213,13 @@ DO i=1,n
 END DO
 end subroutine quad_change_domain
 !---------------------------------------------------------------------------
-! FUNCTION create_quad_1d
-!---------------------------------------------------------------------------
-!> @brief Set 1D quadrature rule for 1st order.
-!!
-!! @result quad Quadrature rule
+!> Create 1D quadrature object from base Gaussian quadrature rule
 !---------------------------------------------------------------------------
 function create_quad_1d(x,w,n) result(quad)
-real(r8), intent(in) :: x(n),w(n)
-integer(i4), INTENT(IN) :: n
-type(oft_quad_type) :: quad
+real(r8), intent(in) :: x(n) !< Quadrature points
+real(r8), intent(in) :: w(n) !< Quadrature weights
+integer(i4), INTENT(IN) :: n !< Number of quadrature points
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=1
 quad%np=n
 quad%order=n
@@ -246,18 +229,11 @@ quad%wts=w
 CALL quad_change_domain(quad%pts(1,:), quad%wts, n)
 end function create_quad_1d
 !---------------------------------------------------------------------------
-! FUNCTION: set_quad_2d
-!---------------------------------------------------------------------------
-!> @brief Get 2D quadrature rule for specified order.
-!!
-!! Get 2D quadrature rule for specified order (max = 11).
-!!
-!! @param[in,out] quad Quadrature rule
-!! @param[in] order Quadrature order
+!> Get 2D quadrature rule for specified order (max = 11)
 !---------------------------------------------------------------------------
 subroutine set_quad_2d(quad,order)
-type(oft_quad_type), intent(inout) :: quad
-integer(i4), intent(in) :: order
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
+integer(i4), intent(in) :: order !< Desired quadrature order
 type(oft_quad_type) :: tmp_quad
 integer(i4) :: i,j,ind
 DEBUG_STACK_PUSH
@@ -269,27 +245,23 @@ quad%order=order
 allocate(quad%pts(2,quad%np),quad%wts(quad%np))
 ind=0
 DO i=1,tmp_quad%np
-    DO j=1,tmp_quad%np
+  DO j=1,tmp_quad%np
     ind=ind+1
     quad%pts(:,ind)=(/tmp_quad%pts(1,i), tmp_quad%pts(1,j)/)
     quad%wts(ind)=tmp_quad%wts(i)*tmp_quad%wts(j)
-    END DO
+  END DO
 END DO
 DEBUG_STACK_POP
 end subroutine set_quad_2d
 !---------------------------------------------------------------------------
-! FUNCTION: set_quad_3d
-!---------------------------------------------------------------------------
-!> @brief Get 3D quadrature rule for specified order.
-!!
-!! Get 3D quadrature rule for specified order (max = 11).
+!> Get 3D quadrature rule for specified order (max = 11)
 !!
 !! @param[in,out] quad Quadrature rule
 !! @param[in] order Quadrature order
 !---------------------------------------------------------------------------
 subroutine set_quad_3d(quad,order)
-type(oft_quad_type), intent(inout) :: quad
-integer(i4), intent(in) :: order
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
+integer(i4), intent(in) :: order !< Desired quadrature order
 type(oft_quad_type) :: tmp_quad
 integer(i4) :: i,j,k,ind
 DEBUG_STACK_PUSH
@@ -301,48 +273,23 @@ quad%order=order
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
 ind=0
 DO i=1,tmp_quad%np
-    DO j=1,tmp_quad%np
+  DO j=1,tmp_quad%np
     DO k=1,tmp_quad%np
-        ind=ind+1
-        quad%pts(:,ind)=(/tmp_quad%pts(1,i), tmp_quad%pts(1,j), tmp_quad%pts(1,k)/)
-        quad%wts(ind)=tmp_quad%wts(i)*tmp_quad%wts(j)*tmp_quad%wts(k)
+      ind=ind+1
+      quad%pts(:,ind)=(/tmp_quad%pts(1,i), tmp_quad%pts(1,j), tmp_quad%pts(1,k)/)
+      quad%wts(ind)=tmp_quad%wts(i)*tmp_quad%wts(j)*tmp_quad%wts(k)
     END DO
-    END DO
+  END DO
 END DO
 DEBUG_STACK_POP
 end subroutine set_quad_3d
-!------------------------------------------------------------------------------
-! FUNCTION: quad_wt
-!------------------------------------------------------------------------------
-!> Need docs
-!------------------------------------------------------------------------------
-pure function quad_wt(x,xnodes,n) result(val)
-integer(i4), intent(in) :: n
-real(r8), intent(in) :: x,xnodes(n)
-integer(i4) :: i,j
-real(r10) :: vha,vtmp,sfac
-real(r8) :: val
-vha=0._r10
-sfac=1._r10
-DO i=1,n
-    vtmp=1._r10
-    DO j=1,n
-    IF(j==i)CYCLE
-    vtmp=vtmp*(x-xnodes(j))
-    END DO
-    vha=vha+vtmp
-    sfac=sfac*(1._r10-xnodes(i))
-END DO
-vha=vha/sfac
-val=REAL( 2._r10/((1._r10-x**2)*vha**2) ,8)
-end function quad_wt
 end module oft_gauss_quadrature
 !---------------------------------------------------------------------------
 !> Definition of 1D, 2D, and 3D quadrature rules
 !!
 !! Symmetric quadrature rules defined by Zhang et al.
 !!
-!! "Zhang, L., Cui, T., & Liu, H. (January 01, 2009). A set of symmetric
+!! "Zhang, L., Cui, T., & Liu, H. (January 01, 2009) A set of symmetric
 !! quadrature rules on triangles and tetrahedra. Journal of Computational
 !! Mathematics, 27, 1, 89-96."
 !!
@@ -359,50 +306,39 @@ private
 public set_quad_1d, set_quad_2d, set_quad_3d, oft_quad_type
 contains
 !---------------------------------------------------------------------------
-! FUNCTION: set_quad_1d
-!---------------------------------------------------------------------------
-!> @brief Get 1D quadrature rule for specified order.
-!!
-!! Get 1D quadrature rule for specified order (max = 7).
-!!
-!! @param[in,out] quad Quadrature rule
-!! @param[in] order Quadrature order
+!> Get 1D quadrature rule for specified order (max = 7)
 !---------------------------------------------------------------------------
 subroutine set_quad_1d(quad,order)
-type(oft_quad_type), intent(inout) :: quad
-integer, intent(in) :: order
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
+integer(i4), intent(in) :: order !< Desired quadrature order
 DEBUG_STACK_PUSH
 ! Select quadrature rule from requested order
 select case(order)
-    case(1)
-        quad=quad_1d_p1()
-    case(2)
-        quad=quad_1d_p3()
-    case(3)
-        quad=quad_1d_p3()
-    case(4)
-        quad=quad_1d_p5()
-    case(5)
-        quad=quad_1d_p5()
-    case(6)
-        quad=quad_1d_p7()
-    case(7)
-        quad=quad_1d_p7()
-    case default
-        CALL oft_warn('1-D Quadrature not available, using highest order = 7')
-        quad=quad_1d_p7()
+  case(1)
+    quad=quad_1d_p1()
+  case(2)
+    quad=quad_1d_p3()
+  case(3)
+    quad=quad_1d_p3()
+  case(4)
+    quad=quad_1d_p5()
+  case(5)
+    quad=quad_1d_p5()
+  case(6)
+    quad=quad_1d_p7()
+  case(7)
+    quad=quad_1d_p7()
+  case default
+    CALL oft_warn('1-D Quadrature not available, using highest order = 7')
+    quad=quad_1d_p7()
 end select
 DEBUG_STACK_POP
 end subroutine set_quad_1d
 !---------------------------------------------------------------------------
-! FUNCTION quad_1d_p1
-!---------------------------------------------------------------------------
-!> @brief Set 1D quadrature rule for 1st order.
-!!
-!! @result quad Quadrature rule
+!> Set 1D quadrature rule for 1st order
 !---------------------------------------------------------------------------
 function quad_1d_p1() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=1
 quad%np=1
 quad%order=1
@@ -411,14 +347,10 @@ quad%pts(:,1)=quad_p11()
 quad%wts(:)=1.d0
 end function quad_1d_p1
 !---------------------------------------------------------------------------
-! FUNCTION quad_1d_p3
-!---------------------------------------------------------------------------
-!> @brief Set 1D quadrature rule for 3rd order.
-!!
-!! @result quad Quadrature rule
+!> Set 1D quadrature rule for 3rd order
 !---------------------------------------------------------------------------
 function quad_1d_p3() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=1
 quad%np=2
 quad%order=3
@@ -427,14 +359,10 @@ quad%pts(:,1:2)=quad_p12(.2113248654051871177454256097490212d0)
 quad%wts(:)=.5d0
 end function quad_1d_p3
 !---------------------------------------------------------------------------
-! FUNCTION quad_1d_p5
-!---------------------------------------------------------------------------
-!> @brief Set 1D quadrature rule for 5th order.
-!!
-!! @result quad Quadrature rule
+!> Set 1D quadrature rule for 5th order
 !---------------------------------------------------------------------------
 function quad_1d_p5() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=1
 quad%np=3
 quad%order=5
@@ -445,14 +373,10 @@ quad%pts(:,3)=quad_p11()
 quad%wts(3)=4.d0/9.d0
 end function quad_1d_p5
 !---------------------------------------------------------------------------
-! FUNCTION quad_1d_p7
-!---------------------------------------------------------------------------
-!> @brief Set 1D quadrature rule for 7th order.
-!!
-!! @result quad Quadrature rule
+!> Set 1D quadrature rule for 7th order
 !---------------------------------------------------------------------------
 function quad_1d_p7() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=1
 quad%np=4
 quad%order=7
@@ -463,365 +387,271 @@ quad%pts(:,3:4)=quad_p12(.3300094782075718675986671204483776d0)
 quad%wts(3:4)=.3260725774312730713134680253890002d0
 end function quad_1d_p7
 !---------------------------------------------------------------------------
-! FUNCTION quad_p11
-!---------------------------------------------------------------------------
-!> @brief Set 1D points to (1/2,1/2).
-!!
-!! @result Evaluation points
+!> Set 1D points to (1/2,1/2)
 !---------------------------------------------------------------------------
 function quad_p11() result(b)
-real(r8) :: b(2)
+real(r8) :: b(2) !< Evaluation points
 b=1.d0/2.d0
 end function
 !---------------------------------------------------------------------------
-! FUNCTION quad_p12
-!---------------------------------------------------------------------------
-!> @brief Permute 1D points of the form (a,1-a).
-!!
-!! param[in] a Parameter 1
-!! @result Evaluation points from permutation
+!> Permute 1D points of the form (a,1-a)
 !---------------------------------------------------------------------------
 function quad_p12(a) result(b)
-real(r8), intent(in) :: a
-real(r8) :: b(2,2)
+real(r8), intent(in) :: a !< Parameter 1
+real(r8) :: b(2,2) !< Evaluation points from permutation [2,2]
 b(:,1)=(/a,1.d0-a/)
 b(:,2)=(/1.d0-a,a/)
 end function
 !---------------------------------------------------------------------------
-! FUNCTION: set_quad_2d
-!---------------------------------------------------------------------------
-!> @brief Get 2D quadrature rule for specified order.
-!!
-!! Get 2D quadrature rule for specified order (max = 11).
-!!
-!! @param[in,out] quad Quadrature rule
-!! @param[in] order Quadrature order
+!> Get 2D quadrature rule for specified order (max = 11)
 !---------------------------------------------------------------------------
 subroutine set_quad_2d(quad,order)
-type(oft_quad_type), intent(inout) :: quad
-integer(i4), intent(in) :: order
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
+integer(i4), intent(in) :: order !< Desired quadrature order
 DEBUG_STACK_PUSH
 ! Select quadrature rule from requested order
 select case(order)
-    case(1)
-        quad=quad_2d_p1()
-    case(2)
-        quad=quad_2d_p3()
-    case(3)
-        quad=quad_2d_p3()
-    case(4)
-        quad=quad_2d_p4()
-    case(5)
-        quad=quad_2d_p5()
-    case(6)
-        quad=quad_2d_p6()
-    case(7)
-        quad=quad_2d_p7()
-    case(8)
-        quad=quad_2d_p8()
-    case(9)
-        quad=quad_2d_p9()
-    case(10)
-        quad=quad_2d_p10()
-    case(11)
-        quad=quad_2d_p11()
-    case(12)
-        quad=quad_2d_p12()
-    case(13)
-        quad=quad_2d_p14()
-    case(14)
-        quad=quad_2d_p14()
-    case(15)
-        quad=quad_2d_p16()
-    case(16)
-        quad=quad_2d_p16()
-    case(17)
-        quad=quad_2d_p18()
-    case(18)
-        quad=quad_2d_p18()
-    case default
-        CALL oft_warn('2-D Quadrature not available, using highest order = 18')
-        quad=quad_2d_p18()
+  case(1)
+    quad=quad_2d_p1()
+  case(2)
+    quad=quad_2d_p3()
+  case(3)
+    quad=quad_2d_p3()
+  case(4)
+    quad=quad_2d_p4()
+  case(5)
+    quad=quad_2d_p5()
+  case(6)
+    quad=quad_2d_p6()
+  case(7)
+    quad=quad_2d_p7()
+  case(8)
+    quad=quad_2d_p8()
+  case(9)
+    quad=quad_2d_p9()
+  case(10)
+    quad=quad_2d_p10()
+  case(11)
+    quad=quad_2d_p11()
+  case(12)
+    quad=quad_2d_p12()
+  case(13)
+    quad=quad_2d_p14()
+  case(14)
+    quad=quad_2d_p14()
+  case(15)
+    quad=quad_2d_p16()
+  case(16)
+    quad=quad_2d_p16()
+  case(17)
+    quad=quad_2d_p18()
+  case(18)
+    quad=quad_2d_p18()
+  case default
+    CALL oft_warn('2-D Quadrature not available, using highest order = 18')
+    quad=quad_2d_p18()
 end select
 DEBUG_STACK_POP
 end subroutine set_quad_2d
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p1
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 1st order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 1st order
 !---------------------------------------------------------------------------
 function quad_2d_p1() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=1
 quad%order=1
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1)=quad_p21()
-quad%wts=1.d0
+i=1
+CALL quad_add_p21(1.d0,i,quad)
 end function quad_2d_p1
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p2
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 2nd order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 2nd order
 !---------------------------------------------------------------------------
 function quad_2d_p2() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=3
 quad%order=2
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1:3)=quad_p22(1.d0/6.d0)
-quad%wts=1.d0/3.d0
+i=1
+CALL quad_add_p22(1.d0/3.d0,1.d0/6.d0,i,quad)
 end function quad_2d_p2
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p3
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 3rd order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 3rd order
 !---------------------------------------------------------------------------
 function quad_2d_p3() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=6
 quad%order=3
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1:3)=quad_p22(.1628828503958919109001618041849063d0)
-quad%wts(1:3)=.2811498024409796482535143227020770d0
-quad%pts(:,4:6)=quad_p22(.4779198835675637000000000000000000d0)
-quad%wts(4:6)=.0521835308923536850798190106312564d0
+i=1
+CALL quad_add_p22(.2811498024409796482535143227020770d0,.1628828503958919109001618041849063d0,i,quad)
+CALL quad_add_p22(.0521835308923536850798190106312564d0,.4779198835675637000000000000000000d0,i,quad)
 end function quad_2d_p3
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p4
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 4th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 4th order
 !---------------------------------------------------------------------------
 function quad_2d_p4() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=6
 quad%order=4
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1:3)=quad_p22(.4459484909159648863183292538830519d0)
-quad%wts(1:3)=.2233815896780114656950070084331228d0
-quad%pts(:,4:6)=quad_p22(.0915762135097707434595714634022015d0)
-quad%wts(4:6)=.1099517436553218676383263249002105d0
+i=1
+CALL quad_add_p22(.2233815896780114656950070084331228d0,.4459484909159648863183292538830519d0,i,quad)
+CALL quad_add_p22(.1099517436553218676383263249002105d0,.0915762135097707434595714634022015d0,i,quad)
 end function quad_2d_p4
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p5
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 5th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 5th order
 !---------------------------------------------------------------------------
 function quad_2d_p5() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=7
 quad%order=5
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1:3)=quad_p22(.1012865073234563388009873619151238d0)
-quad%wts(1:3)=.1259391805448271525956839455001813d0
-quad%pts(:,4:6)=quad_p22(.4701420641051150897704412095134476d0)
-quad%wts(4:6)=.1323941527885061807376493878331519d0
-quad%pts(:,7)=quad_p21()
-quad%wts(7)=9.d0/40.d0
+i=1
+CALL quad_add_p22(.1259391805448271525956839455001813d0,.1012865073234563388009873619151238d0,i,quad)
+CALL quad_add_p22(.1323941527885061807376493878331519d0,.4701420641051150897704412095134476d0,i,quad)
+CALL quad_add_p21(9.d0/40.d0,i,quad)
 end function quad_2d_p5
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p6
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 6th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 6th order
 !---------------------------------------------------------------------------
 function quad_2d_p6() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=12
 quad%order=6
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1:3)=quad_p22(.0630890144915022283403316028708192d0)
-quad%wts(1:3)=.0508449063702068169209368091068690d0
-quad%pts(:,4:6)=quad_p22(.2492867451709104212916385531070191d0)
-quad%wts(4:6)=.1167862757263793660252896113855794d0
-quad%pts(:,7:12)=quad_p23(.0531450498448169473532496716313981d0,.3103524510337844054166077339565522d0)
-quad%wts(7:12)=.0828510756183735751935534564204425d0
+i=1
+CALL quad_add_p22(.0508449063702068169209368091068690d0,.0630890144915022283403316028708192d0,i,quad)
+CALL quad_add_p22(.1167862757263793660252896113855794d0,.2492867451709104212916385531070191d0,i,quad)
+CALL quad_add_p23(.0828510756183735751935534564204425d0,.0531450498448169473532496716313981d0,.3103524510337844054166077339565522d0,i,quad)
 end function quad_2d_p6
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p7
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 7th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 7th order
 !---------------------------------------------------------------------------
 function quad_2d_p7() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=15
 quad%order=7
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1:3)=quad_p22(.0282639241560763402235960069132400d0)
-quad%wts(1:3)=.0135338625156655615668230924525939d0
-quad%pts(:,4:6)=quad_p22(.4743113232672225752752252279318165d0)
-quad%wts(4:6)=.0789512544320109813765214502977033d0
-quad%pts(:,7:9)=quad_p22(.2411433258498488102541435126703621d0)
-quad%wts(7:9)=.1286079278189060745566555330895234d0
-quad%pts(:,10:15)=quad_p23(.7612227480245238000000000000000000d0,.0462708777988089106409255939170205d0)
-quad%wts(10:15)=.0561201442833753579166666287467563d0
+i=1
+CALL quad_add_p22(.0135338625156655615668230924525939d0,.0282639241560763402235960069132400d0,i,quad)
+CALL quad_add_p22(.0789512544320109813765214502977033d0,.4743113232672225752752252279318165d0,i,quad)
+CALL quad_add_p22(.1286079278189060745566555330895234d0,.2411433258498488102541435126703621d0,i,quad)
+CALL quad_add_p23(.0561201442833753579166666287467563d0,.7612227480245238000000000000000000d0,.0462708777988089106409255939170205d0,i,quad)
 end function quad_2d_p7
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p8
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 8th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 8th order
 !---------------------------------------------------------------------------
 function quad_2d_p8() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=16
 quad%order=8
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1)=quad_p21()
-quad%wts(1)=.1443156076777871682510911104890646d0
-quad%pts(:,2:4)=quad_p22(.1705693077517602066222935014914645d0)
-quad%wts(2:4)=.1032173705347182502817915502921290d0
-quad%pts(:,5:7)=quad_p22(.0505472283170309754584235505965989d0)
-quad%wts(5:7)=.0324584976231980803109259283417806d0
-quad%pts(:,8:10)=quad_p22(.4592925882927231560288155144941693d0)
-quad%wts(8:10)=.0950916342672846247938961043885843d0
-quad%pts(:,11:16)=quad_p23(.2631128296346381134217857862846436d0,.0083947774099576053372138345392944d0)
-quad%wts(11:16)=.0272303141744349942648446900739089d0
+i=1
+CALL quad_add_p21(.1443156076777871682510911104890646d0,i,quad)
+CALL quad_add_p22(.1032173705347182502817915502921290d0,.1705693077517602066222935014914645d0,i,quad)
+CALL quad_add_p22(.0324584976231980803109259283417806d0,.0505472283170309754584235505965989d0,i,quad)
+CALL quad_add_p22(.0950916342672846247938961043885843d0,.4592925882927231560288155144941693d0,i,quad)
+CALL quad_add_p23(.0272303141744349942648446900739089d0,.2631128296346381134217857862846436d0,.0083947774099576053372138345392944d0,i,quad)
 end function quad_2d_p8
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p9
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 9th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 9th order
 !---------------------------------------------------------------------------
 function quad_2d_p9() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=19
 quad%order=9
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1)=quad_p21()
-quad%wts(1)=.0971357962827988338192419825072886d0
-quad%pts(:,2:4)=quad_p22(.4896825191987376277837069248361928d0)
-quad%wts(2:4)=.0313347002271390705368548312872093d0
-quad%pts(:,5:7)=quad_p22(.0447295133944527098651065899662764d0)
-quad%wts(5:7)=.0255776756586980312616787985589998d0
-quad%pts(:,8:10)=quad_p22(.4370895914929366372699303644353550d0)
-quad%wts(8:10)=.0778275410047742793167393562994040d0
-quad%pts(:,11:13)=quad_p22(.1882035356190327302409612804673356d0)
-quad%wts(11:13)=.0796477389272102530328917742640453d0
-quad%pts(:,14:19)=quad_p23(.7411985987844980206900798735234238d0,.2219629891607656956751025276931911d0)
-quad%wts(14:19)=.0432835393772893772893772893772894d0
+i=1
+CALL quad_add_p21(.0971357962827988338192419825072886d0,i,quad)
+CALL quad_add_p22(.0313347002271390705368548312872093d0,.4896825191987376277837069248361928d0,i,quad)
+CALL quad_add_p22(.0255776756586980312616787985589998d0,.0447295133944527098651065899662764d0,i,quad)
+CALL quad_add_p22(.0778275410047742793167393562994040d0,.4370895914929366372699303644353550d0,i,quad)
+CALL quad_add_p22(.0796477389272102530328917742640453d0,.1882035356190327302409612804673356d0,i,quad)
+CALL quad_add_p23(.0432835393772893772893772893772894d0,.7411985987844980206900798735234238d0,.2219629891607656956751025276931911d0,i,quad)
 end function quad_2d_p9
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p10
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 10th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 10th order
 !---------------------------------------------------------------------------
 function quad_2d_p10() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=25
 quad%order=10
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1)=quad_p21()
-quad%wts(1)=.0809374287976228802571131238165019d0
-quad%pts(:,2:4)=quad_p22(.4272731788467755380904427175154472d0)
-quad%wts(2:4)=.0772985880029631216825069823803434d0
-quad%pts(:,5:7)=quad_p22(.1830992224486750205215743848502200d0)
-quad%wts(5:7)=.0784576386123717313680939208343967d0
-quad%pts(:,8:10)=quad_p22(.4904340197011305874539712223768484d0)
-quad%wts(8:10)=.0174691679959294869176071632906781d0
-quad%pts(:,11:13)=quad_p22(.0125724455515805327313290850210413d0)
-quad%wts(11:13)=.0042923741848328280304804020901319d0
-quad%pts(:,14:19)=quad_p23(.6542686679200661406665700955876279d0,.3080460016852477000000000000000000d0)
-quad%wts(14:19)=.0374688582104676429790207654850445d0
-quad%pts(:,20:25)=quad_p23(.1228045770685592734301298174812812d0,.0333718337393047862408164417747804d0)
-quad%wts(20:25)=.0269493525918799596454494795810967d0
+i=1
+CALL quad_add_p21(.0809374287976228802571131238165019d0,i,quad)
+CALL quad_add_p22(.0772985880029631216825069823803434d0,.4272731788467755380904427175154472d0,i,quad)
+CALL quad_add_p22(.0784576386123717313680939208343967d0,.1830992224486750205215743848502200d0,i,quad)
+CALL quad_add_p22(.0174691679959294869176071632906781d0,.4904340197011305874539712223768484d0,i,quad)
+CALL quad_add_p22(.0042923741848328280304804020901319d0,.0125724455515805327313290850210413d0,i,quad)
+CALL quad_add_p23(.0374688582104676429790207654850445d0,.6542686679200661406665700955876279d0,.3080460016852477000000000000000000d0,i,quad)
+CALL quad_add_p23(.0269493525918799596454494795810967d0,.1228045770685592734301298174812812d0,.0333718337393047862408164417747804d0,i,quad)
 end function quad_2d_p10
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p11
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 11th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 11th order
 !---------------------------------------------------------------------------
 function quad_2d_p11() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=28
 quad%order=11
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1)=quad_p21()
-quad%wts(1)=.0811779602968671595154759687498236d0
-quad%pts(:,2:4)=quad_p22(.0309383552454307848951950149913047d0)
-quad%wts(2:4)=.0123240435069094941184739010162328d0
-quad%pts(:,5:7)=quad_p22(.4364981811341288419176152765599732d0)
-quad%wts(5:7)=.0628280097444101072833394281602940d0
-quad%pts(:,8:10)=quad_p22(.4989847637025932662879869838313909d0)
-quad%wts(8:10)=.0122203790493645297552122150039379d0
-quad%pts(:,11:13)=quad_p22(.2146881979585943366068758138782509d0)
-quad%wts(11:13)=.0677013489528115099209888618232256d0
-quad%pts(:,14:16)=quad_p22(.1136831040421133902052931562283618d0)
-quad%wts(14:16)=.0402196936288516904235668896075687d0
-quad%pts(:,17:22)=quad_p23(.8256187661648629043588062003083580d0,.1597423045918501898008607882250075d0)
-quad%wts(17:22)=.0147622727177161013362930655877821d0
-quad%pts(:,23:28)=quad_p23(.6404723101348652676770365908189668d0,.3117837157095990000000000000000000d0)
-quad%wts(23:28)=.0407279964582990396603369584816179d0
+i=1
+CALL quad_add_p21(.0811779602968671595154759687498236d0,i,quad)
+CALL quad_add_p22(.0123240435069094941184739010162328d0,.0309383552454307848951950149913047d0,i,quad)
+CALL quad_add_p22(.0628280097444101072833394281602940d0,.4364981811341288419176152765599732d0,i,quad)
+CALL quad_add_p22(.0122203790493645297552122150039379d0,.4989847637025932662879869838313909d0,i,quad)
+CALL quad_add_p22(.0677013489528115099209888618232256d0,.2146881979585943366068758138782509d0,i,quad)
+CALL quad_add_p22(.0402196936288516904235668896075687d0,.1136831040421133902052931562283618d0,i,quad)
+CALL quad_add_p23(.0147622727177161013362930655877821d0,.8256187661648629043588062003083580d0,.1597423045918501898008607882250075d0,i,quad)
+CALL quad_add_p23(.0407279964582990396603369584816179d0,.6404723101348652676770365908189668d0,.3117837157095990000000000000000000d0,i,quad)
 end function quad_2d_p11
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p12
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 11th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 12th order
 !---------------------------------------------------------------------------
 function quad_2d_p12() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
+integer(4) :: i
 quad%dim=2
 quad%np=33
 quad%order=12
 allocate(quad%pts(3,quad%np),quad%wts(quad%np))
-quad%pts(:,1:3)=quad_p22(.0213173504532103702468569755157282d0)
-quad%wts(1:3)=.0061662610515590172338664837852304d0
-quad%pts(:,4:6)=quad_p22(.2712103850121159223459513403968947d0)
-quad%wts(4:6)=.0628582242178851003542705130928825d0
-quad%pts(:,7:9)=quad_p22(.1275761455415859246738963251542836d0)
-quad%wts(7:9)=.0347961129307089429893283972949994d0
-quad%pts(:,10:12)=quad_p22(.4397243922944602729797366234843611d0)
-quad%wts(10:12)=.0436925445380384021354572625574750d0
-quad%pts(:,13:15)=quad_p22(.4882173897738048825646620652588110d0)
-quad%wts(13:15)=.0257310664404553354177909230715644d0
-quad%pts(:,16:21)=quad_p23(.6958360867878034221416355232360725d0,.2813255809899395482481306929745527d0)
-quad%wts(16:21)=.0223567732023034457118390767023200d0
-quad%pts(:,22:27)=quad_p23(.8580140335440726305905366166261782d0,.1162519159075971412413541478426018d0)
-quad%wts(22:27)=.0173162311086588923716421008110341d0
-quad%pts(:,28:33)=quad_p23(.6089432357797878068561924377637101d0,.2757132696855141939747963460797640d0)
-quad%wts(28:33)=.0403715577663809295178286992522368d0
+i=1
+CALL quad_add_p22(.0061662610515590172338664837852304d0,.0213173504532103702468569755157282d0,i,quad)
+CALL quad_add_p22(.0628582242178851003542705130928825d0,.2712103850121159223459513403968947d0,i,quad)
+CALL quad_add_p22(.0347961129307089429893283972949994d0,.1275761455415859246738963251542836d0,i,quad)
+CALL quad_add_p22(.0436925445380384021354572625574750d0,.4397243922944602729797366234843611d0,i,quad)
+CALL quad_add_p22(.0257310664404553354177909230715644d0,.4882173897738048825646620652588110d0,i,quad)
+CALL quad_add_p23(.0223567732023034457118390767023200d0,.6958360867878034221416355232360725d0,.2813255809899395482481306929745527d0,i,quad)
+CALL quad_add_p23(.0173162311086588923716421008110341d0,.8580140335440726305905366166261782d0,.1162519159075971412413541478426018d0,i,quad)
+CALL quad_add_p23(.0403715577663809295178286992522368d0,.6089432357797878068561924377637101d0,.2757132696855141939747963460797640d0,i,quad)
 end function quad_2d_p12
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p14
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 11th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 14th order
 !---------------------------------------------------------------------------
 function quad_2d_p14() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 integer(4) :: i
 quad%dim=2
 quad%np=46
@@ -846,14 +676,10 @@ CALL quad_add_p23(.0069646633735184124253997225042413d0,.91420998492962541223996
 .0711657108777507625475924502924336d0,i,quad)
 end function quad_2d_p14
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p16
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 11th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 16th order
 !---------------------------------------------------------------------------
 function quad_2d_p16() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 integer(4) :: i
 quad%dim=2
 quad%np=55
@@ -881,14 +707,10 @@ CALL quad_add_p23(.0072997969394317620841125440877777d0,.90639484399204150136249
 .0771943712957554322825152250527139d0,i,quad)
 end function quad_2d_p16
 !---------------------------------------------------------------------------
-! FUNCTION quad_2d_p18
-!---------------------------------------------------------------------------
-!> @brief Set 2D quadrature rule for 11th order.
-!!
-!! @result quad Quadrature rule
+!> Set 2D quadrature rule for 18th order
 !---------------------------------------------------------------------------
 function quad_2d_p18() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 integer(4) :: i
 quad%dim=2
 quad%np=72
@@ -921,28 +743,24 @@ CALL quad_add_p23(.0043268574608764182945223447328327d0,.01271046057225546793114
 .9393450876437317887074042026828225d0,i,quad)
 end function quad_2d_p18
 !---------------------------------------------------------------------------
-!> @brief Set 2D points to (1/3,1/3,1/3).
-!!
-!! @result Evaluation points
+!> Add points to 2D quadrature rule of the form (1/3,1/3,1/3)
 !---------------------------------------------------------------------------
 subroutine quad_add_p21(wt,i,quad)
-real(8), intent(in) :: wt
-integer(4), intent(inout) :: i
-type(oft_quad_type), intent(inout) :: quad
+real(8), intent(in) :: wt !< Weight value for points
+integer(4), intent(inout) :: i !< Starting index to add points
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
 quad%wts(i)=wt
 quad%pts(:,i)=1.d0/3.d0
 i=i+1
 end subroutine quad_add_p21
 !---------------------------------------------------------------------------
-!> @brief Permute 2D points of the form (a,a,1-2*a).
-!!
-!! param[in] a Parameter 1
-!! @result Evaluation points from permutation
+!> Add points to 2D quadrature rule of the form (a,a,1-2*a)
 !---------------------------------------------------------------------------
 subroutine quad_add_p22(wt,a,i,quad)
-real(8), intent(in) :: wt,a
-integer(4), intent(inout) :: i
-type(oft_quad_type), intent(inout) :: quad
+real(8), intent(in) :: wt !< Weight value for points
+real(8), intent(in) :: a !< Parameter 1
+integer(4), intent(inout) :: i !< Starting index to add points
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
 quad%wts(i:i+2)=wt
 quad%pts(:,i)=(/a,a,1.d0-2*a/)
 quad%pts(:,i+1)=(/1.d0-2*a,a,a/)
@@ -950,16 +768,14 @@ quad%pts(:,i+2)=(/a,1.d0-2*a,a/)
 i=i+3
 end subroutine quad_add_p22
 !---------------------------------------------------------------------------
-!> @brief Permute 2D points of the form (a,b,1-a-b).
-!!
-!! param[in] a Parameter 1
-!! param[in] b Parameter 2
-!! @result Evaluation points from permutation
+!> Add points to 2D quadrature rule of the form (a,b,1-a-b)
 !---------------------------------------------------------------------------
 subroutine quad_add_p23(wt,a,b,i,quad)
-real(8), intent(in) :: wt,a,b
-integer(4), intent(inout) :: i
-type(oft_quad_type), intent(inout) :: quad
+real(8), intent(in) :: wt !< Weight value for points
+real(8), intent(in) :: a !< Parameter 1
+real(8), intent(in) :: b !< Parameter 2
+integer(4), intent(inout) :: i !< Starting index to add points
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
 quad%wts(i:i+5)=wt
 quad%pts(:,i)=(/a,b,1.d0-a-b/)
 quad%pts(:,i+1)=(/1.d0-a-b,a,b/)
@@ -970,103 +786,47 @@ quad%pts(:,i+5)=(/1.d0-a-b,b,a/)
 i=i+6
 end subroutine quad_add_p23
 !---------------------------------------------------------------------------
-! FUNCTION quad_p21
-!---------------------------------------------------------------------------
-!> @brief Set 2D points to (1/3,1/3,1/3).
-!!
-!! @result Evaluation points
-!---------------------------------------------------------------------------
-function quad_p21() result(b)
-real(r8) :: b(3)
-b=1.d0/3.d0
-end function quad_p21
-!---------------------------------------------------------------------------
-! FUNCTION quad_p22
-!---------------------------------------------------------------------------
-!> @brief Permute 2D points of the form (a,a,1-2*a).
-!!
-!! param[in] a Parameter 1
-!! @result Evaluation points from permutation
-!---------------------------------------------------------------------------
-function quad_p22(a) result(b)
-real(r8), intent(in) :: a
-real(r8) :: b(3,3)
-b(:,1)=(/a,a,1.d0-2*a/)
-b(:,2)=(/1.d0-2*a,a,a/)
-b(:,3)=(/a,1.d0-2*a,a/)
-end function quad_p22
-!---------------------------------------------------------------------------
-! FUNCTION quad_p23
-!---------------------------------------------------------------------------
-!> @brief Permute 2D points of the form (a,b,1-a-b).
-!!
-!! param[in] a Parameter 1
-!! param[in] b Parameter 2
-!! @result Evaluation points from permutation
-!---------------------------------------------------------------------------
-function quad_p23(a,b) result(c)
-real(r8), intent(in) :: a,b
-real(r8) :: c(3,6)
-c(:,1)=(/a,b,1.d0-a-b/)
-c(:,2)=(/1.d0-a-b,a,b/)
-c(:,3)=(/b,1.d0-a-b,a/)
-c(:,4)=(/a,1.d0-a-b,b/)
-c(:,5)=(/b,a,1.d0-a-b/)
-c(:,6)=(/1.d0-a-b,b,a/)
-end function quad_p23
-!---------------------------------------------------------------------------
-! FUNCTION: set_quad_3d
-!---------------------------------------------------------------------------
-!> @brief Get 3D quadrature rule for specified order.
-!!
-!! Get 3D quadrature rule for specified order (max = 11).
-!!
-!! @param[in,out] quad Quadrature rule
-!! @param[in] order Quadrature order
+!> Get 3D quadrature rule for specified order (max = 11)
 !---------------------------------------------------------------------------
 subroutine set_quad_3d(quad,order)
-type(oft_quad_type), intent(inout) :: quad
-integer(i4), intent(in) :: order
+type(oft_quad_type), intent(inout) :: quad !< Quadrature rule
+integer(i4), intent(in) :: order !< Desired quadrature order
 DEBUG_STACK_PUSH
 ! Select quadrature rule from requested order
 select case(order)
-    case(1)
-        quad=quad_3d_p1()
-    case(2)
-        quad=quad_3d_p2()
-    case(3)
-        quad=quad_3d_p3()
-    case(4)
-        quad=quad_3d_p4()
-    case(5)
-        quad=quad_3d_p5()
-    case(6)
-        quad=quad_3d_p6()
-    case(7)
-        quad=quad_3d_p7()
-    case(8)
-        quad=quad_3d_p8()
-    case(9)
-        quad=quad_3d_p9()
-    case(10)
-        quad=quad_3d_p10()
-    case(11)
-        quad=quad_3d_p11()
-    case default
-        CALL oft_warn('3-D Quadrature not available, using highest order = 11')
-        quad=quad_3d_p11()
+  case(1)
+    quad=quad_3d_p1()
+  case(2)
+    quad=quad_3d_p2()
+  case(3)
+    quad=quad_3d_p3()
+  case(4)
+    quad=quad_3d_p4()
+  case(5)
+    quad=quad_3d_p5()
+  case(6)
+    quad=quad_3d_p6()
+  case(7)
+    quad=quad_3d_p7()
+  case(8)
+    quad=quad_3d_p8()
+  case(9)
+    quad=quad_3d_p9()
+  case(10)
+    quad=quad_3d_p10()
+  case(11)
+    quad=quad_3d_p11()
+  case default
+    CALL oft_warn('3-D Quadrature not available, using highest order = 11')
+    quad=quad_3d_p11()
 end select
 DEBUG_STACK_POP
 end subroutine set_quad_3d
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p1
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 1st order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 1st order
 !---------------------------------------------------------------------------
 function quad_3d_p1() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=3
 quad%np=1
 quad%order=1
@@ -1075,14 +835,10 @@ quad%pts(:,1:1)=quad_p31()
 quad%wts=1.d0
 end function quad_3d_p1
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p2
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 2nd order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 2nd order
 !---------------------------------------------------------------------------
 function quad_3d_p2() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=3
 quad%np=4
 quad%order=2
@@ -1091,14 +847,10 @@ quad%pts(:,1:4)=quad_p32(.1381966011250105151795413165634361d0)
 quad%wts=1.d0/4.d0
 end function quad_3d_p2
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p3
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 3rd order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 3rd order
 !---------------------------------------------------------------------------
 function quad_3d_p3() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=3
 quad%np=8
 quad%order=3
@@ -1109,14 +861,10 @@ quad%pts(:,5:8)=quad_p32(.1069522739329306827717020415706165d0)
 quad%wts(5:8)=.1114720334881378576763823016243588d0
 end function quad_3d_p3
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p4
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 4th order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 4th order
 !---------------------------------------------------------------------------
 function quad_3d_p4() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=3
 quad%np=14
 quad%order=4
@@ -1129,14 +877,10 @@ quad%pts(:,9:14)=quad_p33(.0455037041256496500000000000000000d0)
 quad%wts(9:14)=.0425460207770814668609320837732882d0
 end function quad_3d_p4
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p5
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 5th order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 5th order
 !---------------------------------------------------------------------------
 function quad_3d_p5() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=3
 quad%np=14
 quad%order=5
@@ -1149,14 +893,10 @@ quad%pts(:,9:14)=quad_p33(.0455037041256496494918805262793394d0)
 quad%wts(9:14)=.0425460207770814664380694281202574d0
 end function quad_3d_p5
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p6
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 6th order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 6th order
 !---------------------------------------------------------------------------
 function quad_3d_p6() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=3
 quad%np=24
 quad%order=6
@@ -1171,14 +911,10 @@ quad%pts(:,13:24)=quad_p34(.0636610018750175252992355276057270d0,.60300566479164
 quad%wts(13:24)=.0482142857142857142857142857142857d0
 end function quad_3d_p6
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p7
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 7th order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 7th order
 !---------------------------------------------------------------------------
 function quad_3d_p7() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=3
 quad%np=35
 quad%order=7
@@ -1195,14 +931,10 @@ quad%pts(:,24:35)=quad_p34(.0212654725414832459888361014998199d0,.81083024109854
 quad%wts(24:35)=.0081107708299033415661034334910965d0
 end function quad_3d_p7
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p8
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 8th order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 8th order
 !---------------------------------------------------------------------------
 function quad_3d_p8() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=3
 quad%np=46
 quad%order=8
@@ -1223,14 +955,10 @@ quad%pts(:,35:46)=quad_p34(.2044800806367957142413355748727453d0,.58057719012880
 quad%wts(35:46)=.0163721819453191175409381397561191d0
 end function quad_3d_p8
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p9
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 9th order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 9th order
 !---------------------------------------------------------------------------
 function quad_3d_p9() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 integer(i4) :: i,ii
 quad%dim=3
 quad%np=61
@@ -1271,14 +999,10 @@ quad%pts(:,i+1:ii)=quad_p34(.1748330320115746157853246459722452d0,.6166825717812
 quad%wts(i+1:ii)=.0194928120472399967169721944892460d0
 end function quad_3d_p9
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p10
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 10th order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 10th order
 !---------------------------------------------------------------------------
 function quad_3d_p10() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 integer(i4) :: i,ii
 quad%dim=3
 quad%np=81
@@ -1323,14 +1047,10 @@ quad%pts(:,i+1:ii)=quad_p34(.1749793421839390242849492265283104d0,.6280718454753
 quad%wts(i+1:ii)=.0129070357988619906392954302494990d0
 end function quad_3d_p10
 !---------------------------------------------------------------------------
-! FUNCTION quad_3d_p11
-!---------------------------------------------------------------------------
-!> @brief Set 3D quadrature rule for 11th order.
-!!
-!! @result quad Quadrature rule
+!>  Set 3D quadrature rule for 11th order
 !---------------------------------------------------------------------------
 function quad_3d_p11() result(quad)
-type(oft_quad_type) :: quad
+type(oft_quad_type) :: quad !< Quadrature rule
 integer(i4) :: i,ii
 quad%dim=3
 quad%np=109
@@ -1384,27 +1104,18 @@ quad%pts(:,i+1:ii)=quad_p35(.5229075395099384729652169275860292d0,.1407536305436
 quad%wts(i+1:ii)=.0061856401712178114128192550838953d0
 end function quad_3d_p11
 !---------------------------------------------------------------------------
-! FUNCTION quad_p31
-!---------------------------------------------------------------------------
-!> @brief Set 3D points to (1/4,1/4,1/4,1/4).
-!!
-!! @result Evaluation points
+!> Set 3D points to (1/4,1/4,1/4,1/4)
 !---------------------------------------------------------------------------
 function quad_p31() result(b)
-real(r8) :: b(4,1)
+real(r8) :: b(4,1) !< Evaluation points
 b=1.d0/4.d0
 end function quad_p31
 !---------------------------------------------------------------------------
-! FUNCTION quad_p32
-!---------------------------------------------------------------------------
-!> @brief Permute 3D points of the form (a,a,a,1-3*a).
-!!
-!! param[in] a Parameter 1
-!! @result Evaluation points from permutation
+!> Permute 3D points of the form (a,a,a,1-3*a)
 !---------------------------------------------------------------------------
 function quad_p32(a) result(b)
-real(r8), intent(in) :: a
-real(r8) :: b(4,4)
+real(r8), intent(in) :: a !< Parameter 1
+real(r8) :: b(4,4) !< Evaluation points from permutation
 integer :: i
 b(:,1)=(/a,a,a,1.d0-3.d0*a/)
 do i=1,3
@@ -1412,16 +1123,14 @@ do i=1,3
 end do
 end function quad_p32
 !---------------------------------------------------------------------------
-! FUNCTION quad_p33
-!---------------------------------------------------------------------------
-!> @brief Permute 3D points of the form (a,a,1/2-a,1/2-a).
+!> Permute 3D points of the form (a,a,1/2-a,1/2-a)
 !!
 !! param[in] a Parameter 1
 !! @result Evaluation points from permutation
 !---------------------------------------------------------------------------
 function quad_p33(a) result(b)
-real(r8), intent(in) :: a
-real(r8) :: b(4,6)
+real(r8), intent(in) :: a !< Parameter 1
+real(r8) :: b(4,6) !< Evaluation points from permutation
 integer :: i
 b(:,1)=(/a,a,.5d0-a,.5d0-a/)
 do i=1,3
@@ -1431,17 +1140,12 @@ b(:,5)=(/a,.5d0-a,a,.5d0-a/)
 b(:,6)=(/.5d0-a,a,.5d0-a,a/)
 end function quad_p33
 !---------------------------------------------------------------------------
-! FUNCTION quad_p34
-!---------------------------------------------------------------------------
-!> @brief Permute 3D points of the form (a,a,b,1-2*a-b).
-!!
-!! param[in] a Parameter 1
-!! param[in] b Parameter 2
-!! @result Evaluation points from permutation
+!> Permute 3D points of the form (a,a,b,1-2*a-b)
 !---------------------------------------------------------------------------
 function quad_p34(a,b) result(c)
-real(r8), intent(in) :: a,b
-real(r8) :: c(4,12)
+real(r8), intent(in) :: a !< Parameter 1
+real(r8), intent(in) :: b !< Parameter 2
+real(r8) :: c(4,12) !< Evaluation points from permutation
 integer :: i
 c(:,1)=(/a,a,b,1.d0-2.d0*a-b/)
 do i=1,3
@@ -1457,18 +1161,13 @@ do i=9,11
 end do
 end function quad_p34
 !---------------------------------------------------------------------------
-! FUNCTION quad_p35
-!---------------------------------------------------------------------------
-!> @brief Permute 3D points of the form (a,b,c,1-a-b-c).
-!!
-!! param[in] a Parameter 1
-!! param[in] b Parameter 2
-!! param[in] c Parameter 3
-!! @result Evaluation points from permutation
+!> Permute 3D points of the form (a,b,c,1-a-b-c)
 !---------------------------------------------------------------------------
 function quad_p35(a,b,c) result(d)
-real(r8), intent(in) :: a,b,c
-real(r8) :: d(4,24)
+real(r8), intent(in) :: a !< Parameter 1
+real(r8), intent(in) :: b !< Parameter 2
+real(r8), intent(in) :: c !< Parameter 3
+real(r8) :: d(4,24) !< Evaluation points from permutation
 integer :: i
 d(:,1)=(/a,b,c,1.d0-a-b-c/)
 do i=1,3

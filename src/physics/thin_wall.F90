@@ -137,7 +137,7 @@ TYPE :: tw_type
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL() !< Jumper definitions
   TYPE(tw_coil_set), POINTER, DIMENSION(:) :: vcoils => NULL() !< List of Vcoils
   TYPE(tw_coil_set), POINTER, DIMENSION(:) :: icoils => NULL() !< List of Icoils
-  TYPE(fox_node), POINTER :: xml => NULL()
+  TYPE(xml_node), POINTER :: xml => NULL()
 CONTAINS
   !> Setup thin-wall model
   PROCEDURE :: setup => tw_setup
@@ -185,7 +185,7 @@ INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag
 INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
 #ifdef HAVE_XML
-TYPE(fox_node), POINTER :: coil_element
+TYPE(xml_node), POINTER :: coil_element
 #endif
 !
 IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
@@ -2275,13 +2275,13 @@ END SUBROUTINE tw_setup_hole
 !> Read coil sets for "oft_in.xml" file
 !---------------------------------------------------------------------------
 subroutine tw_load_coils(group_node,ncoils,coils)
-TYPE(fox_node), POINTER, INTENT(IN) :: group_node !< XML node relative to base `<thincurr>` node
+TYPE(xml_node), POINTER, INTENT(IN) :: group_node !< XML node relative to base `<thincurr>` node
 INTEGER(4), INTENT(out) :: ncoils !< Number of coil sets found
 TYPE(tw_coil_set), POINTER, INTENT(out) :: coils(:) !< List of coil sets
 !---XML solver fields
 integer(4) :: ncoil_sets,nread,coil_type
-TYPE(fox_node), POINTER :: doc,coil_set,coil,thincurr_group,xml_attr
-TYPE(fox_nodelist), POINTER :: coil_sets,coil_list
+TYPE(xml_node), POINTER :: doc,coil_set,coil,thincurr_group
+TYPE(xml_nodelist) :: coil_sets,coil_list
 !---
 LOGICAL :: success
 INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims
@@ -2290,23 +2290,20 @@ REAL(8) :: pts_tmp(2),res_per_len,radius,dl,theta
 CHARACTER(LEN=10) :: coil_ind
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
 TYPE(tw_coil_set), POINTER :: coil_tmp
-TYPE(fox_DOMException) :: xml_ex
-! IF(.NOT.ASSOCIATED(oft_env%xml))RETURN
-! thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
-! group_node=>fox_item(fox_getElementsByTagname(thincurr_group,TRIM(xml_node)),0)
 !---Count coil sets
 ncoils=0
-coil_sets=>fox_getElementsByTagName(group_node,"coil_set",ex=xml_ex)
-IF(fox_getExceptionCode(xml_ex)==0)ncoils=fox_getLength(coil_sets)
+CALL xml_get_element(group_node,"coil_set",coil_sets,ierr)
+IF(ierr==0)ncoils=coil_sets%n
 ALLOCATE(coils(ncoils))
 IF(ncoils==0)RETURN
 !---Setup coil sets
 DO i=1,ncoils
   coil_tmp=>coils(i)
-  coil_set=>fox_item(coil_sets,i-1)
+  coil_set=>coil_sets%nodes(i)%this
   !
-  coil_list=>fox_getElementsByTagName(coil_set,"coil")
-  coil_tmp%ncoils=fox_getLength(coil_list)
+  CALL xml_get_element(coil_set,"coil",coil_list,ierr)
+  IF(ierr/=0)CYCLE
+  coil_tmp%ncoils=coil_list%n
   ALLOCATE(coil_tmp%scales(coil_tmp%ncoils))
   ALLOCATE(coil_tmp%res_per_len(coil_tmp%ncoils))
   ALLOCATE(coil_tmp%radius(coil_tmp%ncoils))
@@ -2315,37 +2312,32 @@ DO i=1,ncoils
   coil_tmp%radius=-1.d0
   coil_tmp%Rself=0.d0
   !---Get coil set name
-  xml_attr=>fox_getAttributeNode(coil_set,"name")
-  IF(ASSOCIATED(xml_attr))THEN
-    CALL fox_extractDataContent(xml_attr,coil_tmp%name,num=nread,iostat=ierr)
+  IF(xml_hasAttribute(coil_set,"name"))THEN
+    CALL xml_extractDataAttribute(coil_set,"name",coil_tmp%name,num=nread,iostat=ierr)
   ELSE
     WRITE(coil_tmp%name,'(A8,I5.5)')'UNKNOWN_',i
   END IF
   !---Get coil set resistivity per unit length (can be overriden)
-  xml_attr=>fox_getAttributeNode(coil_set,"res_per_len")
-  IF(ASSOCIATED(xml_attr))THEN
-    CALL fox_extractDataContent(xml_attr,res_per_len,num=nread,iostat=ierr)
+  IF(xml_hasAttribute(coil_set,"res_per_len"))THEN
+    CALL xml_extractDataAttribute(coil_set,"res_per_len",res_per_len,num=nread,iostat=ierr)
     coil_tmp%res_per_len=res_per_len
   END IF
   !---Get coil set radius (can be overriden)
-  xml_attr=>fox_getAttributeNode(coil_set,"radius")
-  IF(ASSOCIATED(xml_attr))THEN
-    CALL fox_extractDataContent(xml_attr,radius,num=nread,iostat=ierr)
+  IF(xml_hasAttribute(coil_set,"radius"))THEN
+    CALL xml_extractDataAttribute(coil_set,"radius",radius,num=nread,iostat=ierr)
     coil_tmp%radius=radius
   END IF
   !---Get sensor flag
-  xml_attr=>fox_getAttributeNode(coil_set,"sens_mask")
-  IF(ASSOCIATED(xml_attr))THEN
-    CALL fox_extractDataContent(xml_attr,coil_tmp%sens_mask,num=nread,iostat=ierr)
+  IF(xml_hasAttribute(coil_set,"sens_mask"))THEN
+    CALL xml_extractDataAttribute(coil_set,"sens_mask",coil_tmp%sens_mask,num=nread,iostat=ierr)
     IF(coil_tmp%sens_mask)WRITE(*,'(2A,I4,A)')oft_indent,'Masking coil ',i,' from sensors'
   END IF
   ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
   DO j=1,coil_tmp%ncoils
-    coil=>fox_item(coil_list,j-1)
+    coil=>coil_list%nodes(j)%this
     !---Look for HDF5 path
-    xml_attr=>fox_getAttributeNode(coil,"path")
-    IF(ASSOCIATED(xml_attr))THEN
-      CALL fox_extractDataContent(xml_attr,coil_path,num=nread,iostat=ierr)
+    IF(xml_hasAttribute(coil,"path"))THEN
+      CALL xml_extractDataAttribute(coil,"path",coil_path,num=nread,iostat=ierr)
       IF(ierr/=0)THEN
         WRITE(coil_ind,'(I4,2X,I4)')i,j
         CALL oft_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
@@ -2374,16 +2366,15 @@ DO i=1,ncoils
       END IF
     ELSE
       !---Read number of points
-      xml_attr=>fox_getAttributeNode(coil,"npts")
-      IF(ASSOCIATED(xml_attr))THEN
-        CALL fox_extractDataContent(xml_attr,coil_tmp%coils(j)%npts,num=nread,iostat=ierr)
+      IF(xml_hasAttribute(coil,"npts"))THEN
+        CALL xml_extractDataAttribute(coil,"npts",coil_tmp%coils(j)%npts,num=nread,iostat=ierr)
         coil_type=2
       ELSE
         coil_type=1
       END IF
       SELECT CASE(coil_type)
         CASE(1)
-          CALL fox_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
+          CALL xml_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
           IF(ierr/=0)THEN
             WRITE(coil_ind,'(I4,2X,I4)')i,j
             CALL oft_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
@@ -2396,7 +2387,7 @@ DO i=1,ncoils
           END DO
         CASE(2)
           ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-          CALL fox_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
+          CALL xml_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
           IF(ierr/=0)THEN
             WRITE(coil_ind,'(I4,2X,I4)')i,j
             CALL oft_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
@@ -2404,16 +2395,15 @@ DO i=1,ncoils
       END SELECT
     END IF
     !---Get scale factor
-    xml_attr=>fox_getAttributeNode(coil,"scale")
-    IF(ASSOCIATED(xml_attr))CALL fox_extractDataContent(xml_attr,coil_tmp%scales(j),num=nread,iostat=ierr)
+    IF(xml_hasAttribute(coil,"scale"))CALL xml_extractDataAttribute(coil,"scale",coil_tmp%scales(j),num=nread,iostat=ierr)
     !---Get coil resistivity per unit length
-    xml_attr=>fox_getAttributeNode(coil,"res_per_len")
-    IF(ASSOCIATED(xml_attr))CALL fox_extractDataContent(xml_attr,coil_tmp%res_per_len(j),num=nread,iostat=ierr)
+    IF(xml_hasAttribute(coil,"res_per_len"))CALL xml_extractDataAttribute(coil,"res_per_len",coil_tmp%res_per_len(j),num=nread,iostat=ierr)
     !---Get coil radius
-    xml_attr=>fox_getAttributeNode(coil,"radius")
-    IF(ASSOCIATED(xml_attr))CALL fox_extractDataContent(xml_attr,coil_tmp%radius(j),num=nread,iostat=ierr)
+    IF(xml_hasAttribute(coil,"radius"))CALL xml_extractDataAttribute(coil,"radius",coil_tmp%radius(j),num=nread,iostat=ierr)
   END DO
+  IF(ASSOCIATED(coil_list%nodes))DEALLOCATE(coil_list%nodes)
 END DO
+IF(ASSOCIATED(coil_sets%nodes))DEALLOCATE(coil_sets%nodes)
 !---
 IF(oft_debug_print(1))THEN
   WRITE(*,*)
@@ -2589,8 +2579,7 @@ subroutine tw_load_eta(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
 !---XML solver fields
 integer(4) :: nshells,nreg_mesh,nread
-TYPE(fox_node), POINTER :: sens_node,eta_group,thincurr_group
-TYPE(fox_nodelist), POINTER :: sens_list
+TYPE(xml_node), POINTER :: sens_node,eta_group,thincurr_group
 !---
 INTEGER(4) :: i,j,io_unit,ierr,id,cell
 REAL(8) :: location(2)
@@ -2605,10 +2594,9 @@ IF(.NOT.ASSOCIATED(self%xml))THEN
 END IF
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
-! thincurr_group=>fox_item(fox_getElementsByTagname(oft_env%xml,"thincurr"),0)
 !
-eta_group=>fox_item(fox_getElementsByTagname(self%xml,"eta"),0)
-CALL fox_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
+CALL xml_get_element(self%xml,"eta",eta_group,ierr)
+CALL xml_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
 IF(nread/=nreg_mesh)CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
 ! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
 DO i=1,nreg_mesh
@@ -2616,11 +2604,10 @@ DO i=1,nreg_mesh
   self%Eta_reg(i)=self%Eta_reg(i)/mu0 ! Convert to magnetic units
 END DO
 ! Load sensor mask
-sens_list=>fox_getElementsByTagname(self%xml,"sens_mask")
-IF(fox_getLength(sens_list)==1)THEN
+CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)
+IF(ierr==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'
-  sens_node=>fox_item(sens_list,0)
-  CALL fox_extractDataContent(sens_node,self%sens_mask,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(sens_node,self%sens_mask,num=nread,iostat=ierr)
   IF(nread/=nreg_mesh)CALL oft_abort('Sensor mask size mismatch','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
     WRITE(*,'(A,I4,L)')oft_indent,i,self%sens_mask(i)
@@ -2989,7 +2976,7 @@ END IF
 !---
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,'(6A)')oft_indent,'Writting "',TRIM(path), &
   '" to restart file "',TRIM(filename),'"'
-IF(native_vector_cast(outvec,u)<0)CALL oft_abort('Failed to cast "source".', &
+IF(.NOT.native_vector_cast(outvec,u))CALL oft_abort('Failed to cast "source".', &
   'tw_rst_save',__FILE__)
 !---
 ALLOCATE(global_le(u%n))
@@ -3022,7 +3009,7 @@ type(hdf5_rst) :: rst_info
 DEBUG_STACK_PUSH
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Reading "',TRIM(path), &
   '" from restart file "',TRIM(filename),'"'
-IF(native_vector_cast(invec,u)<0)CALL oft_abort('Failed to cast "source".', &
+IF(.NOT.native_vector_cast(invec,u))CALL oft_abort('Failed to cast "source".', &
   'tw_rst_load',__FILE__)
 !
 ALLOCATE(global_le(u%n))

@@ -13,11 +13,11 @@ MODULE oft_gs_util
 USE oft_base
 USE spline_mod
 USE oft_io, ONLY: hdf5_create_file, hdf5_create_group, hdf5_write, hdf5_read
-USE oft_mesh_type, ONLY: smesh, bmesh_findcell
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
-USE oft_lag_basis, ONLY: oft_blagrange, oft_blag_geval
+USE oft_lag_basis, ONLY: oft_blag_geval
 USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp, &
   oft_blag_vproject
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
@@ -198,13 +198,13 @@ IF(PRESENT(mpsi_sample))m=mpsi_sample
 CALL hdf5_create_file(filename)
 !---Save mesh
 CALL hdf5_create_group(filename,'mesh')
-CALL hdf5_write(smesh%np,filename,'mesh/np')
-CALL hdf5_write(smesh%nc,filename,'mesh/nc')
-CALL hdf5_write(smesh%r(1:2,:),filename,'mesh/r')
-CALL hdf5_write(smesh%lc,filename,'mesh/lc')
-CALL hdf5_write(smesh%reg,filename,'mesh/regions')
-CALL hdf5_write(oft_blagrange%order,filename,'mesh/order')
-CALL smesh%tessellate(rtmp,lctmp,oft_blagrange%order)
+CALL hdf5_write(self%mesh%np,filename,'mesh/np')
+CALL hdf5_write(self%mesh%nc,filename,'mesh/nc')
+CALL hdf5_write(self%mesh%r(1:2,:),filename,'mesh/r')
+CALL hdf5_write(self%mesh%lc,filename,'mesh/lc')
+CALL hdf5_write(self%mesh%reg,filename,'mesh/regions')
+CALL hdf5_write(self%fe_rep%order,filename,'mesh/order')
+CALL self%mesh%tessellate(rtmp,lctmp,self%fe_rep%order)
 CALL hdf5_write(rtmp,filename,'mesh/r_plot')
 CALL hdf5_write(lctmp,filename,'mesh/lc_plot')
 np_plot=SIZE(rtmp,DIM=2)
@@ -243,7 +243,7 @@ CALL self%psi%new(bt)
 CALL self%psi%new(bz)
 ! CALL vector_cast(psiv,a)
 field%gs=>self
-CALL field%setup()
+CALL field%setup(self)
 CALL create_cg_solver(solver)
 solver%A=>self%mop
 solver%its=-2
@@ -251,7 +251,7 @@ CALL create_diag_pre(solver%pre)
 !---Project to plotting grid
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 ALLOCATE(tmpout(3,a%n))
-CALL oft_blag_vproject(field,br,bt,bz)
+CALL oft_blag_vproject(self%fe_rep,field,br,bt,bz)
 CALL a%set(0.d0)
 CALL solver%apply(a,br)
 CALL a%get_local(vals_tmp)
@@ -277,7 +277,7 @@ DEALLOCATE(solver%pre)
 CALL solver%delete()
 DEALLOCATE(solver)
 !---Save coil/conductor info
-ALLOCATE(tmpout(smesh%nc,1))
+ALLOCATE(tmpout(self%mesh%nc,1))
 CALL gs_get_cond_source(self,tmpout(:,1))
 CALL hdf5_write(tmpout(:,1),filename,'gs/cond_source')
 DEALLOCATE(tmpout)
@@ -299,7 +299,7 @@ IF(self%ncoils_ext>0)THEN
   DO i=1,self%ncoils_ext
     DO j=1,self%ncoils
       tmpout(i,1)=tmpout(i,1) &
-        + self%coil_currs(j)*self%coil_nturns(smesh%nreg+i,j)
+        + self%coil_currs(j)*self%coil_nturns(self%mesh%nreg+i,j)
     END DO
   END DO
   CALL hdf5_write(tmpout(:,1),filename,'gs/ext_coils')
@@ -372,12 +372,12 @@ real(8), pointer :: vals_tmp(:)
 !---
 CALL hdf5_read(tmp_version,filename,'gs/version')
 !---Load mesh
-! CALL hdf5_read(smesh%np,filename,'mesh/np')
-! CALL hdf5_read(smesh%nf,filename,'mesh/nc')
-! CALL hdf5_read(smesh%r(1:2,:),filename,'mesh/r')
-! CALL hdf5_read(smesh%lf,filename,'mesh/lc')
+! CALL hdf5_read(oft_blagrange%mesh%np,filename,'mesh/np')
+! CALL hdf5_read(oft_blagrange%mesh%nf,filename,'mesh/nc')
+! CALL hdf5_read(oft_blagrange%mesh%r(1:2,:),filename,'mesh/r')
+! CALL hdf5_read(oft_blagrange%mesh%lf,filename,'mesh/lc')
 CALL hdf5_read(tmpval,filename,'mesh/order')
-IF(INT(tmpval)/=oft_blagrange%order)CALL oft_abort("order mismatch","gs_load",__FILE__)
+IF(INT(tmpval)/=self%fe_rep%order)CALL oft_abort("order mismatch","gs_load",__FILE__)
 !---Load GS components
 CALL hdf5_read(tmpval,filename,'gs/mpsi')
 m=INT(tmpval)
@@ -394,7 +394,7 @@ CALL self%psi%get_local(vals_tmp)
 CALL hdf5_read(vals_tmp,filename,'gs/psi')
 CALL self%psi%restore_local(vals_tmp)
 IF(self%ncond_eigs>0)THEN
-  ALLOCATE(tmpin(smesh%nc,1))
+  ALLOCATE(tmpin(self%mesh%nc,1))
   CALL hdf5_read(tmpin(:,1),filename,'gs/cond_source')
   CALL cond_fit(self,tmpin)
   DEALLOCATE(tmpin)
@@ -480,10 +480,10 @@ integer(4), allocatable, dimension(:) :: ipvt
 !---
 gs_fit=>self
 tmpprof=>tmpin
-ALLOCATE(contmp(smesh%nc),wttmp(self%ncond_eigs))
+ALLOCATE(contmp(self%mesh%nc),wttmp(self%ncond_eigs))
 CALL gs_get_cond_weights(gs_fit,wttmp,.TRUE.)
 !---Use MINPACK to find maximum (zero gradient)
-ncons=smesh%nc
+ncons=self%mesh%nc
 ncofs=self%ncond_eigs
 allocate(diag(ncofs),fjac(ncons,ncofs))
 allocate(qtf(ncofs),wa1(ncofs),wa2(ncofs))
@@ -606,9 +606,11 @@ type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
 real(8) :: pt(3),curr_cent(2),Btor,Bpol(2)
 integer(4) :: i,m
+class(oft_bmesh), pointer :: smesh
 !---
+smesh=>self%mesh
 psi_eval%u=>self%psi
-CALL psi_eval%setup
+CALL psi_eval%setup(self%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
 !---
 itor = 0.d0
@@ -623,11 +625,11 @@ bp_vol = 0.d0
 !$omp reduction(+:tflux) reduction(+:bp_vol)
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
-  do m=1,oft_blagrange%quad%np
-    call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
+  do m=1,self%fe_rep%quad%np
+    call smesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,self%fe_rep%quad%pts(:,m),goptmp,psitmp)
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
-    pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+    pt=smesh%log2phys(i,self%fe_rep%quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
@@ -637,21 +639,21 @@ do i=1,smesh%nc
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
         + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
       END IF
-      itor = itor + itor_loc*v*oft_blagrange%quad%wts(m)
-      centroid = centroid + itor_loc*pt(1:2)*v*oft_blagrange%quad%wts(m)
-      pvol = pvol + (self%pnorm*self%P%F(psitmp(1)))*v*oft_blagrange%quad%wts(m)*pt(1)
-      vol = vol + v*oft_blagrange%quad%wts(m)*pt(1)
+      itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
+      centroid = centroid + itor_loc*pt(1:2)*v*self%fe_rep%quad%wts(m)
+      pvol = pvol + (self%pnorm*self%P%F(psitmp(1)))*v*self%fe_rep%quad%wts(m)*pt(1)
+      vol = vol + v*self%fe_rep%quad%wts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
         Btor = (self%alam*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+self%eps)
       ELSE
         Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+self%eps)
       END IF
-      tflux = tflux + Btor*v*oft_blagrange%quad%wts(m)
+      tflux = tflux + Btor*v*self%fe_rep%quad%wts(m)
       !---Compute internal inductance
-      call psi_geval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,gpsitmp)
+      call psi_geval%interp(i,self%fe_rep%quad%pts(:,m),goptmp,gpsitmp)
       Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+self%eps)
-      bp_vol = bp_vol + SUM(Bpol**2)*v*oft_blagrange%quad%wts(m)*pt(1)
+      bp_vol = bp_vol + SUM(Bpol**2)*v*self%fe_rep%quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
         Btor = self%alam*(self%I%F(psitmp(1)))/pt(1)
@@ -659,7 +661,7 @@ do i=1,smesh%nc
         Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2) &
         - self%I%f_offset)/pt(1)
       END IF
-      dflux = dflux + Btor*v*oft_blagrange%quad%wts(m)
+      dflux = dflux + Btor*v*self%fe_rep%quad%wts(m)
     END IF
   end do
 end do
@@ -694,10 +696,12 @@ real(8) :: curr_cent(2) !< needs docs
 real(8) :: psitmp(1) !< magnetic flux coordinate
 real(8) :: gpsitmp(3) !< needs docs
 integer(4) :: i,m
+class(oft_bmesh), pointer :: smesh
 !---
+smesh=>self%mesh
 CALL self%eta%update(self) ! Make sure eta is up to date with current equilibrium
 psi_eval%u=>self%psi
-CALL psi_eval%setup
+CALL psi_eval%setup(self%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
 !---
 eta_jsq = 0.d0
@@ -708,11 +712,11 @@ vloop = 0.d0
 !!$omp reduction(+:itor) reduction(+:vol) &
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
-  do m=1,oft_blagrange%quad%np
-    call smesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,oft_blagrange%quad%pts(:,m),goptmp,psitmp)
+  do m=1,self%fe_rep%quad%np
+    call smesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,self%fe_rep%quad%pts(:,m),goptmp,psitmp)
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
-    pt=smesh%log2phys(i,oft_blagrange%quad%pts(:,m))
+    pt=smesh%log2phys(i,self%fe_rep%quad%pts(:,m))
     !---Compute toroidal current itor, and eta*j^2 eta_jsq (numerator of Vloop integral)
     IF(gs_test_bounds(self,pt))THEN
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
@@ -727,8 +731,8 @@ do i=1,smesh%nc
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
           + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
       END IF
-      eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(j_NI_loc**2)*v*oft_blagrange%quad%wts(m)*pt(1)
-      itor = itor + itor_loc*v*oft_blagrange%quad%wts(m)
+      eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(j_NI_loc**2)*v*self%fe_rep%quad%wts(m)*pt(1)
+      itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
     END IF
   end do
 end do
@@ -875,13 +879,13 @@ xr = (x2-x1)
 x1 = x1 + xr*1.d-3
 x2 = x2 - xr*1.d-3
 psi_int%u=>gseq%psi
-CALL psi_int%setup()
+CALL psi_int%setup(gseq%fe_rep)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
 DO j=1,100
   pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(smesh,cell,pt,f)
+  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
   IF( psi_surf(1) < x1)EXIT
@@ -904,7 +908,7 @@ ALLOCATE(rout(npsi,ntheta))
 ALLOCATE(zout(npsi,ntheta))
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 field%u=>gseq%psi
-CALL field%setup()
+CALL field%setup(gseq%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -929,9 +933,9 @@ do j=1,npsi-1
   END IF
   pt=pt_last
   !$omp critical
-  CALL gs_psi2r(gseq,psi_surf(1),pt)
+  CALL gs_psi2r(gseq,psi_surf(1),pt,psi_int=psi_int)
   !$omp end critical
-  CALL tracinginv_fs(pt,ptout)
+  CALL tracinginv_fs(gseq%mesh,pt,ptout)
   pt_last=pt
   !---Exit if trace fails
   IF(active_tracer%status/=1)THEN
@@ -979,6 +983,7 @@ end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 !$omp end parallel
+CALL psi_int%delete()
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN
     DEALLOCATE(cout,rout,zout)
@@ -1042,7 +1047,7 @@ end subroutine gs_save_decon
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !---------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1054,6 +1059,7 @@ CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: limiter_file !< Path to limiter file
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
+REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
@@ -1095,13 +1101,13 @@ IF(do_truncate)THEN
   xr = (x2-x1)
 END IF
 psi_int%u=>gseq%psi
-CALL psi_int%setup()
+CALL psi_int%setup(gseq%fe_rep)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
 DO j=1,100
   pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(smesh,cell,pt,f)
+  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
   IF( psi_tmp(1) < x1)EXIT
@@ -1123,7 +1129,7 @@ ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
 field%u=>gseq%psi
-CALL field%setup()
+CALL field%setup(gseq%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -1149,13 +1155,13 @@ do j=1,nr
   IF(j>1)THEN
     pt=pt_last
     !$omp critical
-    CALL gs_psi2r(gseq,psi_trace,pt)
+    CALL gs_psi2r(gseq,psi_trace,pt,psi_int=psi_int)
     !$omp end critical
     IF(j==nr)THEN
       ALLOCATE(ptout(3,active_tracer%maxsteps+1))
-      CALL tracinginv_fs(pt(1:2),ptout)
+      CALL tracinginv_fs(gseq%mesh,pt(1:2),ptout)
     ELSE
-      CALL tracinginv_fs(pt(1:2))
+      CALL tracinginv_fs(gseq%mesh,pt(1:2))
     END IF
     pt_last=pt
     !---Exit if trace fails
@@ -1229,6 +1235,7 @@ IF(PRESENT(error_str))THEN
     RETURN
   END IF
 END IF
+IF(PRESENT(lcfs_press))pres=pres+lcfs_press
 !---Extrapolate q on axis
 f(1) = x2
 f(2) = x2 - xr*(1.d0/REAL(nr-1,8))
@@ -1253,11 +1260,12 @@ DO i=1,nr
   pt(1) = (i-1)*rdim/REAL(nr-1,8) + rbounds(1)
   DO j=1,nz
     pt(2) = (j-1)*zdim/REAL(nz-1,8) + zbounds(1)
-    call bmesh_findcell(smesh,cell,pt,f)
+    call bmesh_findcell(gseq%mesh,cell,pt,f)
     call psi_int%interp(cell,f,gop,psi_tmp)
     psirz(i,j)=psi_tmp(1)
   END DO
 END DO
+CALL psi_int%delete()
 !---------------------------------------------------------------------------
 ! Create output file
 !---------------------------------------------------------------------------
@@ -1291,8 +1299,8 @@ IF(TRIM(limiter_file)=='')THEN
   nlim=gseq%lim_ptr(lim_max+1)-gseq%lim_ptr(lim_max)+1
   ALLOCATE(rlim(nlim),zlim(nlim))
   DO i=gseq%lim_ptr(lim_max),gseq%lim_ptr(lim_max+1)-1
-    rlim(i-gseq%lim_ptr(lim_max)+1)=smesh%r(1,gseq%lim_con(i))
-    zlim(i-gseq%lim_ptr(lim_max)+1)=smesh%r(2,gseq%lim_con(i))
+    rlim(i-gseq%lim_ptr(lim_max)+1)=gseq%mesh%r(1,gseq%lim_con(i))
+    zlim(i-gseq%lim_ptr(lim_max)+1)=gseq%mesh%r(2,gseq%lim_con(i))
   END DO
   rlim(nlim)=rlim(1)
   zlim(nlim)=zlim(1)
@@ -1354,16 +1362,16 @@ integer(4) :: jc
 real(8) :: rop(3),d2op(6),pt(3),grad(3),tmp
 real(8) :: s,c,Bp2,Bt2,mod_B,bratio
 !---Get dofs
-allocate(j(oft_blagrange%nce))
-call oft_blagrange%ncdofs(cell,j)
+allocate(j(self%lag_rep%nce))
+call self%lag_rep%ncdofs(cell,j)
 !---Reconstruct gradient
 grad=0.d0
-do jc=1,oft_blagrange%nce
-  call oft_blag_geval(oft_blagrange,cell,jc,f,rop,gop)
+do jc=1,self%lag_rep%nce
+  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
   grad=grad+self%uvals(j(jc))*rop
 end do
 !---Get radial position
-pt=smesh%log2phys(cell,f)
+pt=self%mesh%log2phys(cell,f)
 !---
 s=SIN(self%t)
 c=COS(self%t)
@@ -1414,13 +1422,13 @@ IF(gseq%plasma_bounds(1)>-1.d98)THEN
 END IF
 ! IF(.NOT.gseq%free)x1 = x1 + (x2-x1)*2.d-2
 psi_int%u=>gseq%psi
-CALL psi_int%setup()
+CALL psi_int%setup(gseq%fe_rep)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
 DO j=1,100
   pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(smesh,cell,pt,f)
+  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
   IF( psi_tmp(1) < x1)EXIT
@@ -1441,7 +1449,7 @@ call set_tracer(1)
 ! !$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 field%mag_axis=gseq%o_point
-CALL field%setup()
+CALL field%setup(gseq%fe_rep)
 active_tracer%neq=8
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -1463,7 +1471,7 @@ do j=1,nr
   !
   pt=pt_last
   ! !$omp critical
-  CALL gs_psi2r(gseq,psi_surf,pt)
+  CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
   ! !$omp end critical
   IF(gseq%mode==0)THEN
     field%f_surf=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
@@ -1473,9 +1481,9 @@ do j=1,nr
   END IF
   field%bmax=0.d0
   field%stage_1=.TRUE.
-  CALL tracinginv_fs(pt(1:2))
+  CALL tracinginv_fs(gseq%mesh,pt(1:2))
   field%stage_1=.FALSE.
-  CALL tracinginv_fs(pt(1:2))
+  CALL tracinginv_fs(gseq%mesh,pt(1:2))
   pt_last=pt
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN
@@ -1504,5 +1512,6 @@ CALL field%delete
 CALL active_tracer%delete
 DEALLOCATE(ptout)
 ! !$omp end parallel
+CALL psi_int%delete()
 end subroutine sauter_fc
 END MODULE oft_gs_util

@@ -17,7 +17,7 @@
 !! @ingroup doxy_oft_lin_alg
 !---------------------------------------------------------------------------
 MODULE oft_lu
-USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr
+USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr, c_f_pointer, c_loc
 USE oft_local
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_graph
@@ -366,7 +366,7 @@ TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting LU solver: ',self%package,self%refactor
-IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'lusolver_apply',__FILE__)
 !---Check call threading for MUMPS
 IF(self%package(1:5)=='mumps')THEN
@@ -609,7 +609,8 @@ CASE("superd")
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
     END IF
-    self%mumps_struct%rhs => vals
+    CALL c_f_pointer(C_LOC(vals),self%mumps_struct%rhs,[nrhs*g%n])
+    ! self%mumps_struct%rhs => vals(1:g%n,1:nrhs)
     self%mumps_struct%lrhs = g%n
     self%mumps_struct%nrhs = nrhs
     !---
@@ -661,24 +662,21 @@ end subroutine lusolver_update
 !---------------------------------------------------------------------------
 subroutine lusolver_setup_xml(self,solver_node,level)
 CLASS(oft_lusolver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node
-TYPE(fox_nodelist), POINTER :: current_nodes
+TYPE(xml_node), POINTER :: current_node
 !---
 CHARACTER(LEN=7) :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"package")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
-  CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
+CALL xml_get_element(solver_node,"package",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN
     self%package=factor_package
   END IF
@@ -716,6 +714,8 @@ IF(.NOT.self%initialized)THEN
   NULLIFY(self%A)
   RETURN
 END IF
+nrhs=0
+ldb=0
 ALLOCATE(ivals(1),rvals(1))
 SELECT CASE(TRIM(self%package))
 #ifdef HAVE_SUPERLU
@@ -782,7 +782,7 @@ TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting ILU solver: ',self%package,self%refactor
-IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required', &
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'ilusolver_apply',__FILE__)
 IF(ASSOCIATED(A_native%Mfull))THEN
   mat_vals=>A_native%Mfull
@@ -924,24 +924,21 @@ end subroutine ilusolver_update
 !---------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
-TYPE(fox_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 #ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(fox_node), POINTER :: current_node
-TYPE(fox_nodelist), POINTER :: current_nodes
+TYPE(xml_node), POINTER :: current_node
 !---
 CHARACTER(LEN=7) :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
-current_nodes=>fox_getElementsByTagName(solver_node,"package")
-nnodes=fox_getLength(current_nodes)
-IF(nnodes==1)THEN
-  current_node=>fox_item(current_nodes,0)
-  CALL fox_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
+CALL xml_get_element(solver_node,"package",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
   IF(nread==1)THEN
     self%package=factor_package
   END IF

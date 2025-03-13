@@ -19,29 +19,18 @@ USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_map, map_list, &
   oft_matrix, oft_matrix_ptr, oft_cmatrix, oft_cmatrix_ptr, &
   oft_graph, oft_graph_ptr, oft_matrix_map
 USE oft_native_la, ONLY: oft_native_vector, oft_native_cvector, &
-  oft_native_matrix, oft_native_cmatrix, native_vector_cast, native_cvector_cast
-! #ifdef HAVE_PETSC
-! USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
-!   oft_petsc_matrix_cast
-! #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>5)
-! #if PETSC_VERSION_MINOR<8
-! #include "petsc/finclude/petscmatdef.h"
-! #define PETSC_NULL_MAT PETSC_NULL_OBJECT
-! #else
-! #include "petsc/finclude/petscmat.h"
-! #endif
-! #else
-! #include "finclude/petscmatdef.h"
-! #endif
-! #undef IS
-! #undef Mat
-! use petscmat
-! #endif
+  oft_native_matrix, oft_native_cmatrix, native_cvector_cast
+#ifdef HAVE_PETSC
+USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
+  oft_petsc_matrix_cast
+#include "petsc/finclude/petscmat.h"
+#undef IS
+#undef Mat
+use petscmat
+#endif
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
-! INTERFACE create_vector
-!-----------------------------------------------------------------------------
 !> Create a new vector by combining a set of vectors.
 !!
 !! @param[in,out] vec Resulting vector
@@ -54,8 +43,6 @@ INTERFACE create_vector
   MODULE PROCEDURE create_vector_comp
 END INTERFACE create_vector
 !---------------------------------------------------------------------------
-! INTERFACE create_matrix
-!-----------------------------------------------------------------------------
 !> Create a matrix using a set of non-overlapping graphs.
 !!
 !! Native and PETSc (real only)s matrices are supported.
@@ -71,8 +58,6 @@ INTERFACE create_matrix
   MODULE PROCEDURE create_matrix_comp
 END INTERFACE create_matrix
 !---------------------------------------------------------------------------
-! INTERFACE combine_matrices
-!-----------------------------------------------------------------------------
 !> Combine a set of non-overlapping sub-matrices into a single matrix.
 !!
 !! Native and PETSc (real only) matrices are supported. The matrix should be created using
@@ -88,8 +73,6 @@ INTERFACE combine_matrices
   MODULE PROCEDURE combine_matrices_comp
 END INTERFACE combine_matrices
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE: create_vector_real
 !------------------------------------------------------------------------------
 !> Real implementation for \ref create_vector
 !------------------------------------------------------------------------------
@@ -161,6 +144,7 @@ SELECT TYPE(this=>vec)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE setup_native_vec(this)
 TYPE(oft_native_vector), INTENT(inout) :: this
 INTEGER(i4) :: i
@@ -177,17 +161,14 @@ DO i=1,this%n
   this%stitch_info%lie(this%stitch_info%nie)=i
 END DO
 END SUBROUTINE setup_native_vec
+!
 #ifdef HAVE_PETSC
 SUBROUTINE setup_petsc_vec(this)
 TYPE(oft_petsc_vector), INTENT(inout) :: this
 INTEGER(i4) :: i,j,offset,offset1,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: is0
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: vtmp
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-INTEGER(petsc_addr) :: istemp
-#else
 TYPE(tis) :: istemp
-#endif
 IF(this%stitch_info%full)THEN
   CALL VecCreate(PETSC_COMM_SELF,this%v,ierr)
   CALL VecSetType(this%v,VECSEQ,ierr)
@@ -223,8 +204,6 @@ DEALLOCATE(is0)
 END SUBROUTINE setup_petsc_vec
 #endif
 END SUBROUTINE create_vector_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: create_vector_comp
 !------------------------------------------------------------------------------
 !> Complex implementation for \ref create_vector
 !------------------------------------------------------------------------------
@@ -310,24 +289,24 @@ END DO
 END SUBROUTINE setup_native_vec
 END SUBROUTINE create_vector_comp
 !------------------------------------------------------------------------------
-! SUBROUTINE: condense_stitch
-!------------------------------------------------------------------------------
-!> Combine seam information for a set of vectors.
-!!
-!! @param[in] stitch_info Array of seam structures
-!! @param[in] maps Mapping from sub-vectors into full vector
-!! @param[in,out] stitcher Resulting seam structure for full vector
+!> Combine seam information for a set of vectors
 !------------------------------------------------------------------------------
 SUBROUTINE condense_stitch(stitch_info,map,stitcher)
-TYPE(seam_list), INTENT(in) :: stitch_info(:)
-type(oft_map), INTENT(in) :: map(:)
-TYPE(oft_seam), INTENT(inout) :: stitcher
+TYPE(seam_list), INTENT(in) :: stitch_info(:) !< Array of seam structures
+type(oft_map), INTENT(in) :: map(:) !< Mapping from sub-vectors into full vector
+TYPE(oft_seam), INTENT(inout) :: stitcher !< Resulting seam structure for full vector
 INTEGER(i4) :: i,j,k,m,nblocks,offset1,offset2
 DEBUG_STACK_PUSH
 !---
 IF(oft_debug_print(3))WRITE(*,'(4X,A)')'Condensing seam structures'
 nblocks=SIZE(stitch_info)
-!---Condense stitching info
+!---
+stitcher%nproc_con=stitch_info(1)%s%nproc_con
+stitcher%proc_split=stitch_info(1)%s%proc_split
+stitcher%proc_con=>stitch_info(1)%s%proc_con
+stitcher%send_reqs=>stitch_info(1)%s%send_reqs
+stitcher%recv_reqs=>stitch_info(1)%s%recv_reqs
+!---Condense stitching 
 stitcher%full=.TRUE.
 stitcher%skip=.TRUE.
 stitcher%nbe=0
@@ -336,6 +315,11 @@ DO i=1,nblocks
   stitcher%full=stitcher%full.AND.stitch_info(i)%s%full
   stitcher%skip=stitcher%skip.AND.stitch_info(i)%s%skip
   stitcher%nbe=stitcher%nbe+stitch_info(i)%s%nbe
+  IF(stitcher%nproc_con/=stitch_info(i)%s%nproc_con)CALL oft_abort("Inconsistent number of processor connections","condense_stitch",__FILE__)
+  IF(stitcher%proc_split/=stitch_info(i)%s%proc_split)CALL oft_abort("Inconsistent processor connectivity split","condense_stitch",__FILE__)
+  IF(stitcher%nproc_con>0)THEN
+    IF(.NOT.ALL(stitcher%proc_con==stitch_info(i)%s%proc_con))CALL oft_abort("Inconsistent processor connectivity","condense_stitch",__FILE__)
+  END IF
   !---
   offset1=offset1+map(i)%n
 END DO
@@ -358,24 +342,24 @@ DO i=1,nblocks
   offset1=offset1+stitch_info(i)%s%nbe
 END DO
 !---
-allocate(stitcher%kle(0:oft_env%nproc_con+1)) ! Allocate point linkage arrays
+allocate(stitcher%kle(0:stitcher%nproc_con+1)) ! Allocate point linkage arrays
 stitcher%kle=0
 DO i=1,nblocks
-  DO j=0,oft_env%nproc_con
+  DO j=0,stitcher%nproc_con
     stitcher%kle(j)=stitcher%kle(j)+stitch_info(i)%s%kle(j+1)-stitch_info(i)%s%kle(j)
   END DO
 END DO
 !---Condense linkage to sparse rep
 stitcher%nle=SUM(stitcher%kle)
-stitcher%kle(oft_env%nproc_con+1)=stitcher%nle+1
-do i=oft_env%nproc_con,0,-1 ! cumulative unique point linkage count
+stitcher%kle(stitcher%nproc_con+1)=stitcher%nle+1
+do i=stitcher%nproc_con,0,-1 ! cumulative unique point linkage count
   stitcher%kle(i)=stitcher%kle(i+1)-stitcher%kle(i)
 end do
 if(stitcher%kle(0)/=1)call oft_abort('Bad element linkage count','fem_global_linkage',__FILE__)
 !---Construct seam lists
 allocate(stitcher%lle(2,stitcher%nle))
-allocate(stitcher%send(0:oft_env%nproc_con),stitcher%recv(0:oft_env%nproc_con))
-DO j=1,oft_env%nproc_con
+allocate(stitcher%send(0:stitcher%nproc_con),stitcher%recv(0:stitcher%nproc_con))
+DO j=1,stitcher%nproc_con
   m=stitcher%kle(j)
   offset1=0
   stitcher%nbemax=0
@@ -412,8 +396,6 @@ allocate(stitcher%recv(0)%v(stitcher%recv(0)%n))
 CALL oft_stitch_check(stitcher)
 DEBUG_STACK_POP
 END SUBROUTINE condense_stitch
-!------------------------------------------------------------------------------
-! SUBROUTINE: create_matrix_real
 !------------------------------------------------------------------------------
 !> Real implementation for \ref create_matrix
 !------------------------------------------------------------------------------
@@ -504,6 +486,7 @@ SELECT TYPE(this=>mat)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE setup_native(this)
 TYPE(oft_native_matrix), INTENT(inout) :: this
 TYPE(oft_graph), POINTER :: outgraph
@@ -518,14 +501,14 @@ END SUBROUTINE setup_native
 #ifdef HAVE_PETSC
 SUBROUTINE setup_petsc(this)
 TYPE(oft_petsc_matrix), INTENT(inout) :: this
-INTEGER(i4) :: ii,jj,,m,n,nnz_loc,nnz_max
+INTEGER(i4) :: ii,jj,ierr,m,n,nnz_loc,nnz_max
 INTEGER(i4), ALLOCATABLE :: nnz_dist(:)
 REAL(r8), POINTER :: vals(:) => NULL()
 CLASS(oft_petsc_vector), POINTER :: rowpv,colpv
 CLASS(oft_vector), POINTER :: tmpv
-IF(oft_petsc_vector_cast(rowpv,row_vec)<0)CALL oft_abort('"row_vec" is not a PETSc object.', &
+IF(.NOT.oft_petsc_vector_cast(rowpv,row_vec))CALL oft_abort('"row_vec" is not a PETSc object.', &
   'create_matrix_real',__FILE__)
-IF(oft_petsc_vector_cast(colpv,col_vec)<0)CALL oft_abort('"col_vec" is not a PETSc object.', &
+IF(.NOT.oft_petsc_vector_cast(colpv,col_vec))CALL oft_abort('"col_vec" is not a PETSc object.', &
   'create_matrix_real',__FILE__)
 !---
 ALLOCATE(nnz_dist(this%nrslice))
@@ -563,22 +546,13 @@ IF((this%nr==this%nrg).AND.(this%nc==this%ncg))THEN
   CALL MatCreate(PETSC_COMM_SELF,this%M,ierr)
   CALL MatSetType(this%M,MATSEQAIJ,ierr)
   CALL MatSetSizes(this%M,this%nr,this%nc,PETSC_DETERMINE,PETSC_DETERMINE,ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-  CALL MatSeqAIJSetPreallocation(this%M,PETSC_NULL_INTEGER,MIN(this%ncg,nnz_dist),ierr)
-#else
-  CALL MatSeqAIJSetPreallocation(this%M,PETSC_DEFAULT_INTEGER,MIN(this%ncg,nnz_dist),ierr)
-#endif
+  CALL MatSeqAIJSetPreallocation(this%M,PETSC_DEFAULT_INTEGER,INT(MIN(this%ncg,nnz_dist),4),ierr)
 ELSE
   CALL MatCreate(oft_env%COMM,this%M,ierr)
   CALL MatSetType(this%M,MATMPIAIJ,ierr)
   CALL MatSetSizes(this%M,this%nrslice,this%ncslice,PETSC_DETERMINE,PETSC_DETERMINE,ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-  CALL MatMPIAIJSetPreallocation(this%M,PETSC_NULL_INTEGER,MIN(this%ncslice,nnz_dist), &
-    PETSC_NULL_INTEGER,MIN(this%ncg-this%ncslice,nnz_dist),ierr)
-#else
   CALL MatMPIAIJSetPreallocation(this%M,PETSC_DEFAULT_INTEGER,MIN(this%ncslice,nnz_dist), &
-    PETSC_DEFAULT_INTEGER,MIN(this%ncg-this%ncslice,nnz_dist),ierr)
-#endif
+    PETSC_DEFAULT_INTEGER,INT(MIN(this%ncg-this%ncslice,nnz_dist),4),ierr)
 END IF
 DEALLOCATE(nnz_dist)
 !---
@@ -590,8 +564,6 @@ CALL MatGetSize(this%M,m,n,ierr)
 END SUBROUTINE setup_petsc
 #endif
 END SUBROUTINE create_matrix_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: create_matrix_comp
 !------------------------------------------------------------------------------
 !> Real implementation for \ref create_matrix
 !------------------------------------------------------------------------------
@@ -686,6 +658,7 @@ SELECT TYPE(this=>mat)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE setup_native(this)
 TYPE(oft_native_cmatrix), INTENT(inout) :: this
 CLASS(oft_native_cvector), POINTER :: rowv,colv
@@ -693,9 +666,9 @@ TYPE(oft_graph), POINTER :: outgraph
 INTEGER(i4) :: ierr
 INTEGER(i8) :: gsize,gtmp,gmax,gmin
 !---Allocate and setup map structure
-IF(native_cvector_cast(rowv,row_vec)<0)CALL oft_abort('"row_vec" is not a native vector.', &
+IF(.NOT.native_cvector_cast(rowv,row_vec))CALL oft_abort('"row_vec" is not a native vector.', &
   'create_matrix_real',__FILE__)
-IF(native_cvector_cast(colv,col_vec)<0)CALL oft_abort('"col_vec" is not a native vector.', &
+IF(.NOT.native_cvector_cast(colv,col_vec))CALL oft_abort('"col_vec" is not a native vector.', &
   'create_matrix_real',__FILE__)
 !---
 CALL condense_graph(ingraphs,outgraph,this%map,rowv%map,colv%map)
@@ -756,21 +729,14 @@ lc=lctmp(1:kr(nr+1)-1)
 DEALLOCATE(lctmp)
 END SUBROUTINE csr_remove_redundant
 !------------------------------------------------------------------------------
-! SUBROUTINE: condense_graph
-!------------------------------------------------------------------------------
-!> Combine a set of non-overlapping CRS-graphs into a graph.
-!!
-!! @param[in] ingraphs Array of graphs representing submatrices
-!! @param[in,out] outgraph Resulting graph
-!! @param[out] maps Mapping from sub-graphs into full graph
-!! @param[in] row_vec Vector representing matrix rows
-!! @param[in] col_vec Vector representing matrix columns
+!> Combine a set of non-overlapping CRS-graphs into a graph
 !------------------------------------------------------------------------------
 SUBROUTINE condense_graph(ingraphs,outgraph,maps,row_map,col_map)
-TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:)
-TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph
-TYPE(oft_matrix_map), POINTER, INTENT(out) :: maps(:,:)
-TYPE(oft_map), DIMENSION(:), INTENT(in) :: row_map,col_map
+TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing submatrices
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+TYPE(oft_matrix_map), POINTER, INTENT(out) :: maps(:,:) !< Mapping from sub-graphs into full graph
+TYPE(oft_map), DIMENSION(:), INTENT(in) :: row_map !< Vector representing matrix rows
+TYPE(oft_map), DIMENSION(:), INTENT(in) :: col_map !< Vector representing matrix rows
 !---
 INTEGER(i4) :: ni,nj
 INTEGER(i4) :: i,j,jj,l,k
@@ -999,8 +965,6 @@ DEALLOCATE(ltmp)
 DEBUG_STACK_POP
 end subroutine graph_add_full_col
 !------------------------------------------------------------------------------
-! SUBROUTINE: combine_matrices_real
-!------------------------------------------------------------------------------
 !> Real implementation for \ref combine_matrices
 !------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_real(mats,nr,nc,mat)
@@ -1023,6 +987,7 @@ SELECT TYPE(this=>mat)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE combine_native(this)
 TYPE(oft_native_matrix), INTENT(inout) :: this
 INTEGER(i4) :: i,j,ii,jj,jp,jn
@@ -1045,24 +1010,18 @@ DO i=1,nr
   END DO
 END DO
 END SUBROUTINE combine_native
+!
 #ifdef HAVE_PETSC
 SUBROUTINE combine_petsc(this)
 TYPE(oft_petsc_matrix), INTENT(inout) :: this
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<8)
-INTEGER(petsc_addr) :: mtmp
-INTEGER(petsc_addr), ALLOCATABLE :: pmats(:,:)
-INTEGER(petsc_addr), ALLOCATABLE :: ris(:)
-INTEGER(petsc_addr), ALLOCATABLE :: cis(:)
-#else
-TYPE(tmat) :: mtmp
 TYPE(tmat), ALLOCATABLE :: pmats(:,:)
-TYPE(tis), ALLOCATABLE, DIMENSION(:) :: ris,cis
-#endif
-INTEGER(i4) :: ierr,m,n,offset,proc
+INTEGER(i4) :: i,j,ii,jj,ierr,m,n,offset,proc
 INTEGER(i4) :: mcomm,roffset,coffset,rgoffset,cgoffset,ncols,maxcols,rows(1),ncslice
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rstart,cstart,cols,coltmp
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: goffsets,offsets,tmpoff
 REAL(r8), POINTER :: vals(:),varray(:,:)
+INTEGER(i4), POINTER :: int_tmp(:)
+REAL(r8), POINTER :: real_tmp(:)
 mcomm=oft_env%COMM
 IF(this%nr==this%nrg)mcomm=PETSC_COMM_SELF
 CALL MatGetOwnershipRange(this%m,m,n,ierr)
@@ -1072,15 +1031,17 @@ ALLOCATE(pmats(nr,nc))
 ALLOCATE(rstart(nr),cstart(nc))
 rstart=-1
 cstart=-1
-pmats=PETSC_NULL_MAT
 !---
 DO i=1,nr
   DO j=1,nc
+    pmats(i,j)=PETSC_NULL_MAT
     IF(.NOT.ASSOCIATED(mats(i,j)%m))CYCLE
     SELECT TYPE(pmat=>mats(i,j)%m)
       TYPE IS(oft_petsc_matrix)
         IF(rstart(i)<0)rstart(i)=pmat%i_map(1)%nslice
         IF(cstart(j)<0)cstart(j)=pmat%j_map(1)%nslice
+      CLASS DEFAULT
+        CALL oft_abort("Incorrect matrix type","combine_matrices_real::combine_petsc",__FILE__)
     END SELECT
   END DO
 END DO
@@ -1088,20 +1049,22 @@ END DO
 ALLOCATE(offsets(nc,oft_env%nprocs+1),tmpoff(nc,oft_env%nprocs+1))
 tmpoff=0
 DO i=1,nr
-DO j=1,nc
-  IF(ASSOCIATED(mats(i,j)%m))THEN
-    SELECT TYPE(pmat=>mats(i,j)%m)
-      TYPE IS(oft_petsc_matrix)
-        CALL MatGetOwnershipRangeColumn(pmat%m,m,n,ierr)
-        tmpoff(j,oft_env%rank+1)=m
-    END SELECT
-  END IF
-END DO
+  DO j=1,nc
+    IF(ASSOCIATED(mats(i,j)%m))THEN
+      SELECT TYPE(pmat=>mats(i,j)%m)
+        TYPE IS(oft_petsc_matrix)
+          CALL MatGetOwnershipRangeColumn(pmat%m,m,n,ierr)
+          tmpoff(j,oft_env%rank+1)=m
+        CLASS DEFAULT
+          CALL oft_abort("Incorrect matrix type","combine_matrices_real::combine_petsc",__FILE__)
+      END SELECT
+    END IF
+  END DO
 END DO
 IF(this%nr/=this%nrg)THEN
   CALL MPI_ALLREDUCE(tmpoff,offsets,nc*(oft_env%nprocs+1),OFT_MPI_I4,MPI_SUM,oft_env%COMM,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_ALLREDUCE','combine_matrices_real',__FILE__)
-  offsets(:,oft_env%nprocs+1)=offsets(:,oft_env%nprocs)+this%ncg
+  offsets(:,oft_env%nprocs+1)=offsets(:,oft_env%nprocs)+INT(this%ncg,4)
   DEALLOCATE(tmpoff)
   ALLOCATE(goffsets(nc,oft_env%nprocs),tmpoff(nc,oft_env%nprocs))
   tmpoff=0
@@ -1116,7 +1079,7 @@ IF(this%nr/=this%nrg)THEN
 ELSE
   offsets=-1
   offsets(:,oft_env%rank+1)=tmpoff(:,oft_env%rank+1)
-  offsets(:,oft_env%rank+2)=this%ncg
+  offsets(:,oft_env%rank+2)=INT(this%ncg,4)
   ALLOCATE(goffsets(nc,oft_env%nprocs))
   goffsets(1,:)=0
   DO j=2,nc
@@ -1139,14 +1102,15 @@ DO i=1,nr
         coffset=m
         pmats(i,j)=pmat%m
         maxcols=0
+        NULLIFY(int_tmp,real_tmp)
         DO ii=1,pmat%i_map(1)%nslice
-          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,PETSC_NULL_INTEGER,PETSC_NULL_SCALAR,ierr)
+          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
           maxcols=MAX(ncols,maxcols)
-          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,PETSC_NULL_INTEGER,PETSC_NULL_SCALAR,ierr)
+          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
         END DO
-        ALLOCATE(varray(1,maxcols),cols(maxcols),coltmp(maxcols))
+        ALLOCATE(varray(maxcols,1),cols(maxcols),coltmp(maxcols))
         cols=0
-        vals=>varray(1,:)
+        vals=>varray(:,1)
         m=0
         DO ii=1,pmat%i_map(1)%nslice
           rows=ii-1
@@ -1159,8 +1123,8 @@ DO i=1,nr
             END DO
             coltmp(jj)=cols(jj)-offsets(j,proc)+goffsets(j,proc)
           END DO
-          CALL MatSetValues(this%M,1,rows+rgoffset,ncols,&
-          coltmp,TRANSPOSE(varray),ADD_VALUES,ierr)
+          CALL MatSetValues(this%M,1,rows+rgoffset,ncols, &
+            coltmp,varray,ADD_VALUES,ierr)
           CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,cols,vals,ierr)
         END DO
         DEALLOCATE(varray,cols,coltmp)
@@ -1170,12 +1134,11 @@ DO i=1,nr
   END DO
   rgoffset=rgoffset+rstart(i)
 END DO
+DEALLOCATE(rstart,cstart,goffsets,offsets)
 CALL this%assemble()
 END SUBROUTINE combine_petsc
 #endif
 END SUBROUTINE combine_matrices_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: combine_matrices_comp
 !------------------------------------------------------------------------------
 !> Real implementation for \ref combine_matrices
 !------------------------------------------------------------------------------
@@ -1194,6 +1157,7 @@ SELECT TYPE(this=>mat)
 END SELECT
 DEBUG_STACK_POP
 CONTAINS
+!
 SUBROUTINE combine_native(this)
 TYPE(oft_native_cmatrix), INTENT(inout) :: this
 INTEGER(i4) :: i,j,ii,jj,jp,jn
@@ -1216,16 +1180,11 @@ END DO
 END SUBROUTINE combine_native
 END SUBROUTINE combine_matrices_comp
 !------------------------------------------------------------------------------
-! SUBROUTINE: create_identity_graph
-!------------------------------------------------------------------------------
 !> Create an identity graph for a given vector
-!!
-!! @param[in,out] outgraph Resulting graph
-!! @param[in] vec Vector representing matrix rows/columns
 !------------------------------------------------------------------------------
 SUBROUTINE create_identity_graph(outgraph,vec)
-TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph
-CLASS(oft_vector), POINTER, INTENT(in) :: vec
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+CLASS(oft_vector), POINTER, INTENT(in) :: vec !< Vector representing matrix rows/columns
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Setup graph

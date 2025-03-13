@@ -14,8 +14,6 @@ USE oft_base
 IMPLICIT NONE
 PRIVATE
 !------------------------------------------------------------------------------
-! TYPE axi_coil_set
-!------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
 TYPE, PUBLIC :: axi_coil_set
@@ -28,11 +26,7 @@ REAL(r8), PARAMETER :: ROFF = 1.d-13
 PUBLIC green, grad_green, decay_eigenmodes, green_brute
 CONTAINS
 !------------------------------------------------------------------------------
-! FUNCTION rf
-!------------------------------------------------------------------------------
-!> Create flux function object from definition file
-!!
-!! Computes Carlson's elliptic integral of the first kind, RF(x; y; z). x, y, and z must be
+!> Computes Carlson's elliptic integral of the first kind, RF(x; y; z). x, y, and z must be
 !! nonnegative, and at most one can be zero. TINY must be at least 5 times the machine
 !! undeflow limit, BIG at most one fifth the machine overflow limit.
 !------------------------------------------------------------------------------
@@ -76,11 +70,7 @@ e3=delx*dely*delz
 rf=(1.d0+(C1*e2-C2-C3*e3)*e2+C4*e3)/SQRT(ave)
 END FUNCTION rf
 !------------------------------------------------------------------------------
-! FUNCTION rd
-!------------------------------------------------------------------------------
-!> Create flux function object from definition file
-!!
-!! Computes Carlson's elliptic integral of the second kind, RD(x; y; z). x and y must be
+!> Computes Carlson's elliptic integral of the second kind, RD(x; y; z). x and y must be
 !! nonnegative, and at most one can be zero. z must be positive. TINY must be at least twice
 !! the negative 2/3 power of the machine overflow limit. BIG must be at most 0:1ERRTOL
 !! times the negative 2/3 power of the machine underflow limit.
@@ -134,11 +124,7 @@ rd=3.d0*loc_sum+fac*(1.d0+ed*(-C1+C5*ed-C6*delz*ee) &
   + delz*(C2*ee+delz*(-C3*ec+delz*C4*ea)))/(ave*SQRT(ave))
 END FUNCTION rd
 !------------------------------------------------------------------------------
-! FUNCTION ellf
-!------------------------------------------------------------------------------
-!> Create flux function object from definition file
-!!
-!! Legendre elliptic integral of the 1st kind F(; k), evaluated using Carlson's function RF.
+!> Legendre elliptic integral of the 1st kind F(; k), evaluated using Carlson's function RF.
 !! The argument ranges are 0 =2, 0 ksin 1.
 !------------------------------------------------------------------------------
 FUNCTION ellf(phi,ak)
@@ -148,11 +134,7 @@ s=sin(phi)
 ellf=s*rf(cos(phi)**2,(1.d0-s*ak)*(1.d0+s*ak),1.d0)
 END FUNCTION ellf
 !------------------------------------------------------------------------------
-! FUNCTION elle
-!------------------------------------------------------------------------------
-!> Create flux function object from definition file
-!!
-!! Legendre elliptic integral of the 2nd kind E(; j), evaluated using Carlson's functions RD
+!> Legendre elliptic integral of the 2nd kind E(; j), evaluated using Carlson's functions RD
 !! and RF. The argument ranges are 0 =2, 0 ksin 1.
 !------------------------------------------------------------------------------
 FUNCTION elle(phi,ak)
@@ -164,16 +146,18 @@ q=(1.d0-s*ak)*(1.d0+s*ak)
 elle=s*(rf(cc,q,1.d0)-((s*ak)**2)*rd(cc,q,1.d0)/3.d0)
 END FUNCTION elle
 !------------------------------------------------------------------------------
-! FUNCTION green
-!------------------------------------------------------------------------------
-!> Create flux function object from definition file
+!> Evaluate Green's function for axisymmetric current filament
 !!
 !! Legendre elliptic integral of the 2nd kind E(; k), evaluated using Carlson's functions RD
 !! and RF. The argument ranges are 0    =2, 0  ksin  1.
 !------------------------------------------------------------------------------
 FUNCTION green(r,z,rc,zc)
-REAL(r8), intent(in) :: r,z,rc,zc
-REAL(r8) :: green,k,k2,ellipk,ellipe,kextrap
+REAL(r8), intent(in) :: r !< Radial location of observation point
+REAL(r8), intent(in) :: z !< Vertical location of observation point
+REAL(r8), intent(in) :: rc !< Radial location of filament
+REAL(r8), intent(in) :: zc !< Radial location of filament
+REAL(r8) :: green !< Value of Green's function
+REAL(r8) :: k,k2,ellipk,ellipe,kextrap
 IF(r < ROFF)THEN
   green = 0.d0
   RETURN
@@ -191,16 +175,17 @@ green = -SQRT(r*rc/k2)*((2.d0 - k2)*ellipk-2.d0*ellipe)/(2.d0*pi)
 IF(kextrap>0.d0)green=green*LOG(kextrap)/LOG(1.d0-k2)
 END FUNCTION green
 !------------------------------------------------------------------------------
-! SUBROUTINE grad_green
-!------------------------------------------------------------------------------
-!> Create flux function object from definition file
+!> Evaluate gradient of Green's function for axisymmetric current filament
 !!
-!! Legendre elliptic integral of the 2nd kind E(; k), evaluated using Carlson's functions RD
-!! and RF. The argument ranges are 0 =2, 0 < ksin < 1.
+!! @sa green
 !------------------------------------------------------------------------------
 SUBROUTINE grad_green(r,z,rc,zc,Fg,Gg)
-REAL(r8), intent(in) :: r,z,rc,zc
-REAL(r8), INTENT(out) :: Fg,Gg(2)
+REAL(r8), intent(in) :: r !< Radial location of observation point
+REAL(r8), intent(in) :: z !< Vertical location of observation point
+REAL(r8), intent(in) :: rc !< Radial location of filament
+REAL(r8), intent(in) :: zc !< Radial location of filament
+REAL(r8), INTENT(out) :: Fg !< Value of Green's function
+REAL(r8), INTENT(out) :: Gg(2) !< Gradient of Green's function
 REAL(r8) :: k,k2,m1,ellipk,ellipe,dke
 REAL(r8), PARAMETER :: dx = 1.d-6
 ! Fg=green(r,z,rc,zc)
@@ -219,16 +204,15 @@ Gg(2) = 0.25d0*k2*((z - zc)/(r*rc))*(Fg + sqrt(k2*r*rc)*dKE)/(2.d0*pi)
 Fg=Fg/(2.d0*pi)
 END SUBROUTINE grad_green
 !------------------------------------------------------------------------------
-! FUNCTION green
-!------------------------------------------------------------------------------
-!> Create flux function object from definition file
-!!
-!! Legendre elliptic integral of the 2nd kind E(; k), evaluated using Carlson's functions RD
-!! and RF. The argument ranges are 0    =2, 0  ksin  1.
+!> Evaluate Green's function using brute force integration with 360 points
 !------------------------------------------------------------------------------
 FUNCTION green_brute(r,z,rc,zc)
-REAL(r8), intent(in) :: r,z,rc,zc
-REAL(r8) :: green_brute,phi,x(3),xc(3),dx
+REAL(r8), intent(in) :: r !< Radial location of observation point
+REAL(r8), intent(in) :: z !< Vertical location of observation point
+REAL(r8), intent(in) :: rc !< Radial location of filament
+REAL(r8), intent(in) :: zc !< Radial location of filament
+REAL(r8) :: green_brute !< Value of Green's function
+REAL(r8) :: phi,x(3),xc(3),dx
 INTEGER :: i
 x=[r,0.d0,z]
 dx=2.d0*pi*rc/REAL(360,8)
@@ -240,8 +224,6 @@ DO i=1,360
 END DO
 green_brute=green_brute*r/(4.d0*pi)
 END FUNCTION green_brute
-!------------------------------------------------------------------------------
-! SUBROUTINE decay_eigenmodes
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

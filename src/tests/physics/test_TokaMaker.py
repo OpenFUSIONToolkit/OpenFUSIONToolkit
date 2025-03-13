@@ -36,7 +36,7 @@ def mp_run(target,args,timeout=30):
         return None
     # Completed successfully
     try:
-        test_result = mp_q.get(timeout=10)
+        test_result = mp_q.get(timeout=5)
     except:
         print("Failed to get output")
         return None
@@ -254,9 +254,14 @@ def test_spheromak_h3(order):
 
 
 #============================================================================
-def run_coil_case(mesh_resolution,fe_order,mp_q):
+def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
+    px1,py1,pdx,pdy = 0.4,0.4,0.2,0.2
+    cx1,cy1,cdx,cdy = 0.8,0.8,0.1,0.1
     def coil_green(rc,zc,r,z):
-        return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
+        if dist is None:
+            return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
+        else:
+            return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]*dist(rc,zc)
     def masked_err(point_mask,gs_obj,psi,sort_ind):
         bdry_points = gs_obj.r[point_mask,:]
         sort_ind = bdry_points[:,sort_ind].argsort()
@@ -265,15 +270,15 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
         bdry_points = bdry_points[sort_ind]
         green = np.zeros((bdry_points.shape[0],))
         for i in range(bdry_points.shape[0]):
-            green[i], _ = dblquad(coil_green,0.75,0.85,0.75,0.85,args=(bdry_points[i,0],bdry_points[i,1]))
+            green[i], _ = dblquad(coil_green,cx1-cdx/2,cx1+cdx/2,cy1-cdy/2,cy1+cdy/2,args=(bdry_points[i,0],bdry_points[i,1]))
         return green, psi_bdry
     # Build mesh
     gs_mesh = gs_Domain(rextent=1.0,zextents=[0.0,1.0])
     gs_mesh.define_region('air',mesh_resolution,'boundary')
     gs_mesh.define_region('plasma',mesh_resolution,'plasma')
     gs_mesh.define_region('coil',0.01,'coil')
-    gs_mesh.add_rectangle(0.4,0.4,0.2,0.2,'plasma')
-    gs_mesh.add_rectangle(0.8,0.8,0.1,0.1,'coil')
+    gs_mesh.add_rectangle(px1,py1,pdx,pdy,'plasma')
+    gs_mesh.add_rectangle(cx1,cy1,cdx,cdy,'coil')
     mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
@@ -283,16 +288,19 @@ def run_coil_case(mesh_resolution,fe_order,mp_q):
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
-    mygs.set_coil_currents({'COIL': 1.E-2})
+    mygs.set_coil_currents({'COIL': cdx*cdy})
+    if dist is not None:
+        mygs.set_coil_current_dist('COIL',dist(mygs.r[:,0],mygs.r[:,1]))
     try:
         psi0 = mygs.vac_solve()
     except ValueError:
         mp_q.put(None)
         return
+
     # Get analytic result
     green1, psi1 = masked_err(mygs.r[:,1]==1.0,mygs,psi0,0)
     green2, psi2 = masked_err(mygs.r[:,0]==1.0,mygs,psi0,1)
-    green3, psi3 = masked_err(mygs.r[:,1]==-1.0,mygs,psi0,0)
+    green3, psi3 = masked_err(mygs.r[:,1]==0.0,mygs,psi0,0)
     # Compute error in psi
     green_full = np.hstack((green1[1:], green2, green3[1:]))
     psi_full = np.hstack((psi1[1:], psi2, psi3[1:]))
@@ -315,22 +323,41 @@ def validate_coil(results,psi_err_exp):
 
 
 # Test runners for vacuum coil cases
+def coil_dist(r,z):
+    return r-z
+
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h1(order):
-    errs = [0.010800921782063938, 0.0002851010669736233, 1.8185396736818836e-05]
-    results = mp_run(run_coil_case,(0.1,order))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h1(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.01840042334178343, 0.003450061648683903, 0.0008471927795560409]
+        results = mp_run(run_coil_case,(0.1,order,coil_dist))
+    else:
+        errs = np.r_[0.010702389576304984, 0.00028240755964702516, 1.7930442330763583e-05]
+        results = mp_run(run_coil_case,(0.1,order,None))
+    print('Err = ',results[0])
     assert validate_coil(results,errs[order-2])
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h2(order):
-    errs = [0.0032993582771277, 2.725546769847347e-05, 8.670511127765199e-07]
-    results = mp_run(run_coil_case,(0.1/2.0,order))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h2(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.0036698088466649878, 0.00021755100020083888, 1.736479174843997e-05]
+        results = mp_run(run_coil_case,(0.1/2.0,order,coil_dist))
+    else:
+        errs = np.r_[0.0032680822197860876, 2.7032824967342426e-05, 8.560758830069598e-07]
+        results = mp_run(run_coil_case,(0.1/2.0,order,None))
     assert validate_coil(results,errs[order-2])
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
-def test_coil_h3(order):
-    errs = [0.0008175212508035045, 1.921137561342415e-06, 4.4282752350112954e-07]
-    results = mp_run(run_coil_case,(0.1/4.0,order))
+@pytest.mark.parametrize("dist_coil", (False, True))
+def test_coil_h3(order,dist_coil):
+    if dist_coil:
+        errs = np.r_[0.001364423661608862, 1.5953386454257285e-05, 9.158565258919996e-07]
+        results = mp_run(run_coil_case,(0.1/4.0,order,coil_dist))
+    else:
+        errs = np.r_[0.0008094155097004184, 1.8949323808351823e-06, 4.4169705023586007e-07]
+        results = mp_run(run_coil_case,(0.1/4.0,order,None))
     assert validate_coil(results,errs[order-2])
 
 
@@ -444,6 +471,7 @@ def run_ITER_case(mesh_resolution,fe_order,eig_test,stability_test,mp_q):
         eig_vals, _ = mygs.eig_td(-1.E2,10,False)
         mp_q.put([{'gamma': eig_vals[:5,0]}])
         return
+    mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
     eq_info = mygs.get_stats(li_normalization='ITER')
     Lmat = mygs.get_coil_Lmat()
     eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
@@ -598,6 +626,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     Ip_target = 9.0E4
     mygs.set_targets(Ip=Ip_target,Ip_ratio=2.0)
     mygs.solve()
+    mygs.save_eqdsk('test.eqdsk')
     #
     mp_q.put([mygs.get_stats()])
     oftpy_dump_cov()
@@ -647,3 +676,9 @@ def test_LTX_eq(order):
     }
     results = mp_run(run_LTX_case,(order,False,False))
     assert validate_dict(results,exp_dict)
+
+# Example of how to run single test without pytest
+# if __name__ == '__main__':
+#     multiprocessing.freeze_support()
+#     mp_q = multiprocessing.Queue()
+#     run_sph_case(0.05,2,mp_q)

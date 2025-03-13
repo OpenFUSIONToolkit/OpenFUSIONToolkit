@@ -16,10 +16,9 @@ USE oft_lag_poly
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 IMPLICIT NONE
 #include "local.h"
+PRIVATE
 !------------------------------------------------------------------------------
-! TYPE oft_hexmesh
-!------------------------------------------------------------------------------
-!> Tetrahedral Mesh type
+!> Hexahedral volume mesh type
 !!
 !! Contains geometry information for the computational grid.
 !! - Entity counts
@@ -27,12 +26,12 @@ IMPLICIT NONE
 !! - Global mesh information
 !! - Linkage of geometric primatives
 !------------------------------------------------------------------------------
-TYPE, EXTENDS(oft_mesh) :: oft_hexmesh
-  INTEGER(i4) :: inodesp(3,8)
-  INTEGER(i4), POINTER, DIMENSION(:,:) :: inodesc => NULL()
-  INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodese => NULL()
-  INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodesf => NULL()
-  REAL(r8), POINTER, DIMENSION(:) :: xnodes => NULL()
+TYPE, PUBLIC, EXTENDS(oft_mesh) :: oft_hexmesh
+  INTEGER(i4) :: inodesp(3,8) !< Needs docs
+  INTEGER(i4), POINTER, DIMENSION(:,:) :: inodesc => NULL() !< Needs docs
+  INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodese => NULL() !< Needs docs
+  INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodesf => NULL() !< Needs docs
+  REAL(r8), POINTER, DIMENSION(:) :: xnodes => NULL() !< Needs docs
 CONTAINS
   PROCEDURE :: setup => hexmesh_setup
   PROCEDURE :: set_order => hexmesh_set_order
@@ -49,7 +48,7 @@ CONTAINS
   PROCEDURE :: in_cell => hexmesh_in_cell
   PROCEDURE :: quad_rule => hexmesh_quad_rule
   PROCEDURE :: tessellate => hexmesh_tessellate
-  PROCEDURE :: get_io_sizes => hexmesh_get_io_sizes
+  PROCEDURE :: tessellated_sizes => hexmesh_tessellated_sizes
 END TYPE oft_hexmesh
 !---
 INTEGER(i4), PARAMETER :: hex_ed(2,12)=RESHAPE((/ & !< Hexahedron edge list
@@ -96,15 +95,16 @@ CLASS(oft_hexmesh), PRIVATE, POINTER :: active_mesh => NULL() !< Active mesh for
 INTEGER(i4), PRIVATE :: active_cell = 0 !< Active cell for high order find_cell
 REAL(r8), PRIVATE :: active_pt(3) = 0.d0 !< Active point for high order find_cell
 !$omp threadprivate(active_mesh,active_cell,active_pt)
+!
+PUBLIC hex_3d_grid, hex_grid_forient, hex_get_bary, hex_get_bary_gop, hex_get_bary_cgop
+PUBLIC hex_bary_pfcoords, hex_bary_efcoords, hex_bary_ecoords, hex_bary_fcoords
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE hexmesh_setup
-!---------------------------------------------------------------------------
-!> Load trimesh from transfer file
+!> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)
 !---------------------------------------------------------------------------
 SUBROUTINE hexmesh_setup(self,cad_type)
-CLASS(oft_hexmesh), INTENT(inout) :: self
-INTEGER(i4), INTENT(in) :: cad_type
+CLASS(oft_hexmesh), INTENT(inout) :: self!< Mesh object
+INTEGER(i4), INTENT(in) :: cad_type !< CAD/mesh interface ID number
 self%type=3
 self%cad_type=cad_type
 ! self%cell_geom=(/8,12,6/)
@@ -121,13 +121,11 @@ self%face_ed=quad_ed
 CALL self%set_order(1)
 END SUBROUTINE hexmesh_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE hexmesh_setup
-!---------------------------------------------------------------------------
-!> Load trimesh from transfer file
+!> Set maximum order of spatial mapping
 !---------------------------------------------------------------------------
 SUBROUTINE hexmesh_set_order(self,order)
-CLASS(oft_hexmesh), INTENT(inout) :: self
-INTEGER(i4), INTENT(in) :: order
+CLASS(oft_hexmesh), INTENT(inout) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: order !< Maximum order of spatial mapping
 INTEGER(i4) :: i,j,k,np,inc1,ind1,inc2,ind2,inode(3),counts(3)
 IF(order<1.OR.order>2)CALL oft_abort("Invalid grid order", "hexmesh_set_order", __FILE__)
 IF(ASSOCIATED(self%xnodes))DEALLOCATE(self%xnodes)
@@ -162,13 +160,11 @@ END IF
 CALL hex_3d_grid(order,self%xnodes,self%inodesp,self%inodese,self%inodesf,self%inodesc)
 END SUBROUTINE hexmesh_set_order
 !---------------------------------------------------------------------------
-! SUBROUTINE hex_get_bary
-!---------------------------------------------------------------------------
-!
+!> Map from orthogonal logical coordinates to barycentric logical coordinates
 !---------------------------------------------------------------------------
 PURE FUNCTION hex_get_bary(flog) RESULT(fbary)
-REAL(r8), INTENT(in) :: flog(:)
-REAL(r8) :: fbary(6)
+REAL(r8), INTENT(in) :: flog(:) !< Position in orthogonal logical coordinates [3]
+REAL(r8) :: fbary(6) !< Position in barycentric logical coordinates [6]
 INTEGER(i4) :: i
 DO i=1,6
   IF(hex_bary_map(i)<0)THEN
@@ -179,13 +175,11 @@ DO i=1,6
 END DO
 END FUNCTION  hex_get_bary
 !---------------------------------------------------------------------------
-! SUBROUTINE hex_get_bary_gop
-!---------------------------------------------------------------------------
-!
+!> Map gradients from orthogonal logical coordinates to barycentric logical coordinates
 !---------------------------------------------------------------------------
 PURE FUNCTION hex_get_bary_gop(glog) RESULT(gbary)
-REAL(r8), INTENT(in) :: glog(:,:)
-REAL(r8) :: gbary(3,6)
+REAL(r8), INTENT(in) :: glog(:,:) !< Gradients in orthogonal logical coordinates [3,3]
+REAL(r8) :: gbary(3,6) !< Gradients in barycentric logical coordinates [3,6]
 INTEGER(i4) :: i
 DO i=1,6
   IF(hex_bary_map(i)<0)THEN
@@ -196,26 +190,27 @@ DO i=1,6
 END DO
 END FUNCTION  hex_get_bary_gop
 !---------------------------------------------------------------------------
-! SUBROUTINE hex_get_bary_cgop
-!---------------------------------------------------------------------------
-!
+!> Map gradient cross-products from orthogonal logical coordinates to barycentric logical coordinates
 !---------------------------------------------------------------------------
 PURE FUNCTION hex_get_bary_cgop(cglog,i,j) RESULT(cgbary)
-INTEGER(i4), INTENT(in) :: i,j
-REAL(r8), INTENT(in) :: cglog(3,3)
-REAL(r8) :: cgbary(3)
+REAL(r8), INTENT(in) :: cglog(3,3) !< Crossed-gradients in orthogonal logical coordinates [3,3]
+INTEGER(i4), INTENT(in) :: i !< First barycentric coordinate
+INTEGER(i4), INTENT(in) :: j !< Second barycentric coordinate
+REAL(r8) :: cgbary(3) !< Crossed-gradient between barycentric coordinates `i` and `j` [3]
 INTEGER(i4) :: ii,jj,k
 INTEGER(i4), PARAMETER :: bary_cmap(3,3) = &
   RESHAPE((/0,-1,-2, 1,0,-3, 2,3,0/), (/3,3/))
 ii=hex_bary_map(i)
 jj=hex_bary_map(j)
 k=bary_cmap(ABS(ii), ABS(jj))
-cgbary=cglog(:, ABS(k))*SIGN(1, ii*jj*k)
+IF(k==0)THEN
+  cgbary=0.d0
+ELSE
+  cgbary=cglog(:, ABS(k))*SIGN(1, ii*jj*k)
+END IF
 END FUNCTION  hex_get_bary_cgop
 !---------------------------------------------------------------------------
-! SUBROUTINE hex_3d_grid
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE hex_3d_grid(order,xnodes,inodesp,inodese,inodesf,inodesc)
 INTEGER(i4), INTENT(in) :: order
@@ -280,9 +275,7 @@ IF(np>0)THEN
 END IF
 END SUBROUTINE hex_3d_grid
 !---------------------------------------------------------------------------
-! SUBROUTINE hex_grid_forient
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE hex_grid_forient(oflag,order,finds)
 INTEGER(i4), INTENT(in) :: oflag,order
@@ -317,9 +310,7 @@ DO i=1,np
 END DO
 END SUBROUTINE hex_grid_forient
 !---------------------------------------------------------------------------
-! SUBROUTINE hex_grid_forient
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE hex_grid_forient_inv(oflag,order,finds)
 INTEGER(i4), INTENT(in) :: oflag,order
@@ -354,64 +345,43 @@ DO i=1,np
 END DO
 END SUBROUTINE hex_grid_forient_inv
 !---------------------------------------------------------------------------
-! SUBROUTINE hexmesh_invert_cell
+!> Turn cell "inside out", used to ensure consistent orientations
 !---------------------------------------------------------------------------
-!> Invert cell to produce positive volume
-!---------------------------------------------------------------------------
-SUBROUTINE hexmesh_invert_cell(self,i)
-CLASS(oft_hexmesh), INTENT(inout) :: self
-INTEGER(i4), INTENT(in) :: i
+SUBROUTINE hexmesh_invert_cell(self,cell)
+CLASS(oft_hexmesh), INTENT(inout) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: cell !< Index of cell to invert
 INTEGER(i4) :: lctmp(8)
-lctmp=self%lc(:,i)
-self%lc(1:4,i)=lctmp(5:8)
-self%lc(5:8,i)=lctmp(1:4)
+lctmp=self%lc(:,cell)
+self%lc(1:4,cell)=lctmp(5:8)
+self%lc(5:8,cell)=lctmp(1:4)
 END SUBROUTINE hexmesh_invert_cell
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_quad_rule
-!------------------------------------------------------------------------------
-!> Create quadrature rule for tetrahedra
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result Physical position [3]
+!> Retrieve suitable quadrature rule for mesh with given order
 !------------------------------------------------------------------------------
 SUBROUTINE hexmesh_quad_rule(self,order,quad_rule)
-CLASS(oft_hexmesh), INTENT(in) :: self
-INTEGER(i4), INTENT(in) :: order
-TYPE(oft_quad_type), INTENT(out) :: quad_rule
+CLASS(oft_hexmesh), INTENT(in) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: order !< Desired order of quadrature rule
+TYPE(oft_quad_type), INTENT(out) :: quad_rule !< Resulting quadrature rule
 CALL set_quad_3d(quad_rule, order)
 END SUBROUTINE hexmesh_quad_rule
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_vlog
-!------------------------------------------------------------------------------
-!> Logical locations of vertices
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result Physical position [3]
+!> Get position in logical space of vertex `i`
 !------------------------------------------------------------------------------
 SUBROUTINE hexmesh_vlog(self,i,f)
-CLASS(oft_hexmesh), INTENT(in) :: self
-INTEGER(i4), INTENT(in) :: i
-REAL(r8), INTENT(out) :: f(:)
+CLASS(oft_hexmesh), INTENT(in) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: i !< Vertex to locate
+REAL(r8), INTENT(out) :: f(:) !< Logical coordinates of vertex `i`
 f(1:3)=self%xnodes(self%inodesp(:,i))
 END SUBROUTINE hexmesh_vlog
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_in_cell
-!------------------------------------------------------------------------------
-!> Logical locations of vertices
+!> Test if logical position lies within the base cell
 !!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result Physical position [3]
+!! @returns Position `f` is inside the base cell?
 !------------------------------------------------------------------------------
 FUNCTION hexmesh_in_cell(self,f,tol) RESULT(eface)
-CLASS(oft_hexmesh), INTENT(in) :: self
-REAL(r8), INTENT(in) :: f(:)
-REAL(r8), INTENT(in) :: tol
+CLASS(oft_hexmesh), INTENT(in) :: self !< Mesh object
+REAL(r8), INTENT(in) :: f(:) !< Logical coordinate to evaluate
+REAL(r8), INTENT(in) :: tol !< Tolerance for test
 INTEGER(i4) :: eface
 REAL(r8) :: fmin,fmax,fbary(6)
 fmin=MINVAL(f(1:3))
@@ -424,24 +394,18 @@ ELSE
 END IF
 END FUNCTION hexmesh_in_cell
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_tessellate
-!------------------------------------------------------------------------------
-!> Driver for order specific tessellation subroutines
+!> Tessellate mesh onto lagrange FE nodes of specified order (usually for plotting)
 !!
-!! @note The maximum tessellation order currently supported is 4.
+!! @note The maximum tessellation order currently supported is 4
+!! (may be lower for certain mesh types).
 !!
-!! @warning Cell lists are returned with zero based indexing.
-!!
-!! @param[in] self Mesh to tessellate
-!! @param[out] rtmp Tessellated mesh points [3,np_tess]
-!! @param[out] lctmp Tessellated cell list [4,nc_tess]
-!! @param[in] order Desired tessellation order
+!! @warning Cell lists are returned with zero based indexing
 !------------------------------------------------------------------------------
 SUBROUTINE hexmesh_tessellate(self,rtmp,lctmp,order)
-CLASS(oft_hexmesh), INTENT(in) :: self
-REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp
-INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp
-INTEGER(i4), INTENT(in) :: order
+CLASS(oft_hexmesh), INTENT(in) :: self !< Mesh to tessellate
+REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,:]
+INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp !< Tessellated cell list [8,:]
+INTEGER(i4), INTENT(in) :: order !< Tessellation order
 INTEGER(i4) :: i,j,k,cell,np,inodesp(3,8),inodespf(3,4),i1,i2,inc
 INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodese,inodesf,pmap
 INTEGER(i4), POINTER, DIMENSION(:,:) :: inodesc
@@ -520,32 +484,23 @@ END IF
 DEBUG_STACK_POP
 END SUBROUTINE hexmesh_tessellate
 !---------------------------------------------------------------------------
-! FUNCTION: hexmesh_get_io_sizes
+!> Get sizes of arrays returned by @ref tetmesh_tessellate
 !---------------------------------------------------------------------------
-!> Get variable sizes following tessellation
-!---------------------------------------------------------------------------
-FUNCTION hexmesh_get_io_sizes(self) result(sizes)
-CLASS(oft_hexmesh), INTENT(in) :: self
-INTEGER(i4) :: sizes(2)
+FUNCTION hexmesh_tessellated_sizes(self) result(sizes)
+CLASS(oft_hexmesh), INTENT(in) :: self !< Mesh object
+INTEGER(i4) :: sizes(2) !< Array sizes following tessellation [np_tess,nc_tess]
 sizes(1)=self%np + self%ne*(self%tess_order-1) + self%nf*((self%tess_order-1)**2) &
   + self%nc*((self%tess_order-1)**3)
 sizes(2)=self%nc*(self%tess_order**3)
-END FUNCTION hexmesh_get_io_sizes
+END FUNCTION hexmesh_tessellated_sizes
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_log2physq
-!------------------------------------------------------------------------------
-!> Map from logical to physical coordinates for a quadratic element
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result Physical position [3]
+!> Map from logical to physical coordinates in a given cell
 !------------------------------------------------------------------------------
 function hexmesh_log2phys(self,cell,f) result(pt)
-class(oft_hexmesh), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8) :: pt(3)
+class(oft_hexmesh), intent(in) :: self !< Mesh object
+integer, intent(in) :: cell !< Index of cell for evaulation
+real(r8), intent(in) :: f(:) !< Logical coordinate in cell [4]
+real(r8) :: pt(3) !< Physical position [3]
 integer(i4) :: k,i,j,inode(3)
 DEBUG_STACK_PUSH
 if(self%order>2)call oft_abort('Invalid mesh order','hexmesh_log2phys',__FILE__)
@@ -573,28 +528,17 @@ END IF
 DEBUG_STACK_POP
 end function hexmesh_log2phys
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_phys2log
+!> Map from physical to logical coordinates in a given cell
 !------------------------------------------------------------------------------
-!> Map from physical to logical coordinates
-!!
-!! Driver function calls mapping specific function depending on mesh order.
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] pt Physical position [3]
-!! @result Logical coordinates within the cell [4]
-!------------------------------------------------------------------------------
-subroutine hexmesh_phys2log(self,i,pt,f)
-class(oft_hexmesh), intent(in) :: self
-integer(i4), intent(in) :: i
-real(r8), intent(in) :: pt(3)
-real(r8), intent(out) :: f(:)
-f=hexmesh_phys2logho(self,i,pt)
+subroutine hexmesh_phys2log(self,cell,pt,f)
+class(oft_hexmesh), intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Index of cell for evaulation
+real(r8), intent(in) :: pt(3) !< Physical position [3]
+real(r8), intent(out) :: f(:) !< Logical coordinates within the cell [4]
+f=hexmesh_phys2logho(self,cell,pt)
 end subroutine hexmesh_phys2log
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_phys2logho
-!------------------------------------------------------------------------------
-!> Map from physical to logical coordinates for general high order elements
+!> Implementation of @ref hexmesh_phys2log
 !!
 !! The MINPACK package is used with step size given by
 !! @ref hexmesh_mapping::ho_find_du "ho_find_du". The convergence tolerance is
@@ -602,18 +546,13 @@ end subroutine hexmesh_phys2log
 !!
 !! @note The final location may be outside the cell being searched. This is correct
 !! if the point is outside the cell, however it may also indicate a problem in the
-!! mapping, most likely due to a badly shaped cell.
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] pt Physical position [3]
-!! @result Logical coordinates within the cell [4]
+!! mapping, most likely due to a badly shaped cell
 !------------------------------------------------------------------------------
-function hexmesh_phys2logho(self,i,pt) result(f)
-class(oft_hexmesh), target, intent(in) :: self
-integer(i4), intent(in) :: i
-real(r8), intent(in) :: pt(3)
-real(r8) :: f(4)
+function hexmesh_phys2logho(self,cell,pt) result(f)
+class(oft_hexmesh), target, intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Index of cell for evaulation
+real(r8), intent(in) :: pt(3) !< Physical position [3]
+real(r8) :: f(4) !< Logical coordinates within the cell [4]
 !---
 integer(i4), parameter :: nerr=3
 integer(i4), parameter :: neq=3
@@ -636,7 +575,7 @@ ldfjac = nerr
 !---
 active_mesh=>self
 active_pt=pt
-active_cell=i
+active_cell=cell
 uv=1.d0/2.d0
 !---
 call lmdif(tm_findcell_error,nerr,neq,uv,error, &
@@ -647,24 +586,17 @@ f(1:3)=uv
 DEBUG_STACK_POP
 end function hexmesh_phys2logho
 !---------------------------------------------------------------------------
-! SUBROUTINE: tm_findcell_error
-!---------------------------------------------------------------------------
 !> Evalute the error between a logical point and the current active point
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref hexmesh_mapping::hexmesh_phys2logho "hexmesh_phys2logho"
-!!
-!! @param[in] m Number of spatial dimensions (3)
-!! @param[in] n Number of parametric dimensions (3)
-!! @param[in] uv Parametric possition [n]
-!! @param[out] err Error vector between current and desired point [3]
-!! @param[in,out] iflag Unused flag
 !---------------------------------------------------------------------------
 subroutine tm_findcell_error(m,n,uv,err,iflag)
-integer(i4), intent(in) :: m,n
-real(r8), intent(in) :: uv(n)
-real(r8), intent(out) :: err(m)
-integer(i4), intent(inout) :: iflag
+integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
+integer(i4), intent(in) :: n !< Number of parametric dimensions (3)
+real(r8), intent(in) :: uv(n) !< Parametric position [n]
+real(r8), intent(out) :: err(m) !< Error vector between current and desired point [3]
+integer(i4), intent(inout) :: iflag !< Unused flag
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
 pt=hexmesh_log2phys(active_mesh,active_cell,uv)
@@ -672,22 +604,14 @@ err=active_pt-pt
 DEBUG_STACK_POP
 end subroutine tm_findcell_error
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_jacobian
-!------------------------------------------------------------------------------
-!> Compute the jacobian matrix and its determinant for a quadratic element
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @param[out] gop Jacobian matrix \f$ (\frac{\partial x_i}{\partial \lambda_j})^{-1} \f$ [3,4]
-!! @param[out] j Jacobian of transformation from logical to physical coordinates
+!> Compute the spatial jacobian matrix and its determinant for a given cell at a given logical position
 !------------------------------------------------------------------------------
 subroutine hexmesh_jacobian(self,cell,f,gop,j)
-class(oft_hexmesh), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: gop(:,:)
-real(r8), intent(out) :: j
+class(oft_hexmesh), intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Index of cell for evaulation
+real(r8), intent(in) :: f(:) !< Logical coordinate in cell [4]
+real(r8), intent(out) :: gop(:,:) !< Jacobian matrix \f$ (\frac{\partial x_i}{\partial \lambda_j})^{-1} \f$ [3,4]
+real(r8), intent(out) :: j !< Jacobian of transformation from logical to physical coordinates
 integer(i4) :: i,k,l,m
 real(r8) :: A(3,3),pt(3),vtmp(3)
 DEBUG_STACK_PUSH
@@ -737,24 +661,16 @@ call hexmesh_jacinv(A,gop,j)
 DEBUG_STACK_POP
 end subroutine hexmesh_jacobian
 !---------------------------------------------------------------------------
-! SUBROUTINE hexmesh_hessian
+!> Compute the spatial hessian matrices for a given cell at a given logical position
 !---------------------------------------------------------------------------
-!> Compute the second order jacobians for a linear element
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[out] g2op Second order Jacobian matrix
+subroutine hexmesh_hessian(self,cell,f,g2op,K)
+class(oft_hexmesh), intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Index of cell for evaulation
+real(r8), intent(in) :: f(:) !< Logical coordinate in cell [4]
+real(r8), intent(out) :: g2op(:,:) !< Second order Jacobian matrix
 !! \f$ (\frac{\partial x_i}{\partial \lambda_l} \frac{\partial x_j}{\partial \lambda_k})^{-1} \f$
-!! [6,10]
-!! @param[out] K Gradient correction matrix
+real(r8), intent(out) :: K(:,:) !< Gradient correction matrix
 !! \f$ \frac{\partial^2 x_i}{\partial \lambda_k \partial \lambda_l}\f$ [10,3]
-!---------------------------------------------------------------------------
-subroutine hexmesh_hessian(self,i,f,g2op,K)
-class(oft_hexmesh), intent(in) :: self
-integer(i4), intent(in) :: i
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: g2op(:,:)
-real(r8), intent(out) :: K(:,:)
 real(r8) :: ri(3,4),jac(3,3),A(6,6)
 integer(i4) :: ii,l,m,j
 REAL(r8) :: work(12),pt(3),vtmp(3)
@@ -765,7 +681,7 @@ jac=0.d0
 K=0.d0
 !---Get node points
 do l=1,8
-  pt = self%r(:,self%lc(l,i))
+  pt = self%r(:,self%lc(l,cell))
   vtmp=dlag_3d(self%inodesp(:,l),f,self%xnodes,self%order+1)
   DO j=1,3
     jac(j,:)=jac(j,:)+vtmp(j)*pt
@@ -779,7 +695,7 @@ IF(self%order>1)THEN
   !---Get edge points
   DO ii=1,self%ho_info%nep
     do l=1,12
-      m=ABS(self%lce(l,i))
+      m=ABS(self%lce(l,cell))
       pt=self%ho_info%r(:,self%ho_info%lep(ii,m))
       vtmp=dlag_3d(self%inodese(:,ii,l),f,self%xnodes,self%order+1)
       DO j=1,3
@@ -794,7 +710,7 @@ IF(self%order>1)THEN
   !---Get face points
   DO ii=1,self%ho_info%nfp
     do l=1,6
-      m=ABS(self%lcf(l,i))
+      m=ABS(self%lcf(l,cell))
       pt=self%ho_info%r(:,self%ho_info%lfp(ii,m))
       vtmp=dlag_3d(self%inodesf(:,ii,l),f,self%xnodes,self%order+1)
       DO m=1,3
@@ -808,7 +724,7 @@ IF(self%order>1)THEN
   END DO
   !---Get cell points
   DO ii=1,self%ho_info%ncp
-    pt=self%ho_info%r(:,self%ho_info%lcp(ii,i))
+    pt=self%ho_info%r(:,self%ho_info%lcp(ii,cell))
     vtmp=dlag_3d(self%inodesc(:,ii),f,self%xnodes,self%order+1)
     DO j=1,3
       jac(j,:)=jac(j,:)+vtmp(j)*pt
@@ -822,31 +738,24 @@ END IF
 CALL hexmesh_g2inv(jac,g2op)
 end subroutine hexmesh_hessian
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_snormal
-!------------------------------------------------------------------------------
 !> Compute the surface normal vector for a given face on a cell
 !!
-!! If face is not a global boundary face the function returns with \c norm = 0
+!! If face is not a global boundary face the function returns with `norm = 0`
 !!
 !! @note The logical position in the cell must be on the chosen face for this
-!! subroutine, else an error will be thrown.
-!!
-!! @param[in] self Mesh containing face
-!! @param[in] i Index of cell
-!! @param[in] ind Index of face within cell
-!! @param[in] f Logical coordinate in cell [4]
-!! @param[out] norm Unit vector normal to the face [3]
+!! subroutine, else an error will be thrown
 !------------------------------------------------------------------------------
-subroutine hexmesh_snormal(self,i,ind,f,norm)
-class(oft_hexmesh), intent(in) :: self
-integer(i4), intent(in) :: i,ind
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: norm(3)
+subroutine hexmesh_snormal(self,cell,ind,f,norm)
+class(oft_hexmesh), intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Index of cell
+integer(i4), intent(in) :: ind !< Index of face within cell
+real(r8), intent(in) :: f(:) !< Logical coordinate in cell [4]
+real(r8), intent(out) :: norm(3) !< Unit vector normal to the face [3]
 REAL(r8) :: goptmp(3,3),v
 integer(i4), parameter :: gmap(6) = (/-3,-2,1,2,-1,3/)
 DEBUG_STACK_PUSH
 !---
-if(i<0.OR.i>self%nc)call oft_abort('Invalid cell index.','hexmesh_snormal',__FILE__)
+if(cell<0.OR.cell>self%nc)call oft_abort('Invalid cell index.','hexmesh_snormal',__FILE__)
 if(ind<0.OR.ind>6)call oft_abort('Invalid face index.','hexmesh_snormal',__FILE__)
 ! IF(f(ind)/=0._r8)call oft_abort('Invalid cell position.','hexmesh_snormal',__FILE__)
 !---
@@ -860,37 +769,30 @@ if(ind<0.OR.ind>6)call oft_abort('Invalid face index.','hexmesh_snormal',__FILE_
 !   RETURN
 ! END IF
 !---
-CALL hexmesh_jacobian(self,i,f,goptmp,v)
+CALL hexmesh_jacobian(self,cell,f,goptmp,v)
 norm = SIGN(1_i4,gmap(ind))*goptmp(:,ABS(gmap(ind)))
 norm = norm/sqrt(sum(norm**2))
 DEBUG_STACK_POP
 end subroutine hexmesh_snormal
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_ctang
-!------------------------------------------------------------------------------
 !> Compute the curve tangent vector for a given edge on a cell
 !!
-!! If edge is not a global boundary edge the function returns with \c tang = 0
+!! If edge is not a global boundary edge the function returns with `tang = 0`
 !!
 !! @note The logical position in the cell must be on the chosen edge for this
-!! subroutine to return a meaningful result.
-!!
-!! @param[in] self Mesh containing face
-!! @param[in] i Index of cell
-!! @param[in] ind Index of edge within cell
-!! @param[in] f Logical coordinate in cell [4]
-!! @param[out] tang Unit vector tangent to the edge [3]
+!! subroutine to return a meaningful result
 !------------------------------------------------------------------------------
-subroutine hexmesh_ctang(self,i,ind,f,tang)
-class(oft_hexmesh), intent(in) :: self
-integer(i4), intent(in) :: i,ind
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: tang(3)
+subroutine hexmesh_ctang(self,cell,ind,f,tang)
+class(oft_hexmesh), intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Index of cell
+integer(i4), intent(in) :: ind !< Index of edge within cell
+real(r8), intent(in) :: f(:) !< Logical coordinate in cell [4]
+real(r8), intent(out) :: tang(3) !< Unit vector tangent to the edge [3]
 INTEGER(i4) :: j,k
 REAL(r8) :: goptmp(3,3),v,norm(3,2),e(3)
 DEBUG_STACK_PUSH
 !---
-IF(i<0.OR.i>self%nc)CALL oft_abort('Invalid cell index.','hexmesh_ctang',__FILE__)
+IF(cell<0.OR.cell>self%nc)CALL oft_abort('Invalid cell index.','hexmesh_ctang',__FILE__)
 IF(ind<0.OR.ind>12)CALL oft_abort('Invalid edge index.','hexmesh_ctang',__FILE__)
 !IF(f(ed1(ind))/=0._r8.AND.f(ed2(ind))/=0._r8)CALL oft_abort('Invalid cell position.','hexmesh_ctang',__FILE__)
 !---
@@ -907,23 +809,21 @@ IF(ind<0.OR.ind>12)CALL oft_abort('Invalid edge index.','hexmesh_ctang',__FILE__
 k=1
 DO j=1,6
   IF(ANY(ABS(hex_fe(:,j))==ind))THEN
-    CALL hexmesh_snormal(self, i, j, f, norm(:,k))
+    CALL hexmesh_snormal(self, cell, j, f, norm(:,k))
     k=k+1
   END IF
 END DO
-e=self%r(:,self%lc(hex_ed(2,ind),i))-self%r(:,self%lc(hex_ed(1,ind),i))
+e=self%r(:,self%lc(hex_ed(2,ind),cell))-self%r(:,self%lc(hex_ed(1,ind),cell))
 tang=cross_product(norm(:,1),norm(:,2))
 tang=tang/SQRT(SUM(tang**2))
-tang=tang*SIGN(1_i4,self%lce(ind,i))*SIGN(1._r8,DOT_PRODUCT(tang,e))
+tang=tang*SIGN(1_i4,self%lce(ind,cell))*SIGN(1._r8,DOT_PRODUCT(tang,e))
 DEBUG_STACK_POP
 end subroutine hexmesh_ctang
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_get_surf_map
-!
 !> Get mapping between boundary and volume logical coordinates
 !------------------------------------------------------------------------------
 subroutine hexmesh_get_surf_map(self,face,cell,lmap)
-class(oft_hexmesh), intent(in) :: self
+class(oft_hexmesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: face !< Index of face on boundary mesh
 integer(i4), intent(out) :: cell !< Cell containing face
 integer(i4), intent(out) :: lmap(3) !< Coordinate mapping
@@ -960,12 +860,10 @@ DO k=1,2
 END DO
 end subroutine hexmesh_get_surf_map
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_surf_to_vol
-!
 !> Map between surface and volume logical coordinates
 !------------------------------------------------------------------------------
 subroutine hexmesh_surf_to_vol(self,fsurf,lmap,fvol)
-CLASS(oft_hexmesh), INTENT(in) :: self
+CLASS(oft_hexmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), INTENT(in) :: fsurf(:) !< Surface coordinates [2]
 INTEGER(i4), INTENT(in) :: lmap(3) !< Coordinate mapping
 REAL(r8), INTENT(out) :: fvol(:) !< Volume coordinates [3]
@@ -985,18 +883,12 @@ ELSE IF(lmap(k)>0)THEN
 END IF
 end subroutine hexmesh_surf_to_vol
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_jacinv
-!------------------------------------------------------------------------------
-!> Invert a 3x3 matrix.
-!!
-!! @param[in] A Matrix to invert
-!! @param[out] C \f$ A^{-1} \f$
-!! @param[out] j |A|
+!> Invert a 3x3 matrix
 !------------------------------------------------------------------------------
 subroutine hexmesh_jacinv(A,C,j)
-real(r8), intent(in) :: A(3,3)
-real(r8), intent(out) :: C(3,3)
-real(r8), intent(out) :: j
+real(r8), intent(in) :: A(3,3) !< Matrix to invert
+real(r8), intent(out) :: C(3,3) !< \f$ A^{-1} \f$
+real(r8), intent(out) :: j !< |A|
 real(r8) :: t1,t2,t3
 DEBUG_STACK_PUSH
 !---Compute resusables
@@ -1023,13 +915,7 @@ C=C/j
 DEBUG_STACK_POP
 end subroutine hexmesh_jacinv
 !------------------------------------------------------------------------------
-! SUBROUTINE: hexmesh_g2inv
-!------------------------------------------------------------------------------
-!> Invert a 3x3 matrix.
-!!
-!! @param[in] A Matrix to invert
-!! @param[out] C \f$ A^{-1} \f$
-!! @param[out] j |A|
+!> Expand and invert the matrix for the grid Hessian
 !------------------------------------------------------------------------------
 subroutine hexmesh_g2inv(jac,A)
 real(r8), intent(in) :: jac(3,3)
