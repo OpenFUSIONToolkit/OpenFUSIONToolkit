@@ -14,59 +14,41 @@ USE oft_base
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_global_stitch, &
   oft_stitch_check
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_matrix, oft_matrix_ptr, &
-  oft_graph, oft_graph_ptr, oft_matrix_map
-USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, oft_native_matrix
-USE oft_solver_base, ONLY: oft_solver, oft_bc_proto
+  oft_graph, oft_graph_ptr, oft_matrix_map, oft_ml_vecspace
+USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_native_solvers, ONLY: oft_native_cg_solver, native_cg_solver_cast, &
   oft_native_gmres_solver, native_gmres_solver_cast, oft_jblock_precond, &
-  oft_ml_precond, oft_veccreate_proto, oft_interp_proto, jblock_precond_cast, &
+  oft_ml_precond, jblock_precond_cast, &
   ml_precond_cast, oft_diag_scale, diag_scale_cast, oft_bjprecond
 USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, oft_petsc_matrix_cast
 USE oft_petsc_solvers, ONLY: oft_petsc_sjacobi_solver, oft_petsc_cg_solver, oft_petsc_gmres_solver, &
-oft_petsc_diagprecond, petsc_cg_solver_cast, petsc_gmres_solver_cast, petsc_sjacobi_solver_cast, &
-petsc_diagprecond_cast, oft_petsc_asprecond, oft_petsc_direct_solver, petsc_direct_solver_cast, &
-oft_petsc_pre_solver, oft_petsc_luprecond
+  oft_petsc_diagprecond, petsc_cg_solver_cast, petsc_gmres_solver_cast, petsc_sjacobi_solver_cast, &
+  petsc_diagprecond_cast, oft_petsc_asprecond, oft_petsc_direct_solver, petsc_direct_solver_cast, &
+  oft_petsc_luprecond
 #endif
 IMPLICIT NONE
 #include "local.h"
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_mlpre
-!---------------------------------------------------------------------------
 !> Construct Multi-Grid preconditioner
 !!
 !! This subroutine is a wrapper around specific subroutines for construction
-!! from an XML specification or standard native/PETSc preconditioners.
-!!
-!! @param[out] pre Preconditioner object
-!! @param[in] Mats Operator matrices [nlevels]
-!! @param[in] levels List of level indices [nlevels]
-!! @param[in] nlevels Number of levels
-!! @param[in] create_vec Vector creation subroutine
-!! @param[in] interp Interpolation subroutine
-!! @param[in] inject Restriction subroutine
-!! param[in] bc Bondary condition subroutine (optional)
-!! @param[in] stype Smoother type (optional)
-!! @param[in] df Smoother damping factors [nlevels] (optional)
-!! @param[in] nu Number of smoother iterations [nlevels] (optional)
-!! @param[in] xml_root Preconditioner definition node (optional)
+!! from an XML specification or standard native/PETSc preconditioners
 !---------------------------------------------------------------------------
-subroutine create_mlpre(pre,Mats,levels,nlevels,create_vec,interp, &
-  inject,bc,stype,df,nu,xml_root)
-class(oft_solver), pointer, intent(out) :: pre
-TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:)
-integer(i4), intent(in) :: levels(:)
-integer(i4), intent(in) :: nlevels
-procedure(oft_veccreate_proto) :: create_vec
-procedure(oft_interp_proto) :: interp
-procedure(oft_interp_proto) :: inject
-procedure(oft_bc_proto), optional :: bc
-integer(i4), optional, intent(in) :: stype
-real(r8), optional, intent(in) :: df(:)
-integer(i4), optional, intent(in) :: nu(:)
-TYPE(xml_node), optional, pointer, intent(in) :: xml_root
+subroutine create_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu,xml_root)
+class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
+TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: nlevels !< Number of levels
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition subroutine (optional)
+integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
+real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
+integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
+TYPE(xml_node), optional, pointer, intent(in) :: xml_root !< Preconditioner definition node (optional)
 !---
 NULLIFY(pre)
 #ifdef HAVE_XML
@@ -74,52 +56,33 @@ IF(ASSOCIATED(oft_env%xml).AND.PRESENT(xml_root))THEN
   IF(ASSOCIATED(xml_root))THEN
     !---Create preconditioner
     CALL create_ml_xml(pre,Mats,levels,nlevels=nlevels, &
-      create_vec=create_vec,interp=interp,inject=inject,&
-      pre_node=xml_root,bc=bc)
+      ml_vecspace=ml_vecspace,pre_node=xml_root,bc=bc)
   END IF
 END IF
 #endif
 IF(.NOT.ASSOCIATED(pre))THEN
   IF(use_petsc)THEN
     CALL create_petsc_mlpre(pre,Mats,levels,nlevels=nlevels, &
-      create_vec=create_vec,interp=interp,inject=inject, &
-      bc=bc,stype=stype,nu=nu,df=df)
+      bc=bc,ml_vecspace=ml_vecspace,stype=stype,nu=nu,df=df)
   ELSE
     CALL create_native_mlpre(pre,Mats,levels,nlevels=nlevels, &
-      create_vec=create_vec,interp=interp,inject=inject, &
-      bc=bc,stype=stype,nu=nu,df=df)
+      bc=bc,ml_vecspace=ml_vecspace,stype=stype,nu=nu,df=df)
   END IF
 END IF
 end subroutine create_mlpre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_native_mlpre
-!---------------------------------------------------------------------------
 !> Construct native Multi-Grid preconditioner
-!!
-!! @param[out] pre Preconditioner object
-!! @param[in] Mats Operator matrices [nlevels]
-!! @param[in] levels List of level indices [nlevels]
-!! @param[in] nlevels Number of levels
-!! @param[in] create_vec Vector creation subroutine
-!! @param[in] interp Interpolation subroutine
-!! @param[in] inject Restriction subroutine
-!! @param[in] bc Bondary condition subroutine (optional)
-!! @param[in] stype Smoother type (optional)
-!! @param[in] df Smoother damping factors [nlevels] (optional)
-!! @param[in] nu Number of smoother iterations [nlevels] (optional)
 !---------------------------------------------------------------------------
-subroutine create_native_mlpre(pre,Mats,levels,nlevels,create_vec,interp,inject,bc,stype,df,nu)
-class(oft_solver), pointer, intent(out) :: pre
-TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:)
-integer(i4), intent(in) :: levels(:)
-integer(i4), intent(in) :: nlevels
-procedure(oft_veccreate_proto) :: create_vec
-procedure(oft_interp_proto) :: interp
-procedure(oft_interp_proto) :: inject
-procedure(oft_bc_proto), optional :: bc
-integer(i4), optional, intent(in) :: stype
-real(r8), optional, intent(in) :: df(:)
-integer(i4), optional, intent(in) :: nu(:)
+subroutine create_native_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu)
+class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
+TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: nlevels !< Number of levels
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition (optional)
+integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
+real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
+integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
 integer(i4) :: i,smoother
 class(oft_ml_precond), pointer :: this_ml
 type(oft_jblock_precond), pointer :: this_jac
@@ -158,16 +121,14 @@ SELECT TYPE(pre)
     CALL oft_abort('Error in precon allocation!','create_native_mlpre',__FILE__)
 END SELECT
 !---Setup MG smoother
-this_ml%interp=>interp
-this_ml%inject=>inject
-this_ml%vec_create=>create_vec
+this_ml%ml_vecspace=>ml_vecspace
 this_ml%level=ABS(levels(nlevels))
 !---Allocate top-level smoother
 SELECT CASE(smoother)
   CASE(1) ! Jacobi
     ALLOCATE(oft_jblock_precond::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(jblock_precond_cast(this_jac,this_ml%smooth_up)<0) &
+    IF(.NOT.jblock_precond_cast(this_jac,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_jac".','create_native_mlpre',__FILE__)
     this_jac%A=>Mats(nlevels)%M
     IF(PRESENT(bc))this_jac%bc=>bc
@@ -176,7 +137,7 @@ SELECT CASE(smoother)
   CASE(2) ! FGMRES
     ALLOCATE(oft_native_gmres_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(native_gmres_solver_cast(this_gmres,this_ml%smooth_up)<0) &
+    IF(.NOT.native_gmres_solver_cast(this_gmres,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_gmres".','create_native_mlpre',__FILE__)
     this_gmres%A=>Mats(nlevels)%M
     IF(PRESENT(bc))this_gmres%bc=>bc
@@ -184,13 +145,13 @@ SELECT CASE(smoother)
     this_gmres%its=nu(nlevels)
     !---
     ALLOCATE(oft_diag_scale::this_gmres%pre)
-    IF(diag_scale_cast(this_diag,this_gmres%pre)<0) &
+    IF(.NOT.diag_scale_cast(this_diag,this_gmres%pre)) &
       CALL oft_abort('Failed to allocate "this_diag".','create_native_mlpre',__FILE__)
     this_diag%A=>Mats(nlevels)%M
   CASE(3) ! CG
     ALLOCATE(oft_native_cg_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(native_cg_solver_cast(this_cg,this_ml%smooth_up)<0) &
+    IF(.NOT.native_cg_solver_cast(this_cg,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_cg".','create_native_mlpre',__FILE__)
     this_cg%A=>Mats(nlevels)%M
     IF(PRESENT(bc))this_cg%bc=>bc
@@ -202,12 +163,10 @@ this_ml%symmetric=.TRUE.
 DO i=nlevels-1,1,-1
   !---Set smoother
   ALLOCATE(oft_ml_precond::this_ml%base_solve)
-  IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
+  IF(.NOT.ml_precond_cast(this_ml,this_ml%base_solve)) &
     CALL oft_abort('Failed to allocate "this_ml".','create_native_mlpre',__FILE__)
   !---Setup MG smoother
-  this_ml%interp=>interp
-  this_ml%inject=>inject
-  this_ml%vec_create=>create_vec
+  this_ml%ml_vecspace=>ml_vecspace
   this_ml%level=ABS(levels(i))
   IF(levels(i)<0)CYCLE
   !---Allocate level smoother
@@ -215,7 +174,7 @@ DO i=nlevels-1,1,-1
     CASE(1)
       ALLOCATE(oft_jblock_precond::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(jblock_precond_cast(this_jac,this_ml%smooth_up)<0) &
+      IF(.NOT.jblock_precond_cast(this_jac,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_jac".','create_native_mlpre',__FILE__)
       this_jac%A=>Mats(i)%M
       IF(PRESENT(bc))this_jac%bc=>bc
@@ -226,7 +185,7 @@ DO i=nlevels-1,1,-1
     CASE(2) ! FGMRES
       ALLOCATE(oft_native_gmres_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(native_gmres_solver_cast(this_gmres,this_ml%smooth_up)<0) &
+      IF(.NOT.native_gmres_solver_cast(this_gmres,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_gmres".','create_native_mlpre',__FILE__)
       this_gmres%A=>Mats(i)%M
       IF(PRESENT(bc))this_gmres%bc=>bc
@@ -234,7 +193,7 @@ DO i=nlevels-1,1,-1
       this_gmres%its=nu(i)
       !---
       ALLOCATE(oft_diag_scale::this_gmres%pre)
-      IF(diag_scale_cast(this_diag,this_gmres%pre)<0) &
+      IF(.NOT.diag_scale_cast(this_diag,this_gmres%pre)) &
         CALL oft_abort('Failed to allocate "this_diag".','create_native_mlpre',__FILE__)
       this_diag%A=>Mats(i)%M
       IF(i>1)THEN
@@ -244,7 +203,7 @@ DO i=nlevels-1,1,-1
     CASE(3) ! CG
       ALLOCATE(oft_native_cg_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(native_cg_solver_cast(this_cg,this_ml%smooth_up)<0) &
+      IF(.NOT.native_cg_solver_cast(this_cg,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_cg".','create_native_mlpre',__FILE__)
       this_cg%A=>Mats(i)%M
       IF(PRESENT(bc))this_cg%bc=>bc
@@ -258,34 +217,18 @@ END DO
 DEBUG_STACK_POP
 end subroutine create_native_mlpre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_petsc_mlpre
-!---------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
-!!
-!! @param[out] pre Preconditioner object
-!! @param[in] Mats Operator matrices [nlevels]
-!! @param[in] levels List of level indices [nlevels]
-!! @param[in] nlevels Number of levels
-!! @param[in] create_vec Vector creation subroutine
-!! @param[in] interp Interpolation subroutine
-!! @param[in] inject Restriction subroutine
-!! @param[in] bc Bondary condition subroutine (optional)
-!! @param[in] stype Smoother type (optional)
-!! @param[in] df Smoother damping factors [nlevels] (optional)
-!! @param[in] nu Number of smoother iterations [nlevels] (optional)
 !---------------------------------------------------------------------------
-subroutine create_petsc_mlpre(pre,Mats,levels,nlevels,create_vec,interp,inject,bc,stype,df,nu)
-class(oft_solver), pointer, intent(out) :: pre
-TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:)
-integer(i4), intent(in) :: levels(:)
-integer(i4), intent(in) :: nlevels
-procedure(oft_veccreate_proto) :: create_vec
-procedure(oft_interp_proto) :: interp
-procedure(oft_interp_proto) :: inject
-procedure(oft_bc_proto), optional :: bc
-integer(i4), optional, intent(in) :: stype
-real(r8), optional, intent(in) :: df(:)
-integer(i4), optional, intent(in) :: nu(:)
+subroutine create_petsc_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu)
+class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
+TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: nlevels !< Number of levels
+class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition (optional)
+integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
+real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
+integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
 #ifdef HAVE_PETSC
 !---
 integer(i4) :: i,smoother
@@ -328,9 +271,7 @@ SELECT TYPE(pre)
     CALL oft_abort('Error in precon allocation!','create_petsc_mlpre',__FILE__)
 END SELECT
 !---Setup MG smoother
-this_ml%interp=>interp
-this_ml%inject=>inject
-this_ml%vec_create=>create_vec
+this_ml%ml_vecspace=>ml_vecspace
 this_ml%level=ABS(levels(nlevels))
 IF(PRESENT(bc))this_ml%bc=>bc
 !---Allocate top-level smoother
@@ -338,7 +279,7 @@ SELECT CASE(smoother)
   CASE(1) ! Jacobi
     ALLOCATE(oft_petsc_sjacobi_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(petsc_sjacobi_solver_cast(this_jac,this_ml%smooth_up)<0) &
+    IF(.NOT.petsc_sjacobi_solver_cast(this_jac,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_jac".','create_petsc_mlpre',__FILE__)
     this_jac%A=>Mats(nlevels)%M
     this_jac%df=df(nlevels)
@@ -347,7 +288,7 @@ SELECT CASE(smoother)
   CASE(2) ! FGMRES
     ALLOCATE(oft_petsc_gmres_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(petsc_gmres_solver_cast(this_gmres,this_ml%smooth_up)<0) &
+    IF(.NOT.petsc_gmres_solver_cast(this_gmres,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_gmres".','create_petsc_mlpre',__FILE__)
     this_gmres%A=>Mats(nlevels)%M
     this_gmres%nrits=nu(nlevels)
@@ -357,13 +298,13 @@ SELECT CASE(smoother)
   CASE(3) ! CG
     ALLOCATE(oft_petsc_cg_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(petsc_cg_solver_cast(this_cg,this_ml%smooth_up)<0) &
+    IF(.NOT.petsc_cg_solver_cast(this_cg,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_cg".','create_petsc_mlpre',__FILE__)
     this_cg%A=>Mats(nlevels)%M
     this_cg%its=nu(nlevels)
     !---
     ALLOCATE(oft_petsc_diagprecond::this_cg%pre)
-    IF(petsc_diagprecond_cast(this_diag,this_cg%pre)<0) &
+    IF(.NOT.petsc_diagprecond_cast(this_diag,this_cg%pre)) &
       CALL oft_abort('Failed to allocate "this_diag".','create_petsc_mlpre',__FILE__)
 END SELECT
 this_ml%smooth_down=>this_ml%smooth_up
@@ -372,19 +313,17 @@ this_ml%symmetric=.TRUE.
 DO i=nlevels-1,1,-1
   !---Set smoother
   ALLOCATE(oft_ml_precond::this_ml%base_solve)
-  IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
+  IF(.NOT.ml_precond_cast(this_ml,this_ml%base_solve)) &
     CALL oft_abort('Failed to allocate "this_ml".','create_petsc_mlpre',__FILE__)
   !---Setup MG smoother
-  this_ml%interp=>interp
-  this_ml%inject=>inject
-  this_ml%vec_create=>create_vec
+  this_ml%ml_vecspace=>ml_vecspace
   this_ml%level=ABS(levels(i))
   IF(levels(i)<0)CYCLE
   IF(PRESENT(bc))this_ml%bc=>bc
   IF(i==1.AND.stype<0)THEN
     ALLOCATE(oft_petsc_direct_solver::this_ml%smooth_up)
     !---Setup top-level smoother
-    IF(petsc_direct_solver_cast(this_direct,this_ml%smooth_up)<0) &
+    IF(.NOT.petsc_direct_solver_cast(this_direct,this_ml%smooth_up)) &
       CALL oft_abort('Failed to allocate "this_direct".','create_petsc_mlpre',__FILE__)
     this_direct%A=>Mats(i)%M
     this_direct%its=nu(i)
@@ -394,7 +333,7 @@ DO i=nlevels-1,1,-1
     CASE(1)
       ALLOCATE(oft_petsc_sjacobi_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(petsc_sjacobi_solver_cast(this_jac,this_ml%smooth_up)<0) &
+      IF(.NOT.petsc_sjacobi_solver_cast(this_jac,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_jac".','create_petsc_mlpre',__FILE__)
       this_jac%A=>Mats(i)%M
       this_jac%df=df(i)
@@ -405,7 +344,7 @@ DO i=nlevels-1,1,-1
     CASE(2) ! FGMRES
       ALLOCATE(oft_petsc_gmres_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(petsc_gmres_solver_cast(this_gmres,this_ml%smooth_up)<0) &
+      IF(.NOT.petsc_gmres_solver_cast(this_gmres,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_gmres".','create_petsc_mlpre',__FILE__)
       this_gmres%A=>Mats(i)%M
       this_gmres%nrits=MIN(20,nu(i))
@@ -419,13 +358,13 @@ DO i=nlevels-1,1,-1
     CASE(3) ! CG
       ALLOCATE(oft_petsc_cg_solver::this_ml%smooth_up)
       !---Setup top-level smoother
-      IF(petsc_cg_solver_cast(this_cg,this_ml%smooth_up)<0) &
+      IF(.NOT.petsc_cg_solver_cast(this_cg,this_ml%smooth_up)) &
         CALL oft_abort('Failed to allocate "this_cg".','create_petsc_mlpre',__FILE__)
       this_cg%A=>Mats(i)%M
       this_cg%its=nu(i)
       !---
       ALLOCATE(oft_petsc_diagprecond::this_cg%pre)
-      IF(petsc_diagprecond_cast(this_diag,this_cg%pre)<0) &
+      IF(.NOT.petsc_diagprecond_cast(this_diag,this_cg%pre)) &
         CALL oft_abort('Failed to allocate "this_diag".','create_petsc_mlpre',__FILE__)
       IF(i>1)THEN
         this_ml%smooth_down=>this_ml%smooth_up
@@ -440,9 +379,7 @@ CALL oft_abort("Not compiled with PETSc", "create_petsc_mlpre", __FILE__)
 #endif
 end subroutine create_petsc_mlpre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_native_solver
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_native_solver(solver,solver_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -465,9 +402,7 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine create_native_solver
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_petsc_solver
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_petsc_solver(solver,solver_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -494,9 +429,7 @@ DEBUG_STACK_POP
 #endif
 end subroutine create_petsc_solver
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_cg_solver
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_cg_solver(solver,force_native)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -513,9 +446,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_cg_solver
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_cg_solver
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_gmres_solver(solver,nrits,force_native)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -547,9 +478,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_gmres_solver
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_solver_xml
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_solver_xml(solver,solver_node,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
@@ -629,9 +558,7 @@ CALL oft_abort('OFT not compiled with xml support.','create_solver_xml',__FILE__
 #endif
 end subroutine create_solver_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_native_pre
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_native_pre(pre,pre_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -652,9 +579,7 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine create_native_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_petsc_pre
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_petsc_pre(pre,pre_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -686,9 +611,7 @@ DEBUG_STACK_POP
 #endif
 end subroutine create_petsc_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_diag_pre
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_diag_pre(pre)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -716,9 +639,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_ilu_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_bjacobi_pre
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE create_bjacobi_pre(pre,nlocal)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -744,9 +665,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_bjacobi_pre
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_pre_xml
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_pre_xml(pre,pre_node,native_solver,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -821,29 +740,16 @@ CALL oft_abort('OFT not compiled with xml support.','create_pre_xml',__FILE__)
 #endif
 end subroutine create_pre_xml
 !---------------------------------------------------------------------------
-! SUBROUTINE: create_ml_xml
-!---------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
-!!
-!! @param[out] pre Preconditioner object
-!! @param[in] Mats Operator matrices [nlevels]
-!! @param[in] levels List of level indices [nlevels]
-!! @param[in] nlevels Number of levels
-!! @param[in] create_vec Vector creation subroutine
-!! @param[in] interp Interpolation subroutine
-!! @param[in] inject Restriction subroutine
-!! @param[in] pre_node
 !---------------------------------------------------------------------------
-subroutine create_ml_xml(pre,Mats,levels,nlevels,create_vec,interp,inject,pre_node,bc)
-class(oft_solver), pointer, intent(out) :: pre
-TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:)
-integer(i4), intent(in) :: levels(:)
-integer(i4), intent(in) :: nlevels
-procedure(oft_veccreate_proto) :: create_vec
-procedure(oft_interp_proto) :: interp
-procedure(oft_interp_proto) :: inject
-TYPE(xml_node), POINTER, INTENT(in) :: pre_node
-procedure(oft_bc_proto), optional :: bc
+subroutine create_ml_xml(pre,Mats,levels,nlevels,ml_vecspace,pre_node,bc)
+class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
+TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: nlevels !< Number of levels
+class(oft_ml_vecspace), target, intent(in) :: ml_vecspace !< Multi-level vectorspace
+TYPE(xml_node), POINTER, INTENT(in) :: pre_node !< Preconditioner XML element
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
 #ifdef HAVE_XML
 !---
 integer(i4) :: i,ierr,nnodes
@@ -899,9 +805,7 @@ SELECT TYPE(pre)
     CALL oft_abort('Error in precon allocation!','create_petsc_mlpre',__FILE__)
 END SELECT
 !---Setup MG smoother
-this_ml%interp=>interp
-this_ml%inject=>inject
-this_ml%vec_create=>create_vec
+this_ml%ml_vecspace=>ml_vecspace
 this_ml%level=ABS(levels(nlevels))
 IF(PRESENT(bc))this_ml%bc=>bc
 !---Allocate top-level smoother
@@ -925,12 +829,10 @@ END IF
 DO i=nlevels-1,1,-1
   !---Set smoother
   ALLOCATE(oft_ml_precond::this_ml%base_solve)
-  IF(ml_precond_cast(this_ml,this_ml%base_solve)<0) &
+  IF(.NOT.ml_precond_cast(this_ml,this_ml%base_solve)) &
     CALL oft_abort('Failed to allocate "this_ml".','create_petsc_mlpre',__FILE__)
   !---Setup MG smoother
-  this_ml%interp=>interp
-  this_ml%inject=>inject
-  this_ml%vec_create=>create_vec
+  this_ml%ml_vecspace=>ml_vecspace
   this_ml%level=ABS(levels(i))
   IF(levels(i)<0)CYCLE
   IF(i==1.AND.coarse_present)THEN

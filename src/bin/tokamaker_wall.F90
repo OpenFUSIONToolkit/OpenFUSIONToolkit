@@ -17,8 +17,6 @@ REAL(8) :: ltx_vv_amp = 2.d1
 PUBLIC exp_setup
 CONTAINS
 !------------------------------------------------------------------------------
-! SUBROUTINE exp_setup
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE exp_setup(gs)
@@ -26,8 +24,6 @@ CLASS(gs_eq), INTENT(inout) :: gs
 INTEGER(4) :: ierr
 CALL ltx_setup(gs,ierr)
 END SUBROUTINE exp_setup
-!------------------------------------------------------------------------------
-! SUBROUTINE ltx_setup
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -45,8 +41,6 @@ WRITE(*,*)
 WRITE(*,'(A)')'*** Setting options for the Lithium Tokamak eXperiment ***'
 gs%set_eta=>ltx_eta_set
 END SUBROUTINE ltx_setup
-!------------------------------------------------------------------------------
-! FUNCTION ltx_eta_set
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -75,8 +69,6 @@ USE oft_base
 USE axi_green, ONLY: green
 IMPLICIT NONE
 CONTAINS
-!---------------------------------------------------------------------------
-! FUNCTION biot_savart_elem
 !---------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------
@@ -124,8 +116,6 @@ bout = bout + cross_product(dl,rsep)/(rmag**3)
 !
 bout=bout/(4.d0*pi)
 end function biot_savart_elem
-!------------------------------------------------------------------------------
-! SUBROUTINE nonax_rescouple
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -319,8 +309,6 @@ WRITE(*,*)'  Finished'
 DEALLOCATE(vert_couple,etatmp,corr_mat)
 END SUBROUTINE nonax_rescouple
 !------------------------------------------------------------------------------
-! SUBROUTINE nonax_indcouple
-!------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE nonax_indcouple(ncoils,rc,extent,result,drivers,ndriver,correction, &
@@ -472,8 +460,6 @@ END IF
 WRITE(*,*)'  Finished'
 DEALLOCATE(vert_couple,corr_mat)
 END SUBROUTINE nonax_indcouple
-!------------------------------------------------------------------------------
-! SUBROUTINE nonax_eigs
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -725,12 +711,12 @@ program tokamaker_wall
 USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: hdf5_create_file, hdf5_write, hdf5_create_group
-USE oft_mesh_type, ONLY: smesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
-USE fem_base, ONLY: oft_afem_type
+USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_la_base, ONLY: oft_vector
-USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
-  oft_lag_setup
+USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE oft_gs_profiles, ONLY: zero_flux_func
 USE oft_gs, ONLY: gs_eq, gs_setup_walls, gs_cond_source, gs_vacuum_solve
 USE oft_gs_fit, ONLY: fit_load, fit_constraint_ptr, gs_active
@@ -741,6 +727,9 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4) :: i,ierr,io_unit
 TYPE(gs_eq) :: mygs
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 !---GS input options
 INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30
@@ -812,13 +801,14 @@ IF(ierr>0)CALL oft_abort('Error parsing "tokamaker_wall_options" in input file.'
 !---------------------------------------------------------------------------
 ! Setup Mesh
 !---------------------------------------------------------------------------
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 CALL mygs%xdmf%setup("TokaMaker")
-CALL smesh%setup_io(mygs%xdmf,order)
+CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
+CALL mygs%setup(ML_oft_blagrange)
 !---------------------------------------------------------------------------
 ! Setup experimental geometry
 !---------------------------------------------------------------------------
@@ -854,11 +844,7 @@ CALL compute_eddy(mygs)
 CALL oft_finalize
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE compute_eddy
-!---------------------------------------------------------------------------
 !> Needs Docs
-!!
-!! @param[in,out] self G-S object
 !---------------------------------------------------------------------------
 subroutine compute_eddy(self)
 type(gs_eq), target, intent(inout) :: self
@@ -898,7 +884,7 @@ DO i=1,ncons
   END DO
 END DO
 IF(grid_3d)THEN
-  CALL smesh%tessellate(rz_grid,lctmp,order)
+  CALL mg_mesh%smesh%tessellate(rz_grid,lctmp,order)
   ALLOCATE(rz_correction(3,nphi_3d,SIZE(rz_grid,DIM=2)))
   CALL hdf5_write(nphi_3d*1.d0,'wall_eig.rst','ngrid_3d')
 END IF
@@ -988,9 +974,9 @@ DO i=1,self%ncond_regs
           rz_correction=rz_correction/self%cond_regions(i)%coverage
           ALLOCATE(outtmp(3,SIZE(rz_grid,DIM=2)))
           outtmp=SQRT(SUM(rz_correction**2,DIM=2)/REAL(SIZE(rz_grid,DIM=2),8))
-          CALL smesh%save_vertex_scalar(outtmp(1,:),self%xdmf, 'Br_corr')
-          CALL smesh%save_vertex_scalar(outtmp(2,:),self%xdmf, 'Bt_corr')
-          CALL smesh%save_vertex_scalar(outtmp(3,:),self%xdmf, 'Bz_corr')
+          CALL mg_mesh%smesh%save_vertex_scalar(outtmp(1,:),self%xdmf, 'Br_corr')
+          CALL mg_mesh%smesh%save_vertex_scalar(outtmp(2,:),self%xdmf, 'Bt_corr')
+          CALL mg_mesh%smesh%save_vertex_scalar(outtmp(3,:),self%xdmf, 'Bz_corr')
           DEALLOCATE(outtmp)
           CALL hdf5_write(rz_correction(1,:,:), 'wall_eig.rst', 'rz_corr_r'//num_str//'_'//num_str2)
           CALL hdf5_write(rz_correction(2,:,:), 'wall_eig.rst', 'rz_corr_t'//num_str//'_'//num_str2)
@@ -1012,7 +998,7 @@ DO i=1,self%ncond_regs
         CALL self%psi%get_local(psi_vals)
         WRITE(cond_tag,'(I2.2)')i
         WRITE(eig_tag,'(I2.2)')j
-        CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Eig_'//cond_tag//'_'//eig_tag)
+        CALL mg_mesh%smesh%save_vertex_scalar(psi_vals,self%xdmf,'Eig_'//cond_tag//'_'//eig_tag)
         DEALLOCATE(psi_vals)
         ! CALL self%solve
         DO k=1,ncons

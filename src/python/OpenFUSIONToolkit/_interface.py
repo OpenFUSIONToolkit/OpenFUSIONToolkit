@@ -97,13 +97,13 @@ oftpy_set_nthreads = ctypes_subroutine(oftpy_lib.oftpy_set_nthreads,
 oftpy_load_xml = ctypes_subroutine(oftpy_lib.oftpy_load_xml,
     [c_char_p, c_void_ptr_ptr])
 
-# Set mesh in memory: (ndim,np,r_loc,npc,nc,lc_loc,reg_loc)
+# Set mesh in memory: (ndim,np,r_loc,npc,nc,lc_loc,reg_loc,mesh_ptr)
 oft_setup_smesh = ctypes_subroutine(oftpy_lib.oft_setup_smesh,
-    [c_int,c_int, ctypes_numpy_array(float64,2) ,c_int, c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), c_int_ptr])
+    [c_int,c_int, ctypes_numpy_array(float64,2) ,c_int, c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), c_int_ptr, c_void_ptr_ptr])
 
-# Set mesh in memory: (ndim,np,r_loc,npc,nc,lc_loc,reg_loc)
+# Set mesh in memory: (ndim,np,r_loc,npc,nc,lc_loc,reg_loc,mesh_ptr)
 oft_setup_vmesh = ctypes_subroutine(oftpy_lib.oft_setup_vmesh,
-    [c_int,c_int, ctypes_numpy_array(float64,2) ,c_int, c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), c_int_ptr])
+    [c_int,c_int, ctypes_numpy_array(float64,2) ,c_int, c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), c_int_ptr, c_void_ptr_ptr])
 
 # Dump coverage information if needed
 oftpy_dump_cov = ctypes_subroutine(oftpy_lib.dump_cov)

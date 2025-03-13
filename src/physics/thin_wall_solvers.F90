@@ -606,8 +606,6 @@ oft_env%pm=pm
 END SUBROUTINE gmres_comp
 END SUBROUTINE frequency_response
 !------------------------------------------------------------------------------
-! SUBROUTINE run_td_sim
-!------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tol,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
@@ -982,8 +980,6 @@ ELSE
   DEALLOCATE(linv)
 END IF
 END SUBROUTINE run_td_sim
-!------------------------------------------------------------------------------
-! SUBROUTINE plot_sim
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

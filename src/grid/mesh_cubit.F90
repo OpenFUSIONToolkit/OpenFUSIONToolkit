@@ -21,19 +21,17 @@ USE nurbs_cad, ONLY: nurbs_curve, nurbs_surf, nurbs_entity_ptr, nurbs_init, &
   nurbs_surf_name, nurbs_surf_avg, nurbs_surf_midpoint, nurbs_curve_midpoint, &
   nurbs_surf_center, nurbs_curve_linear, nurbs_surf_planar
 #endif
-USE oft_mesh_type, ONLY: oft_amesh, oft_mesh, mesh, oft_bmesh, smesh
+USE oft_mesh_type, ONLY: oft_amesh, oft_mesh, oft_bmesh
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_hexmesh_type, ONLY: oft_hexmesh
 USE oft_quadmesh_type, ONLY: oft_quadmesh
 USE oft_mesh_local_util, ONLY: mesh_local_findedge, mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 !---End include modules
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
-! TYPE Exodus_curve
 !------------------------------------------------------------------------------
 !> T3D CAD boundary structure
 !! - CAD entity counts
@@ -47,8 +45,6 @@ TYPE :: Exodus_curve
   CHARACTER(LEN=OFT_SLEN) :: name = ''
 END TYPE Exodus_curve
 !------------------------------------------------------------------------------
-! TYPE Exodus_surf
-!------------------------------------------------------------------------------
 !> T3D CAD boundary structure
 !! - CAD entity counts
 !! - CAD wireframe entities
@@ -60,8 +56,6 @@ TYPE :: Exodus_surf
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lgmf => NULL() !< List of geometry model faces
   CHARACTER(LEN=OFT_SLEN) :: name = ''
 END TYPE Exodus_surf
-!------------------------------------------------------------------------------
-! TYPE Exodus_cadlink
 !------------------------------------------------------------------------------
 !> T3D CAD linkage structure
 !! - Linkage of mesh entities to CAD model
@@ -79,7 +73,7 @@ END TYPE Exodus_cadlink
 PRIVATE
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_cubit_id = 2
 PUBLIC mesh_cubit_load, mesh_cubit_reffix, mesh_cubit_add_quad
-PUBLIC mesh_cubit_hobase, mesh_cubit_cadlink
+PUBLIC mesh_cubit_hobase, mesh_cubit_cadlink, cubit_finalize_setup
 PUBLIC mesh_cubit_test_edge, mesh_cubit_set_periodic
 PUBLIC smesh_cubit_load, cubit_read_nodesets, cubit_read_sidesets
 !---Cubit "exodus" indexing maps
@@ -130,12 +124,43 @@ LOGICAL :: have_ho = .FALSE.
 INTEGER(i4) :: np_ho = 0
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: lc_ho
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: r_ho
-!
-! TYPE(oft_1d_int), allocatable, target :: cubit_nsets(:)
-! TYPE(oft_1d_int), allocatable, target :: cubit_ssets(:)
 CONTAINS
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_load
+!> Finalize setup/load-in of CUBIT mesh and destroy temporaries created
+!! for grid construction (eg. high-order input nodes, in-memory data)
+!------------------------------------------------------------------------------
+subroutine cubit_finalize_setup
+lf_file = .TRUE.
+tor_mesh = .FALSE.
+reflect = .FALSE.
+per_ns = -1
+zstretch = 1.d0
+tor_rmin = 0.d0
+!
+#ifdef HAVE_ONURBS
+ngmc = 0
+ngms = 0
+ngwc = 0
+ngws = 0
+! TYPE(Exodus_curve), POINTER, DIMENSION(:) :: model_curves => NULL() !< List of model curves
+! TYPE(Exodus_surf), POINTER, DIMENSION(:) :: model_surfaces => NULL() !< List of model surfaces
+! TYPE(nurbs_curve), POINTER, DIMENSION(:) :: wf_curves => NULL() !< List of CAD wireframe curves
+! TYPE(nurbs_surf), POINTER, DIMENSION(:) :: wf_surfs => NULL() !< List of CAD wireframe surfaces
+! TYPE(Exodus_cadlink), POINTER :: cad_link => NULL() !< Linkage of mesh to CAD geometry
+! TYPE(Exodus_cadlink), POINTER, DIMENSION(:) :: ML_cad_link => NULL() !< ML CAD linkage
+#endif
+!
+ncid=0
+nblks=0
+nregions=0
+np_per=0
+IF(ALLOCATED(per_nodes))DEALLOCATE(per_nodes)
+!
+have_ho=.FALSE.
+np_ho=0
+IF(ALLOCATED(r_ho))DEALLOCATE(r_ho)
+IF(ALLOCATED(lc_ho))DEALLOCATE(lc_ho)
+end subroutine cubit_finalize_setup
 !------------------------------------------------------------------------------
 !> Read in Exodus mesh and geometry information
 !! - Read in Cubit options from input file
@@ -143,18 +168,23 @@ CONTAINS
 !! - Read in surface mesh
 !! - Load and initialize OpenNURBS CAD representation
 !------------------------------------------------------------------------------
-subroutine mesh_cubit_load
+subroutine mesh_cubit_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8), allocatable :: rtmp(:,:)
 integer(i4) :: blkID,nodesID,att_len
 integer(i4) :: i,j,id,it,lenreflag,ierr,io_unit
 integer(i4), allocatable :: lptmp(:)
 logical :: ltrans(3)
 character(40) :: eltype
+class(oft_mesh), pointer :: mesh
+class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
 namelist/cubit_options/filename,inpname,lf_file,tor_mesh, &
   reflect,per_ns,zstretch,tor_rmin
 DEBUG_STACK_PUSH
 IF(oft_env%head_proc)THEN
+  filename = 'none'
+  inpname = 'none'
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cubit_options,IOSTAT=ierr)
   CLOSE(io_unit)
@@ -205,6 +235,7 @@ DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_cubit_id,.TRUE.)
   mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
 END DO
+CALL multigrid_level(mg_mesh,1)
 mesh=>mg_mesh%meshes(1)
 smesh=>mg_mesh%smeshes(1)
 !---
@@ -279,6 +310,15 @@ IF(have_ho)THEN
       lc_ho(j,i) = lptmp(lc_ho(j,i))
     END DO
   END DO
+  !---Reindex periodic points
+  j=0
+  DO i=1,np_per
+    IF(lptmp(per_nodes(i))/=0)THEN
+      j=j+1
+      per_nodes(j)=lptmp(per_nodes(i))
+    END IF
+  END DO
+  np_per=j
 #ifdef HAVE_ONURBS
   !---Reindex CAD edges
   DO i=1,ngmc
@@ -299,7 +339,7 @@ END IF
 mesh%r(3,:)=mesh%r(3,:)*zstretch
 IF(reflect)THEN
   call mesh_global_resolution(mesh)
-  call mesh_cubit_reflect(.1d0*mesh%hmin)
+  call mesh_cubit_reflect(mesh,.1d0*mesh%hmin)
 END IF
 IF(oft_env%rank/=0)DEALLOCATE(mesh%r,mesh%lc,mesh%reg)
 !---
@@ -315,8 +355,6 @@ END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 contains
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_read_regions
 !------------------------------------------------------------------------------
 !> Read in Exodus volume mesh
 !! - Merge all blocks
@@ -452,11 +490,10 @@ CALL oft_decrease_indent
 end subroutine mesh_cubit_read_regions
 end subroutine mesh_cubit_load
 !------------------------------------------------------------------------------
-! SUBROUTINE smesh_cubit_load
-!------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-subroutine smesh_cubit_load()
+subroutine smesh_cubit_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 logical :: read_2d = .FALSE.
 logical :: ltrans(3)
 real(8), allocatable :: rtmp(:),r2dtmp(:,:)
@@ -465,10 +502,13 @@ integer(4) :: nf,np,io_unit,nsID,num_nsets,num_sidesets,att_len
 integer(i4), allocatable :: lptmp(:)
 character(LEN=3) :: blknm
 character(LEN=10) :: eltype
+class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
 namelist/cubit_options/filename,inpname,lf_file,tor_mesh, &
   reflect,per_ns,zstretch,tor_rmin
 IF(oft_env%head_proc)THEN
+  filename = 'none'
+  inpname = 'none'
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cubit_options,IOSTAT=ierr)
   CLOSE(io_unit)
@@ -514,6 +554,7 @@ END IF
 DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_cubit_id,.FALSE.)
 END DO
+CALL multigrid_level(mg_mesh,1)
 smesh=>mg_mesh%smeshes(1)
 !---Read vertex count
 call mesh_cubit_error(NF90_INQ_DIMID(ncid,"num_nodes",nodesID))
@@ -638,8 +679,6 @@ else if((ind>99).AND.(ind<1000))then
   write(blknum,'(I3)')ind
 end if
 end function format_blknum
-!------------------------------------------------------------------------------
-! SUBROUTINE: read_regions
 !------------------------------------------------------------------------------
 !> Read in Exodus surface mesh
 !! - Merge all blocks
@@ -833,8 +872,6 @@ end if
 end function format_blknum
 END SUBROUTINE cubit_read_sidesets
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_read_surface
-!------------------------------------------------------------------------------
 !> Read in Exodus surface mesh
 !! - Surface mesh used for indexing CAD geometry
 !------------------------------------------------------------------------------
@@ -992,8 +1029,6 @@ end do
 DEBUG_STACK_POP
 end subroutine mesh_cubit_read_surface
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_geom
-!------------------------------------------------------------------------------
 !> Load and initialize OpenNURBS geometry for current Exodus mesh
 !! - Initialize OpenNURBS library
 !! - Construct FORTRAN objects for each CAD object
@@ -1105,12 +1140,11 @@ DEBUG_STACK_POP
 end subroutine mesh_cubit_geom
 #endif
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_cadlink
-!------------------------------------------------------------------------------
 !> Link OpenNURBS CAD objects to Exodus mesh entities for use in refinement.
 !! - Map Exodus surface mesh to CAD objects using name attributes
 !------------------------------------------------------------------------------
-subroutine mesh_cubit_cadlink
+subroutine mesh_cubit_cadlink(mesh)
+CLASS(oft_amesh), INTENT(inout) :: mesh
 #ifdef HAVE_ONURBS
 real(r8) :: pt(3),u,v
 integer(i4) :: i,j,m,ind,k,ep(2),fp(3),etmp(2),ftmp(3),ierr(4),chk
@@ -1227,8 +1261,6 @@ DEBUG_STACK_POP
 #endif
 end subroutine mesh_cubit_cadlink
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_hobase
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points from high order import
 !------------------------------------------------------------------------------
 subroutine mesh_cubit_hobase(self)
@@ -1254,8 +1286,6 @@ SELECT CASE(self%type)
     CALL oft_abort("Unknown element type", "mesh_cubit_hobase", __FILE__)
 END SELECT
 end subroutine mesh_cubit_hobase
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_hobase_tet
 !------------------------------------------------------------------------------
 !> Add quadratic mesh node points from TRI6 import
 !------------------------------------------------------------------------------
@@ -1293,8 +1323,6 @@ DEALLOCATE(r_ho,lc_ho,emark)
 DEBUG_STACK_POP
 end subroutine mesh_cubit_hobase_tri
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_hobase_tet
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points from TETRA10 import
 !------------------------------------------------------------------------------
 subroutine mesh_cubit_hobase_tet(self)
@@ -1330,8 +1358,6 @@ END DO
 DEALLOCATE(r_ho,lc_ho,emark)
 DEBUG_STACK_POP
 end subroutine mesh_cubit_hobase_tet
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_hobase_quad
 !------------------------------------------------------------------------------
 !> Add quadratic mesh node points from QUAD9 import
 !------------------------------------------------------------------------------
@@ -1377,8 +1403,6 @@ DEALLOCATE(r_ho,lc_ho,emark)
 DEBUG_STACK_POP
 end subroutine mesh_cubit_hobase_quad
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_hobase_hex
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points from HEX27 import
 !------------------------------------------------------------------------------
 subroutine mesh_cubit_hobase_hex(self)
@@ -1416,10 +1440,18 @@ DO i=1,self%nc
   END DO
 END DO
 DEALLOCATE(emark)
+!---Set cell points from imported list
+DO i=1,self%nc
+  self%ho_info%lcp(1,i)=i+self%ne+self%nf
+  self%ho_info%r(:,i+self%ne+self%nf) = (self%r(:,self%lc(1,i)) + self%r(:,self%lc(2,i)) &
+    + self%r(:,self%lc(3,i)) + self%r(:,self%lc(4,i)) + self%r(:,self%lc(5,i)) &
+    + self%r(:,self%lc(6,i)) + self%r(:,self%lc(7,i)) + self%r(:,self%lc(8,i)))/8.d0
+  self%ho_info%r(:,i+self%ne+self%nf) = r_ho(:,lc_ho(21,i))
+END DO
 !---Initialize high order points with flat faces
 DO i=1,self%nf
   self%ho_info%lfp(1,i)=i+self%ne
-  self%ho_info%r(:,i+self%ne)=(self%r(:,self%lf(1,i)) + self%r(:,self%lf(2,i)) &
+  self%ho_info%r(:,i+self%ne) = (self%r(:,self%lf(1,i)) + self%r(:,self%lf(2,i)) &
     + self%r(:,self%lf(3,i)) + self%r(:,self%lf(4,i)))/4.d0
 END DO
 !---Set face centers from imported list
@@ -1431,30 +1463,21 @@ DO i=1,self%nc
     k=ABS(mesh_local_findface(self,ftmp))
     if(k==0)CALL oft_abort('Unlinked mesh face','mesh_cubit_hobase_hex',__FILE__)
     IF(fmark(k)==0)THEN
-      self%ho_info%r(:,k+self%ne) = r_ho(:,lc_ho(20+j,i))
+      self%ho_info%r(:,k+self%ne) = r_ho(:,lc_ho(21+j,i))
       fmark(k)=1
     END IF
   END DO
 END DO
 DEALLOCATE(fmark)
-!---Set cell points from imported list
-DO i=1,self%nc
-  self%ho_info%lcp(1,i)=i+self%ne+self%nf
-  self%ho_info%r(:,i+self%ne+self%nf)= (self%r(:,self%lc(1,i)) + self%r(:,self%lc(2,i)) &
-    + self%r(:,self%lc(3,i)) + self%r(:,self%lc(4,i)) + self%r(:,self%lc(5,i)) &
-    + self%r(:,self%lc(6,i)) + self%r(:,self%lc(7,i)) + self%r(:,self%lc(8,i)))/8.d0
-  self%ho_info%r(:,i+self%ne+self%nf) = r_ho(:,lc_ho(27,i))
-END DO
 !---Destory temporary storage
 DEALLOCATE(r_ho,lc_ho)
 DEBUG_STACK_POP
 end subroutine mesh_cubit_hobase_hex
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_reffix
-!------------------------------------------------------------------------------
 !> Adjust points to CAD boundary and propogate CAD linkage
 !------------------------------------------------------------------------------
-subroutine mesh_cubit_reffix
+subroutine mesh_cubit_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 #ifdef HAVE_ONURBS
 real(r8) :: u1,v1,u2,v2,rp(3),p(2),pt(3),rad,p1(2),p2(2),f(4)
 integer(i4) :: i,j,k,l,ed,lecors(2),npcors,lfecors(3),ho_count
@@ -1466,9 +1489,10 @@ CHARACTER(LEN=60) :: error_str
 real(r8) :: rp(3)
 integer(i4) :: i,j,ho_count
 #endif
-class(oft_mesh), pointer :: pmesh
+class(oft_mesh), pointer :: pmesh,mesh
 DEBUG_STACK_PUSH
 !---Get parent mesh
+mesh=>mg_mesh%mesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 !---If only one level do nothing
 IF(mg_mesh%level==1)THEN
@@ -1631,15 +1655,16 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine mesh_cubit_reffix
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_add_quad
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points using CAD model
 !------------------------------------------------------------------------------
-subroutine mesh_cubit_add_quad
+subroutine mesh_cubit_add_quad(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8) :: pt(3),r1,r2,r3,pts_tmp(3,10),wts_tmp(10)
 integer(i4) :: i,j,k,ierr,nerr
 CHARACTER(LEN=60) :: error_str
+class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
+mesh=>mg_mesh%mesh
 IF(tor_mesh)THEN
   if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting toroidal quadratic nodes'
   wts_tmp(1:2)=1.d0/2.d0
@@ -1723,8 +1748,6 @@ END IF
 DEBUG_STACK_POP
 end subroutine mesh_cubit_add_quad
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_test_edge
-!------------------------------------------------------------------------------
 !> Add quadratic mesh node points using CAD model
 !------------------------------------------------------------------------------
 subroutine mesh_cubit_test_edge(i)
@@ -1802,8 +1825,6 @@ CALL oft_abort('OFT not compiled with OpenNURBS.','mesh_cubit_test_edge',__FILE_
 #endif
 end subroutine mesh_cubit_test_edge
 !------------------------------------------------------------------------------
-! SUBROUTINE mesh_cubit_error
-!------------------------------------------------------------------------------
 !> Catch NETCDF errors
 !------------------------------------------------------------------------------
 subroutine mesh_cubit_error(status)
@@ -1814,14 +1835,11 @@ if(status /= nf90_noerr) THEN
 end if
 end subroutine mesh_cubit_error
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_reflect
+!> Reflect an exodus mesh and CAD model across the xy-plane
 !------------------------------------------------------------------------------
-!> Reflect an exodus mesh and CAD model across the xy-plane.
-!!
-!! @param[in] tol Tolerance for marking point as on the reflection plane
-!------------------------------------------------------------------------------
-subroutine mesh_cubit_reflect(tol)
-real(r8), intent(in) :: tol
+subroutine mesh_cubit_reflect(mesh,tol)
+CLASS(oft_amesh), intent(inout) :: mesh !< Mesh to reflect
+real(r8), intent(in) :: tol !< Tolerance for marking point as on the reflection plane
 integer(i4) :: npold,ncold,i,j,ic,is,cid_max,sid_max,nreg,n_ho
 integer(i4), allocatable :: newindex(:),hoindex(:),regtmp(:),ltemp(:,:)
 real(r8), allocatable :: rtemp(:,:)
@@ -1984,11 +2002,10 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine mesh_cubit_reflect
 !------------------------------------------------------------------------------
-! SUBROUTINE: mesh_cubit_set_periodic
+!> Needs docs
 !------------------------------------------------------------------------------
-!>
-!------------------------------------------------------------------------------
-subroutine mesh_cubit_set_periodic
+subroutine mesh_cubit_set_periodic(mesh)
+class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,pt_e(2),ind,k,kk
 integer(i4), ALLOCATABLE :: pt_f(:)
 IF(np_per==0)RETURN

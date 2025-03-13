@@ -16,10 +16,9 @@ USE oft_lag_poly
 USE oft_mesh_type, ONLY: oft_bmesh
 IMPLICIT NONE
 #include "local.h"
+PRIVATE
 !------------------------------------------------------------------------------
-! TYPE oft_quadmesh
-!------------------------------------------------------------------------------
-!> Quadralateral boundary mesh type
+!> Quadralateral surface mesh type
 !!
 !! Contains geometry information for the computational grid.
 !! - Entity counts
@@ -27,7 +26,7 @@ IMPLICIT NONE
 !! - Global mesh information
 !! - Linkage of geometric primatives
 !------------------------------------------------------------------------------
-TYPE, EXTENDS(oft_bmesh) :: oft_quadmesh
+TYPE, PUBLIC, EXTENDS(oft_bmesh) :: oft_quadmesh
   INTEGER(i4) :: inodesp(2,4)
   INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodese => NULL()
   INTEGER(i4), POINTER, DIMENSION(:,:) :: inodesf => NULL()
@@ -48,23 +47,10 @@ CONTAINS
   PROCEDURE :: in_cell => quadmesh_in_cell
   PROCEDURE :: quad_rule => quadmesh_quad_rule
   PROCEDURE :: tessellate => quadmesh_tessellate
-  PROCEDURE :: get_io_sizes => quadmesh_get_io_sizes
+  PROCEDURE :: tessellated_sizes => quadmesh_tessellated_sizes
 END TYPE oft_quadmesh
 INTEGER(i4), PARAMETER :: quad_ed(2,4)=RESHAPE((/1,2, 2,3, 3,4, 4,1/),(/2,4/)) !< Quad edge list
-!
 INTEGER(i4), PARAMETER :: quad_bary_map(4) = [-2,1,2,-1]
-! INTEGER(i4), PARAMETER :: hex_bary_pfcoords(3,8) = RESHAPE((/ & ! Do not vary
-!   1,2,5, 1,2,3, 1,3,4, 1,4,5, 2,5,6, 2,3,6, 3,4,6, 4,5,6/), (/3,8/))
-! INTEGER(i4), PARAMETER :: hex_bary_efcoords(2,12) = RESHAPE((/ & ! Do not vary
-!   1,2, 1,3, 1,4, 1,5, 2,5, 2,3, 3,4, 4,5, 2,6, 3,6, 4,6, 5,6/), (/2,12/))
-! INTEGER(i4), PARAMETER :: hex_bary_ecoords(2,12) = RESHAPE((/ & ! Do vary
-!   5,3, 2,4, 3,5, 4,2, &
-!   1,6, 1,6, 1,6, 1,6, &
-!   5,3, 2,4, 3,5, 4,2/), (/2,12/))
-! INTEGER(i4), PARAMETER :: hex_bary_fcoords(4,6) = RESHAPE((/ & ! Do vary
-!   5,2,3,4, 1,5,6,3, 1,2,6,4, &
-!   1,3,6,5, 2,1,4,6, 2,5,4,3/), (/4,6/))
-!---
 INTEGER(i4), PARAMETER :: inodesp_base(2,4) = RESHAPE((/ &
   0,0, 1,0, 1,1, 0,1/),(/2,4/))
 INTEGER(i4), PARAMETER :: inodes1p(2,4) = RESHAPE((/ &
@@ -74,15 +60,15 @@ INTEGER(i4), PARAMETER :: inodes2p(2,4) = RESHAPE((/ &
 INTEGER(i4), PARAMETER :: inodes2e(2,4) = RESHAPE((/ &
   2,1, 3,2, 2,3, 1,2/),(/2,4/))
 INTEGER(i4), PARAMETER :: inodes2f(2) = (/2,2/)
+!
+PUBLIC quad_2d_grid, quad_grid_orient
 CONTAINS
 !---------------------------------------------------------------------------
-! SUBROUTINE quadmesh_load
-!---------------------------------------------------------------------------
-!> Load quadmesh from transfer file
+!> Load trimesh from transfer file
 !---------------------------------------------------------------------------
 SUBROUTINE quadmesh_load(self,filename)
-CLASS(oft_quadmesh), INTENT(inout) :: self
-CHARACTER(LEN=*), INTENT(in) :: filename
+CLASS(oft_quadmesh), INTENT(inout) :: self !< Mesh object
+CHARACTER(LEN=*), INTENT(in) :: filename !< File to load mesh from
 INTEGER(i4) :: i,io_unit
 DEBUG_STACK_PUSH
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
@@ -105,13 +91,11 @@ CLOSE(io_unit)
 DEBUG_STACK_POP
 END SUBROUTINE quadmesh_load
 !---------------------------------------------------------------------------
-! SUBROUTINE quadmesh_save
-!---------------------------------------------------------------------------
-!> Load trimesh from transfer file
+!> Save trimesh from transfer file
 !---------------------------------------------------------------------------
 SUBROUTINE quadmesh_save(self,filename)
-CLASS(oft_quadmesh), INTENT(in) :: self
-CHARACTER(LEN=*), INTENT(in) :: filename
+CLASS(oft_quadmesh), INTENT(in) :: self !< Mesh object
+CHARACTER(LEN=*), INTENT(in) :: filename !< File to save mesh to
 INTEGER(i4) :: i,io_unit
 DEBUG_STACK_PUSH
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
@@ -129,14 +113,12 @@ CLOSE(io_unit)
 DEBUG_STACK_POP
 END SUBROUTINE quadmesh_save
 !---------------------------------------------------------------------------
-! SUBROUTINE quadmesh_setup
-!---------------------------------------------------------------------------
-!> Load quadmesh from transfer file
+!> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)
 !---------------------------------------------------------------------------
 SUBROUTINE quadmesh_setup(self,cad_type,has_parent)
-CLASS(oft_quadmesh), INTENT(inout) :: self
-INTEGER(i4), INTENT(in) :: cad_type
-LOGICAL, INTENT(in) :: has_parent
+CLASS(oft_quadmesh), INTENT(inout) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: cad_type !< CAD/mesh interface ID number
+LOGICAL, INTENT(in) :: has_parent !< Is this mesh the/a surface of a volume mesh?
 self%cell_np=4
 self%cell_ne=self%cell_np
 self%type=3
@@ -147,13 +129,11 @@ CALL self%set_order(1)
 IF(has_parent)ALLOCATE(self%parent)
 END SUBROUTINE quadmesh_setup
 !---------------------------------------------------------------------------
-! SUBROUTINE quadmesh_set_order
-!---------------------------------------------------------------------------
-!> Load trimesh from transfer file
+!> Set maximum order of spatial mapping
 !---------------------------------------------------------------------------
 SUBROUTINE quadmesh_set_order(self,order)
-CLASS(oft_quadmesh), INTENT(inout) :: self
-INTEGER(i4), INTENT(in) :: order
+CLASS(oft_quadmesh), INTENT(inout) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: order !< Maximum order of spatial mapping
 INTEGER(i4) :: counts(2)
 IF(order<1.OR.order>2)CALL oft_abort("Invalid grid order", "quadmesh_setup", __FILE__)
 IF(ASSOCIATED(self%xnodes))DEALLOCATE(self%xnodes)
@@ -183,11 +163,11 @@ END IF
 CALL quad_2d_grid(order,self%xnodes,self%inodesp,self%inodese,self%inodesf)
 END SUBROUTINE quadmesh_set_order
 !---------------------------------------------------------------------------
-!
+!> Map from orthogonal logical coordinates to barycentric logical coordinates
 !---------------------------------------------------------------------------
 PURE FUNCTION quad_get_bary(flog) RESULT(fbary)
-REAL(r8), INTENT(in) :: flog(:)
-REAL(r8) :: fbary(4)
+REAL(r8), INTENT(in) :: flog(:) !< Position in orthogonal logical coordinates [2]
+REAL(r8) :: fbary(4) !< Position in barycentric logical coordinates [4]
 INTEGER(i4) :: i
 DO i=1,4
   IF(quad_bary_map(i)<0)THEN
@@ -198,9 +178,7 @@ DO i=1,4
 END DO
 END FUNCTION quad_get_bary
 !---------------------------------------------------------------------------
-! SUBROUTINE quad_2d_grid
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE quad_2d_grid(order,xnodes,inodesp,inodese,inodesf)
 INTEGER(i4), INTENT(in) :: order
@@ -240,9 +218,7 @@ IF(np>0)THEN
 END IF
 END SUBROUTINE quad_2d_grid
 !---------------------------------------------------------------------------
-! SUBROUTINE quad_grid_orient
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE quad_grid_orient(oflag,order,finds)
 INTEGER(i4), INTENT(in) :: oflag,order
@@ -269,9 +245,7 @@ DO i=1,np
 END DO
 END SUBROUTINE quad_grid_orient
 !---------------------------------------------------------------------------
-! SUBROUTINE quad_grid_orient_inv
-!---------------------------------------------------------------------------
-!
+!> Needs docs
 !---------------------------------------------------------------------------
 SUBROUTINE quad_grid_orient_inv(oflag,order,finds)
 INTEGER(i4), INTENT(in) :: oflag,order
@@ -298,59 +272,42 @@ DO i=1,np
 END DO
 END SUBROUTINE quad_grid_orient_inv
 !---------------------------------------------------------------------------
-! SUBROUTINE quadmesh_invert_face
+!> Turn cell "inside out", used to ensure consistent orientations
 !---------------------------------------------------------------------------
-!> Invert cell to produce positive volume
-!---------------------------------------------------------------------------
-SUBROUTINE quadmesh_invert_face(self,i)
-CLASS(oft_quadmesh), INTENT(inout) :: self
-INTEGER(i4), INTENT(in) :: i
-self%lc((/2,4/),i)=self%lc((/4,2/),i)
-IF(ASSOCIATED(self%lce))self%lce(:,i)=-self%lce([4,3,2,1],i)
-IF(ASSOCIATED(self%lcc))self%lcc(:,i)=self%lcc([4,3,2,1],i)
+SUBROUTINE quadmesh_invert_face(self,cell)
+CLASS(oft_quadmesh), INTENT(inout) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: cell !< Maximum order of spatial mapping
+self%lc((/2,4/),cell)=self%lc((/4,2/),cell)
+IF(ASSOCIATED(self%lce))self%lce(:,cell)=-self%lce([4,3,2,1],cell)
+IF(ASSOCIATED(self%lcc))self%lcc(:,cell)=self%lcc([4,3,2,1],cell)
 END SUBROUTINE quadmesh_invert_face
 !------------------------------------------------------------------------------
-! SUBROUTINE: quadmesh_quad_rule
-!------------------------------------------------------------------------------
-!> Create quadrature rule for tetrahedra
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result Physical position [3]
+!> Retrieve suitable quadrature rule for triangular mesh with given order
 !------------------------------------------------------------------------------
 SUBROUTINE quadmesh_quad_rule(self,order,quad_rule)
-CLASS(oft_quadmesh), INTENT(in) :: self
-INTEGER(i4), INTENT(in) :: order
-TYPE(oft_quad_type), INTENT(out) :: quad_rule
+CLASS(oft_quadmesh), INTENT(in) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: order !< Desired order of quadrature rule
+TYPE(oft_quad_type), INTENT(out) :: quad_rule !< Resulting quadrature rule
 CALL set_quad_2d(quad_rule, order)
 END SUBROUTINE quadmesh_quad_rule
 !------------------------------------------------------------------------------
-!> Logical locations of vertices
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result Physical position [3]
+!> Get position in logical space of cell vertex `i`
 !------------------------------------------------------------------------------
 SUBROUTINE quadmesh_vlog(self,i,f)
-CLASS(oft_quadmesh), INTENT(in) :: self
-INTEGER(i4), INTENT(in) :: i
-REAL(r8), INTENT(out) :: f(:)
+CLASS(oft_quadmesh), INTENT(in) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: i !< Vertex to locate
+REAL(r8), INTENT(out) :: f(:) !< Logical coordinates of vertex `i`
 f(1:2)=self%xnodes(self%inodesp(:,i))
 END SUBROUTINE quadmesh_vlog
 !------------------------------------------------------------------------------
-!> Logical locations of vertices
+!> Test if logical position lies within the base cell
 !!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result Physical position [3]
+!! @returns Position `f` is inside the base cell?
 !------------------------------------------------------------------------------
 FUNCTION quadmesh_in_cell(self,f,tol) RESULT(eedge)
-CLASS(oft_quadmesh), INTENT(in) :: self
-REAL(r8), INTENT(in) :: f(:)
-REAL(r8), INTENT(in) :: tol
+CLASS(oft_quadmesh), INTENT(in) :: self !< Mesh object
+REAL(r8), INTENT(in) :: f(:) !< Logical coordinate to evaluate
+REAL(r8), INTENT(in) :: tol !< Tolerance for test
 INTEGER(i4) :: eedge
 REAL(r8) :: fmin,fmax,fbary(4)
 fmin=MINVAL(f(1:2))
@@ -363,24 +320,18 @@ ELSE
 END IF
 END FUNCTION quadmesh_in_cell
 !------------------------------------------------------------------------------
-! SUBROUTINE: quadmesh_tessellate
-!------------------------------------------------------------------------------
-!> Driver for order specific tessellation subroutines
+!> Tessellate mesh onto lagrange FE nodes of specified order (usually for plotting)
 !!
-!! @note The maximum tessellation order currently supported is 4.
+!! @note The maximum tessellation order currently supported is 4
+!! (may be lower for certain mesh types).
 !!
-!! @warning Cell lists are returned with zero based indexing.
-!!
-!! @param[in] self Mesh to tessellate
-!! @param[out] rtmp Tessellated mesh points [3,np_tess]
-!! @param[out] lctmp Tessellated cell list [4,nc_tess]
-!! @param[in] order Desired tessellation order
+!! @warning Cell lists are returned with zero based indexing
 !------------------------------------------------------------------------------
 SUBROUTINE quadmesh_tessellate(self,rtmp,lctmp,order)
-CLASS(oft_quadmesh), INTENT(in) :: self
-REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp
-INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp
-INTEGER(i4), INTENT(in) :: order
+CLASS(oft_quadmesh), INTENT(in) :: self !< Mesh object
+REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,:]
+INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp !< Tessellated cell list [self%ncp,:]
+INTEGER(i4), INTENT(in) :: order !< Tessellation order
 INTEGER(i4) :: i,j,k,cell,np,inodesp(2,4),i1,i2,inc
 INTEGER(i4), POINTER, DIMENSION(:,:,:) :: inodese
 INTEGER(i4), POINTER, DIMENSION(:,:) :: inodesf,pmap
@@ -456,31 +407,22 @@ END IF
 DEBUG_STACK_POP
 END SUBROUTINE quadmesh_tessellate
 !---------------------------------------------------------------------------
-! FUNCTION: quadmesh_get_io_sizes
+!> Get sizes of arrays returned by @ref trimesh_tessellate
 !---------------------------------------------------------------------------
-!> Get variable sizes following tessellation
-!---------------------------------------------------------------------------
-FUNCTION quadmesh_get_io_sizes(self) result(sizes)
-CLASS(oft_quadmesh), INTENT(in) :: self
-INTEGER(i4) :: sizes(2)
+FUNCTION quadmesh_tessellated_sizes(self) result(sizes)
+CLASS(oft_quadmesh), INTENT(in) :: self !< Mesh object
+INTEGER(i4) :: sizes(2) !< Array sizes following tessellation [np_tess,nc_tess]
 sizes(1)=self%np + self%ne*(self%tess_order-1) + self%nc*((self%tess_order-1)**2)
 sizes(2)=self%nc*(self%tess_order**2)
-END FUNCTION quadmesh_get_io_sizes
+END FUNCTION quadmesh_tessellated_sizes
 !---------------------------------------------------------------------------
-! SUBROUTINE quadmesh_phys2log
-!---------------------------------------------------------------------------
-!> Map from physical to logical coordinates
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] cell Index of cell for evaulation
-!! @param[in] pt Physical position [3]
-!! @result f Logical coordinates within the cell [4]
+!> Map from physical to logical coordinates in a given cell
 !---------------------------------------------------------------------------
 SUBROUTINE quadmesh_phys2log(self,cell,pt,f)
-class(oft_quadmesh), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: pt(3)
-real(r8), intent(out) :: f(:)
+class(oft_quadmesh), intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Index of cell for evaulation
+real(r8), intent(in) :: pt(3) !< Physical position [3]
+real(r8), intent(out) :: f(:) !< Logical coordinates within the cell [4]
 real(r8) :: gop(3,3),v
 integer(i4) :: k
 CALL oft_abort("Operation not supported", "quadmesh_phys2log", __FILE__)
@@ -490,22 +432,13 @@ CALL oft_abort("Operation not supported", "quadmesh_phys2log", __FILE__)
 ! end do
 end SUBROUTINE quadmesh_phys2log
 !------------------------------------------------------------------------------
-! SUBROUTINE: quadmesh_log2phys
-!------------------------------------------------------------------------------
-!> Map from logical to physical coordinates
-!!
-!! Driver function calls mapping specific function depending on mesh order.
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] cell Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result pt Physical position [3]
+!> Map from logical to physical coordinates in a given cell
 !------------------------------------------------------------------------------
 function quadmesh_log2phys(self,cell,f) result(pt)
-class(oft_quadmesh), intent(in) :: self
-integer, intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8) :: pt(3)
+class(oft_quadmesh), intent(in) :: self !< Mesh object
+integer, intent(in) :: cell !< Index of cell for evaulation
+real(r8), intent(in) :: f(:) !< Logical coordinate in cell [4]
+real(r8) :: pt(3) !< Physical position [3]
 integer(i4) :: i,j,k
 DEBUG_STACK_PUSH
 pt=0.d0
@@ -527,24 +460,14 @@ end if
 DEBUG_STACK_POP
 end function quadmesh_log2phys
 !------------------------------------------------------------------------------
-! SUBROUTINE: quadmesh_jacobian
-!------------------------------------------------------------------------------
-!> Compute the jacobian matrix and its determinant for a grid cell
-!!
-!! Driver function calls mapping specific function depending on mesh order.
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] cell Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @param[out] gop Jacobian matrix ( \f$ \frac{\partial x_i}{\partial \lambda_j} \f$ ) [3,4] (optional)
-!! @param[out] j Jacobian of transformation from logical to physical coordinates (optional)
+!> Compute the spatial jacobian matrix and its determinant for a given cell at a given logical position
 !------------------------------------------------------------------------------
 subroutine quadmesh_jacobian(self,cell,f,gop,j)
-class(oft_quadmesh), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: gop(:,:)
-real(r8), intent(out) :: j
+class(oft_quadmesh), intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Index of cell for evaulation
+real(r8), intent(in) :: f(:) !< Logical coordinate in cell [3]
+real(r8), intent(out) :: gop(:,:) !< Jacobian matrix \f$ (\frac{\partial x_i}{\partial \lambda_j})^{-1} \f$ [3,4]
+real(r8), intent(out) :: j !< Jacobian of transformation from logical to physical coordinates
 integer(i4) :: i,k,l,m,inode(2)
 real(r8) :: A(2,2),C(2,2),t(3,2),pt(3),ftmp
 DEBUG_STACK_PUSH
@@ -619,130 +542,94 @@ END IF
 DEBUG_STACK_POP
 end subroutine quadmesh_jacobian
 !------------------------------------------------------------------------------
-! SUBROUTINE quadmesh_hessian
-!------------------------------------------------------------------------------
-!> Compute the second order jacobians for a grid cell
+!> Compute the spatial hessian matrices for a given cell at a given logical position
 !!
-!! @param[in] self Mesh containing cell
-!! @param[in] cell Index of cell for evaulation
-!! @param[in] f Logical coordinate in cell [4]
-!! @param[out] g2op Second order Jacobian matrix
-!! \f$ (\frac{\partial x_i}{\partial \lambda_l} \frac{\partial x_j}{\partial \lambda_k})^{-1} \f$
-!! [6,6]
-!! @param[out] K Gradient correction matrix
-!! \f$ \frac{\partial^2 x_i}{\partial \lambda_k \partial \lambda_l}\f$ [6,3]
+!! @warning Not presently supported for quadrilateral meshes
 !------------------------------------------------------------------------------
 subroutine quadmesh_hessian(self,cell,f,g2op,K)
-class(oft_quadmesh), intent(in) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: g2op(:,:)
-real(r8), intent(out) :: K(:,:)
+class(oft_quadmesh), intent(in) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: cell !< Index of cell for evaulation
+REAL(r8), INTENT(in) :: f(:) !< Logical coordinate in cell [4]
+REAL(r8), INTENT(out) :: g2op(:,:) !< Second order Jacobian matrix
+!! \f$ (\frac{\partial x_i}{\partial \lambda_l} \frac{\partial x_j}{\partial \lambda_k})^{-1} \f$
+REAL(r8), INTENT(out) :: K(:,:) !< Gradient correction matrix
+!! \f$ \frac{\partial^2 x_i}{\partial \lambda_k \partial \lambda_l}\f$ [10,3]
 call oft_abort('Hessian not yet supported for quadmesh','quadmesh_hessian',__FILE__)
 end subroutine quadmesh_hessian
 !------------------------------------------------------------------------------
-! FUNCTION: quadmesh_norm
+!> Get unit normal for surface at a given point in a given cell
 !------------------------------------------------------------------------------
-!> Compute the unit normal vector to a face
-!!
-!! @param[in] self Mesh containing face
-!! @param[in] i Index of face for evaulation
-!! @param[in] f Logical coordinate on face [3]
-!! @param[out] n Normal vector [3]
-!------------------------------------------------------------------------------
-subroutine quadmesh_norm(self,i,f,n)
-class(oft_quadmesh), target, intent(in) :: self
-integer(i4), intent(in) :: i
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: n(3)
+subroutine quadmesh_norm(self,cell,f,n)
+class(oft_quadmesh), target, intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Cell containing point
+real(r8), intent(in) :: f(:) !< Logical coordinates in cell
+real(r8), intent(out) :: n(3) !< Unit normal [3]
 real(r8) :: t(3,2)
 DEBUG_STACK_PUSH
-CALL quadmesh_tang(self,i,f,t)
+CALL quadmesh_tang(self,cell,f,t)
 n = cross_product(t(:,1),t(:,2))
 DEBUG_STACK_POP
 end subroutine quadmesh_norm
 !------------------------------------------------------------------------------
-! FUNCTION: quadmesh_tang
+!> Get tangent basis set for surface at a given point in a given cell
 !------------------------------------------------------------------------------
-!> Compute a orthonormal set of axis tangential to a face
-!!
-!! @param[in] self Mesh containing face
-!! @param[in] i Index of face for evaulation
-!! @param[in] f Logical coordinate on face [3]
-!! @param[out] t Orthonormal vectors [3,2]
-!------------------------------------------------------------------------------
-subroutine quadmesh_tang(self,i,f,t)
-class(oft_quadmesh), target, intent(in) :: self
-integer(i4), intent(in) :: i
-real(r8), intent(in) :: f(:)
-real(r8), intent(out) :: t(3,2)
+subroutine quadmesh_tang(self,cell,f,t)
+class(oft_quadmesh), target, intent(in) :: self !< Mesh object
+integer(i4), intent(in) :: cell !< Cell containing point
+real(r8), intent(in) :: f(:) !< Logical coordinates in cell
+real(r8), intent(out) :: t(3,2) !< Unit tangent basis set [3,2]
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
 !---Get tangent direction 1
-t(:,1) = quadmesh_glogphys(self,i,1,f)
+t(:,1) = quadmesh_glogphys(self,cell,1,f)
 t(:,1) = t(:,1)/magnitude(t(:,1))
 !---Get tangent direction 2
-t(:,2) = quadmesh_glogphys(self,i,2,f)
+t(:,2) = quadmesh_glogphys(self,cell,2,f)
 t(:,2) = t(:,2) - DOT_PRODUCT(t(:,2),t(:,1))*t(:,1)
 t(:,2) = t(:,2)/magnitude(t(:,2))
 DEBUG_STACK_POP
 end subroutine quadmesh_tang
 !------------------------------------------------------------------------------
-! SUBROUTINE: quadmesh_glogphys
-!------------------------------------------------------------------------------
-!> Compute the partial derivative of the physical coordinates with a specific
-!! logical coordinate
+!> Compute the partial derivative of the physical coordinates with a specific logical coordinate
 !!
-!! Driver function calls mapping specific function depending on mesh order.
-!!
-!! @param[in] self Mesh containing cell
-!! @param[in] i Index of cell for evaulation
-!! @param[in] k Logical coordinate for differentiation
-!! @param[in] f Logical coordinate in cell [4]
-!! @result pt \f$ \frac{\partial r}{\partial f_k} \f$ [3]
+!! Driver function calls mapping specific function depending on mesh order
 !------------------------------------------------------------------------------
-function quadmesh_glogphys(self,face,j,f) result(pt)
-class(oft_quadmesh), intent(in) :: self
-integer, intent(in) :: face
-integer, intent(in) :: j
-real(r8), intent(in) :: f(2)
-real(r8) :: pt(3)
+function quadmesh_glogphys(self,cell,j,f) result(pt)
+class(oft_quadmesh), intent(in) :: self !< Mesh object
+integer, intent(in) :: cell !< Index of cell for evaulation
+integer, intent(in) :: j !< Needs docs
+real(r8), intent(in) :: f(3) !< Logical coordinate in cell [4]
+real(r8) :: pt(3) !< \f$ \frac{\partial r}{\partial f_k} \f$ [3]
 real(r8) :: gtmp(2),pttmp(3)
 integer(i4) :: k,l,ed,etmp(2),dof
 DEBUG_STACK_PUSH
 if(self%order>2)call oft_abort('Invalid mesh order','quadmesh_glogphys',__FILE__)
 pt=0.d0
 do k=1,4 ! Get edge nodes
-  pt=pt+dlag_2d(self%inodesp(:,k),j,f,self%xnodes,self%order+1)*self%r(:,self%lc(k,face))
+  pt=pt+dlag_2d(self%inodesp(:,k),j,f,self%xnodes,self%order+1)*self%r(:,self%lc(k,cell))
 end do
 !---Get edge points
 IF(self%order>1)THEN
   do k=1,4 ! Get edge nodes
-    ed=ABS(self%lce(k,face))
+    ed=ABS(self%lce(k,cell))
     pttmp=self%ho_info%r(:,self%ho_info%lep(1,ed))
     pt=pt+dlag_2d(self%inodese(:,1,k),j,f,self%xnodes,self%order+1)*pttmp
   end do
   IF(self%ho_info%ncp>0)THEN
     ! Add loop and orient if add higher order
-    pttmp=self%ho_info%r(:,self%ho_info%lcp(1,face))
+    pttmp=self%ho_info%r(:,self%ho_info%lcp(1,cell))
     pt=pt+dlag_2d(self%inodesf(:,1),j,f,self%xnodes,self%order+1)*pttmp
   END IF
 END IF
 DEBUG_STACK_POP
 end function quadmesh_glogphys
 !------------------------------------------------------------------------------
-! SUBROUTINE: quadmesh_jacinv
-!------------------------------------------------------------------------------
-!> Invert a 2x2 matrix.
-!!
-!! @param[in] A Matrix to invert
-!! @param[out] C \f$ A^{-1} \f$
-!! @param[out] j |A|
+!> Invert a 2x2 matrix
 !------------------------------------------------------------------------------
 subroutine quadmesh_jacinv(A,C,j)
-real(r8), intent(in) :: A(2,2)
-real(r8), intent(out) :: C(2,2)
-real(r8), intent(out) :: j
+real(r8), intent(in) :: A(2,2) !< Matrix to invert
+real(r8), intent(out) :: C(2,2) !< \f$ A^{-1} \f$
+real(r8), intent(out) :: j !< |A|
 DEBUG_STACK_PUSH
 ! Compute Det(A)
 j=A(1,1)*A(2,2)-A(1,2)*A(2,1)

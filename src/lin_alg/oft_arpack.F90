@@ -15,7 +15,7 @@ MODULE oft_arpack
 #ifdef HAVE_ARPACK
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_matrix
-USE oft_solver_base, ONLY: oft_solver, oft_eigsolver, oft_bc_proto, oft_orthog
+USE oft_solver_base, ONLY: oft_solver, oft_eigsolver, oft_solver_bc
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
@@ -32,9 +32,8 @@ TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_iram_eigsolver
   REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL() !< Eigenvectors
   CHARACTER(LEN=2) :: which = 'LM' !< Spectrum search flag
   CLASS(oft_solver), POINTER :: Minv => NULL() !< RHS inversion operator
-  !> Boundary condition
-  PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
-  CLASS(oft_orthog), POINTER :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
+  CLASS(oft_solver_bc), POINTER :: orthog => NULL() !< Orthogonalization
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => iram_eig_apply
@@ -56,9 +55,8 @@ TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_irlm_eigsolver
   REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL() !< Eigenvectors
   CHARACTER(LEN=2) :: which = 'LM' !< Spectrum search flag
   CLASS(oft_solver), POINTER :: Minv => NULL() !< RHS inversion operator
-  !> Boundary condition
-  PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
-  CLASS(oft_orthog), POINTER :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
+  CLASS(oft_solver_bc), POINTER :: orthog => NULL() !< Orthogonalization
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => irlm_eig_apply
@@ -407,13 +405,13 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp1)
     !---Compute y' = A*x
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%A%apply(tmp1,tmp2)
     oft_env%pm=pm_save
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp2)
     CALL tmp1%set(0.d0)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
@@ -433,7 +431,7 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp1)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     !---Compute y = M*x
@@ -443,7 +441,7 @@ DO
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
     oft_env%pm=pm_save
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
@@ -610,10 +608,10 @@ DO i=1,4000
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    CALL self%bc(tmp1)
+    CALL self%bc%apply(tmp1)
     !---Compute y' = A*x
     CALL self%A%apply(tmp1,tmp2)
-    CALL self%bc(tmp2)
+    CALL self%bc%apply(tmp2)
     CALL tmp1%set(0.d0)
     IF(bmat=='G')THEN
       !---Compute y = inv(M)*y'
@@ -632,14 +630,14 @@ DO i=1,4000
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    CALL self%bc(tmp1)
+    CALL self%bc%apply(tmp1)
     IF(bmat=='G')THEN
       !---Compute y = M*x
       CALL self%M%apply(tmp1,tmp2)
     ELSE
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
-    CALL self%bc(tmp2)
+    CALL self%bc%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
     CALL tmp2%get_slice(vslice)
@@ -803,12 +801,12 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     !---Compute y' = A*x
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%A%apply(tmp1,tmp2)
     oft_env%pm=pm_save
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp2%get_slice(vslice)
@@ -830,7 +828,7 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     !---Compute y = M*x
     IF(bmat=='G')THEN
@@ -839,7 +837,7 @@ DO
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
     oft_env%pm=pm_save
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
     CALL tmp2%get_slice(vslice)
@@ -1000,10 +998,10 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     !---Compute y' = A*x
     CALL self%A%apply(tmp1,tmp2)
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
@@ -1028,7 +1026,7 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     !---Compute y = M*x
     CALL self%M%apply(tmp1,tmp2)
     IF(bmat=='G')THEN
@@ -1037,7 +1035,7 @@ DO
     ELSE
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)

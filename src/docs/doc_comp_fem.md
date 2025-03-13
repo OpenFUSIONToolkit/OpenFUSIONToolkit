@@ -91,6 +91,6 @@ CALL fem_3vec%mat_create(mat,mask)
 
 Currently the code creates composite fields by stacking the sub-fields in memory. Although there are
 instances where an interleaved layout would be desired this method is not amenable to cases where the
-finite element representations are not homogeneous, ie when Lagrange and Nedelec representations are
+finite element representations are not homogeneous, ie when Lagrange and Conforming/Nedelec representations are
 used. This is due to the fact that the elements do share a common node ordering so that there is no
 way to consistently interleave elements.
