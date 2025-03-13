@@ -1068,7 +1068,7 @@ type(oft_lag_brinterp) :: psi_int
 real(8), pointer :: ptout(:,:),rout(:),zout(:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,k,cell,io_unit,lim_max
-type(gsinv_interp), target :: field
+type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: rz
 !---
 INTEGER(4) :: nlim
@@ -1128,6 +1128,7 @@ call set_tracer(1)
 ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
+ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
 active_tracer%neq=3
@@ -1227,6 +1228,8 @@ do j=1,nr
   IF(j>1)qpsi(j)=fptmp*active_tracer%v(3)/(2*pi)
 end do
 CALL active_tracer%delete
+CALL field%delete()
+DEALLOCATE(field)
 !$omp end parallel
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN
