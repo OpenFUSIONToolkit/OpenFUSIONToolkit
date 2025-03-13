@@ -29,7 +29,7 @@ jobs:
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
             build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
+            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
@@ -37,7 +37,7 @@ jobs:
             cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3",
             build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --build_superlu_dist=1"
+            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 Intel",
@@ -53,7 +53,7 @@ jobs:
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3.12",
             build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
           }
         - {
@@ -62,7 +62,7 @@ jobs:
             cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
             python: "python3.12",
             build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu=1 --build_superlu_dist=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
         exclude:
@@ -70,6 +70,15 @@ jobs:
             config: {os: macos-14}
           - parallel: openmpi
             config: {cc: icx}
+        include:
+          - parallel: mpich_petsc
+            config: {
+              name: "Ubuntu 22.04 GCC 12",
+              os: ubuntu-22.04,
+              cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
+              python: "python3",
+              mpi_build_flags: "--build_petsc=1 --petsc_version=3.20"
+            }
 
     steps:
     - name: Checkout repo
@@ -144,7 +153,7 @@ jobs:
         python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1
     
     - name: Build external (MPICH+OpenMP)
-      if: ${{ matrix.parallel == 'mpich' }}
+      if: startsWith(matrix.parallel, 'mpich')
       shell: bash
       timeout-minutes: 60
       working-directory: libs
@@ -153,7 +162,7 @@ jobs:
         python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 
     - name: Build external (OpenMPI+OpenMP)
-      if: ${{ matrix.parallel == 'openmpi' }}
+      if: startsWith(matrix.parallel, 'openmpi')
       shell: bash
       timeout-minutes: 60
       working-directory: libs

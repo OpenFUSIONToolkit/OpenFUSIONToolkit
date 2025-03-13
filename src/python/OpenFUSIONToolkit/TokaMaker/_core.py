@@ -92,6 +92,8 @@ class TokaMaker():
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_eq "gs_eq")
         self.gs_obj = c_void_p()
         tokamaker_alloc(ctypes.byref(self.gs_obj))
+        ## Internal mesh object
+        self.mesh_obj = c_void_p()
         ## General settings object
         self.settings = tokamaker_default_settings(self._oft_env)
         ## Conductor definition dictionary
@@ -158,7 +160,7 @@ class TokaMaker():
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_reset(error_string)
+        tokamaker_reset(self.mesh_obj,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self.nregs = -1
@@ -218,7 +220,7 @@ class TokaMaker():
             self._oft_env.oft_in_groups['mesh_options'] = {'cad_type': "0"}
             self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
             self._oft_env.update_oft_in()
-            oft_setup_smesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs))
+            oft_setup_smesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs),ctypes.byref(self.mesh_obj))
         elif r is not None:
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)
             lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
@@ -230,7 +232,7 @@ class TokaMaker():
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
             else:
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
-            oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs))
+            oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self.mesh_obj))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
@@ -287,7 +289,10 @@ class TokaMaker():
             for sub_coil in self.coil_sets[key]['sub_coils']:
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
         cstring = self._oft_env.path2c('none')
-        tokamaker_setup_regions(cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_setup_regions(self.mesh_obj,cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
     
     def setup(self,order=2,F0=0.0,full_domain=False):
         r'''! Setup G-S solver
@@ -301,7 +306,7 @@ class TokaMaker():
         #
         ncoils = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(order,full_domain,ctypes.byref(ncoils),error_string)
+        tokamaker_setup(self.mesh_obj,order,full_domain,ctypes.byref(ncoils),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         ## Number of coils in mesh
@@ -1158,12 +1163,14 @@ class TokaMaker():
             mesh_currents = numpy.zeros((self.lc.shape[0],))
             if self.ncoils >0:
                 mesh_currents = region_currents[self.reg-1]
+            # Adjust current in coils with non-uniform distribution
             if len(self.dist_coils)>0:
-                for _, coil_dict in self._coil_dict.items():
-                    if (coil_id:=coil_dict["coil_id"]+1) in self.dist_coils.keys():
-                        mask = self.reg==coil_dict["reg_id"]
-                        face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
-                        mesh_currents[mask] *= face_currents[mask]
+                for _, coil_obj in self.coil_sets.items():
+                    if (coil_id:=coil_obj["id"]) in self.dist_coils.keys():
+                        for sub_coil in coil_obj["sub_coils"]:
+                            mask = (self.reg==sub_coil["reg_id"])
+                            face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
+                            mesh_currents[mask] *= face_currents[mask]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:
                 mesh_currents *= coil_scale
@@ -1423,19 +1430,20 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_coil_current_dist(self,iCoil,curr_dist):
+    def set_coil_current_dist(self,coil_name,curr_dist):
         '''! Overwrite coil with non-uniform current distribution.
 
-        @param iCoil Coil index
-        @param curr_dist Relative current density
+        @param coil_name Name of coil to modify
+        @param curr_dist Relative current density [self.np]
         '''
         if curr_dist.shape[0] != self.np:
-            raise IndexError('Incorrect shape of "psi0", should be [np]')
-        if iCoil <= 0:
-            raise IndexError("iCoil must be between 1 and ncoils")
+            raise IndexError('Incorrect shape of "curr_dist", should be [np]')
+        if coil_name not in self.coil_sets:
+            raise KeyError('Unknown coil "{0}"'.format(coil_name))
+        iCoil = self.coil_sets[coil_name]['id']
         self.dist_coils[iCoil] = curr_dist
         curr_dist = numpy.ascontiguousarray(curr_dist, dtype=numpy.float64)
-        tokamaker_set_coil_current_dist(c_int(iCoil),curr_dist)
+        tokamaker_set_coil_current_dist(c_int(iCoil+1),curr_dist)
 
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
@@ -1670,7 +1678,12 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
 
         self.set_profiles(ffp_prof=init_ffp_prof,pp_prof=init_pp_prof)
 
-        flag = self.solve()
+        try:
+            self.solve()
+            flag = 0
+        except ValueError:
+            flag = -1
+        print('  Solve flag: ', flag)
 
     ### Specify original H-mode profiles, iterate on bootstrap contribution until reasonably converged
     n = 0
@@ -1689,8 +1702,12 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
 
         self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
 
-        flag = self.solve()
-        print('Solve flag: ', flag)
+        try:
+            self.solve()
+            flag = 0
+        except ValueError:
+            flag = -1
+        print('  Solve flag: ', flag)
 
         n += 1
         if (n > 2) and (flag >= 0):

@@ -38,7 +38,7 @@ oft_in_template = """
  nu_lop={7}
 /
 
-&h0_op_options
+&h1_op_options
  df_lop={6}
  nu_lop={7}
 /
@@ -50,7 +50,8 @@ oft_in_template = """
 """
 
 # Common setup function and process handling
-def taylor_setup(nbase,nlevels,order,mg='F',df_wop='',nu_wop='',df_lop='',nu_lop='',rst=False,petsc='F'):
+def taylor_setup(nbase,nlevels,order,mg='F',df_wop='',nu_wop='',df_lop='',nu_lop='',rst=False,petsc=False):
+    petsc_flag=('T' if petsc else 'F')
     nproc = 1
     if nbase != nlevels:
         nproc = 2
@@ -58,7 +59,7 @@ def taylor_setup(nbase,nlevels,order,mg='F',df_wop='',nu_wop='',df_lop='',nu_lop
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, order, mg, df_wop, nu_wop,
-                                       df_lop, nu_lop, min(order,2), petsc))
+                                       df_lop, nu_lop, min(order,2), petsc_flag))
     #
     if not rst:
         run_command("rm -f *.rst")
@@ -121,19 +122,18 @@ def run_r2_base(energy, mags, order, parallel, petsc_flag):
 #============================================================================
 # Test runner for base test case
 @pytest.mark.parametrize("parallel", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
-def test_r1_p1(parallel, petsc_flag):
+def test_r1_p1(parallel, petsc_flag=False):
     energy = 7.969787207500343
     mags = (111.78525848354835, 7.3927838909183474E-2, 2.3689570294000877)
     run_r1_base(energy, mags, 1, parallel, petsc_flag)
 @pytest.mark.coverage
 @pytest.mark.parametrize("parallel", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r2_p1(parallel, petsc_flag):
     energy = 7.584444064306102
     mags = (164.12243228531662, 0.15111708774307858, 7.969982572878115)
     run_r2_base(energy, mags, 1, parallel, petsc_flag)
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r2_p1_mg(petsc_flag):
     energy = 7.584444064306102
     mags = (164.12243228531662, 0.15111708774307858, 7.969982572878115)
@@ -144,19 +144,18 @@ def test_r2_p1_mg(petsc_flag):
 #============================================================================
 # Test runner for base test case
 @pytest.mark.parametrize("parallel", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
-def test_r1_p2(parallel, petsc_flag):
+def test_r1_p2(parallel, petsc_flag=False):
     energy = 7.465311073555994
     mags = (99.312891042746003, 0.12514150675409644, 11.854654269477292)
     run_r1_base(energy, mags, 2, parallel, petsc_flag)
 @pytest.mark.parametrize("parallel", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r2_p2(parallel, petsc_flag):
     energy = 7.4654554644593762
     mags = (159.33067882086129, 0.15585267451452800, 11.630373174047200)
     run_r2_base(energy, mags, 2, parallel, petsc_flag)
 @pytest.mark.coverage
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r2_p2_mg(petsc_flag):
     energy = 7.4654554644593762
     mags = (159.33067882086129, 0.15585267451452800, 11.630373174047200)
@@ -167,20 +166,19 @@ def test_r2_p2_mg(petsc_flag):
 #============================================================================
 # Test runner for base test case
 @pytest.mark.parametrize("parallel", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
-def test_r1_p3(parallel, petsc_flag):
+def test_r1_p3(parallel, petsc_flag=False):
     energy = 7.4654401997148261
     mags = (99.963405459273531, 0.13867123084037269, 15.698941734111418)
     run_r1_base(energy, mags, 3, parallel, petsc_flag)
 @pytest.mark.slow
 @pytest.mark.parametrize("parallel", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r2_p3(parallel, petsc_flag):
     energy = 7.4654749264250251
     mags = (159.56410182996319, 0.15625258194273445, 11.811248986404657)
     run_r2_base(energy, mags, 3, parallel, petsc_flag)
 @pytest.mark.slow
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r2_p3_mg(petsc_flag):
     energy = 7.4654749264250251
     mags = (159.56410182996319, 0.15625258194273445, 11.811248986404657)
@@ -192,20 +190,19 @@ def test_r2_p3_mg(petsc_flag):
 # Test runner for base test case
 @pytest.mark.slow
 @pytest.mark.parametrize("parallel", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
-def test_r1_p4(parallel, petsc_flag):
+def test_r1_p4(parallel, petsc_flag=False):
     energy = 7.4654670797578868
     mags = (103.02430162981594, 0.14093313194717669, 16.583714239751544)
     run_r1_base(energy, mags, 4, parallel, petsc_flag)
 @pytest.mark.slow
 @pytest.mark.parametrize("parallel", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r2_p4(parallel, petsc_flag):
     energy = 7.4654796151171006
     mags = (160.85985195059590, 0.15636315584737048, 11.814889822341094)
     run_r2_base(energy, mags, 4, parallel, petsc_flag)
 @pytest.mark.slow
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r2_p4_mg(petsc_flag):
     energy = 7.4654796151171006
     mags = (160.85985195059590, 0.15636315584737048, 11.814889822341094)

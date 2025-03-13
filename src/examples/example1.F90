@@ -25,16 +25,17 @@ PROGRAM example1
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
 USE oft_solver_utils, ONLY: create_diag_pre
 !---Lagrange FE space
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup
-USE oft_lag_fields, ONLY: oft_lag_create
-USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, lag_zerob
+USE oft_lag_operators, ONLY: oft_lag_getlop, oft_lag_getmop, oft_lag_zerob
 IMPLICIT NONE
 !!The first two modules import runtime and helper functions. The \ref tetmesh_local module contains
 !!the main global mesh object \ref tetmesh_local::mesh "mesh" and \ref multigrid_build contains
@@ -59,6 +60,10 @@ INTEGER(i4), PARAMETER :: order = 3
 REAL(r8) :: lambda
 REAL(r8), POINTER, DIMENSION(:) :: vtmp => NULL()
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
+TYPE(oft_lag_zerob) :: lag_zerob
 !!\subsection doc_ex1_code_init Initialize Enviroment
 !!
 !!This call setups of the basics OFT run environment, including initializing MPI and PETSc if
@@ -68,7 +73,7 @@ CALL oft_init
 !!
 !!This call constructs the grid levels through heirarchical refinement,
 !!\ref multigrid_build::multigrid_construct "multigrid_construct".
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 !!\subsection doc_ex1_code_hdf5 Create Output Files
 !!
 !!This call sets up metadata files for I/O and saves the mesh for use with solution fields output
@@ -76,36 +81,37 @@ CALL multigrid_construct
 !!produce additional tets using the new node points. The level of tesselation is set by
 !!the first argument to \ref oft_mesh_type::oft_mesh::setup_io "mesh%setup_io".
 CALL plot_file%setup("Example1")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!\subsection doc_ex1_code_fem Setup Lagrange FE
 !!
 !!\ref oft_lag_basis::oft_lag_setup "oft_lag_setup" builds the Lagrange finte elements on each grid
 !!and polynomial level. This create element interaction lists as well as boundary and seam information.
 !!All FE index fields are encapsulated in the \ref fem_base::oft_fem_type "oft_fem_type" structure,
 !!see \ref fem_base::fem_setup "fem_setup".
-CALL oft_lag_setup(order)
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !!\subsection doc_ex1_code_ops Setup linear system
 !!
 !!Solving the Helmholtz eigensystem requires the operators coresponding the general eigenvalue problem
 !!\f$ Ax = \lambda Mx \f$. These operators are the distcretized Laplace operator
 !!\f$ A = \int \nabla u_i^T \cdot \nabla u_j dV \f$ and the finite element mass matrix
-!!\f$ M = \int u_i^T u_j dV \f$. Where \c u and \f$ u^T \f$ are the Lagrange basis and test functions
+!!\f$ M = \int u_i^T u_j dV \f$. Where `u` and \f$ u^T \f$ are the Lagrange basis and test functions
 !!respectively. A vector defining the solution space is also required, to store the solution and to
-!!create worker vectors. In this case a dirichlet boundary condition is used where \c u is 0 everywhere
+!!create worker vectors. In this case a dirichlet boundary condition is used where `u` is 0 everywhere
 !!on the boundary, denoted by the BC flag `'zerob'` used in matrix construction.
-CALL oft_lag_create(u)
+CALL ML_oft_lagrange%vec_create(u)
 !---Create Operators
 NULLIFY(lop,mop)
-CALL oft_lag_getlop(lop,'zerob')
-CALL oft_lag_getmop(mop,'zerob')
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'zerob')
 !!\subsection doc_ex1_code_solver Setup solver
 !!
 !!This section assembles the solver object by fill the required references. The solver object used here
 !!is the native non-linear Conjugate-Gradient iterative method. It requires the right and left hand side
-!!matrices for the generalized EV problem, \c A and \c M. The convergence tolerance is also specified
+!!matrices for the generalized EV problem, `A` and `M`. The convergence tolerance is also specified
 !!to be double precision convergence of the eigenvalue, see \ref oft_cg::oft_cg_eigsolver
 !!"oft_cg_eigsolver". Preconditioning is supplied by diagonal scaling, which requires identifying the
-!!preconditioner matrix, in this case \c A.
+!!preconditioner matrix, in this case `A`.
 !!
 !!The vector is then initialized with a guess solution and the boundary condition is applied to make sure
 !!the initial guess is consistent with the boundary condition. Finally, the assembled solver is used
@@ -116,7 +122,7 @@ solver%its=-2
 CALL create_diag_pre(solver%pre) ! Setup Preconditioner
 !---Compute EV
 CALL u%set(1.d0)
-CALL lag_zerob(u)
+CALL lag_zerob%apply(u)
 CALL solver%apply(u,lambda)
 !!\subsection doc_ex1_code_plot Save Solution
 !!
@@ -126,10 +132,10 @@ CALL solver%apply(u,lambda)
 !!\ref oft_io::hdf5_spdata "hdf5_spdata" subroutine. When the program has completed
 !!\ref oft_base::oft_finalize "oft_finalize" is called to cleanup the runtime environment and terminate
 !!the process. This subroutine calls any required MPI and PETSc finalize subroutines as well. After
-!!completing the run, the \c build_xdmf script may be used to construct VisIt files and view the solution
-!!field, saved as tag \c T.
+!!completing the run, the `build_xdmf` script may be used to construct VisIt files and view the solution
+!!field, saved as tag `T`.
 CALL u%get_local(vtmp)
-CALL mesh%save_vertex_scalar(vtmp,plot_file,'T')
+CALL mg_mesh%mesh%save_vertex_scalar(vtmp,plot_file,'T')
 DEALLOCATE(vtmp)
 !---Program Stop
 CALL oft_finalize
@@ -163,7 +169,7 @@ END PROGRAM example1
 !!\ref doc_input_mesh. To perform a parallel run that is analogous to the serial run shown
 !!above the input file must be modified as below. The choice of nbase is somewhat arbitrary
 !!here, but generally is a function of the number of MPI tasks and the size of the base mesh.
-!!\c nlevels however, must be incremented by 1 in order to account for the additional transfer
+!!`nlevels` however, must be incremented by 1 in order to account for the additional transfer
 !!level create during decomposition.
 !!
 !!\verbatim

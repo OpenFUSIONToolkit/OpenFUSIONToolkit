@@ -36,7 +36,7 @@ def mp_run(target,args,timeout=30):
         return None
     # Completed successfully
     try:
-        test_result = mp_q.get(timeout=10)
+        test_result = mp_q.get(timeout=5)
     except:
         print("Failed to get output")
         return None
@@ -290,7 +290,7 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     mygs.setup(order=fe_order)
     mygs.set_coil_currents({'COIL': cdx*cdy})
     if dist is not None:
-        mygs.set_coil_current_dist(1,dist(mygs.r[:,0],mygs.r[:,1]))
+        mygs.set_coil_current_dist('COIL',dist(mygs.r[:,0],mygs.r[:,1]))
     try:
         psi0 = mygs.vac_solve()
     except ValueError:
@@ -677,3 +677,8 @@ def test_LTX_eq(order):
     results = mp_run(run_LTX_case,(order,False,False))
     assert validate_dict(results,exp_dict)
 
+# Example of how to run single test without pytest
+# if __name__ == '__main__':
+#     multiprocessing.freeze_support()
+#     mp_q = multiprocessing.Queue()
+#     run_sph_case(0.05,2,mp_q)

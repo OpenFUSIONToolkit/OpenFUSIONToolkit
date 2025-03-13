@@ -23,11 +23,11 @@ USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: oft_bin_file, hdf5_create_file, hdf5_write, &
   hdf5_create_group, hdf5_add_string_attribute
-USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
 USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
 USE oft_la_base, ONLY: oft_vector
@@ -51,6 +51,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL()
 TYPE(oft_tw_hodlr_op), TARGET :: tw_hodlr
+TYPE(multigrid_mesh) :: mg_mesh
 !
 INTEGER(4) :: neigs = 5
 INTEGER(4) :: jumper_start = 0
@@ -72,14 +73,14 @@ CLOSE(io_unit)
 if(ierr<0)call oft_abort('No "thincurr_eig_options" found in input file.','thincurr_eig',__FILE__)
 if(ierr>0)call oft_abort('Error parsing "thincurr_eig_options" in input file.','thincurr_eig',__FILE__)
 !---Setup mesh
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 ! ALLOCATE(mg_mesh)
 ! mg_mesh%mgmax=1
 ! mg_mesh%nbase=1
 ! oft_env%nbase=1
 ! mg_mesh%mgdim=mg_mesh%mgmax
 ! CALL smesh_cubit_load
-SELECT CASE(smesh%cad_type)
+SELECT CASE(mg_mesh%smesh%cad_type)
 CASE(0)
   CALL native_read_nodesets(mesh_nsets)
   CALL native_read_sidesets(mesh_ssets)
@@ -98,7 +99,7 @@ IF(ASSOCIATED(mesh_ssets))THEN
     tw_sim%closures=mesh_ssets(1)%v
   END IF
 END IF
-tw_sim%mesh=>smesh
+tw_sim%mesh=>mg_mesh%smesh
 IF(jumper_start>0)THEN
   n=SIZE(mesh_nsets)
   hole_nsets=>mesh_nsets(1:jumper_start-1)
@@ -114,7 +115,7 @@ END IF
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
 CALL tw_sim%xdmf%setup("thincurr")
-CALL smesh%setup_io(tw_sim%xdmf,1)
+CALL mg_mesh%smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---------------------------------------------------------------------------
 ! Eigenvalue run
@@ -212,8 +213,6 @@ END IF
 CALL oft_finalize
 CONTAINS
 !------------------------------------------------------------------------------
-! SUBROUTINE plot_eig
-!------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE plot_eig(self,nsensors,sensors)
@@ -267,7 +266,7 @@ DO i=1,neigs
       cc_vals(3,:)=vtmp
     ELSE
       !$omp parallel do private(j,jj,tmp)
-      DO k=1,smesh%np
+      DO k=1,mg_mesh%smesh%np
         DO jj=1,3
           tmp=0.d0
           !$omp simd reduction(+:tmp)

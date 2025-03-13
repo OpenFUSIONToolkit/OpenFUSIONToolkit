@@ -17,24 +17,24 @@
 PROGRAM test_mapping_find
 USE oft_base
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, mesh_findcell
+USE oft_mesh_type, ONLY: mesh_findcell
 USE oft_mesh_sphere, ONLY: mesh_sphere_id
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 IMPLICIT NONE
 INTEGER(i4) :: ierr
+TYPE(multigrid_mesh) :: mg_mesh
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
-IF(mesh%cad_type/=mesh_sphere_id)CALL oft_abort('Wrong mesh type, test for SPHERE only.','main',__FILE__)
+CALL multigrid_construct(mg_mesh)
+IF(mg_mesh%mesh%cad_type/=mesh_sphere_id)CALL oft_abort('Wrong mesh type, test for SPHERE only.','main',__FILE__)
 IF(oft_env%nprocs>1)CALL oft_abort('Test is for serial meshes only.','main',__FILE__)
 !---Run test
 CALL check_surface_points(4,1.d-6)
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
-! SUBROUTINE check_surface_points
 !---------------------------------------------------------------------------
 !> Validates @ref tetmesh_mapping::tetmesh_findcell "tetmesh_findcell" by
 !! creating points on the boundary of the mesh and comparing them to the
@@ -46,18 +46,18 @@ REAL(r8), INTENT(in) :: tol
 INTEGER(i4) :: i,j,cell,fail_count,io_unit
 REAL(r8) :: f(4),pt_face(3),pt_cell(3)
 TYPE(oft_quad_type) :: quad
-CALL mesh%bmesh%quad_rule(order,quad)
+CALL mg_mesh%smesh%quad_rule(order,quad)
 !---
 fail_count=0
 !$omp parallel do private(j,cell,f,pt_face,pt_cell) reduction(+:fail_count)
-DO i=1,mesh%bmesh%nc
+DO i=1,mg_mesh%smesh%nc
   !---Get local reconstructed operators
   DO j=1,quad%np ! Loop over quadrature points
-    pt_face=mesh%bmesh%log2phys(i,quad%pts(:,j))
+    pt_face=mg_mesh%smesh%log2phys(i,quad%pts(:,j))
     cell=0
-    CALL mesh_findcell(mesh,cell,pt_face,f)
+    CALL mesh_findcell(mg_mesh%mesh,cell,pt_face,f)
     IF(cell>0)THEN
-      pt_cell=mesh%log2phys(cell,f)
+      pt_cell=mg_mesh%mesh%log2phys(cell,f)
     ELSE
       pt_cell=1.d99
     END IF

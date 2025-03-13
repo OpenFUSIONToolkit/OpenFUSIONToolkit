@@ -33,7 +33,8 @@ oft_in_template = """
 """
 
 # Common setup function and process handling
-def hcurl_sop_setup(nbase, nlevels, order, grid_type, petsc_flag):
+def hcurl_sop_setup(nbase, nlevels, order, grid_type, petsc):
+    petsc_flag=('T' if petsc else 'F')
     nproc = 1
     if nbase != nlevels:
         nproc = 2
@@ -55,64 +56,60 @@ def validate_result():
     return True
 
 # Single level test function
-def single_level(nlevels, order, mpi=False, grid_type=1, petsc_flag='F'):
+def single_level(nlevels, order, mpi=False, grid_type=1, petsc=False):
     if mpi:
         nbase = nlevels-1
         nlev = nlevels+1
     else:
         nbase = nlevels
         nlev = nlevels
-    assert hcurl_sop_setup(nbase, nlev, order, grid_type=grid_type, petsc_flag=petsc_flag)
+    assert hcurl_sop_setup(nbase, nlev, order, grid_type=grid_type, petsc=petsc)
     assert validate_result()
 
 #============================================================================
 # Test runners for NP=1
 @pytest.mark.parametrize("grid_type", (1, 2))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
-def test_r2_p1(grid_type, petsc_flag):
-    single_level(2, 1, grid_type=grid_type, petsc_flag=petsc_flag)
+def test_r2_p1(grid_type, petsc_flag=False):
+    single_level(2, 1, grid_type=grid_type, petsc=petsc_flag)
 @pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("mpi", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r3_p1(grid_type, mpi, petsc_flag):
-    single_level(3, 1, grid_type=grid_type, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 1, grid_type=grid_type, mpi=mpi, petsc=petsc_flag)
 
 #============================================================================
 # Test runners for NP=2
 @pytest.mark.parametrize("grid_type", (1, 2))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
-def test_r2_p2(grid_type, petsc_flag):
-    single_level(2, 2, grid_type=grid_type, petsc_flag=petsc_flag)
+def test_r2_p2(grid_type, petsc_flag=False):
+    single_level(2, 2, grid_type=grid_type, petsc=petsc_flag)
 @pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("mpi", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r3_p2(grid_type, mpi, petsc_flag):
-    single_level(3, 2, grid_type=grid_type, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 2, grid_type=grid_type, mpi=mpi, petsc=petsc_flag)
 
 #============================================================================
 # Test runners for NP=3
 @pytest.mark.parametrize("grid_type", (1, 2))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
-def test_r2_p3(grid_type, petsc_flag):
-    single_level(2, 3, grid_type=grid_type, petsc_flag=petsc_flag)
+def test_r2_p3(grid_type, petsc_flag=False):
+    single_level(2, 3, grid_type=grid_type, petsc=petsc_flag)
 @pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("mpi", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r3_p3(grid_type, mpi, petsc_flag):
-    single_level(3, 3, grid_type=grid_type, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 3, grid_type=grid_type, mpi=mpi, petsc=petsc_flag)
 
 #============================================================================
 # Test runners for NP=4
 @pytest.mark.parametrize("grid_type", (1, 2))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
-def test_r2_p4(grid_type, petsc_flag):
-    single_level(2, 4, grid_type=grid_type, petsc_flag=petsc_flag)
+def test_r2_p4(grid_type, petsc_flag=False):
+    single_level(2, 4, grid_type=grid_type, petsc=petsc_flag)
 @pytest.mark.coverage
 @pytest.mark.parametrize("grid_type", (1, 2))
 @pytest.mark.parametrize("mpi", (False, True))
-@pytest.mark.parametrize("petsc_flag", ('F','T'))
+@pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r3_p4(grid_type, mpi, petsc_flag):
-    single_level(3, 4, grid_type=grid_type, mpi=mpi, petsc_flag=petsc_flag)
+    single_level(3, 4, grid_type=grid_type, mpi=mpi, petsc=petsc_flag)

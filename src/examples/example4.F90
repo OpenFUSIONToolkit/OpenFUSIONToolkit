@@ -19,32 +19,28 @@ PROGRAM example4
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !---Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels
-USE oft_lag_fields, ONLY: oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
   oft_lag_vgetmop, oft_lag_vproject
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level
-USE oft_hcurl_fields, ONLY: oft_hcurl_create
+!---H1 FE space (Grad(H^1) subspace)
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_mloptions, h1_setup_interp
+!---Full H(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
-!---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_mloptions, h0_setup_interp
-!---H1 Full FE space
-USE oft_h1_basis, ONLY: oft_h1_setup, oft_h1_level
-USE oft_h1_fields, ONLY: oft_h1_create
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
   taylor_injectors, taylor_hffa, taylor_hlam, taylor_hvac, taylor_gffa, taylor_htor, &
-  taylor_tag_size
+  taylor_tag_size, ML_oft_hcurl, ML_oft_h1, &
+  ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 !---Tracing
 USE tracing, ONLY: oft_tracer, create_tracer, tracing_poincare
 IMPLICIT NONE
@@ -69,6 +65,7 @@ CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_taylor_rinterp), TARGET :: Bfield
 CLASS(oft_tracer), POINTER :: tracer
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 !!\subsection doc_ex4_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting
@@ -76,27 +73,27 @@ TYPE(xdmf_plot_file) :: plot_file
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Example4")
-CALL mesh%setup_io(plot_file,order)
+CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!\subsection doc_ex4_code_fem Setup FE Types
 !!
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
-!---Lagrange
-CALL oft_lag_setup(order)
-CALL lag_setup_interp
+!--- Lagrange
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
+CALL lag_setup_interp(ML_oft_lagrange)
 CALL lag_mloptions
-!---H1(Curl) subspace
-CALL oft_hcurl_setup(order)
-CALL hcurl_setup_interp
-CALL hcurl_mloptions
-!---H1(Grad) subspace
-CALL oft_h0_setup(order+1)
-CALL h0_setup_interp
-CALL h0_mloptions
-!---H1 full space
-CALL oft_h1_setup(order)
+!--- Grad(H^1) subspace
+CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1)
+CALL h1_setup_interp(ML_oft_h1)
+CALL h1_mloptions
+!--- H(Curl) subspace
+CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
+CALL hcurl_setup_interp(ML_oft_hcurl)
+CALL hcurl_mloptions(ML_oft_hcurl)
+!--- Full H(Curl) space
+CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad)
 !!\subsection doc_ex4_code_taylor Compute Taylor state
 !!
 !!For composite Taylor states the lowest eigenmode is used used in addition to the injector fields. This
@@ -137,17 +134,17 @@ htags(2)='Yinj'
 !!interpolation object \ref taylor::oft_taylor_rinterp "oft_taylor_rinterp" is designed to support this type of field
 !!and is populated once the subfields are computed.
 CALL taylor_vacuum(nh,hcpc,hcpv,htags)
-CALL taylor_injectors(taylor_hlam(1,oft_hcurl_level))
+CALL taylor_injectors(taylor_hlam(1,ML_oft_hcurl%level))
 !---Setup field interpolation object
 fluxes=(/1.d0,0.d0/)
-CALL oft_h1_create(Bfield%uvac)
+CALL ML_hcurl_grad%vec_create(Bfield%uvac)
 DO i=1,nh
-  CALL Bfield%uvac%add(1.d0,fluxes(i),taylor_hvac(i,oft_h1_level)%f)
+  CALL Bfield%uvac%add(1.d0,fluxes(i),taylor_hvac(i,ML_hcurl_grad%level)%f)
 END DO
-CALL oft_hcurl_create(Bfield%ua)
-CALL Bfield%ua%add(0.d0,fr/taylor_htor(1,oft_hcurl_level),taylor_hffa(1,oft_hcurl_level)%f)
+CALL ML_oft_hcurl%vec_create(Bfield%ua)
+CALL Bfield%ua%add(0.d0,fr/taylor_htor(1,ML_oft_hcurl%level),taylor_hffa(1,ML_oft_hcurl%level)%f)
 DO i=1,nh
-  CALL Bfield%ua%add(1.d0,fluxes(i),taylor_gffa(i,oft_h1_level)%f)
+  CALL Bfield%ua%add(1.d0,fluxes(i),taylor_gffa(i,ML_hcurl_grad%level)%f)
 END DO
 !!\subsection doc_ex4_code_project Project Solution for Plotting
 !!
@@ -155,19 +152,19 @@ END DO
 !!\ref ex3 "example 3".
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(lmop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre) ! Setup Preconditioner
 !---Create solver fields
-CALL oft_lag_vcreate(u)
-CALL oft_lag_vcreate(v)
+CALL ML_oft_vlagrange%vec_create(u)
+CALL ML_oft_vlagrange%vec_create(v)
 !---Setup field interpolation
-CALL Bfield%setup
+CALL Bfield%setup(ML_oft_hcurl%current_level,ML_oft_h1%current_level)
 !---Project field
-CALL oft_lag_vproject(Bfield,v)
+CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save
@@ -178,7 +175,7 @@ vals=>bvout(2,:)
 CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
-call mesh%save_vertex_vector(bvout,plot_file,'B')
+call mg_mesh%mesh%save_vertex_vector(bvout,plot_file,'B')
 !!\subsection doc_ex4_code_poincare Create Poincare section
 !!
 !! Poincare sections can be created using the subroutine \ref tracing::tracing_poincare
@@ -245,7 +242,7 @@ END PROGRAM example4
 !! nu_lop=64,2,1
 !!/
 !!
-!!&h0_op_options
+!!&h1_op_options
 !! df_lop=.98,.564,.441,.363
 !! nu_lop=64,4,2,1
 !!/
@@ -286,7 +283,7 @@ END PROGRAM example4
 !! nu_lop=0,64,2,1
 !!/
 !!
-!!&h0_op_options
+!!&h1_op_options
 !! df_lop=0.,.98,.564,.441,.363
 !! nu_lop=0,64,4,2,1
 !!/

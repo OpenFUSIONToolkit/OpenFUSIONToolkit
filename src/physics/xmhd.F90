@@ -3,7 +3,7 @@
 !---------------------------------------------------------------------------
 !> @file xmhd.F90
 !
-!> Module for modeling extended MHD with a mixed Nedelec/lagrange basis set.
+!> Module for modeling extended MHD with a mixed conforming/lagrange basis set.
 !!
 !! The equations currently solved are the equations of extended xMHD with
 !! scalar temperature and pressure.
@@ -77,8 +77,8 @@ USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, cell_is_curved
-USE multigrid, ONLY: mg_mesh, multigrid_level, multigrid_base_pushcc
+USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
+USE multigrid, ONLY: multigrid_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
   oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat
@@ -90,29 +90,22 @@ USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
   create_cg_solver, create_diag_pre
 !---
-USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
-USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
+USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
-  oft_lagrange_nlevels, oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
-  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_3D_lagrange_cast, &
+  oft_lag_geval_all, oft_scalar_fem
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_ops, oft_hcurl_level, &
-  oft_hcurl_nlevels, oft_hcurl_lev, oft_hcurl_blevel, oft_hcurl_eval_all, &
-  oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem
-USE oft_hcurl_fields, ONLY: oft_hcurl_create
+USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_3D_hcurl_cast, &
+  oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
-USE oft_h0_basis, ONLY: oft_h0_ops, oft_h0_geval_all, oft_h0_fem
-USE oft_h0_fields, ONLY: oft_h0_create
-USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_getmop, h0_zerogrnd, h0_zeroi
-USE oft_h1_basis, ONLY: oft_hgrad, oft_h1_ops, oft_h1_set_level, ML_oft_hgrad
-USE oft_h1_fields, ONLY: oft_h1_create, oft_hgrad_create
-USE oft_h1_operators, ONLY: oft_h1_rinterp, oft_h1_cinterp, oft_h1_dinterp, &
-  oft_h1_divout, h1_jump_error, h1_div
+USE oft_h1_basis, ONLY: oft_h1_fem, oft_h1_geval_all, oft_3D_h1_cast
+USE oft_h1_operators, ONLY: oft_h1_zeroi
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp, oft_hcurl_grad_cinterp, oft_hcurl_grad_dinterp, &
+  oft_hcurl_grad_divout, hcurl_grad_jump_error, hcurl_grad_div
 !---
 USE diagnostic, ONLY: tfluxfun, vec_energy, weighted_vec_energy, scal_energy, &
   scal_int, field_probe
@@ -212,9 +205,9 @@ type, extends(fem_interp) :: xmhd_interp
   real(r8), contiguous, pointer, dimension(:) :: J2_loc => NULL() !< Local hyper-res aux values (HCurl)
   real(r8), contiguous, pointer, dimension(:,:) :: lf_loc => NULL() !< Local Lagrange values (V,N,Ti)
   class(oft_vector), pointer :: u => NULL() !< Field to interpolate
-  class(oft_h0_fem), pointer :: hgrad_rep => NULL() !< H1(Grad) FE representation
-  class(oft_hcurl_fem), pointer :: hcurl_rep => NULL() !< H1(Curl) FE representation
-  class(oft_scalar_fem), pointer :: lag_rep => NULL() !< H1(Curl) FE representation
+  class(oft_h1_fem), pointer :: grad_rep => NULL() !< Grad(H^1) FE representation
+  class(oft_hcurl_fem), pointer :: curl_rep => NULL() !< H(Curl) FE representation
+  class(oft_scalar_fem), pointer :: lag_rep => NULL() !< Lagrange FE representation
   type(xmhd_interp_cache), pointer :: cache(:) => NULL() !< Thread local field cache
 contains
   !> Retrieve local values for interpolation
@@ -248,13 +241,13 @@ end type xmhd_loc_values
 !! and @ref xmhd::oft_xmhd_pop "oft_xmhd_pop"
 !---------------------------------------------------------------------------
 type, public :: xmhd_sub_fields
-  CLASS(oft_vector), POINTER :: B => NULL() !< Magnetic field "H1"
+  CLASS(oft_vector), POINTER :: B => NULL() !< Magnetic field "H(Curl) + Grad(H^1)"
   CLASS(oft_vector), POINTER :: V => NULL() !< Velocity "Vector Lagrange"
   CLASS(oft_vector), POINTER :: Ne => NULL() !< Electron density "Lagrange"
   CLASS(oft_vector), POINTER :: Ti => NULL() !< Ion temperature "Lagrange"
   CLASS(oft_vector), POINTER :: Te => NULL() !< Electron temperature "Lagrange"
   CLASS(oft_vector), POINTER :: N2 => NULL() !< Hyper-diff aux field "Lagrange"
-  CLASS(oft_vector), POINTER :: J2 => NULL() !< Hyper-res aux field "HCurl"
+  CLASS(oft_vector), POINTER :: J2 => NULL() !< Hyper-res aux field "H(Curl)"
 end type xmhd_sub_fields
 !---Interface definitions
 abstract interface
@@ -280,6 +273,16 @@ abstract interface
     real(r8), intent(in) :: t !< Current time
   end subroutine xmhd_probe_apply
 end interface
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+type, PUBLIC, extends(oft_ml_fe_comp_vecspace) :: ml_xmhd_vecspace
+contains
+  !> Needs docs
+  PROCEDURE :: interp => oft_xmhd_interp
+  !> Needs docs
+  PROCEDURE :: inject => oft_xmhd_inject
+end type ml_xmhd_vecspace
 !---------------------------------------------------------------------------
 ! Global variables
 !---------------------------------------------------------------------------
@@ -359,7 +362,8 @@ INTEGER(i4) :: xmhd_minlev = -1 !< Lowest MG level
 INTEGER(i4), DIMENSION(fem_max_levels) :: nu_xmhd = 1 !< Number of smoother iterations
 !---Operators and preconditioning
 TYPE(oft_fem_comp_type), POINTER :: xmhd_rep => NULL() !< Active field representation
-TYPE(oft_ml_fem_comp_type) :: ML_xmhd_rep !< ML container for field representation
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_xmhd_rep !< ML container for field representation
+TYPE(ml_xmhd_vecspace), TARGET :: xmhd_ml_vecspace
 TYPE(oft_mf_matrix), TARGET :: mfmat !< Matrix free operator
 TYPE(xmhd_ops), POINTER :: oft_xmhd_ops => NULL() !< Operator container
 TYPE(xmhd_ops), POINTER, DIMENSION(:) :: oft_xmhd_ops_ML => NULL() !< MG operator container
@@ -379,6 +383,17 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_rop => NULL()
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_cop => NULL()
 !$omp threadprivate(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
+CLASS(multigrid_mesh), POINTER :: mg_mesh
+CLASS(oft_mesh), POINTER :: mesh
+!
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_h1,ML_h1grad
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_hcurl
+TYPE(oft_ml_fem_comp_type), TARGET, PUBLIC :: ML_hcurl_grad,ML_oft_vlagrange
+!
+CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
+CLASS(oft_hcurl_fem), POINTER :: oft_hcurl => NULL()
+CLASS(oft_h1_fem), POINTER :: oft_hgrad => NULL()
 !---------------------------------------------------------------------------
 ! Exported interfaces
 !---------------------------------------------------------------------------
@@ -388,7 +403,7 @@ CONTAINS
 !---------------------------------------------------------------------------
 !> Read settings for extended MHD model from input files
 !!
-!! Runtime options are set in the main input file using the \c xmhd_options group.
+!! Runtime options are set in the main input file using the `xmhd_options` group.
 !!
 !! @warning Most default physical values in the namelist below will not be appropriate
 !! for new simulations. They are merely placeholders to indicate the type of the input.
@@ -529,15 +544,15 @@ END SUBROUTINE xmhd_read_settings
 !> Main driver subroutine for extended MHD time advance
 !!
 !! Runtime options are set in the main input file using the group
-!! \c xmhd_options group, see \ref xmhd_read_settings.
+!! `xmhd_options` group, see \ref xmhd_read_settings.
 !---------------------------------------------------------------------------
 subroutine xmhd_run(initial_fields,driver,probes,profile_only)
 TYPE(xmhd_sub_fields), INTENT(inout) :: initial_fields !< Initial conditions
 CLASS(oft_xmhd_driver), OPTIONAL, INTENT(inout) :: driver !< Forcing object
 CLASS(oft_xmhd_probe), OPTIONAL, INTENT(inout) :: probes !< Probe object
 LOGICAL, OPTIONAL, INTENT(in) :: profile_only !< Profile operator timing and stop?
-!---H1 divout solver
-TYPE(oft_h1_divout) :: divout
+!---H(Curl) + Grad(H^1) divout solver
+TYPE(oft_hcurl_grad_divout) :: divout
 !---Jacobian solver
 type(oft_nksolver) :: nksolver
 type(oft_native_gmres_solver), target :: solver
@@ -546,8 +561,8 @@ integer(i4), allocatable, dimension(:) :: levels
 !---Local variables
 class(oft_vector), pointer :: u,v,up
 type(xmhd_sub_fields) :: sub_fields
-type(oft_h1_rinterp), target :: Bfield
-type(oft_h1_dinterp) :: divfield
+type(oft_hcurl_grad_rinterp), target :: Bfield
+type(oft_hcurl_grad_dinterp) :: divfield
 type(oft_timer) :: mytimer
 real(r8), pointer :: vals(:)
 integer(i4) :: i,j,k,ierr,io_unit,io_stat,rst_version,rst_tmp,baseit,nredo,nl_update
@@ -558,6 +573,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,tmpint(2)
 character(LEN=XMHD_RST_LEN) :: rst_char
 LOGICAL :: force_refactor,exists,rst
+TYPE(oft_h1_zeroi), TARGET :: h1_zeroi
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -570,6 +586,11 @@ real(4) :: hist_r4(11)
 real(r8) :: lin_tol,nl_tol,scale_tmp(4)
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
+mg_mesh=>ML_oft_hcurl%ml_mesh
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
+mesh=>oft_hcurl%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
 !---------------------------------------------------------------------------
@@ -602,8 +623,8 @@ END IF
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
-call oft_h1_create(sub_fields%B)
-CALL divout%setup("grnd")
+call ML_hcurl_grad%vec_create(sub_fields%B)
+CALL divout%setup(ML_hcurl_grad,"grnd")
 divout%pm=.TRUE.
 IF(TRIM(bbc)=="ic")divout%keep_boundary=.TRUE.
 !---------------------------------------------------------------------------
@@ -712,12 +733,12 @@ END IF
 IF(xmhd_monitor_div)THEN
   CALL oft_xmhd_pop(u,sub_fields)
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup
+  CALL Bfield%setup(oft_hcurl,oft_hgrad)
   !---Compute jump error
-  jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
+  jump_error=hcurl_grad_jump_error(ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
   divfield%u=>sub_fields%B
-  CALL divfield%setup
-  derror=scal_energy(divfield,oft_hcurl%quad%order)
+  CALL divfield%setup(oft_hcurl,oft_hgrad)
+  derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
 ELSE
   jump_error=-1.d0
   derror=-1.d0
@@ -725,9 +746,10 @@ END IF
 !---Setup B-norm
 IF(.NOT.xmhd_bnorm_force)THEN
   IF(.NOT.xmhd_monitor_div)CALL oft_xmhd_pop(u,sub_fields)
-  CALL oft_h0_create(divout%bnorm)
-  CALL h1_div(sub_fields%B,divout%bnorm)
-  CALL h0_zeroi(divout%bnorm)
+  CALL ML_h1grad%vec_create(divout%bnorm)
+  CALL hcurl_grad_div(ML_hcurl_grad%current_level,sub_fields%B,divout%bnorm)
+  h1_zeroi%ML_H1_rep=>ML_h1grad
+  CALL h1_zeroi%apply(divout%bnorm)
 END IF
 !---------------------------------------------------------------------------
 ! Print run information
@@ -818,8 +840,9 @@ IF(nlevels==1)THEN
 ELSE
   ALLOCATE(levels(nlevels))
   levels=(/(i,i=xmhd_minlev,xmhd_nlevels)/)
+  xmhd_ml_vecspace%ML_FE_rep=>ML_xmhd_rep
   CALL create_mlpre(solver%pre,ml_J,levels,nlevels=nlevels, &
-    create_vec=oft_xmhd_create,interp=oft_xmhd_interp,inject=oft_xmhd_inject, &
+    ml_vecspace=xmhd_ml_vecspace, &
     stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels),xml_root=xmhd_pre_node)
   DEALLOCATE(levels)
 END IF
@@ -977,12 +1000,12 @@ DO i=1,nsteps
     IF(xmhd_monitor_div)THEN
       CALL oft_xmhd_pop(u,sub_fields)
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup
+      CALL Bfield%setup(oft_hcurl,oft_hgrad)
       !---Compute jump error
-      jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
+      jump_error=hcurl_grad_jump_error(ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
       divfield%u=>sub_fields%B
-      CALL divfield%setup
-      derror=scal_energy(divfield,oft_hcurl%quad%order)
+      CALL divfield%setup(oft_hcurl,oft_hgrad)
+      derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
     END IF
 !---------------------------------------------------------------------------
 ! Write out initial solution progress
@@ -1064,7 +1087,7 @@ end subroutine xmhd_run
 !---------------------------------------------------------------------------
 !> Main driver subroutine for extended MHD time advance
 !!
-!! Runtime options are set in the main input file using the group \c xmhd_options group,
+!! Runtime options are set in the main input file using the group `xmhd_options` group,
 !! see \ref xmhd_run.
 !!
 !! @note This method assumes that [B0, V0, Ne0, Ti0, Te0] constitute an
@@ -1074,8 +1097,8 @@ subroutine xmhd_lin_run(equil_fields,pert_fields,escale)
 TYPE(xmhd_sub_fields), INTENT(inout) :: equil_fields !< Equilibrium fields
 TYPE(xmhd_sub_fields), INTENT(inout) :: pert_fields !< Perurbed fields
 REAL(r8), OPTIONAL, INTENT(in) :: escale !< Desired total energy to be used for rescaling (optional)
-!---H1 divout solver
-TYPE(oft_h1_divout) :: divout
+!---H(Curl) + Grad(H^1) divout solver
+TYPE(oft_hcurl_grad_divout) :: divout
 !---Jacobian solver
 type(oft_native_gmres_solver), target :: solver
 integer(i4) :: nlevels
@@ -1083,8 +1106,8 @@ integer(i4), allocatable, dimension(:) :: levels
 !---Local variables
 class(oft_vector), pointer :: du,u0,v,un1,un2
 type(xmhd_sub_fields) :: sub_fields
-type(oft_h1_rinterp) :: Bfield
-type(oft_h1_dinterp) :: divfield
+type(oft_hcurl_grad_rinterp) :: Bfield
+type(oft_hcurl_grad_dinterp) :: divfield
 type(oft_xmhd_massmatrix) :: mop
 type(oft_timer) :: mytimer
 integer(i4) :: i,j,ierr,io_unit,io_stat,rst_tmp,nl_update
@@ -1109,6 +1132,11 @@ logical :: rst
 real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_lin_run",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_lin_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_lin_run",__FILE__)
+mg_mesh=>ML_oft_hcurl%ml_mesh
+mesh=>oft_hcurl%mesh
 !---------------------------------------------------------------------------
 ! Read-in Parameters
 !---------------------------------------------------------------------------
@@ -1151,8 +1179,8 @@ END IF
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
-call oft_h1_create(sub_fields%B)
-CALL divout%setup("grnd")
+call ML_hcurl_grad%vec_create(sub_fields%B)
+CALL divout%setup(ML_hcurl_grad,"grnd")
 divout%pm=.TRUE.
 IF(TRIM(bbc)=="ic")divout%keep_boundary=.TRUE.
 !---------------------------------------------------------------------------
@@ -1253,12 +1281,12 @@ tempe_avg=mop%diag_vals(7)/mesh_vol
 IF(xmhd_monitor_div)THEN
   CALL oft_xmhd_pop(du,sub_fields)
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup
+  CALL Bfield%setup(oft_hcurl,oft_hgrad)
   !---Compute jump error
-  jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
+  jump_error=hcurl_grad_jump_error(ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
   divfield%u=>sub_fields%B
-  CALL divfield%setup
-  derror=scal_energy(divfield,oft_hcurl%quad%order)
+  CALL divfield%setup(oft_hcurl,oft_hgrad)
+  derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
 ELSE
   jump_error=-1.d0
   derror=-1.d0
@@ -1331,8 +1359,9 @@ IF(nlevels==1)THEN
 ELSE
   ALLOCATE(levels(nlevels))
   levels=(/(i,i=xmhd_minlev,xmhd_nlevels)/)
+  xmhd_ml_vecspace%ML_FE_rep=>ML_xmhd_rep
   CALL create_mlpre(solver%pre,ml_J,levels,nlevels=nlevels, &
-    create_vec=oft_xmhd_create,interp=oft_xmhd_interp,inject=oft_xmhd_inject, &
+    ml_vecspace=xmhd_ml_vecspace, &
     stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels),xml_root=xmhd_pre_node)
   DEALLOCATE(levels)
 END IF
@@ -1409,12 +1438,12 @@ DO i=1,nsteps
     IF(xmhd_monitor_div)THEN
       CALL oft_xmhd_pop(du,sub_fields)
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup
+      CALL Bfield%setup(oft_hcurl,oft_hgrad)
       !---Compute jump error
-      jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
+      jump_error=hcurl_grad_jump_error(ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
       divfield%u=>sub_fields%B
-      CALL divfield%setup
-      derror=scal_energy(divfield,oft_hcurl%quad%order)
+      CALL divfield%setup(oft_hcurl,oft_hgrad)
+      derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
     END IF
 !---------------------------------------------------------------------------
 ! Write out initial solution progress
@@ -1601,7 +1630,7 @@ do ii=1,mesh%tloc_c(ip)%n
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
     CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
     lag_gopt=TRANSPOSE(lag_gop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     hgrad_ropt=TRANSPOSE(hgrad_rop)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     hcurl_ropt=TRANSPOSE(hcurl_rop)
@@ -2302,7 +2331,7 @@ do ii=1,mesh%tloc_c(ip)%n
   IF(xmhd_vbcdir)THEN
     DO jr=1,oft_lagrange%nce
       IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(j_lag(jr),vbc_type,umat)
+        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),vbc_type,umat)
         DO m=1,xmhd_rep%nfields
           IF(ASSOCIATED(mtmp(3,m)%m))THEN
             DO jc=1,SIZE(mtmp(3,m)%m,2)
@@ -2364,7 +2393,7 @@ IF(xmhd_vbcdir)THEN
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
     jtmp=j
-    CALL lag_vbc_diag(j,vbc_type,umat)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,umat)
     DO jr=1,3
       DO jc=1,3
         CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr+2,jc+2)
@@ -2399,11 +2428,11 @@ DEBUG_STACK_PUSH
 !---------------------------------------------------------------------------
 ! Setup Operators and ML environment
 !---------------------------------------------------------------------------
-allocate(ml_J(oft_hcurl_nlevels-xmhd_minlev+1),ml_int(oft_hcurl_nlevels-xmhd_minlev))
-allocate(oft_xmhd_ops_ML(oft_hcurl_nlevels))
-xmhd_blevel=oft_hcurl_blevel
-xmhd_nlevels=oft_hcurl_nlevels
-xmhd_level=oft_hcurl_level
+allocate(ml_J(ML_oft_hcurl%nlevels-xmhd_minlev+1),ml_int(ML_oft_hcurl%nlevels-xmhd_minlev))
+allocate(oft_xmhd_ops_ML(ML_oft_hcurl%nlevels))
+xmhd_blevel=ML_oft_hcurl%blevel
+xmhd_nlevels=ML_oft_hcurl%nlevels
+xmhd_level=ML_oft_hcurl%level
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Allocating xMHD structures'
 !---------------------------------------------------------------------------
 ! Setup matrix mask based on included physics
@@ -2529,7 +2558,7 @@ DO level=levelin,xmhd_minlev,-1
   !
   ALLOCATE(oft_xmhd_ops%solid_node(oft_lagrange%ne))
   oft_xmhd_ops%solid_node=.FALSE.
-  CALL oft_lag_create(vectmp)
+  CALL ML_oft_vlagrange%vec_create(vectmp)
   CALL vectmp%set(0.d0)
   CALL vectmp%get_local(node_flag)
   !
@@ -2759,7 +2788,7 @@ neg_vols=0.d0
 ! Get local field values from source
 !---------------------------------------------------------------------------
 full_interp%u=>a
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 !---------------------------------------------------------------------------
 ! Get local field values from previous step if necessary
 !---------------------------------------------------------------------------
@@ -2853,7 +2882,7 @@ do ii=1,mesh%tloc_c(ip)%n
       vpin_loc(jr,1) = npin(j_lag(jr))
       IF(xmhd_upwind)vpin_loc(jr,2:4) = vpin(j_lag(jr),:)
     end do
-    !---H1(Curl) elements
+    !---H(Curl) elements
     do jr=1,oft_hcurl%nce
       jpin_loc(jr) = jpin(j_hcurl(jr))
     end do
@@ -2873,7 +2902,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !---Get local reconstruction operators
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
     CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !---Evaluate centering values
@@ -3288,10 +3317,10 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=MATMUL(mloc,vout(j,:))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=vout(j,:)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3369,7 +3398,7 @@ quad=>oft_hcurl%quad
 ! Get local field values from source
 !---------------------------------------------------------------------------
 full_interp%u=>a
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 NULLIFY(neqin)
 IF(ASSOCIATED(self%u0))THEN
   neq_present=.TRUE.
@@ -3446,7 +3475,7 @@ do ii=1,mesh%tloc_c(ip)%n
     det=vol*quad%wts(m)
     !---Lagrange elements
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !
@@ -3549,10 +3578,10 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=MATMUL(mloc,vout(j,:))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=vout(j,:)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3618,7 +3647,7 @@ quad=>oft_hcurl%quad
 ! Get local field values from source
 !---------------------------------------------------------------------------
 full_interp%u=>u
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 NULLIFY(neqin)
 IF(PRESENT(ueq))THEN
   neq_present=.TRUE.
@@ -3672,7 +3701,7 @@ do ii=1,mesh%tloc_c(ip)%n
     det=vol*quad%wts(m)
     !---Lagrange elements
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !
@@ -3725,7 +3754,7 @@ end subroutine xmhd_diag
 subroutine xmhd_setup_rep
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating xMHD FE type'
 !---Create FE representation
-ML_xmhd_rep%nlevels=oft_hcurl_nlevels
+ML_xmhd_rep%nlevels=ML_oft_hcurl%nlevels
 ML_xmhd_rep%nfields=7
 IF(xmhd_two_temp)THEN
   ML_xmhd_rep%nfields=ML_xmhd_rep%nfields+1
@@ -3743,7 +3772,7 @@ ALLOCATE(ML_xmhd_rep%ml_fields(ML_xmhd_rep%nfields))
 ALLOCATE(ML_xmhd_rep%field_tags(ML_xmhd_rep%nfields))
 ML_xmhd_rep%ml_fields(1)%ml=>ML_oft_hcurl
 ML_xmhd_rep%field_tags(1)='Bc'
-ML_xmhd_rep%ml_fields(2)%ml=>ML_oft_hgrad
+ML_xmhd_rep%ml_fields(2)%ml=>ML_h1grad
 ML_xmhd_rep%field_tags(2)='Bg'
 ML_xmhd_rep%ml_fields(3)%ml=>ML_oft_lagrange
 ML_xmhd_rep%field_tags(3)='Vx'
@@ -3767,12 +3796,12 @@ IF(j2_ind>0)THEN
   ML_xmhd_rep%ml_fields(j2_ind)%ml=>ML_oft_hcurl
   ML_xmhd_rep%field_tags(j2_ind)='j2'
 END IF
-call ML_xmhd_rep%setup
+call ML_xmhd_rep%setup()
 xmhd_rep=>ML_xmhd_rep%current_level
 !---Declare legacy variables
-xmhd_blevel=oft_hcurl_blevel
-xmhd_nlevels=oft_hcurl_nlevels
-xmhd_level=oft_hcurl_level
+xmhd_blevel=ML_oft_hcurl%blevel
+xmhd_nlevels=ML_oft_hcurl%nlevels
+xmhd_level=ML_oft_hcurl%level
 IF(xmhd_minlev<0)xmhd_minlev=xmhd_nlevels
 end subroutine xmhd_setup_rep
 !---------------------------------------------------------------------------
@@ -3780,21 +3809,24 @@ end subroutine xmhd_setup_rep
 !---------------------------------------------------------------------------
 subroutine xmhd_set_level(level)
 integer(i4), intent(in) :: level !< Desired level
-if(level>oft_hcurl_nlevels.OR.level<=0)then
+if(level>ML_oft_hcurl%nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','xmhd_set_level',__FILE__)
 end if
-if(level<mg_mesh%mgdim)then
-  call multigrid_level(level)
-else
-  call multigrid_level(mg_mesh%mgdim)
-end if
+! if(level<mg_mesh%mgdim)then
+!   call multigrid_level(mg_mesh,level)
+! else
+!   call multigrid_level(mg_mesh,mg_mesh%mgdim)
+! end if
 CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
-CALL oft_lag_set_level(level)
-CALL oft_h1_set_level(level)
+CALL ML_oft_lagrange%set_level(level)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid FE object","xmhd_set_level",__FILE__)
+CALL ML_hcurl_grad%set_level(level,propogate=.TRUE.)
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,ML_oft_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,ML_h1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
 xmhd_level=level
-xmhd_lev=oft_hcurl_lev
+! xmhd_lev=oft_hcurl_lev
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)
 end subroutine xmhd_set_level
 !---------------------------------------------------------------------------
@@ -3812,21 +3844,23 @@ END SUBROUTINE xmhd_mfnk_update
 !!
 !! @note Should only be used via class \ref xmhd_interp
 !---------------------------------------------------------------------------
-subroutine xmhd_interp_setup(self)
+subroutine xmhd_interp_setup(self,mesh)
 CLASS(xmhd_interp), INTENT(inout) :: self !< Interpolation object
+class(oft_mesh), target, intent(inout) :: mesh
 INTEGER(i4) :: i
 REAL(r8), POINTER, DIMENSION(:) :: vtmp
 !---Set FEM links
-self%hgrad_rep=>oft_hgrad
-self%hcurl_rep=>oft_hcurl
+self%grad_rep=>oft_hgrad
+self%curl_rep=>oft_hcurl
 self%lag_rep=>oft_lagrange
+self%mesh=>mesh
 !---Get local slice
 CALL self%u%get_local(self%bcurl_loc,1)
 CALL self%u%get_local(self%bgrad_loc,2)
 IF(.NOT.ASSOCIATED(self%lf_loc))THEN
   ALLOCATE(self%lf_loc(self%lag_rep%ne,5))
   IF(xmhd_two_temp)ALLOCATE(self%Te_loc(self%lag_rep%ne))
-  IF(j2_ind>0)ALLOCATE(self%J2_loc(self%hcurl_rep%ne))
+  IF(j2_ind>0)ALLOCATE(self%J2_loc(self%curl_rep%ne))
   IF(n2_ind>0)ALLOCATE(self%N2_loc(self%lag_rep%ne))
 END IF
 vtmp=>self%lf_loc(:,1)
@@ -3846,11 +3880,11 @@ IF(n2_ind>0)CALL self%u%get_local(self%N2_loc,n2_ind)
 IF(.NOT.ASSOCIATED(self%cache))THEN
   ALLOCATE(self%cache(oft_env%nthreads))
   DO i=1,oft_env%nthreads
-    ALLOCATE(self%cache(i)%bcurl(self%hcurl_rep%nce))
-    ALLOCATE(self%cache(i)%bgrad(self%hgrad_rep%nce))
+    ALLOCATE(self%cache(i)%bcurl(self%curl_rep%nce))
+    ALLOCATE(self%cache(i)%bgrad(self%grad_rep%nce))
     ALLOCATE(self%cache(i)%lf(self%lag_rep%nce,5))
     IF(xmhd_two_temp)ALLOCATE(self%cache(i)%Te(self%lag_rep%nce))
-    IF(j2_ind>0)ALLOCATE(self%cache(i)%J2(self%hcurl_rep%nce))
+    IF(j2_ind>0)ALLOCATE(self%cache(i)%J2(self%curl_rep%nce))
     IF(n2_ind>0)ALLOCATE(self%cache(i)%N2(self%lag_rep%nce))
     self%cache(i)%cell=-1
     self%cache(i)%bcurl=0.d0
@@ -3888,7 +3922,7 @@ IF(ASSOCIATED(self%cache))THEN
   END DO
   DEALLOCATE(self%cache)
 END IF
-NULLIFY(self%hcurl_rep,self%hgrad_rep,self%lag_rep,self%u)
+NULLIFY(self%curl_rep,self%grad_rep,self%lag_rep,self%u)
 end subroutine xmhd_interp_delete
 !---------------------------------------------------------------------------
 !> Reconstruct xMHD solution fields
@@ -3914,16 +3948,16 @@ IF(.NOT.ASSOCIATED(self%bgrad_loc))CALL oft_abort('Setup has not been called!', 
 !---Pull cache
 tloc=>self%cache(oft_tid+1)
 IF(tloc%cell/=cell)THEN
-  allocate(j(self%hcurl_rep%nce))
-  call self%hcurl_rep%ncdofs(cell,j)
-  do jc=1,self%hcurl_rep%nce
+  allocate(j(self%curl_rep%nce))
+  call self%curl_rep%ncdofs(cell,j)
+  do jc=1,self%curl_rep%nce
     tloc%bcurl(jc)=self%bcurl_loc(j(jc))
     IF(j2_ind>0)tloc%J2(jc)=self%J2_loc(j(jc))
   end do
   deallocate(j)
-  allocate(j(self%hgrad_rep%nce))
-  call self%hgrad_rep%ncdofs(cell,j)
-  do jc=1,self%hgrad_rep%nce
+  allocate(j(self%grad_rep%nce))
+  call self%grad_rep%ncdofs(cell,j)
+  do jc=1,self%grad_rep%nce
     tloc%bgrad(jc)=self%bgrad_loc(j(jc))
   end do
   deallocate(j)
@@ -3971,18 +4005,18 @@ IF(ASSOCIATED(xmhd_lag_rop))THEN
   END IF
   !---Reconstruct magnetic field
   !$omp simd reduction(+:b0)
-  do jc=1,self%hgrad_rep%nce
+  do jc=1,self%grad_rep%nce
     b0 = b0 + tloc%bgrad(jc)*xmhd_hgrad_rop(:,jc)
   end do
   !---Reconstruct magnetic field and current density
   !$omp simd reduction(+:b0,j0)
-  do jc=1,self%hcurl_rep%nce
+  do jc=1,self%curl_rep%nce
     b0 = b0 + tloc%bcurl(jc)*xmhd_hcurl_rop(:,jc)
     j0 = j0 + tloc%bcurl(jc)*xmhd_hcurl_cop(:,jc)
   end do
   IF(j2_ind>0)THEN
     !$omp simd reduction(+:J2,J2c)
-    do jc=1,self%hcurl_rep%nce
+    do jc=1,self%curl_rep%nce
       J2 = J2 + tloc%J2(jc)*xmhd_hcurl_rop(:,jc)
       J2c = J2c + tloc%J2(jc)*xmhd_hcurl_cop(:,jc)
     end do
@@ -4018,29 +4052,29 @@ ELSE
     END DO
   END IF
   DEALLOCATE(lag_rop,lag_gop)
-  !---H1(Grad) elements
-  ALLOCATE(hgrad_rop(3,self%hgrad_rep%nce))
-  CALL oft_h0_geval_all(self%hgrad_rep,cell,f,hgrad_rop,gop)
+  !---Grad(H^1) elements
+  ALLOCATE(hgrad_rop(3,self%grad_rep%nce))
+  CALL oft_h1_geval_all(self%grad_rep,cell,f,hgrad_rop,gop)
   !---Reconstruct magnetic field
   !$omp simd reduction(+:b0)
-  do jc=1,self%hgrad_rep%nce
+  do jc=1,self%grad_rep%nce
     b0 = b0 + tloc%bgrad(jc)*hgrad_rop(:,jc)
   end do
   DEALLOCATE(hgrad_rop)
-  !---H1(Curl) elements
+  !---H(Curl) elements
   CALL oft_hcurl_get_cgops(gop,cgop)
-  ALLOCATE(hcurl_rop(3,self%hcurl_rep%nce),hcurl_cop(3,self%hcurl_rep%nce))
-  CALL oft_hcurl_eval_all(self%hcurl_rep,cell,f,hcurl_rop,gop)
-  CALL oft_hcurl_ceval_all(self%hcurl_rep,cell,f,hcurl_cop,cgop)
+  ALLOCATE(hcurl_rop(3,self%curl_rep%nce),hcurl_cop(3,self%curl_rep%nce))
+  CALL oft_hcurl_eval_all(self%curl_rep,cell,f,hcurl_rop,gop)
+  CALL oft_hcurl_ceval_all(self%curl_rep,cell,f,hcurl_cop,cgop)
   !---Reconstruct magnetic field and current density
   !$omp simd reduction(+:b0,j0)
-  do jc=1,self%hcurl_rep%nce
+  do jc=1,self%curl_rep%nce
     b0 = b0 + tloc%bcurl(jc)*hcurl_rop(:,jc)
     j0 = j0 + tloc%bcurl(jc)*hcurl_cop(:,jc)
   end do
   IF(j2_ind>0)THEN
     !$omp simd reduction(+:J2,J2c)
-    do jc=1,self%hcurl_rep%nce
+    do jc=1,self%curl_rep%nce
       J2 = J2 + tloc%J2(jc)*hcurl_rop(:,jc)
       J2c = J2c + tloc%J2(jc)*hcurl_cop(:,jc)
     end do
@@ -4114,7 +4148,7 @@ IF(oft_debug_print(1))write(*,'(2X,A)')'Update xMHD Jacobians'
 !---------------------------------------------------------------------------
 NULLIFY(fullcc,fullcctmp)
 full_interp%u=>uin
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 !---------------------------------------------------------------------------
 ! Construct Jacobian on each sublevel
 !---------------------------------------------------------------------------
@@ -4128,13 +4162,13 @@ do i=levelin,minlev,-1
 !---------------------------------------------------------------------------
 ! Level is on finest mesh, use full field representations
 !---------------------------------------------------------------------------
-  if(oft_lagrange%mesh%nc==oft_lagrange_lin%mesh%nc)then
+  if(oft_lagrange%mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc)then
     !---Construct Jacobian
     call xmhd_build_ops(full_interp)
     !---Average on lowest level to cell centers
     if(oft_lagrange%order==1.AND.i>xmhd_minlev)then
       allocate(fullcc(nfields,mesh%nc))
-      call fem_avg_bcc(full_interp,fullcc,qorder,n=nfields)
+      call fem_avg_bcc(mesh,full_interp,fullcc,qorder,n=nfields)
     end if
 !---------------------------------------------------------------------------
 ! Level is on coarse mesh, average fields to coarser grid
@@ -4144,8 +4178,8 @@ do i=levelin,minlev,-1
     if(ASSOCIATED(fullcctmp))DEALLOCATE(fullcctmp)
     allocate(fullcctmp(nfields,mesh%nc))
     !---Transfer from distributed to local grid
-    if(oft_lagrange_level==oft_lagrange_blevel)then
-      call multigrid_base_pushcc(fullcc,fullcctmp,nfields)
+    if(ML_oft_lagrange%level==ML_oft_lagrange%blevel)then
+      call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,nfields)
     !---Average values to over child cells
     else
       !$omp parallel do private(k)
@@ -4383,7 +4417,8 @@ end subroutine oft_xmhd_pop
 !!
 !! @note The global \ref xmhd_level is incremented by one in this subroutine
 !---------------------------------------------------------------------------
-subroutine oft_xmhd_interp(acors,afine)
+subroutine oft_xmhd_interp(self,acors,afine)
+class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Coarse level vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Interpolated solution on fine level
 INTEGER(i4) :: i
@@ -4395,7 +4430,7 @@ CALL afine%set(0.d0)
 CALL oft_xmhd_ops%interp%apply(acors,afine)
 !---Correct gradient subspace following geometric interpolation
 IF(oft_hcurl%order==1)THEN
-  !---Cast to H1 type and get aliases
+  !---Get local values
   NULLIFY(agrad,acurl)
   CALL afine%get_local(acurl,1)
   CALL afine%get_local(agrad,2)
@@ -4436,7 +4471,8 @@ end subroutine oft_xmhd_interp
 !!
 !! @note The global \ref xmhd_level is decremented by one in this subroutine
 !---------------------------------------------------------------------------
-subroutine oft_xmhd_inject(afine,acors)
+subroutine oft_xmhd_inject(self,afine,acors)
+class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine level vector to inject
 class(oft_vector), intent(inout) :: acors !< Injected solution on coarse level
 real(r8), pointer, dimension(:) :: vtmp
@@ -4508,8 +4544,8 @@ end subroutine xmhd_probe_flush
 !---------------------------------------------------------------------------
 !> Plotting subroutine for xMHD post-processing
 !!
-!! Runtime options are set in the main input file using the group \c xmhd_plot_options.
-!! Additionally, options from the \c xmhd_options group are also read to get run parameters,
+!! Runtime options are set in the main input file using the group `xmhd_plot_options`.
+!! Additionally, options from the `xmhd_options` group are also read to get run parameters,
 !! see @ref xmhd::xmhd_run "xmhd_run" for a list of options.
 !!
 !! **Option group:** `xmhd_plot_options`
@@ -4532,8 +4568,8 @@ CLASS(oft_solver), POINTER :: lminv => NULL()
 !---Local variables
 class(oft_vector), pointer :: u,uc,up,ap,bp,x
 TYPE(xmhd_sub_fields) :: sub_fields
-TYPE(oft_h1_cinterp), TARGET :: Jfield
-TYPE(oft_h1_rinterp), TARGET :: Bfield
+TYPE(oft_hcurl_grad_cinterp), TARGET :: Jfield
+TYPE(oft_hcurl_grad_rinterp), TARGET :: Bfield
 TYPE(oft_hcurl_rinterp), TARGET :: J2field
 type(oft_timer) :: mytimer
 real(r8), pointer :: bvout(:,:)
@@ -4569,6 +4605,8 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,'(2X,A)')'Starting xMHD post-processing'
 END IF
+mg_mesh=>ML_oft_hcurl%ml_mesh
+mesh=>oft_hcurl%mesh
 file_list="none"
 open(NEWUNIT=io_unit,FILE=oft_env%ifile)
 read(io_unit,xmhd_plot_options,IOSTAT=ierr)
@@ -4630,7 +4668,7 @@ nsteps=rst_end
 !---Build composite representation if necessary
 IF(ML_xmhd_rep%nlevels==0)THEN
   CALL xmhd_setup_rep
-  ALLOCATE(oft_xmhd_ops_ML(oft_hcurl_nlevels))
+  ALLOCATE(oft_xmhd_ops_ML(ML_oft_hcurl%nlevels))
 END IF
 !---------------------------------------------------------------------------
 ! Create solver fields
@@ -4642,23 +4680,23 @@ call oft_xmhd_create(up)
 ! Create plotting fields
 !---------------------------------------------------------------------------
 NULLIFY(hcvals)
-call oft_lag_create(x)
-call oft_lag_vcreate(ap)
-call oft_lag_vcreate(bp)
+call ML_oft_lagrange%vec_create(x)
+call ML_oft_vlagrange%vec_create(ap)
+call ML_oft_vlagrange%vec_create(bp)
 allocate(bvout(3,x%n))
 !---Allocate sub-fields
-call oft_h1_create(sub_fields%B)
-call oft_lag_vcreate(sub_fields%V)
-call oft_lag_create(sub_fields%Ne)
-call oft_lag_create(sub_fields%Ti)
-IF(xmhd_two_temp)call oft_lag_create(sub_fields%Te)
-IF(n2_ind>0)call oft_lag_create(sub_fields%N2)
-IF(j2_ind>0)call oft_hcurl_create(sub_fields%J2)
+call ML_hcurl_grad%vec_create(sub_fields%B)
+call ML_oft_vlagrange%vec_create(sub_fields%V)
+call ML_oft_lagrange%vec_create(sub_fields%Ne)
+call ML_oft_lagrange%vec_create(sub_fields%Ti)
+IF(xmhd_two_temp)call ML_oft_lagrange%vec_create(sub_fields%Te)
+IF(n2_ind>0)call ML_oft_lagrange%vec_create(sub_fields%N2)
+IF(j2_ind>0)call ML_oft_hcurl%vec_create(sub_fields%J2)
 !---------------------------------------------------------------------------
 ! Setup Lagrange mass solver
 !---------------------------------------------------------------------------
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(lmop,'none')
+CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
@@ -4707,8 +4745,8 @@ IF(linear)THEN
 ! Project magnetic field and plot
 !---------------------------------------------------------------------------
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup
-  CALL oft_lag_vproject(Bfield,bp)
+  CALL Bfield%setup(oft_hcurl,oft_hgrad)
+  CALL oft_lag_vproject(oft_lagrange,Bfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
   vals=>bvout(1,:)
@@ -4720,8 +4758,8 @@ IF(linear)THEN
   CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
-  CALL Jfield%setup
-  CALL oft_lag_vproject(Jfield,bp)
+  CALL Jfield%setup(oft_hcurl,oft_hgrad)
+  CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
   vals=>bvout(1,:)
@@ -4890,8 +4928,8 @@ DO
 ! Project magnetic field and plot
 !---------------------------------------------------------------------------
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup
-      CALL oft_lag_vproject(Bfield,bp)
+      CALL Bfield%setup(oft_hcurl,oft_hgrad)
+      CALL oft_lag_vproject(oft_lagrange,Bfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
       vals=>bvout(1,:)
@@ -4904,8 +4942,8 @@ DO
       !---Hyper-res aux field
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
-        CALL J2field%setup
-        CALL oft_lag_vproject(J2field,bp)
+        CALL J2field%setup(oft_hcurl)
+        CALL oft_lag_vproject(oft_lagrange,J2field,bp)
         CALL ap%set(0.d0)
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
@@ -4918,8 +4956,8 @@ DO
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
-      CALL Jfield%setup
-      CALL oft_lag_vproject(Jfield,bp)
+      CALL Jfield%setup(oft_hcurl,oft_hgrad)
+      CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
       vals=>bvout(1,:)
@@ -4931,7 +4969,7 @@ DO
       CALL mesh%save_vertex_vector(bvout,xdmf,'J')
       !---Divergence error
       IF(plot_div)THEN
-        CALL oft_lag_project_div(Bfield,x)
+        CALL oft_lag_project_div(oft_lagrange,Bfield,x)
         vals=>bvout(1,:)
         CALL x%get_local(vals)
         CALL bp%set(0.d0)

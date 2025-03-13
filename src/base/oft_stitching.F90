@@ -26,12 +26,22 @@ TYPE :: oft_seam
   INTEGER(i4) :: nbe = 0 !< Number of local boundary elements
   INTEGER(i4) :: nie = 0 !< Number of interior elements
   INTEGER(i4) :: nle = 0 !< Number of local boundary elements
+  INTEGER(i4) :: nproc_con = 0 !< Number of connections to other processors
+  INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: leo => NULL() !< List of boundary element ownership
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: be => NULL() !< Boundary element flag
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lbe => NULL() !< List of boundary elements in full vector
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lie => NULL() !< List of interior elements in full vector
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kle => NULL() !< Pointer to list of boundary element linkage
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: proc_con => NULL() !< Processor connectivity list
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:,:) :: lle => NULL() !< List of boundary element linkage
+#ifdef OFT_MPI_F08
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send requests
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv requests
+#else
+  INTEGER(i4), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send requests
+  INTEGER(i4), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv requests
+#endif
   TYPE(oft_1d_real), POINTER, DIMENSION(:) :: send => NULL() !< Preallocated MPI send arrays
   TYPE(oft_1d_real), POINTER, DIMENSION(:) :: recv => NULL() !< Preallocated MPI recv arrays
   TYPE(oft_1d_comp), POINTER, DIMENSION(:) :: csend => NULL() !< Preallocated MPI send arrays
@@ -45,12 +55,6 @@ TYPE :: seam_list
 END TYPE seam_list
 !---------------------------------------------------------------------------
 !> Perform a global dot product for vectors with a given seam structure
-!!
-!! @param[in] self Seam structure for "a" and "b"
-!! @param[in] a Local values for vector 1
-!! @param[in] b Local values for vector 2
-!! @param[out] n Local size of vectors
-!! @result \f$ a \cdot b \f$
 !---------------------------------------------------------------------------
 INTERFACE oft_global_dp
   MODULE PROCEDURE global_dp_r8
@@ -58,11 +62,6 @@ INTERFACE oft_global_dp
 END INTERFACE oft_global_dp
 !------------------------------------------------------------------------------
 !> Perform a global sum reduction for a vector with a given seam structure
-!!
-!! @param[in] self Seam structure for vector "a"
-!! @param[in] a Local values for vector
-!! @param[out] n Local size of vector
-!! @result \f$ \sum_i a_i \f$
 !------------------------------------------------------------------------------
 INTERFACE oft_global_reduction
   MODULE PROCEDURE global_reduction_r8
@@ -211,17 +210,17 @@ integer(i4) :: i,j,js,jn,elocal,active_procs,ierr
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
 if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','global_stitch_r8',__FILE__)
-active_procs=oft_env%nproc_con
+active_procs=self%nproc_con
 IF(self%full)active_procs=0
 !---Create Recv calls
 #ifdef HAVE_MPI
 DO j=1,active_procs
   !---Skip processors with no elements
   IF(self%send(j)%n==0)THEN
-    oft_env%recv(j)=MPI_REQUEST_NULL
+    self%recv_reqs(j)=MPI_REQUEST_NULL
     CYCLE
   END IF
-  CALL MPI_IRECV(self%recv(j)%v,self%recv(j)%n,OFT_MPI_R8,oft_env%proc_con(j),1,oft_env%comm,oft_env%recv(j),ierr)
+  CALL MPI_IRECV(self%recv(j)%v,self%recv(j)%n,OFT_MPI_R8,self%proc_con(j),1,oft_env%comm,self%recv_reqs(j),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','global_stitch_r8',__FILE__)
 END DO
 #endif
@@ -252,10 +251,10 @@ DO j=1,active_procs
   enddo
   !---Start MPI Send
   IF(self%send(j)%n==0)THEN ! Skip processors with no elements
-    oft_env%send(j)=MPI_REQUEST_NULL
+    self%send_reqs(j)=MPI_REQUEST_NULL
   ELSE
     !$omp critical
-    CALL MPI_ISEND(self%send(j)%v,self%send(j)%n,OFT_MPI_R8,oft_env%proc_con(j),1,oft_env%comm,oft_env%send(j),ierr)
+    CALL MPI_ISEND(self%send(j)%v,self%send(j)%n,OFT_MPI_R8,self%proc_con(j),1,oft_env%comm,self%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','global_stitch_r8',__FILE__)
     !$omp end critical
   END IF
@@ -277,11 +276,11 @@ END IF
 atmp=0.d0
 !---Add couplings (always same order)
 #ifdef HAVE_MPI
-IF((active_procs>0).AND.(oft_env%proc_split>0))THEN
+IF((active_procs>0).AND.(self%proc_split>0))THEN
   !---Wait for all Recvs to complete
-  CALL oft_mpi_waitall(oft_env%proc_split,oft_env%recv(1:oft_env%proc_split),ierr)
+  CALL oft_mpi_waitall(self%proc_split,self%recv_reqs(1:self%proc_split),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_r8',__FILE__)
-  DO j=1,oft_env%proc_split
+  DO j=1,self%proc_split
     js=self%kle(j)
     jn=self%kle(j+1)-1
     do i=js,jn
@@ -313,9 +312,9 @@ IF(up_method/=2)THEN
 END IF
 #ifdef HAVE_MPI
 IF(active_procs>0)THEN
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%recv,ierr)
+  CALL oft_mpi_waitall(self%nproc_con,self%recv_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_r8',__FILE__)
-  DO j=oft_env%proc_split+1,active_procs
+  DO j=self%proc_split+1,active_procs
     js=self%kle(j)
     jn=self%kle(j+1)-1
     do i=js,jn
@@ -334,7 +333,7 @@ DEALLOCATE(atmp)
 !---Wait for all sends to complete
 #ifdef HAVE_MPI
 IF(active_procs>0)THEN
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(self%nproc_con,self%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_r8',__FILE__)
 END IF
 #endif
@@ -352,17 +351,17 @@ integer(i4) :: i,j,js,jn,elocal,active_procs,ierr
 IF(self%skip.OR.self%nbe==0)RETURN
 DEBUG_STACK_PUSH
 if(up_method>2.OR.up_method<0)call oft_abort('Invalid stitch method','global_stitch_c8',__FILE__)
-active_procs=oft_env%nproc_con
+active_procs=self%nproc_con
 IF(self%full)active_procs=0
 !---Create Recv calls
 #ifdef HAVE_MPI
 DO j=1,active_procs
   !---Skip processors with no elements
   IF(self%csend(j)%n==0)THEN
-    oft_env%recv(j)=MPI_REQUEST_NULL
+    self%recv_reqs(j)=MPI_REQUEST_NULL
     CYCLE
   END IF
-  CALL MPI_IRECV(self%crecv(j)%v,self%crecv(j)%n,OFT_MPI_C8,oft_env%proc_con(j),1,oft_env%comm,oft_env%recv(j),ierr)
+  CALL MPI_IRECV(self%crecv(j)%v,self%crecv(j)%n,OFT_MPI_C8,self%proc_con(j),1,oft_env%comm,self%recv_reqs(j),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','global_stitch_c8',__FILE__)
 END DO
 #endif
@@ -393,10 +392,10 @@ DO j=1,active_procs
   enddo
   !---Start MPI Send
   IF(self%csend(j)%n==0)THEN ! Skip processors with no elements
-    oft_env%send(j)=MPI_REQUEST_NULL
+    self%send_reqs(j)=MPI_REQUEST_NULL
   ELSE
     !$omp critical
-    CALL MPI_ISEND(self%csend(j)%v,self%csend(j)%n,OFT_MPI_C8,oft_env%proc_con(j),1,oft_env%comm,oft_env%send(j),ierr)
+    CALL MPI_ISEND(self%csend(j)%v,self%csend(j)%n,OFT_MPI_C8,self%proc_con(j),1,oft_env%comm,self%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','global_stitch_c8',__FILE__)
     !$omp end critical
   END IF
@@ -418,11 +417,11 @@ END IF
 atmp=0.d0
 !---Add couplings (always same order)
 #ifdef HAVE_MPI
-IF((active_procs>0).AND.(oft_env%proc_split>0))THEN
+IF((active_procs>0).AND.(self%proc_split>0))THEN
   !---Wait for all Recvs to complete
-  CALL oft_mpi_waitall(oft_env%proc_split,oft_env%recv(1:oft_env%proc_split),ierr)
+  CALL oft_mpi_waitall(self%proc_split,self%recv_reqs(1:self%proc_split),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_c8',__FILE__)
-  DO j=1,oft_env%proc_split
+  DO j=1,self%proc_split
     js=self%kle(j)
     jn=self%kle(j+1)-1
     do i=js,jn
@@ -454,9 +453,9 @@ IF(up_method/=2)THEN
 END IF
 #ifdef HAVE_MPI
 IF(active_procs>0)THEN
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%recv,ierr)
+  CALL oft_mpi_waitall(self%nproc_con,self%recv_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_c8',__FILE__)
-  DO j=oft_env%proc_split+1,active_procs
+  DO j=self%proc_split+1,active_procs
     js=self%kle(j)
     jn=self%kle(j+1)-1
     do i=js,jn
@@ -475,14 +474,12 @@ DEALLOCATE(atmp)
 !---Wait for all sends to complete
 #ifdef HAVE_MPI
 IF(active_procs>0)THEN
-  CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
+  CALL oft_mpi_waitall(self%nproc_con,self%send_reqs,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_WAITALL','global_stitch_c8',__FILE__)
 END IF
 #endif
 DEBUG_STACK_POP
 end subroutine global_stitch_c8
-! !------------------------------------------------------------------------------
-! ! SUBROUTINE: oft_global_stitch_begin
 ! !------------------------------------------------------------------------------
 ! !> Begin stitch operation and return while transfers complete
 ! !!
@@ -560,8 +557,6 @@ end subroutine global_stitch_c8
 ! DEBUG_STACK_POP
 ! end subroutine oft_global_stitch_begin
 ! !------------------------------------------------------------------------------
-! ! SUBROUTINE: oft_global_stitch_end
-! !------------------------------------------------------------------------------
 ! !> Complete stitch operation by processing transfers
 ! !!
 ! !! @param[in,out] self Stitching information
@@ -626,24 +621,24 @@ IF(ANY(self%kle>self%nle+1))THEN
   CALL oft_abort('BAD LINKAGE PTR','oft_stitch_check',__FILE__)
 END IF
 !---Check local sizes
-DO j=1,oft_env%nproc_con
+DO j=1,self%nproc_con
   IF(self%send(j)%n==0.OR.self%recv(j)%n==0)CYCLE
   IF(SIZE(self%send(j)%v)/=self%send(j)%n)CALL oft_abort('BAD SEND ARRAY','oft_stitch_check',__FILE__)
   IF(SIZE(self%recv(j)%v)/=self%recv(j)%n)CALL oft_abort('BAD RECV ARRAY','oft_stitch_check',__FILE__)
 END DO
 !---Check matching transfer sizes
 #ifdef HAVE_MPI
-ALLOCATE(le_size(2,oft_env%nproc_con),le_out(2,oft_env%nproc_con))
-DO j=1,oft_env%nproc_con
+ALLOCATE(le_size(2,self%nproc_con),le_out(2,self%nproc_con))
+DO j=1,self%nproc_con
   le_out(:,j)=[self%send(j)%n,self%recv(j)%n]
-  CALL MPI_ISEND(le_out(:,j),2,OFT_MPI_I4,oft_env%proc_con(j),2,oft_env%comm,oft_env%send(j),ierr)
+  CALL MPI_ISEND(le_out(:,j),2,OFT_MPI_I4,self%proc_con(j),2,oft_env%comm,self%send_reqs(j),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','oft_stitch_check',__FILE__)
-  CALL MPI_IRECV(le_size(:,j),2,OFT_MPI_I4,oft_env%proc_con(j),2,oft_env%comm,oft_env%recv(j),ierr)
+  CALL MPI_IRECV(le_size(:,j),2,OFT_MPI_I4,self%proc_con(j),2,oft_env%comm,self%recv_reqs(j),ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','oft_stitch_check',__FILE__)
 END DO
-CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%recv,ierr)
-CALL oft_mpi_waitall(oft_env%nproc_con,oft_env%send,ierr)
-DO j=1,oft_env%nproc_con
+CALL oft_mpi_waitall(self%nproc_con,self%recv_reqs,ierr)
+CALL oft_mpi_waitall(self%nproc_con,self%send_reqs,ierr)
+DO j=1,self%nproc_con
   IF((le_size(1,j)/=self%recv(j)%n).OR.(le_size(2,j)/=self%send(j)%n))THEN
     WRITE(*,*)'STITCH ERROR: ',[self%send(j)%n,self%recv(j)%n],le_size(:,j)
     CALL oft_abort('BAD ARRAY SIZE MATCH','oft_stitch_check',__FILE__)
@@ -668,14 +663,14 @@ IF(ASSOCIATED(self%kle))DEALLOCATE(self%kle)
 IF(ASSOCIATED(self%lle))DEALLOCATE(self%lle)
 !---
 IF(ASSOCIATED(self%send))THEN
-  DO i=0,oft_env%nproc_con
+  DO i=0,self%nproc_con
     DEALLOCATE(self%send(i)%v)
     DEALLOCATE(self%recv(i)%v)
   END DO
   DEALLOCATE(self%send,self%recv)
 END IF
 IF(ASSOCIATED(self%csend))THEN
-  DO i=0,oft_env%nproc_con
+  DO i=0,self%nproc_con
     DEALLOCATE(self%csend(i)%v)
     DEALLOCATE(self%crecv(i)%v)
   END DO

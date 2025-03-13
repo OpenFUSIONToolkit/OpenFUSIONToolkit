@@ -1,7 +1,7 @@
 # FindOFT_PETSc.cmake
 #
 # Finds the PETSc library for use with the Open FUSION Toolkit
-# as installed by versions 3.6 - 3.11 of PETSc.
+# as installed by versions 3.18 - 3.22 of PETSc using OFT's `build_libs.py` script
 #
 # This will define the following variables
 #
@@ -45,9 +45,9 @@ find_path(PETSC_INCLUDE_DIR
 )
 if( PETSC_INCLUDE_DIR )
   file(READ "${PETSC_INCLUDE_DIR}/petscversion.h" ver_file)
-  string(REGEX MATCH "PETSC_VERSION_MAJOR[ ]*([0-9]*)" _ ${ver_file})
+  string(REGEX MATCH "PETSC_VERSION_MAJOR[ ]*([0-9]+)" _ ${ver_file})
   set(PETSC_VER_MAJOR ${CMAKE_MATCH_1})
-  string(REGEX MATCH "PETSC_VERSION_MINOR[ ]*([0-9]*)" _ ${ver_file})
+  string(REGEX MATCH "PETSC_VERSION_MINOR[ ]*([0-9]+)" _ ${ver_file})
   set(PETSC_VER_MINOR ${CMAKE_MATCH_1})
 endif()
 set(PETSC_LIBRARIES ${PETSC_LIBRARY})
@@ -62,7 +62,7 @@ find_path(SUPERLU_INCLUDE_DIR
 if( SUPERLU_LIBRARY AND SUPERLU_INCLUDE_DIR )
   set(OFT_SUPERLU_FOUND TRUE)
   file(READ "${SUPERLU_INCLUDE_DIR}/slu_util.h" ver_file)
-  string(REGEX MATCH "SUPERLU_MAJOR_VERSION[ ]*([0-9]*)" _ ${ver_file})
+  string(REGEX MATCH "SUPERLU_MAJOR_VERSION[ ]*([0-9]+)" _ ${ver_file})
   set(OFT_SUPERLU_VER_MAJOR ${CMAKE_MATCH_1})
   set(OFT_SUPERLU_INCLUDE_DIRS ${SUPERLU_INCLUDE_DIR})
   set(OFT_SUPERLU_LIBRARIES ${SUPERLU_LIBRARY})
@@ -84,19 +84,23 @@ if(SUPERLU_DIST_LIBRARY AND SUPERLU_DIST_INCLUDE_DIR )
 endif()
 
 # UMFPACK
-find_library(UMFPACK_LIBRARY
-  NAMES umfpack
-)
-find_library(UMFPACK_AMD_LIBRARY
-  NAMES amd
-)
+set(UMFPACK_TMP_LIBRARIES)
+foreach(LIB_NAME amd btf camd ccolamd cholmod colamd klu spqr suitesparseconfig umfpack )
+  set(LIB_VAR "LIB_${LIB_NAME}")
+  find_library(${LIB_VAR}
+    NAMES ${LIB_NAME}
+  )
+  if( LIB_VAR )
+    set(UMFPACK_TMP_LIBRARIES ${UMFPACK_TMP_LIBRARIES} ${${LIB_VAR}})
+  endif()
+endforeach()
 find_path(UMFPACK_INCLUDE_DIR
   NAMES umfpack.h
 )
-if( UMFPACK_LIBRARY AND UMFPACK_AMD_LIBRARY AND UMFPACK_INCLUDE_DIR )
+if( UMFPACK_TMP_LIBRARIES AND UMFPACK_INCLUDE_DIR )
   set(OFT_UMFPACK_FOUND TRUE)
   set(OFT_UMFPACK_INCLUDE_DIRS ${UMFPACK_INCLUDE_DIR})
-  set(OFT_UMFPACK_LIBRARIES ${UMFPACK_LIBRARY} ${UMFPACK_AMD_LIBRARY})
+  set(OFT_UMFPACK_LIBRARIES ${UMFPACK_TMP_LIBRARIES})
   list(APPEND PETSC_LIBRARIES ${OFT_UMFPACK_LIBRARIES})
 endif()
 

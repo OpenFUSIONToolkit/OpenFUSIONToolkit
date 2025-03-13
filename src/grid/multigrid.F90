@@ -12,10 +12,9 @@
 module multigrid
 use oft_base
 USE oft_sort, ONLY: sort_array, sort_matrix
-use oft_mesh_type, only: oft_mesh, mesh, oft_bmesh, smesh
+use oft_mesh_type, only: oft_mesh, oft_bmesh, mesh_seam
 use oft_mesh_local_util, only: mesh_local_findedge, mesh_local_findface
 use oft_mesh_global_util, only: mesh_global_set_curved
-use oft_hexmesh_type, only: hex_fe
 implicit none
 #define MOD_NAME "multigrid"
 #include "local.h"
@@ -43,26 +42,34 @@ end type multigrid_inter
 type :: multigrid_mesh
   integer(i4) :: mgmax = 0 !< Maximum MG level
   integer(i4) :: level = 0 !< Current mesh level
-  integer(i4) :: lev = 0 !< Current structure level
+  integer(i4) :: lev = 0 !< Current structure level (doesn't increment on `nbase+1`)
   integer(i4) :: mgdim = 0 !< Size of MG structure
   integer(i4) :: nbase = 0 !< Number of local base refinements
+  INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
+  INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
+  INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
+#ifdef OFT_MPI_F08
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
+  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
+#else
+  INTEGER(i4), POINTER, DIMENSION(:) :: send_reqs => NULL() !< Asynchronous MPI Send tags
+  INTEGER(i4), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
+#endif
   class(oft_mesh), pointer :: mesh => NULL() !< Structure containing current mesh
   class(oft_bmesh), pointer :: smesh => NULL() !< Structure containing current mesh
+  TYPE(mesh_seam), POINTER :: seam => NULL() !< Global domain-domain connectivity information
   class(oft_mesh), pointer, dimension(:) :: meshes => NULL() !< Structure containing all meshes
   class(oft_bmesh), pointer, dimension(:) :: smeshes => NULL() !< Structure containing current mesh
   type(multigrid_inter), pointer, dimension(:) :: inter => NULL() !< Structure containing linkages
   type(multigrid_inter), pointer, dimension(:) :: sinter => NULL() !< Structure containing linkages
   character(2) :: rlevel !< Character rep of refinement level
 end type multigrid_mesh
-!---Global variables
-integer(i4), parameter :: mgdim=10 !< Dimension of MG mesh (decrecated)
-character(4) :: clevel(mgdim)=(/'.L01','.L02','.L03','.L04','.L05','.L06','.L07','.L08','.L09','.L10'/)
-type(multigrid_mesh), pointer :: mg_mesh => NULL() !< Global ML Mesh
 contains
 !---------------------------------------------------------------------------
 !> Set mesh level in ML mesh
 !---------------------------------------------------------------------------
-subroutine multigrid_level(level)
+subroutine multigrid_level(mg_mesh,level)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: level !< Desired mesh level
 DEBUG_STACK_PUSH
 if(level<0.OR.level>mg_mesh%mgmax)call oft_abort('Requested invalid mesh level.','multigrid_level',__FILE__)
@@ -75,11 +82,11 @@ end if
 write(mg_mesh%rlevel,'(I2.2)')mg_mesh%lev
 IF(ASSOCIATED(mg_mesh%meshes))THEN
   mg_mesh%mesh=>mg_mesh%meshes(level)
-  mesh=>mg_mesh%mesh
+  ! mesh=>mg_mesh%mesh
 END IF
 IF(ASSOCIATED(mg_mesh%smeshes))THEN
   mg_mesh%smesh=>mg_mesh%smeshes(level)
-  smesh=>mg_mesh%smesh
+  ! smesh=>mg_mesh%smesh
 END IF
 ! smesh=>mg_mesh%mesh%bmesh
 DEBUG_STACK_POP
@@ -89,7 +96,8 @@ end subroutine multigrid_level
 !! - Add new points at the center of each edge
 !! - Update cell lists
 !---------------------------------------------------------------------------
-subroutine multigrid_refine
+subroutine multigrid_refine(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,k,reg_tmp,neskip,nfskip,ncskip
 integer(i4) :: lccors(4),lecors(2),lcecors(6),lfcors(3),lfecors(3)
 real(r8) :: diag(3)
@@ -132,10 +140,13 @@ end subroutine multigrid_refine
 !------------------------------------------------------------------------------
 !> Adjust points to CAD boundary and propogate CAD linkage
 !------------------------------------------------------------------------------
-subroutine multigrid_reffix_ho
+subroutine multigrid_reffix_ho(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,nfdf,ncde,ncdf,fc,cc
 real(r8) :: f1(4),f2(4),ftmp(4),pt(3)
+class(oft_mesh), pointer :: mesh
 class(oft_mesh), pointer :: pmesh
+mesh=>mg_mesh%mesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 IF(.NOT.ASSOCIATED(pmesh%ho_info%r))RETURN
 DEBUG_STACK_PUSH
@@ -551,10 +562,13 @@ end subroutine multigrid_reffix_ho
 !------------------------------------------------------------------------------
 !> Adjust points to CAD boundary and propogate CAD linkage
 !------------------------------------------------------------------------------
-subroutine multigrid_reffix_ho_surf
+subroutine multigrid_reffix_ho_surf(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,k,l,cell,ho_count,ep(2),fp(4),ed,ed2,nfde,ncde,cc
 real(r8) :: f1(4),f2(4),ftmp(4)
+class(oft_bmesh), pointer :: smesh
 class(oft_bmesh), pointer :: pmesh
+smesh=>mg_mesh%smesh
 pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
 IF(.NOT.ASSOCIATED(pmesh%ho_info%r))RETURN
 DEBUG_STACK_PUSH
@@ -707,9 +721,9 @@ IF(smesh%ho_info%ncp==1)THEN
       DO j=1,2
         IF(smesh%lc(j,cc)>pmesh%np+pmesh%ne)THEN
           ftmp=ftmp+f2
-        ELSE IF(smesh%lc(j,cc)>pmesh%np)THEN
+        ELSE IF((smesh%lc(j,cc)>pmesh%np).AND.(smesh%lc(j,cc)<=pmesh%np+pmesh%ne))THEN
           !---Endpoint is mid point of edge
-          ed2=smesh%le(j,ed)-pmesh%np
+          ed2=smesh%lc(j,cc)-pmesh%np
           DO k=1,smesh%cell_np
             IF(ANY(pmesh%lc(k,i)==pmesh%le(:,ed2)))THEN
               CALL pmesh%vlog(k,f1)
@@ -727,8 +741,8 @@ IF(smesh%ho_info%ncp==1)THEN
         END IF
       END DO
       ftmp=ftmp/REAL(smesh%cell_np,8)
-      smesh%ho_info%r(:,cc+mesh%ne) = pmesh%log2phys(i,ftmp)
-      smesh%ho_info%lcp(1,cc) = cc+mesh%ne
+      smesh%ho_info%r(:,cc+smesh%ne) = pmesh%log2phys(i,ftmp)
+      smesh%ho_info%lcp(1,cc) = cc+smesh%ne
     END DO
   END DO
   !$omp end do nowait
@@ -743,7 +757,8 @@ end subroutine multigrid_reffix_ho_surf
 !! - Add new points at the center of each edge
 !! - Update face lists
 !---------------------------------------------------------------------------
-subroutine multigrid_brefine
+subroutine multigrid_brefine(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j,reg_tmp,lecors(2),lfcors(3),lfecors(3)
 class(oft_bmesh), pointer :: cmesh,fmesh
 DEBUG_STACK_PUSH
@@ -822,7 +837,8 @@ end subroutine multigrid_brefine
 !> Generate a transfer level for local to global mapping.
 !! - Populate global indexing for grid block
 !---------------------------------------------------------------------------
-subroutine multigrid_hybrid_base
+subroutine multigrid_hybrid_base(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,e(2),eind,find,f(4)
 integer(i4), allocatable :: lptmp(:)
 integer(i4), allocatable :: g_fmap(:),l_fmap(:)
@@ -885,7 +901,8 @@ end subroutine multigrid_hybrid_base
 !> Generate a transfer level for local to global mapping for the boundary mesh.
 !! - Populate global indexing for grid block
 !---------------------------------------------------------------------------
-subroutine multigrid_hybrid_bmesh
+subroutine multigrid_hybrid_bmesh(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,e(2),eind
 integer(i4), ALLOCATABLE :: lptmp(:),letmp(:),lftmp(:)
 class(oft_mesh), pointer :: lmesh_tet,gmesh_tet
@@ -1001,7 +1018,8 @@ end subroutine multigrid_hybrid_bmesh
 !> Transfer a cell based field from the distributed to base level
 !! - Synchronize cell variables to the base mesh
 !---------------------------------------------------------------------------
-subroutine multigrid_base_pushcc(bccl,bcc,n)
+subroutine multigrid_base_pushcc(mg_mesh,bccl,bcc,n)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8), intent(in) :: bccl(:,:) !< Cell field on local domain [n,local%nc]
 real(r8), intent(out) :: bcc(:,:) !< Cell field on base mesh [n,base%nc]
 integer(i4), intent(in) :: n !< Number of values per cell
@@ -1012,7 +1030,7 @@ DEBUG_STACK_PUSH
 if(mg_mesh%level/=mg_mesh%nbase)call oft_abort('Level is not a transfer level.','multigrid_base_pushcc',__FILE__)
 lctmp=>mg_mesh%meshes(mg_mesh%nbase+1)%base%lc
 nccors=mg_mesh%meshes(mg_mesh%nbase+1)%nc
-allocate(bcctmp(n,mesh%nc))
+allocate(bcctmp(n,mg_mesh%mesh%nc))
 bcctmp=0.d0
 do i=1,nccors
   DO j=1,n
@@ -1021,7 +1039,7 @@ do i=1,nccors
 end do
 !---Global reduction over all processors
 #ifdef HAVE_MPI
-call MPI_ALLREDUCE(bcctmp,bcc,n*mesh%nc,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
+call MPI_ALLREDUCE(bcctmp,bcc,n*mg_mesh%mesh%nc,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
 #else
 bcc=bcctmp
 #endif
@@ -1032,16 +1050,17 @@ end subroutine multigrid_base_pushcc
 !> Transfer a cell based field from the base level to the distributed mesh
 !! - Sample local cell variables from the base level
 !---------------------------------------------------------------------------
-subroutine multigrid_base_popcc(bccg,bcc,n)
+subroutine multigrid_base_popcc(mg_mesh,bccg,bcc,n)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8), intent(in) :: bccg(:,:) !< Cell field on base mesh [n,base%nc]
 real(r8), intent(out) :: bcc(:,:) !< Cell field on local domain [n,local%nc]
 integer(i4), intent(in) :: n !< Number of values per cell
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 if(mg_mesh%level/=mg_mesh%nbase+1)call oft_abort('Level is not a transfer level.','multigrid_base_popcc',__FILE__)
-do i=1,mesh%nc
+do i=1,mg_mesh%mesh%nc
   DO j=1,n
-    bcc(j,i)=bccg(j,mesh%global%lc(i))
+    bcc(j,i)=bccg(j,mg_mesh%mesh%global%lc(i))
   END DO
 end do
 DEBUG_STACK_POP
@@ -1054,7 +1073,8 @@ end subroutine multigrid_base_popcc
 !! - Decompose mesh
 !! - Setup distributed meshes
 !---------------------------------------------------------------------------
-subroutine multigrid_reset
+subroutine multigrid_reset(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,level,io_unit
 NULLIFY(mg_mesh%mesh,mg_mesh%smesh)
 IF(ASSOCIATED(mg_mesh%smeshes))THEN
@@ -1077,12 +1097,12 @@ IF(ASSOCIATED(mg_mesh%inter))THEN
     CALL destory_inter(mg_mesh%inter(i))
   END DO
 END IF
-DEALLOCATE(mg_mesh)
+! DEALLOCATE(mg_mesh)
 !---Reset global environment info (needs to be moved to a mesh-specific object)
 oft_env%nbase = -1
-oft_env%nproc_con = 0
-oft_env%proc_split = 0
-IF(ASSOCIATED(oft_env%proc_con))DEALLOCATE(oft_env%proc_con,oft_env%send,oft_env%recv)
+mg_mesh%nproc_con = 0
+mg_mesh%proc_split = 0
+IF(ASSOCIATED(mg_mesh%proc_con))DEALLOCATE(mg_mesh%proc_con,mg_mesh%send_reqs,mg_mesh%recv_reqs)
 contains
 subroutine destory_inter(obj)
 type(multigrid_inter), intent(inout) :: obj
@@ -1100,7 +1120,8 @@ end subroutine multigrid_reset
 !> Update global indices following refinement
 !! - Populate new indices using consistent mapping
 !---------------------------------------------------------------------------
-subroutine tetmesh_mg_globals(self,fmesh)
+subroutine tetmesh_mg_globals(mg_mesh,self,fmesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 CLASS(oft_mesh), INTENT(in) :: self
 CLASS(oft_mesh), INTENT(inout) :: fmesh
 integer(i4), pointer :: lfde(:,:),lede(:,:),lfdf(:,:),lcde(:,:),lcdf(:,:),lcdg(:)
@@ -1255,7 +1276,7 @@ enddo
 !
 ! Boundary mesh
 !
-CALL trimesh_mg_globals(self%bmesh,fmesh%bmesh)
+CALL trimesh_mg_globals(mg_mesh,self%bmesh,fmesh%bmesh)
 !---Get edge and face boundary mapping
 allocate(fmap(fmesh%nf))
 CALL get_inverse_map(fmesh%lbf,fmesh%nbf,fmap,fmesh%nf) ! Get face map
@@ -1274,7 +1295,8 @@ end subroutine tetmesh_mg_globals
 !> Update global indices following refinement.
 !! - Populate new indices using consistent mapping
 !---------------------------------------------------------------------------
-subroutine trimesh_mg_globals(self,fmesh)
+subroutine trimesh_mg_globals(mg_mesh,self,fmesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 CLASS(oft_bmesh), INTENT(in) :: self
 CLASS(oft_bmesh), INTENT(inout) :: fmesh
 integer(i4), pointer :: lede(:,:),lcde(:,:)
@@ -1352,7 +1374,8 @@ end subroutine trimesh_mg_globals
 !> Update global indices following refinement.
 !! - Populate new indices using consistent mapping
 !---------------------------------------------------------------------------
-subroutine hexmesh_mg_globals(self,fmesh)
+subroutine hexmesh_mg_globals(mg_mesh,self,fmesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 CLASS(oft_mesh), INTENT(in) :: self
 CLASS(oft_mesh), INTENT(inout) :: fmesh
 integer(i4), pointer :: lfde(:,:),lede(:,:),lfdf(:,:),lcde(:,:),lcdf(:,:)
@@ -1423,7 +1446,7 @@ do i=1,self%nc ! loop over coarse faces & find daughter faces
   DO j=1,12
     lfecors(1:2)=0
     DO k=1,6
-      IF(ANY(ABS(hex_fe(:,k))==j))THEN
+      IF(ANY(ABS(fmesh%cell_fe(:,k))==j))THEN
         IF(lfecors(1)==0)THEN
           lfecors(1)=ABS(self%lcf(k,i)) + self%ne + self%np
         ELSE
@@ -1498,7 +1521,7 @@ enddo
 !
 ! Boundary mesh
 !
-CALL quadmesh_mg_globals(self%bmesh,fmesh%bmesh)
+CALL quadmesh_mg_globals(mg_mesh,self%bmesh,fmesh%bmesh)
 !---Get edge and face boundary mapping
 allocate(fmap(fmesh%nf))
 CALL get_inverse_map(fmesh%lbf,fmesh%nbf,fmap,fmesh%nf) ! Get face map
@@ -1517,7 +1540,8 @@ end subroutine hexmesh_mg_globals
 !> Update global indices following refinement.
 !! - Populate new indices using consistent mapping
 !---------------------------------------------------------------------------
-subroutine quadmesh_mg_globals(self,fmesh)
+subroutine quadmesh_mg_globals(mg_mesh,self,fmesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 CLASS(oft_bmesh), INTENT(in) :: self
 CLASS(oft_bmesh), INTENT(inout) :: fmesh
 integer(i4), pointer :: lede(:,:),lcde(:,:)
