@@ -365,7 +365,7 @@ logical :: rst=.FALSE.
 character(2) :: pnum,mnum
 character(40) :: filename
 type(oft_hcurl_zerob), target :: hcurl_zerob
-type(oft_lag_zerob), target :: lag_zerob
+! type(oft_lag_zerob), target :: lag_zerob
 DEBUG_STACK_PUSH
 NULLIFY(lop,mop)
 NULLIFY(ml_lop)
@@ -387,7 +387,7 @@ ELSE
   END DO
 END IF
 hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
-lag_zerob%ML_lag_rep=>ML_oft_lagrange
+! lag_zerob%ML_lag_rep=>ML_oft_lagrange
 !---Loop over cut planes
 IF(taylor_rst)THEN
   rst=.TRUE.
@@ -407,14 +407,14 @@ IF(.NOT.rst)THEN
 !---------------------------------------------------------------------------
 ! Setup H^1::LOP preconditioner
 !---------------------------------------------------------------------------
-  if(taylor_minlev==ML_oft_h1%nlevels-1)then ! Lowest level uses diag precond
+  if(ML_oft_h1%minlev==ML_oft_h1%nlevels-1)then ! Lowest level uses diag precond
     CALL oft_h1_getlop(ML_oft_h1%current_level,lop,'grnd')
     CALL create_cg_solver(linv)
     CALL create_diag_pre(linv%pre)
   else ! Nested levels use MG
     CALL create_cg_solver(linv, force_native=.TRUE.)
-    CALL h1_getlop_pre(ML_oft_h1,linv%pre,ml_lop,'grnd',nlevels=ML_oft_h1%nlevels-taylor_minlev+1)
-      lop=>ml_lop(ML_oft_h1%nlevels-taylor_minlev+1)%M
+    CALL h1_getlop_pre(ML_oft_h1,linv%pre,ml_lop,'grnd',nlevels=ML_oft_h1%nlevels-ML_oft_h1%minlev+1)
+      lop=>ml_lop(ML_oft_h1%nlevels-ML_oft_h1%minlev+1)%M
   end if
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
@@ -613,7 +613,7 @@ DEALLOCATE(linv)
 ! DEALLOCATE(linv_lag%pre)
 ! CALL linv_lag%delete
 ! DEALLOCATE(linv_lag)
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_vacuum
 !---------------------------------------------------------------------------
@@ -643,6 +643,7 @@ class(oft_matrix), pointer :: mop_hcurl => NULL()
 class(oft_matrix), pointer :: wop => NULL()
 !---
 class(oft_vector), pointer :: u,b,tmp
+type(oft_hcurl_zerob), target :: hcurl_zerob
 real(r8), pointer, dimension(:) :: vals => NULL()
 real(r8) :: alam,venergy
 integer(i4) :: i,j,k,nlevels,ierr
@@ -673,11 +674,11 @@ NULLIFY(ml_wop)
 IF(taylor_rst)THEN
   rst=.TRUE.
   DO i=1,taylor_nh
-    WRITE(pnum,'(I2.2)')oft_hcurl%order
+    WRITE(pnum,'(I2.2)')ML_oft_hcurl%current_level%order
     WRITE(mnum,'(I2.2)')i
     ! filename='hvac_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     ! rst=rst.AND.oft_file_exist(filename)
-    filename='hcur_r'//mg_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
+    filename='hcur_r'//ML_oft_hcurl%ml_mesh%rlevel//'_p'//pnum//'_h'//mnum//'.rst'
     rst=rst.AND.oft_file_exist(filename)
   END DO
 ELSE
@@ -711,13 +712,13 @@ END IF
 ! Setup H1(Curl)::WOP preconditioner
 !---------------------------------------------------------------------------
 CALL create_cg_solver(winv, force_native=.TRUE.)
-IF((taylor_minlev==oft_hcurl_nlevels).OR.rst)THEN ! Lowest level uses diag precond
+IF((taylor_minlev==ML_oft_hcurl%nlevels).OR.rst)THEN ! Lowest level uses diag precond
   NULLIFY(wop)
-  CALL oft_hcurl_getwop(wop,'zerob')
+  CALL oft_hcurl_getwop(ML_oft_hcurl%current_level,wop,'zerob')
   CALL create_diag_pre(winv%pre)
 ELSE ! Nested levels use MG
-  CALL hcurl_getwop_pre(winv%pre,ml_wop,nlevels=oft_hcurl_nlevels-taylor_minlev+1)
-  wop=>ml_wop(oft_hcurl_nlevels-taylor_minlev+1)%M
+  CALL hcurl_getwop_pre(ML_oft_hcurl,winv%pre,ml_wop,nlevels=ML_oft_hcurl%nlevels-taylor_minlev+1)
+  wop=>ml_wop(ML_oft_hcurl%nlevels-taylor_minlev+1)%M
 END IF
 !---------------------------------------------------------------------------
 ! Create H1(Curl)::WOP solver
@@ -734,30 +735,32 @@ END SELECT
 !---------------------------------------------------------------------------
 ! Create H1(Curl) divergence cleaner
 !---------------------------------------------------------------------------
-CALL oft_lag_set_level(MIN(oft_hcurl_level,oft_lagrange_lin_level))
-CALL oft_lag_getlop(lop_lag,"zerob")
+CALL ML_oft_lagrange%set_level(MIN(ML_oft_hcurl%level,ML_oft_lagrange%ml_mesh%mgdim))
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop_lag,"zerob")
 CALL create_cg_solver(linv_lag)
 linv_lag%A=>lop_lag
 !linv_lag%its=-2
 CALL create_diag_pre(linv_lag%pre)
 linv_lag%its=40
 hcurl_divout%solver=>linv_lag
-hcurl_divout%bc=>lag_zerob
+CALL hcurl_divout%setup(ML_oft_hcurl,ML_oft_lagrange,'zerob',solver=linv_lag)
+! hcurl_divout%bc=>lag_zerob
 hcurl_divout%app_freq=2
-CALL oft_hcurl_getmop(mop_hcurl,'zerob')
+CALL oft_hcurl_getmop(ML_oft_hcurl%current_level,mop_hcurl,'zerob')
 hcurl_divout%mop=>mop_hcurl
 !---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
 NULLIFY(tmp)
 !---Get H1 mass matrix
-CALL h1_getmop(mop,'none')
+CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,'none')
 !---Allocate vacuum and current field containers
 IF(ASSOCIATED(taylor_hcur))DEALLOCATE(taylor_hcur)
 ! ALLOCATE(taylor_hvac(taylor_nh,oft_h1_nlevels))
-ALLOCATE(taylor_hcur(taylor_nh,oft_h1_nlevels))
-!---Create temporary H1(Curl) vector
-CALL oft_hcurl_create(b)
+ALLOCATE(taylor_hcur(taylor_nh,ML_hcurl_grad%nlevels))
+!---Create temporary H(Curl) vector
+CALL ML_oft_hcurl%vec_create(b)
+hcurl_zerob%ML_hcurl_rep=>ML_oft_hcurl
 !---Loop over cut planes
 DO i=1,taylor_nh
 !---------------------------------------------------------------------------

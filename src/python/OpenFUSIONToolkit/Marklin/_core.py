@@ -156,7 +156,7 @@ class Marklin():
         '''
         return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
 
-    def compute_eig(self,nmodes=1,order=2,minlev=-1,save_rst=True):
+    def compute_eig(self,nmodes=1,save_rst=True):
         r'''! Compute force-free eigenmodes
 
         @param nmodes Number of eigenmodes to compute
@@ -166,18 +166,18 @@ class Marklin():
             raise ValueError('Eigenstates already computed')
         eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_compute_eig(self._marklin_ptr,order,minlev,nmodes,save_rst,eig_vals,error_string)
+        marklin_compute_eig(self._marklin_ptr,nmodes,save_rst,eig_vals,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self.nm = nmodes
         self.eig_vals = eig_vals
     
-    def compute_vac(self,nh,hcpc,hcpv,order=2,minlev=-1,save_rst=True):
-        r'''! Compute force-free eigenmodes
+    def compute_vac(self,nh,hcpc,hcpv,save_rst=True):
+        r'''! Compute vacuum field with specified fluxes through jump planes
 
-        @param nmodes Number of eigenmodes to compute
-        @param order Order of FE representation
-        @param minlev Minimum level for multigrid solve
+        @param nh Number of jump planes
+        @param hcpc Plane specification points
+        @param hcpv Plane specification vectors
         @param save_rst Save restart files? 
         '''
         if hcpc.shape[0] != nh:
@@ -189,7 +189,7 @@ class Marklin():
         if hcpv.shape[1] != 3:
             raise ValueError('Inconsistent sizes for "hcpv[0]" != {0}'.format(3))
         cstring = c_char_p(b""*200)
-        marklin_compute_vac(order,minlev,nh,hcpc,hcpv,save_rst,cstring)
+        marklin_compute_vac(self._marklin_ptr,nh,hcpc,hcpv,save_rst,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
         self.nh = nh
@@ -197,8 +197,13 @@ class Marklin():
         self.hcpv = hcpv
     
     def compute_par_diff(self,interpolator,k_perp):
+        r'''! Compute parallel diffusion with specified vector field and diffusivity
+
+        @param interpolator Interpolator defining vector field
+        @param k_perp Perpendicular diffusion value (k_par = 1.0)
+        '''
         cstring = c_char_p(b""*200)
-        marklin_compute_pardiff(interpolator.int_obj,interpolator.int_type,k_perp,cstring)
+        marklin_compute_pardiff(self._marklin_ptr,interpolator._int_ptr,interpolator.int_type,k_perp,cstring)
         if cstring.value != b'':
             raise Exception(cstring.value)
 

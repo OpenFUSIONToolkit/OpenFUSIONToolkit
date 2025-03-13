@@ -33,13 +33,13 @@ USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
 !---H1 FE space (Grad(H^1) subspace)
 USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_setup_interp, oft_h1_getlop, oft_h1_zerogrnd, &
-  oft_h1_zerob
+  oft_h1_zerob, h1_mloptions
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
     hcurl_mloptions
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, oft_hcurl_grad_zeroi, hcurl_grad_mc, oft_hcurl_grad_czerob, &
-  hcurl_grad_setup_interp, oft_hcurl_grad_rinterp
+  hcurl_grad_setup_interp, oft_hcurl_grad_rinterp, hcurl_grad_mloptions
 !---Taylor state
 USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
   taylor_rst, taylor_hlam, taylor_vacuum, oft_taylor_rinterp, taylor_nh, taylor_hvac, &
@@ -110,7 +110,7 @@ END SUBROUTINE marklin_setup
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_compute(marklin_ptr,nmodes,save_rst,eig_vals,error_str) BIND(C,NAME="marklin_compute")
+SUBROUTINE marklin_compute_eig(marklin_ptr,nmodes,save_rst,eig_vals,error_str) BIND(C,NAME="marklin_compute_eig")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nmodes !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_rst !< Needs docs
@@ -143,13 +143,12 @@ taylor_rst=save_rst
 CALL taylor_hmodes(nmodes)
 CALL c_f_pointer(eig_vals, vals_tmp, [nmodes])
 vals_tmp=taylor_hlam(:,ML_oft_hcurl%level)
-END SUBROUTINE marklin_compute
+END SUBROUTINE marklin_compute_eig
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_compute_vac(order,minlev,nh,hcpc,hcpv,save_rst,error_str) BIND(C,NAME="marklin_compute_vac")
-INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< Needs docs
-INTEGER(KIND=c_int), VALUE, INTENT(in) :: minlev !< Needs docs
+SUBROUTINE marklin_compute_vac(marklin_ptr,nh,hcpc,hcpv,save_rst,error_str) BIND(C,NAME="marklin_compute_vac")
+TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nh !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hcpc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hcpv !< Needs docs
@@ -164,42 +163,30 @@ REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
 REAL(r8), POINTER, DIMENSION(:,:) :: hcpc_tmp,hcpv_tmp
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
+TYPE(marklin_obj), POINTER :: self
 CHARACTER(LEN=3) :: pltnum
 !---Clear error flag
 CALL copy_string('',error_str)
-!---Lagrange
-IF(ML_oft_lagrange%nlevels==0)THEN
-  CALL oft_lag_setup(order,minlev)
-  IF(minlev>0)THEN
-    CALL lag_setup_interp
-    CALL lag_mloptions
-  END IF
+IF(.NOT.c_associated(marklin_ptr))THEN
+  CALL copy_string('Marklin object not associated',error_str)
+  RETURN
 END IF
-!---H1(Curl) subspace
-IF(ML_oft_hcurl%nlevels==0)THEN
-  CALL oft_hcurl_setup(order,minlev)
-  IF(minlev>0)THEN
-    CALL hcurl_setup_interp
-    CALL hcurl_mloptions
-  END IF
-END IF
-!---
-IF(ML_oft_h0%nlevels==0)THEN
-  CALL oft_h0_setup(order+1,minlev)
-  IF(minlev>0)THEN
-    CALL h0_setup_interp
-    CALL h0_mloptions
+CALL c_f_pointer(marklin_ptr,self)
+!---Build FE spaces if not yet built
+IF(ML_hcurl_grad%nlevels==0)THEN
+  !---Grad(H^1) subspace
+  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h1,minlev=ML_oft_hcurl%minlev+1)
+  !---Full H(Curl) + Grad(H^1) space
+  CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,ML_oft_hcurl%minlev)
+  !---MG setup
+  IF(taylor_minlev<ML_oft_hcurl%level)THEN
+    CALL h1_setup_interp(ML_oft_h1)
+    CALL h1_mloptions()
+    CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1)
+    CALL hcurl_grad_mloptions()
   END IF
 END IF
 !---
-IF(ML_oft_h1%nlevels==0)CALL oft_h1_setup(order,minlev)
-!---
-IF(minlev<0)THEN
-  taylor_minlev=oft_hcurl_level
-ELSE
-  taylor_minlev=minlev
-  IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,minlev)
-END IF
 oft_env%pm=.TRUE.
 taylor_rst=save_rst
 CALL c_f_pointer(hcpc, hcpc_tmp, [3,nh])
@@ -209,7 +196,8 @@ END SUBROUTINE marklin_compute_vac
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_compute_pardiff(int_obj,int_type,k_perp,error_str) BIND(C,NAME="marklin_compute_pardiff")
+SUBROUTINE marklin_compute_pardiff(marklin_ptr,int_obj,int_type,k_perp,error_str) BIND(C,NAME="marklin_compute_pardiff")
+TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: k_perp !< Needs docs
@@ -224,16 +212,22 @@ REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
 REAL(r8), POINTER, DIMENSION(:,:) :: hcpc_tmp,hcpv_tmp
 CLASS(oft_vector), POINTER :: u,v,check
 CHARACTER(LEN=3) :: pltnum
+TYPE(marklin_obj), POINTER :: self
 CLASS(fem_interp), POINTER :: interp_obj
-TYPE(oft_h1_rinterp), POINTER :: ainterp_obj
+TYPE(oft_hcurl_grad_rinterp), POINTER :: ainterp_obj
 TYPE(oft_taylor_rinterp), POINTER :: binterp_obj
+!---Clear error flag
+CALL copy_string('',error_str)
+IF(.NOT.c_associated(marklin_ptr))THEN
+  CALL copy_string('Marklin object not associated',error_str)
+  RETURN
+END IF
+CALL c_f_pointer(marklin_ptr,self)
 !---Check that interpolator is allocated
 IF(.NOT.C_ASSOCIATED(int_obj))THEN
   CALL copy_string('Interpolation object not associated',error_str)
   RETURN
 END IF
-!---Clear error flag
-CALL copy_string('',error_str)
 !
 NULLIFY(pdop,mop,vals)
 SELECT CASE(int_type)
@@ -247,16 +241,16 @@ SELECT CASE(int_type)
     CALL copy_string('Invalid interpolation type',error_str)
     RETURN
 END SELECT
-CALL oft_lag_getpdop(pdop,interp_obj,'zerob',k_perp)
+CALL oft_lag_getpdop(ML_oft_lagrange%current_level,pdop,interp_obj,'zerob',k_perp)
 !---Setup solver
 CALL create_cg_solver(pdinv)
 CALL create_diag_pre(pdinv%pre)
 pdinv%A=>pdop
 pdinv%its=-2
 !---Create solver fields
-CALL oft_lag_create(u)
-CALL oft_lag_create(v)
-CALL oft_lag_getmop(mop,'none')
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(v)
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
 !
@@ -264,7 +258,7 @@ CALL u%set(0.d0)
 CALL pdinv%apply(u,v)
 !
 CALL u%get_local(vals)
-CALL mesh%save_vertex_scalar(vals,xdmf_plot,'T')
+CALL self%ml_mesh%mesh%save_vertex_scalar(vals,self%xdmf_plot,'T')
 !
 CALL mop%delete()
 CALL pdinv%pre%delete()
@@ -450,7 +444,7 @@ DEALLOCATE(lop)
 CALL linv%pre%delete()
 DEALLOCATE(linv%pre)
 CALL linv%delete()
-DEALLOCATE(linv,tmp)
+DEALLOCATE(linv)
 CALL divout%bc%delete()
 NULLIFY(divout%bc)
 CALL divout%delete()
@@ -485,7 +479,7 @@ CALL c_f_pointer(hmode_facs, hmode_tmp, [taylor_nm])
 DO i=1,taylor_nm
   CALL interp_obj%ua%add(1.d0,hmode_tmp(i),taylor_hffa(i,ML_oft_hcurl%level)%f)
 END DO
-CALL interp_obj%setup()
+CALL interp_obj%setup(ML_hcurl_grad%current_level)
 int_obj=C_LOC(interp_obj)
 END SUBROUTINE marklin_get_bint
 !------------------------------------------------------------------------------
