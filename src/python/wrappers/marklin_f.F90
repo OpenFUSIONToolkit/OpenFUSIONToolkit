@@ -41,9 +41,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, oft_hcurl_grad_zeroi, hcurl_grad_mc, oft_hcurl_grad_czerob, &
   hcurl_grad_setup_interp, oft_hcurl_grad_rinterp
 !---Taylor state
-USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, taylor_nm, &
-  taylor_rst, taylor_hlam, ML_oft_hcurl, ML_oft_h1, &
-  ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
+USE taylor, ONLY: oft_taylor_eigs, oft_taylor_inhomo, taylor_hmodes, taylor_vacuum
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -55,14 +53,16 @@ TYPE :: marklin_obj
   INTEGER(i4), POINTER, DIMENSION(:) :: reg_plot => NULL() !< Needs docs
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_plot => NULL() !< Needs docs
   REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Needs docs
+  TYPE(oft_taylor_eigs) :: eig_obj
+  TYPE(oft_taylor_eigs) :: ff_obj
   TYPE(xdmf_plot_file) :: xdmf_plot
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL()
-  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_lagrange => NULL()
-  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_h1 => NULL()
-  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_hgrad => NULL()
-  ! TYPE(oft_ml_fem_type), POINTER :: ML_oft_hcurl => NULL()
-  ! TYPE(oft_ml_fem_comp_type), POINTER :: ML_oft_h1 => NULL()
-  ! TYPE(oft_ml_fem_comp_type), POINTER :: ML_oft_vlagrange => NULL()
+  TYPE(oft_ml_fem_type), POINTER :: ML_lagrange => NULL()
+  TYPE(oft_ml_fem_type), POINTER :: ML_h1 => NULL()
+  TYPE(oft_ml_fem_type), POINTER :: ML_h1grad => NULL()
+  TYPE(oft_ml_fem_type), POINTER :: ML_hcurl => NULL()
+  TYPE(oft_ml_fem_comp_type), POINTER :: ML_hcurl_grad => NULL()
+  TYPE(oft_ml_fem_comp_type), POINTER :: ML_vlagrange => NULL()
 END TYPE marklin_obj
 CONTAINS
 !------------------------------------------------------------------------------
@@ -106,21 +106,22 @@ self%order=order
 self%minlev=minlev
 CALL c_f_pointer(mesh_ptr,self%ml_mesh)
 !---Lagrange
-CALL oft_lag_setup(self%ml_mesh,self%order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=self%minlev)
+ALLOCATE(self%ML_lagrange,self%ML_vlagrange)
+CALL oft_lag_setup(self%ml_mesh,self%order,self%ML_lagrange,ML_vlag_obj=self%ML_vlagrange,minlev=self%minlev)
 !---H(Curl) subspace
-CALL oft_hcurl_setup(self%ml_mesh,self%order,ML_oft_hcurl,minlev=self%minlev)
+ALLOCATE(self%ML_hcurl)
+CALL oft_hcurl_setup(self%ml_mesh,self%order,self%ML_hcurl,minlev=self%minlev)
 !---Compute modes
 IF(self%minlev<0)THEN
-  taylor_minlev=ML_oft_hcurl%level
+  self%minlev=self%ML_hcurl%level
 ELSE
-  taylor_minlev=self%minlev
-  IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,self%minlev)
+  IF(oft_env%nprocs>1)self%minlev=MAX(oft_env%nbase+1,self%minlev)
 END IF
-IF(taylor_minlev<ML_oft_hcurl%level)THEN
-  CALL lag_setup_interp(ML_oft_lagrange)
+IF(self%minlev<self%ML_hcurl%level)THEN
+  CALL lag_setup_interp(self%ML_lagrange)
   CALL lag_mloptions
-  CALL hcurl_setup_interp(ML_oft_hcurl)
-  CALL hcurl_mloptions(ML_oft_hcurl)
+  CALL hcurl_setup_interp(self%ML_hcurl)
+  CALL hcurl_mloptions(self%ML_hcurl)
 END IF
 !
 marklin_ptr=C_LOC(self)
@@ -146,15 +147,19 @@ TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(marklin_obj), POINTER :: self
 CHARACTER(LEN=3) :: pltnum
 IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
-IF(taylor_nm>0)THEN
+IF(self%eig_obj%nm>0)THEN
   CALL copy_string('Eigenstates already computed',error_str)
   RETURN
 END IF
 oft_env%pm=.TRUE.
-taylor_rst=save_rst
-CALL taylor_hmodes(nmodes)
+CALL self%eig_obj%setup(self%ML_hcurl,self%ML_lagrange,self%minlev)
+IF(save_rst)THEN
+  CALL taylor_hmodes(self%eig_obj,nmodes,'marklin_hmodes.rst')
+ELSE
+  CALL taylor_hmodes(self%eig_obj,nmodes)
+END IF
 CALL c_f_pointer(eig_vals, vals_tmp, [nmodes])
-vals_tmp=taylor_hlam(:,ML_oft_hcurl%level)
+vals_tmp=self%eig_obj%hlam(:,self%ML_hcurl%level)
 END SUBROUTINE marklin_compute
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -170,10 +175,10 @@ CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
   CALL self%xdmf_plot%setup('Marklin',pathprefix)
-  CALL self%ml_mesh%mesh%setup_io(self%xdmf_plot,ML_oft_hcurl%current_level%order)
+  CALL self%ml_mesh%mesh%setup_io(self%xdmf_plot,self%ML_hcurl%current_level%order)
 ELSE
   CALL self%xdmf_plot%setup('Marklin')
-  CALL self%ml_mesh%mesh%setup_io(self%xdmf_plot,ML_oft_hcurl%current_level%order)
+  CALL self%ml_mesh%mesh%setup_io(self%xdmf_plot,self%ML_hcurl%current_level%order)
 END IF
 END SUBROUTINE marklin_setup_io
 !------------------------------------------------------------------------------
@@ -201,24 +206,24 @@ IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 CALL copy_string_rev(key,name_tmp)
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
+CALL oft_lag_vgetmop(self%ML_vlagrange%current_level,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 CALL create_diag_pre(lminv%pre)
 lminv%A=>lmop
 lminv%its=-2
 !---Create solver fields
-CALL ML_oft_vlagrange%vec_create(u)
-CALL ML_oft_vlagrange%vec_create(v)
+CALL self%ML_vlagrange%vec_create(u)
+CALL self%ML_vlagrange%vec_create(v)
 ALLOCATE(bvout(3,u%n/3))
 !---Project field onto plotting mesh
 SELECT CASE(int_type)
 CASE(1)
   CALL c_f_pointer(int_obj, ainterp_obj)
-  CALL oft_lag_vproject(ML_oft_lagrange%current_level,ainterp_obj,v)
+  CALL oft_lag_vproject(self%ML_lagrange%current_level,ainterp_obj,v)
 CASE(2)
   CALL c_f_pointer(int_obj, binterp_obj)
-  CALL oft_lag_vproject(ML_oft_lagrange%current_level,binterp_obj,v)
+  CALL oft_lag_vproject(self%ML_lagrange%current_level,binterp_obj,v)
 END SELECT
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
@@ -257,47 +262,47 @@ REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 TYPE(oft_h1_zerob), TARGET :: h1_zerob
 IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
-IF(ML_hcurl_grad%nlevels==0)THEN
+IF(self%ML_hcurl_grad%nlevels==0)THEN
   !---Grad(H^1) subspace
-  CALL oft_h1_setup(self%ml_mesh,ML_oft_hcurl%current_level%order+1,ML_oft_h1,minlev=ML_oft_hcurl%minlev+1)
-  CALL h1_setup_interp(ML_oft_h1)
+  CALL oft_h1_setup(self%ml_mesh,self%ML_hcurl%current_level%order+1,self%ML_h1,minlev=self%ML_hcurl%minlev+1)
+  CALL h1_setup_interp(self%ML_h1)
   !---Full H(Curl) + Grad(H^1) space
-  CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,ML_oft_hcurl%minlev)
-  CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1)
+  CALL oft_hcurl_grad_setup(self%ML_hcurl,self%ML_h1,self%ML_hcurl_grad,self%ML_h1grad,self%ML_hcurl%minlev)
+  CALL hcurl_grad_setup_interp(self%ML_hcurl_grad,self%ML_h1)
 END IF
 !---------------------------------------------------------------------------
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
 NULLIFY(lop,tmp)
 IF(zero_norm)THEN
-  CALL oft_h1_getlop(ML_oft_h1%current_level,lop,"grnd")
+  CALL oft_h1_getlop(self%ML_h1%current_level,lop,"grnd")
 ELSE
-  CALL oft_h1_getlop(ML_oft_h1%current_level,lop,"zerob")
+  CALL oft_h1_getlop(self%ML_h1%current_level,lop,"zerob")
 END IF
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
 CALL create_diag_pre(linv%pre) ! Setup Preconditioner
-CALL divout%setup(ML_hcurl_grad,'none',solver=linv)
+CALL divout%setup(self%ML_hcurl_grad,'none',solver=linv)
 IF(zero_norm)THEN
-  h1_zerogrnd%ML_H1_rep=>ML_h1grad
+  h1_zerogrnd%ML_H1_rep=>self%ML_h1grad
   divout%bc=>h1_zerogrnd
   divout%keep_boundary=.TRUE.
 ELSE
-  h1_zerob%ML_H1_rep=>ML_h1grad
+  h1_zerob%ML_H1_rep=>self%ML_h1grad
   divout%bc=>h1_zerob
 END IF
 !---------------------------------------------------------------------------
 ! Setup initial conditions
 !---------------------------------------------------------------------------
 ALLOCATE(interp_obj)
-CALL ML_hcurl_grad%vec_create(interp_obj%u)
-CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
+CALL self%ML_hcurl_grad%vec_create(interp_obj%u)
+CALL self%eig_obj%hffa(1,self%ML_hcurl%level)%f%get_local(tmp)
 CALL interp_obj%u%restore_local(tmp,1)
 IF(zero_norm)WRITE(*,*)'Setting gauge'
 divout%pm=.TRUE.
 CALL divout%apply(interp_obj%u)
-CALL interp_obj%setup(ML_oft_hcurl%current_level,ML_oft_h1%current_level)
+CALL interp_obj%setup(self%ML_hcurl%current_level,self%ML_h1%current_level)
 int_obj=C_LOC(interp_obj)
 !---Cleanup
 CALL lop%delete()
@@ -322,8 +327,8 @@ TYPE(marklin_obj), POINTER :: self
 TYPE(oft_hcurl_cinterp), POINTER :: interp_obj
 IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 ALLOCATE(interp_obj)
-interp_obj%u=>taylor_hffa(imode,ML_oft_hcurl%level)%f
-CALL interp_obj%setup(ML_oft_hcurl%current_level)
+interp_obj%u=>self%eig_obj%hffa(imode,self%ML_hcurl%level)%f
+CALL interp_obj%setup(self%ML_hcurl%current_level)
 int_obj=C_LOC(interp_obj)
 END SUBROUTINE marklin_get_bint
 !------------------------------------------------------------------------------
