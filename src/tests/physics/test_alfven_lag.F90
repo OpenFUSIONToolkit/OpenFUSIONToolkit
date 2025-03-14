@@ -69,6 +69,7 @@ CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
+ALLOCATE(xmhd_ML_lagrange,xmhd_ML_vlagrange)
 !---Lagrange
 CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=minlev)
 CALL lag_setup_interp(xmhd_ML_lagrange)
