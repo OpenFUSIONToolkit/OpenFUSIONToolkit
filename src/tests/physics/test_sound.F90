@@ -81,15 +81,19 @@ CALL multigrid_construct(mg_mesh)
 ! Build FE structures
 !---------------------------------------------------------------------------
 !--- Lagrange
+ALLOCATE(xmhd_ML_lagrange,xmhd_ML_vlagrange)
 CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=minlev)
 CALL lag_setup_interp(xmhd_ML_lagrange)
 !--- Grad(H^1) subspace
+ALLOCATE(xmhd_ML_H1)
 CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=minlev)
 CALL h1_setup_interp(xmhd_ML_H1)
 !--- H(Curl) subspace
+ALLOCATE(xmhd_ML_hcurl)
 CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=minlev)
 CALL hcurl_setup_interp(xmhd_ML_hcurl)
 !--- Full H(Curl) space
+ALLOCATE(xmhd_ML_hcurl_grad,xmhd_ML_H1grad)
 CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,minlev)
 CALL hcurl_grad_setup_interp(xmhd_ML_hcurl_grad,xmhd_ML_H1)
 !---------------------------------------------------------------------------

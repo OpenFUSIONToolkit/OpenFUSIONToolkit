@@ -41,7 +41,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, oft_hcurl_grad_zeroi, hcurl_grad_mc, oft_hcurl_grad_czerob, &
   hcurl_grad_setup_interp, oft_hcurl_grad_rinterp
 !---Taylor state
-USE taylor, ONLY: oft_taylor_eigs, oft_taylor_inhomo, taylor_hmodes, taylor_vacuum
+USE taylor, ONLY: oft_taylor_eigs, oft_taylor_inhomo, taylor_hmodes
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev

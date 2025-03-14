@@ -143,18 +143,19 @@ htags(2)='Yinj'
 !!the injector, and \f$ \vec{B}^i_{gffa} \f$ is the plasma component of the inhomogeneous equilibrium field. The
 !!interpolation object \ref taylor::oft_taylor_rinterp "oft_taylor_rinterp" is designed to support this type of field
 !!and is populated once the subfields are computed.
-CALL taylor_vacuum(ff_obj,nh,hcpc,hcpv,htags,hmodes=hmodes)
+CALL ff_obj%setup(nh,hcpc,hcpv,htags)
+CALL taylor_vacuum(ff_obj,hmodes=hmodes)
 CALL taylor_injectors(ff_obj,hmodes,hmodes%hlam(1,hmodes%ML_hcurl%level))
 !---Setup field interpolation object
 fluxes=(/1.d0,0.d0/)
 CALL ff_obj%ML_hcurl_grad%vec_create(Bfield%uvac)
 DO i=1,nh
-  CALL Bfield%uvac%add(1.d0,fluxes(i),ff_obj%hvac(i,ff_obj%ML_hcurl_grad%level)%f)
+  CALL Bfield%uvac%add(1.d0,fluxes(i),ff_obj%hvac(i)%f)
 END DO
 CALL hmodes%ML_hcurl%vec_create(Bfield%ua)
 CALL Bfield%ua%add(0.d0,fr/hmodes%htor(1,hmodes%ML_hcurl%level),hmodes%hffa(1,hmodes%ML_hcurl%level)%f)
 DO i=1,nh
-  CALL Bfield%ua%add(1.d0,fluxes(i),ff_obj%gffa(i,ff_obj%ML_hcurl_grad%level)%f)
+  CALL Bfield%ua%add(1.d0,fluxes(i),ff_obj%gffa(i)%f)
 END DO
 !!\subsection doc_ex4_code_project Project Solution for Plotting
 !!

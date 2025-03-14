@@ -80,17 +80,18 @@ END IF
 hcpc(:,1)=(/1.d0, 0.d0, 0.d0/)
 hcpv(:,1)=(/0.d0, 1.d0, 0.d0/)*1.5d0
 htags(1)='Tinj'
+CALL ff_obj%setup(nh,hcpc,hcpv,htags)
 !---Run tests
 ff_obj%jtol=1.d-4
 oft_env%pm=.FALSE.
-CALL taylor_vacuum(ff_obj,nh,hcpc,hcpv,htags,energy=energy,hmodes=hmodes,rst_filename='oft_taylor.rst')
+CALL taylor_vacuum(ff_obj,energy=energy,hmodes=hmodes,rst_filename='oft_taylor.rst')
 CALL taylor_injectors(ff_obj,hmodes,5.d0,rst_filename='oft_taylor.rst')
-comps(1) = ff_obj%hvac(1,ff_obj%ML_hcurl_grad%level)%f%dot(ff_obj%hvac(1,ff_obj%ML_hcurl_grad%level)%f)
-comps(2) = ff_obj%hcur(1,ff_obj%ML_hcurl_grad%level)%f%dot(ff_obj%hcur(1,ff_obj%ML_hcurl_grad%level)%f)
-comps(3) = ff_obj%gffa(1,ff_obj%ML_hcurl_grad%level)%f%dot(ff_obj%gffa(1,ff_obj%ML_hcurl_grad%level)%f)
-CALL ff_obj%gffa(1,ff_obj%ML_hcurl_grad%level)%f%new(gffa)
+comps(1) = ff_obj%hvac(1)%f%dot(ff_obj%hvac(1)%f)
+comps(2) = ff_obj%hcur(1)%f%dot(ff_obj%hcur(1)%f)
+comps(3) = ff_obj%gffa(1)%f%dot(ff_obj%gffa(1)%f)
+CALL ff_obj%gffa(1)%f%new(gffa)
 CALL taylor_injector_single(ff_obj,hmodes,5.d0,(/1.d0/),gffa)
-CALL gffa%add(1.d0,-1.d0,ff_obj%gffa(1,ff_obj%ML_hcurl_grad%level)%f)
+CALL gffa%add(1.d0,-1.d0,ff_obj%gffa(1)%f)
 diff_err = gffa%dot(gffa)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='taylor.results')
@@ -121,8 +122,8 @@ lminv%its=-2
 CALL ML_vlagrange%current_level%vec_create(u)
 CALL ML_vlagrange%current_level%vec_create(v)
 !---Plot solution
-Bfield%uvac=>ff_obj%hvac(1,ff_obj%ML_hcurl_grad%level)%f
-Bfield%ua=>ff_obj%gffa(1,ff_obj%ML_hcurl_grad%level)%f
+Bfield%uvac=>ff_obj%hvac(1)%f
+Bfield%ua=>ff_obj%gffa(1)%f
 CALL Bfield%setup(ff_obj%ML_hcurl%current_level,ff_obj%ML_h1%current_level)
 !---Project field
 CALL oft_lag_vproject(ff_obj%ML_lagrange%current_level,Bfield,v)

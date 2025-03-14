@@ -68,15 +68,15 @@ end type oft_taylor_rinterp
 !---------------------------------------------------------------------------
 !> Force-free eigenmode object
 !---------------------------------------------------------------------------
-type, public :: oft_taylor_eigs
+type :: oft_taylor_eigs
   integer(i4) :: minlev = -1 !< Lowest FE level for MG solvers
   integer(i4) :: nm = 0 !< Number of force-free fields to be computed
   real(r8), pointer, dimension(:,:) :: hlam => NULL() !< Homogeneous force-free lambdas
   real(r8), pointer, dimension(:,:) :: htor => NULL() !< Homogeneous force-free toroidal fluxes
   type(oft_vector_ptr), pointer, dimension(:,:) :: hffa => NULL() !< Homogeneous force-free fields
-  type(oft_hcurl_orthog), pointer :: orthog => NULL()
-  TYPE(oft_ml_fem_type), POINTER :: ML_hcurl => NULL()
-  TYPE(oft_ml_fem_type), POINTER :: ML_lagrange => NULL()
+  type(oft_hcurl_orthog), pointer :: orthog => NULL() !< Orthogonalization operator
+  TYPE(oft_ml_fem_type), POINTER :: ML_hcurl => NULL() !< Multi-level H(Curl) FE object
+  TYPE(oft_ml_fem_type), POINTER :: ML_lagrange => NULL() !< Multi-level Lagrange FE object
 CONTAINS
   PROCEDURE :: setup => eigs_setup
 end type oft_taylor_eigs
@@ -84,21 +84,21 @@ integer(i4), parameter :: taylor_tag_size = 4 !< Size of  jump planes character 
 !---------------------------------------------------------------------------
 !> Force-free vacuum source object
 !---------------------------------------------------------------------------
-type, public :: oft_taylor_inhomo
+type :: oft_taylor_inhomo
   integer(i4) :: minlev = -1 !< Lowest FE level for MG solvers
   integer(i4) :: nh = 2 !< Number of jump planes in current geometry
   real(r8)  :: jtol = 1.d-6 !< Tolerance for identifying edges on jump plane
   real(r8), pointer, dimension(:,:)  :: hcpc => NULL() !< Center points of jump planes
   real(r8), pointer, dimension(:,:)  :: hcpv => NULL() !< Normal vectors for jump planes
   character(LEN=taylor_tag_size), pointer, dimension(:) :: htag => NULL() !< Injector names
-  type(oft_vector_ptr), pointer, dimension(:,:) :: hvac => NULL() !< Vacuum magnetic fields
-  type(oft_vector_ptr), pointer, dimension(:,:) :: hcur => NULL() !< Inhomogeneous source fields
-  type(oft_vector_ptr), pointer, dimension(:,:) :: gffa => NULL() !< Inhomogeneous force-free fields
-  TYPE(oft_ml_fem_type), POINTER :: ML_lagrange => NULL()
-  TYPE(oft_ml_fem_type), POINTER :: ML_h1 => NULL()
-  TYPE(oft_ml_fem_type), POINTER :: ML_h1grad => NULL()
-  TYPE(oft_ml_fem_type), POINTER :: ML_hcurl => NULL()
-  TYPE(oft_ml_fem_comp_type), POINTER :: ML_hcurl_grad => NULL()
+  type(oft_vector_ptr), pointer, dimension(:) :: hvac => NULL() !< Vacuum magnetic fields
+  type(oft_vector_ptr), pointer, dimension(:) :: hcur => NULL() !< Inhomogeneous source fields
+  type(oft_vector_ptr), pointer, dimension(:) :: gffa => NULL() !< Inhomogeneous force-free fields
+  TYPE(oft_ml_fem_type), POINTER :: ML_lagrange => NULL() !< Multi-level Lagrange FE object
+  TYPE(oft_ml_fem_type), POINTER :: ML_h1 => NULL() !< Multi-level H^1 FE object
+  TYPE(oft_ml_fem_type), POINTER :: ML_h1grad => NULL() !< Multi-level grad(H^1) FE object
+  TYPE(oft_ml_fem_type), POINTER :: ML_hcurl => NULL() !< Multi-level H(Curl) FE object
+  TYPE(oft_ml_fem_comp_type), POINTER :: ML_hcurl_grad => NULL() !< Multi-level H(Curl) + grad(H^1) FE object
 CONTAINS
   PROCEDURE :: setup => ff_setup
 end type oft_taylor_inhomo
@@ -107,35 +107,79 @@ contains
 !> Setup eigenmodes object
 !---------------------------------------------------------------------------
 subroutine eigs_setup(self,ML_hcurl,ML_lagrange,minlev)
-class(oft_taylor_eigs), intent(inout) :: self
-TYPE(oft_ml_fem_type), TARGET, INTENT(in) :: ML_hcurl
-TYPE(oft_ml_fem_type), TARGET, INTENT(in) :: ML_lagrange
-integer(i4), optional, intent(in) :: minlev
-self%ML_hcurl=>ML_hcurl
-self%ML_lagrange=>ML_lagrange
+CLASS(oft_taylor_eigs), INTENT(inout) :: self !< Force-free eigenmode object
+TYPE(oft_ml_fem_type), OPTIONAL, TARGET, INTENT(in) :: ML_hcurl !< Multi-level H(Curl) FE representation
+TYPE(oft_ml_fem_type), OPTIONAL, TARGET, INTENT(in) :: ML_lagrange !< Multi-level Lagrange FE representation
+INTEGER(i4), OPTIONAL, INTENT(in) :: minlev
+IF(PRESENT(ML_hcurl))THEN
+  self%ML_hcurl=>ML_hcurl
+ELSE
+  IF(.NOT.ASSOCIATED(self%ML_hcurl))CALL oft_abort("No H(Curl) FE representation","eigs_setup",__FILE__)
+END IF
+IF(PRESENT(ML_lagrange))THEN
+  self%ML_lagrange=>ML_lagrange
+ELSE
+  IF(.NOT.ASSOCIATED(self%ML_lagrange))CALL oft_abort("No Lagrange FE representation","eigs_setup",__FILE__)
+END IF
 !
-self%minlev=-1
 IF(PRESENT(minlev))self%minlev=minlev
 IF(self%minlev<0)self%minlev=self%ML_hcurl%level
 end subroutine eigs_setup
 !---------------------------------------------------------------------------
 !> Setup eigenmodes object
 !---------------------------------------------------------------------------
-subroutine ff_setup(self,ML_hcurl,ML_h1,ML_hcurl_grad,ML_h1grad,ML_lagrange,minlev)
-class(oft_taylor_inhomo), intent(inout) :: self
-TYPE(oft_ml_fem_type), TARGET, INTENT(in) :: ML_hcurl
-TYPE(oft_ml_fem_type), TARGET, INTENT(in) :: ML_h1
-TYPE(oft_ml_fem_comp_type), TARGET, INTENT(in) :: ML_hcurl_grad
-TYPE(oft_ml_fem_type), TARGET, INTENT(in) :: ML_h1grad
-TYPE(oft_ml_fem_type), TARGET, INTENT(in) :: ML_lagrange
-integer(i4), optional, intent(in) :: minlev
-self%ML_hcurl=>ML_hcurl
-self%ML_h1=>ML_h1
-self%ML_hcurl_grad=>ML_hcurl_grad
-self%ML_h1grad=>ML_h1grad
-self%ML_lagrange=>ML_lagrange
+subroutine ff_setup(self,nh,hcpc,hcpv,htags,ML_hcurl,ML_h1,ML_hcurl_grad,ML_h1grad,ML_lagrange,minlev)
+  CLASS(oft_taylor_inhomo), INTENT(inout) :: self !< Force-free field object
+INTEGER(i4), INTENT(in) :: nh !< Number of jump planes
+REAL(r8), INTENT(in) :: hcpc(3,nh) !< Jump plane center possitions [3,nh]
+REAL(r8), INTENT(in) :: hcpv(3,nh) !< Jump plane normal vectors [3,nh]
+CHARACTER(LEN=taylor_tag_size), OPTIONAL, INTENT(in) :: htags(nh) !< Names for each jump plane [LEN=taylor_tag_size,nh] (optional)
+TYPE(oft_ml_fem_type), OPTIONAL, TARGET, INTENT(in) :: ML_hcurl !< Multi-level H(Curl) FE representation
+TYPE(oft_ml_fem_type), OPTIONAL, TARGET, INTENT(in) :: ML_h1 !< Multi-level H^1 FE representation
+TYPE(oft_ml_fem_comp_type), OPTIONAL, TARGET, INTENT(in) :: ML_hcurl_grad !< Multi-level H(Curl) + grad(H^1) FE representation
+TYPE(oft_ml_fem_type), OPTIONAL, TARGET, INTENT(in) :: ML_h1grad !< Multi-level grad(H^1) FE representation
+TYPE(oft_ml_fem_type), OPTIONAL, TARGET, INTENT(in) :: ML_lagrange !< Multi-level Lagrange FE representation
+INTEGER(i4), OPTIONAL, INTENT(in) :: minlev
+integer(i4) :: i
+IF(PRESENT(ML_hcurl))THEN
+  self%ML_hcurl=>ML_hcurl
+ELSE
+  IF(.NOT.ASSOCIATED(self%ML_hcurl))CALL oft_abort("No H(Curl) FE representation","ff_setup",__FILE__)
+END IF
+IF(PRESENT(ML_h1))THEN
+  self%ML_h1=>ML_h1
+ELSE
+  IF(.NOT.ASSOCIATED(self%ML_h1))CALL oft_abort("No H^1 FE representation","ff_setup",__FILE__)
+END IF
+IF(PRESENT(ML_hcurl_grad))THEN
+  self%ML_hcurl_grad=>ML_hcurl_grad
+ELSE
+  IF(.NOT.ASSOCIATED(self%ML_hcurl_grad))CALL oft_abort("No H(Curl) + grad(H^1) FE representation","ff_setup",__FILE__)
+END IF
+IF(PRESENT(ML_h1grad))THEN
+  self%ML_h1grad=>ML_h1grad
+ELSE
+  IF(.NOT.ASSOCIATED(self%ML_h1grad))CALL oft_abort("No grad(H^1) FE representation","ff_setup",__FILE__)
+END IF
+IF(PRESENT(ML_lagrange))THEN
+  self%ML_lagrange=>ML_lagrange
+ELSE
+  IF(.NOT.ASSOCIATED(self%ML_lagrange))CALL oft_abort("No Lagrange FE representation","ff_setup",__FILE__)
+END IF
 !
-self%minlev=-1
+self%nh=nh
+ALLOCATE(self%hcpc(3,self%nh),self%hcpv(3,self%nh))
+self%hcpc=hcpc
+self%hcpv=hcpv
+ALLOCATE(self%htag(self%nh))
+IF(PRESENT(htags))THEN
+  self%htag=htags
+ELSE
+  DO i=1,self%nh
+    WRITE(self%htag(i),'(A3,I1)')'INJ',i
+  END DO
+END IF
+!
 IF(PRESENT(minlev))self%minlev=minlev
 IF(self%minlev<0)self%minlev=self%ML_hcurl%level
 end subroutine ff_setup
@@ -146,9 +190,9 @@ end subroutine ff_setup
 !! each computed mode on each MG level `hffa_*.rst`
 !---------------------------------------------------------------------------
 subroutine taylor_hmodes(self,nm,rst_filename)
-type(oft_taylor_eigs), intent(inout) :: self
+type(oft_taylor_eigs), intent(inout) :: self !< Force-free eigenmode object
 integer(i4), optional, intent(in) :: nm !< Number of modes to compute (optional: 1)
-character(LEN=OFT_PATH_SLEN), optional, intent(in) :: rst_filename
+character(LEN=*), optional, intent(in) :: rst_filename !< File name to store/load restart information
 class(oft_vector), pointer :: u,tmp
 !--- Taylor eigenvalue solver
 TYPE(oft_native_cg_eigsolver) :: eigsolver
@@ -378,15 +422,11 @@ end subroutine taylor_hmodes
 !! @note When `taylor_rst=.TRUE.` two restart files will be generated for
 !! each jump plane `hvac_*.rst` and `hcur_*.rst`
 !---------------------------------------------------------------------------
-subroutine taylor_vacuum(self,nh,hcpc,hcpv,htags,energy,hmodes,rst_filename)
-type(oft_taylor_inhomo), intent(inout) :: self
-integer(i4), intent(in) :: nh !< Number of jump planes
-real(r8), intent(in) :: hcpc(3,nh) !< Jump plane center possitions [3,nh]
-real(r8), intent(in) :: hcpv(3,nh) !< Jump plane normal vectors [3,nh]
-character(LEN=taylor_tag_size), optional, intent(in) :: htags(nh) !< Names for each jump plane [LEN=taylor_tag_size,nh] (optional)
-real(r8), optional, intent(out) :: energy(nh) !< Vacuum energy for each jump plan (optional)
-type(oft_taylor_eigs), optional, intent(inout) :: hmodes
-character(LEN=OFT_PATH_SLEN), optional, intent(in) :: rst_filename
+subroutine taylor_vacuum(self,energy,hmodes,rst_filename)
+type(oft_taylor_inhomo), intent(inout) :: self !< Force-free field object
+real(r8), optional, intent(out) :: energy(:) !< Vacuum energy for each jump plan (optional)
+type(oft_taylor_eigs), optional, intent(inout) :: hmodes !< Force-free eigenmode object
+character(LEN=*), optional, intent(in) :: rst_filename !< File name to store/load restart information
 !---H(Curl) full space divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_hcurl_grad_divout) :: divout
@@ -420,18 +460,6 @@ DEBUG_STACK_PUSH
 NULLIFY(lop,lop_lag,mop,mop_hcurl,wop)
 NULLIFY(ml_int,ml_lop,ml_wop)
 !---Create taylor module variables
-self%nh=nh
-ALLOCATE(self%hcpc(3,self%nh),self%hcpv(3,self%nh))
-self%hcpc=hcpc
-self%hcpv=hcpv
-ALLOCATE(self%htag(self%nh))
-IF(PRESENT(htags))THEN
-  self%htag=htags
-ELSE
-  DO i=1,self%nh
-    WRITE(self%htag(i),'(A3,I1)')'INJ',i
-  END DO
-END IF
 hcurl_zerob%ML_hcurl_rep=>self%ML_hcurl
 lag_zerob%ML_lag_rep=>self%ML_lagrange
 !---Loop over cut planes
@@ -519,8 +547,7 @@ NULLIFY(tmp)
 !---Get H(Curl) + Grad(H^1) mass matrix
 CALL hcurl_grad_getmop(self%ML_hcurl_grad%current_level,mop,'none')
 !---Allocate vacuum and current field containers
-ALLOCATE(self%hvac(self%nh,self%ML_hcurl_grad%nlevels))
-ALLOCATE(self%hcur(self%nh,self%ML_hcurl_grad%nlevels))
+ALLOCATE(self%hvac(self%nh),self%hcur(self%nh))
 !---Create temporary H(Curl) vector
 CALL self%ML_hcurl%vec_create(b)
 !---Loop over cut planes
@@ -529,8 +556,8 @@ DO i=1,self%nh
 ! Compute vacuum fields
 !---------------------------------------------------------------------------
   !---Setup level fields
-  CALL self%ML_hcurl_grad%vec_create(self%hvac(i,self%ML_hcurl_grad%level)%f)
-  u=>self%hvac(i,self%ML_hcurl_grad%level)%f
+  CALL self%ML_hcurl_grad%vec_create(self%hvac(i)%f)
+  u=>self%hvac(i)%f
   IF(.NOT.ASSOCIATED(tmp))CALL u%new(tmp)
   have_rst=.FALSE.
   IF(save_rst)THEN
@@ -574,8 +601,8 @@ DO i=1,self%nh
 !---------------------------------------------------------------------------
   !---Use vacuum field as source term
   call tmp%scale(1.d0/venergy)
-  call self%ML_hcurl%vec_create(self%hcur(i,self%ML_hcurl%level)%f)
-  u=>self%hcur(i,self%ML_hcurl%level)%f
+  call self%ML_hcurl%vec_create(self%hcur(i)%f)
+  u=>self%hcur(i)%f
   have_rst=.FALSE.
   IF(save_rst)THEN
     IF(oft_file_exist(rst_filename))THEN
@@ -667,10 +694,10 @@ end subroutine taylor_vacuum
 !! each jump plane `gffa_*.rst`
 !---------------------------------------------------------------------------
 subroutine taylor_injectors(self,hmodes,lambda,rst_filename)
-type(oft_taylor_inhomo), intent(inout) :: self
-type(oft_taylor_eigs), intent(inout) :: hmodes
+type(oft_taylor_inhomo), intent(inout) :: self !< Force-free field object
+type(oft_taylor_eigs), intent(inout) :: hmodes !< Force-free eigenmode object
 real(r8), intent(in) :: lambda !< Desired lambda for force-free state
-character(LEN=OFT_PATH_SLEN), optional, intent(in) :: rst_filename
+character(LEN=*), optional, intent(in) :: rst_filename !< File name to store/load restart information
 CLASS(oft_matrix), POINTER :: lop_lag => NULL()
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_jmlb => NULL()
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_wop => NULL()
@@ -763,13 +790,13 @@ hcurl_divout%mop=>mop
 call self%ML_hcurl_grad%set_level(self%ML_hcurl_grad%nlevels,propogate=.TRUE.)
 !---
 call self%ML_hcurl%vec_create(tmp)
-allocate(self%gffa(self%nh,self%ML_hcurl_grad%nlevels))
+allocate(self%gffa(self%nh))
 IF(.NOT.have_rst)CALL oft_hcurl_getkop(self%ML_hcurl%current_level,kop,'zerob')
 !---
 do i=1,self%nh
   !---
-  CALL self%ML_hcurl%vec_create(self%gffa(i,self%ML_hcurl_grad%level)%f)
-  u=>self%gffa(i,self%ML_hcurl_grad%level)%f
+  CALL self%ML_hcurl%vec_create(self%gffa(i)%f)
+  u=>self%gffa(i)%f
   have_rst=.FALSE.
   IF(save_rst)THEN
     IF(oft_file_exist(rst_filename))THEN
@@ -785,7 +812,7 @@ do i=1,self%nh
     END IF
   END IF
   IF(.NOT.have_rst)THEN
-    CALL u%add(0.d0,1.d0,self%hcur(i,self%ML_hcurl_grad%level)%f)
+    CALL u%add(0.d0,1.d0,self%hcur(i)%f)
     IF(do_orthog)CALL hmodes%orthog%apply(u)
     CALL kop%apply(u,tmp)
     !---Solve
@@ -811,7 +838,7 @@ do i=1,self%nh
     END IF
   END IF
   !---
-  CALL u%add(lambda**2,lambda,self%hcur(i,self%ML_hcurl_grad%level)%f)
+  CALL u%add(lambda**2,lambda,self%hcur(i)%f)
 end do
 !---
 CALL tmp%delete
@@ -849,8 +876,8 @@ end subroutine taylor_injectors
 !! taylor::taylor_vacuum "taylor_vacuum"
 !---------------------------------------------------------------------------
 subroutine taylor_injector_single(self,hmodes,lambda,fluxes,gffa)
-type(oft_taylor_inhomo), intent(inout) :: self
-type(oft_taylor_eigs), intent(inout) :: hmodes
+type(oft_taylor_inhomo), intent(inout) :: self !< Force-free field object
+type(oft_taylor_eigs), intent(inout) :: hmodes !< Force-free eigenmode object
 real(r8), intent(in) :: lambda !< Desired lambda for force-free state
 real(r8), intent(in) :: fluxes(:) !< Flux for each injector
 class(oft_vector), pointer, intent(inout) :: gffa !< Plasma component (non-vacuum) of injector field
@@ -926,7 +953,7 @@ call self%ML_hcurl%vec_create(tmp)
 !---
 CALL gffa%set(0.d0)
 do i=1,self%nh
-  CALL gffa%add(1.d0,fluxes(i),self%hcur(i,self%ML_hcurl_grad%level)%f)
+  CALL gffa%add(1.d0,fluxes(i),self%hcur(i)%f)
 end do
 !---Orthogonalize (if within 5% of Taylor state)
 IF(hmodes%nm>0)THEN
@@ -957,7 +984,7 @@ CALL hcurl_divout%apply(gffa)
 !---
 CALL gffa%scale(lambda**2)
 do i=1,self%nh
-  CALL gffa%add(1.d0,fluxes(i)*lambda,self%hcur(i,self%ML_hcurl_grad%level)%f)
+  CALL gffa%add(1.d0,fluxes(i)*lambda,self%hcur(i)%f)
 end do
 !---
 CALL tmp%delete
