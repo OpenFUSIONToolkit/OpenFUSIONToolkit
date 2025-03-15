@@ -41,7 +41,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, oft_hcurl_grad_zeroi, hcurl_grad_mc, oft_hcurl_grad_czerob, &
   hcurl_grad_setup_interp, oft_hcurl_grad_rinterp
 !---Taylor state
-USE taylor, ONLY: oft_taylor_eigs, oft_taylor_inhomo, taylor_hmodes
+USE taylor, ONLY: oft_taylor_hmodes, oft_taylor_ifield, taylor_hmodes
 USE mhd_utils, ONLY: mu0
 !---Wrappers
 USE oft_base_f, ONLY: copy_string, copy_string_rev
@@ -53,8 +53,8 @@ TYPE :: marklin_obj
   INTEGER(i4), POINTER, DIMENSION(:) :: reg_plot => NULL() !< Needs docs
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_plot => NULL() !< Needs docs
   REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Needs docs
-  TYPE(oft_taylor_eigs) :: eig_obj
-  TYPE(oft_taylor_eigs) :: ff_obj
+  TYPE(oft_taylor_hmodes) :: eig_obj
+  TYPE(oft_taylor_hmodes) :: ff_obj
   TYPE(xdmf_plot_file) :: xdmf_plot
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL()
   TYPE(oft_ml_fem_type), POINTER :: ML_lagrange => NULL()
@@ -129,11 +129,11 @@ END SUBROUTINE marklin_setup
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_compute(marklin_ptr,nmodes,save_rst,eig_vals,error_str) BIND(C,NAME="marklin_compute")
+SUBROUTINE marklin_compute(marklin_ptr,nmodes,eig_vals,cache_file,error_str) BIND(C,NAME="marklin_compute")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nmodes !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: save_rst !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eig_vals !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()
@@ -145,7 +145,7 @@ REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(marklin_obj), POINTER :: self
-CHARACTER(LEN=3) :: pltnum
+CHARACTER(LEN=OFT_PATH_SLEN) :: rst_filename = ''
 IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 IF(self%eig_obj%nm>0)THEN
   CALL copy_string('Eigenstates already computed',error_str)
@@ -153,8 +153,9 @@ IF(self%eig_obj%nm>0)THEN
 END IF
 oft_env%pm=.TRUE.
 CALL self%eig_obj%setup(self%ML_hcurl,self%ML_lagrange,self%minlev)
-IF(save_rst)THEN
-  CALL taylor_hmodes(self%eig_obj,nmodes,'marklin_hmodes.rst')
+CALL copy_string_rev(cache_file,rst_filename)
+IF(TRIM(rst_filename)=='')THEN
+  CALL taylor_hmodes(self%eig_obj,nmodes,rst_filename)
 ELSE
   CALL taylor_hmodes(self%eig_obj,nmodes)
 END IF

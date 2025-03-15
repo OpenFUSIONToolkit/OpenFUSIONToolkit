@@ -150,7 +150,7 @@ class Marklin():
         '''
         return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
 
-    def compute(self,nmodes=1,save_rst=True):
+    def compute(self,nmodes=1,cache_file=None):
         r'''! Compute force-free eigenmodes
 
         @param nmodes Number of eigenmodes to compute
@@ -158,10 +158,14 @@ class Marklin():
         '''
         if self._nm != -1:
             raise ValueError('Eigenstates already computed')
+        if cache_file is None:
+            cache_string = self._oft_env.path2c("")
+        else:
+            cache_string = self._oft_env.path2c(cache_file)
         #
         eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_compute(self._marklin_ptr,nmodes,save_rst,eig_vals,error_string)
+        marklin_compute(self._marklin_ptr,nmodes,eig_vals,cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self._nm = nmodes

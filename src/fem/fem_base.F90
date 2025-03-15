@@ -1547,18 +1547,19 @@ end subroutine afem_vec_save
 !---------------------------------------------------------------------------
 !> Load a Lagrange scalar field from a HDF5 restart file
 !---------------------------------------------------------------------------
-subroutine afem_vec_load(self,source,filename,path)
+subroutine afem_vec_load(self,source,filename,path,err_flag)
 class(oft_afem_type), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: source !< Destination vector
 character(*), intent(in) :: filename !< Name of source file
 character(*), intent(in) :: path !< Field path in file
+integer(i4), optional, intent(out) :: err_flag !< Error flag
 integer(i4) :: version
 integer(i8), pointer, dimension(:) :: lge
 real(r8), pointer, dimension(:) :: valtmp
 class(oft_vector), pointer :: infield
 class(oft_native_vector), pointer :: invec
 type(hdf5_rst) :: rst_info
-logical :: legacy
+logical :: legacy,success
 DEBUG_STACK_PUSH
 legacy=.FALSE.
 ! CALL hdf5_rst_read_version(version,filen,fem_idx_str)
@@ -1578,7 +1579,21 @@ IF(legacy)THEN
   lge=>self%legacy_lge
 END IF
 CALL native_vector_slice_push(invec,lge,rst_info,alloc_only=.TRUE.)
-CALL hdf5_read(rst_info,filename,path)
+IF(PRESENT(err_flag))THEN
+  CALL hdf5_read(rst_info,filename,path,success=success)
+  IF(success)THEN
+    err_flag=0
+  ELSE
+    err_flag=-1
+    CALL infield%delete
+    NULLIFY(lge)
+    DEALLOCATE(infield)
+    CALL hdf5_rst_destroy(rst_info)
+    RETURN
+  END IF
+ELSE
+  CALL hdf5_read(rst_info,filename,path)
+END IF
 CALL native_vector_slice_pop(invec,lge,rst_info)
 CALL infield%get_local(valtmp)
 CALL source%restore_local(valtmp)

@@ -20,11 +20,11 @@ USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
-USE taylor, ONLY: taylor_hmodes, oft_taylor_eigs
+USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
 implicit none
 INTEGER(i4) :: order=1,nm=1,ierr,io_unit
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_taylor_eigs) :: taylor_states
+TYPE(oft_taylor_hmodes) :: taylor_states
 LOGICAL :: mg_test=.FALSE.
 NAMELIST/test_taylor_options/order,nm,mg_test
 !---Initialize enviroment

@@ -38,7 +38,7 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
-USE taylor, ONLY: taylor_hmodes, oft_taylor_eigs
+USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
 IMPLICIT NONE
 #include "local.h"
 !---Lagrange mass solver
@@ -54,7 +54,7 @@ CHARACTER(LEN=3) :: pltnum
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_comp_type) :: ML_vlagrange
-TYPE(oft_taylor_eigs) :: hmodes
+TYPE(oft_taylor_hmodes) :: hmodes
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: nmodes = 1
 INTEGER(i4) :: minlev = 1

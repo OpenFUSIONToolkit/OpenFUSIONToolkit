@@ -187,7 +187,7 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
-USE taylor, ONLY: taylor_hmodes, oft_taylor_eigs
+USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
 IMPLICIT NONE
 #include "local.h"
 !!\subsection ex3_code_vars Variable Definitions
@@ -211,7 +211,7 @@ TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_comp_type) :: ML_vlagrange
-TYPE(oft_taylor_eigs) :: taylor_states
+TYPE(oft_taylor_hmodes) :: taylor_states
 !!\subsection doc_ex3_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting files must be setup

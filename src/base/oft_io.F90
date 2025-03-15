@@ -1246,11 +1246,13 @@ end subroutine hdf5_read_2d_i4
 !---------------------------------------------------------------------------
 !> FE vector implementation of \ref oft_io::hdf5_write
 !---------------------------------------------------------------------------
-subroutine hdf5_read_rst(rst_info,filename,path)
+subroutine hdf5_read_rst(rst_info,filename,path,success)
 type(hdf5_rst), intent(inout) :: rst_info !< Restart data (structure containing mapping and data holder)
 character(*), intent(in) :: filename !< Path to file
 character(*), intent(in) :: path !< Variable path in file
-integer(i4) :: i,error,one=1
+logical, optional, intent(out) :: success !< Successful read?
+integer(i4) :: i,error
+integer(i4), parameter :: two=2,one=1,zero=0
 integer :: access_flag
 integer(HID_T) :: file_id
 integer(HID_T) :: dset_id
@@ -1264,7 +1266,11 @@ logical :: exists
 integer(i4) :: info
 integer(HID_T) :: plist_id
 #endif
-DEBUG_STACK_PUSH
+! DEBUG_STACK_PUSH
+IF(PRESENT(success))THEN
+  success=.FALSE.
+  CALL h5eset_auto_f(zero, error)
+END IF
 !---Set filename and check for file
 CALL oft_mpi_barrier(error)
 !---Set access flag
@@ -1281,7 +1287,10 @@ if(rst_info%full)then
   !---Initialize HDF5 and open vector dump file
   call h5open_f(error)
   call h5fopen_f(TRIM(filename), access_flag, file_id, error)
-  IF(error/=0)CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 103
+    CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+  END IF
   !---
   dims=rst_info%dim
   count=rst_info%count
@@ -1289,15 +1298,26 @@ if(rst_info%full)then
   data=>rst_info%data
   !---
   call h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
-  IF(error/=0)CALL oft_abort('Dataset not found','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 102
+    CALL oft_abort('Error opening dataset','hdf5_read_rst',__FILE__)
+  END IF
   !---Check size
   CALL h5dget_space_f(dset_id, memspace, error)
   CALL h5sget_simple_extent_npoints_f(memspace, space_count, error)
-  IF(error/=0)CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
-  IF(space_count/=rst_info%dim)CALL oft_abort('Dataset size does not match', &
-    'hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 101
+    CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
+  END IF
+  IF(space_count/=rst_info%dim)THEN
+    IF(PRESENT(success))GOTO 101
+    CALL oft_abort('Dataset size does not match','hdf5_read_rst',__FILE__)
+  END IF
   CALL h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, count, error)
-  IF(error/=0)CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 100
+    CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+  END IF
   !---Close dataset
   CALL h5sclose_f(memspace, error)
   call h5dclose_f(dset_id, error)
@@ -1315,7 +1335,10 @@ else
   CALL h5pset_fapl_mpio_f(plist_id, int(oft_env%comm,4), info, error)
   !---
   CALL h5fopen_f(TRIM(filename), access_flag, file_id, error, access_prp=plist_id)
-  IF(error/=0)CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 103
+    CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+  END IF
   CALL h5pclose_f(plist_id, error)
   !---
   dims=rst_info%dim
@@ -1324,13 +1347,21 @@ else
   data=>rst_info%data
   !---Write out cell data
   CALL h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
-  IF(error/=0)CALL oft_abort('Dataset not found','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 102
+    CALL oft_abort('Error opening dataset','hdf5_read_rst',__FILE__)
+  END IF
   !---Check size
   CALL h5dget_space_f(dset_id, memspace, error)
   CALL h5sget_simple_extent_npoints_f(memspace, space_count, error)
-  IF(error/=0)CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
-  IF(space_count/=rst_info%dim)CALL oft_abort('Dataset size does not match', &
-    'hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 101
+    CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
+  END IF
+  IF(space_count/=rst_info%dim)THEN
+    IF(PRESENT(success))GOTO 101
+    CALL oft_abort('Dataset size does not match','hdf5_read_rst',__FILE__)
+  END IF
   !---Write out cell data
   CALL h5screate_simple_f(one, count, memspace, error)
   !---Write out cell data
@@ -1341,7 +1372,10 @@ else
   CALL h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, error)
   CALL h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, count, error, &
     file_space_id=filespace, mem_space_id=memspace, xfer_prp=plist_id)
-  IF(error/=0)CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 100
+    CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+  END IF
   !---Write out cell data
   CALL h5sclose_f(filespace, error)
   CALL h5sclose_f(memspace, error)
@@ -1365,16 +1399,27 @@ else
     if(oft_env%rank+1==i)then
       !---
       call h5fopen_f(TRIM(filename), access_flag, file_id, error)
-      IF(error/=0)CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+      IF(error/=0)THEN
+        ! IF(PRESENT(success))GOTO 102
+        CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+      END IF
       !---
       CALL h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
-      IF(error/=0)CALL oft_abort('Dataset not found','hdf5_read_rst',__FILE__)
+      IF(error/=0)THEN
+        ! IF(PRESENT(success))GOTO 101
+        CALL oft_abort('Error opening dataset','hdf5_read_rst',__FILE__)
+      END IF
       !---Check size
       CALL h5dget_space_f(dset_id, memspace, error)
       CALL h5sget_simple_extent_npoints_f(memspace, space_count, error)
-      IF(error/=0)CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
-      IF(space_count/=rst_info%dim)CALL oft_abort('Dataset size does not match', &
-        'hdf5_read_rst',__FILE__)
+      IF(error/=0)THEN
+        ! IF(PRESENT(success))GOTO 100
+        CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
+      END IF
+      IF(space_count/=rst_info%dim)THEN
+        ! IF(PRESENT(success))GOTO 100
+        CALL oft_abort('Dataset size does not match','hdf5_read_rst',__FILE__)
+      END IF
       !---
       CALL h5screate_simple_f(one, count, memspace, error)
       CALL h5dget_space_f(dset_id, filespace, error)
@@ -1382,7 +1427,10 @@ else
       !---
       CALL h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, count, error, &
         file_space_id=filespace, mem_space_id=memspace)
-      IF(error/=0)CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+      IF(error/=0)THEN
+        ! IF(PRESENT(success))GOTO 100
+        CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+      END IF
       !---Close dataset
       CALL h5sclose_f(filespace, error)
       CALL h5sclose_f(memspace, error)
@@ -1399,7 +1447,25 @@ else
   call oft_abort("Requested distributed read without MPI","hdf5_read_rst",__FILE__)
 #endif
 end if
-DEBUG_STACK_POP
+! DEBUG_STACK_POP
+IF(PRESENT(success))THEN
+  success=.TRUE.
+  CALL h5eset_auto_f(one, error)
+END IF
+RETURN
+100 CALL h5dclose_f(dset_id, error)
+#ifdef HAVE_MPI
+#ifdef HAVE_PHDF5
+IF(.NOT.rst_info%full)THEN
+  CALL h5pclose_f(plist_id, error)
+  CALL h5sclose_f(filespace, error)
+END IF
+#endif
+#endif
+101 CALL h5sclose_f(memspace, error)
+102 CALL h5fclose_f(file_id, error)
+103 CALL h5close_f(error)
+IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_rst
 !---------------------------------------------------------------------------
 !> Deallocate internal storage fields created for HDF5 collective I/O

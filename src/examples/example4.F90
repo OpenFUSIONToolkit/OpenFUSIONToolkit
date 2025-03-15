@@ -40,7 +40,7 @@ USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
 USE taylor, ONLY: taylor_hmodes, oft_taylor_rinterp, taylor_vacuum, &
-  taylor_injectors, oft_taylor_eigs, oft_taylor_inhomo, taylor_tag_size
+  taylor_injectors, oft_taylor_hmodes, oft_taylor_ifield, taylor_tag_size
 !---Tracing
 USE tracing, ONLY: oft_tracer, create_tracer, tracing_poincare
 IMPLICIT NONE
@@ -67,8 +67,8 @@ CLASS(oft_tracer), POINTER :: tracer
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_comp_type) :: ML_vlagrange
-TYPE(oft_taylor_eigs) :: hmodes
-TYPE(oft_taylor_inhomo) :: ff_obj
+TYPE(oft_taylor_hmodes) :: hmodes
+TYPE(oft_taylor_ifield) :: ff_obj
 !!\subsection doc_ex4_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting

@@ -46,7 +46,7 @@ USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
 !---Physics
-USE taylor, ONLY: taylor_hmodes, oft_taylor_eigs
+USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, &
   den_floor, temp_floor, xmhd_sub_fields, xmhd_ML_hcurl, &
   xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange
@@ -63,7 +63,7 @@ INTEGER(i4) :: ierr,io_unit
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(xmhd_sub_fields) :: ic_fields
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_taylor_eigs) :: taylor_states
+TYPE(oft_taylor_hmodes) :: taylor_states
 TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 !---Runtime options
 INTEGER(i4) :: order = 2

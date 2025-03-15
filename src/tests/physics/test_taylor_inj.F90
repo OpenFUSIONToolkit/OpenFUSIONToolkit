@@ -28,7 +28,7 @@ USE oft_hcurl_operators, ONLY: hcurl_setup_interp, hcurl_mloptions
 USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_mloptions, h1_setup_interp
 USE taylor, ONLY: taylor_vacuum, taylor_injectors, taylor_injector_single, &
-  oft_taylor_rinterp, oft_taylor_eigs, oft_taylor_inhomo, taylor_tag_size
+  oft_taylor_rinterp, oft_taylor_hmodes, oft_taylor_ifield, taylor_tag_size
 implicit none
 INTEGER(i4) :: ierr,io_unit
 REAL(r8) :: comps(3),diff_err
@@ -39,8 +39,8 @@ CHARACTER(LEN=taylor_tag_size) :: htags(nh)
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_comp_type) :: ML_vlagrange
-TYPE(oft_taylor_eigs) :: hmodes
-TYPE(oft_taylor_inhomo) :: ff_obj
+TYPE(oft_taylor_hmodes) :: hmodes
+TYPE(oft_taylor_ifield) :: ff_obj
 INTEGER(i4) :: order=1
 LOGICAL :: mg_test=.FALSE.
 NAMELIST/test_taylor_options/order,mg_test
