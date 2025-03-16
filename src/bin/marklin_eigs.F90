@@ -27,6 +27,8 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
+!
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
@@ -36,8 +38,7 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
-USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, ML_oft_lagrange, &
-  ML_oft_vlagrange, ML_oft_hcurl
+USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
 IMPLICIT NONE
 #include "local.h"
 !---Lagrange mass solver
@@ -52,6 +53,8 @@ TYPE(oft_hcurl_cinterp) :: Bfield
 CHARACTER(LEN=3) :: pltnum
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_comp_type) :: ML_vlagrange
+TYPE(oft_taylor_hmodes) :: hmodes
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: nmodes = 1
 INTEGER(i4) :: minlev = 1
@@ -73,43 +76,44 @@ CALL plot_file%setup("marklin_eigs")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !
 IF(minlev<0)THEN
-  taylor_minlev=ML_oft_hcurl%level
+  hmodes%minlev=mg_mesh%mgdim+(order-1)
 ELSE
-  taylor_minlev=minlev
-  IF(oft_env%nprocs>1)taylor_minlev=MAX(oft_env%nbase+1,minlev)
+  hmodes%minlev=minlev
+  IF(oft_env%nprocs>1)hmodes%minlev=MAX(oft_env%nbase+1,minlev)
 END IF
+ALLOCATE(hmodes%ML_hcurl,hmodes%ML_lagrange)
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=taylor_minlev)
-CALL lag_setup_interp(ML_oft_lagrange)
+CALL oft_lag_setup(mg_mesh,order,hmodes%ML_lagrange,ML_vlag_obj=ML_vlagrange,minlev=hmodes%minlev)
+CALL lag_setup_interp(hmodes%ML_lagrange)
 CALL lag_mloptions
 !---H(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=taylor_minlev)
-CALL hcurl_setup_interp(ML_oft_hcurl)
-CALL hcurl_mloptions(ML_oft_hcurl)
+CALL oft_hcurl_setup(mg_mesh,order,hmodes%ML_hcurl,minlev=hmodes%minlev)
+CALL hcurl_setup_interp(hmodes%ML_hcurl)
+CALL hcurl_mloptions(hmodes%ML_hcurl)
 oft_env%pm=.TRUE.
-CALL taylor_hmodes(nmodes)
+CALL taylor_hmodes(hmodes,nmodes)
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
+CALL oft_lag_vgetmop(ML_vlagrange%current_level,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 CALL create_diag_pre(lminv%pre)
 lminv%A=>lmop
 lminv%its=-2
 !---Create solver fields
-CALL ML_oft_vlagrange%vec_create(u)
-CALL ML_oft_vlagrange%vec_create(v)
+CALL ML_vlagrange%vec_create(u)
+CALL ML_vlagrange%vec_create(v)
 ALLOCATE(bvout(3,u%n/3))
 !---Save modes
 DO i=1,nmodes
   WRITE(pltnum,'(I3.3)')i
-  CALL ML_oft_hcurl%current_level%vec_save(taylor_hffa(i,ML_oft_hcurl%level)%f, &
+  CALL hmodes%ML_hcurl%current_level%vec_save(hmodes%hffa(i,hmodes%ML_hcurl%level)%f, &
                           'marklin_eigs.rst','A_'//pltnum, append=(i/=1))
   !---Setup field interpolation
-  Bfield%u=>taylor_hffa(i,ML_oft_hcurl%level)%f
-  CALL Bfield%setup(ML_oft_hcurl%current_level)
+  Bfield%u=>hmodes%hffa(i,hmodes%ML_hcurl%level)%f
+  CALL Bfield%setup(hmodes%ML_hcurl%current_level)
   !---Project field
-  CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
+  CALL oft_lag_vproject(hmodes%ML_lagrange%current_level,Bfield,v)
   CALL u%set(0.d0)
   CALL lminv%apply(u,v)
   !---Retrieve local values and save

@@ -176,6 +176,8 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
+!
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
@@ -185,8 +187,7 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
   hcurl_mloptions
 !---Taylor state
-USE taylor, ONLY: taylor_minlev, taylor_hmodes, taylor_hffa, ML_oft_hcurl, &
-  ML_oft_lagrange, ML_oft_vlagrange
+USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
 IMPLICIT NONE
 #include "local.h"
 !!\subsection ex3_code_vars Variable Definitions
@@ -209,6 +210,8 @@ CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_hcurl_cinterp) :: Bfield
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_comp_type) :: ML_vlagrange
+TYPE(oft_taylor_hmodes) :: taylor_states
 !!\subsection doc_ex3_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting files must be setup
@@ -224,13 +227,15 @@ CALL mg_mesh%mesh%setup_io(plot_file,order)
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
 !---Lagrange
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange)
-CALL lag_setup_interp(ML_oft_lagrange)
+ALLOCATE(taylor_states%ML_lagrange)
+CALL oft_lag_setup(mg_mesh,order,taylor_states%ML_lagrange,ML_vlag_obj=ML_vlagrange)
+CALL lag_setup_interp(taylor_states%ML_lagrange)
 CALL lag_mloptions
 !---H(Curl) space
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl)
-CALL hcurl_setup_interp(ML_oft_hcurl)
-CALL hcurl_mloptions(ML_oft_hcurl)
+ALLOCATE(taylor_states%ML_hcurl)
+CALL oft_hcurl_setup(mg_mesh,order,taylor_states%ML_hcurl)
+CALL hcurl_setup_interp(taylor_states%ML_hcurl)
+CALL hcurl_mloptions(taylor_states%ML_hcurl)
 !!\subsection doc_ex3_code_taylor Compute Taylor state
 !!
 !!The eigenstate is now computed using the \ref taylor::taylor_hmodes "taylor_hmodes" subroutine. The
@@ -242,10 +247,10 @@ CALL hcurl_mloptions(ML_oft_hcurl)
 !!\ref taylor::taylor_minlev "taylor_minlev".
 !!
 !!\note For our parallel example we increase the minimum level by 1 to use distributed levels only.
-taylor_minlev=1
-IF(oft_env%nprocs>1)taylor_minlev=2
+taylor_states%minlev=1
+IF(oft_env%nprocs>1)taylor_states%minlev=2
 oft_env%pm=.TRUE.
-CALL taylor_hmodes(1)
+CALL taylor_hmodes(taylor_states,1)
 !!\subsection doc_ex3_code_project Project Solution for Plotting
 !!
 !!In order to output the solution for plotting the field must be converted to a nodal, Lagrange,
@@ -262,20 +267,20 @@ CALL taylor_hmodes(1)
 !!\f$ B = \nabla \times A \f$.
 !---Construct operator
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(ML_oft_vlagrange%current_level,lmop,'none')
+CALL oft_lag_vgetmop(ML_vlagrange%current_level,lmop,'none')
 !---Setup solver
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre) ! Setup Preconditioner
 !---Create solver fields
-CALL ML_oft_vlagrange%vec_create(u)
-CALL ML_oft_vlagrange%vec_create(v)
+CALL ML_vlagrange%vec_create(u)
+CALL ML_vlagrange%vec_create(v)
 !---Setup field interpolation
-Bfield%u=>taylor_hffa(1,ML_oft_hcurl%level)%f
-CALL Bfield%setup(ML_oft_hcurl%current_level)
+Bfield%u=>taylor_states%hffa(1,taylor_states%ML_hcurl%level)%f
+CALL Bfield%setup(taylor_states%ML_hcurl%current_level)
 !---Project field
-CALL oft_lag_vproject(ML_oft_lagrange%current_level,Bfield,v)
+CALL oft_lag_vproject(taylor_states%ML_lagrange%current_level,Bfield,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save
