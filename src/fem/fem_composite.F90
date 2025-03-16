@@ -12,7 +12,8 @@
 MODULE fem_composite
 USE oft_base
 USE oft_stitching, ONLY: oft_seam, seam_list
-USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
+USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file, &
+  hdf5_field_exist
 !---
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_graph_ptr, &
   oft_matrix, oft_matrix_ptr, oft_local_mat, oft_ml_vecspace
