@@ -4,6 +4,7 @@
 @date September 2023
 @ingroup doxy_oft_python
 '''
+import warnings
 import numpy
 from ._interface import *
 from ..io import build_XDMF
@@ -150,14 +151,18 @@ class Marklin():
         '''
         return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
 
-    def compute(self,nmodes=1,cache_file=None):
+    def compute(self,nmodes=1,cache_file=None,save_rst=False):
         r'''! Compute force-free eigenmodes
 
         @param nmodes Number of eigenmodes to compute
-        @param save_rst Save restart files? 
+        @param cache_file Path to cache file to store/load modes
+        @param save_rst Save restart files? (deprecated)
         '''
         if self._nm != -1:
             raise ValueError('Eigenstates already computed')
+        if save_rst:
+            warnings.warn("Argument `save_rst` is deprecated, use `cache_file` instead", DeprecationWarning)
+            cache_file = 'oft_Marklin.rst'
         if cache_file is None:
             cache_string = self._oft_env.path2c("")
         else:

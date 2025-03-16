@@ -155,9 +155,9 @@ oft_env%pm=.TRUE.
 CALL self%eig_obj%setup(self%ML_hcurl,self%ML_lagrange,self%minlev)
 CALL copy_string_rev(cache_file,rst_filename)
 IF(TRIM(rst_filename)=='')THEN
-  CALL taylor_hmodes(self%eig_obj,nmodes,rst_filename)
-ELSE
   CALL taylor_hmodes(self%eig_obj,nmodes)
+ELSE
+  CALL taylor_hmodes(self%eig_obj,nmodes,rst_filename)
 END IF
 CALL c_f_pointer(eig_vals, vals_tmp, [nmodes])
 vals_tmp=self%eig_obj%hlam(:,self%ML_hcurl%level)

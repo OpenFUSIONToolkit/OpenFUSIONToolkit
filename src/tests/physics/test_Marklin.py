@@ -58,7 +58,7 @@ def run_marklin(meshfile,nmodes,order,grid_order,meshfile2,mp_q):
             taylor_solver = Marklin(myOFT)
             taylor_solver.setup_mesh(mesh_file=meshfile2,grid_order=grid_order)
             taylor_solver.setup(order,minlev=1)
-            taylor_solver.compute(nmodes,cache_file='Marklin_{0}.rst'.format(meshfile.split(".")[0]))
+            taylor_solver.compute(nmodes,cache_file='Marklin_{0}.rst'.format(meshfile2.split(".")[0]))
             result = True
         except BaseException as e:
             print(e)

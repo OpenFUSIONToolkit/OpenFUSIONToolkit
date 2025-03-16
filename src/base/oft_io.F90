@@ -1453,7 +1453,7 @@ IF(PRESENT(success))THEN
   CALL h5eset_auto_f(one, error)
 END IF
 RETURN
-100 CALL h5dclose_f(dset_id, error)
+100 CALL h5sclose_f(memspace, error)
 #ifdef HAVE_MPI
 #ifdef HAVE_PHDF5
 IF(.NOT.rst_info%full)THEN
@@ -1462,7 +1462,7 @@ IF(.NOT.rst_info%full)THEN
 END IF
 #endif
 #endif
-101 CALL h5sclose_f(memspace, error)
+101 CALL h5dclose_f(dset_id, error)
 102 CALL h5fclose_f(file_id, error)
 103 CALL h5close_f(error)
 IF(PRESENT(success))CALL h5eset_auto_f(one, error)

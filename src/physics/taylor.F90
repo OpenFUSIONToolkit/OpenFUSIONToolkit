@@ -275,7 +275,9 @@ ELSE
 END IF
 save_rst=.FALSE.
 rst_append=.FALSE.
-IF(PRESENT(rst_filename))save_rst=.TRUE.
+IF(PRESENT(rst_filename))THEN
+  IF(TRIM(rst_filename)/='')save_rst=.TRUE.
+END IF
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
   WRITE(*,'(A)')'============================'
@@ -436,12 +438,10 @@ do k=1,self%nm
 ! Write restart files
 !---------------------------------------------------------------------------
     if(save_rst)then
-      if(.NOT.oft_file_exist(rst_filename))then
-        CALL oft_mpi_barrier(ierr)
-        WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'hffa_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_m',k
-        CALL self%ML_hcurl%current_level%vec_save(u,rst_filename,field_name,append=rst_append)
-        rst_append=.TRUE.
-      end if
+      CALL oft_mpi_barrier(ierr)
+      WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'hffa_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_m',k
+      CALL self%ML_hcurl%current_level%vec_save(u,rst_filename,field_name,append=rst_append)
+      rst_append=.TRUE.
     end if
   end do ! End level loop
 end do ! End mode loop
