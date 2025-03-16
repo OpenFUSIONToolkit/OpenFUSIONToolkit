@@ -4,6 +4,7 @@
 @date September 2023
 @ingroup doxy_oft_python
 '''
+import warnings
 import numpy
 from ._interface import *
 from ..io import build_XDMF
@@ -156,17 +157,26 @@ class Marklin():
         '''
         return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
 
-    def compute_eig(self,nmodes=1,save_rst=True):
+    def compute_eig(self,nmodes=1,cache_file=None,save_rst=False):
         r'''! Compute force-free eigenmodes
 
         @param nmodes Number of eigenmodes to compute
-        @param save_rst Save restart files? 
+        @param cache_file Path to cache file to store/load modes
+        @param save_rst Save restart files? (deprecated)
         '''
         if self.nm != 0:
             raise ValueError('Eigenstates already computed')
+        if save_rst:
+            warnings.warn("Argument `save_rst` is deprecated, use `cache_file` instead", DeprecationWarning)
+            cache_file = 'oft_Marklin.rst'
+        if cache_file is None:
+            cache_string = self._oft_env.path2c("")
+        else:
+            cache_string = self._oft_env.path2c(cache_file)
+        #
         eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_compute_eig(self._marklin_ptr,nmodes,save_rst,eig_vals,error_string)
+        marklin_compute_eig(self._marklin_ptr,nmodes,eig_vals,cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self.nm = nmodes
