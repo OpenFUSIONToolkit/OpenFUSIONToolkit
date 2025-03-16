@@ -202,8 +202,10 @@ logical :: do_append
 DEBUG_STACK_PUSH
 do_append=.FALSE.
 IF(PRESENT(append))do_append=append
-IF(.NOT.do_append)THEN
-  IF(oft_env%head_proc)THEN
+IF(oft_env%head_proc)THEN
+  IF(do_append)THEN
+    IF(.NOT.hdf5_field_exist(filename,fem_idx_path))CALL hdf5_write(fem_idx_ver,filename,fem_idx_path)
+  ELSE
     CALL hdf5_create_file(filename)
     CALL hdf5_write(fem_idx_ver,filename,fem_idx_path)
   END IF
