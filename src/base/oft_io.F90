@@ -689,11 +689,11 @@ call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_create_group
 !---------------------------------------------------------------------------
-!> Create HDF5 group in existing file
+!> Delete HDF5 object in existing file
 !---------------------------------------------------------------------------
 subroutine hdf5_delete_obj(filename,obj_path)
 character(LEN=*), intent(in) :: filename !< Name of HDF5 file
-character(LEN=*), intent(in) :: obj_path !< Group path
+character(LEN=*), intent(in) :: obj_path !< Object path
 integer :: error
 integer(HID_T) :: file_id,grp_id
 DEBUG_STACK_PUSH
@@ -794,6 +794,11 @@ integer(i4), parameter :: one=1
 integer(HID_T) :: file_id,dspace_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(1) :: dims
 DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
 !---Write at lower precision?
 write_single=.FALSE.
 IF(PRESENT(single_prec))write_single=single_prec
@@ -834,6 +839,11 @@ integer(i4), parameter :: one=1
 integer(HID_T) :: file_id,dspace_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(1) :: dims
 DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
@@ -866,6 +876,11 @@ integer(i4), parameter :: two=2
 integer(HID_T) :: file_id,dspace_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(2) :: dims
 DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
 !---Write at lower precision?
 write_single=.FALSE.
 IF(PRESENT(single_prec))write_single=single_prec
@@ -907,6 +922,11 @@ integer(HID_T) :: file_id
 integer(HID_T) :: dspace_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(2) :: dims
 DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
@@ -928,11 +948,10 @@ end subroutine hdf5_write_2d_i4
 !---------------------------------------------------------------------------
 !> FE vector implementation of \ref oft_io::hdf5_write
 !---------------------------------------------------------------------------
-subroutine hdf5_write_rst(rst_info,filename,path,append)
+subroutine hdf5_write_rst(rst_info,filename,path)
 type(hdf5_rst), intent(in) :: rst_info !< Restart data (structure containing data and mapping)
 character(LEN=*), intent(in) :: filename !< Path to file
 character(LEN=*), intent(in) :: path !< Variable path in file
-logical, optional, intent(in) :: append !< Append to or create file? (optional)
 integer(i4) :: i,error,one=1
 integer(HID_T) :: file_id
 integer(HID_T) :: dset_id
@@ -947,8 +966,15 @@ integer(HID_T) :: plist_id
 integer(i4) :: j
 #endif
 DEBUG_STACK_PUSH
-CALL oft_mpi_barrier(error)
 if(oft_debug_print(2))write(*,'(3A)')oft_indent,'Writing FE vector to file: ',TRIM(filename)
+!---Remove field if it already exists
+IF(oft_env%head_proc)THEN
+  IF(hdf5_field_exist(filename,path))THEN
+    CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+    CALL hdf5_delete_obj(filename,path)
+  END IF
+END IF
+CALL oft_mpi_barrier(error)
 !---Setup local chunk
 dims=rst_info%dim
 count=rst_info%count
@@ -1316,7 +1342,7 @@ if(rst_info%full)then
   CALL h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, count, error)
   IF(error/=0)THEN
     IF(PRESENT(success))GOTO 100
-    CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+    CALL oft_abort('Error reading dataset','hdf5_read_rst',__FILE__)
   END IF
   !---Close dataset
   CALL h5sclose_f(memspace, error)
@@ -1374,7 +1400,7 @@ else
     file_space_id=filespace, mem_space_id=memspace, xfer_prp=plist_id)
   IF(error/=0)THEN
     IF(PRESENT(success))GOTO 100
-    CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+    CALL oft_abort('Error reading dataset','hdf5_read_rst',__FILE__)
   END IF
   !---Write out cell data
   CALL h5sclose_f(filespace, error)
@@ -1400,24 +1426,24 @@ else
       !---
       call h5fopen_f(TRIM(filename), access_flag, file_id, error)
       IF(error/=0)THEN
-        ! IF(PRESENT(success))GOTO 102
+        IF(PRESENT(success))GOTO 103
         CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
       END IF
       !---
       CALL h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
       IF(error/=0)THEN
-        ! IF(PRESENT(success))GOTO 101
+        IF(PRESENT(success))GOTO 102
         CALL oft_abort('Error opening dataset','hdf5_read_rst',__FILE__)
       END IF
       !---Check size
       CALL h5dget_space_f(dset_id, memspace, error)
       CALL h5sget_simple_extent_npoints_f(memspace, space_count, error)
       IF(error/=0)THEN
-        ! IF(PRESENT(success))GOTO 100
+        IF(PRESENT(success))GOTO 101
         CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
       END IF
       IF(space_count/=rst_info%dim)THEN
-        ! IF(PRESENT(success))GOTO 100
+        IF(PRESENT(success))GOTO 101
         CALL oft_abort('Dataset size does not match','hdf5_read_rst',__FILE__)
       END IF
       !---
@@ -1428,8 +1454,8 @@ else
       CALL h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, count, error, &
         file_space_id=filespace, mem_space_id=memspace)
       IF(error/=0)THEN
-        ! IF(PRESENT(success))GOTO 100
-        CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+        IF(PRESENT(success))GOTO 100
+        CALL oft_abort('Error reading dataset','hdf5_read_rst',__FILE__)
       END IF
       !---Close dataset
       CALL h5sclose_f(filespace, error)
@@ -1447,25 +1473,37 @@ else
   call oft_abort("Requested distributed read without MPI","hdf5_read_rst",__FILE__)
 #endif
 end if
-! DEBUG_STACK_POP
 IF(PRESENT(success))THEN
   success=.TRUE.
   CALL h5eset_auto_f(one, error)
 END IF
+! DEBUG_STACK_POP
 RETURN
 100 CALL h5sclose_f(memspace, error)
 #ifdef HAVE_MPI
-#ifdef HAVE_PHDF5
 IF(.NOT.rst_info%full)THEN
+#ifdef HAVE_PHDF5
   CALL h5pclose_f(plist_id, error)
+#endif
   CALL h5sclose_f(filespace, error)
 END IF
-#endif
 #endif
 101 CALL h5dclose_f(dset_id, error)
 102 CALL h5fclose_f(file_id, error)
 103 CALL h5close_f(error)
 IF(PRESENT(success))CALL h5eset_auto_f(one, error)
+#ifdef HAVE_MPI
+IF(.NOT.rst_info%full)THEN
+#ifdef HAVE_PHDF5
+  CALL oft_mpi_barrier(error)
+#else
+  do i=oft_env%rank+1,oft_env%nprocs
+    CALL oft_mpi_barrier(error)
+  end do
+#endif
+END IF
+#endif
+! DEBUG_STACK_POP
 end subroutine hdf5_read_rst
 !---------------------------------------------------------------------------
 !> Deallocate internal storage fields created for HDF5 collective I/O

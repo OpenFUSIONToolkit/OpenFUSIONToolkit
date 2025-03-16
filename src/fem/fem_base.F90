@@ -22,7 +22,8 @@ USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, oft_init_seam
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_stitch_check, destory_seam
-USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
+USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file, &
+  hdf5_field_exist
 !---
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_graph, &
   oft_graph_ptr, oft_matrix, oft_matrix_ptr, oft_ml_vecspace
@@ -224,7 +225,7 @@ type :: fem_parent
   integer(i4), pointer, dimension(:) :: le => NULL() !< Parent index of elements (ne)
 end type fem_parent
 !---
-PUBLIC fem_common_linkage, fem_gen_legacy, fem_delete, bfem_delete
+PUBLIC fem_common_linkage, fem_delete, bfem_delete
 contains
 !---------------------------------------------------------------------------
 !> Needs docs
@@ -1363,13 +1364,6 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine fem_global_linkage
 !---------------------------------------------------------------------------
-!> Compute legacy FE contexts
-!---------------------------------------------------------------------------
-subroutine fem_gen_legacy(self)
-class(oft_afem_type), intent(inout) :: self !< Finite element representation
-CALL oft_abort("Legacy file formats not supported", "", __FILE__)
-end subroutine fem_gen_legacy
-!---------------------------------------------------------------------------
 !> Retrieve the indices of elements beloning to a given cell
 !---------------------------------------------------------------------------
 subroutine fem_ncdofs(self,cell,dofs)
@@ -1520,7 +1514,9 @@ logical :: do_append
 DEBUG_STACK_PUSH
 do_append=.FALSE.
 IF(PRESENT(append))do_append=append
-IF(.NOT.do_append)THEN
+IF(do_append)THEN
+  IF(.NOT.hdf5_field_exist(filename,fem_idx_path))CALL hdf5_write(fem_idx_ver,filename,fem_idx_path)
+ELSE
   IF(oft_env%head_proc)THEN
     CALL hdf5_create_file(filename)
     CALL hdf5_write(fem_idx_ver,filename,fem_idx_path)
@@ -1559,12 +1555,18 @@ real(r8), pointer, dimension(:) :: valtmp
 class(oft_vector), pointer :: infield
 class(oft_native_vector), pointer :: invec
 type(hdf5_rst) :: rst_info
-logical :: legacy,success
+logical :: success
 DEBUG_STACK_PUSH
-legacy=.FALSE.
-! CALL hdf5_rst_read_version(version,filen,fem_idx_str)
-CALL hdf5_read(version,filename,fem_idx_path)
-legacy=(version<1)
+CALL hdf5_read(version,filename,fem_idx_path,success=success)
+IF(.NOT.success)THEN
+  IF(PRESENT(err_flag))THEN
+    err_flag=2
+    DEBUG_STACK_POP
+    RETURN
+  ELSE
+    CALL oft_abort("OFT_idx_Version not found, legacy files not supported","afem_vec_load",__FILE__)
+  END IF
+END IF
 !---
 NULLIFY(valtmp)
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Reading "',TRIM(path), &
@@ -1574,10 +1576,6 @@ IF(.NOT.native_vector_cast(invec,infield))CALL oft_abort('Failed to create "infi
   'fem_vec_load',__FILE__)
 !---
 lge=>self%global%le
-IF(legacy)THEN
-  CALL fem_gen_legacy(self)
-  lge=>self%legacy_lge
-END IF
 CALL native_vector_slice_push(invec,lge,rst_info,alloc_only=.TRUE.)
 IF(PRESENT(err_flag))THEN
   CALL hdf5_read(rst_info,filename,path,success=success)

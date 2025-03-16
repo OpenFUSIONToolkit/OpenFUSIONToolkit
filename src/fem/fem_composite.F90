@@ -22,7 +22,7 @@ USE oft_la_utils, ONLY: create_vector, combine_matrices, create_matrix, &
   create_identity_graph
 !---
 USE fem_base, ONLY: oft_fem_ptr, oft_ml_fem_ptr, fem_max_levels, &
-  fem_common_linkage, fem_gen_legacy, fem_idx_ver, fem_idx_path
+  fem_common_linkage, fem_idx_ver, fem_idx_path
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------
@@ -234,22 +234,30 @@ end subroutine fem_vec_save
 !---------------------------------------------------------------------------
 !> Load a Lagrange scalar field from a HDF5 restart file
 !---------------------------------------------------------------------------
-subroutine fem_vec_load(self,source,filename,path)
+subroutine fem_vec_load(self,source,filename,path,err_flag)
 class(oft_fem_comp_type), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: source !< Destination field
 character(LEN=*), intent(in) :: filename !< Name of source file
 character(LEN=*), intent(in) :: path !< ield path in file
+integer(i4), optional, intent(out) :: err_flag !< Error flag
 INTEGER(i4) :: i,version
 integer(i8), pointer, dimension(:) :: lge
 real(r8), pointer, dimension(:) :: valtmp
 class(oft_vector), pointer :: infield
 class(oft_native_vector), pointer :: invec
 type(hdf5_rst) :: rst_info
-logical :: legacy,success
+logical :: success
 DEBUG_STACK_PUSH
-legacy=.FALSE.
 CALL hdf5_read(version,filename,fem_idx_path,success)
-legacy=(version<1)
+IF(.NOT.success)THEN
+  IF(PRESENT(err_flag))THEN
+    err_flag=2
+    DEBUG_STACK_POP
+    RETURN
+  ELSE
+    CALL oft_abort("OFT_idx_Version not found, legacy files not supported","fem_vec_load",__FILE__)
+  END IF
+END IF
 !---
 NULLIFY(valtmp)
 IF(oft_debug_print(1))WRITE(*,'(2X,5A)')'Reading "',TRIM(path), &
@@ -261,13 +269,21 @@ DO i=1,self%nfields
   IF(.NOT.native_vector_cast(invec,infield))CALL oft_abort('Failed to create "infield".', &
     'fem_vec_load',__FILE__)
   lge=>self%fields(i)%fe%global%le
-  IF(legacy)THEN
-    CALL fem_gen_legacy(self%fields(i)%fe)
-    lge=>self%fields(i)%fe%legacy_lge
-  END IF
   !---
   CALL native_vector_slice_push(invec,lge,rst_info,alloc_only=.TRUE.)
-  CALL hdf5_read(rst_info,filename,TRIM(path)//'_'//TRIM(self%field_tags(i)))
+  IF(PRESENT(err_flag))THEN
+    CALL hdf5_read(rst_info,filename,TRIM(path)//'_'//TRIM(self%field_tags(i)),success=success)
+    IF(.NOT.success)THEN
+      err_flag=-i
+      CALL infield%delete
+      NULLIFY(lge)
+      DEALLOCATE(infield)
+      CALL hdf5_rst_destroy(rst_info)
+      EXIT
+    END IF
+  ELSE
+    CALL hdf5_read(rst_info,filename,TRIM(path)//'_'//TRIM(self%field_tags(i)))
+  END IF
   CALL native_vector_slice_pop(invec,lge,rst_info)
   CALL infield%get_local(valtmp)
   CALL source%restore_local(valtmp,i)
