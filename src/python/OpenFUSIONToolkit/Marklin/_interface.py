@@ -12,9 +12,9 @@ from .._interface import *
 marklin_setup = ctypes_subroutine(oftpy_lib.marklin_setup,
     [c_void_ptr_ptr, c_void_p, c_int, c_int, c_char_p])
 
-# marklin_compute(marklin_ptr,nmodes,save_rst,eig_vals,error_str)
+# marklin_compute(marklin_ptr,nmodes,eig_vals,cache_file,error_str)
 marklin_compute = ctypes_subroutine(oftpy_lib.marklin_compute,
-    [c_void_p, c_int, c_bool, ctypes_numpy_array(numpy.float64,1), c_char_p])
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p, c_char_p])
 
 # (basepath,error_str
 marklin_setup_io = ctypes_subroutine(oftpy_lib.marklin_setup_io,

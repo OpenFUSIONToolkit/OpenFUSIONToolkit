@@ -43,9 +43,9 @@ USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
 !---Physics
-USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
+USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
 USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields, &
-  ML_oft_hcurl, ML_oft_h1, ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
+  xmhd_ML_hcurl, xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex1_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
@@ -59,6 +59,7 @@ INTEGER(i4) :: ierr,io_unit
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(xmhd_sub_fields) :: ic_fields,pert_fields
 TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_taylor_hmodes) :: taylor_states
 TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 !---Runtime options
 INTEGER(i4) :: order = 2
@@ -85,14 +86,14 @@ CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
 ! Build FE structures
 !---------------------------------------------------------------------------
 !--- Lagrange
-CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
+CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=-1)
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=-1)
+CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=-1)
 !--- H(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
+CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=-1)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,-1)
-h1_zerogrnd%ML_H1_rep=>ML_h1grad
+CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,-1)
+h1_zerogrnd%ML_H1_rep=>xmhd_ML_H1grad
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
 !! To visualize the solution fields once a simulation has completed, the \ref xmhd::xmhd_plot
@@ -118,8 +119,9 @@ END IF
 !! that will drive the configuration toward one of these minimum energy states.
 !! This also leads us to our choice of an intial perturbation to the equilibrium,
 !! which we will chose to match field of the lowest eigenstate.
-CALL taylor_hmodes(3)
-CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
+CALL taylor_states%setup(xmhd_ML_hcurl,xmhd_ML_lagrange)
+CALL taylor_hmodes(taylor_states,3)
+CALL xmhd_ML_lagrange%set_level(xmhd_ML_lagrange%nlevels)
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" subroutine computes the vector
 !! potential for each of the requested eignestates. However, the MHD
 !! solver uses magnetic field as the primary variable. With force-free eigenstate
@@ -139,7 +141,7 @@ CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 ! Create divergence cleaner
 !---------------------------------------------------------------------------
 NULLIFY(lop)
-CALL oft_h1_getlop(ML_oft_h1%current_level,lop,"grnd")
+CALL oft_h1_getlop(xmhd_ML_H1%current_level,lop,"grnd")
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
@@ -153,13 +155,13 @@ divout%pm=.TRUE.
 ! Setup initial conditions
 !---------------------------------------------------------------------------
 !---Apply to equilibrium field
-CALL ML_hcurl_grad%vec_create(ic_fields%B)
-CALL taylor_hffa(3,ML_oft_hcurl%level)%f%get_local(tmp)
+CALL xmhd_ML_hcurl_grad%vec_create(ic_fields%B)
+CALL taylor_states%hffa(3,xmhd_ML_hcurl%level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
 !---Apply to perturbation field
-CALL ML_hcurl_grad%vec_create(pert_fields%B)
-CALL taylor_hffa(1,ML_oft_hcurl%level)%f%get_local(tmp)
+CALL xmhd_ML_hcurl_grad%vec_create(pert_fields%B)
+CALL taylor_states%hffa(1,xmhd_ML_hcurl%level)%f%get_local(tmp)
 CALL pert_fields%B%restore_local(tmp,1)
 CALL divout%apply(pert_fields%B)
 !---Clean up solver
@@ -178,24 +180,24 @@ DEALLOCATE(linv)
 !! density fields are also created. The velocity field is initialized to zero everywhere,
 !! while the temperature and density fields, which are not evolved in this case, are set to
 !! uniform values for the equilibrium and zero for the perturbation.
-CALL ic_fields%B%scale(b0_scale*taylor_hlam(3,ML_oft_hcurl%level))
-CALL pert_fields%B%scale(b1_scale*taylor_hlam(1,ML_oft_hcurl%level))
+CALL ic_fields%B%scale(b0_scale*taylor_states%hlam(3,xmhd_ML_hcurl%level))
+CALL pert_fields%B%scale(b1_scale*taylor_states%hlam(1,xmhd_ML_hcurl%level))
 IF(.NOT.linear)THEN
   CALL ic_fields%B%add(1.d0,1.d0,pert_fields%B)
   CALL pert_fields%B%delete
   DEALLOCATE(pert_fields%B)
 END IF
 !---Create velocity field
-CALL ML_oft_vlagrange%vec_create(ic_fields%V)
-IF(linear)CALL ML_oft_vlagrange%vec_create(pert_fields%V)
+CALL xmhd_ML_vlagrange%vec_create(ic_fields%V)
+IF(linear)CALL xmhd_ML_vlagrange%vec_create(pert_fields%V)
 !---Create static density/temperature
-CALL ML_oft_lagrange%vec_create(ic_fields%Ne)
-CALL ML_oft_lagrange%vec_create(ic_fields%Ti)
+CALL xmhd_ML_lagrange%vec_create(ic_fields%Ne)
+CALL xmhd_ML_lagrange%vec_create(ic_fields%Ti)
 CALL ic_fields%Ne%set(n0)
 CALL ic_fields%Ti%set(t0)
 IF(linear)THEN
-  CALL ML_oft_lagrange%vec_create(pert_fields%Ne)
-  CALL ML_oft_lagrange%vec_create(pert_fields%Ti)
+  CALL xmhd_ML_lagrange%vec_create(pert_fields%Ne)
+  CALL xmhd_ML_lagrange%vec_create(pert_fields%Ti)
 END IF
 !---Clean up temporary matrices and fields
 CALL lop%delete
