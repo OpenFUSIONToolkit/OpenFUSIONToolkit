@@ -113,6 +113,8 @@ type :: oft_taylor_ifield
 CONTAINS
   !> Setup object before solution
   PROCEDURE :: setup => ff_setup
+  !> Setup object before solution
+  PROCEDURE :: delete => ff_delete
 end type oft_taylor_ifield
 contains
 !---------------------------------------------------------------------------
@@ -235,6 +237,55 @@ END IF
 IF(PRESENT(minlev))self%minlev=minlev
 IF(self%minlev<0)self%minlev=self%ML_hcurl%level
 end subroutine ff_setup
+!---------------------------------------------------------------------------
+!> Setup eigenmodes object
+!---------------------------------------------------------------------------
+subroutine ff_delete(self,storage_only)
+CLASS(oft_taylor_ifield), INTENT(inout) :: self !< Force-free eigenmode object
+LOGICAL, OPTIONAL, INTENT(in) :: storage_only !< Only reset storage, but do not clear references
+LOGICAL :: do_nullify
+INTEGER(i4) :: i,j
+do_nullify=.TRUE.
+IF(PRESENT(storage_only))do_nullify=.NOT.storage_only
+!---Deallocate fields
+IF(ASSOCIATED(self%hvac))THEN
+  DO i=1,SIZE(self%hvac)
+    IF(ASSOCIATED(self%hvac(i)%f))THEN
+      CALL self%hvac(i)%f%delete()
+      DEALLOCATE(self%hvac(i)%f)
+    END IF
+  END DO
+  DEALLOCATE(self%hvac)
+END IF
+IF(ASSOCIATED(self%hcur))THEN
+  DO i=1,SIZE(self%hcur)
+    IF(ASSOCIATED(self%hcur(i)%f))THEN
+      CALL self%hcur(i)%f%delete()
+      DEALLOCATE(self%hcur(i)%f)
+    END IF
+  END DO
+  DEALLOCATE(self%hcur)
+END IF
+IF(ASSOCIATED(self%gffa))THEN
+  DO i=1,SIZE(self%gffa)
+    IF(ASSOCIATED(self%gffa(i)%f))THEN
+      CALL self%gffa(i)%f%delete()
+      DEALLOCATE(self%gffa(i)%f)
+    END IF
+  END DO
+  DEALLOCATE(self%gffa)
+END IF
+IF(ASSOCIATED(self%hcpc))DEALLOCATE(self%hcpc)
+IF(ASSOCIATED(self%hcpv))DEALLOCATE(self%hcpv)
+IF(ASSOCIATED(self%htag))DEALLOCATE(self%htag)
+!---Nullify pointers and reset defaults
+IF(do_nullify)THEN
+  NULLIFY(self%ML_hcurl,self%ML_lagrange)
+  NULLIFY(self%ML_h1,self%ML_hcurl_grad,self%ML_h1grad)
+  self%minlev=-1
+  self%nh=0
+END IF
+end subroutine ff_delete
 !---------------------------------------------------------------------------
 !> Compute 'taylor_nm' Force-Free eignemodes.
 !---------------------------------------------------------------------------
@@ -482,23 +533,13 @@ character(LEN=*), optional, intent(in) :: rst_filename !< File name to store/loa
 !---H(Curl) full space divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_hcurl_grad_divout) :: divout
-!---WOP solver
-CLASS(oft_solver), POINTER :: winv => NULL()
-!---H(Curl) subspace divergence cleaner
-CLASS(oft_solver), POINTER :: linv_lag => NULL()
-TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
 !--- ML structures for MG-preconditioner
-TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL()
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_lop => NULL()
-TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_wop => NULL()
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: levels,nu
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: df
 !---
 class(oft_matrix), pointer :: lop => NULL()
-class(oft_matrix), pointer :: lop_lag => NULL()
 class(oft_matrix), pointer :: mop => NULL()
-class(oft_matrix), pointer :: mop_hcurl => NULL()
-class(oft_matrix), pointer :: wop => NULL()
 !---
 class(oft_vector), pointer :: u,b,tmp
 real(r8), pointer, dimension(:) :: vals => NULL()
@@ -506,14 +547,9 @@ real(r8) :: alam,venergy
 integer(i4) :: i,j,k,nlevels,ierr
 logical :: have_rst,save_rst
 character(LEN=16) :: field_name
-type(oft_hcurl_zerob), target :: hcurl_zerob
-type(oft_lag_zerob), target :: lag_zerob
 DEBUG_STACK_PUSH
-NULLIFY(lop,lop_lag,mop,mop_hcurl,wop)
-NULLIFY(ml_int,ml_lop,ml_wop)
-!---Create taylor module variables
-hcurl_zerob%ML_hcurl_rep=>self%ML_hcurl
-lag_zerob%ML_lag_rep=>self%ML_lagrange
+NULLIFY(lop,mop)
+NULLIFY(ml_lop)
 !---Loop over cut planes
 save_rst=.FALSE.
 IF(PRESENT(rst_filename))save_rst=.TRUE.
@@ -521,8 +557,6 @@ IF(save_rst)THEN
   have_rst=oft_file_exist(TRIM(rst_filename))
   DO i=1,self%nh
     WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'hvac_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_h',i
-    have_rst=have_rst.AND.hdf5_field_exist(rst_filename,field_name)
-    WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'hcur_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_h',i
     have_rst=have_rst.AND.hdf5_field_exist(rst_filename,field_name)
   END DO
 ELSE
@@ -553,53 +587,13 @@ ELSE
   CALL create_diag_pre(linv%pre)
 END IF
 !---------------------------------------------------------------------------
-! Setup H(Curl)::WOP preconditioner
-!---------------------------------------------------------------------------
-CALL create_cg_solver(winv, force_native=.TRUE.)
-IF((self%minlev==self%ML_hcurl%level).OR.have_rst)THEN ! Lowest level uses diag precond
-  NULLIFY(wop)
-  CALL oft_hcurl_getwop(self%ML_hcurl%current_level,wop,'zerob')
-  CALL create_diag_pre(winv%pre)
-ELSE ! Nested levels use MG
-  CALL hcurl_getwop_pre(self%ML_hcurl,winv%pre,ml_wop,nlevels=self%ML_hcurl%level-self%minlev+1)
-  wop=>ml_wop(self%ML_hcurl%level-self%minlev+1)%M
-END IF
-!---------------------------------------------------------------------------
-! Create H(Curl)::WOP solver
-!---------------------------------------------------------------------------
-winv%A=>wop
-winv%its=-3
-winv%atol=1.d-9
-SELECT TYPE(this=>winv)
-CLASS IS(oft_native_cg_solver)
-    this%cleaner=>hcurl_divout
-  CLASS DEFAULT
-    CALL oft_abort('Error allocating winv solver', 'taylor_vacuum', __FILE__)
-END SELECT
-!---------------------------------------------------------------------------
-! Create H(Curl) divergence cleaner
-!---------------------------------------------------------------------------
-CALL self%ML_lagrange%set_level(MIN(self%ML_hcurl%level,self%ML_lagrange%ml_mesh%mgdim))
-CALL oft_lag_getlop(self%ML_lagrange%current_level,lop_lag,"zerob")
-CALL create_cg_solver(linv_lag)
-linv_lag%A=>lop_lag
-!linv_lag%its=-2
-CALL create_diag_pre(linv_lag%pre)
-linv_lag%its=40
-hcurl_divout%solver=>linv_lag
-! hcurl_divout%bc=>lag_zerob
-CALL hcurl_divout%setup(self%ML_hcurl,self%ML_lagrange,bc='zero',solver=linv_lag)
-hcurl_divout%app_freq=2
-CALL oft_hcurl_getmop(self%ML_hcurl%current_level,mop_hcurl,'zerob')
-hcurl_divout%mop=>mop_hcurl
-!---------------------------------------------------------------------------
 !
 !---------------------------------------------------------------------------
 NULLIFY(tmp)
 !---Get H(Curl) + Grad(H^1) mass matrix
 CALL hcurl_grad_getmop(self%ML_hcurl_grad%current_level,mop,'none')
 !---Allocate vacuum and current field containers
-ALLOCATE(self%hvac(self%nh),self%hcur(self%nh))
+ALLOCATE(self%hvac(self%nh))
 !---Create temporary H(Curl) vector
 CALL self%ML_hcurl%vec_create(b)
 !---Loop over cut planes
@@ -648,11 +642,135 @@ DO i=1,self%nh
     WRITE(*,*)'Vacuum Energy = ',1.d0/venergy
   END IF
   IF(PRESENT(energy))energy(i)=1.d0/venergy
+END DO
+!---
+CALL tmp%delete
+CALL b%delete
+NULLIFY(tmp,b)
+!---
+CALL mop%delete
+IF(ASSOCIATED(ml_lop))THEN
+  DO i=1,SIZE(ml_lop)
+    CALL ml_lop(i)%M%delete
+    DEALLOCATE(ml_lop(i)%M)
+  END DO
+  DEALLOCATE(ml_lop)
+END IF
+CALL linv%pre%delete
+DEALLOCATE(linv%pre)
+CALL linv%delete
+DEALLOCATE(linv)
+CALL self%ML_lagrange%set_level(self%ML_lagrange%nlevels)
+DEBUG_STACK_POP
+end subroutine taylor_vacuum
+!---------------------------------------------------------------------------
+!> Generate vector potential whose corresponding current matches the
+!! vacuum fields stored in @ref taylor::taylor_hvac
+!---------------------------------------------------------------------------
+subroutine taylor_vac_curr(self,hmodes,rst_filename)
+type(oft_taylor_ifield), intent(inout) :: self !< Force-free field object
+type(oft_taylor_hmodes), intent(inout) :: hmodes !< Force-free eigenmode object
+character(LEN=*), optional, intent(in) :: rst_filename !< File name to store/load restart information (optional)
+!---WOP solver
+CLASS(oft_solver), POINTER :: winv => NULL()
+!---H(Curl) subspace divergence cleaner
+CLASS(oft_solver), POINTER :: linv_lag => NULL()
+TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
+!--- ML structures for MG-preconditioner
+TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_wop => NULL()
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: levels,nu
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: df
+!---
+class(oft_matrix), pointer :: lop_lag => NULL()
+class(oft_matrix), pointer :: mop => NULL()
+class(oft_matrix), pointer :: mop_hcurl => NULL()
+class(oft_matrix), pointer :: wop => NULL()
+!---
+class(oft_vector), pointer :: u,b,tmp
+real(r8), pointer, dimension(:) :: vals => NULL()
+real(r8) :: alam,venergy
+integer(i4) :: i,j,k,nlevels,ierr
+logical :: have_rst,save_rst
+character(LEN=16) :: field_name
+type(oft_hcurl_zerob), target :: hcurl_zerob
+type(oft_lag_zerob), target :: lag_zerob
+DEBUG_STACK_PUSH
+NULLIFY(lop_lag,mop,mop_hcurl,wop)
+NULLIFY(ml_wop)
+!---Create taylor module variables
+hcurl_zerob%ML_hcurl_rep=>self%ML_hcurl
+lag_zerob%ML_lag_rep=>self%ML_lagrange
+!---Loop over cut planes
+save_rst=.FALSE.
+IF(PRESENT(rst_filename))save_rst=.TRUE.
+IF(save_rst)THEN
+  have_rst=oft_file_exist(TRIM(rst_filename))
+  DO i=1,self%nh
+    WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'hcur_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_h',i
+    have_rst=have_rst.AND.hdf5_field_exist(rst_filename,field_name)
+  END DO
+ELSE
+  have_rst=.FALSE.
+END IF
+!---------------------------------------------------------------------------
+! Setup H(Curl)::WOP preconditioner
+!---------------------------------------------------------------------------
+CALL create_cg_solver(winv, force_native=.TRUE.)
+IF((self%minlev==self%ML_hcurl%level).OR.have_rst)THEN ! Lowest level uses diag precond
+  NULLIFY(wop)
+  CALL oft_hcurl_getwop(self%ML_hcurl%current_level,wop,'zerob')
+  CALL create_diag_pre(winv%pre)
+ELSE ! Nested levels use MG
+  CALL hcurl_getwop_pre(self%ML_hcurl,winv%pre,ml_wop,nlevels=self%ML_hcurl%level-self%minlev+1)
+  wop=>ml_wop(self%ML_hcurl%level-self%minlev+1)%M
+END IF
+!---------------------------------------------------------------------------
+! Create H(Curl)::WOP solver
+!---------------------------------------------------------------------------
+winv%A=>wop
+winv%its=-3
+winv%atol=1.d-9
+SELECT TYPE(this=>winv)
+CLASS IS(oft_native_cg_solver)
+    this%cleaner=>hcurl_divout
+  CLASS DEFAULT
+    CALL oft_abort('Error allocating winv solver', 'taylor_vac_curr', __FILE__)
+END SELECT
+!---------------------------------------------------------------------------
+! Create H(Curl) divergence cleaner
+!---------------------------------------------------------------------------
+CALL self%ML_lagrange%set_level(MIN(self%ML_hcurl%level,self%ML_lagrange%ml_mesh%mgdim))
+CALL oft_lag_getlop(self%ML_lagrange%current_level,lop_lag,"zerob")
+CALL create_cg_solver(linv_lag)
+linv_lag%A=>lop_lag
+!linv_lag%its=-2
+CALL create_diag_pre(linv_lag%pre)
+linv_lag%its=40
+hcurl_divout%solver=>linv_lag
+! hcurl_divout%bc=>lag_zerob
+CALL hcurl_divout%setup(self%ML_hcurl,self%ML_lagrange,bc='zero',solver=linv_lag)
+hcurl_divout%app_freq=2
+CALL oft_hcurl_getmop(self%ML_hcurl%current_level,mop_hcurl,'zerob')
+hcurl_divout%mop=>mop_hcurl
+!---------------------------------------------------------------------------
+!
+!---------------------------------------------------------------------------
+NULLIFY(tmp)
+!---Get H(Curl) + Grad(H^1) mass matrix
+CALL hcurl_grad_getmop(self%ML_hcurl_grad%current_level,mop,'none')
+!---Allocate vacuum and current field containers
+ALLOCATE(self%hcur(self%nh))
+!---Create temporary H(Curl) vector
+CALL self%ML_hcurl%vec_create(b)
+!---Loop over cut planes
+DO i=1,self%nh
 !---------------------------------------------------------------------------
 ! Compute current field
 !---------------------------------------------------------------------------
   !---Use vacuum field as source term
-  call tmp%scale(1.d0/venergy)
+  u=>self%hvac(i)%f
+  IF(.NOT.ASSOCIATED(tmp))CALL u%new(tmp)
+  CALL mop%apply(u,tmp)
   call self%ML_hcurl%vec_create(self%hcur(i)%f)
   u=>self%hcur(i)%f
   have_rst=.FALSE.
@@ -683,13 +801,11 @@ DO i=1,self%nh
   hcurl_divout%pm=.TRUE.
   CALL hcurl_divout%apply(u)
   !---
-  IF(PRESENT(hmodes))THEN
-    DO j=1,hmodes%nm
-      CALL wop%apply(hmodes%hffa(j,self%ML_hcurl%level)%f,b)
-      venergy = u%dot(b)
-      IF(oft_env%head_proc)WRITE(*,'(A,I3,A,E10.3)')'Mode ',j,' Coupling = ',venergy
-    END DO
-  END IF
+  DO j=1,hmodes%nm
+    CALL wop%apply(hmodes%hffa(j,self%ML_hcurl%level)%f,b)
+    venergy = u%dot(b)
+    IF(oft_env%head_proc)WRITE(*,'(A,I3,A,E10.3)')'Mode ',j,' Coupling = ',venergy
+  END DO
 !---------------------------------------------------------------------------
 ! Write restart file
 !---------------------------------------------------------------------------
@@ -716,17 +832,6 @@ IF(ASSOCIATED(ml_wop))THEN
   END DO
   DEALLOCATE(ml_wop)
 END IF
-IF(ASSOCIATED(ml_lop))THEN
-  DO i=1,SIZE(ml_lop)
-    CALL ml_lop(i)%M%delete
-    DEALLOCATE(ml_lop(i)%M)
-  END DO
-  DEALLOCATE(ml_lop)
-END IF
-CALL linv%pre%delete
-DEALLOCATE(linv%pre)
-CALL linv%delete
-DEALLOCATE(linv)
 CALL winv%pre%delete
 DEALLOCATE(winv%pre)
 CALL winv%delete
@@ -737,7 +842,7 @@ CALL linv_lag%delete
 DEALLOCATE(linv_lag)
 CALL self%ML_lagrange%set_level(self%ML_lagrange%nlevels)
 DEBUG_STACK_POP
-end subroutine taylor_vacuum
+end subroutine taylor_vac_curr
 !---------------------------------------------------------------------------
 !> Compute force-free plasma response to external fields generated by @ref
 !! taylor::taylor_injectors "taylor_injectors"
@@ -770,6 +875,9 @@ type(oft_lag_zerob), target :: lag_zerob
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%hcpc))CALL oft_abort("Vacuum fields not available", &
 "taylor_injectors", __FILE__)
+!
+IF(.NOT.ASSOCIATED(self%hcur))CALL taylor_vac_curr(self,hmodes,rst_filename)
+WRITE(*,*)'Inj curr done'
 !
 save_rst=.FALSE.
 IF(PRESENT(rst_filename))save_rst=.TRUE.
@@ -1060,8 +1168,6 @@ end subroutine taylor_injector_single
 !> Setup interpolator for composite Taylor state fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_taylor_rinterp or children
 !---------------------------------------------------------------------------
 subroutine taylor_rinterp_setup1(self,hcurl_grad_rep)
 class(oft_taylor_rinterp), intent(inout) :: self
@@ -1090,8 +1196,6 @@ end subroutine taylor_rinterp_setup1
 !> Setup interpolator for composite Taylor state fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_taylor_rinterp or children
 !---------------------------------------------------------------------------
 subroutine taylor_rinterp_setup2(self,hcurl_rep,hgrad_rep)
 class(oft_taylor_rinterp), intent(inout) :: self

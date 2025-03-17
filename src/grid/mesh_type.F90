@@ -155,7 +155,7 @@ TYPE, PUBLIC, ABSTRACT :: oft_amesh
   INTEGER(i4) :: cad_type = 1 !< Type of CAD geometry
   INTEGER(i4) :: type = 0 !< Mesh type
   INTEGER(i4) :: order = 1 !< order of boundary tets (default=linear)
-  INTEGER(i4) :: tess_order = 1 !< order of boundary tets (default=linear)
+  INTEGER(i4) :: tess_order = 0 !< order of boundary tets (default=linear)
   INTEGER(i4) :: cell_np = 0 !< Number of points per cell
   INTEGER(i4) :: cell_ne = 0 !< Number of edged per cell
   INTEGER(i4) :: np = 0 !< Number of points
@@ -802,6 +802,7 @@ DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Writing mesh to plot files'
 CALL oft_increase_indent
 self%tess_order=tess_order
+self%bmesh%tess_order=tess_order
 !---Get grid tessellation
 CALL self%tessellate(rtmp, lctmp, self%tess_order)
 IF(TRIM(self%meshname)=='none')self%meshname='vmesh'
@@ -915,8 +916,6 @@ DEBUG_STACK_POP
 end subroutine mesh_save_cell_vector
 !---------------------------------------------------------------------------
 !> Destroy mesh object
-!!
-!! @note Should only be used via class \ref tri_mesh or children
 !---------------------------------------------------------------------------
 SUBROUTINE mesh_destroy(self)
 CLASS(oft_mesh), INTENT(inout) :: self
@@ -941,6 +940,7 @@ IF(ASSOCIATED(self%lcfo))DEALLOCATE(self%lcfo)
 IF(ASSOCIATED(self%cv))DEALLOCATE(self%cv)
 IF(ASSOCIATED(self%vv))DEALLOCATE(self%vv)
 !---
+NULLIFY(self%fstitch%be,self%fstitch%lbe)
 CALL destory_seam(self%fstitch)
 IF(ASSOCIATED(self%tloc_f))THEN
   DO i=1,self%nparts

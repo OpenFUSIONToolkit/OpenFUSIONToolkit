@@ -217,9 +217,7 @@ end subroutine tensor_dot_interp_apply
 !> Setup composite interpolator for a matrix-vector product
 !!
 !! Allocates local interpolation objects. Setup of component fields must be
-!! called separately before the interpolator may be used.
-!!
-!! @note Should only be used via class @ref tensor_dot_interp or children
+!! called separately before the interpolator may be used
 !---------------------------------------------------------------------------
 subroutine tensor_dot_interp_setup(self,mesh)
 class(tensor_dot_interp), intent(inout) :: self
@@ -229,8 +227,6 @@ IF(.NOT.ASSOCIATED(self%bvals))ALLOCATE(self%bvals(3*self%bshape))
 end subroutine tensor_dot_interp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!!
-!! @note Should only be used via class @ref tensor_dot_interp or children
 !---------------------------------------------------------------------------
 subroutine tensor_dot_interp_delete(self)
 class(tensor_dot_interp), intent(inout) :: self

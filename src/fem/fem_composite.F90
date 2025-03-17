@@ -11,7 +11,7 @@
 !---------------------------------------------------------------------------
 MODULE fem_composite
 USE oft_base
-USE oft_stitching, ONLY: oft_seam, seam_list
+USE oft_stitching, ONLY: oft_seam, seam_list, destory_seam
 USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file, &
   hdf5_field_exist
 !---
@@ -56,6 +56,8 @@ CONTAINS
   PROCEDURE :: mat_zero_local_rows => fem_mat_zero_local_rows
   !> Create matrix for FE representation
   PROCEDURE :: mat_add_local => fem_mat_add_local
+  !> Destroy object
+  PROCEDURE :: delete => fem_comp_delete
 END TYPE oft_fem_comp_type
 !---------------------------------------------------------------------------
 !> Composite FE type pointer container
@@ -81,6 +83,8 @@ TYPE, PUBLIC :: oft_ml_fem_comp_type
 CONTAINS
   !> Setup composite FE structure from sub-field FE definitions
   PROCEDURE :: setup => ml_fem_setup
+  !> Destroy object
+  PROCEDURE :: delete => ml_fem_comp_delete
   !> Create vector for FE representation
   PROCEDURE :: vec_create => ml_fem_vec_create
   !> Build interpolation operators from sub-fields
@@ -521,6 +525,32 @@ end subroutine fem_mat_add_local
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
+subroutine fem_comp_delete(self)
+class(oft_fem_comp_type), intent(inout) :: self
+! NULLIFY(self%linkage%be,self%linkage%lbe)
+IF(ASSOCIATED(self%linkage))THEN
+  CALL destory_seam(self%linkage)
+  DEALLOCATE(self%linkage)
+END IF
+!---
+IF(ASSOCIATED(self%map))THEN
+  DEALLOCATE(self%map)
+  ! IF(ASSOCIATED(self%map%gbe))DEALLOCATE(self%map%gbe)
+  ! IF(ASSOCIATED(self%map%slice))DEALLOCATE(self%map%slice)
+  ! IF(ASSOCIATED(self%map%lge))DEALLOCATE(self%map%lge)
+END IF
+IF(ASSOCIATED(self%cache_PETSc))THEN
+  CALL self%cache_PETSc%delete()
+  DEALLOCATE(self%cache_PETSc)
+END IF
+IF(ASSOCIATED(self%cache_native))THEN
+  CALL self%cache_native%delete()
+  DEALLOCATE(self%cache_native)
+END IF
+end subroutine fem_comp_delete
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
 subroutine ml_fem_setup(self)
 class(oft_ml_fem_comp_type), intent(inout) :: self
 type(oft_fem_comp_type), pointer :: fe_tmp
@@ -542,6 +572,28 @@ self%level=self%nlevels
 self%current_level=>self%levels(self%level)%fe
 DEBUG_STACK_POP
 end subroutine ml_fem_setup
+!---------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------
+subroutine ml_fem_comp_delete(self)
+class(oft_ml_fem_comp_type), intent(inout) :: self
+INTEGER(i4) :: i
+DO i=self%minlev,self%nlevels
+  IF(ASSOCIATED(self%levels(i)%fe))THEN
+    CALL self%levels(i)%fe%delete()
+    DEALLOCATE(self%levels(i)%fe)
+  END IF
+  IF(ASSOCIATED(self%interp_matrices(i)%m))THEN
+    CALL self%interp_matrices(i)%m%delete()
+    DEALLOCATE(self%interp_matrices(i)%m)
+  END IF
+END DO
+IF(ASSOCIATED(self%field_tags))DEALLOCATE(self%field_tags)
+IF(ASSOCIATED(self%ml_fields))DEALLOCATE(self%ml_fields)
+NULLIFY(self%current_level)
+self%nlevels=0
+self%minlev=1
+end subroutine ml_fem_comp_delete
 !---------------------------------------------------------------------------
 !> Create weight vector for FE representation
 !---------------------------------------------------------------------------

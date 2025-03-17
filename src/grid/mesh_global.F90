@@ -1548,7 +1548,7 @@ END DO
 IF(self%pstitch%kle(1)/=1)CALL oft_abort('Bad point linkage count','tetmesh_global_plinkage',__FILE__)
 !---
 ALLOCATE(self%pstitch%lle(2,self%pstitch%nle),self%pstitch%leo(parent%nbp))
-ALLOCATE(self%pstitch%send(self%pstitch%nproc_con),self%pstitch%recv(self%pstitch%nproc_con))
+ALLOCATE(self%pstitch%send(0:self%pstitch%nproc_con),self%pstitch%recv(0:self%pstitch%nproc_con))
 !---
 !!$omp do
 DO i=1,self%pstitch%nproc_con
@@ -1631,7 +1631,7 @@ END DO
 IF(self%estitch%kle(1)/=1)CALL oft_abort('Bad point linkage count','tetmesh_global_plinkage',__FILE__)
 !---
 ALLOCATE(self%estitch%lle(2,self%estitch%nle),self%estitch%leo(parent%nbe))
-ALLOCATE(self%estitch%send(self%estitch%nproc_con),self%estitch%recv(self%estitch%nproc_con))
+ALLOCATE(self%estitch%send(0:self%estitch%nproc_con),self%estitch%recv(0:self%estitch%nproc_con))
 !---
 !!$omp do
 DO i=1,self%estitch%nproc_con

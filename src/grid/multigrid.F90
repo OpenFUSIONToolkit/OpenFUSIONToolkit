@@ -1081,21 +1081,25 @@ IF(ASSOCIATED(mg_mesh%smeshes))THEN
   DO i=1,mg_mesh%mgmax
     CALL mg_mesh%smeshes(i)%delete()
   END DO
+  DEALLOCATE(mg_mesh%smeshes)
 END IF
 IF(ASSOCIATED(mg_mesh%meshes))THEN
   DO i=1,mg_mesh%mgmax
     CALL mg_mesh%meshes(i)%delete()
   END DO
+  DEALLOCATE(mg_mesh%meshes)
 END IF
 IF(ASSOCIATED(mg_mesh%sinter))THEN
   DO i=1,mg_mesh%mgmax
     CALL destory_inter(mg_mesh%sinter(i))
   END DO
+  DEALLOCATE(mg_mesh%sinter)
 END IF
 IF(ASSOCIATED(mg_mesh%inter))THEN
   DO i=1,mg_mesh%mgmax
     CALL destory_inter(mg_mesh%inter(i))
   END DO
+  DEALLOCATE(mg_mesh%inter)
 END IF
 ! DEALLOCATE(mg_mesh)
 !---Reset global environment info (needs to be moved to a mesh-specific object)

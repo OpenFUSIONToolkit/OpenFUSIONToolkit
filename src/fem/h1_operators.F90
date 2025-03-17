@@ -117,8 +117,6 @@ end subroutine h1_mloptions
 !> Setup interpolator for H^1 scalar fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_h1_rinterp or children
 !---------------------------------------------------------------------------
 subroutine rinterp_setup(self,h1_rep)
 class(oft_h1_rinterp), intent(inout) :: self
@@ -130,8 +128,6 @@ CALL self%u%get_local(self%vals)
 end subroutine rinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!!
-!! @note Should only be used via class \ref oft_h1_rinterp or children
 !---------------------------------------------------------------------------
 subroutine rinterp_delete(self)
 class(oft_h1_rinterp), intent(inout) :: self
