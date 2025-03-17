@@ -18,7 +18,7 @@ marklin_compute_eig = ctypes_subroutine(oftpy_lib.marklin_compute_eig,
 
 # marklin_compute_vac(marklin_ptr,nh,hcpc,hcpv,save_rst,error_str)
 marklin_compute_vac = ctypes_subroutine(oftpy_lib.marklin_compute_vac,
-    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_char_p])
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_char_p, c_char_p])
 
 # marklin_compute_pardiff(marklin_ptr,int_obj,int_type,k_perp,error_str)
 marklin_compute_pardiff = ctypes_subroutine(oftpy_lib.marklin_compute_pardiff,

@@ -182,13 +182,13 @@ class Marklin():
         self.nm = nmodes
         self.eig_vals = eig_vals
     
-    def compute_vac(self,nh,hcpc,hcpv,save_rst=True):
+    def compute_vac(self,nh,hcpc,hcpv,cache_file=None):
         r'''! Compute vacuum field with specified fluxes through jump planes
 
         @param nh Number of jump planes
         @param hcpc Plane specification points
         @param hcpv Plane specification vectors
-        @param save_rst Save restart files? 
+        @param cache_file Path to cache file to store/load modes
         '''
         if hcpc.shape[0] != nh:
             raise ValueError('Inconsistent sizes for "hcpc[0]" != {0}'.format(nh))
@@ -198,10 +198,14 @@ class Marklin():
             raise ValueError('Inconsistent sizes for "hcpv[0]" != {0}'.format(nh))
         if hcpv.shape[1] != 3:
             raise ValueError('Inconsistent sizes for "hcpv[0]" != {0}'.format(3))
-        cstring = c_char_p(b""*200)
-        marklin_compute_vac(self._marklin_ptr,nh,hcpc,hcpv,save_rst,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        if cache_file is None:
+            cache_string = self._oft_env.path2c("")
+        else:
+            cache_string = self._oft_env.path2c(cache_file)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_compute_vac(self._marklin_ptr,nh,hcpc,hcpv,cache_string,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         self.nh = nh
         self.hcpc = hcpc
         self.hcpv = hcpv

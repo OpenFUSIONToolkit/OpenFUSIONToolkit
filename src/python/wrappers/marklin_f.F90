@@ -166,12 +166,12 @@ END SUBROUTINE marklin_compute_eig
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE marklin_compute_vac(marklin_ptr,nh,hcpc,hcpv,save_rst,error_str) BIND(C,NAME="marklin_compute_vac")
+SUBROUTINE marklin_compute_vac(marklin_ptr,nh,hcpc,hcpv,cache_file,error_str) BIND(C,NAME="marklin_compute_vac")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nh !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hcpc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hcpv !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: save_rst !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()
@@ -183,7 +183,7 @@ REAL(r8), POINTER, DIMENSION(:,:) :: hcpc_tmp,hcpv_tmp
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 CLASS(oft_vector), POINTER :: u,v,check
 TYPE(marklin_obj), POINTER :: self
-CHARACTER(LEN=3) :: pltnum
+CHARACTER(LEN=OFT_PATH_SLEN) :: rst_filename = ''
 !---Clear error flag
 CALL copy_string('',error_str)
 IF(.NOT.c_associated(marklin_ptr))THEN
@@ -192,9 +192,10 @@ IF(.NOT.c_associated(marklin_ptr))THEN
 END IF
 CALL c_f_pointer(marklin_ptr,self)
 !---Build FE spaces if not yet built
-IF(self%ML_hcurl_grad%nlevels==0)THEN
+IF(.NOT.ASSOCIATED(self%ML_hcurl_grad))THEN
+  ALLOCATE(self%ML_h1,self%ML_hcurl_grad,self%ML_h1grad)
   !---Grad(H^1) subspace
-  CALL oft_h1_setup(self%ml_mesh,self%ML_hcurl%current_level%order+1,self%ML_h1,minlev=self%ML_hcurl%minlev+1)
+  CALL oft_h1_setup(self%ml_mesh,self%ML_hcurl%current_level%order+1,self%ML_h1,minlev=self%ML_hcurl%minlev)
   !---Full H(Curl) + Grad(H^1) space
   CALL oft_hcurl_grad_setup(self%ML_hcurl,self%ML_h1,self%ML_hcurl_grad,self%ML_h1grad,self%ML_hcurl%minlev)
   !---MG setup
@@ -209,11 +210,13 @@ END IF
 oft_env%pm=.TRUE.
 CALL c_f_pointer(hcpc, hcpc_tmp, [3,nh])
 CALL c_f_pointer(hcpv, hcpv_tmp, [3,nh])
-CALL self%ff_obj%setup(nh,hcpc_tmp,hcpv_tmp)
-IF(save_rst)THEN
+CALL self%ff_obj%setup(nh,hcpc_tmp,hcpv_tmp,ML_hcurl=self%ML_hcurl,ML_h1=self%ML_h1,ML_hcurl_grad=self%ML_hcurl_grad, &
+  ML_h1grad=self%ML_h1grad,ML_lagrange=self%ML_lagrange,minlev=self%minlev)
+CALL copy_string_rev(cache_file,rst_filename)
+IF(TRIM(rst_filename)=='')THEN
   CALL taylor_vacuum(self%ff_obj)
 ELSE
-  CALL taylor_vacuum(self%ff_obj,rst_filename='marklin_inj.rst')
+  CALL taylor_vacuum(self%ff_obj,rst_filename=rst_filename)
 END IF
 END SUBROUTINE marklin_compute_vac
 !------------------------------------------------------------------------------
@@ -395,7 +398,8 @@ REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 TYPE(oft_h1_zerob), TARGET :: h1_zerob
 IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
-IF(self%ML_hcurl_grad%nlevels==0)THEN
+IF(.NOT.ASSOCIATED(self%ML_hcurl_grad))THEN
+  ALLOCATE(self%ML_h1,self%ML_hcurl_grad,self%ML_h1grad)
   !---Grad(H^1) subspace
   CALL oft_h1_setup(self%ml_mesh,self%ML_hcurl%current_level%order+1,self%ML_h1,minlev=self%ML_hcurl%minlev+1)
   CALL h1_setup_interp(self%ML_h1)
