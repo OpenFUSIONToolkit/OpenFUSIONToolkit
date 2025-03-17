@@ -212,7 +212,7 @@ END SUBROUTINE tokamaker_setup_regions
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_reset(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_reset")
+SUBROUTINE tokamaker_destroy(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_destroy")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
@@ -237,7 +237,7 @@ IF(ASSOCIATED(tMaker_obj%ml_mesh))THEN
   DEALLOCATE(tMaker_obj%ml_mesh)
 END IF
 DEALLOCATE(tMaker_obj)
-END SUBROUTINE tokamaker_reset
+END SUBROUTINE tokamaker_destroy
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

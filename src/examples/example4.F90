@@ -1,16 +1,16 @@
-!!Taylor Example 2: Inhomogeneous Ideal MHD Equilibria    {#doc_tay_ex2}
+!!Marklin Example: Inhomogeneous Ideal MHD Equilibria    {#doc_marklin_ex2}
 !!=============================================
 !!
 !![TOC]
 !!
 !! This example shows how to use the \ref taylor "Taylor State" physics module
 !! and mesh cut planes to compute Inhomogeneous Ideal MHD Equilibria with uniform
-!! \f$\lambda\f$. The code computes a composite Taylor state in HIT-SI with a flux
+!! \f$ \lambda \f$. The code computes a composite Taylor state in HIT-SI with a flux
 !! ratio of 6.
 !!
-!!\section doc_ex4_code Code Walk Through
+!!\section doc_marklin_ex2_code Code Walk Through
 !!
-!!\subsection doc_ex4_code_inc Module Includes
+!!\subsection doc_marklin_ex2_code_inc Module Includes
 !!
 !!
 ! START SOURCE
@@ -69,7 +69,7 @@ TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_comp_type) :: ML_vlagrange
 TYPE(oft_taylor_hmodes) :: hmodes
 TYPE(oft_taylor_ifield) :: ff_obj
-!!\subsection doc_ex4_code_grid Setup Grid
+!!\subsection doc_marklin_ex2_code_grid Setup Grid
 !!
 !!As in the previous \ref ex1 "examples" the runtime environment, grid and plotting
 !!files must be setup before the FE setup begins.
@@ -79,7 +79,7 @@ CALL oft_init
 CALL multigrid_construct(mg_mesh)
 CALL plot_file%setup("Example4")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
-!!\subsection doc_ex4_code_fem Setup FE Types
+!!\subsection doc_marklin_ex2_code_fem Setup FE Types
 !!
 !!As in \ref ex2 "example 2" we construct the finite element space, MG vector cache, and interpolation
 !!operators. In this case the setup procedure is done for each required finite element space.
@@ -103,7 +103,7 @@ CALL hcurl_mloptions(hmodes%ML_hcurl)
 !--- Full H(Curl) space
 ALLOCATE(ff_obj%ML_hcurl_grad,ff_obj%ML_h1grad)
 CALL oft_hcurl_grad_setup(hmodes%ML_hcurl,ff_obj%ML_H1,ff_obj%ML_hcurl_grad,ff_obj%ML_h1grad)
-!!\subsection doc_ex4_code_taylor Compute Taylor state
+!!\subsection doc_marklin_ex2_code_taylor Compute Taylor state
 !!
 !!For composite Taylor states the lowest eigenmode is used used in addition to the injector fields. This
 !!is possible in HIT-SI due to decoupling of the injector vacuum field and lowest eigenmode. The lowest
@@ -112,7 +112,7 @@ hmodes%minlev=1
 IF(oft_env%nprocs>1)hmodes%minlev=2
 ff_obj%minlev=hmodes%minlev
 CALL taylor_hmodes(hmodes,1)
-!!\subsection doc_ex4_code_jumps Injector Cut Planes
+!!\subsection doc_marklin_ex2_code_jumps Injector Cut Planes
 !!
 !!The ideal MHD equilibrium solvers with inhomogeneous source terms require vacuum fields to use as the
 !!external source term. For HIT-SI the \ref taylor::taylor_vacuum "taylor_vacuum" can be used to compute
@@ -129,7 +129,7 @@ htags(1)='Xinj'
 hcpc(:,2)=(/.0,.0,.6/)
 hcpv(:,2)=(/.0,-5.,.0/)
 htags(2)='Yinj'
-!!\subsection doc_ex4_code_inj Compute Inhomogeneous state
+!!\subsection doc_marklin_ex2_code_inj Compute Inhomogeneous state
 !!
 !!With cut planes specified, the injector equilibrium can then be compute using the \ref taylor::taylor_vacuum
 !!"taylor_vacuum" and \ref taylor::taylor_injectors "taylor_injectors" subroutines. \ref taylor::taylor_injectors
@@ -157,7 +157,7 @@ CALL Bfield%ua%add(0.d0,fr/hmodes%htor(1,hmodes%ML_hcurl%level),hmodes%hffa(1,hm
 DO i=1,nh
   CALL Bfield%ua%add(1.d0,fluxes(i),ff_obj%gffa(i)%f)
 END DO
-!!\subsection doc_ex4_code_project Project Solution for Plotting
+!!\subsection doc_marklin_ex2_code_project Project Solution for Plotting
 !!
 !!With the interpolation operator defined the field can be projected to a Lagrange basis for plotting as in
 !!\ref ex3 "example 3".
@@ -187,7 +187,7 @@ CALL u%get_local(vals,2)
 vals=>bvout(3,:)
 CALL u%get_local(vals,3)
 call mg_mesh%mesh%save_vertex_vector(bvout,plot_file,'B')
-!!\subsection doc_ex4_code_poincare Create Poincare section
+!!\subsection doc_marklin_ex2_code_poincare Create Poincare section
 !!
 !! Poincare sections can be created using the subroutine \ref tracing::tracing_poincare
 !! "tracing_poincare". This subroutine requires a tracing object, which is used to advance
@@ -224,7 +224,7 @@ CALL oft_finalize
 END PROGRAM example4
 ! STOP SOURCE
 !!
-!!\section doc_ex4_input Input file
+!!\section doc_marklin_ex2_input Input file
 !!
 !!Below is an input file which can be used with this example in a serial environment.
 !!
@@ -264,7 +264,7 @@ END PROGRAM example4
 !!/
 !!\endverbatim
 !!
-!!\subsection doc_ex4_input_mpi Parallel input file
+!!\subsection doc_marklin_ex2_input_mpi Parallel input file
 !!
 !!The input file below will provide the same preconditioner as the serial example, but can
 !!be run in parallel.

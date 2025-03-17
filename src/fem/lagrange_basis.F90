@@ -1622,8 +1622,6 @@ DEBUG_STACK_POP
 end subroutine oft_blag_npos
 !---------------------------------------------------------------------------
 !> Destroy boundary FE object
-!!
-!! @note Should only be used via class \ref oft_bfem_type or children
 !---------------------------------------------------------------------------
 SUBROUTINE scalar_bfem_delete(self)
 CLASS(oft_scalar_bfem), INTENT(inout) :: self
@@ -1635,9 +1633,7 @@ IF(ASSOCIATED(self%xnodes))DEALLOCATE(self%xnodes)
 DEBUG_STACK_POP
 END SUBROUTINE scalar_bfem_delete
 !---------------------------------------------------------------------------
-!> Destroy boundary FE object
-!!
-!! @note Should only be used via class \ref oft_bfem_type or children
+!> Destroy FE object
 !---------------------------------------------------------------------------
 SUBROUTINE scalar_fem_delete(self)
 CLASS(oft_scalar_fem), INTENT(inout) :: self

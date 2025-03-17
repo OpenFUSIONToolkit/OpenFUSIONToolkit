@@ -180,8 +180,6 @@ end subroutine hcurl_mloptions
 !> Setup interpolator for H(Curl) fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_hcurl_rinterp or children
 !---------------------------------------------------------------------------
 subroutine hcurl_rinterp_setup(self,hcurl_rep)
 class(oft_hcurl_rinterp), intent(inout) :: self
@@ -199,8 +197,6 @@ CALL self%u%get_local(self%vals)
 end subroutine hcurl_rinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!!
-!! @note Should only be used via class \ref oft_hcurl_rinterp or children
 !---------------------------------------------------------------------------
 subroutine hcurl_rinterp_delete(self)
 class(oft_hcurl_rinterp), intent(inout) :: self
@@ -958,8 +954,6 @@ DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_bcurl
 !---------------------------------------------------------------------------
 !> Setup matrix and solver with default
-!!
-!! @note Should only be used via class \ref oft_hcurl_divout
 !---------------------------------------------------------------------------
 subroutine hcurl_divout_setup(self,ML_hcurl_rep,ML_lag_rep,bc,solver)
 class(oft_hcurl_divout), intent(inout) :: self
@@ -1001,8 +995,6 @@ DEBUG_STACK_POP
 end subroutine hcurl_divout_setup
 !---------------------------------------------------------------------------
 !> Remove divergence from a H(Curl) vector field by adding a gradient correction
-!!
-!! @note Should only be used via class \ref oft_hcurl_divout
 !---------------------------------------------------------------------------
 subroutine hcurl_divout_apply(self,a)
 class(oft_hcurl_divout), intent(inout) :: self
@@ -1056,8 +1048,6 @@ DEBUG_STACK_POP
 end subroutine hcurl_divout_apply
 !---------------------------------------------------------------------------
 !> Clean-up internal storage for a oft_hcurl_divout object
-!!
-!! @note Should only be used via class \ref oft_hcurl_divout
 !---------------------------------------------------------------------------
 subroutine hcurl_divout_delete(self)
 class(oft_hcurl_divout), intent(inout) :: self

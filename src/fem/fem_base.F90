@@ -157,6 +157,8 @@ CONTAINS
   PROCEDURE :: vec_create => ml_fem_vec_create
   !> Set level in ML framework if available
   PROCEDURE :: set_level => ml_fem_set_level
+  !> Destory FE type
+  PROCEDURE :: delete => ml_fem_delete
 END TYPE oft_ml_fem_type
 !---------------------------------------------------------------------------
 !> Needs docs
@@ -1051,9 +1053,7 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine fem_setup
 !---------------------------------------------------------------------------
-!> Destroy boundary FE object
-!!
-!! @note Should only be used via class \ref oft_bfem_type or children
+!> Destroy FE object
 !---------------------------------------------------------------------------
 SUBROUTINE fem_delete(self)
 CLASS(oft_fem_type), INTENT(inout) :: self
@@ -1677,6 +1677,32 @@ end if
 DEBUG_STACK_POP
 end subroutine ml_fem_set_level
 !---------------------------------------------------------------------------
+!> Destroy boundary multi-level FE object
+!---------------------------------------------------------------------------
+SUBROUTINE ml_fem_delete(self)
+CLASS(oft_ml_fem_type), INTENT(inout) :: self
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+DO i=self%minlev,self%nlevels
+  IF(ASSOCIATED(self%levels(i)%fe))THEN
+    CALL self%levels(i)%fe%delete()
+    DEALLOCATE(self%levels(i)%fe)
+  END IF
+  IF(ASSOCIATED(self%interp_matrices(i)%m))THEN
+    CALL self%interp_matrices(i)%m%delete()
+    DEALLOCATE(self%interp_matrices(i)%m)
+  END IF
+  IF(ASSOCIATED(self%interp_graphs(i)%g))THEN
+    ! TODO: Perform actual deallocation
+    DEALLOCATE(self%interp_graphs(i)%g)
+  END IF
+END DO
+NULLIFY(self%ml_mesh,self%current_level)
+self%nlevels=0
+self%minlev=1
+DEBUG_STACK_POP
+END SUBROUTINE ml_fem_delete
+!---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
 subroutine ml_fe_vecspace_create(self,new,level,cache,native)
@@ -1882,8 +1908,6 @@ DEBUG_STACK_POP
 end subroutine bfem_setup
 !---------------------------------------------------------------------------
 !> Destroy boundary FE object
-!!
-!! @note Should only be used via class \ref oft_bfem_type or children
 !---------------------------------------------------------------------------
 SUBROUTINE bfem_delete(self)
 CLASS(oft_bfem_type), INTENT(inout) :: self

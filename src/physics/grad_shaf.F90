@@ -3328,7 +3328,7 @@ SELECT CASE(ierr)
   CASE(-8)
     err_reason='Wall eigenmode flux loop fitting failed'
   CASE DEFAULT
-    err_reason='Unkown reason'
+    err_reason='Unknown reason'
 END SELECT
 end function gs_err_reason
 !---------------------------------------------------------------------------
@@ -5186,7 +5186,7 @@ SELECT CASE(self%mode)
       val(1)=0.d0
     END IF
   CASE DEFAULT
-    CALL oft_abort('Unkown field mode','gs_prof_interp_apply',__FILE__)
+    CALL oft_abort('Unknown field mode','gs_prof_interp_apply',__FILE__)
 END SELECT
 end subroutine gs_prof_interp_apply
 !---------------------------------------------------------------------------

@@ -511,7 +511,7 @@ SELECT CASE(info)
   CASE(8)
     exit_reason='gtol is too small. No further reduction possible'
   CASE DEFAULT
-    exit_reason='Unkown reason'
+    exit_reason='Unknown reason'
 END SELECT
 end function minpack_exit_reason
 END SUBROUTINE fit_gs

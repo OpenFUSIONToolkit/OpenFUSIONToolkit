@@ -664,15 +664,19 @@ IF(ASSOCIATED(self%lle))DEALLOCATE(self%lle)
 !---
 IF(ASSOCIATED(self%send))THEN
   DO i=0,self%nproc_con
-    DEALLOCATE(self%send(i)%v)
-    DEALLOCATE(self%recv(i)%v)
+    IF(ASSOCIATED(self%send(i)%v))THEN
+      DEALLOCATE(self%send(i)%v)
+      DEALLOCATE(self%recv(i)%v)
+    END IF
   END DO
   DEALLOCATE(self%send,self%recv)
 END IF
 IF(ASSOCIATED(self%csend))THEN
   DO i=0,self%nproc_con
-    DEALLOCATE(self%csend(i)%v)
-    DEALLOCATE(self%crecv(i)%v)
+    IF(ASSOCIATED(self%csend(i)%v))THEN
+      DEALLOCATE(self%csend(i)%v)
+      DEALLOCATE(self%crecv(i)%v)
+    END IF
   END DO
   DEALLOCATE(self%csend,self%crecv)
 END IF
