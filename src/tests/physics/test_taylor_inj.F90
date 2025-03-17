@@ -85,7 +85,6 @@ CALL ff_obj%setup(nh,hcpc,hcpv,htags)
 ff_obj%jtol=1.d-4
 oft_env%pm=.FALSE.
 CALL taylor_vacuum(ff_obj,energy=energy,hmodes=hmodes,rst_filename='oft_taylor.rst')
-WRITE(*,*)'Hi'
 CALL taylor_injectors(ff_obj,hmodes,5.d0,rst_filename='oft_taylor.rst')
 comps(1) = ff_obj%hvac(1)%f%dot(ff_obj%hvac(1)%f)
 comps(2) = ff_obj%hcur(1)%f%dot(ff_obj%hcur(1)%f)
