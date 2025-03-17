@@ -200,8 +200,6 @@ end subroutine hcurl_grad_mloptions
 !> Setup interpolator for H(Curl) + Grad(H^1) vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_hcurl_grad_rinterp or children
 !---------------------------------------------------------------------------
 subroutine rinterp_setup1(self,hcurl_grad_rep)
 class(oft_hcurl_grad_rinterp), intent(inout) :: self
@@ -251,8 +249,6 @@ end subroutine rinterp_setup1
 !> Setup interpolator for H(Curl) + Grad(H^1) vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_hcurl_grad_rinterp or children
 !---------------------------------------------------------------------------
 subroutine rinterp_setup2(self,hcurl_rep,hgrad_rep)
 class(oft_hcurl_grad_rinterp), intent(inout) :: self
@@ -301,8 +297,6 @@ END IF
 end subroutine rinterp_setup2
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!!
-!! @note Should only be used via class \ref oft_hcurl_grad_rinterp or children
 !---------------------------------------------------------------------------
 subroutine rinterp_delete(self)
 class(oft_hcurl_grad_rinterp), intent(inout) :: self
@@ -1249,8 +1243,6 @@ DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_grad_bproject
 !---------------------------------------------------------------------------
 !> Setup matrix and solver with default
-!!
-!! @note Should only be used via class \ref oft_hcurl_grad_divout
 !---------------------------------------------------------------------------
 subroutine divout_setup(self,ML_hcurl_grad_rep,bc,solver)
 class(oft_hcurl_grad_divout), intent(inout) :: self
@@ -1298,8 +1290,6 @@ DEBUG_STACK_POP
 end subroutine divout_setup
 !---------------------------------------------------------------------------
 !> Remove divergence from a H(Curl) + Grad(H^1) vector field by adding a gradient correction
-!!
-!! @note Should only be used via class \ref oft_hcurl_grad_divout
 !---------------------------------------------------------------------------
 subroutine divout_apply(self,a)
 class(oft_hcurl_grad_divout), intent(inout) :: self
@@ -1354,8 +1344,6 @@ DEBUG_STACK_POP
 end subroutine divout_apply
 !---------------------------------------------------------------------------
 !> Clean-up internal storage for a oft_hcurl_grad_divout object
-!!
-!! @note Should only be used via class \ref oft_hcurl_grad_divout
 !---------------------------------------------------------------------------
 subroutine divout_delete(self)
 class(oft_hcurl_grad_divout), intent(inout) :: self

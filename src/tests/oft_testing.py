@@ -3,8 +3,8 @@ import time
 import os
 import pytest
 
-def run_command(command):
-    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def run_command(command, cwd=None):
+    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
     outs, errs = pid.communicate()
     errcode = pid.poll()
     return outs, errs, errcode

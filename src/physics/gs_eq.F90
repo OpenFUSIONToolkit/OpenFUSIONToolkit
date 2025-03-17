@@ -52,8 +52,6 @@ CONTAINS
 !> Setup interpolator for Grad-Shafranov fields
 !!
 !! Load equilibrium from file and constructs mesh and FE objects
-!!
-!! @note Should only be used via class \ref oft_gs_eq or children
 !---------------------------------------------------------------------------
 SUBROUTINE gs_setup(self,mesh)
 CLASS(oft_gs_eq), INTENT(inout) :: self
@@ -103,8 +101,6 @@ DEBUG_STACK_POP
 END SUBROUTINE gs_setup
 !---------------------------------------------------------------------------
 !> Reconstruct a Grad-Shafranov field
-!!
-!! @note Should only be used via class \ref oft_gs_eq
 !---------------------------------------------------------------------------
 subroutine gs_interp(self,cell,f,gop,val)
 class(oft_gs_eq), intent(inout) :: self
@@ -142,8 +138,6 @@ DEBUG_STACK_POP
 end subroutine gs_interp
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!!
-!! @note Should only be used via class \ref oft_lag_rinterp or children
 !---------------------------------------------------------------------------
 subroutine gs_delete(self)
 class(oft_gs_eq), intent(inout) :: self

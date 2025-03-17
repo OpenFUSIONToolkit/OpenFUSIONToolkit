@@ -181,8 +181,6 @@ end subroutine lag_mloptions
 !> Setup interpolator for Lagrange scalar fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_lag_rinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_rinterp_setup(self,lag_rep)
 class(oft_lag_rinterp), intent(inout) :: self
@@ -214,8 +212,6 @@ END IF
 end subroutine lag_rinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!!
-!! @note Should only be used via class \ref oft_lag_rinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_rinterp_delete(self)
 class(oft_lag_rinterp), intent(inout) :: self
@@ -232,8 +228,6 @@ END IF
 end subroutine lag_rinterp_delete
 !---------------------------------------------------------------------------
 !> Reconstruct a Lagrange scalar field
-!!
-!! @note Should only be used via class \ref oft_lag_rinterp
 !---------------------------------------------------------------------------
 subroutine lag_rinterp(self,cell,f,gop,val)
 class(oft_lag_rinterp), intent(inout) :: self
@@ -276,8 +270,6 @@ DEBUG_STACK_POP
 end subroutine lag_rinterp
 !---------------------------------------------------------------------------
 !> Reconstruct the gradient of a Lagrange scalar field
-!!
-!! @note Should only be used via class \ref oft_lag_ginterp
 !---------------------------------------------------------------------------
 subroutine lag_ginterp_apply(self,cell,f,gop,val)
 class(oft_lag_ginterp), intent(inout) :: self !< 
@@ -322,8 +314,6 @@ end subroutine lag_ginterp_apply
 !> Setup interpolator for Lagrange vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_lag_vrinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_vrinterp_setup(self,lag_rep)
 class(oft_lag_vrinterp), intent(inout) :: self
@@ -363,8 +353,6 @@ end subroutine lag_vrinterp_setup
 !> Setup interpolator for Lagrange vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_lag_vrinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_vrinterp_delete(self)
 class(oft_lag_vrinterp), intent(inout) :: self
@@ -381,8 +369,6 @@ END IF
 end subroutine lag_vrinterp_delete
 !---------------------------------------------------------------------------
 !> Reconstruct a Lagrange vector field
-!!
-!! @note Should only be used via class \ref oft_lag_vrinterp
 !---------------------------------------------------------------------------
 subroutine lag_vrinterp(self,cell,f,gop,val)
 class(oft_lag_vrinterp), intent(inout) :: self
@@ -425,8 +411,6 @@ DEBUG_STACK_POP
 end subroutine lag_vrinterp
 !---------------------------------------------------------------------------
 !> Reconstruct the curl of a Lagrange vector field
-!!
-!! @note Should only be used via class \ref oft_lag_vcinterp
 !---------------------------------------------------------------------------
 subroutine lag_vcinterp(self,cell,f,gop,val)
 class(oft_lag_vcinterp), intent(inout) :: self
@@ -465,8 +449,6 @@ end subroutine lag_vcinterp
 !!\code
 !! dv = RESHAPE(val,(/3,3/))
 !!\endcode
-!!
-!! @note Should only be used via class \ref oft_lag_vdinterp
 !---------------------------------------------------------------------------
 subroutine lag_vdinterp(self,cell,f,gop,val)
 class(oft_lag_vdinterp), intent(inout) :: self

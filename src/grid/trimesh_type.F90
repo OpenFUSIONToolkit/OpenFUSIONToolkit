@@ -286,7 +286,7 @@ CASE(3)
 CASE(4)
   sizes=[self%np+3*self%ne+3*self%nc, self%nc*16]
 CASE DEFAULT
-  CALL oft_abort("Unkown tessellation size","trimesh_tessellated_sizes",__FILE__)
+  CALL oft_abort("Unknown tessellation size","trimesh_tessellated_sizes",__FILE__)
 END SELECT
 END FUNCTION trimesh_tessellated_sizes
 !------------------------------------------------------------------------------

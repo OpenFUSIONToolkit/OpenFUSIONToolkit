@@ -51,7 +51,7 @@ def run_all(dummy,mp_q):
         taylor_solver = Marklin(myOFT)
         taylor_solver.setup_mesh(mesh_file='cyl_Marklin.h5',grid_order=1)
         taylor_solver.setup(2,minlev=1)
-        taylor_solver.compute(1)
+        taylor_solver.compute_eig(1)
         mp_q.put(taylor_solver.eig_vals)
     except:
         mp_q.put(None)
@@ -116,7 +116,7 @@ def validate_all(results, expected, rtol=1.E-3):
 
 @pytest.mark.coverage
 def test_packages_serial():
-    with open("oft_in.xml", "w+") as fid:
+    with open(os.path.join(test_dir,"oft_in.xml"), "w+") as fid:
         fid.write("""<oft>
   <thincurr>
     <eta>1.256637E-5</eta>
