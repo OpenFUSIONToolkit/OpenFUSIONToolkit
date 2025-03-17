@@ -4,6 +4,7 @@
 @date September 2023
 @ingroup doxy_oft_python
 '''
+import warnings
 import numpy
 from ._interface import *
 from ..io import build_XDMF
@@ -69,11 +70,25 @@ class Marklin():
         ## Mesh regions [nc]
         self.reg = None
         ## Number of modes
-        self._nm = -1
+        self.nm = 0
+        ## Needs docs
+        self.nh = 0
+        ## Needs docs
+        self.hcpc = None
+        ## Needs docs
+        self.hcpv = None
         ## Eigenvalues
         self.eig_vals = None
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
+    
+    def __del__(self):
+        if not self._marklin_ptr:
+            return # Nothing to do
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_destroy(self._marklin_ptr,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None,grid_order=1):
         '''! Setup mesh for Marklin force-free equilibrium calculations
@@ -95,7 +110,7 @@ class Marklin():
             regfake = numpy.ones((1,),dtype=numpy.int32)
             self._oft_env.oft_in_groups['mesh_options'] = {
                 'cad_type': "0",
-                'grid_order': '{0}'.format(grid_order)
+                'grid_order': '{0:d}'.format(grid_order)
             }
             self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
             self._oft_env.update_oft_in()
@@ -150,22 +165,69 @@ class Marklin():
         '''
         return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
 
-    def compute(self,nmodes=1,save_rst=True):
+    def compute_eig(self,nmodes=1,cache_file=None,save_rst=False):
         r'''! Compute force-free eigenmodes
 
         @param nmodes Number of eigenmodes to compute
-        @param save_rst Save restart files? 
+        @param cache_file Path to cache file to store/load modes
+        @param save_rst Save restart files? (deprecated)
         '''
-        if self._nm != -1:
+        if self.nm != 0:
             raise ValueError('Eigenstates already computed')
+        if save_rst:
+            warnings.warn("Argument `save_rst` is deprecated, use `cache_file` instead", DeprecationWarning)
+            cache_file = 'oft_Marklin.rst'
+        if cache_file is None:
+            cache_string = self._oft_env.path2c("")
+        else:
+            cache_string = self._oft_env.path2c(cache_file)
         #
         eig_vals = numpy.zeros((nmodes,),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_compute(self._marklin_ptr,nmodes,save_rst,eig_vals,error_string)
+        marklin_compute_eig(self._marklin_ptr,nmodes,eig_vals,cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        self._nm = nmodes
+        self.nm = nmodes
         self.eig_vals = eig_vals
+    
+    def compute_vac(self,nh,hcpc,hcpv,cache_file=None):
+        r'''! Compute vacuum field with specified fluxes through jump planes
+
+        @param nh Number of jump planes
+        @param hcpc Plane specification points
+        @param hcpv Plane specification vectors
+        @param cache_file Path to cache file to store/load modes
+        '''
+        if hcpc.shape[0] != nh:
+            raise ValueError('Inconsistent sizes for "hcpc[0]" != {0}'.format(nh))
+        if hcpc.shape[1] != 3:
+            raise ValueError('Inconsistent sizes for "hcpc[0]" != {0}'.format(3))
+        if hcpv.shape[0] != nh:
+            raise ValueError('Inconsistent sizes for "hcpv[0]" != {0}'.format(nh))
+        if hcpv.shape[1] != 3:
+            raise ValueError('Inconsistent sizes for "hcpv[0]" != {0}'.format(3))
+        if cache_file is None:
+            cache_string = self._oft_env.path2c("")
+        else:
+            cache_string = self._oft_env.path2c(cache_file)
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_compute_vac(self._marklin_ptr,nh,hcpc,hcpv,cache_string,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        self.nh = nh
+        self.hcpc = hcpc
+        self.hcpv = hcpv
+    
+    def compute_par_diff(self,interpolator,k_perp):
+        r'''! Compute parallel diffusion with specified vector field and diffusivity
+
+        @param interpolator Interpolator defining vector field
+        @param k_perp Perpendicular diffusion value (k_par = 1.0)
+        '''
+        cstring = c_char_p(b""*200)
+        marklin_compute_pardiff(self._marklin_ptr,interpolator._int_ptr,interpolator.int_type,k_perp,cstring)
+        if cstring.value != b'':
+            raise Exception(cstring.value)
 
     def save_field(self,field,tag):
         '''! Save field to XDMF files for VisIt/Paraview
@@ -180,33 +242,40 @@ class Marklin():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def get_ainterp(self,imode,bn_gauge=False):
+    def get_ainterp(self,hmode_facs,bn_gauge=False):
         r'''! Create field interpolator for vector potential
 
         @param imode Index of eigenstate
         @param bn_gauge Use B-field gauge (A_t = 0 @ wall)?
         @result Field interpolation object
         '''
-        if imode > self._nm:
+        if hmode_facs.shape[0] > self.nm:
             raise ValueError("Requested mode number exceeds number of available modes")
         interpolation_ptr = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_get_aint(self._marklin_ptr,imode,ctypes.byref(interpolation_ptr),bn_gauge,error_string)
+        marklin_get_aint(self._marklin_ptr,hmode_facs,ctypes.byref(interpolation_ptr),bn_gauge,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return Marklin_field_interpolator(self,interpolation_ptr,1,3)
 
-    def get_binterp(self,imode):
+    def get_binterp(self,hmode_facs=None,vac_facs=None):
         r'''! Create field interpolator for magnetic field
 
         @param imode Index of eigenstate
         @result Field interpolation object
         '''
-        if imode > self._nm:
-            raise ValueError("Requested mode number exceeds number of available modes")
+        if hmode_facs is None:
+            if vac_facs is None:
+                raise ValueError('"hmode_facs" or "vac_facs" must be specified.')
+            hmode_facs = numpy.zeros((self.nm,), dtype=numpy.float64)
+        else:
+            if hmode_facs.shape[0] > self.nm:
+                raise ValueError("Requested mode number exceeds number of available modes")
+        if vac_facs is None:
+            vac_facs = numpy.zeros((self.nh,), dtype=numpy.float64)
         interpolation_ptr = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_get_bint(self._marklin_ptr,imode,ctypes.byref(interpolation_ptr),error_string)
+        marklin_get_bint(self._marklin_ptr,hmode_facs,vac_facs,ctypes.byref(interpolation_ptr),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return Marklin_field_interpolator(self,interpolation_ptr,2,3)

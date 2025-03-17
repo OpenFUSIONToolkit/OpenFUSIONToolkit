@@ -22,7 +22,8 @@ USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, oft_init_seam
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_stitch_check, destory_seam
-USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file
+USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file, &
+  hdf5_field_exist
 !---
 USE oft_la_base, ONLY: oft_vector, oft_map, map_list, oft_graph, &
   oft_graph_ptr, oft_matrix, oft_matrix_ptr, oft_ml_vecspace
@@ -156,6 +157,8 @@ CONTAINS
   PROCEDURE :: vec_create => ml_fem_vec_create
   !> Set level in ML framework if available
   PROCEDURE :: set_level => ml_fem_set_level
+  !> Destory FE type
+  PROCEDURE :: delete => ml_fem_delete
 END TYPE oft_ml_fem_type
 !---------------------------------------------------------------------------
 !> Needs docs
@@ -224,7 +227,7 @@ type :: fem_parent
   integer(i4), pointer, dimension(:) :: le => NULL() !< Parent index of elements (ne)
 end type fem_parent
 !---
-PUBLIC fem_common_linkage, fem_gen_legacy, fem_delete, bfem_delete
+PUBLIC fem_common_linkage, fem_delete, bfem_delete
 contains
 !---------------------------------------------------------------------------
 !> Needs docs
@@ -1050,9 +1053,7 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine fem_setup
 !---------------------------------------------------------------------------
-!> Destroy boundary FE object
-!!
-!! @note Should only be used via class \ref oft_bfem_type or children
+!> Destroy FE object
 !---------------------------------------------------------------------------
 SUBROUTINE fem_delete(self)
 CLASS(oft_fem_type), INTENT(inout) :: self
@@ -1363,13 +1364,6 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine fem_global_linkage
 !---------------------------------------------------------------------------
-!> Compute legacy FE contexts
-!---------------------------------------------------------------------------
-subroutine fem_gen_legacy(self)
-class(oft_afem_type), intent(inout) :: self !< Finite element representation
-CALL oft_abort("Legacy file formats not supported", "", __FILE__)
-end subroutine fem_gen_legacy
-!---------------------------------------------------------------------------
 !> Retrieve the indices of elements beloning to a given cell
 !---------------------------------------------------------------------------
 subroutine fem_ncdofs(self,cell,dofs)
@@ -1520,8 +1514,10 @@ logical :: do_append
 DEBUG_STACK_PUSH
 do_append=.FALSE.
 IF(PRESENT(append))do_append=append
-IF(.NOT.do_append)THEN
-  IF(oft_env%head_proc)THEN
+IF(oft_env%head_proc)THEN
+  IF(do_append)THEN
+    IF(.NOT.hdf5_field_exist(filename,fem_idx_path))CALL hdf5_write(fem_idx_ver,filename,fem_idx_path)
+  ELSE
     CALL hdf5_create_file(filename)
     CALL hdf5_write(fem_idx_ver,filename,fem_idx_path)
   END IF
@@ -1547,23 +1543,30 @@ end subroutine afem_vec_save
 !---------------------------------------------------------------------------
 !> Load a Lagrange scalar field from a HDF5 restart file
 !---------------------------------------------------------------------------
-subroutine afem_vec_load(self,source,filename,path)
+subroutine afem_vec_load(self,source,filename,path,err_flag)
 class(oft_afem_type), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: source !< Destination vector
 character(*), intent(in) :: filename !< Name of source file
 character(*), intent(in) :: path !< Field path in file
+integer(i4), optional, intent(out) :: err_flag !< Error flag
 integer(i4) :: version
 integer(i8), pointer, dimension(:) :: lge
 real(r8), pointer, dimension(:) :: valtmp
 class(oft_vector), pointer :: infield
 class(oft_native_vector), pointer :: invec
 type(hdf5_rst) :: rst_info
-logical :: legacy
+logical :: success
 DEBUG_STACK_PUSH
-legacy=.FALSE.
-! CALL hdf5_rst_read_version(version,filen,fem_idx_str)
-CALL hdf5_read(version,filename,fem_idx_path)
-legacy=(version<1)
+CALL hdf5_read(version,filename,fem_idx_path,success=success)
+IF(.NOT.success)THEN
+  IF(PRESENT(err_flag))THEN
+    err_flag=2
+    DEBUG_STACK_POP
+    RETURN
+  ELSE
+    CALL oft_abort("OFT_idx_Version not found, legacy files not supported","afem_vec_load",__FILE__)
+  END IF
+END IF
 !---
 NULLIFY(valtmp)
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Reading "',TRIM(path), &
@@ -1573,12 +1576,22 @@ IF(.NOT.native_vector_cast(invec,infield))CALL oft_abort('Failed to create "infi
   'fem_vec_load',__FILE__)
 !---
 lge=>self%global%le
-IF(legacy)THEN
-  CALL fem_gen_legacy(self)
-  lge=>self%legacy_lge
-END IF
 CALL native_vector_slice_push(invec,lge,rst_info,alloc_only=.TRUE.)
-CALL hdf5_read(rst_info,filename,path)
+IF(PRESENT(err_flag))THEN
+  CALL hdf5_read(rst_info,filename,path,success=success)
+  IF(success)THEN
+    err_flag=0
+  ELSE
+    err_flag=-1
+    CALL infield%delete
+    NULLIFY(lge)
+    DEALLOCATE(infield)
+    CALL hdf5_rst_destroy(rst_info)
+    RETURN
+  END IF
+ELSE
+  CALL hdf5_read(rst_info,filename,path)
+END IF
 CALL native_vector_slice_pop(invec,lge,rst_info)
 CALL infield%get_local(valtmp)
 CALL source%restore_local(valtmp)
@@ -1663,6 +1676,32 @@ else
 end if
 DEBUG_STACK_POP
 end subroutine ml_fem_set_level
+!---------------------------------------------------------------------------
+!> Destroy boundary multi-level FE object
+!---------------------------------------------------------------------------
+SUBROUTINE ml_fem_delete(self)
+CLASS(oft_ml_fem_type), INTENT(inout) :: self
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+DO i=self%minlev,self%nlevels
+  IF(ASSOCIATED(self%levels(i)%fe))THEN
+    CALL self%levels(i)%fe%delete()
+    DEALLOCATE(self%levels(i)%fe)
+  END IF
+  IF(ASSOCIATED(self%interp_matrices(i)%m))THEN
+    CALL self%interp_matrices(i)%m%delete()
+    DEALLOCATE(self%interp_matrices(i)%m)
+  END IF
+  IF(ASSOCIATED(self%interp_graphs(i)%g))THEN
+    ! TODO: Perform actual deallocation
+    DEALLOCATE(self%interp_graphs(i)%g)
+  END IF
+END DO
+NULLIFY(self%ml_mesh,self%current_level)
+self%nlevels=0
+self%minlev=1
+DEBUG_STACK_POP
+END SUBROUTINE ml_fem_delete
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
@@ -1869,8 +1908,6 @@ DEBUG_STACK_POP
 end subroutine bfem_setup
 !---------------------------------------------------------------------------
 !> Destroy boundary FE object
-!!
-!! @note Should only be used via class \ref oft_bfem_type or children
 !---------------------------------------------------------------------------
 SUBROUTINE bfem_delete(self)
 CLASS(oft_bfem_type), INTENT(inout) :: self
