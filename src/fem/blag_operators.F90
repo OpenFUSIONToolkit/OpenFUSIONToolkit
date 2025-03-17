@@ -120,8 +120,6 @@ contains
 !> Setup interpolator for boundary Lagrange scalar fields
 !!
 !! Fetches local representation used for interpolation from solution vector
-!!
-!! @note Should only be used via class \ref oft_lag_brinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_brinterp_setup(self,lag_rep)
 class(oft_lag_brinterp), intent(inout) :: self
@@ -133,8 +131,6 @@ CALL self%u%get_local(self%vals)
 end subroutine lag_brinterp_setup
 !---------------------------------------------------------------------------
 !> Setup interpolator by linking to another interpolator of the same class
-!!
-!! @note Should only be used via class \ref oft_lag_brinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_brinterp_share(self,source_obj)
 class(oft_lag_brinterp), intent(inout) :: self
@@ -150,8 +146,6 @@ self%own_vals=.FALSE.
 end subroutine lag_brinterp_share
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!!
-!! @note Should only be used via class \ref oft_lag_brinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_brinterp_delete(self)
 class(oft_lag_brinterp), intent(inout) :: self
@@ -165,8 +159,6 @@ NULLIFY(self%lag_rep,self%mesh,self%u)
 end subroutine lag_brinterp_delete
 !---------------------------------------------------------------------------
 !> Reconstruct a surface Lagrange scalar field
-!!
-!! @note Should only be used via class \ref oft_lag_brinterp
 !---------------------------------------------------------------------------
 subroutine lag_brinterp(self,cell,f,gop,val)
 class(oft_lag_brinterp), intent(inout) :: self
@@ -194,8 +186,6 @@ DEBUG_STACK_POP
 end subroutine lag_brinterp
 !---------------------------------------------------------------------------
 !> Reconstruct the gradient of a surface Lagrange scalar field
-!!
-!! @note Should only be used via class \ref lag_bginterp
 !---------------------------------------------------------------------------
 subroutine lag_bginterp(self,cell,f,gop,val)
 class(oft_lag_bginterp), intent(inout) :: self
@@ -223,8 +213,6 @@ DEBUG_STACK_POP
 end subroutine lag_bginterp
 !---------------------------------------------------------------------------
 !> Reconstruct the Hessian of a surface Lagrange scalar field
-!!
-!! @note Should only be used via class \ref oft_lag_bg2interp
 !---------------------------------------------------------------------------
 subroutine lag_bg2interp(self,cell,f,gop,val)
 class(oft_lag_bg2interp), intent(inout) :: self
@@ -257,8 +245,6 @@ end subroutine lag_bg2interp
 !> Setup interpolator for boundary Lagrange vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_lag_bvrinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_bvrinterp_setup(self,lag_rep)
 class(oft_lag_bvrinterp), intent(inout) :: self
@@ -277,8 +263,6 @@ CALL self%u%get_local(vtmp,3)
 end subroutine lag_bvrinterp_setup
 !---------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!!
-!! @note Should only be used via class \ref oft_lag_bvrinterp or children
 !---------------------------------------------------------------------------
 subroutine lag_bvrinterp_delete(self)
 class(oft_lag_bvrinterp), intent(inout) :: self
@@ -288,8 +272,6 @@ NULLIFY(self%lag_rep,self%u)
 end subroutine lag_bvrinterp_delete
 !---------------------------------------------------------------------------
 !> Reconstruct a boundary Lagrange vector field
-!!
-!! @note Should only be used via class \ref oft_lag_bvrinterp
 !---------------------------------------------------------------------------
 subroutine lag_bvrinterp(self,cell,f,gop,val)
 class(oft_lag_bvrinterp), intent(inout) :: self

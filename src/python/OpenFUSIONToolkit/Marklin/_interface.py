@@ -12,6 +12,10 @@ from .._interface import *
 marklin_setup = ctypes_subroutine(oftpy_lib.marklin_setup,
     [c_void_ptr_ptr, c_void_p, c_int, c_int, c_char_p])
 
+# marklin_destroy(marklin_ptr,error_str)
+marklin_destroy = ctypes_subroutine(oftpy_lib.marklin_destroy,
+    [c_void_p, c_char_p])
+
 # marklin_compute(marklin_ptr,nmodes,eig_vals,cache_file,error_str)
 marklin_compute_eig = ctypes_subroutine(oftpy_lib.marklin_compute_eig,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p, c_char_p])

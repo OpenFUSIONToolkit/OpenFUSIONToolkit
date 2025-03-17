@@ -48,8 +48,8 @@ tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
 tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
     [c_void_p, c_int, c_bool, c_int_ptr, c_char_p])
 
-# tokamaker_reset(tMaker_ptr,error_str)
-tokamaker_reset = ctypes_subroutine(oftpy_lib.tokamaker_reset,
+# tokamaker_destroy(tMaker_ptr,error_str)
+tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,
     [c_void_p, c_char_p])
 
 # tokamaker_load_profiles(tMaker_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str)

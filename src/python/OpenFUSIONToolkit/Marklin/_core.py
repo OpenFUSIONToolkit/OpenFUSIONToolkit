@@ -81,6 +81,14 @@ class Marklin():
         self.eig_vals = None
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
+    
+    def __del__(self):
+        if not self._marklin_ptr:
+            return # Nothing to do
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_destroy(self._marklin_ptr,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None,grid_order=1):
         '''! Setup mesh for Marklin force-free equilibrium calculations

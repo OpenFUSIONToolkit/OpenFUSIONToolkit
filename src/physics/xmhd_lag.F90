@@ -3763,8 +3763,6 @@ END SUBROUTINE xmhd_mfnk_update
 !> Setup interpolator for xMHD solution fields
 !!
 !! - Fetches local vector values for interpolation
-!!
-!! @note Should only be used via class \ref xmhd_interp
 !---------------------------------------------------------------------------
 subroutine xmhd_interp_setup(self,mesh)
 CLASS(xmhd_interp), INTENT(inout) :: self !< Interpolation object
@@ -3807,8 +3805,6 @@ END IF
 end subroutine xmhd_interp_setup
 !---------------------------------------------------------------------------
 !> Destroy interpolator for xMHD solution fields
-!!
-!! @note Should only be used via class \ref xmhd_interp
 !---------------------------------------------------------------------------
 subroutine xmhd_interp_delete(self)
 class(xmhd_interp), intent(inout) :: self !< Interpolation object
@@ -3833,8 +3829,6 @@ NULLIFY(self%lag_rep,self%u)
 end subroutine xmhd_interp_delete
 !---------------------------------------------------------------------------
 !> Reconstruct xmhd operator linearization fields
-!!
-!! @note Should only be used via class \ref xmhd_interp
 !---------------------------------------------------------------------------
 subroutine xmhd_interp_apply(self,cell,f,gop,val)
 class(xmhd_interp), intent(inout) :: self !< Interpolation object

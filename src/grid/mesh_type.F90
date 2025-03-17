@@ -916,8 +916,6 @@ DEBUG_STACK_POP
 end subroutine mesh_save_cell_vector
 !---------------------------------------------------------------------------
 !> Destroy mesh object
-!!
-!! @note Should only be used via class \ref tri_mesh or children
 !---------------------------------------------------------------------------
 SUBROUTINE mesh_destroy(self)
 CLASS(oft_mesh), INTENT(inout) :: self
@@ -942,6 +940,7 @@ IF(ASSOCIATED(self%lcfo))DEALLOCATE(self%lcfo)
 IF(ASSOCIATED(self%cv))DEALLOCATE(self%cv)
 IF(ASSOCIATED(self%vv))DEALLOCATE(self%vv)
 !---
+NULLIFY(self%fstitch%be,self%fstitch%lbe)
 CALL destory_seam(self%fstitch)
 IF(ASSOCIATED(self%tloc_f))THEN
   DO i=1,self%nparts

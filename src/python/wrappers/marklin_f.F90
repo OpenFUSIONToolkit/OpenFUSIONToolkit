@@ -16,7 +16,7 @@ USE oft_io, ONLY: hdf5_create_file, xdmf_plot_file
 !--Grid
 USE oft_mesh_type, ONLY: mesh_findcell
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
-USE multigrid, ONLY: multigrid_mesh
+USE multigrid, ONLY: multigrid_mesh, multigrid_reset
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -127,6 +127,50 @@ END IF
 !
 marklin_ptr=C_LOC(self)
 END SUBROUTINE marklin_setup
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE marklin_destroy(marklin_ptr,error_str) BIND(C,NAME="marklin_destroy")
+TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Pointer to Marklin object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(4) :: i,ierr,io_unit,npts,iostat
+REAL(8) :: theta
+LOGICAL :: file_exists
+real(r8), POINTER :: vals_tmp(:)
+TYPE(marklin_obj), POINTER :: self
+IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
+!---Destroy objects
+IF(ASSOCIATED(self%r_plot))DEALLOCATE(self%r_plot)
+IF(ASSOCIATED(self%lc_plot))DEALLOCATE(self%lc_plot)
+IF(ASSOCIATED(self%reg_plot))DEALLOCATE(self%reg_plot)
+CALL self%eig_obj%delete()
+CALL self%ff_obj%delete()
+IF(ASSOCIATED(self%ML_lagrange))THEN
+  CALL self%ML_lagrange%delete()
+  DEALLOCATE(self%ML_lagrange)
+END IF
+IF(ASSOCIATED(self%ML_h1))THEN
+  CALL self%ML_h1%delete()
+  DEALLOCATE(self%ML_h1)
+END IF
+IF(ASSOCIATED(self%ML_hcurl))THEN
+  CALL self%ML_hcurl%delete()
+  DEALLOCATE(self%ML_hcurl)
+END IF
+IF(ASSOCIATED(self%ML_hcurl_grad))THEN
+  CALL self%ML_hcurl_grad%delete()
+  DEALLOCATE(self%ML_hcurl_grad)
+END IF
+! IF(ASSOCIATED(self%ML_h1grad))THEN
+!   CALL self%ML_h1grad%delete()
+!   DEALLOCATE(self%ML_h1grad)
+! END IF
+IF(ASSOCIATED(self%ml_mesh))THEN
+  CALL multigrid_reset(self%ml_mesh)
+  DEALLOCATE(self%ml_mesh)
+END IF
+DEALLOCATE(self)
+END SUBROUTINE marklin_destroy
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

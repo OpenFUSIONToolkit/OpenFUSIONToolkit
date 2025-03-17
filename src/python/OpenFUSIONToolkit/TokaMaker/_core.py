@@ -165,7 +165,7 @@ class TokaMaker():
         if not self._tMaker_ptr:
             return # Nothing to do
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_reset(self._tMaker_ptr,error_string)
+        tokamaker_destroy(self._tMaker_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self.nregs = -1

@@ -113,6 +113,8 @@ type :: oft_taylor_ifield
 CONTAINS
   !> Setup object before solution
   PROCEDURE :: setup => ff_setup
+  !> Setup object before solution
+  PROCEDURE :: delete => ff_delete
 end type oft_taylor_ifield
 contains
 !---------------------------------------------------------------------------
@@ -235,6 +237,55 @@ END IF
 IF(PRESENT(minlev))self%minlev=minlev
 IF(self%minlev<0)self%minlev=self%ML_hcurl%level
 end subroutine ff_setup
+!---------------------------------------------------------------------------
+!> Setup eigenmodes object
+!---------------------------------------------------------------------------
+subroutine ff_delete(self,storage_only)
+CLASS(oft_taylor_ifield), INTENT(inout) :: self !< Force-free eigenmode object
+LOGICAL, OPTIONAL, INTENT(in) :: storage_only !< Only reset storage, but do not clear references
+LOGICAL :: do_nullify
+INTEGER(i4) :: i,j
+do_nullify=.TRUE.
+IF(PRESENT(storage_only))do_nullify=.NOT.storage_only
+!---Deallocate fields
+IF(ASSOCIATED(self%hvac))THEN
+  DO i=1,SIZE(self%hvac)
+    IF(ASSOCIATED(self%hvac(i)%f))THEN
+      CALL self%hvac(i)%f%delete()
+      DEALLOCATE(self%hvac(i)%f)
+    END IF
+  END DO
+  DEALLOCATE(self%hvac)
+END IF
+IF(ASSOCIATED(self%hcur))THEN
+  DO i=1,SIZE(self%hcur)
+    IF(ASSOCIATED(self%hcur(i)%f))THEN
+      CALL self%hcur(i)%f%delete()
+      DEALLOCATE(self%hcur(i)%f)
+    END IF
+  END DO
+  DEALLOCATE(self%hcur)
+END IF
+IF(ASSOCIATED(self%gffa))THEN
+  DO i=1,SIZE(self%gffa)
+    IF(ASSOCIATED(self%gffa(i)%f))THEN
+      CALL self%gffa(i)%f%delete()
+      DEALLOCATE(self%gffa(i)%f)
+    END IF
+  END DO
+  DEALLOCATE(self%gffa)
+END IF
+IF(ASSOCIATED(self%hcpc))DEALLOCATE(self%hcpc)
+IF(ASSOCIATED(self%hcpv))DEALLOCATE(self%hcpv)
+IF(ASSOCIATED(self%htag))DEALLOCATE(self%htag)
+!---Nullify pointers and reset defaults
+IF(do_nullify)THEN
+  NULLIFY(self%ML_hcurl,self%ML_lagrange)
+  NULLIFY(self%ML_h1,self%ML_hcurl_grad,self%ML_h1grad)
+  self%minlev=-1
+  self%nh=0
+END IF
+end subroutine ff_delete
 !---------------------------------------------------------------------------
 !> Compute 'taylor_nm' Force-Free eignemodes.
 !---------------------------------------------------------------------------
@@ -1117,8 +1168,6 @@ end subroutine taylor_injector_single
 !> Setup interpolator for composite Taylor state fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_taylor_rinterp or children
 !---------------------------------------------------------------------------
 subroutine taylor_rinterp_setup1(self,hcurl_grad_rep)
 class(oft_taylor_rinterp), intent(inout) :: self
@@ -1147,8 +1196,6 @@ end subroutine taylor_rinterp_setup1
 !> Setup interpolator for composite Taylor state fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!!
-!! @note Should only be used via class \ref oft_taylor_rinterp or children
 !---------------------------------------------------------------------------
 subroutine taylor_rinterp_setup2(self,hcurl_rep,hgrad_rep)
 class(oft_taylor_rinterp), intent(inout) :: self
