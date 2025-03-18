@@ -1,3 +1,8 @@
+!------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !!Marklin Example: Inhomogeneous Ideal MHD Equilibria    {#doc_marklin_ex2}
 !!=============================================
 !!

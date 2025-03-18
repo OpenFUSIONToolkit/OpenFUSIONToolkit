@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_sort.F90
 !
 !> Portable array sorting and search functions
@@ -11,7 +13,7 @@
 !! @author Chris Hansen
 !! @date June 2010
 !! @ingroup doxy_oft_base
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 MODULE oft_sort
 USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_long, c_double
 USE oft_local
@@ -19,9 +21,9 @@ IMPLICIT NONE
 #define MOD_NAME oft_sort
 #include "local.h"
 PRIVATE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Sort an array in ascending order
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE sort_array
   ! Sort 1D array
   MODULE PROCEDURE sort4
@@ -73,16 +75,16 @@ INTERFACE sort_array
   MODULE PROCEDURE sorta4
   MODULE PROCEDURE sorta8
 END INTERFACE sort_array
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Search a sorted integer array
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE search_array
   MODULE PROCEDURE search4
   MODULE PROCEDURE search8
 END INTERFACE search_array
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! External C++ subroutine definitions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE
 #if !defined(__INTEL_COMPILER)
   SUBROUTINE int_sort44(list,n) BIND(C)
@@ -146,9 +148,9 @@ END INTERFACE
 PUBLIC sort_array, search_array
 !
 INTERFACE sort_matrix
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   !> Sort rows of a matrix and associated index vector by the first column in ascending order
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix44(matrix,ind,n) BIND(C)
     IMPORT c_int
     IMPLICIT NONE
@@ -156,9 +158,9 @@ INTERFACE sort_matrix
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
     INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   !> Sort rows of a matrix and associated index vector by the first column in ascending order
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix48(matrix,ind,n) BIND(C)
     IMPORT c_int, c_long
     IMPLICIT NONE
@@ -166,9 +168,9 @@ INTERFACE sort_matrix
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
     INTEGER(c_long), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   !> Sort rows of a matrix and associated index vector by the first column in ascending order
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix84(matrix,ind,n) BIND(C)
     IMPORT c_int, c_long
     IMPLICIT NONE
@@ -176,9 +178,9 @@ INTERFACE sort_matrix
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
     INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   !> Sort rows of a matrix and associated index vector by the first column in ascending order
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix88(matrix,ind,n) BIND(C)
     IMPORT c_long
     IMPLICIT NONE
@@ -186,9 +188,9 @@ INTERFACE sort_matrix
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
     INTEGER(c_long), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   !> Sort rows of a matrix and associated index vector by the first column in ascending order
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   SUBROUTINE real_sort_matrix4(matrix,ind,n) BIND(C)
     IMPORT c_int, c_double
     IMPLICIT NONE
@@ -196,9 +198,9 @@ INTERFACE sort_matrix
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
     INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
   END SUBROUTINE
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   !> Sort rows of a matrix and associated index vector by the first column in ascending order
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   SUBROUTINE real_sort_matrix8(matrix,ind,n) BIND(C)
     IMPORT c_long, c_double
     IMPLICIT NONE
@@ -209,9 +211,9 @@ INTERFACE sort_matrix
 END INTERFACE sort_matrix
 PUBLIC sort_matrix
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Integer(4) implementation of @ref sort_array
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE sort4(ia,n)
 INTEGER(i4), INTENT(inout) :: ia(n) !< Array to sort
 INTEGER(i4), INTENT(in) :: n !< Number of values in array
@@ -224,9 +226,9 @@ CALL int_sort44(ia,n)
 #endif
 ! DEBUG_STACK_POP
 END SUBROUTINE sort4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Integer(8) implementation of @ref sort_array
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE sort8(ia,n)
 INTEGER(i8), INTENT(inout) :: ia(n) !< Array to sort
 INTEGER(i8), INTENT(in) :: n !< Number of values in array
@@ -239,11 +241,11 @@ CALL int_sort88(ia,n)
 #endif
 ! DEBUG_STACK_POP
 END SUBROUTINE sort8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Integer(4) 2D implementation of @ref sort_array
 !!
 !! @note Matrix is flattened for sorting
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE sorta4(ia,n,m)
 INTEGER(i4), INTENT(inout) :: ia(n,m) !< Array to sort
 INTEGER(i4), INTENT(in) :: n !< Number of values in first dimension of array
@@ -257,11 +259,11 @@ CALL int_sort44(ia,n*m)
 #endif
 ! DEBUG_STACK_POP
 END SUBROUTINE sorta4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Integer(8) 2D implementation of @ref sort_array
 !!
 !! @note Matrix is flattened for sorting
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE sorta8(ia,n,m)
 INTEGER(i8), INTENT(inout) :: ia(n,m) !< Array to sort
 INTEGER(i8), INTENT(in) :: n !< Number of values in first dimension of array
@@ -275,9 +277,9 @@ CALL int_sort88(ia,n*m)
 #endif
 ! DEBUG_STACK_POP
 END SUBROUTINE sorta8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Integer(4) implementation of @ref search_array
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION search4(item,list,n)
 INTEGER(i4), INTENT(in) :: item !< Value to search for
 INTEGER(i4), INTENT(in) :: list(n) !< Array to search [n]
@@ -295,9 +297,9 @@ CALL int_search44(list,n,item,search4)
 #endif
 ! DEBUG_STACK_POP
 END FUNCTION search4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Integer(8) implementation of @ref search_array
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION search8(item,list,n)
 INTEGER(i8), INTENT(in) :: item !< Value to search for
 INTEGER(i8), INTENT(in) :: list(n) !< Array to search [n]

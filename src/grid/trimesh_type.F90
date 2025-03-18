@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_tetmesh_type.F90
 !
 !> Triangular boundary mesh definitions
@@ -19,7 +21,7 @@
 !! @author Chris Hansen
 !! @date June 2010
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_trimesh_type
 USE oft_base
 USE oft_lag_poly
@@ -29,7 +31,7 @@ USE trimesh_tessellation, ONLY: tessellate1, tessellate2, tessellate3, tessellat
 IMPLICIT NONE
 #include "local.h"
 INTEGER(i4), PARAMETER :: tri_ed(2,3)=RESHAPE((/3,2,1,3,2,1/),(/2,3/)) !< Triangle edge list
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Triangular surface mesh type
 !!
 !! Contains geometry information for the computational grid.
@@ -37,7 +39,7 @@ INTEGER(i4), PARAMETER :: tri_ed(2,3)=RESHAPE((/3,2,1,3,2,1/),(/2,3/)) !< Triang
 !! - Mesh type and order
 !! - Global mesh information
 !! - Linkage of geometric primatives
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, EXTENDS(oft_bmesh) :: oft_trimesh
   REAL(r8), POINTER, DIMENSION(:) :: xnodes => NULL()
 CONTAINS
@@ -59,9 +61,9 @@ CONTAINS
   PROCEDURE :: tessellated_sizes => trimesh_tessellated_sizes
 END TYPE oft_trimesh
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load trimesh from transfer file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE trimesh_load(self,filename)
 CLASS(oft_trimesh), INTENT(inout) :: self !< Mesh object
 CHARACTER(LEN=*), INTENT(in) :: filename !< File to load mesh from
@@ -86,9 +88,9 @@ CLOSE(io_unit)
 ! self%stand_alone=.TRUE.
 DEBUG_STACK_POP
 END SUBROUTINE trimesh_load
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Save trimesh from transfer file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE trimesh_save(self,filename)
 CLASS(oft_trimesh), INTENT(in) :: self !< Mesh object
 CHARACTER(LEN=*), INTENT(in) :: filename !< File to save mesh to
@@ -108,9 +110,9 @@ END DO
 CLOSE(io_unit)
 DEBUG_STACK_POP
 END SUBROUTINE trimesh_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE trimesh_setup(self,cad_type,has_parent)
 CLASS(oft_trimesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: cad_type !< CAD/mesh interface ID number
@@ -124,9 +126,9 @@ self%cell_ed=tri_ed
 CALL self%set_order(1)
 IF(has_parent)ALLOCATE(self%parent)
 END SUBROUTINE trimesh_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Set maximum order of spatial mapping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE trimesh_set_order(self,order)
 CLASS(oft_trimesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: order !< Maximum order of spatial mapping
@@ -157,9 +159,9 @@ DO i=1,order+1
   self%xnodes(i)=REAL(i-1,8)/REAL(order,8)
 END DO
 END SUBROUTINE trimesh_set_order
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE tri_2d_grid(order,xnodes,inodesf)
 INTEGER(i4), INTENT(in) :: order
 INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: inodesf
@@ -188,9 +190,9 @@ IF(order>2)THEN
   END DO
 END IF
 END SUBROUTINE tri_2d_grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Turn cell "inside out", used to ensure consistent orientations
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE trimesh_invert_cell(self,cell)
 CLASS(oft_trimesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: cell !< Maximum order of spatial mapping
@@ -198,18 +200,18 @@ self%lc(2:3,cell)=self%lc(3:2:-1,cell)
 IF(ASSOCIATED(self%lce))self%lce(:,cell)=-self%lce([1,3,2],cell)
 IF(ASSOCIATED(self%lcc))self%lcc(:,cell)=self%lcc([1,3,2],cell)
 END SUBROUTINE trimesh_invert_cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Retrieve suitable quadrature rule for triangular mesh with given order
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE trimesh_quad_rule(self,order,quad_rule)
 CLASS(oft_trimesh), INTENT(in) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: order !< Desired order of quadrature rule
 TYPE(oft_quad_type), INTENT(out) :: quad_rule !< Resulting quadrature rule
 CALL set_quad_2d(quad_rule, order)
 END SUBROUTINE trimesh_quad_rule
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get position in logical space of vertex `i`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE trimesh_vlog(self,i,f)
 CLASS(oft_trimesh), INTENT(in) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: i !< Vertex to locate
@@ -217,11 +219,11 @@ REAL(r8), INTENT(out) :: f(:) !< Logical coordinates of vertex `i`
 f=0.d0
 f(i)=1.d0
 END SUBROUTINE trimesh_vlog
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Test if logical position lies within the base cell
 !!
 !! @returns Position `f` is inside the base cell?
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION trimesh_in_cell(self,f,tol) RESULT(eedge)
 CLASS(oft_trimesh), INTENT(in) :: self !< Mesh object
 REAL(r8), INTENT(in) :: f(:) !< Logical coordinate to evaluate
@@ -236,14 +238,14 @@ ELSE
   eedge=MINLOC(f(1:3), DIM=1)
 END IF
 END FUNCTION trimesh_in_cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Tessellate mesh onto lagrange FE nodes of specified order (usually for plotting)
 !!
 !! @note The maximum tessellation order currently supported is 4
 !! (may be lower for certain mesh types).
 !!
 !! @warning Cell lists are returned with zero based indexing
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE trimesh_tessellate(self,rtmp,lctmp,order)
 CLASS(oft_trimesh), INTENT(in) :: self !< Mesh object
 REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,:]
@@ -270,9 +272,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE trimesh_tessellate
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Get sizes of arrays returned by @ref trimesh_tessellate
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION trimesh_tessellated_sizes(self) result(sizes)
 CLASS(oft_trimesh), INTENT(in) :: self !< Mesh object
 INTEGER(i4) :: sizes(2) !< Array sizes following tessellation [np_tess,nc_tess]
@@ -289,9 +291,9 @@ CASE DEFAULT
   CALL oft_abort("Unknown tessellation size","trimesh_tessellated_sizes",__FILE__)
 END SELECT
 END FUNCTION trimesh_tessellated_sizes
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Map from physical to logical coordinates in a given cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE trimesh_phys2log(self,cell,pt,f)
 class(oft_trimesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Index of cell for evaulation
@@ -304,9 +306,9 @@ do k=1,3
   f(k)=1.d0+dot_product(pt-self%r(:,self%lc(k,cell)),gop(:,k))
 end do
 end SUBROUTINE trimesh_phys2log
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Map from logical to physical coordinates in a given cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function trimesh_log2phys(self,cell,f) result(pt)
 class(oft_trimesh), intent(in) :: self !< Mesh object
 integer, intent(in) :: cell !< Index of cell for evaulation
@@ -342,9 +344,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end function trimesh_log2phys
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute the spatial jacobian matrix and its determinant for a given cell at a given logical position
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine trimesh_jacobian(self,cell,f,gop,j)
 class(oft_trimesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Index of cell for evaulation
@@ -452,9 +454,9 @@ gop(:,1)=-(gop(:,2)+gop(:,3))
 j=j/2.d0
 DEBUG_STACK_POP
 end subroutine trimesh_jacobian
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute the spatial hessian matrices for a given cell at a given logical position
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine trimesh_hessian(self,cell,f,g2op,K)
 class(oft_trimesh), intent(in) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: cell !< Index of cell for evaulation
@@ -550,9 +552,9 @@ K=0.d0
   g2op([1,2,4],6)=C(:,1)+C(:,2)+C(:,3)
 ! END IF
 end subroutine trimesh_hessian
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Linear implementation of @trimesh_jacobian
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine trimesh_jacl(self,cell,f,gop,j)
 class(oft_trimesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Index of cell for evaulation
@@ -594,9 +596,9 @@ gop(:,1)=-(gop(:,2)+gop(:,3))
 j=j/2.d0
 DEBUG_STACK_POP
 end subroutine trimesh_jacl
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get unit normal for surface at a given point in a given cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine trimesh_norm(self,cell,f,n)
 class(oft_trimesh), target, intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Cell containing point
@@ -608,9 +610,9 @@ CALL trimesh_tang(self,cell,f,t)
 n = cross_product(t(:,1),t(:,2))
 DEBUG_STACK_POP
 end subroutine trimesh_norm
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get tangent basis set for surface at a given point in a given cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine trimesh_tang(self,cell,f,t)
 class(oft_trimesh), target, intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Cell containing point
@@ -628,11 +630,11 @@ t(:,2) = t(:,2) - DOT_PRODUCT(t(:,2),t(:,1))*t(:,1)
 t(:,2) = t(:,2)/magnitude(t(:,2))
 DEBUG_STACK_POP
 end subroutine trimesh_tang
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute the partial derivative of the physical coordinates with a specific logical coordinate
 !!
 !! Driver function calls mapping specific function depending on mesh order
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function trimesh_glogphys(self,cell,j,f) result(pt)
 class(oft_trimesh), intent(in) :: self !< Mesh object
 integer, intent(in) :: cell !< Index of cell for evaulation
@@ -670,9 +672,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end function trimesh_glogphys
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Invert a 2x2 matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine trimesh_jacinv(A,C,j)
 real(r8), intent(in) :: A(2,2) !< Matrix to invert
 real(r8), intent(out) :: C(2,2) !< \f$ A^{-1} \f$
@@ -690,9 +692,9 @@ C(2,1)=-A(2,1)
 C=C/j
 DEBUG_STACK_POP
 end subroutine trimesh_jacinv
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Invert a 3x3 matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine trimesh_m3inv(A,C,j)
 real(8), intent(in) :: A(3,3) !< Matrix to invert
 real(8), intent(out) :: C(3,3) !< \f$ A^{-1} \f$

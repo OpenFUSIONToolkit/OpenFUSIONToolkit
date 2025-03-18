@@ -1,4 +1,10 @@
-// Sorting and search functions for the Open FUSION Toolkit
+/*-----------------------------------------------------------------------------
+* Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+*
+* SPDX-License-Identifier: LGPL-3.0-only
+*------------------------------------------------------------------------------
+* Sorting and search functions for the Open FUSION Toolkit
+*----------------------------------------------------------------------------*/
 #include <algorithm>
 #include <vector>
 

@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_cube.F90
 !
 !> Mesh handling for a 1x1x1 cube test mesh.
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date August 2012
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_cube
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
@@ -32,12 +34,12 @@ public mesh_cube_load, mesh_cube_cadlink, mesh_cube_set_periodic
 public smesh_square_load, smesh_square_cadlink
 public smesh_square_set_periodic
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup a 1x1x1 cube test mesh
 !! The mesh is initialized with a basic set of cells
 !! - 9 Points
 !! - 12 Cells
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_cube_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j,k,ierr,io_unit,mesh_type,ni(3)
@@ -168,9 +170,9 @@ END IF
 call mesh_global_resolution(mesh)
 DEBUG_STACK_POP
 end subroutine mesh_cube_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup surface IDs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_cube_cadlink(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j
@@ -191,9 +193,9 @@ DO i=1,mesh%nbf
   END IF
 END DO
 end subroutine mesh_cube_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !>
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_cube_set_periodic(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,jj,k,kk,l,m,n,iper
@@ -301,12 +303,12 @@ DO iper=1,3
 END DO
 DEBUG_STACK_POP
 end subroutine mesh_cube_set_periodic
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup a 1x1x1 cube test mesh
 !! The mesh is initialized with a basic set of cells
 !! - 9 Points
 !! - 12 Cells
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_square_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j,k,ierr,io_unit,nptmp,nctmp,mesh_type,ni(3)
@@ -432,9 +434,9 @@ IF(oft_env%rank==0)DEALLOCATE(rtmp,lctmp)
 call mesh_global_resolution(smesh)
 DEBUG_STACK_POP
 end subroutine smesh_square_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup surface IDs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_square_cadlink(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j
@@ -451,10 +453,10 @@ DO i=1,smesh%nbe
   END IF
 END DO
 end subroutine smesh_square_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add quadratic mesh node points
 !! @note All edges are straight so construction is trivial
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_square_add_quad(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j
@@ -484,9 +486,9 @@ END IF
 if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine smesh_square_add_quad
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_square_set_periodic(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j,jj,k,kk,l,m,n,iper

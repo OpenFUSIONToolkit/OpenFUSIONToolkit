@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_solver_xml.F90
 !
 !> Regression tests for scalar Lagrange finite elements. Tests are performed
@@ -13,7 +15,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_solver_xml
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
@@ -52,10 +54,10 @@ CALL oft_finalize
 WRITE(*,*)'SKIP TEST'
 #endif
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_lap
 !---Create solver objects
 CLASS(oft_solver), POINTER :: linv

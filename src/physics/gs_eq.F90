@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file gs_eq.F90
 !
 !> Classes and subroutines used for synthetic diagnostics.
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date April 2014
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE gs_eq
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, bmesh_findcell
@@ -22,9 +24,9 @@ USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bvrinterp
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Grad-Shafranov equilibrium field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(fem_interp) :: oft_gs_eq
   INTEGER(i4) :: order = 1 !< Order of FE representation on input mesh
   INTEGER(i4) :: interp_mode = 1 !< Interpolation mode (1 -> 'B', 2 -> 'P')
@@ -48,11 +50,11 @@ CONTAINS
   PROCEDURE :: delete => gs_delete
 END TYPE oft_gs_eq
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator for Grad-Shafranov fields
 !!
 !! Load equilibrium from file and constructs mesh and FE objects
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE gs_setup(self,mesh)
 CLASS(oft_gs_eq), INTENT(inout) :: self
 class(oft_mesh), target, intent(inout) :: mesh
@@ -99,9 +101,9 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE gs_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a Grad-Shafranov field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_interp(self,cell,f,gop,val)
 class(oft_gs_eq), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -136,9 +138,9 @@ SELECT CASE(self%interp_mode)
 END SELECT
 DEBUG_STACK_POP
 end subroutine gs_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_delete(self)
 class(oft_gs_eq), intent(inout) :: self
 IF(.NOT.ASSOCIATED(self%lagrange))RETURN

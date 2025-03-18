@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file tokamaker_fit.F90
 !
 !> Driver program for GS fitting
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date March 2014
 !! @ingroup doxy_tokamaker
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM tokamaker_fit
 USE oft_base
 USE multigrid_build, ONLY: multigrid_mesh, multigrid_construct_surf
@@ -91,13 +93,13 @@ limited_only,eqdsk_filename,eqdsk_nr,eqdsk_nz,eqdsk_rbounds,eqdsk_zbounds,eqdsk_
 eqdsk_limiter_file,eqdsk_lcfs_pad,init_r0,init_a,init_kappa,init_delta,lim_zmax,estore_target
 NAMELIST/tokamaker_fit_options/psinorm,adjust_pnorm,adjust_alam,adjust_R0,adjust_V0, &
 adjust_coils,adjust_F0,fixed_f,fixed_p,fixed_center
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Initialize enviroment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load settings
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,tokamaker_options,IOSTAT=ierr)
 IF(ierr<0)CALL oft_abort('No "tokamaker_options" found in input file.', &
@@ -111,9 +113,9 @@ IF(ierr>0)CALL oft_abort('Error parsing "tokamaker_fit_options" in input file.',
   'tokamaker_fit',__FILE__)
 CLOSE(io_unit)
 oft_env%pm=pm
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Check input files
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(TRIM(coil_file)/='none')THEN
   INQUIRE(EXIST=file_exists,FILE=TRIM(coil_file))
   IF(.NOT.file_exists)CALL oft_abort('Specified "coil_file" cannot be found', &
@@ -129,24 +131,24 @@ IF(TRIM(eqdsk_limiter_file)/='')THEN
   IF(.NOT.file_exists)CALL oft_abort('Specified "eqdsk_limiter_file" cannot be found', &
     'tokamaker_fit', __FILE__)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Mesh
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL multigrid_construct_surf(mg_mesh)
 CALL mygs%xdmf%setup("TokaMaker")
 CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Lagrange Elements
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
 CALL mygs%setup(ML_oft_blagrange)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute optimized smoother coefficients
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! CALL lag_mloptions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup experimental geometry
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! CALL exp_setup(mygs)
 mygs%compute_chi=.FALSE.
 mygs%free=free_boundary
@@ -158,9 +160,9 @@ ELSE
   IF(f_offset/=0.d0)mygs%itor_target=itor_target*mu0
 END IF
 CALL gs_setup_walls(mygs)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup profiles
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'*** Loading flux and pressure profiles ***'
 CALL gs_profile_load('f_prof.in',mygs%I)
@@ -168,9 +170,9 @@ mygs%I%f_offset=f_offset
 IF(fixed_f)mygs%I%ncofs=0
 CALL gs_profile_load('p_prof.in',mygs%P)
 IF(fixed_p)mygs%P%ncofs=0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Initialize GS solution
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'*** Initializing GS solution ***'
 INQUIRE(EXIST=file_exists,FILE='tokamaker_psi_in.rst')
@@ -181,9 +183,9 @@ ELSE
   CALl mygs%init_psi(ierr,r0=init_r0,a=init_a,kappa=init_kappa,delta=init_delta)
   IF(ierr/=0)CALL oft_abort("Flux initialization failed","tokamaker_fit",__FILE__)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute GS fit
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 mygs%mode=mode
 mygs%urf=urf
 mygs%maxits=maxits
@@ -221,9 +223,9 @@ IF(file_exists)CALL gs_load(mygs,'tokamaker_fit_in.rst')
 CALL fit_gs(mygs, 'fit.in', 'fit.out', fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
             fitR0=adjust_R0, fitV0=adjust_V0, fitCoils=adjust_coils, fitF0=adjust_F0, &
             fixedCentering=fixed_center)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Post-solution analysis
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'*** Post-solution analysis ***'
 !---Equilibrium information
@@ -274,8 +276,8 @@ IF(has_plasma)THEN
       eqdsk_run_info,eqdsk_limiter_file,eqdsk_lcfs_pad)
   END IF
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Terminate
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_finalize
 END PROGRAM tokamaker_fit

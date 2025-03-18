@@ -1,12 +1,14 @@
-'''! Python interface for ThinCurr thin-wall eddy current functionality
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! ThinCurr sensor definition and manipulation functionality
 
 @authors Chris Hansen
 @date May 2024
 @ingroup doxy_oft_python
 '''
-
-#
-# Python interface for ThinCurr sensor functionality
 import numpy
 
 

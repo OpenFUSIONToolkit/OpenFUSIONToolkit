@@ -1,12 +1,14 @@
-'''! Python interface for ThinCurr thin-wall eddy current functionality
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Python interface for ThinCurr thin-wall E-M functionality
 
 @authors Chris Hansen
 @date March 2024
 @ingroup doxy_oft_python
 '''
-
-#
-# Python interface for TokaMaker Grad-Shafranov functionality
 import ctypes
 import numpy
 import h5py
@@ -15,7 +17,7 @@ from ..io import build_XDMF
 
 
 class ThinCurr():
-    '''! ThinCurr thin-wall eddy current model class'''
+    '''! ThinCurr thin-wall E-M model class'''
     def __init__(self,OFT_env):
         '''! Initialize ThinCurr object
 

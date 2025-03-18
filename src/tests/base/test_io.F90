@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_io.F90
 !
 !> Regression tests for some HDF5 I/O
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date March 2025
 !! @ingroup testing
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 PROGRAM test_io
 USE oft_base
 USE oft_io, ONLY: hdf5_write, hdf5_read, hdf5_create_file
@@ -33,9 +35,9 @@ TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 CLASS(oft_vector), POINTER :: vec_tmp,vec_chk
 INTEGER(i4) :: test_id=1
 NAMELIST/test_io_options/test_id
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Initialize enviroment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=iounit,FILE=oft_env%ifile)
@@ -44,9 +46,9 @@ CLOSE(iounit)
 !---Setup grid
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Run tests
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 oft_env%pm=.FALSE.
 SELECT CASE(test_id)
   CASE(1) !< Test saving/reading 1D

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file fem_utils.F90
 !
 !> FEM utility classes and functions
@@ -10,7 +12,7 @@
 !! @authors Chris Hansen
 !! @date March 2013
 !! @ingroup doxy_oft_fem
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 module fem_utils
 USE oft_base
 USE oft_quadrature
@@ -21,9 +23,9 @@ USE oft_la_base, ONLY: oft_matrix
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Base class for interpolation of a FE field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, abstract :: fem_interp
   integer(i4) :: dim = 0 !< Dimension of field
   class(oft_mesh), pointer :: mesh => NULL() !< Mesh for interpolation
@@ -36,9 +38,9 @@ contains
 end type fem_interp
 !---
 abstract interface
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Protoype for FE interpolation method
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   subroutine oft_fem_interp(self,cell,f,gop,val)
     import fem_interp, i4, r8
     class(fem_interp), intent(inout) :: self
@@ -48,9 +50,9 @@ abstract interface
     real(r8), intent(out) :: val(:)
   end subroutine oft_fem_interp
 end interface
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Base class for interpolation of a FE field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, abstract :: bfem_interp
   integer(i4) :: dim = 0 !< Dimension of field
   class(oft_bmesh), pointer :: mesh => NULL() !< Mesh for interpolation
@@ -63,9 +65,9 @@ contains
 end type bfem_interp
 !---
 abstract interface
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Protoype for FE interpolation method
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   subroutine oft_bfem_interp(self,cell,f,gop,val)
     import bfem_interp, i4, r8
     class(bfem_interp), intent(inout) :: self
@@ -75,18 +77,18 @@ abstract interface
     real(r8), intent(out) :: val(:)
   end subroutine oft_bfem_interp
 end interface
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolator for cell centered fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: cc_interp
   real(r8), contiguous, pointer :: bcc(:,:) => NULL() !< Field values in each cell
 contains
   !> Reconstruct field
   procedure :: interp => cc_interp_apply
 end type cc_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolator for difference between two fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: diff_interp
   class(fem_interp), pointer :: a => NULL() !< Field 1
   class(fem_interp), pointer :: b => NULL() !< Field 2
@@ -94,9 +96,9 @@ contains
   !> Reconstruct field
   procedure :: interp => diff_interp_apply
 end type diff_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolator for dot-product of two fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: dot_interp
   class(fem_interp), pointer :: a => NULL() !< Field 1
   class(fem_interp), pointer :: b => NULL() !< Field 2
@@ -104,9 +106,9 @@ contains
   !> Reconstruct field
   procedure :: interp => dot_interp_apply
 end type dot_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolator for cross-product of two fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: cross_interp
   class(fem_interp), pointer :: a => NULL() !< Field 1
   class(fem_interp), pointer :: b => NULL() !< Field 2
@@ -114,9 +116,9 @@ contains
   !> Reconstruct field
   procedure :: interp => cross_interp_apply
 end type cross_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolator for the product of a vector and tensor field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: tensor_dot_interp
   INTEGER(i4) :: bshape = 1 !< Number of rows in tensor B
   REAL(r8), POINTER :: bvals(:) => NULL()  !< Internal storage for intepolated B
@@ -131,9 +133,9 @@ contains
   procedure :: delete => tensor_dot_interp_delete
 end type tensor_dot_interp
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a cell centered field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cc_interp_apply(self,cell,f,gop,val)
 class(cc_interp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -145,9 +147,9 @@ DEBUG_STACK_PUSH
 val=self%bcc(:,cell)
 DEBUG_STACK_POP
 end subroutine cc_interp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct the difference between two fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine diff_interp_apply(self,cell,f,gop,val)
 class(diff_interp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -165,9 +167,9 @@ val=aval-bval
 DEALLOCATE(aval,bval)
 DEBUG_STACK_POP
 end subroutine diff_interp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct the dot-product of two fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine dot_interp_apply(self,cell,f,gop,val)
 class(dot_interp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -181,9 +183,9 @@ CALL self%b%interp(cell,f,gop,bval)
 val(1)=DOT_PRODUCT(aval,bval)
 DEBUG_STACK_POP
 end subroutine dot_interp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct the cross-product of two fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cross_interp_apply(self,cell,f,gop,val)
 class(cross_interp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -197,9 +199,9 @@ CALL self%b%interp(cell,f,gop,bval)
 val=cross_product(aval,bval)
 DEBUG_STACK_POP
 end subroutine cross_interp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct the product of a vector and tensor field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tensor_dot_interp_apply(self,cell,f,gop,val)
 class(tensor_dot_interp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -213,42 +215,42 @@ CALL self%b%interp(cell,f,gop,self%bvals)
 val=MATMUL(aval,RESHAPE(self%bvals,(/3,self%bshape/)))
 DEBUG_STACK_POP
 end subroutine tensor_dot_interp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup composite interpolator for a matrix-vector product
 !!
 !! Allocates local interpolation objects. Setup of component fields must be
 !! called separately before the interpolator may be used
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tensor_dot_interp_setup(self,mesh)
 class(tensor_dot_interp), intent(inout) :: self
 class(oft_mesh), target, intent(inout) :: mesh
 self%mesh=>mesh
 IF(.NOT.ASSOCIATED(self%bvals))ALLOCATE(self%bvals(3*self%bshape))
 end subroutine tensor_dot_interp_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tensor_dot_interp_delete(self)
 class(tensor_dot_interp), intent(inout) :: self
 IF(ASSOCIATED(self%bvals))DEALLOCATE(self%bvals)
 end subroutine tensor_dot_interp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Dummy destroy function
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_interp_delete(self)
 class(fem_interp), intent(inout) :: self
 call oft_warn('Finalize called on general interpolator, this may indicate an error.')
 end subroutine fem_interp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Dummy destroy function
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bfem_interp_delete(self)
 class(bfem_interp), intent(inout) :: self
 call oft_warn('Finalize called on general interpolator, this may indicate an error.')
 end subroutine bfem_interp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Average a FE interpolator field to cell centers, by volume averaging
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_avg_bcc(mesh,field,bcc,order,n)
 CLASS(oft_mesh), INTENT(in) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Source field intepolator
@@ -286,9 +288,9 @@ DEALLOCATE(dets,bcctmp)
 CALL quad%delete
 DEBUG_STACK_POP
 end subroutine fem_avg_bcc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Partition FE weights based on geometric connectivity
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_partition(self,part,nparts)
 class(oft_fem_type), intent(inout) :: self !< Finite element structure
 INTEGER(i4), intent(inout) :: part(:) !< Weight partitioning [self%ne]
@@ -346,9 +348,9 @@ END DO
 DEALLOCATE(tloc_p,tloc_e,tloc_f,tloc_c)
 DEBUG_STACK_POP
 end subroutine fem_partition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Set diagonal elements to one on owned rows according to BC flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_map_flag(fem_obj,vert_flag,edge_flag,face_flag,fe_flag)
 CLASS(oft_fem_type), INTENT(INOUT) :: fem_obj !< Needs docs
 LOGICAL, DIMENSION(:), INTENT(IN) :: vert_flag !< Needs docs
@@ -391,9 +393,9 @@ CALL oft_global_stitch(fem_obj%linkage,flag_tmp,1)
 fe_flag=(flag_tmp>0.5d0)
 DEALLOCATE(flag_tmp)
 end subroutine fem_map_flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Set diagonal elements to one on owned rows according to BC flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bfem_map_flag(fem_obj,vert_flag,edge_flag,fe_flag)
 CLASS(oft_bfem_type), INTENT(INOUT) :: fem_obj !< Needs docs
 LOGICAL, DIMENSION(:), INTENT(IN) :: vert_flag !< Needs docs
@@ -425,9 +427,9 @@ CALL oft_global_stitch(fem_obj%linkage,flag_tmp,1)
 fe_flag=(flag_tmp>0.5d0)
 DEALLOCATE(flag_tmp)
 end subroutine bfem_map_flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Set diagonal elements to one on owned rows according to BC flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_dirichlet_diag(fem_obj,mat,flag,iblock)
 CLASS(oft_afem_type), INTENT(INOUT) :: fem_obj !< Needs docs
 CLASS(oft_matrix), INTENT(INOUT) :: mat !< Needs docs
@@ -451,9 +453,9 @@ DO i=1,fem_obj%nbe
   END IF
 END DO
 end subroutine fem_dirichlet_diag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Replace values in local vector according to BC flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_dirichlet_vec(fem_obj,vecin,vecout,flag)
 CLASS(oft_afem_type), INTENT(INOUT) :: fem_obj !< Needs docs
 REAL(r8), DIMENSION(:), INTENT(INOUT) :: vecin !< Needs docs

@@ -1,11 +1,13 @@
 #!/usr/bin/env python
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-#---------------------------------------------------------------------------
 #
-# Driver script for creating XDMF descriptor files for Open FUSION Toolkit output
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 #
-#---------------------------------------------------------------------------
+# Legacy driver script for creating XDMF descriptor files for Open FUSION Toolkit output
+#
+#------------------------------------------------------------------------------
 from __future__ import print_function
 import argparse
 try:

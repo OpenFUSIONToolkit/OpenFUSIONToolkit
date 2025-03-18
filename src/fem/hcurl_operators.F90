@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file oft_hcurl_operators.F90
 !
 !> H(Curl) FE operator definitions
@@ -23,7 +25,7 @@
 !! @authors Chris Hansen
 !! @date August 2011
 !! @ingroup doxy_oft_hcurl
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 module oft_hcurl_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
@@ -51,9 +53,9 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, &
   oft_hcurl_fem, oft_hcurl_bfem, oft_3D_hcurl_cast, oft_2D_hcurl_cast
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Orthogonalize a H(Curl) vector against a library of given modes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_hcurl_orthog
   integer(i4) :: nm = 0 !< Number of modes to orthogonalize against
   type(oft_vector_ptr), pointer, dimension(:,:) :: orthog => NULL() !< Library of modes
@@ -65,9 +67,9 @@ contains
   !> Clean-up internal variables
   procedure :: delete => hcurl_orthog_delete
 end type oft_hcurl_orthog
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a H(Curl) field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: oft_hcurl_rinterp
   class(oft_vector), pointer :: u => NULL() !< Field to interpolate
   real(r8), pointer, dimension(:) :: vals => NULL() !< Local values
@@ -80,15 +82,15 @@ contains
   !> Destroy temporary internal storage
   procedure :: delete => hcurl_rinterp_delete
 end type oft_hcurl_rinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \times \f$ of a H(Curl) field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_hcurl_rinterp) :: oft_hcurl_cinterp
 contains
   !> Reconstruct field
   procedure :: interp => hcurl_cinterp
 end type oft_hcurl_cinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Clean the divergence from a H(Curl) vector field
 !!
 !! Divergence is removed by adding a gradient field, such that \f$ f = f +
@@ -101,7 +103,7 @@ end type oft_hcurl_cinterp
 !! @note This only removes the 0-th order component, which is sufficient for
 !! orthogonalization against the H(Curl)::WOP null space. Higher order cleaning
 !! requires the full H(Curl) + Grad(H^1) vector space.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_hcurl_divout
   integer(i4) :: count=0 !< Number of times apply has been called
   integer(i4) :: app_freq=1 !< Frequency to apply solver
@@ -120,9 +122,9 @@ contains
   !> Clean-up internal storage
   procedure :: delete => hcurl_divout_delete
 end type oft_hcurl_divout
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_hcurl_zerob
   class(oft_ml_fem_type), pointer :: ML_hcurl_rep => NULL() !< FE representation
 contains
@@ -138,9 +140,9 @@ REAL(r8), POINTER, DIMENSION(:,:) :: oft_hcurl_rop => NULL()
 REAL(r8), POINTER, DIMENSION(:,:) :: oft_hcurl_cop => NULL()
 !$omp threadprivate(oft_hcurl_rop,oft_hcurl_cop)
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Read-in options for the basic H(Curl) ML preconditioners
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_mloptions(ML_hcurl_obj)
 class(oft_ml_fem_type), intent(inout) :: ML_hcurl_obj
 integer(i4) :: i,ierr,io_unit
@@ -176,11 +178,11 @@ IF(df_wop(1)<-1.d90)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine hcurl_mloptions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator for H(Curl) fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_rinterp_setup(self,hcurl_rep)
 class(oft_hcurl_rinterp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: hcurl_rep
@@ -195,18 +197,18 @@ self%mesh=>self%hcurl_rep%mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
 end subroutine hcurl_rinterp_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_rinterp_delete(self)
 class(oft_hcurl_rinterp), intent(inout) :: self
 !---Deallocate local storage
 IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
 NULLIFY(self%hcurl_rep,self%u)
 end subroutine hcurl_rinterp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a H(Curl) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_rinterp(self,cell,f,gop,val)
 class(oft_hcurl_rinterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -231,9 +233,9 @@ end do
 deallocate(j,rop)
 DEBUG_STACK_POP
 end subroutine hcurl_rinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct the curl of a H(Curl) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_cinterp(self,cell,f,gop,val)
 class(oft_hcurl_cinterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -260,12 +262,12 @@ end do
 deallocate(j,cop)
 DEBUG_STACK_POP
 end subroutine hcurl_cinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Apply the divergence operator to a H(Curl) field
 !!
 !! @note This subroutine computes the divergence of a H(Curl) field as
 !! projected on to a linear Lagrange scalar basis.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_div(hcurl_fe,lag_fe,a,b)
 class(oft_afem_type), intent(inout) :: hcurl_fe
 class(oft_afem_type), intent(inout) :: lag_fe
@@ -284,18 +286,18 @@ CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,lag_fe))CALL oft_abort("Incorrect Lagrange FE type","hcurl_div",__FILE__)
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_fe))CALL oft_abort("Incorrect HCurl FE type","hcurl_div",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate Laplacian Op
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(aloc,bloc)
 !---Get local values
 CALL a%get_local(aloc)
 !---Zero output and get aliases
 CALL b%set(0.d0)
 CALL b%get_local(bloc)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j_curl,j_grad,rop_curl,rop_grad,det,btmp,curved,goptmp,m,v,jc,jr,f)
 allocate(j_curl(hcurl_rep%nce)) ! Local DOF and matrix indices
@@ -336,9 +338,9 @@ CALL b%restore_local(bloc,add=.TRUE.)
 deallocate(aloc,bloc)
 DEBUG_STACK_POP
 end subroutine hcurl_div
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Add the gradient of a linear Lagrange scalar field to a H(Curl) field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad(hcurl_fe,a,b)
 class(oft_afem_type), intent(inout) :: hcurl_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
@@ -364,12 +366,12 @@ CALL b%restore_local(bloc)
 DEALLOCATE(aloc,bloc)
 DEBUG_STACK_POP
 end subroutine hcurl_grad
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Apply the transposed gradient operator to a H(Curl) vector field.
 !!
 !! @note Only the 0th order component is computed from the discrete gradient
 !! operator
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_gradtp(hcurl_fe,a,b)
 class(oft_afem_type), intent(inout) :: hcurl_fe
 class(oft_vector), intent(inout) :: a !< Input field
@@ -412,9 +414,9 @@ CALL b%restore_local(bloc,add=.TRUE.)
 DEALLOCATE(aloc,bloc)
 DEBUG_STACK_POP
 end subroutine hcurl_gradtp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero the tangential component of a H(Curl) vector field on the boundary
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_apply(self,a)
 class(oft_hcurl_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -433,20 +435,20 @@ CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine zerob_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero the tangential component of a H(Curl) vector field on the boundary
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_delete(self)
 class(oft_hcurl_zerob), intent(inout) :: self
 NULLIFY(self%ML_hcurl_rep)
 end subroutine zerob_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct mass matrix for a H(Curl) representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_hcurl_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -465,17 +467,17 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getmop",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL hcurl_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,det,mop,curved,goptmp,m,vol,jc,jr)
 allocate(j(hcurl_rep%nce)) ! Local DOF and matrix indices
@@ -539,13 +541,13 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getmop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct helicity matrix for a H(Curl) representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_hcurl_getkop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -564,17 +566,17 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getkop",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL hcurl_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,cop,det,kop,curved,goptmp,cgop,m,vol,jc,jr)
 allocate(j(hcurl_rep%nce)) ! Local DOF and matrix indices
@@ -641,13 +643,13 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getkop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct energy matrix for a H(Curl) representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_hcurl_getwop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -666,17 +668,17 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getwop",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate Laplacian Op
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL hcurl_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,cop,det,wop,curved,goptmp,cgop,m,vol,jc,jr)
 allocate(j(hcurl_rep%nce)) ! Local DOF and matrix indices
@@ -741,13 +743,13 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getwop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct force-free response matrix for a H(Curl) representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_hcurl_getjmlb(fe_rep,mat,alam,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -767,17 +769,17 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getjmlb",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate Laplacian Op
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL hcurl_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,cop,det,wop,curved,goptmp,cgop,m,vol,jc,jr)
 allocate(j(hcurl_rep%nce)) ! Local DOF and matrix indices
@@ -844,13 +846,13 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getjmlb
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Project a vector field onto a H(Curl) basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! test functions for a H(Curl) basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of H(Curl)::MOP
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_hcurl_project(fe_rep,field,x)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(fem_interp), intent(inout) :: field !< Vector field for projection
@@ -893,10 +895,10 @@ call x%restore_local(xloc,add=.TRUE.)
 deallocate(xloc)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_project
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute the boundary term for integration by parts of the curl operator using
 !! a HCurl basis
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_hcurl_bcurl(fe_rep,bfe_rep,field,x)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_afem_type), target, intent(inout) :: bfe_rep
@@ -952,9 +954,9 @@ call x%restore_local(xloc,add=.TRUE.)
 deallocate(xloc)
 DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_bcurl
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup matrix and solver with default
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_divout_setup(self,ML_hcurl_rep,ML_lag_rep,bc,solver)
 class(oft_hcurl_divout), intent(inout) :: self
 class(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_rep
@@ -993,9 +995,9 @@ CASE DEFAULT
 END SELECT
 DEBUG_STACK_POP
 end subroutine hcurl_divout_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Remove divergence from a H(Curl) vector field by adding a gradient correction
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_divout_apply(self,a)
 class(oft_hcurl_divout), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field for divergence cleaning
@@ -1046,9 +1048,9 @@ call g%delete
 deallocate(tmp,u,g)
 DEBUG_STACK_POP
 end subroutine hcurl_divout_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Clean-up internal storage for a oft_hcurl_divout object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_divout_delete(self)
 class(oft_hcurl_divout), intent(inout) :: self
 IF(ASSOCIATED(self%solver).AND.self%internal_solver)THEN
@@ -1065,11 +1067,11 @@ IF(ASSOCIATED(self%bc))THEN
 END IF
 NULLIFY(self%ML_hcurl_rep,self%ML_lag_rep)
 end subroutine hcurl_divout_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Orthogonalize a H(Curl) vector against a library of given modes.
 !!
 !! @note Used as a member function of oft_hcurl_orthog only
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_orthog_apply(self,a)
 class(oft_hcurl_orthog), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to orthogonalize
@@ -1091,17 +1093,17 @@ call b%delete
 deallocate(b)
 DEBUG_STACK_POP
 end subroutine hcurl_orthog_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Clean-up internal storage for a oft_hcurl_orthog object
 !!
 !! @note Used as a member function of oft_hcurl_orthog only
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_orthog_delete(self)
 class(oft_hcurl_orthog), intent(inout) :: self
 end subroutine hcurl_orthog_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_setup_interp(ML_hcurl_rep)
 CLASS(oft_ml_fem_type), intent(inout) :: ML_hcurl_rep
 INTEGER(i4) :: i
@@ -1124,9 +1126,9 @@ DO i=ML_hcurl_rep%minlev+1,ML_hcurl_rep%nlevels
 END DO
 DEBUG_STACK_POP
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_ginterpmatrix(mat)
 class(oft_matrix), pointer, intent(inout) :: mat !< Interpolation matrix
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
@@ -1230,9 +1232,9 @@ DO i=1,cmesh%nc
     interp_graph%lc(k+j)=jce(1+j)
   END DO
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Construct matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(hcurl_vec_fine,hcurl_vec_cors)
 CALL ML_hcurl_rep%vec_create(hcurl_vec_fine)
 CALL ML_hcurl_rep%vec_create(hcurl_vec_cors,ML_hcurl_rep%level-1)
@@ -1244,9 +1246,9 @@ CALL create_matrix(mat,graphs,hcurl_vec_fine,hcurl_vec_cors)
 CALL hcurl_vec_fine%delete
 CALL hcurl_vec_cors%delete
 DEALLOCATE(graphs,hcurl_vec_fine,hcurl_vec_cors)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Construct matrix
 allocate(emap(cmesh%ne))
 CALL get_inverse_map(cmesh%lbe,cmesh%nbe,emap,cmesh%ne)
@@ -1329,9 +1331,9 @@ DO i=1,cmesh%nc ! loop over coarse cells
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_ginterpmatrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_pinterpmatrix(mat)
 class(oft_matrix), pointer, intent(inout) :: mat !< Interolation matrix
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,js,jn,i_ind(1),j_ind(1)
@@ -1423,9 +1425,9 @@ do i=1,mesh%nc
     interp_graph%lc(interp_graph%kr(j+offsetf))=j+offsetc
   end do
 end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Construct matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(hcurl_vec_fine,hcurl_vec_cors)
 CALL ML_hcurl_rep%vec_create(hcurl_vec_fine)
 CALL ML_hcurl_rep%vec_create(hcurl_vec_cors,ML_hcurl_rep%level-1)
@@ -1437,9 +1439,9 @@ CALL create_matrix(mat,graphs,hcurl_vec_fine,hcurl_vec_cors)
 CALL hcurl_vec_fine%delete
 CALL hcurl_vec_cors%delete
 DEALLOCATE(graphs,hcurl_vec_fine,hcurl_vec_cors)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---
 allocate(emap(mesh%ne))
 CALL get_inverse_map(mesh%lbe,mesh%nbe,emap,mesh%ne)
@@ -1484,9 +1486,9 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_pinterpmatrix
 END SUBROUTINE hcurl_setup_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Transfer a base level H(Curl) vector field to the next MPI level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_base_pop(self,acors,afine)
 class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to transfer
@@ -1506,9 +1508,9 @@ CALL afine%restore_local(array_f)
 DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine hcurl_base_pop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Transfer a MPI level H(Curl) vector field to the base level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_base_push(self,afine,acors)
 class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Vector to transfer
@@ -1543,9 +1545,9 @@ call acors%restore_local(array_c)
 deallocate(alias,array_c,array_f)
 DEBUG_STACK_POP
 end subroutine hcurl_base_push
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H(Curl)::WOP
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_wop_eigs(ML_hcurl_rep,minlev)
 type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_rep
 INTEGER(i4), INTENT(in) :: minlev !< Needs docs
@@ -1559,9 +1561,9 @@ CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: wop => NULL()
 TYPE(oft_hcurl_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H(Curl)::WOP'
 bc_tmp%ML_hcurl_rep=>ML_hcurl_rep
 ALLOCATE(df(ML_hcurl_rep%nlevels))
@@ -1611,9 +1613,9 @@ DEBUG_STACK_POP
 CALL oft_abort("Subroutine requires ARPACK", "lag_lop_eigs", __FILE__)
 #endif
 END SUBROUTINE hcurl_wop_eigs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct default MG preconditioner for H(Curl)::WOP
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_getwop_pre(ML_hcurl_rep,pre,mats,level,nlevels)
 type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_rep
 CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Needs docs
@@ -1649,9 +1651,9 @@ nl=toplev-minlev+1
 !---
 IF(minlev<ML_hcurl_rep%minlev)CALL oft_abort('Minimum level is < minlev','hcurl_getwop_pre',__FILE__)
 IF(toplev>ML_hcurl_rep%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getwop_pre',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create ML Matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 create_mats=.FALSE.
 IF(.NOT.ASSOCIATED(mats))THEN
   create_mats=.TRUE.
@@ -1676,9 +1678,9 @@ DO i=1,nl
   IF(i>1)ml_int(i-1)%M=>ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m !oft_hcurl_ops%interp
 END DO
 CALL ML_hcurl_rep%set_level(levin)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Search for XML-spec
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
@@ -1686,9 +1688,9 @@ IF(ASSOCIATED(oft_env%xml))THEN
   IF(ierr==0)CALL xml_get_element(hcurl_node,"wop",pre_node,ierr)
 END IF
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup preconditioner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(bc_tmp)
 bc_tmp%ML_hcurl_rep=>ML_hcurl_rep
 NULLIFY(pre)
@@ -1698,15 +1700,15 @@ tmp_vecspace%base_pop=>hcurl_base_pop
 tmp_vecspace%base_push=>hcurl_base_push
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
       bc=bc_tmp,stype=1,df=df,nu=nu,xml_root=pre_node)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(ml_int,levels,df,nu)
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_getwop_pre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct default MG preconditioner for H(Curl)::JMLB
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_getjmlb_pre(ML_hcurl_rep,pre,mats,alam,level,nlevels)
 type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_rep
 CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Needs docs
@@ -1743,9 +1745,9 @@ nl=toplev-minlev+1
 !---
 IF(minlev<ML_hcurl_rep%minlev)CALL oft_abort('Minimum level is < minlev','hcurl_getjmlb_pre',__FILE__)
 IF(toplev>ML_hcurl_rep%nlevels)CALL oft_abort('Maximum level is > hcurl_nlevels','hcurl_getjmlb_pre',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create ML Matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 create_mats=.FALSE.
 IF(.NOT.ASSOCIATED(mats))THEN
   create_mats=.TRUE.
@@ -1764,9 +1766,9 @@ DO i=1,nl
   IF(i>1)ml_int(i-1)%M=>ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m !oft_hcurl_ops%interp
 END DO
 CALL ML_hcurl_rep%set_level(levin)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Search for XML-spec
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
@@ -1774,9 +1776,9 @@ IF(ASSOCIATED(oft_env%xml))THEN
   IF(ierr==0)CALL xml_get_element(hcurl_node,"jmlb",pre_node,ierr)
 END IF
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup preconditioner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(bc_tmp)
 bc_tmp%ML_hcurl_rep=>ML_hcurl_rep
 NULLIFY(pre)
@@ -1786,9 +1788,9 @@ tmp_vecspace%base_pop=>hcurl_base_pop
 tmp_vecspace%base_push=>hcurl_base_push
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
       bc=bc_tmp,stype=2,nu=nu,xml_root=pre_node)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(ml_int,levels,nu)
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_getjmlb_pre
