@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file oft_h1_operators.F90
 !
 !> H^1 FE operator definitions
@@ -16,7 +18,7 @@
 !! @authors Chris Hansen
 !! @date August 2011
 !! @ingroup doxy_oft_h1
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_h1_operators
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
@@ -36,9 +38,9 @@ USE oft_h1_basis, ONLY: oft_h1_eval_all, oft_h1_geval_all, &
   oft_h1_fem, oft_3D_h1_cast
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a H^1 field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: oft_h1_rinterp
   class(oft_vector), pointer :: u => NULL() !< Field to interpolate
   real(r8), pointer, dimension(:) :: vals => NULL() !< Local values
@@ -51,33 +53,33 @@ contains
   !> Destroy temporary internal storage
   procedure :: delete => rinterp_delete
 end type oft_h1_rinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \f$ of a H^1 field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_h1_rinterp) :: oft_h1_ginterp
 contains
   !> Reconstruct field
   procedure :: interp => ginterp_apply
 end type oft_h1_ginterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_h1_zerob
   class(oft_ml_fem_type), pointer :: ML_H1_rep => NULL() !< FE representation
 contains
   procedure :: apply => zerob_apply
   procedure :: delete => zerob_delete
 end type oft_h1_zerob
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_h1_zerob) :: oft_h1_zerogrnd
 contains
   procedure :: apply => zerogrnd_apply
 end type oft_h1_zerogrnd
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_h1_zerob) :: oft_h1_zeroi
 contains
   procedure :: apply => zeroi_apply
@@ -90,9 +92,9 @@ REAL(r8), POINTER, DIMENSION(:) :: oft_h1_rop => NULL()
 REAL(r8), POINTER, DIMENSION(:,:) :: oft_h1_gop => NULL()
 !$omp threadprivate(oft_h1_rop,oft_h1_gop)
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Read-in options for the basic H^1 ML preconditioners
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine h1_mloptions
 integer(i4) :: ierr,io_unit
 namelist/h1_op_options/df_lop,nu_lop
@@ -113,11 +115,11 @@ IF(df_lop(1)<-1.d90)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine h1_mloptions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator for H^1 scalar fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rinterp_setup(self,h1_rep)
 class(oft_h1_rinterp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: h1_rep
@@ -126,18 +128,18 @@ self%mesh=>self%h1_rep%mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
 end subroutine rinterp_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rinterp_delete(self)
 class(oft_h1_rinterp), intent(inout) :: self
 !---Deallocate local storage
 IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
 NULLIFY(self%h1_rep,self%u)
 end subroutine rinterp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a H^1 scalar field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rinterp_apply(self,cell,f,gop,val)
 class(oft_h1_rinterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -161,9 +163,9 @@ end do
 deallocate(rop,j)
 DEBUG_STACK_POP
 end subroutine rinterp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct the gradient of a H^1 scalar field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ginterp_apply(self,cell,f,gop,val)
 class(oft_h1_ginterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -187,9 +189,9 @@ end do
 DEALLOCATE(rop,j)
 DEBUG_STACK_POP
 end subroutine ginterp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a H^1 scalar field at all boundary nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_apply(self,a)
 class(oft_h1_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -210,19 +212,19 @@ CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine zerob_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a H^1 scalar field at all boundary nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_delete(self)
 class(oft_h1_zerob), intent(inout) :: self
 NULLIFY(self%ML_H1_rep)
 end subroutine zerob_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a H^1 scalar field at the global grounding node
 !!
 !! @note The possition of this node is defined by the mesh pointer igrnd in
 !! mesh
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerogrnd_apply(self,a)
 class(oft_h1_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -241,9 +243,9 @@ CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a H^1 scalar field at all interior nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zeroi_apply(self,a)
 class(oft_h1_zeroi), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -262,13 +264,13 @@ CALL a%restore_local(aloc)
 DEALLOCATE(aloc)
 DEBUG_STACK_POP
 end subroutine zeroi_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct mass matrix for H^1 scalar representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -287,17 +289,17 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_h1_cast(h1_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_h1_getmop",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL h1_rep%mat_create(mat)
 ELSE
   CALL mat%zero()
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,det,mop,curved,goptmp,m,vol,jc,jr)
 allocate(j(h1_rep%nce)) ! Local DOF and matrix indices
@@ -375,14 +377,14 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_h1_getmop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct laplacian matrix for H^1 scalar representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
 !! - `'grnd'`  Dirichlet for only groundin point
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_getlop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -401,17 +403,17 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_h1_cast(h1_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_h1_getlop",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL h1_rep%mat_create(mat)
 ELSE
   CALL mat%zero()
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,gop,det,lop,curved,goptmp,m,vol,jc,jr)
 allocate(j(h1_rep%nce)) ! Local DOF and matrix indices
@@ -489,7 +491,7 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_h1_getlop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Project a scalar field onto a H^1 basis
 !!
 !! @note This subroutine only performs the integration of the field with
@@ -498,7 +500,7 @@ end subroutine oft_h1_getlop
 !!
 !! @param[in,out] field Vector field for projection
 !! @param[in,out] x Field projected onto H^1 basis
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_project(fe_rep,field,x)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(fem_interp), intent(inout) :: field
@@ -541,10 +543,10 @@ call x%restore_local(xloc,add=.TRUE.)
 deallocate(xloc)
 DEBUG_STACK_POP
 end subroutine oft_h1_project
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct interpolation matrices for transfer between H^1 finite element
 !! spaces
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE h1_setup_interp(ML_h1_rep)
 CLASS(oft_ml_fem_type), intent(inout) :: ML_h1_rep
 INTEGER(i4) :: i
@@ -565,10 +567,10 @@ DO i=ML_h1_rep%minlev+1,ML_h1_rep%nlevels
 END DO
 DEBUG_STACK_POP
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct interpolation matrix for transfer between geometric levels
 !! of H^1 finite element space
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE build_ginterpmatrix(mat)
 class(oft_matrix), pointer, intent(inout) :: mat
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
@@ -635,9 +637,9 @@ DO i=1,cmesh%ne
     interp_graph%lc(jb+k)=etmp(k)
   END DO
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Construct matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(h1_vec_fine,h1_vec_cors)
 CALL ML_h1_rep%vec_create(h1_vec_fine)
 CALL ML_h1_rep%vec_create(h1_vec_cors,ML_h1_rep%level-1)
@@ -649,9 +651,9 @@ CALL create_matrix(mat,graphs,h1_vec_fine,h1_vec_cors)
 CALL h1_vec_fine%delete
 CALL h1_vec_cors%delete
 DEALLOCATE(graphs,h1_vec_fine,h1_vec_cors)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Construct matrix
 allocate(pmap(cmesh%np))
 CALL get_inverse_map(cmesh%lbp,cmesh%nbp,pmap,cmesh%np)
@@ -688,10 +690,10 @@ END DO
 deallocate(emap)
 DEBUG_STACK_POP
 END SUBROUTINE build_ginterpmatrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct interpolation matrix for transfer between polynomial levels
 !! of H^1 finite element space
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE build_pinterpmatrix(mat)
 class(oft_matrix), pointer, intent(inout) :: mat
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,js,jn,i_ind(1),j_ind(1)
@@ -781,9 +783,9 @@ do i=1,mesh%nc
     interp_graph%lc(interp_graph%kr(j+offsetf))=j+offsetc
   end do
 end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Construct matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(h1_vec_fine,h1_vec_cors)
 CALL ML_h1_rep%vec_create(h1_vec_fine)
 CALL ML_h1_rep%vec_create(h1_vec_cors,ML_h1_rep%level-1)
@@ -795,9 +797,9 @@ CALL create_matrix(mat,graphs,h1_vec_fine,h1_vec_cors)
 CALL h1_vec_fine%delete
 CALL h1_vec_cors%delete
 DEALLOCATE(graphs,h1_vec_fine,h1_vec_cors)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---
 allocate(pmap(mesh%np))
 CALL get_inverse_map(mesh%lbp,mesh%nbp,pmap,mesh%np)
@@ -856,9 +858,9 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE build_pinterpmatrix
 END SUBROUTINE h1_setup_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Transfer a base level H^1 scalar field to the next MPI level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine h1_base_pop(self,acors,afine)
 class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to transfer
@@ -878,9 +880,9 @@ CALL afine%restore_local(array_f)
 DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine h1_base_pop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Transfer a MPI level H^1 scalar field to the base level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine h1_base_push(self,afine,acors)
 class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Vector to transfer
@@ -915,9 +917,9 @@ call acors%restore_local(array_c)
 deallocate(alias,array_c,array_f)
 DEBUG_STACK_POP
 end subroutine h1_base_push
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H^1::LOP
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE h1_lop_eigs(ML_h1_rep,minlev)
 type(oft_ml_fem_type), target, intent(inout) :: ML_h1_rep
 INTEGER(i4), INTENT(in) :: minlev
@@ -933,9 +935,9 @@ CLASS(oft_h1_fem), POINTER :: h1_obj
 TYPE(oft_h1_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
 bc_tmp%ML_H1_rep=>ML_h1_rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H^1::LOP'
 ALLOCATE(df(ML_h1_rep%nlevels))
 df=0.d0
@@ -979,9 +981,9 @@ DEBUG_STACK_POP
 CALL oft_abort("Subroutine requires ARPACK", "lag_lop_eigs", __FILE__)
 #endif
 END SUBROUTINE h1_lop_eigs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator H^1::LOP
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE h1_getlop_pre(ML_h1_rep,pre,mats,bc_type,level,nlevels)
 type(oft_ml_fem_type), target, intent(inout) :: ML_h1_rep
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -1019,9 +1021,9 @@ nl=toplev-minlev+1
 !---
 IF(minlev<ML_h1_rep%minlev)CALL oft_abort('Minimum level is < minlev','h1_getlop_pre',__FILE__)
 IF(toplev>ML_h1_rep%nlevels)CALL oft_abort('Maximum level is > nlevels','h1_getlop_pre',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create ML Matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 create_mats=.FALSE.
 IF(.NOT.ASSOCIATED(mats))THEN
   create_mats=.TRUE.
@@ -1046,9 +1048,9 @@ DO i=1,nl
   IF(i>1)ml_int(i-1)%M=>ML_h1_rep%interp_matrices(ML_h1_rep%level)%m
 END DO
 CALL ML_h1_rep%set_level(levin)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Search for XML-spec
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
@@ -1057,9 +1059,9 @@ IF(ASSOCIATED(oft_env%xml))THEN
   IF(ierr==0)CALL xml_get_element(h1_node,"lop",pre_node,ierr)
 END IF
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup preconditioner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(pre)
 ALLOCATE(tmp_vecspace)
 tmp_vecspace%ML_FE_rep=>ML_h1_rep
@@ -1079,9 +1081,9 @@ SELECT CASE(TRIM(bc_type))
   CASE DEFAULT
     CALL oft_abort("Unknown BC type","h1_getlop_pre",__FILE__)
 END SELECT
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(ml_int,levels,df,nu)
 DEBUG_STACK_POP
 END SUBROUTINE h1_getlop_pre

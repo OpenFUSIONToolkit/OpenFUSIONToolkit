@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 ! MODULE: diagnostic
 !
 !> @file diagnostic.F90
@@ -10,7 +12,7 @@
 !! @authors Chris Hansen
 !! @date March 2013
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE diagnostic
 USE oft_base
 USE oft_quadrature
@@ -19,13 +21,13 @@ USE oft_io, ONLY: oft_bin_file
 USE fem_utils, ONLY: fem_interp, bfem_interp
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Synthetic field diagnostic
 !!
 !! Provides setup and driver for sampling a n-vector at specified locations.
 !! Locations are mapped during the setup procedure so that subsequent calls to
 !! eval have very low overhead.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: field_probe
   INTEGER(i4) :: dim = 3 !< Dimension of field being sampled
   INTEGER(i4) :: nprobes = 0 !< Number of probe locations
@@ -48,7 +50,7 @@ CONTAINS
   !> Sample and save the result to a history file
   PROCEDURE :: save => field_probe_save
 END TYPE field_probe
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Synthetic flux diagnostic
 !!
 !! Provides setup and driver for computing the flux of a 3-vector at a specified
@@ -59,7 +61,7 @@ END TYPE field_probe
 !!
 !! @warning Currently this diagnostic does not take into account mesh curvature.
 !! This may result in errors when the internal boundary intersects a curved boundary.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: flux_probe
   INTEGER(i4) :: order = 3 !< Order of quadrature required
   INTEGER(i4) :: nf = 0 !< Number of surface faces
@@ -78,13 +80,13 @@ CONTAINS
   PROCEDURE :: eval => flux_probe_eval
 END TYPE flux_probe
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Initialize point list and setup ownership
 !!
 !! Sampling locations may be set in the code directly, via `pts`, or loaded
 !! from a file, via `filename`. If `filename` is specified the number of points
 !! read from the file is returned in `npts`.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE field_probe_setup(self,npts,pts,filename)
 CLASS(field_probe), INTENT(inout) :: self
 INTEGER(i4), INTENT(inout) :: npts !< Number of probes
@@ -166,9 +168,9 @@ DO i=1,self%nprobes
 END DO
 DEALLOCATE(ptmp,pown,fout)
 END SUBROUTINE field_probe_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute field at all probe locations
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE field_probe_eval(self,vals)
 CLASS(field_probe), INTENT(inout) :: self
 REAL(r8), INTENT(inout) :: vals(:,:) !< Fields at all probe locations [3,npts]
@@ -192,9 +194,9 @@ vals=vtmp
 #endif
 DEALLOCATE(vtmp)
 END SUBROUTINE field_probe_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup history file for repeated saves
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE field_probe_setup_save(self,filename)
 CLASS(field_probe), INTENT(inout) :: self
 CHARACTER(LEN=*), INTENT(in) :: filename !< Filename for history file
@@ -216,9 +218,9 @@ IF(oft_env%head_proc)THEN
   CALL self%hist_file%close
 END IF
 END SUBROUTINE field_probe_setup_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Sample and save the result to the history file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE field_probe_save(self,time)
 CLASS(field_probe), INTENT(inout) :: self
 REAL(r8), INTENT(in) :: time !< Time of signal sample
@@ -238,9 +240,9 @@ IF(oft_env%head_proc)THEN
 END IF
 DEALLOCATE(vals,output)
 END SUBROUTINE field_probe_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE flux_probe_setup(self)
 CLASS(flux_probe), INTENT(inout) :: self
 !---
@@ -303,9 +305,9 @@ IF(self%nf>0)THEN
 END IF
 deallocate(fmap)
 END SUBROUTINE flux_probe_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE flux_probe_eval(self,tflux)
 CLASS(flux_probe), INTENT(inout) :: self
 REAL(r8), INTENT(inout) :: tflux
@@ -337,14 +339,14 @@ tflux=oft_mpi_sum(reg)
 !---Delete quadrature object
 CALL quad%delete
 END SUBROUTINE flux_probe_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Project a set of points to the mesh boundary
 !!
 !! Projection is performed by finding the closest point to a set of known points
 !! on the boundary mesh. Boundary points are defined by a given 2D quadrature
 !! rule. This provides a relatively evenly spaced set of points over each boundary
 !! triangle.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE project_points_to_boundary(mesh,npts,pts,order)
 CLASS(oft_mesh), INTENT(inout) :: mesh
 INTEGER(i4), INTENT(in) :: npts !< Number of points
@@ -424,12 +426,12 @@ pts=ptstmp
 CALL quad%delete
 DEALLOCATE(ptstmp,dist,distin,distout)
 END SUBROUTINE project_points_to_boundary
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the toroidally averaged toroidal flux of a 3-vector
 !!
 !! @note This requires your geometry is oriented with one of the principle axes
 !! as the axis of toroidal symmetry.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION tfluxfun(mesh,field,quad_order,axis) RESULT(tflux)
 CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
@@ -466,9 +468,9 @@ tflux=oft_mpi_sum(tflux)/(2*pi)
 CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION tfluxfun
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the volume integral of a scalar
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION scal_int(mesh,field,quad_order) RESULT(energy)
 CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
@@ -496,9 +498,9 @@ energy=oft_mpi_sum(energy)
 CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_int
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the field energy of a scalar
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION scal_energy(mesh,field,quad_order) RESULT(energy)
 CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
@@ -526,9 +528,9 @@ energy=oft_mpi_sum(energy)
 CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_energy
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the field energy of a 3-vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION vec_energy(mesh,field,quad_order) RESULT(energy)
 CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
@@ -556,9 +558,9 @@ energy=oft_mpi_sum(energy)
 CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION vec_energy
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the field energy of a 3-vector with a scalar weight field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION weighted_vec_energy(mesh,field,weight,quad_order) RESULT(energy)
 CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field \f$ (u) \f$
@@ -588,9 +590,9 @@ energy=oft_mpi_sum(energy)
 CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION weighted_vec_energy
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the boundary integral of a scalar field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION scal_surf_int(mesh,field,quad_order) RESULT(energy)
 CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
@@ -621,9 +623,9 @@ energy=oft_mpi_sum(energy)
 CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_surf_int
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the boundary integral of a boundary scalar field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION bscal_surf_int(mesh,field,quad_order,reg_mask) RESULT(energy)
 CLASS(oft_bmesh), INTENT(inout) :: mesh
 CLASS(bfem_interp), INTENT(inout) :: field !< Input field
@@ -654,9 +656,9 @@ energy=oft_mpi_sum(energy)
 CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION bscal_surf_int
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the boundary flux of a vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION vec_surf_int(mesh,field,quad_order) RESULT(energy)
 CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field

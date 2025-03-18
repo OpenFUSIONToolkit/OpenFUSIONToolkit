@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file thincurr_fr.F90
 !
 !> Run thin wall frequency response simulations using ThinCurr
@@ -19,7 +21,7 @@
 !! @authors Chris Hansen
 !! @date Feb 2022
 !! @ingroup doxy_thincurr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM thincurr_fr
 USE oft_base
 USE oft_io, ONLY: oft_bin_file
@@ -119,9 +121,9 @@ CALL tw_sim%setup(hole_nsets)
 CALL tw_sim%xdmf%setup("thincurr")
 CALL mg_mesh%smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Frequency-response run
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Load sensors
 CALL tw_load_sensors('floops.loc',tw_sim,sensors)
 !---Setup voltage source
@@ -147,17 +149,17 @@ ELSE ! Driver coil as source
     'thincurr_fr', __FILE__)
   IF(tw_sim%n_icoils>2)CALL oft_abort('More than two coils specified for FR run', &
     'thincurr_fr', __FILE__)
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Load or build coil to element mutual matrix
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   IF(save_Mcoil)THEN
     CALL tw_compute_Ael2dr(tw_sim,'Mcoil.save')
   ELSE
     CALL tw_compute_Ael2dr(tw_sim)
   END IF
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Load or build sensor mutual matrices
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   IF(save_Msen)THEN
     CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops,'Msen.save')
   ELSE
@@ -171,9 +173,9 @@ ELSE ! Driver coil as source
     fr_sensor(:,2)=tw_sim%Adr2sen(:,2)/mu0
   END IF
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load or build element to element mutual matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(fr_limit/=2)THEN
   tw_hodlr%tw_obj=>tw_sim
   CALL tw_hodlr%setup(.FALSE.)
@@ -211,9 +213,9 @@ CALL save_results
 !---
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE save_results()
 INTEGER(i4) :: i,j,k,info
 REAL(r8), ALLOCATABLE :: senin(:,:)

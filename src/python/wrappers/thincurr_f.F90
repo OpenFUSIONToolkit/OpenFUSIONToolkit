@@ -1,4 +1,4 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> @file thincurr_f.F90
 !
 !> Fortran part of Python wrapper for ThinCurr thin-wall eddy current functionality
@@ -6,7 +6,7 @@
 !! @authors Chris Hansen
 !! @date March 2024
 !! @ingroup doxy_oft_python
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE thincurr_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_associated
@@ -38,9 +38,9 @@ integer(i4), POINTER :: lc_plot(:,:) !< Needs docs
 integer(i4), POINTER :: reg_plot(:) !< Needs docs
 real(r8), POINTER :: r_plot(:,:) !< Needs docs
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start_in,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
 CHARACTER(KIND=c_char), INTENT(in) :: mesh_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
@@ -95,9 +95,9 @@ IF(np>0)THEN
     tw_obj%mesh%reg=1
   END IF
 ELSE
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Load model from file
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ALLOCATE(tw_obj)
   ALLOCATE(oft_trimesh::tw_obj%mesh)
   CALL tw_obj%mesh%setup(-1,.FALSE.)
@@ -222,9 +222,9 @@ CALL c_f_pointer(sizes, sizes_tmp, [9])
 sizes_tmp=[tw_obj%mesh%np,tw_obj%mesh%ne,tw_obj%mesh%nc,tw_obj%mesh%nreg,tw_obj%np_active, &
   tw_obj%nholes,tw_obj%n_vcoils,tw_obj%nelems,tw_obj%n_icoils]
 END SUBROUTINE thincurr_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_setup_io(tw_ptr,basepath,save_debug,error_str) BIND(C,NAME="thincurr_setup_io")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
@@ -303,9 +303,9 @@ IF(tw_obj%n_icoils>0)THEN
 END IF
 IF(save_debug)CALL tw_obj%save_debug()
 END SUBROUTINE thincurr_setup_io
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_save_field(tw_ptr,vals,fieldname) BIND(C,NAME="thincurr_save_field")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
@@ -320,9 +320,9 @@ CALL c_f_pointer(vals, vals_tmp, [tw_obj%nelems])
 !---Save plot fields
 CALL tw_save_pfield(tw_obj,vals_tmp,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_field
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_recon_curr(tw_ptr,vals,curr,format) BIND(C,NAME="thincurr_recon_curr")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
@@ -356,9 +356,9 @@ IF(format==2)THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE thincurr_recon_curr
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_recon_field(tw_ptr,pot,coils,field,hodlr_ptr) BIND(C,NAME="thincurr_recon_field")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: pot !< Needs docs
@@ -426,9 +426,9 @@ IF(tw_obj%n_icoils>0)THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE thincurr_recon_field
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_save_scalar(tw_ptr,vals,fieldname) BIND(C,NAME="thincurr_save_scalar")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
@@ -443,9 +443,9 @@ CALL c_f_pointer(vals, vals_tmp, [tw_obj%mesh%np])
 !---Save plot fields
 CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,tw_obj%xdmf,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_scalar
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_scale_va(tw_ptr,vals,div_flag) BIND(C,NAME="thincurr_scale_va")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
@@ -460,9 +460,9 @@ ELSE
   vals_tmp = vals_tmp*tw_obj%mesh%va
 END IF
 END SUBROUTINE thincurr_scale_va
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_cross_coupling(tw_ptr1,tw_ptr2,Mmat,cache_file,error_str) BIND(C,NAME="thincurr_cross_coupling")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr1 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr2 !< Needs docs
@@ -485,9 +485,9 @@ ELSE
   CALL tw_compute_LmatDirect(tw_obj1,Mmat_tmp,col_model=tw_obj2,save_file=filename)
 END IF
 END SUBROUTINE thincurr_cross_coupling
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_cross_eval(tw_ptr1,tw_ptr2,nrhs,vec1,vec2,error_str) BIND(C,NAME="thincurr_cross_eval")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr1 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr2 !< Needs docs
@@ -506,9 +506,9 @@ CALL c_f_pointer(vec2, vec2_tmp, [tw_obj2%nelems,nrhs])
 !
 CALL tw_compute_Lmat_MF(tw_obj1,tw_obj2,nrhs,vec1_tmp,vec2_tmp)
 END SUBROUTINE thincurr_cross_eval
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Lmat(tw_ptr,use_hodlr,Lmat_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Lmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: use_hodlr
@@ -547,9 +547,9 @@ ELSE
   Lmat_ptr=C_LOC(tw_obj%Lmat)
 END IF
 END SUBROUTINE thincurr_Lmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
@@ -584,9 +584,9 @@ ELSE
   Bdr_ptr=C_LOC(tw_obj%Bdr)
 END IF
 END SUBROUTINE thincurr_Bmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Mcoil(tw_ptr,Mc_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Mcoil")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Mc_ptr !< Needs docs
@@ -606,9 +606,9 @@ ELSE
 END IF
 Mc_ptr=C_LOC(tw_obj%Ael2dr)
 END SUBROUTINE thincurr_Mcoil
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,njumpers,sensor_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: sensor_file(OFT_PATH_SLEN) !< Needs docs
@@ -656,9 +656,9 @@ sensor_ptr=C_LOC(sensors)
 nsensors=sensors%nfloops
 njumpers=sensors%njumpers
 END SUBROUTINE thincurr_Msensor
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_get_sensor_name(sensor_ptr,sensor_ind,sensor_name,error_str) BIND(C,NAME="thincurr_get_sensor_name")
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: sensor_ind !< Needs docs
@@ -669,9 +669,9 @@ CALL copy_string('',error_str)
 CALL c_f_pointer(sensor_ptr, sensors)
 CALL copy_string(sensors%floops(sensor_ind)%name,sensor_name)
 END SUBROUTINE thincurr_get_sensor_name
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_get_eta(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_get_eta")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
@@ -686,9 +686,9 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
 res_tmp=tw_obj%Eta_reg*mu0
 END SUBROUTINE thincurr_get_eta
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_set_eta(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_set_eta")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
@@ -703,9 +703,9 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
 tw_obj%Eta_reg=res_tmp/mu0
 END SUBROUTINE thincurr_set_eta
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Rmat(tw_ptr,copy_out,Rmat,error_str) BIND(C,NAME="thincurr_Rmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE,  INTENT(in) :: copy_out !< Needs docs
@@ -730,9 +730,9 @@ IF(copy_out)THEN
   END DO
 END IF
 END SUBROUTINE thincurr_Rmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_curr_regmat(tw_ptr,Rmat,error_str) BIND(C,NAME="thincurr_curr_regmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: Rmat !< Needs docs
@@ -781,9 +781,9 @@ END DO
 END DO
 END DO
 END SUBROUTINE thincurr_curr_regmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_eigenvalues(tw_ptr,direct,neigs,eig_vals,eig_vec,hodlr_ptr,error_str) BIND(C,NAME="thincurr_eigenvalues")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
@@ -824,9 +824,9 @@ ELSE
   END IF
 END IF
 END SUBROUTINE thincurr_eigenvalues
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_freq_response(tw_ptr,direct,fr_limit,freq,fr_driver,hodlr_ptr,error_str) BIND(C,NAME="thincurr_freq_response")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
@@ -866,9 +866,9 @@ ELSE
   CALL frequency_response(tw_obj,LOGICAL(direct),fr_limit,freq,driver_tmp)
 END IF
 END SUBROUTINE thincurr_freq_response
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot, &
   vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
@@ -958,9 +958,9 @@ ELSE
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot, &
   sensor_ptr,sensor_vals_ptr,nsensor,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
@@ -1009,9 +1009,9 @@ ELSE
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain_plot
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,compute_B,sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_reduce_model")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_blag.F90
 !
 !> Regression tests for boundary scalar Lagrange finite elements. Tests are
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_blag
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
@@ -45,9 +47,9 @@ CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup I/0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL plot_file%setup("Test")
 CALL mg_mesh%mesh%setup_io(plot_file,order)
 !---
@@ -60,10 +62,10 @@ CALL test_lap
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_lap
 !---Create solver objects
 CLASS(oft_solver), POINTER :: linv => NULL()

@@ -1,13 +1,14 @@
-'''! Helper interfaces for Open FUSION Toolkit (OFT) Python interfaces
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Fortran interface definitions for Open FUSION Toolkit common runtime functions
 
 @authors Chris Hansen
-@date May 2023
+@date Feb 2025
 @ingroup doxy_oft_python
 '''
-
-## @file util.py
-#
-# Helper interfaces for Open FUSION Toolkit (OFT) Python interfaces
 import sys
 import os
 import time

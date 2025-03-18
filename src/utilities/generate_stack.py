@@ -1,12 +1,17 @@
 #!/usr/bin/env python
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 #
 # Script for handling creation of Open FUSION Toolkit (OFT) internal stack representation for
 # usage with debug and profiling.
 #
 # Note: Script must be run from the root "src" directory.
 #
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 from __future__ import print_function
 import sys
 import os

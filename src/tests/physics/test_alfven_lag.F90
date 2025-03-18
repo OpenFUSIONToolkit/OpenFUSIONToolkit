@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> Regression test for xMHD_lag module. A traveling alfven wave is
 !! initialized in a triply periodic box and advanced for one half period.
 !! The resulting wave is then compared to the initial wave to confirm basic
@@ -9,7 +11,7 @@
 !! @authors Chris Hansen
 !! @date November 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_alfven
 USE oft_base
 !--Grid
@@ -54,28 +56,28 @@ REAL(r8) :: delta = 1.d-4
 REAL(r8) :: v_alf = 1.d4
 LOGICAL :: linear = .FALSE.
 NAMELIST/test_alfven_options/order,minlev,delta,linear
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Initialize enviroment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_alfven_options,IOSTAT=ierr)
 CLOSE(io_unit)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL multigrid_construct(mg_mesh)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Build FE structures
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(xmhd_ML_lagrange,xmhd_ML_vlagrange)
 !---Lagrange
 CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=minlev)
 CALL lag_setup_interp(xmhd_ML_lagrange)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create Lagrange metric solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(mop)
 CALL oft_lag_vgetmop(xmhd_ML_vlagrange%current_level,mop,"none")
 CALL create_cg_solver(minv)
@@ -93,18 +95,18 @@ CALL xmhd_ML_vlagrange%vec_create(bi)
 CALL xmhd_ML_vlagrange%vec_create(vel)
 CALL xmhd_ML_vlagrange%vec_create(dvel)
 CALL xmhd_ML_vlagrange%vec_create(vi)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set uniform B0 = zhat
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 z_field%val=(/0.d0,0.d0,1.d0/)
 CALL oft_lag_vproject(xmhd_ML_lagrange%current_level,z_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL b%add(0.d0,1.d0,u)
 CALL be%add(0.d0,1.d0,u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set dB from alfven wave init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 alf_field%mesh=>mg_mesh%mesh
 CALL oft_lag_vproject(xmhd_ML_lagrange%current_level,alf_field,v)
 CALL u%set(0.d0)
@@ -112,17 +114,17 @@ CALL minv%apply(u,v)
 CALL db%add(0.d0,delta,u)
 B0=v_alf*SQRT(mu0*2.d19*proton_mass)
 CALL bi%add(0.d0,1.d0,u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set dV from alfven wave init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_lag_vproject(xmhd_ML_lagrange%current_level,alf_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL dvel%add(0.d0,delta,u)
 CALL vi%add(0.d0,1.d0,u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Run simulation and test result
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 xmhd_minlev=minlev
 xmhd_taxis=2
 oft_env%pm=.FALSE.

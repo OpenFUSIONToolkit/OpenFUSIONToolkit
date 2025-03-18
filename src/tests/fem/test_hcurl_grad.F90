@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_hcurl_grad.F90
 !
 !> Regression tests for vector H(Curl) + Grad(H^1) finite elements. Tests are performed
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 program test_hcurl_grad
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
@@ -53,9 +55,9 @@ CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Build FE structures
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 minlev=2
 IF(oft_env%nprocs>1)minlev=mg_mesh%nbase+1
 IF(mg_mesh%mesh%type==3)minlev=mg_mesh%mgdim
@@ -82,11 +84,11 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the equation \f$ \nabla \times \nabla \times B = K \hat{I} \f$, where
 !! \f$ K \f$ is the helicity matrix and \f$ \hat{I} \f$ is the identity vector
 !! using H(Curl) elements.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_mop
 !---Create solver objects
 CLASS(oft_solver), POINTER :: winv => NULL()
@@ -124,11 +126,11 @@ END IF
 CALL u%delete
 CALL v%delete
 END SUBROUTINE test_mop
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the equation \f$ \nabla \times \nabla \times B = K \hat{I} \f$, where
 !! \f$ K \f$ is the helicity matrix and \f$ \hat{I} \f$ is the identity vector
 !! using H(Curl) elements.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_mopmg
 !---Create solver objects
 ! TYPE(oft_native_gmres_solver) :: winv

@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_trace.F90
 !
 !> Driver to trace field lines and particles from fields stored in a restart file
@@ -25,7 +27,7 @@
 !! @authors Chris Hansen
 !! @date June 2018
 !! @ingroup doxy_oft_bin
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 PROGRAM oft_trace
 !---Base
 USE ISO_FORTRAN_ENV, ONLY: IOSTAT_END
@@ -200,11 +202,11 @@ CLOSE(pt_file_unit)
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> ODE function for Lorentz force particle advance
 !!
 !! F = q * cross(V,B) / m_i
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE particle_lorentz(t,y,B,n,ydot)
 REAL(r8), INTENT(in) :: t !< Time (unused)
 REAL(r8), INTENT(in) :: y(n) !< Current position/velocity

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_lu.F90
 !
 !> Native module for direct solves.
@@ -15,7 +17,7 @@
 !! @authors Chris Hansen
 !! @date May 2014
 !! @ingroup doxy_oft_lin_alg
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_lu
 USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr, c_f_pointer, c_loc
 USE oft_local
@@ -54,17 +56,17 @@ IMPLICIT NONE
 #endif
 PRIVATE
 PUBLIC lapack_matinv, lapack_cholesky
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Native ILU(0) preconditioner information object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: native_ilu_struc
   INTEGER(i4), POINTER, DIMENSION(:) :: ju => NULL() !< Diagonal entry indices
   INTEGER(i4), POINTER, DIMENSION(:) :: jlu => NULL() !< Column values in iLU factors
   REAL(r8), POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
 END TYPE native_ilu_struc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> SuperLU solver information
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: superlu_struc
   INTEGER(i4) :: col_perm = -1 !< Column permutation to use (-1 for default)
 #ifdef OFT_MPI_F08
@@ -79,9 +81,9 @@ TYPE :: superlu_struc
   INTEGER(i4), POINTER, DIMENSION(:) :: csc_map => NULL() !< Col pointer (0-based indices)
   REAL(r8), POINTER, DIMENSION(:) :: csc_vals => NULL() !< Col pointer (0-based indices)
 END TYPE superlu_struc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Pardiso solver information
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: pardiso_struc
   INTEGER(i4) :: mtype = 11 !< Matrix type (1 -> real/symmetric, 11 -> real/nonsymmetric)
   INTEGER(i4) :: msglvl = 0 !< Controls message output (0 -> no output, 1 -> print some stats)
@@ -90,9 +92,9 @@ TYPE :: pardiso_struc
   INTEGER(i4), POINTER, DIMENSION(:) :: perm => NULL() !< Permutation vector
   TYPE(C_PTR) :: f_factors = C_NULL_PTR !< ILU0 factors pointer
 END TYPE pardiso_struc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> LU solver class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
@@ -123,9 +125,9 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => lusolver_delete
 END TYPE oft_lusolver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> ILU solver class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
@@ -153,9 +155,9 @@ CONTAINS
 END TYPE oft_ilusolver
 INTERFACE
 #ifdef HAVE_SUPERLU
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to dgssv from SuperLU
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE oft_superlu_dgssv(iopt,n,nnz,nrhs,values,colind, &
     rowptr,b,ldb,f_factors,col_perm,iter_refine,info) BIND(C,NAME="oft_superlu_dgssv_c")
   IMPORT c_bool, c_int, c_double, c_ptr
@@ -177,9 +179,9 @@ INTERFACE
   LOGICAL(c_bool), VALUE, INTENT(in) :: iter_refine !< Perform iterative refinement?
   INTEGER(c_int), INTENT(out) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dgssv
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to dgsisx (iLUT) from SuperLU
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE oft_superlu_dgsisx(iopt,n,nnz,nrhs,values,colind, &
     rowptr,b,ldb,f_factors,col_perm,fill_tol,info) BIND(C,NAME="oft_superlu_dgsisx_c")
   IMPORT c_int, c_double, c_ptr
@@ -203,9 +205,9 @@ INTERFACE
   END SUBROUTINE oft_superlu_dgsisx
 #endif
 #ifdef HAVE_SUPERLU_DIST
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to dgssv from SuperLU-DIST (local only)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE oft_superlu_dist_dgssv(iopt,n,nnz,nrhs,values,colind, &
     rowptr,b,ldb,grid_handle,f_factors,col_perm,iter_refine,info) BIND(C,NAME="oft_superlu_dist_dgssv_c")
   IMPORT c_bool, c_int, c_double, c_ptr
@@ -228,9 +230,9 @@ INTERFACE
   !! for unsymmetric matrices)
   INTEGER(c_int), INTENT(inout) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dist_dgssv
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to dgssv from SuperLU
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE oft_superlu_dist_slugrid(iopt,slu_comm,nprow,npcol,grid_handle,info) BIND(C,NAME="oft_superlu_dist_slugrid_c")
   IMPORT c_int, c_double, c_ptr
 #ifdef OFT_MPI_F08
@@ -248,9 +250,9 @@ INTERFACE
   INTEGER(c_int), INTENT(inout) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dist_slugrid
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to dgssv from UMFPACK
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 #ifdef HAVE_UMFPACK
   SUBROUTINE oft_umfpack_dgssv(iopt,n,nnz,nrhs,values,colind, &
     rowptr,b,ldb,f_factors,col_perm,iter_refine,info) BIND(C,NAME="oft_umfpack_dgssv_c")
@@ -275,9 +277,9 @@ INTERFACE
   END SUBROUTINE oft_umfpack_dgssv
 #endif
 #ifdef HAVE_MKL
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to MKL iLU0 solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE oft_mkl_ilu(iopt,n,nnz,values,colind, &
     rowptr,b,f_factors,info) BIND(C,NAME="oft_mkl_ilu_c")
   IMPORT c_int, c_double, c_ptr
@@ -303,9 +305,9 @@ INTERFACE lapack_cholesky
   ! MODULE PROCEDURE lapack_cholesky_complex
 END INTERFACE lapack_cholesky
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Convert csr graph to csc storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE convert_csr_to_csc(csr_graph,csc_graph,map)
 TYPE(oft_graph), INTENT(inout) :: csr_graph !< Original graph in csr format
 TYPE(oft_graph), INTENT(inout) :: csc_graph !< Resulting graph in csc format
@@ -347,9 +349,9 @@ END DO
 DEALLOCATE(kr_tmp)
 DEBUG_STACK_POP
 END SUBROUTINE convert_csr_to_csc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Solve a linear system using a direct solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE lusolver_apply(self,u,g)
 CLASS(oft_lusolver), INTENT(inout) :: self
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
@@ -648,18 +650,18 @@ END IF
 DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE lusolver_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 recursive subroutine lusolver_update(self,new_pattern)
 class(oft_lusolver), intent(inout) :: self
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
 self%refactor=.TRUE.
 IF(PRESENT(new_pattern))self%update_graph=new_pattern
 end subroutine lusolver_update
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup solver from XML definition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lusolver_setup_xml(self,solver_node,level)
 CLASS(oft_lusolver), INTENT(inout) :: self
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
@@ -690,9 +692,9 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','lusolver_setup_xml',__FILE__)
 #endif
 end subroutine lusolver_setup_xml
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Check for thread safety
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 recursive function lusolver_check_thread(self) result(thread_safe)
 class(oft_lusolver), intent(inout) :: self
 logical :: thread_safe
@@ -700,9 +702,9 @@ thread_safe=.TRUE.
 IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
 IF(self%package(1:6)=='superd')thread_safe=.FALSE.
 end function lusolver_check_thread
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy direct solver and deallocate all internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lusolver_delete(self)
 class(oft_lusolver), intent(inout) :: self
 INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
@@ -763,9 +765,9 @@ DEALLOCATE(ivals,rvals)
 NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine lusolver_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Solve a linear system using a direct solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE ilusolver_apply(self,u,g)
 CLASS(oft_ilusolver), INTENT(inout) :: self
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
@@ -910,18 +912,18 @@ END IF
 DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE ilusolver_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 recursive subroutine ilusolver_update(self,new_pattern)
 class(oft_ilusolver), intent(inout) :: self
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
 self%refactor=.TRUE.
 IF(PRESENT(new_pattern))self%update_graph=new_pattern
 end subroutine ilusolver_update
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup solver from XML definition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
@@ -952,9 +954,9 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','lusolver_setup_xml',__FILE__)
 #endif
 end subroutine ilusolver_setup_xml
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Check for thread safety
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 recursive function ilusolver_check_thread(self) result(thread_safe)
 class(oft_ilusolver), intent(inout) :: self
 logical :: thread_safe
@@ -962,9 +964,9 @@ thread_safe=.TRUE.
 ! IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
 ! IF(self%package(1:6)=='superd')thread_safe=.FALSE.
 end function ilusolver_check_thread
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy direct solver and deallocate all internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ilusolver_delete(self)
 class(oft_ilusolver), intent(inout) :: self
 INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
@@ -997,9 +999,9 @@ DEALLOCATE(ivals,rvals)
 NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine ilusolver_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE lapack_matinv_real(nrows,Amat,error)
 INTEGER(4), INTENT(in) :: nrows !< Number of rows/columns
 REAL(8), INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
@@ -1039,9 +1041,9 @@ IF(oft_env%pm)THEN
   WRITE(*,*)'  Time = ',elapsed_time
 END IF
 END SUBROUTINE lapack_matinv_real
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE lapack_matinv_complex(nrows,Amat,error)
 INTEGER(i4), INTENT(in) :: nrows !< Number of rows/columns
 DOUBLE COMPLEX, INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
@@ -1079,9 +1081,9 @@ IF(oft_env%pm)THEN
   WRITE(*,*)'  Time = ',elapsed_timer
 END IF
 END SUBROUTINE lapack_matinv_complex
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE lapack_cholesky_real(nrows,Amat,error)
 INTEGER(4), INTENT(in) :: nrows !< Number of rows/columns
 REAL(8), INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
@@ -1113,13 +1115,13 @@ IF(oft_env%pm)THEN
   WRITE(*,*)'  Time = ',elapsed_time
 END IF
 END SUBROUTINE lapack_cholesky_real
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Native Incomplete LU factorization with no fill
 !!
 !! Based on ILU++ by Mayer (https://dx.doi.org/10.1002/pamm.200700911)
 !!
 !! @note Requires CSR graph with sorted column list and diagonal entries
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine ilu0(n,a,lc,kr,alu,jlu,ju,ierr)
 integer(4), intent(in) :: n !< Size of matrix
 real(8), contiguous, dimension(:), intent(in) :: a !< Matrix entries
@@ -1185,9 +1187,9 @@ do ii=1,n
 end do
 DEALLOCATE(iw)
 END SUBROUTINE
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Approximate solve using ILU(0) factorization produced by ilu0
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine lusol(n, nrhs, x, alu, jlu, ju)
 integer(4), intent(in) :: n !< Size of matrix
 integer(4), intent(in) :: nrhs !< Number of RHS to solve

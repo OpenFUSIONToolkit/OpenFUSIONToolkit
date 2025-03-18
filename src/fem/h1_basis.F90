@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file oft_h1_basis.F90
 !
 !> @defgroup doxy_oft_h1 H^1 FE for conforming FE sequence
@@ -16,7 +18,7 @@
 !! @authors Chris Hansen
 !! @date August 2011
 !! @ingroup doxy_oft_h1
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_h1_basis
 USE oft_base
 USE oft_lag_poly
@@ -30,28 +32,28 @@ USE oft_la_utils, ONLY: oft_matrix, oft_graph
 USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_fem_type) :: oft_h1_fem
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL() !< Needs docs
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsc => NULL() !< Needs docs
 end type oft_h1_fem
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_bfem_type) :: oft_h1_bfem
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL() !< Needs docs
 end type oft_h1_bfem
 !---Global Variables
 integer(i4), parameter :: oft_h1_id = 2 !< FE type ID
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast abstract FE type to 3D H^1 finite element type
 !!
 !! The source matrix must be @ref oft_h1_fem or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_3D_h1_cast(self,source) RESULT(success)
 CLASS(oft_h1_fem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
 CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
@@ -67,12 +69,12 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_3D_h1_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast abstract FE type to 2D H^1 finite element type
 !!
 !! The source matrix must be @ref oft_h1_bfem or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_2D_h1_cast(self,source) RESULT(success)
 CLASS(oft_h1_bfem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
 CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
@@ -88,11 +90,11 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_h1_cast
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct H^1 scalar FE on each mesh level
 !!
 !! @note Highest supported representation is Quartic
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_setup(mg_mesh,order,ML_h1_obj,ML_bh1_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
@@ -163,9 +165,9 @@ IF(PRESENT(ML_bh1_obj))CALL ML_bh1_obj%set_level(ML_bh1_obj%nlevels)
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
 end subroutine oft_h1_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_setup_vol(self,tmesh,order)
 class(oft_afem_type), pointer, intent(out) :: self !< Needs docs
 class(oft_mesh), target, intent(in) :: tmesh !< Needs docs
@@ -224,9 +226,9 @@ call self%setup(self%order*2+1)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine oft_h1_setup_vol
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_setup_surf(self,tmesh,order)
 class(oft_afem_type), pointer, intent(out) :: self !< Needs docs
 class(oft_bmesh), target, intent(in) :: tmesh !< Needs docs
@@ -283,12 +285,12 @@ call self%setup(self%order*2+1)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine oft_h1_setup_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate H^1 interpolation function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_eval(self,cell,dof,f,val)
 class(oft_h1_fem), intent(in) :: self !< H^1 type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -346,12 +348,12 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_h1_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate H^1 interpolation function on the boundary
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_bh1_eval(self,face,dof,f,val)
 class(oft_bfem_type), intent(in) :: self !< H^1 type for evaluation (bfem)
 integer(i4), intent(in) :: face !< Face for evaluation
@@ -376,9 +378,9 @@ select case(self%cmap(dof)%type)
 end select
 DEBUG_STACK_POP
 end subroutine oft_bh1_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate point based interpolation functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_evalp(order,pt,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: pt !< Needs docs
@@ -388,9 +390,9 @@ DEBUG_STACK_PUSH
 val=f(pt)
 DEBUG_STACK_POP
 end subroutine oft_h1_evalp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate edge based interpolation functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_evale(order,ed,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: ed(2) !< Needs docs
@@ -414,9 +416,9 @@ select case(dof)
 end select
 DEBUG_STACK_POP
 end subroutine oft_h1_evale
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate face based interpolation functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_evalf(order,fc,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: fc(3) !< Needs docs
@@ -444,9 +446,9 @@ select case(dof)
 end select
 DEBUG_STACK_POP
 end subroutine oft_h1_evalf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate cell based interpolation functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_evalc(order,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: dof !< Needs docs
@@ -469,11 +471,11 @@ select case(dof)
 end select
 DEBUG_STACK_POP
 end subroutine oft_h1_evalc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_eval_all(self,cell,f,rop)
 class(oft_h1_fem), intent(in) :: self !< H^1 type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -544,11 +546,11 @@ ELSE
 END IF
 DEBUG_STACK_POP
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quadratic)
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_eval_all2()!self,cell,f,rop)
 ! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 ! integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -566,11 +568,11 @@ DO i=1,6
 END DO
 DEBUG_STACK_POP
 end subroutine oft_h1_eval_all2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (cubic)
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_eval_all3()!self,cell,f,rop)
 ! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 ! integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -595,11 +597,11 @@ DO i=1,4
 END DO
 DEBUG_STACK_POP
 end subroutine oft_h1_eval_all3
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_eval_all4()!self,cell,f,rop)
 ! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 ! integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -627,11 +629,11 @@ x1 = f(1); x2 = f(2); x3 = f(3); x4 = f(4)
 rop(35) = -2.d0*x1*x2*x3*x4
 DEBUG_STACK_POP
 end subroutine oft_h1_eval_all4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_eval_all5()!self,cell,f,rop)
 ! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 ! integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -667,12 +669,12 @@ rop(56) = 2.d0*x1*x2*x3*x4*(-x1 + x2)
 DEBUG_STACK_POP
 end subroutine oft_h1_eval_all5
 end subroutine oft_h1_eval_all
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate H^1 gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in, and gradient with respect to, physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_geval(self,cell,dof,f,val,gop)
 class(oft_h1_fem), intent(in) :: self !< H^1 type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -767,12 +769,12 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_h1_geval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate H^1 gradient function on the boundary
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! vector in, and gradient with respect to, physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_bh1_geval(self,face,dof,f,val,gop)
 class(oft_bfem_type), intent(in) :: self !< H^1 type for evaluation (bfem)
 integer(i4), intent(in) :: face !< Face for evaluation
@@ -806,9 +808,9 @@ do i=1,4
 end do
 DEBUG_STACK_POP
 end subroutine oft_bh1_geval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate point based gradient functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_gevalp(order,pt,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: pt !< Needs docs
@@ -818,9 +820,9 @@ DEBUG_STACK_PUSH
 val(pt)=1.d0
 DEBUG_STACK_POP
 end subroutine oft_h1_gevalp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate edge based curl functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_gevale(order,ed,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: ed(2) !< Needs docs
@@ -849,9 +851,9 @@ end select
 val(ed(1))=y1; val(ed(2))=y2
 DEBUG_STACK_POP
 end subroutine oft_h1_gevale
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate face based curl functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_gevalf(order,fc,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: fc(3) !< Needs docs
@@ -892,9 +894,9 @@ end select
 val(fc(1))=y1; val(fc(2))=y2; val(fc(3))=y3
 DEBUG_STACK_POP
 end subroutine oft_h1_gevalf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate cell based curl functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_gevalc(order,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: dof !< Needs docs
@@ -929,11 +931,11 @@ select case(dof)
 end select
 DEBUG_STACK_POP
 end subroutine oft_h1_gevalc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_geval_all(self,cell,f,rop,gop)
 class(oft_h1_fem), intent(in) :: self !< H^1 type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1038,11 +1040,11 @@ ELSE
 END IF
 DEBUG_STACK_POP
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quadratic)
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_geval_all2()!self,cell,f,rop,gop)
 ! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 ! integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1066,11 +1068,11 @@ DO i=1,6
 END DO
 DEBUG_STACK_POP
 end subroutine oft_h1_geval_all2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (cubic)
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_geval_all3()!self,cell,f,rop,gop)
 ! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 ! integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1105,11 +1107,11 @@ DO i=1,4
 END DO
 DEBUG_STACK_POP
 end subroutine oft_h1_geval_all3
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_geval_all4()!self,cell,f,rop,gop)
 ! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 ! integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1161,11 +1163,11 @@ rop(:,35) = -2.d0*x2*x3*x4*gop(:,1) &
             -2.d0*x1*x2*x3*gop(:,4)
 DEBUG_STACK_POP
 end subroutine oft_h1_geval_all4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_geval_all5()!self,cell,f,rop,gop)
 ! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 ! integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1248,12 +1250,12 @@ rop(:,56) = 2.d0*x2*x3*x4*(-2.d0*x1 + x2)*gop(:,1) &
 DEBUG_STACK_POP
 end subroutine oft_h1_geval_all5
 end subroutine oft_h1_geval_all
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate H^1 gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! gradient with respect to physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_d2eval(self,cell,dof,f,val,g2op)
 class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1284,9 +1286,9 @@ do i=1,10
   val=val+g2op(:,i)*cofs(i)
 end do
 end subroutine oft_h1_d2eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> @brief Evaluate edge based gradient functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_d2evale(order,ed,el,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: ed(2) !< Needs docs
@@ -1318,9 +1320,9 @@ select case(dof)
     call oft_abort("Invalid dof","oft_h1_d2evale",__FILE__)
 end select
 end subroutine oft_h1_d2evale
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> @brief Evaluate cell based gradient functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_d2evalf(order,fc,el,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: fc(3) !< Needs docs
@@ -1379,9 +1381,9 @@ select case(dof)
     call oft_abort("Invalid dof","oft_h1_d2evalf",__FILE__)
 end select
 end subroutine oft_h1_d2evalf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> @brief Evaluate cell based gradient functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_h1_d2evalc(order,dof,f,val)
 integer(i4), intent(in) :: order !< Needs docs
 integer(i4), intent(in) :: dof !< Needs docs

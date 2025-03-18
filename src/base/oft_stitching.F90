@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
-! Plasma Reproducible Open Toolkit for Equilibrium and Unstructured Simulation
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_stitching.F90
 !
 !> Subroutines for general global stitching operations
@@ -8,17 +10,17 @@
 !! @author Chris Hansen
 !! @date Spring 2010
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_stitching
 USE oft_base
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Global stitch structure
 !! - Global linkage information
 !! - Global ownership and boundary flags
 !! - Preallocated seam arrays
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: oft_seam
   LOGICAL :: full = .FALSE. !< Flag indicating local mesh is complete
   LOGICAL :: skip = .FALSE. !< Flag for skipping stitching operations
@@ -47,42 +49,42 @@ TYPE :: oft_seam
   TYPE(oft_1d_comp), POINTER, DIMENSION(:) :: csend => NULL() !< Preallocated MPI send arrays
   TYPE(oft_1d_comp), POINTER, DIMENSION(:) :: crecv => NULL() !< Preallocated MPI recv arrays
 END TYPE oft_seam
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Seam object pointer
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: seam_list
   TYPE(oft_seam), POINTER :: s => NULL() !< Seam information
 END TYPE seam_list
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Perform a global dot product for vectors with a given seam structure
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE oft_global_dp
   MODULE PROCEDURE global_dp_r8
   MODULE PROCEDURE global_dp_c8
 END INTERFACE oft_global_dp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Perform a global sum reduction for a vector with a given seam structure
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 INTERFACE oft_global_reduction
   MODULE PROCEDURE global_reduction_r8
   MODULE PROCEDURE global_reduction_c8
 END INTERFACE oft_global_reduction
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Stitch values along domain boundaries
 !!
 !! General subroutine for domain stitching
 !! Available stitching methods
 !! - Synchronize global vector using element ownership [0] (initialization)
 !! - Sum proc contributions [1] (stitching)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 INTERFACE oft_global_stitch
   MODULE PROCEDURE global_stitch_r8
   MODULE PROCEDURE global_stitch_c8
 END INTERFACE oft_global_stitch
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> real(r8) dot_product implementation of \ref oft_stitching::oft_global_reduction
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function global_dp_r8(self,a,b,n,no_reduce) result(c)
 type(oft_seam), intent(inout) :: self !< Seam structure
 real(r8), intent(in) :: a(n) !< Local vector 1 for dot_product
@@ -112,9 +114,9 @@ END IF
 IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
 end function global_dp_r8
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> complex(c8) dot_product implementation of \ref oft_stitching::oft_global_reduction
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function global_dp_c8(self,a,b,n,no_reduce) result(c)
 type(oft_seam), intent(inout) :: self !< Seam structure
 COMPLEX(c8), intent(in) :: a(n) !< Local vector 1 for dot_product
@@ -144,9 +146,9 @@ END IF
 IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
 end function global_dp_c8
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> real(r8) array implementation of \ref oft_stitching::oft_global_reduction
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function global_reduction_r8(self,a,n) result(c)
 type(oft_seam), intent(inout) :: self !< Seam structure
 real(r8), intent(in) :: a(n) !< Local data for reduction
@@ -171,9 +173,9 @@ END IF
 IF(.NOT.self%full)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
 end function global_reduction_r8
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> complex(c8) array implementation of \ref oft_stitching::oft_global_reduction
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function global_reduction_c8(self,a,n) result(c)
 type(oft_seam), intent(inout) :: self !< Seam structure
 COMPLEX(c8), intent(in) :: a(n) !< Local data for reduction
@@ -198,9 +200,9 @@ END IF
 IF(.NOT.self%full)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
 end function global_reduction_c8
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> real(r8) implementation of \ref oft_stitching::oft_global_stitch
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine global_stitch_r8(self,a,up_method)
 type(oft_seam), intent(inout) :: self !< Seam structure
 integer(i4), intent(in) :: up_method !< Stitching method (0 or 1)
@@ -339,9 +341,9 @@ END IF
 #endif
 DEBUG_STACK_POP
 end subroutine global_stitch_r8
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> complex(c8) implementation of \ref oft_stitching::oft_global_stitch
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine global_stitch_c8(self,a,up_method)
 type(oft_seam), intent(inout) :: self !< Seam structure
 integer(i4), intent(in) :: up_method !< Stitching method (0 or 1)
@@ -480,13 +482,13 @@ END IF
 #endif
 DEBUG_STACK_POP
 end subroutine global_stitch_c8
-! !------------------------------------------------------------------------------
+! !---------------------------------------------------------------------------------
 ! !> Begin stitch operation and return while transfers complete
 ! !!
 ! !! @param[in,out] self Stitching information
 ! !! @param[in,out] a Local point data to be stitched
 ! !! @param[in] up_method Stitching method (0 or 1)
-! !------------------------------------------------------------------------------
+! !---------------------------------------------------------------------------------
 ! subroutine oft_global_stitch_begin(self,a,up_method)
 ! type(oft_seam), intent(inout) :: self
 ! integer(i4), intent(in) :: up_method
@@ -556,13 +558,13 @@ end subroutine global_stitch_c8
 ! #endif
 ! DEBUG_STACK_POP
 ! end subroutine oft_global_stitch_begin
-! !------------------------------------------------------------------------------
+! !---------------------------------------------------------------------------------
 ! !> Complete stitch operation by processing transfers
 ! !!
 ! !! @param[in,out] self Stitching information
 ! !! @param[in,out] a Local point data to be stitched
 ! !! @param[in] up_method Stitching method (0 or 1)
-! !------------------------------------------------------------------------------
+! !---------------------------------------------------------------------------------
 ! subroutine oft_global_stitch_end(self,a,up_method)
 ! type(oft_seam), intent(inout) :: self
 ! integer(i4), intent(in) :: up_method
@@ -602,9 +604,9 @@ end subroutine global_stitch_c8
 ! #endif
 ! DEBUG_STACK_POP
 ! end subroutine oft_global_stitch_end
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Validate stitching structure
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine oft_stitch_check(self)
 type(oft_seam), intent(inout) :: self
 integer(i4) :: j,ierr
@@ -648,9 +650,9 @@ DEALLOCATE(le_size,le_out)
 #endif
 DEBUG_STACK_POP
 end subroutine oft_stitch_check
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Validate stitching structure
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine destory_seam(self)
 type(oft_seam), intent(inout) :: self
 integer(i4) :: i

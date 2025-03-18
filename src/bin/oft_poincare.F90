@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file poincare_trace.F90
 !
 !> Driver to compute poincare section from fields stored in restart files
@@ -23,7 +25,7 @@
 !! @authors Chris Hansen
 !! @date December 2014
 !! @ingroup doxy_oft_bin
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 PROGRAM poincare_trace
 !---Base
 USE ISO_FORTRAN_ENV, ONLY: IOSTAT_END
