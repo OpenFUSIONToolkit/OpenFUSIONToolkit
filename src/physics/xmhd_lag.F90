@@ -4513,6 +4513,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A)')'Starting xMHD post-processing'
 END IF
 mg_mesh=>xmhd_ML_lagrange%ml_mesh
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_plot",__FILE__)
 mesh=>oft_lagrange%mesh
 file_list="none"
 open(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -4598,7 +4599,10 @@ call xmhd_ML_lagrange%vec_create(sub_fields%Ne)
 call xmhd_ML_lagrange%vec_create(sub_fields%Ti)
 IF(xmhd_two_temp)call xmhd_ML_lagrange%vec_create(sub_fields%Te)
 IF(n2_ind>0)call xmhd_ML_lagrange%vec_create(sub_fields%N2)
-IF(j2_ind>0)call xmhd_ML_hcurl%vec_create(sub_fields%J2)
+IF(j2_ind>0)THEN
+  IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_plot",__FILE__)
+  call xmhd_ML_hcurl%vec_create(sub_fields%J2)
+END IF
 !---------------------------------------------------------------------------
 ! Setup Lagrange mass solver
 !---------------------------------------------------------------------------

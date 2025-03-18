@@ -14,16 +14,13 @@
 MODULE GEM_helpers
 USE oft_base
 USE oft_io, ONLY: oft_bin_file
-USE oft_mesh_type, ONLY: mesh
 USE fem_utils, ONLY: fem_interp
 USE mhd_utils, ONLY: mu0
 USE oft_la_base, ONLY: oft_vector
-USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
 USE oft_lag_operators, ONLY: oft_lag_rinterp
-USE oft_h1_fields, ONLY: oft_h1_create
-USE oft_h1_operators, ONLY: h1curl_zerob, oft_h1_rinterp
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp
 USE diagnostic, ONLY: flux_probe
-USE xmhd, ONLY: oft_xmhd_driver, oft_xmhd_probe, xmhd_sub_fields
+USE xmhd, ONLY: oft_xmhd_driver, oft_xmhd_probe, xmhd_sub_fields, xmhd_ML_hcurl_grad, xmhd_ML_hcurl
 IMPLICIT NONE
 !---------------------------------------------------------------------------
 ! Field interpolation object for intial conditions
@@ -44,7 +41,7 @@ END TYPE GEM_interp
 TYPE, EXTENDS(oft_xmhd_probe) :: GEM_probe
   INTEGER(4) :: io_unit ! I/O unit for history file
   LOGICAL :: initialized = .FALSE. ! Flag to indicate setup has been called
-  TYPE(oft_h1_rinterp), POINTER :: Bfield => NULL() ! Magnetic field interpolation class
+  TYPE(oft_hcurl_grad_rinterp), POINTER :: Bfield => NULL() ! Magnetic field interpolation class
   TYPE(flux_probe) :: flux_probe ! Synthetic flux probe
   TYPE(oft_bin_file) :: flux_hist ! History file object
 CONTAINS
@@ -62,7 +59,7 @@ REAL(8), INTENT(in) :: gop(3,4) ! Needs docs
 REAL(8), INTENT(out) :: val(:) ! Needs docs
 REAL(8) :: pt(3),Beq(3),Bper(3)
 ! Map logical positionto physical coordinates
-pt = mesh%log2phys(cell,f)
+pt = self%mesh%log2phys(cell,f)
 ! Return requested field evaluated at "(cell,f) -> pt"
 SELECT CASE(TRIM(self%field))
   CASE('n0') ! Density
@@ -97,6 +94,7 @@ IF(.NOT.self%initialized)THEN
   !---Setup internal flux probe
   self%flux_probe%hcpc=(/0.d0, 0.d0, 8.d0/)
   self%flux_probe%hcpv=(/0.125d0, 0.0d0, 0.0d0/)
+  self%flux_probe%mesh=>xmhd_ML_hcurl%ml_mesh%mesh
   CALL self%flux_probe%setup
   self%flux_probe%B=>self%Bfield
   !---Setup history file I/O
@@ -114,7 +112,7 @@ END IF
 !---------------------------------------------------------------------------
 !---Setup interpolator
 self%Bfield%u=>sub_fields%B
-CALL self%Bfield%setup
+CALL self%Bfield%setup(xmhd_ML_hcurl_grad%current_level)
 !---Sample flux
 CALL self%flux_probe%eval(tflux)
 !---Save results
@@ -131,8 +129,9 @@ END MODULE GEM_helpers
 !! Need docs
 PROGRAM MUG_slab_recon
 USE oft_base
-!--Grid
-USE oft_mesh_type, ONLY: mesh, rgrnd
+USE oft_io, ONLY: xdmf_plot_file
+!---Grid
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -141,23 +140,19 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pr
   create_ilu_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
-USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
 USE oft_lag_operators, ONLY: lag_setup_interp, oft_lag_vproject, oft_lag_vgetmop, &
   oft_lag_getmop, oft_lag_project
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 !---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: h0_setup_interp
-!---H1 FE space
 USE oft_h1_basis, ONLY: oft_h1_setup
-USE oft_h1_fields, ONLY: oft_h1_create
-USE oft_h1_operators, ONLY: h1_setup_interp, h1_getmop, oft_h1_project, h1grad_zerop, &
-  oft_h1_rinterp, oft_h1_cinterp
+USE oft_h1_operators, ONLY: h1_setup_interp
+!---H1(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
+USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, oft_hcurl_grad_project, &
+  oft_hcurl_grad_gzerop, oft_hcurl_grad_rinterp, oft_hcurl_grad_cinterp
 !---Physics
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, temp_floor, den_floor, den_scale, &
-  xmhd_sub_fields, xmhd_lin_run
+  xmhd_sub_fields, xmhd_lin_run, xmhd_ML_hcurl, xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange
 !---Self
 USE GEM_helpers, ONLY: GEM_interp, GEM_probe
 IMPLICIT NONE
@@ -170,9 +165,12 @@ CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 CLASS(oft_vector), POINTER :: u,v
 !---Local variables
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(xdmf_plot_file) :: plot_file
 TYPE(xmhd_sub_fields) :: ic_fields,pert_fields
-TYPE(oft_h1_rinterp), TARGET :: bfield
-TYPE(oft_h1_cinterp), TARGET :: jfield
+TYPE(oft_hcurl_grad_gzerop), TARGET :: hcurl_grad_gzerop
+TYPE(oft_hcurl_grad_rinterp), TARGET :: bfield
+TYPE(oft_hcurl_grad_cinterp), TARGET :: jfield
 TYPE(GEM_interp), TARGET :: GEM_field
 TYPE(GEM_probe) :: GEM_probes
 REAL(8), POINTER :: vals(:),vec_vals(:,:)
@@ -195,25 +193,32 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,slab_recon_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-rgrnd=(/0.d0,0.d0,1.d0/)
-CALL multigrid_construct
+CALL multigrid_construct(mg_mesh,[0.d0,0.d0,1.d0])
 !---Setup I/0
-IF(view_ic.OR.plot_run)CALL mesh%setup_io(order)
+IF(view_ic)THEN
+  CALL plot_file%setup("gem")
+  CALL mg_mesh%mesh%setup_io(plot_file,order)
+END IF
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
-!---Lagrange
-CALL oft_lag_setup(order,minlev)
-CALL lag_setup_interp
-!---H1(Curl) subspace
-CALL oft_hcurl_setup(order,minlev)
-CALL hcurl_setup_interp
-!---H1(Grad) subspace
-CALL oft_h0_setup(order+1,minlev)
-CALL h0_setup_interp
-!---H1 full space
-CALL oft_h1_setup(order,minlev)
-CALL h1_setup_interp
+!--- Lagrange
+ALLOCATE(xmhd_ML_lagrange,xmhd_ML_vlagrange)
+CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=minlev)
+CALL lag_setup_interp(xmhd_ML_lagrange)
+!--- Grad(H^1) subspace
+ALLOCATE(xmhd_ML_H1)
+CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=minlev)
+CALL h1_setup_interp(xmhd_ML_H1)
+!--- H(Curl) subspace
+ALLOCATE(xmhd_ML_hcurl)
+CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=minlev)
+CALL hcurl_setup_interp(xmhd_ML_hcurl)
+!--- Full H(Curl) space
+ALLOCATE(xmhd_ML_hcurl_grad,xmhd_ML_H1grad)
+CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,minlev=minlev)
+CALL hcurl_grad_setup_interp(xmhd_ML_hcurl_grad,xmhd_ML_H1)
+hcurl_grad_gzerop%ML_hcurl_grad_rep=>xmhd_ML_hcurl_grad
 !---------------------------------------------------------------------------
 ! If plot run, just run and finish
 !---------------------------------------------------------------------------
@@ -225,32 +230,33 @@ END IF
 !!
 !! Need docs
 !---Set constant initial temperature
-CALL oft_lag_create(ic_fields%Ti)
+CALL xmhd_ML_lagrange%vec_create(ic_fields%Ti)
 CALL ic_fields%Ti%set(T0)
 !---Set zero initial velocity
-CALL oft_lag_vcreate(ic_fields%V)
+CALL xmhd_ML_vlagrange%vec_create(ic_fields%V)
 CALL ic_fields%V%set(0.d0)
 !---------------------------------------------------------------------------
 ! Set intial density from analytic definition
 !---------------------------------------------------------------------------
+GEM_field%mesh=>mg_mesh%mesh
 !---Generate mass matrix
 NULLIFY(mop) ! Ensure the matrix is unallocated (pointer is NULL)
-CALL oft_lag_getmop(mop,"none") ! Construct mass matrix with "none" BC
+CALL oft_lag_getmop(xmhd_ML_lagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
 !---Setup linear solver
 CALL create_cg_solver(minv)
 minv%A=>mop ! Set matrix to be solved
 minv%its=-2 ! Set convergence type (in this case "full" CG convergence)
 CALL create_diag_pre(minv%pre) ! Setup Preconditioner
 !---Create fields for solver
-CALL oft_lag_create(u)
-CALL oft_lag_create(v)
+CALL xmhd_ML_lagrange%vec_create(u)
+CALL xmhd_ML_lagrange%vec_create(v)
 !---Project onto scalar Lagrange basis
 GEM_field%field='n0'
-CALL oft_lag_project(GEM_field,v)
+CALL oft_lag_project(xmhd_ML_lagrange%current_level,GEM_field,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 !---Create density field and set values
-CALL oft_lag_create(ic_fields%Ne)
+CALL xmhd_ML_lagrange%vec_create(ic_fields%Ne)
 CALL ic_fields%Ne%add(0.d0,1.d0,u)
 CALL ic_fields%Ne%scale(N0) ! Scale to desired value
 !---Cleanup objects used for projection
@@ -267,7 +273,7 @@ DEALLOCATE(minv)
 !---------------------------------------------------------------------------
 !---Generate mass matrix
 NULLIFY(mop) ! Ensure the matrix is unallocated (pointer is NULL)
-CALL h1_getmop(mop,"none") ! Construct mass matrix with "none" BC
+CALL hcurl_grad_getmop(xmhd_ML_hcurl_grad%current_level,mop,"none") ! Construct mass matrix with "none" BC
 !---Setup linear solver
 CALL create_cg_solver(minv)
 minv%A=>mop ! Set matrix to be solved
@@ -277,25 +283,25 @@ CALL create_bjacobi_pre(minv%pre,-1)
 DEALLOCATE(minv%pre%pre)
 CALL create_ilu_pre(minv%pre%pre)
 !---Create fields for solver
-CALL oft_h1_create(u)
-CALL oft_h1_create(v)
+CALL xmhd_ML_hcurl_grad%vec_create(u)
+CALL xmhd_ML_hcurl_grad%vec_create(v)
 !---Project onto vector H(Curl) basis
 GEM_field%field='b0'
-CALL oft_h1_project(GEM_field,v)
-CALL h1grad_zerop(v) ! Zero out redundant vertex degrees of freedom
+CALL oft_hcurl_grad_project(xmhd_ML_hcurl_grad%current_level,GEM_field,v)
+CALL hcurl_grad_gzerop%apply(v) ! Zero out redundant vertex degrees of freedom
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 !---Create magnetic field and set values
-CALL oft_h1_create(ic_fields%B)
+CALL xmhd_ML_hcurl_grad%vec_create(ic_fields%B)
 CALL ic_fields%B%add(0.d0,1.d0,u)
 CALL ic_fields%B%scale(B0) ! Scale to desired value
 !---Compute perturbed magnetic field
 GEM_field%field='db'
-CALL oft_h1_project(GEM_field,v)
-CALL h1grad_zerop(v) ! Zero out redundant vertex degrees of freedom
+CALL oft_hcurl_grad_project(xmhd_ML_hcurl_grad%current_level,GEM_field,v)
+CALL hcurl_grad_gzerop%apply(v) ! Zero out redundant vertex degrees of freedom
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL oft_h1_create(pert_fields%B)
+CALL xmhd_ML_hcurl_grad%vec_create(pert_fields%B)
 CALL pert_fields%B%add(0.d0,1.d0,u)
 CALL pert_fields%B%scale(B0*db) ! Scale to desired value
 !---Cleanup objects used for projection
@@ -318,34 +324,34 @@ IF(view_ic)THEN
   ALLOCATE(vec_vals(3,ic_fields%Ne%n))
   !---Plot density
   CALL ic_fields%Ne%get_local(vals) ! Fetch local values
-  CALL mesh%save_vertex_scalar(vals,'N0') ! Add field to plotting file
+  CALL mg_mesh%mesh%save_vertex_scalar(vals,plot_file,'N0') ! Add field to plotting file
   !---Plot temperature
   CALL ic_fields%Ti%get_local(vals) ! Fetch local values
-  CALL mesh%save_vertex_scalar(vals,'T0') ! Add field to plotting file
+  CALL mg_mesh%mesh%save_vertex_scalar(vals,plot_file,'T0') ! Add field to plotting file
   !---Plot velocity
   DO i=1,3
     vals=>vec_vals(i,:)
     CALL ic_fields%V%get_local(vals,i)
   END DO
-  CALL mesh%save_vertex_vector(vec_vals,'V0') ! Add field to plotting file
+  CALL mg_mesh%mesh%save_vertex_vector(vec_vals,plot_file,'V0') ! Add field to plotting file
   !---------------------------------------------------------------------------
   ! Project B and J for plotting
   !---------------------------------------------------------------------------
   !---Generate mass matrix
   NULLIFY(mop) ! Ensure the matrix is unallocated (pointer is NULL)
-  CALL oft_lag_vgetmop(mop,"none") ! Construct mass matrix with "none" BC
+  CALL oft_lag_vgetmop(xmhd_ML_vlagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
   !---Setup linear solver
   CALL create_cg_solver(minv)
   minv%A=>mop ! Set matrix to be solved
   minv%its=-2 ! Set convergence type (in this case "full" CG convergence)
   CALL create_diag_pre(minv%pre) ! Setup Preconditioner
   !---Create fields for solver
-  CALL oft_lag_vcreate(u)
-  CALL oft_lag_vcreate(v)
+  CALL xmhd_ML_vlagrange%vec_create(u)
+  CALL xmhd_ML_vlagrange%vec_create(v)
   !---Project B onto vector Lagrange basis
   bfield%u=>ic_fields%B
-  CALL bfield%setup
-  CALL oft_lag_vproject(bfield,v)
+  CALL bfield%setup(xmhd_ML_hcurl_grad%current_level)
+  CALL oft_lag_vproject(xmhd_ML_lagrange%current_level,bfield,v)
   CALL u%set(0.d0)
   CALL minv%apply(u,v)
   !---Retrieve and save projected magnetic field
@@ -353,11 +359,11 @@ IF(view_ic)THEN
     vals=>vec_vals(i,:)
     CALL u%get_local(vals,i)
   END DO
-  CALL mesh%save_vertex_vector(vec_vals,'B0') ! Add field to plotting file
+  CALL mg_mesh%mesh%save_vertex_vector(vec_vals,plot_file,'B0') ! Add field to plotting file
   !---Project B onto vector Lagrange basis
   bfield%u=>pert_fields%B
-  CALL bfield%setup
-  CALL oft_lag_vproject(bfield,v)
+  CALL bfield%setup(xmhd_ML_hcurl_grad%current_level)
+  CALL oft_lag_vproject(xmhd_ML_lagrange%current_level,bfield,v)
   CALL u%set(0.d0)
   CALL minv%apply(u,v)
   !---Retrieve and save projected magnetic field
@@ -365,11 +371,11 @@ IF(view_ic)THEN
     vals=>vec_vals(i,:)
     CALL u%get_local(vals,i)
   END DO
-  CALL mesh%save_vertex_vector(vec_vals,'dB') ! Add field to plotting file
+  CALL mg_mesh%mesh%save_vertex_vector(vec_vals,plot_file,'dB') ! Add field to plotting file
   !---Project J onto vector Lagrange basis
   jfield%u=>ic_fields%B
-  CALL jfield%setup
-  CALL oft_lag_vproject(jfield,v)
+  CALL jfield%setup(xmhd_ML_hcurl_grad%current_level)
+  CALL oft_lag_vproject(xmhd_ML_lagrange%current_level,jfield,v)
   CALL u%set(0.d0)
   CALL minv%apply(u,v)
   !---Retrieve and save projected current density
@@ -377,7 +383,7 @@ IF(view_ic)THEN
     vals=>vec_vals(i,:)
     CALL u%get_local(vals,i)
   END DO
-  CALL mesh%save_vertex_vector(vec_vals,'J0') ! Add field to plotting file
+  CALL mg_mesh%mesh%save_vertex_vector(vec_vals,plot_file,'J0') ! Add field to plotting file
   !---Cleanup objects used for projection
   CALL u%delete ! Destroy LHS vector
   CALL v%delete ! Destroy RHS vector
@@ -397,9 +403,9 @@ xmhd_minlev=minlev  ! Set minimum level for multigrid preconditioning
 den_scale=N0        ! Set density scale
 oft_env%pm=pm       ! Show linear iteration progress?
 IF(linear)THEN
-  CALL oft_lag_vcreate(pert_fields%V)
-  CALL oft_lag_create(pert_fields%Ti)
-  CALL oft_lag_create(pert_fields%Ne)
+  CALL xmhd_ML_vlagrange%vec_create(pert_fields%V)
+  CALL xmhd_ML_lagrange%vec_create(pert_fields%Ti)
+  CALL xmhd_ML_lagrange%vec_create(pert_fields%Ne)
   CALL xmhd_lin_run(ic_fields,pert_fields)
 ELSE
   CALL ic_fields%B%add(1.d0,1.d0,pert_fields%B)
