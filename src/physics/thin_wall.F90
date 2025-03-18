@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file thin_wall.F90
 !
 !> Module for thin-wall modeling on 3D triangular meshes
@@ -9,7 +11,7 @@
 !! @authors Chris Hansen
 !! @date May 2017
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE thin_wall
 USE, INTRINSIC :: iso_c_binding, only: c_loc
 USE oft_base
@@ -36,10 +38,10 @@ USE mhd_utils, ONLY: mu0
 #define MAX_EDGE_CONN 6
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Structure containing definition of "hole" elements for multiply connected
 !! surfaces
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: hole_mesh
   INTEGER(i4) :: i0 = 0 !< Starting point for point chain
   INTEGER(i4) :: n = 0 !< Number of points in chain
@@ -51,43 +53,43 @@ TYPE :: hole_mesh
   ! REAL(r8), POINTER, DIMENSION(:) :: fsign => NULL() !< Sign of 
   REAL(r8) :: ptcc(3) = 0.d0
 END TYPE hole_mesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Structure containing definition of a flux loop sensor
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: floop_sensor
   INTEGER(i4) :: np = 0 !< Number of points in loop
   REAL(r8) :: scale_fac = 1.d0 !< Scale factor to apply to signal
   REAL(r8), POINTER, DIMENSION(:,:) :: r => NULL() !< List of points [3,np]
   CHARACTER(LEN=40) :: name = '' !< Name of sensor
 END TYPE floop_sensor
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Structure containing definition of a current jumper sensor
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: jumper_sensor
   INTEGER(i4) :: np = 0 !< Number of points on jumper
   CHARACTER(LEN=40) :: name = '' !< Name of sensor
   INTEGER(i4), POINTER, DIMENSION(:) :: points => NULL() !< List of points on jumper
   REAL(r8), POINTER, DIMENSION(:) :: hole_facs => NULL() !< Coupling weight to "holes"
 END TYPE jumper_sensor
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Structure containing sensor sets
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: tw_sensors
   INTEGER(i4) :: nfloops = 0 !< Number of flux loops
   INTEGER(i4) :: njumpers = 0 !< Number of current jumpers
   TYPE(floop_sensor), POINTER, DIMENSION(:) :: floops => NULL() !< List of flux loops
   TYPE(jumper_sensor), POINTER, DIMENSION(:) :: jumpers => NULL() !< List of current jumpers
 END TYPE tw_sensors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Structure containing filament coil definition
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: tw_gen_coil
   INTEGER(i4) :: npts = 0 !< Number of points in coil
   REAL(r8), POINTER, DIMENSION(:,:) :: pts => NULL() !< Points [3,npts]
 END TYPE tw_gen_coil
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Structure containing a coil sets composed of one or more individual filament coils
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: tw_coil_set
   LOGICAL :: sens_mask = .FALSE. !< Mask from sensor output?
   INTEGER(i4) :: ncoils = 0 !< Number of coils in set
@@ -100,9 +102,9 @@ TYPE :: tw_coil_set
   CHARACTER(LEN=40) :: name = '' !< Name of coil set
   TYPE(tw_gen_coil), POINTER, DIMENSION(:) :: coils => NULL() !< List of coils
 END TYPE tw_coil_set
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Class for thin-wall simulation
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: tw_type
   INTEGER(i4) :: nelems = 0 !< Number of elements in model (np_active+nholes+n_vcoils)
   INTEGER(i4) :: np_active = 0 !< Number of active vertices in model
@@ -145,9 +147,9 @@ CONTAINS
   PROCEDURE :: save_debug => tw_save_debug
 END TYPE tw_type
 
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Class for thin-wall simulation
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: tw_plasma_boozer
   CLASS(tw_type), POINTER :: wall => NULL() !< Thin-wall model for structures
   CLASS(tw_type), POINTER :: plasma => NULL() !< Thin-wall model for plasma
@@ -175,9 +177,9 @@ REAL(r8), PARAMETER :: coil_min_rad = 1.d-6
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_setup(self,hole_ns)
 CLASS(tw_type), INTENT(INOUT) :: self !< Thin-wall model object
 TYPE(oft_1d_int), POINTER, INTENT(IN) :: hole_ns(:) !< Hole nodesets
@@ -406,9 +408,9 @@ SELECT TYPE(this=>self%Uloc_pts)
 END SELECT
 CALL oft_decrease_indent
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Find connected chain for a boundary hole from a starting vertex
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE get_hole_pseq(i0,plist,n)
 INTEGER(4), INTENT(in) :: i0 !< Starting vertex (must be on boundary)
 INTEGER(4), POINTER, INTENT(out) :: plist(:) !< List of vertices forming chain
@@ -445,9 +447,9 @@ ALLOCATE(plist(n))
 plist=lloop_tmp(1:n)
 DEALLOCATE(lloop_tmp)
 END SUBROUTINE get_hole_pseq
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Reorder hole vertices into a sequential chain
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE order_hole_list(list_in,list_out,n)
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered list
@@ -528,9 +530,9 @@ IF(ipt/=lloop_tmp(i0))CALL oft_abort('Error building hole mesh, path is not peri
 DEALLOCATE(lloop_tmp,flag_list)
 END SUBROUTINE order_hole_list
 END SUBROUTINE tw_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Save debug plotting information for thin-wall model
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_save_debug(self)
 CLASS(tw_type), INTENT(INOUT) :: self !< Thin-wall model object
 INTEGER(4) :: i,j,k
@@ -558,9 +560,9 @@ END DO
 CALL tw_save_hole_debug(self)
 DEALLOCATE(normals)
 END SUBROUTINE tw_save_debug
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute element to driver (Icoils) coupling matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Ael2dr(tw_obj,save_file)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
@@ -743,14 +745,14 @@ IF(PRESENT(save_file))THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Ael2dr
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute coupling from thin-wall model elements to flux loop sensors
 !!
 !! @note The asymptotic form of self-inductance for thin circular coils derived
 !! by Hurwitz and Landreman [arXiv:2310.09313 (2023)] is used for all inductance
 !! calculations. Note that this is not strictly valid for mutual inductances,
 !! but is instead used to avoid integration challenges with very-closely-spaced coils.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Lmat_coils(tw_obj)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 LOGICAL :: exists
@@ -852,9 +854,9 @@ END DO
 DEALLOCATE(quads)
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_coils
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_LmatDirect(row_model,Lmat,col_model,save_file)
 TYPE(tw_type), TARGET, INTENT(in) :: row_model !< Thin-wall model object for rows
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
@@ -1149,9 +1151,9 @@ IF(PRESENT(save_file))THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_LmatDirect
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Lmat_MF(row_obj,col_obj,nrhs,a,b)
 TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
 TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
@@ -1375,9 +1377,9 @@ elapsed_time=mytimer%tock()
 WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_MF
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute coupling from thin-wall model elements to flux loop sensors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_mutuals(tw_obj,nsensors,sensors,save_file)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 INTEGER(4), INTENT(in) :: nsensors !< Number of flux loops
@@ -1629,9 +1631,9 @@ IF(PRESENT(save_file))THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_mutuals
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute resistivity matrix for thin-wall model
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Rmat(tw_obj,keep_closures)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 LOGICAL, INTENT(in) :: keep_closures !< Keep diagonal entries (1) for closure elements
@@ -1867,9 +1869,9 @@ DEALLOCATE(j_add,eta_add)
 ! END IF
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Rmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute \f$ \int 1/(r-r') dA' \f$ for a triangle
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION tw_compute_phipot(pt_cell,pt) RESULT(phi)
 REAL(8), INTENT(in) :: pt_cell(3,3) !< Vertices defining triangle
 REAL(8), INTENT(in) :: pt(3) !< Observation point (r)
@@ -1922,9 +1924,9 @@ END DO
 phi=phi-DOT_PRODUCT(nhat,r(:,1))*omega
 DEBUG_STACK_POP
 END FUNCTION tw_compute_phipot
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Bops(self,save_file)
 TYPE(tw_type), INTENT(inout) :: self
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
@@ -2148,9 +2150,9 @@ IF(TRIM(save_file)/='none')THEN
   END IF
 END IF
 END SUBROUTINE tw_compute_Bops
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup hole definition for ordered chain of vertices
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_setup_hole(bmesh,hmesh)
 CLASS(oft_bmesh), INTENT(inout) :: bmesh !< Surface mesh containing hole
 TYPE(hole_mesh), INTENT(inout) :: hmesh !< Hole definition
@@ -2271,9 +2273,9 @@ END DO
 DEALLOCATE(face_orientation,point_orient)
 DEBUG_STACK_POP
 END SUBROUTINE tw_setup_hole
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Read coil sets for "oft_in.xml" file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tw_load_coils(group_node,ncoils,coils)
 TYPE(xml_node), POINTER, INTENT(IN) :: group_node !< XML node relative to base `<thincurr>` node
 INTEGER(4), INTENT(out) :: ncoils !< Number of coil sets found
@@ -2421,9 +2423,9 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)
 END IF
 end subroutine tw_load_coils
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create a copy (by reference) of a coil set
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE tw_copy_coil(coil_in,coil_out)
 TYPE(tw_coil_set), INTENT(in) :: coil_in !< Source coil set
 TYPE(tw_coil_set), INTENT(inout) :: coil_out !< Copy of source
@@ -2438,9 +2440,9 @@ coil_out%radius=>coil_in%radius
 coil_out%coils=>coil_in%coils
 coil_out%sens_mask=coil_in%sens_mask
 END SUBROUTINE tw_copy_coil
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load sensors from "floops.loc" and build jumpers from nodesets
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tw_load_sensors(filename,self,sensors)
 CHARACTER(LEN=*), INTENT(in) :: filename !< Thin-wall model object
 CLASS(tw_type), INTENT(inout) :: self !< Thin-wall model object
@@ -2530,9 +2532,9 @@ IF(ASSOCIATED(self%jumper_nsets))THEN
   CLOSE(io_unit)
 END IF
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Order jumper list into sequential chain
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE order_jumper_list(list_in,list_out,n)
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered vertex list
@@ -2572,9 +2574,9 @@ END DO
 DEALLOCATE(lloop_tmp)
 END SUBROUTINE order_jumper_list
 end subroutine tw_load_sensors
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load resistivity and sensor mask from "oft_in.xml" file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tw_load_eta(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
 !---XML solver fields
@@ -2615,9 +2617,9 @@ IF(ierr==0)THEN
   ! WRITE(*,*)'  Sens mask = ',self%sens_mask
 END IF
 end subroutine tw_load_eta
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load forcing mesh and fields for an MHD-style mode 
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tw_load_mode(filename,self,driver)
 CHARACTER(LEN=*) :: filename !< Filename containing mode definition
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model of mode
@@ -2777,9 +2779,9 @@ END DO
 ALLOCATE(self%sens_mask(1))
 self%sens_mask=.FALSE.
 end subroutine tw_load_mode
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_build_boozer(self,s,alpha)
 CLASS(tw_plasma_boozer), INTENT(INOUT) :: self !< Thin-wall model for structures
 REAL(8), INTENT(in) :: s,alpha
@@ -2844,9 +2846,9 @@ M_pw=TRANSPOSE(M_wp)
 ! self%L_d=self%plasma%Lmat(1:nplasma,1:nplasma)
 
 END SUBROUTINE tw_build_boozer
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_recon_curr(self,pot,curr)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 real(8), intent(in) :: pot(:) !< Solution values [self%nelems]
@@ -2882,9 +2884,9 @@ END DO
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE tw_recon_curr
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_save_pfield(self,a,tag)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 real(8), intent(in) :: a(:) !< Solution values [self%nelems]
@@ -2916,9 +2918,9 @@ CALL self%mesh%save_vertex_scalar(ptvec(1,:),self%xdmf,TRIM(tag)//'_p')
 DEALLOCATE(ptvec,cellvec)
 DEBUG_STACK_POP
 END SUBROUTINE tw_save_pfield
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_save_hole_debug(self)
 TYPE(tw_type), INTENT(in) :: self
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
@@ -2949,9 +2951,9 @@ END DO
 CALL self%mesh%save_cell_vector(cellvec,self%xdmf,"hole_vec")
 DEALLOCATE(cellvec)
 END SUBROUTINE tw_save_hole_debug
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Save Thin-wall solution vector to a restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tw_rst_save(self,u,filename,path,append)
 class(tw_type), intent(in) :: self !< Thin-wall model object
 class(oft_vector), pointer, intent(inout) :: u !< Solution to save
@@ -2995,9 +2997,9 @@ CALL hdf5_rst_destroy(rst_info)
 DEALLOCATE(global_le)
 DEBUG_STACK_POP
 end subroutine tw_rst_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load Thin-wall solution vector from a restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tw_rst_load(u,filename,path)
 class(oft_vector), target, intent(inout) :: u !< Solution to load
 character(LEN=*), intent(in) :: filename !< Name of restart file

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_quad.F90
 !
 !> Regression tests for 3D quadrature rules. Test cases are constructed
@@ -10,7 +12,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_quad
 USE oft_base
 USE oft_tet_quadrature, ONLY: oft_quad_type, set_quad_1d
@@ -80,9 +82,9 @@ CLOSE(io_unit2)
 CALL oft_finalize
 !---
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate test polynomial at a point in space
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION poly_eval(x,c,e) RESULT(y)
 REAL(r8), INTENT(in) :: x(3) !< Array of spatial locations [3]
 REAL(r8), INTENT(in) :: c(3) !< Array of polynomial coefficients [3]
@@ -94,9 +96,9 @@ DO i=1,3
   y=y+c(i)*(x(i)**e(i))
 END DO
 END FUNCTION poly_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate integral of the domain {[0,1],[0,1],[0,1]}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION vint_eval(c,e) RESULT(y)
 REAL(r8), INTENT(in) :: c(3) !< Array of polynomial coefficients [3]
 INTEGER(i4), INTENT(in) :: e(3) !< Array of polynomial exponents [3]
@@ -120,9 +122,9 @@ DO i=1,mg_mesh%mesh%nc
 END DO
 CALL quad%delete
 END FUNCTION vint_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate integral of the domain {[0,1],[0,1],1}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION sint_eval(c,e) RESULT(y)
 REAL(r8), INTENT(in) :: c(3) !< Array of polynomial coefficients [3]
 INTEGER(i4), INTENT(in) :: e(3) !< Array of polynomial exponents [3]
@@ -148,9 +150,9 @@ DO i=1,mg_mesh%smesh%nc
 END DO
 CALL quad%delete
 END FUNCTION sint_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate integral of the domain {[0,1],1,1}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION lint_eval(c,e) RESULT(y)
 REAL(r8), INTENT(in) :: c(3) !< Array of polynomial coefficients [3]
 INTEGER(i4), INTENT(in) :: e(3) !< Array of polynomial exponents [3]

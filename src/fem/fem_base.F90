@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file fem_base.F90
 !
 !> @defgroup doxy_oft_fem Finite Element
@@ -14,7 +16,7 @@
 !! @authors Chris Hansen
 !! @date August 2011
 !! @ingroup doxy_oft_fem
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 module fem_base
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array, sort_matrix
@@ -37,9 +39,9 @@ PRIVATE
 integer(i4), public, parameter :: fem_max_levels=10 !< Maximum number of FE levels
 integer(i4), public, parameter :: fem_idx_ver=1 !< File version for array indexing
 character(LEN=16), public, parameter :: fem_idx_path="OFT_idx_Version" !< HDF5 field name
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Base FE type
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, ABSTRACT, PUBLIC :: oft_afem_type
   INTEGER(i4) :: order = -1 !< FE rep order
   INTEGER(i4) :: dim = -1 !< Dimension of FE rep (ex. 3 for 3-vector or 1 for scalar)
@@ -85,17 +87,17 @@ CONTAINS
 END TYPE oft_afem_type
 !
 ABSTRACT INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   subroutine afem_setup(self,quad_order)
     import oft_afem_type, i4
     class(oft_afem_type), intent(inout) :: self
     integer(i4), intent(in) :: quad_order
   end subroutine afem_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------  
+!------------------------------------------------------------------------------  
   subroutine afem_ncdofs(self,cell,dofs)
     import oft_afem_type, i4
     class(oft_afem_type), intent(in) :: self
@@ -103,9 +105,9 @@ ABSTRACT INTERFACE
     integer(i4), intent(inout) :: dofs(:)
   end subroutine afem_ncdofs
 END INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Base FE type for boundary (triangle) meshes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_afem_type) :: oft_bfem_type
   INTEGER(i4) :: gstruct(3) = -1 !< Geometric mapping array
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Structure containing bound mesh
@@ -118,9 +120,9 @@ CONTAINS
   !> Destory FE type
   PROCEDURE :: delete => bfem_delete
 END TYPE oft_bfem_type
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Base FE type
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_afem_type) :: oft_fem_type
   INTEGER(i4) :: gstruct(4) = -1 !< Geometric mapping array
   CLASS(oft_mesh), POINTER :: mesh => NULL() !< Structure containing bound mesh
@@ -132,15 +134,15 @@ CONTAINS
   !> Destory FE type
   PROCEDURE :: delete => fem_delete
 END TYPE oft_fem_type
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, PUBLIC :: oft_fem_ptr
   CLASS(oft_afem_type), pointer :: fe => NULL() !< Finite element object
 end type oft_fem_ptr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC :: oft_ml_fem_type
   INTEGER(i4) :: nlevels = 0 !< Number of FE levels
   INTEGER(i4) :: level = 0 !< Current FE level
@@ -160,15 +162,15 @@ CONTAINS
   !> Destory FE type
   PROCEDURE :: delete => ml_fem_delete
 END TYPE oft_ml_fem_type
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, PUBLIC :: oft_ml_fem_ptr
   TYPE(oft_ml_fem_type), pointer :: ml => NULL() !< ML object
 end type oft_ml_fem_ptr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, PUBLIC, extends(oft_ml_vecspace) :: oft_ml_fe_vecspace
   class(oft_ml_fem_type), pointer :: ML_FE_rep => NULL() !< ML FE representation
   !> Needs docs
@@ -184,18 +186,18 @@ contains
   PROCEDURE :: inject => ml_fe_vecspace_inject
 end type oft_ml_fe_vecspace
 ABSTRACT INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE ml_fe_base_push(self,afine,acors)
     IMPORT oft_ml_fe_vecspace, oft_vector
     CLASS(oft_ml_fe_vecspace), INTENT(inout) :: self
     CLASS(oft_vector), INTENT(inout) :: afine
     CLASS(oft_vector), INTENT(inout) :: acors
   END SUBROUTINE ml_fe_base_push
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE ml_fe_base_pop(self,acors,afine)
     IMPORT oft_ml_fe_vecspace, oft_vector
     CLASS(oft_ml_fe_vecspace), INTENT(inout) :: self
@@ -203,25 +205,25 @@ ABSTRACT INTERFACE
     CLASS(oft_vector), INTENT(inout) :: afine
   END SUBROUTINE ml_fe_base_pop
 END INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cell DOF type information
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: dof_map
   integer(i4) :: type = 0 !< Geometry type
   integer(i4) :: el = 0 !< Element id
   integer(i4) :: ind = 0 !< Sub-index
 end type dof_map
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Global vector information and indicies
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: fem_mpi_global
   integer(8) :: ne = 0 !< Global element count
   integer(8), pointer, dimension(:) :: le => NULL() !< Global index of elements (ne)
   logical, pointer, dimension(:) :: gbe => NULL() !< Global boundary element flag (ne)
 end type fem_mpi_global
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Parent FE information and indicies
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: fem_parent
   integer(i4) :: ne = 0 !< Parent element count
   integer(i4), pointer, dimension(:) :: le => NULL() !< Parent index of elements (ne)
@@ -229,9 +231,9 @@ end type fem_parent
 !---
 PUBLIC fem_common_linkage, fem_delete, bfem_delete
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine afem_delete(self)
 class(oft_afem_type), intent(inout) :: self
 IF(ASSOCIATED(self%be))DEALLOCATE(self%be)
@@ -270,7 +272,7 @@ IF(ASSOCIATED(self%cache_native))THEN
   DEALLOCATE(self%cache_native)
 END IF
 end subroutine afem_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute element to element linkage for a FE representation
 !!
 !! Creates a CSR graph representing the interaction between elements in a single
@@ -282,7 +284,7 @@ end subroutine afem_delete
 !! @note The graph is constructed in the @ref fem_base::oft_fem_type::nee "nee",
 !! @ref fem_base::oft_fem_type::kee "kee", and @ref fem_base::oft_fem_type::lee "lee"
 !! fields of `self`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine afem_self_linkage(self)
 class(oft_afem_type), intent(inout) :: self !< Finite element representation
 integer(i4) :: i,j,k,offset,stack
@@ -362,7 +364,7 @@ deallocate(lcx)
 deallocate(nr)
 DEBUG_STACK_POP
 end subroutine afem_self_linkage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute element to element linkage between two FE representations
 !!
 !! Creates a CSR graph representing the interaction between elements of two different
@@ -371,7 +373,7 @@ end subroutine afem_self_linkage
 !! `self` is used as the test functions and `other` is used as the basis set
 !! in the Galerkin intergral. These correspond to the row and columns of the CSR
 !! graph respectively
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_common_linkage(self,other,nee,kee,lee)
 class(oft_afem_type), intent(in) :: self !< Finite element representation for test set (rows)
 class(oft_afem_type), intent(in) :: other !< Finite element representation for basis set (columns)
@@ -456,14 +458,14 @@ deallocate(nr)
 CALL afem_fill_lgraph(self,other,nee,kee,lee)
 DEBUG_STACK_POP
 end subroutine fem_common_linkage
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Supplement local graph with interactions from other processors
 !!
 !! Due to domain decomposition not all matrix elements for the local block
 !! may be present in the graph constructed from the local mesh. This subroutine
 !! expands the local matrix graph to include all entries in the local block
 !! (interaction between elements owned by the local processor)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine afem_fill_lgraph(row,col,nee,kee,lee)
 class(oft_afem_type), intent(in) :: row !< FE representation for row space
 class(oft_afem_type), intent(in) :: col !< FE representation for column space
@@ -883,7 +885,7 @@ NULLIFY(new_graph%lc)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine afem_fill_lgraph
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Constructs a finite element representation on the associated volume mesh
 !!
 !! Constructs a finite element representation from a specified geometric mapping,
@@ -894,7 +896,7 @@ end subroutine afem_fill_lgraph
 !!
 !! @param[in,out] self FE representation to construct
 !! @param[in] quad_order Desired quadrature order
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_setup(self,quad_order)
 class(oft_fem_type), intent(inout) :: self
 integer(i4), intent(in) :: quad_order
@@ -1052,9 +1054,9 @@ CALL afem_fill_lgraph(self,self,self%nee,self%kee,self%lee)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine fem_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy FE object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE fem_delete(self)
 CLASS(oft_fem_type), INTENT(inout) :: self
 DEBUG_STACK_PUSH
@@ -1062,7 +1064,7 @@ CALL afem_delete(self)
 NULLIFY(self%mesh)
 DEBUG_STACK_POP
 END SUBROUTINE fem_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute FE global context and stitching information
 !!
 !! Sets up structures and information for distributed meshes. Primarily this
@@ -1070,7 +1072,7 @@ END SUBROUTINE fem_delete
 !! linear solves.
 !!
 !! @param[in,out] self Finite element representation
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_global_linkage(self)
 class(oft_fem_type), intent(inout) :: self
 type :: eout
@@ -1363,9 +1365,9 @@ self%map%gbe=>self%global%gbe
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine fem_global_linkage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Retrieve the indices of elements beloning to a given cell
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_ncdofs(self,cell,dofs)
 class(oft_fem_type), intent(in) :: self !< Finite element representation
 integer(i4), intent(in) :: cell !< Desired cell in mesh
@@ -1407,12 +1409,12 @@ do i=1,self%gstruct(4)
 end do
 DEBUG_STACK_POP
 end subroutine fem_ncdofs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct cell element mapping
 !!
 !! Sets up the structure @ref fem_base::oft_fem_type::cmap "cmap", which defines
 !! the local type, index, and geometric linkage of DOFs in a cell
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fem_ncdofs_map(self)
 class(oft_fem_type), intent(inout) :: self !< Finite element representation
 integer(i4) :: coffset,boffset,i,j
@@ -1457,9 +1459,9 @@ do i=1,self%gstruct(4)
 end do
 DEBUG_STACK_POP
 end subroutine fem_ncdofs_map
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create weight vector for FE representation
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine afem_vec_create(self,new,cache,native)
 class(oft_afem_type), intent(inout) :: self
 class(oft_vector), pointer, intent(out) :: new !< Vector to create
@@ -1497,9 +1499,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine afem_vec_create
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Save a Lagrange scalar field to a HDF5 restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine afem_vec_save(self,source,filename,path,append)
 class(oft_afem_type), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: source !< Source field
@@ -1540,9 +1542,9 @@ DEALLOCATE(outfield,valtmp)
 CALL hdf5_rst_destroy(rst_info)
 DEBUG_STACK_POP
 end subroutine afem_vec_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load a Lagrange scalar field from a HDF5 restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine afem_vec_load(self,source,filename,path,err_flag)
 class(oft_afem_type), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: source !< Destination vector
@@ -1602,9 +1604,9 @@ DEALLOCATE(infield,valtmp)
 CALL hdf5_rst_destroy(rst_info)
 DEBUG_STACK_POP
 end subroutine afem_vec_load
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create self-matrix for FE representation
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine afem_mat_create(self,new)
 CLASS(oft_afem_type), INTENT(inout) :: self
 CLASS(oft_matrix), POINTER, INTENT(out) :: new !< Matrix to create
@@ -1626,9 +1628,9 @@ CALL tmp_vec%delete
 DEALLOCATE(graphs(1,1)%g,tmp_vec)
 DEBUG_STACK_POP
 end subroutine afem_mat_create
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create weight vector for FE representation
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ml_fem_vec_create(self,new,level,cache,native)
 class(oft_ml_fem_type), intent(inout) :: self
 class(oft_vector), pointer, intent(out) :: new !< Vector to create
@@ -1651,9 +1653,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine ml_fem_vec_create
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Set the current level for a ML FE structure
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ml_fem_set_level(self,level)
 class(oft_ml_fem_type), intent(inout) :: self
 integer(i4), intent(in) :: level !< Desired level
@@ -1676,9 +1678,9 @@ else
 end if
 DEBUG_STACK_POP
 end subroutine ml_fem_set_level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy boundary multi-level FE object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE ml_fem_delete(self)
 CLASS(oft_ml_fem_type), INTENT(inout) :: self
 INTEGER(i4) :: i
@@ -1702,9 +1704,9 @@ self%nlevels=0
 self%minlev=1
 DEBUG_STACK_POP
 END SUBROUTINE ml_fem_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ml_fe_vecspace_create(self,new,level,cache,native)
 class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), pointer, intent(out) :: new
@@ -1715,11 +1717,11 @@ DEBUG_STACK_PUSH
 CALL self%ML_FE_rep%vec_create(new,level=level,cache=cache,native=native)
 DEBUG_STACK_POP
 end subroutine ml_fe_vecspace_create
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
 !! @note The global Lagrange level in incremented by one in this subroutine
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ml_fe_vecspace_interp(self,acors,afine)
 class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to interpolate
@@ -1737,11 +1739,11 @@ end if
 CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level)%m%apply(acors,afine)
 DEBUG_STACK_POP
 end subroutine ml_fe_vecspace_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
 !! @note The global Lagrange level in incremented by one in this subroutine
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ml_fe_vecspace_inject(self,afine,acors)
 class(oft_ml_fe_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
@@ -1759,14 +1761,14 @@ end if
 CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine ml_fe_vecspace_inject
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Constructs a finite element representation on the associated surface mesh
 !!
 !! This subroutine is the equilivalent of @ref fem_base::fem_setup "fem_setup"
 !! for trangular grids and @ref fem_base::oft_bfem_type. Generally this method
 !! is used to construct a finite element representation for the boundary mesh,
 !! however it may be used with arbitrary triangular grids
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bfem_setup(self,quad_order)
 class(oft_bfem_type), intent(inout) :: self !< FE representation to construct
 integer(i4), intent(in) :: quad_order !< Desired quadrature order
@@ -1906,9 +1908,9 @@ call afem_fill_lgraph(self,self,self%nee,self%kee,self%lee)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine bfem_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy boundary FE object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE bfem_delete(self)
 CLASS(oft_bfem_type), INTENT(inout) :: self
 DEBUG_STACK_PUSH
@@ -1920,12 +1922,12 @@ END IF
 NULLIFY(self%mesh)
 DEBUG_STACK_POP
 END SUBROUTINE bfem_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute FE global context and stitching information
 !!
 !! This subroutine is the equilivalent of @ref fem_base::fem_global_linkage
 !! "fem_global_linkage" for triangular grids and @ref fem_base::oft_bfem_type
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bfem_global_linkage(self)
 class(oft_bfem_type), intent(inout) :: self !< Finite element representation
 type :: eout
@@ -2331,9 +2333,9 @@ self%map%gbe=>self%global%gbe
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine bfem_global_linkage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Retrieve the indices of elements beloning to a given face
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bfem_ncdofs(self,cell,dofs)
 class(oft_bfem_type), intent(in) :: self !< Finite element representation
 integer(i4), intent(in) :: cell !< Desired cell in mesh
@@ -2366,12 +2368,12 @@ do i=1,self%gstruct(3)
 end do
 DEBUG_STACK_POP
 end subroutine bfem_ncdofs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct face element mapping
 !!
 !! Sets up the structure @ref fem_base::oft_bfem_type::fmap "fmap", which defines
 !! the local type, index, and geometric linkage of DOFs on a face
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bfem_nfdofs_map(self)
 class(oft_bfem_type), intent(inout) :: self !< Finite element representation
 integer(i4) :: foffset,boffset,i,j

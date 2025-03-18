@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_hcurl_sop.F90
 !
 !> Regression tests for surface operators for vector H(Curl) finite elements.
@@ -13,7 +15,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 program test_hcurl_sop
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
@@ -50,11 +52,11 @@ CALL test_wop
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the equation \f$ \nabla \times \nabla \times B = K \hat{I} \f$, where
 !! \f$ K \f$ is the helicity matrix and \f$ \hat{I} \f$ is the identity vector
 !! using H(Curl) elements.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_wop
 !---Create solver objects
 CLASS(oft_solver), POINTER :: winv

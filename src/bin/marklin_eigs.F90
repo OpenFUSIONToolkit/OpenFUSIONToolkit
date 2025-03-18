@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file marklin_eigs.F90
 !
 !> Driver to compute Taylor states (and higher force-free modes)
@@ -15,7 +17,7 @@
 !! @authors Chris Hansen
 !! @date June 2018
 !! @ingroup doxy_oft_bin
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 PROGRAM marklin_eigs
 !---Base
 USE oft_base

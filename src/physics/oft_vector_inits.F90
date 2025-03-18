@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_vector_inits.F90
 !
 !> Field initializations and evaluation for common vector analytic field types
@@ -8,16 +10,16 @@
 !! @authors Chris Hansen
 !! @date September 2012
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 module oft_vector_inits
 use oft_base
 use oft_mesh_type, only: oft_mesh
 use fem_utils, only: fem_interp
 use mhd_utils, only: mu0
 implicit none
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolation class for a uniform vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: uniform_field
   integer(i4) :: n=3
   real(r8) :: val(3) = (/1.d0,0.d0,0.d0/) !< Field to initialize
@@ -25,9 +27,9 @@ contains
   !> Reconstruct magnetic field
   procedure :: interp => uniform_field_interp
 end type uniform_field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolation class for a uniform vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: poss_vec_field
   integer(i4) :: n=3
   procedure(poss_vec_eval), pointer, nopass :: func => NULL()
@@ -35,9 +37,9 @@ contains
   !> Reconstruct magnetic field
   procedure :: interp => poss_vec_interp
 end type poss_vec_field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate analytic fields for the tuna can spheromak
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: cyl_taylor
   real(r8) :: scale = 1.d0 !< Global scale of field
   real(r8) :: zmin = 1.d0 !< Lowest z-location on mesh
@@ -54,9 +56,9 @@ contains
   !> Reconstruct magnetic field
   procedure :: interp => cyl_taylor_interp
 end type cyl_taylor
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate analytic fields for a set of straight infinite coils
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: inf_coils
   integer(i4) :: ncoils = 0 !< Number of coils in set
   real(r8), pointer, dimension(:,:) :: axis => NULL() !< Direction of extent
@@ -68,9 +70,9 @@ contains
   !> Evalute cummulative field from all coils
   procedure :: interp => inf_coils_interp
 end type inf_coils
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Field corresponding to a poloidal circulation in toroidal corrdinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: tor_radial
   integer(i4) :: n = 1 !< Toroidal mode number
   integer(i4) :: m = 0 !< Poloidal mode number
@@ -93,9 +95,9 @@ INTERFACE
   END SUBROUTINE poss_vec_eval
 END INTERFACE
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Return a uniform vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine uniform_field_interp(self,cell,f,gop,val)
 class(uniform_field), intent(inout) :: self
 integer(i4), intent(in) :: cell
@@ -104,9 +106,9 @@ real(r8), intent(in) :: gop(3,4)
 real(r8), intent(out) :: val(:)
 val(1:self%n)=self%val(1:self%n)
 end subroutine uniform_field_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Return a uniform vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine poss_vec_interp(self,cell,f,gop,val)
 class(poss_vec_field), intent(inout) :: self
 integer(i4), intent(in) :: cell
@@ -119,9 +121,9 @@ IF(.NOT.ASSOCIATED(self%func))CALL oft_abort("No eval function specified", &
 pt=self%mesh%log2phys(cell,f)
 CALL self%func(pt,val,self%n)
 end subroutine poss_vec_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup analytic Taylor state interpolator for a cylindrical geometry
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cyl_taylor_setup(self,mesh)
 class(cyl_taylor), intent(inout) :: self
 class(oft_mesh), target, intent(inout) :: mesh
@@ -157,9 +159,9 @@ pt(self%zaxis)=(self%zmax+self%zmin)/2.d0
 CALL cyl_taylor_eval(self,pt,val)
 self%scale=1.d0/SUM(val**2)
 end subroutine cyl_taylor_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute analytic Taylor state fields for a cylindrical geometry
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cyl_taylor_interp(self,cell,f,gop,val)
 class(cyl_taylor), intent(inout) :: self
 integer(i4), intent(in) :: cell
@@ -185,9 +187,9 @@ val=val*self%scale
 ! val(self%rplane(1))=-(self%alm*pt(self%rplane(2))*s+self%akz*pt(self%rplane(1))*c)*i
 ! val(self%zaxis)=dbesj0(ar)*s
 end subroutine cyl_taylor_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute analytic Taylor state fields for a cylindrical geometry
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cyl_taylor_eval(self,pt,val)
 class(cyl_taylor), intent(inout) :: self
 real(r8), intent(in) :: pt(:)
@@ -207,9 +209,9 @@ val(self%rplane(2))=(self%alm*pt(self%rplane(1))*s-self%akz*pt(self%rplane(2))*c
 val(self%rplane(1))=-(self%alm*pt(self%rplane(2))*s+self%akz*pt(self%rplane(1))*c)*i
 val(self%zaxis)=dbesj0(ar)*s
 end subroutine cyl_taylor_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup infinite coil interpolation class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine inf_coils_setup(self,mesh)
 class(inf_coils), intent(inout) :: self
 class(oft_mesh), target, intent(inout) :: mesh
@@ -224,9 +226,9 @@ DO i=1,self%ncoils
   self%axis(:,i) = self%axis(:,i)/magnitude(self%axis(:,i))
 END DO
 end subroutine inf_coils_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute cummulative field from all coils
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine inf_coils_interp(self,cell,f,gop,val)
 class(inf_coils), intent(inout) :: self
 integer(i4), intent(in) :: cell
@@ -245,9 +247,9 @@ DO i=1,self%ncoils
 END DO
 val = val*mu0/(4.d0*pi)
 end subroutine inf_coils_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tor_radial_interp(self,cell,f,gop,val)
 class(tor_radial), intent(inout) :: self
 integer(i4), intent(in) :: cell

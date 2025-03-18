@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_sphere.F90
 !
 !> Mesh handling for a spherical test mesh.
@@ -12,7 +14,7 @@
 !! @authors George Marklin and Chris Hansen
 !! @date April 2008 - Present
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_sphere
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
@@ -31,12 +33,12 @@ public mesh_sphere_load, mesh_sphere_cadlink, mesh_sphere_reffix
 public mesh_sphere_add_quad, smesh_circle_load, smesh_circle_cadlink
 public smesh_circle_reffix, smesh_circle_add_quad
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup a spherical test mesh
 !! The mesh is initialized with a minimal "wheel" of cells
 !! - 7 Points
 !! - 8 Cells
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_sphere_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,ierr,io_unit,mesh_type
@@ -158,16 +160,16 @@ END IF
 call mesh_global_resolution(mesh)
 DEBUG_STACK_POP
 end subroutine mesh_sphere_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup surface IDs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_sphere_cadlink(mesh)
 class(oft_mesh), intent(inout) :: mesh
 mesh%bfs=1
 end subroutine mesh_sphere_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Refine boundary points onto the sphere
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_sphere_reffix(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j
@@ -199,9 +201,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine mesh_sphere_reffix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add quadratic mesh node points
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_sphere_add_quad(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,k
@@ -252,12 +254,12 @@ END IF
 if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_sphere_add_quad
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup a spherical test mesh
 !! The mesh is initialized with a minimal "wheel" of cells
 !! - 7 Points
 !! - 8 Cells
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_circle_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,ierr,io_unit,mesh_type
@@ -340,16 +342,16 @@ END IF
 call mesh_global_resolution(smesh)
 DEBUG_STACK_POP
 end subroutine smesh_circle_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup surface IDs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_circle_cadlink(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 smesh%bes=1
 end subroutine smesh_circle_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Refine boundary points onto the sphere
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_circle_reffix(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j
@@ -375,9 +377,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine smesh_circle_reffix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add quadratic mesh node points
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_circle_add_quad(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j,k

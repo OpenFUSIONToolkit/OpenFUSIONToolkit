@@ -1,3 +1,10 @@
+/*-----------------------------------------------------------------------------
+* Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+*
+* SPDX-License-Identifier: LGPL-3.0-only
+*------------------------------------------------------------------------------
+* Environment and other supporting functions for the Open FUSION Toolkit
+*----------------------------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>

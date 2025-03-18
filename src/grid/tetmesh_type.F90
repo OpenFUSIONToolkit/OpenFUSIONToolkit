@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_tetmesh_type.F90
 !
 !> Tetrahedral mesh structure definitions
@@ -19,7 +21,7 @@
 !! @author Chris Hansen
 !! @date June 2010
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_tetmesh_type
 USE oft_base
 USE oft_lag_poly
@@ -28,7 +30,7 @@ USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE tetmesh_tessellation, ONLY: tessellate1, tessellate2, tessellate3, tessellate4
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Tetrahedral volume mesh type
 !!
 !! Contains geometry information for the computational grid.
@@ -36,7 +38,7 @@ IMPLICIT NONE
 !! - Mesh type and order
 !! - Global mesh information
 !! - Linkage of geometric primatives
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, EXTENDS(oft_mesh) :: oft_tetmesh
   REAL(r8), POINTER, DIMENSION(:) :: xnodes => NULL()
 CONTAINS
@@ -71,9 +73,9 @@ INTEGER(i4), PRIVATE :: active_cell = 0 !< Active cell for high order find_cell
 REAL(r8), PRIVATE :: active_pt(3) = 0.d0 !< Active point for high order find_cell
 !$omp threadprivate(active_mesh,active_cell,active_pt)
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE tetmesh_setup(self,cad_type)
 CLASS(oft_tetmesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: cad_type !< CAD/mesh interface ID number
@@ -92,9 +94,9 @@ ALLOCATE(self%face_ed(2,3))
 self%face_ed=tri_ed
 CALL self%set_order(1)
 END SUBROUTINE tetmesh_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Set maximum order of spatial mapping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE tetmesh_set_order(self,order)
 CLASS(oft_tetmesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: order !< Maximum order of spatial mapping
@@ -129,9 +131,9 @@ DO i=1,order+1
   self%xnodes(i)=REAL(i-1,8)/REAL(order,8)
 END DO
 END SUBROUTINE tetmesh_set_order
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE tet_3d_grid(order,xnodes,inodesf,inodesc)
 INTEGER(i4), INTENT(in) :: order
 INTEGER(i4), POINTER, DIMENSION(:,:,:), INTENT(out) :: inodesf
@@ -182,26 +184,26 @@ IF(order>3)THEN
   END DO
 END IF
 END SUBROUTINE tet_3d_grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Turn cell "inside out", used to ensure consistent orientations
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE tetmesh_invert_cell(self,cell)
 CLASS(oft_tetmesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: cell !< Index of cell to invert
 self%lc(3:4,cell)=self%lc(4:3:-1,cell)
 END SUBROUTINE tetmesh_invert_cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Retrieve suitable quadrature rule for mesh with given order
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tetmesh_quad_rule(self,order,quad_rule)
 CLASS(oft_tetmesh), INTENT(in) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: order !< Desired order of quadrature rule
 TYPE(oft_quad_type), INTENT(out) :: quad_rule !< Resulting quadrature rule
 CALL set_quad_3d(quad_rule, order)
 END SUBROUTINE tetmesh_quad_rule
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get position in logical space of vertex `i`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tetmesh_vlog(self,i,f)
 CLASS(oft_tetmesh), INTENT(in) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: i !< Vertex to locate
@@ -209,11 +211,11 @@ REAL(r8), INTENT(out) :: f(:) !< Logical coordinates of vertex `i`
 f=0.d0
 f(i)=1.d0
 END SUBROUTINE tetmesh_vlog
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Test if logical position lies within the base cell
 !!
 !! @returns Position `f` is inside the base cell?
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION tetmesh_in_cell(self,f,tol) RESULT(eface)
 CLASS(oft_tetmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), INTENT(in) :: f(:) !< Logical coordinate to evaluate
@@ -228,14 +230,14 @@ ELSE
   eface=MINLOC(f(1:4), DIM=1)
 END IF
 END FUNCTION tetmesh_in_cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Tessellate mesh onto lagrange FE nodes of specified order (usually for plotting)
 !!
 !! @note The maximum tessellation order currently supported is 4
 !! (may be lower for certain mesh types).
 !!
 !! @warning Cell lists are returned with zero based indexing
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tetmesh_tessellate(self,rtmp,lctmp,order)
 CLASS(oft_tetmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,:]
@@ -256,9 +258,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE tetmesh_tessellate
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Get sizes of arrays returned by @ref tetmesh_tessellate
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION tetmesh_tessellated_sizes(self) result(sizes)
 CLASS(oft_tetmesh), INTENT(in) :: self !< Mesh object
 INTEGER(i4) :: sizes(2) !< Array sizes following tessellation [np_tess,nc_tess]
@@ -275,9 +277,9 @@ CASE DEFAULT
   CALL oft_abort("Unknown tessellation size","tetmesh_tessellated_sizes",__FILE__)
 END SELECT
 END FUNCTION tetmesh_tessellated_sizes
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Map from logical to physical coordinates in a given cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function tetmesh_log2phys(self,cell,f) result(pt)
 class(oft_tetmesh), intent(in) :: self !< Mesh object
 integer, intent(in) :: cell !< Index of cell for evaulation
@@ -343,9 +345,9 @@ IF(self%ho_info%nfp>0)THEN
 END IF
 end subroutine log2phys_gen
 end function tetmesh_log2phys
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Map from physical to logical coordinates in a given cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_phys2log(self,cell,pt,f)
 class(oft_tetmesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Index of cell for evaulation
@@ -359,9 +361,9 @@ else
 end if
 DEBUG_STACK_POP
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Linear element implementation of @ref tetmesh_phys2log
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function tetmesh_phys2logl(self,i,pt) result(f)
 class(oft_tetmesh), intent(in) :: self
 integer(i4), intent(in) :: i
@@ -375,7 +377,7 @@ do k=1,4
 end do
 DEBUG_STACK_POP
 end function tetmesh_phys2logl
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! General high-order implementation of @ref tetmesh_phys2log
 !
 ! The MINPACK package is used with step size given by
@@ -385,7 +387,7 @@ end function tetmesh_phys2logl
 ! @note The final location may be outside the cell being searched. This is correct
 ! if the point is outside the cell, however it may also indicate a problem in the
 ! mapping, most likely due to a badly shaped cell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function tetmesh_phys2logho(self,i,pt) result(f)
 class(oft_tetmesh), target, intent(in) :: self
 integer(i4), intent(in) :: i
@@ -423,12 +425,12 @@ call lmdif(tm_findcell_error,nerr,neq,uv,error, &
 f(1:3)=uv; f(4)=1.d0-SUM(uv)
 DEBUG_STACK_POP
 end function tetmesh_phys2logho
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute the error between a logical point and the current active point
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref tetmesh_mapping::tetmesh_phys2logho "tetmesh_phys2logho"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tm_findcell_error(m,n,uv,err,iflag)
 integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
 integer(i4), intent(in) :: n !< Number of parametric dimensions (3)
@@ -443,9 +445,9 @@ err=active_pt-pt
 DEBUG_STACK_POP
 end subroutine tm_findcell_error
 end subroutine tetmesh_phys2log
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute the spatial jacobian matrix and its determinant for a given cell at a given logical position
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_jacobian(self,cell,f,gop,j)
 class(oft_tetmesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Index of cell for evaulation
@@ -473,9 +475,9 @@ END IF
 call tetmesh_jacinv(jfull,gop,j)
 DEBUG_STACK_POP
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Quadratic element implementation
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine jacobian_quad()
 real(r8) :: pt(3)
 integer(i4) :: k,l,ed
@@ -491,9 +493,9 @@ do k=1,6
   jfull(:,tet_ed(2,k)) = jfull(:,tet_ed(2,k)) + 4.d0*f(tet_ed(1,k))*pt
 end do
 end subroutine jacobian_quad
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! General order element implementation
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine jacobian_gen()
 real(r8) :: pt(3),getmp(2),gftmp(3)
 integer(i4) :: k,l,ed,etmp(2),dof
@@ -530,9 +532,9 @@ IF(self%ho_info%nfp>0)THEN
 END IF
 end subroutine jacobian_gen
 end subroutine tetmesh_jacobian
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Linear implementation of @tetmesh_jacobian
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_jacl(self,cell,gop,j)
 class(oft_tetmesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Index of cell for evaulation
@@ -548,9 +550,9 @@ end do
 call tetmesh_jacinv(jfull,gop,j)
 DEBUG_STACK_POP
 end subroutine tetmesh_jacl
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute the spatial hessian matrices for a given cell at a given logical position
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_hessian(self,cell,f,g2op,K)
 class(oft_tetmesh), intent(in) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: cell !< Index of cell for evaulation
@@ -616,14 +618,14 @@ ELSE
 END IF
 CALL tetmesh_g2inv(jfull,g2op)
 end subroutine tetmesh_hessian
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute the surface normal vector for a given face on a cell
 !!
 !! If face is not a global boundary face the function returns with `norm = 0`
 !!
 !! @note The logical position in the cell must be on the chosen face for this
 !! subroutine, else an error will be thrown
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_snormal(self,cell,ind,f,norm)
 class(oft_tetmesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Index of cell
@@ -651,14 +653,14 @@ CALL tetmesh_jacobian(self,cell,f,goptmp,v)
 norm=-goptmp(:,ind)/sqrt(sum(goptmp(:,ind)**2))
 DEBUG_STACK_POP
 end subroutine tetmesh_snormal
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute the curve tangent vector for a given edge on a cell
 !!
 !! If edge is not a global boundary edge the function returns with `tang = 0`
 !!
 !! @note The logical position in the cell must be on the chosen edge for this
 !! subroutine to return a meaningful result
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_ctang(self,cell,ind,f,tang)
 class(oft_tetmesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell !< Index of cell
@@ -697,9 +699,9 @@ tang=tang/SQRT(SUM(tang**2))
 tang=tang*SIGN(1_i4,self%lce(ind,cell))*SIGN(1._r8,DOT_PRODUCT(tang,e))
 DEBUG_STACK_POP
 end subroutine tetmesh_ctang
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get mapping between boundary and volume logical coordinates
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_get_surf_map(self,face,cell,lmap)
 class(oft_tetmesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: face !< Index of face on boundary mesh
@@ -718,9 +720,9 @@ CALL orient_listn(self%bmesh%lco(face),pmap,3_i4)
 CALL orient_listn_inv(self%lcfo(j,cell),pmap,3_i4)
 lmap(pmap)=self%cell_fc(:,j)
 end subroutine tetmesh_get_surf_map
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Map between surface and volume logical coordinates
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_surf_to_vol(self,fsurf,lmap,fvol)
 CLASS(oft_tetmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), INTENT(in) :: fsurf(:) !< Surface coordinates [3]
@@ -729,9 +731,9 @@ REAL(r8), INTENT(out) :: fvol(:) !< Volume coordinates [4]
 fvol=0.d0
 fvol(lmap)=fsurf(1:3)
 end subroutine tetmesh_surf_to_vol
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Invert a 3x3 matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_jacinv(jfull,gop,jac)
 real(r8), intent(in) :: jfull(3,4) !< Matrix to invert
 real(r8), intent(out) :: gop(3,4) !< \f$ A^{-1} \f$
@@ -769,9 +771,9 @@ gop(:,1)=-(gop(:,2)+gop(:,3)+gop(:,4))
 jac=jac/6.d0
 DEBUG_STACK_POP
 end subroutine tetmesh_jacinv
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tetmesh_g2inv(jfull,g2op)
 real(r8), intent(in) :: jfull(3,4)
 real(r8), intent(out) :: g2op(6,10)

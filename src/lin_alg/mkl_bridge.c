@@ -1,3 +1,10 @@
+/*-----------------------------------------------------------------------------
+* Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+*
+* SPDX-License-Identifier: LGPL-3.0-only
+*------------------------------------------------------------------------------
+* MKL LU/iLU solver interface for the Open FUSION Toolkit
+*----------------------------------------------------------------------------*/
 #ifdef HAVE_MKL
 #include <stdlib.h>
 #include "mkl_spblas.h"

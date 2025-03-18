@@ -1,3 +1,10 @@
+/*-----------------------------------------------------------------------------
+* Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+*
+* SPDX-License-Identifier: LGPL-3.0-only
+*------------------------------------------------------------------------------
+* SuperLU-DIST LU solver interface for the Open FUSION Toolkit
+*----------------------------------------------------------------------------*/
 #ifdef HAVE_SUPERLU_DIST
 /*
  * -- SuperLU routine (version 3.0) --

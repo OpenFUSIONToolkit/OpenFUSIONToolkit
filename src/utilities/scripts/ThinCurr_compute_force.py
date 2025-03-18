@@ -1,3 +1,9 @@
+#!/usr/bin/env python
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 import argparse
 import numpy as np
 import h5py

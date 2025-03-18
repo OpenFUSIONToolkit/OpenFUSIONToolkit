@@ -1,11 +1,11 @@
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 #
 # Python construction of H^1, H(Curl) elements for simplectic elements in 2D and
 # 3D. Designed to be used for FE basis definition in the Open FUSION Toolkit (OFT)
 #
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 from __future__ import print_function
 try:
     from sympy import *

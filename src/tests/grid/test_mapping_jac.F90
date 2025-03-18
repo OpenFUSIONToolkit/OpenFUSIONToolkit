@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_mapping_jac.F90
 !
 !> Regression tests for tetmesh Jacobian transformations. Tests are performed
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date August 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_mapping_jac
 USE oft_base
 USE oft_quadrature
@@ -60,11 +62,11 @@ CLOSE(io_unit)
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Validate 2nd order spatial derivatives by comparing the computed derivatives
 !! to a known result. Currently, setup to test all quadratic functions in 3
 !! dimensions.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION check_jac2(xi,xj,check_vec,order,tol) RESULT(fail_count)
 INTEGER(i4), INTENT(in) :: xi,xj,order
 REAL(r8), INTENT(in) :: check_vec(6),tol

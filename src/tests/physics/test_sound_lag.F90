@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> Regression test for xMHD_lag module. A traveling sound wave is initialized in
 !! a triply periodic box and advanced for one period. The resulting wave is
 !! then compared to the initial wave to confirm basic operation of the xMHD
@@ -9,7 +11,7 @@
 !! @authors Chris Hansen
 !! @date November 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_sound
 USE oft_base
 !--Grid
@@ -57,28 +59,28 @@ REAL(r8) :: delta = 1.d-4
 LOGICAL :: linear = .FALSE.
 LOGICAL :: two_temp = .FALSE.
 NAMELIST/test_sound_options/order,minlev,delta,linear,two_temp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Initialize enviroment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_sound_options,IOSTAT=ierr)
 CLOSE(io_unit)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL multigrid_construct(mg_mesh)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Build FE structures
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(xmhd_ML_lagrange,xmhd_ML_vlagrange)
 !---Lagrange
 CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=minlev)
 CALL lag_setup_interp(xmhd_ML_lagrange)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create Lagrange metric solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(mop)
 CALL oft_lag_getmop(xmhd_ML_lagrange%current_level,mop,"none")
 CALL create_cg_solver(minv)
@@ -95,9 +97,9 @@ CALL xmhd_ML_lagrange%vec_create(ni)
 CALL xmhd_ML_lagrange%vec_create(temp)
 CALL xmhd_ML_lagrange%vec_create(dtemp)
 CALL xmhd_ML_lagrange%vec_create(ti)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set dn from sound wave init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 sound_field%mesh=>mg_mesh%mesh
 sound_field%delta=delta
 sound_field%field='n'
@@ -107,9 +109,9 @@ CALL minv%apply(u,v)
 CALL n%set(1.d0)
 CALL dn%add(0.d0,1.d0,u,-1.d0,n)
 CALL ni%add(0.d0,1.d0,dn)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set dt from sound wave init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 sound_field%field='t'
 CALL oft_lag_project(xmhd_ML_lagrange%current_level,sound_field,v)
 CALL u%set(0.d0)
@@ -125,9 +127,9 @@ CALL mop%delete
 DEALLOCATE(u,v,mop)
 CALL minv%pre%delete
 CALL minv%delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create Lagrange vector metric solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(mop)
 CALL oft_lag_vgetmop(xmhd_ML_vlagrange%current_level,mop,"none")
 minv%A=>mop
@@ -140,9 +142,9 @@ CALL xmhd_ML_vlagrange%vec_create(v)
 CALL xmhd_ML_vlagrange%vec_create(vel)
 CALL xmhd_ML_vlagrange%vec_create(dvel)
 CALL xmhd_ML_vlagrange%vec_create(vi)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set dV from sound wave init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 sound_field%field='v'
 CALL oft_lag_vproject(xmhd_ML_lagrange%current_level,sound_field,v)
 CALL u%set(0.d0)
@@ -155,9 +157,9 @@ CALL u%delete
 CALL v%delete
 CALL mop%delete
 DEALLOCATE(u,v,mop)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Run simulation and test result
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL xmhd_ML_vlagrange%vec_create(b)
 CALL xmhd_ML_vlagrange%vec_create(db)
 xmhd_minlev=minlev

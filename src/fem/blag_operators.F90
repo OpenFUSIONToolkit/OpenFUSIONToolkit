@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file oft_blag_operators.F90
 !
 !> Surface lagrange FE operator definitions
@@ -14,7 +16,7 @@
 !! @authors Chris Hansen
 !! @date August 2011
 !! @ingroup doxy_oft_lag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_blag_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
@@ -36,9 +38,9 @@ USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, oft_
   oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a surface Lagrange field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(bfem_interp) :: oft_lag_brinterp
   logical :: own_vals = .TRUE. !< 
   class(oft_vector), pointer :: u => NULL() !< Field for interpolation
@@ -53,25 +55,25 @@ contains
   !> Delete reconstruction object
   procedure :: delete => lag_brinterp_delete
 end type oft_lag_brinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \f$ of a Lagrange field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_lag_brinterp) :: oft_lag_bginterp
 contains
   !> Reconstruct field
   procedure :: interp => lag_bginterp
 end type oft_lag_bginterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate \f$ \frac{\partial }{\partial x_i \partial x_j} \f$ of a Lagrange field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_lag_brinterp) :: oft_lag_bg2interp
 contains
   !> Reconstruct field
   procedure :: interp => lag_bg2interp
 end type oft_lag_bg2interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a boundary Lagrange vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(bfem_interp) :: oft_lag_bvrinterp
   class(oft_vector), pointer :: u => NULL() !< Field for interpolation
   real(r8), pointer, dimension(:,:) :: vals => NULL() !< Local values
@@ -84,25 +86,25 @@ contains
   !> Delete reconstruction object
   procedure :: delete => lag_bvrinterp_delete
 end type oft_lag_bvrinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_blag_zerob
   class(oft_ml_fem_type), pointer :: ML_lag_rep => NULL() !< FE representation
 contains
   procedure :: apply => zerob_apply
   procedure :: delete => zerob_delete
 end type oft_blag_zerob
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_blag_zerob) :: oft_blag_zerogrnd
 contains
   procedure :: apply => zerogrnd_apply
 end type oft_blag_zerogrnd
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_blag_zerob) :: oft_blag_zeroe
   INTEGER(i4), POINTER, DIMENSION(:) :: parent_geom_flag
 contains
@@ -116,11 +118,11 @@ REAL(r8), POINTER, DIMENSION(:) :: oft_blag_rop => NULL()
 REAL(r8), POINTER, DIMENSION(:,:) :: oft_blag_gop => NULL()
 !$omp threadprivate(oft_blag_rop,oft_blag_gop)
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator for boundary Lagrange scalar fields
 !!
 !! Fetches local representation used for interpolation from solution vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_brinterp_setup(self,lag_rep)
 class(oft_lag_brinterp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: lag_rep
@@ -129,9 +131,9 @@ self%mesh=>self%lag_rep%mesh
 !---Get local slice
 CALL self%u%get_local(self%vals)
 end subroutine lag_brinterp_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator by linking to another interpolator of the same class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_brinterp_share(self,source_obj)
 class(oft_lag_brinterp), intent(inout) :: self
 class(oft_lag_brinterp), intent(in) :: source_obj
@@ -144,9 +146,9 @@ self%mesh=>source_obj%mesh
 self%u=>source_obj%u
 self%own_vals=.FALSE.
 end subroutine lag_brinterp_share
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_brinterp_delete(self)
 class(oft_lag_brinterp), intent(inout) :: self
 !---Destroy locals
@@ -157,9 +159,9 @@ ELSE
 END IF
 NULLIFY(self%lag_rep,self%mesh,self%u)
 end subroutine lag_brinterp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a surface Lagrange scalar field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_brinterp(self,cell,f,gop,val)
 class(oft_lag_brinterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -184,9 +186,9 @@ end do
 deallocate(j)
 DEBUG_STACK_POP
 end subroutine lag_brinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct the gradient of a surface Lagrange scalar field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_bginterp(self,cell,f,gop,val)
 class(oft_lag_bginterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -211,9 +213,9 @@ end do
 deallocate(j)
 DEBUG_STACK_POP
 end subroutine lag_bginterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct the Hessian of a surface Lagrange scalar field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_bg2interp(self,cell,f,gop,val)
 class(oft_lag_bg2interp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -241,11 +243,11 @@ end do
 deallocate(j)
 DEBUG_STACK_POP
 end subroutine lag_bg2interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator for boundary Lagrange vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_bvrinterp_setup(self,lag_rep)
 class(oft_lag_bvrinterp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: lag_rep
@@ -261,18 +263,18 @@ CALL self%u%get_local(vtmp,2)
 vtmp=>self%vals(3,:)
 CALL self%u%get_local(vtmp,3)
 end subroutine lag_bvrinterp_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_bvrinterp_delete(self)
 class(oft_lag_bvrinterp), intent(inout) :: self
 !---Destroy locals
 IF(ASSOCIATED(self%vals))DEALLOCATE(self%vals)
 NULLIFY(self%lag_rep,self%u)
 end subroutine lag_bvrinterp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a boundary Lagrange vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine lag_bvrinterp(self,cell,f,gop,val)
 class(oft_lag_bvrinterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -298,9 +300,9 @@ end do
 deallocate(j)
 DEBUG_STACK_POP
 end subroutine lag_bvrinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all boundary nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_apply(self,a)
 class(oft_blag_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -323,18 +325,18 @@ call a%restore_local(vloc)
 deallocate(vloc)
 DEBUG_STACK_POP
 end subroutine zerob_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all boundary nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_delete(self)
 class(oft_blag_zerob), intent(inout) :: self
 NULLIFY(self%ML_lag_rep)
 end subroutine zerob_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at the mesh "grounding" node
 !!
 !! @note Presently the first boundary node is used as the "grounding" node
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerogrnd_apply(self,a)
 class(oft_blag_zerogrnd), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -355,9 +357,9 @@ call a%restore_local(vloc)
 deallocate(vloc)
 DEBUG_STACK_POP
 end subroutine zerogrnd_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all edge nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zeroe_apply(self,a)
 class(oft_blag_zeroe), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -380,13 +382,13 @@ call a%restore_local(vloc)
 deallocate(vloc)
 DEBUG_STACK_POP
 end subroutine zeroe_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct mass matrix for a boundary Lagrange scalar representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_blag_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -405,17 +407,17 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_getmop",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL lag_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,det,mop,curved,goptmp,m,vol,jc,jr)
 allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
@@ -457,14 +459,14 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_getmop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct laplacian matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
 !! - `'grnd'`  Dirichlet for only groundin point
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_blag_getlop(fe_rep,mat,bc,parent_geom_flag)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -484,17 +486,17 @@ IF(oft_debug_print(1))THEN
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_getlop",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL lag_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Operator integration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(j,gop,det,lop,curved,goptmp,m,vol,jc,jr)
 allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
 allocate(gop(3,lag_rep%nce)) ! Reconstructed gradient operator
@@ -597,12 +599,12 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_getlop
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Project a scalar field onto a boundary Lagrange basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! boundary test functions for a Lagrange basis.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_blag_project(fe_rep,field,x)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 CLASS(bfem_interp), INTENT(inout) :: field !< Scalar field for projection
@@ -643,12 +645,12 @@ call x%restore_local(xloc,add=.TRUE.)
 deallocate(xloc)
 DEBUG_STACK_POP
 END SUBROUTINE oft_blag_project
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Project a vector field onto a boundary Lagrange basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! boundary test functions for a Lagrange basis.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_blag_vproject(fe_rep,field,x,y,z)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 CLASS(bfem_interp), INTENT(inout) :: field !< Vector field for projection
@@ -701,12 +703,12 @@ call z%restore_local(zloc,add=.TRUE.)
 deallocate(xloc,yloc,zloc)
 DEBUG_STACK_POP
 END SUBROUTINE oft_blag_vproject
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Project the normal component of a vector field onto a boundary Lagrange basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! boundary test functions for a Lagrange basis.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_blag_nproject(fe_rep,vmesh,field,x)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_mesh), target, intent(inout) :: vmesh

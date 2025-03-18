@@ -1,13 +1,14 @@
-'''! Helper interfaces for Open FUSION Toolkit (OFT) Python interfaces
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Helper functions for Open FUSION Toolkit (OFT) Python interfaces
 
 @authors Chris Hansen
 @date May 2023
 @ingroup doxy_oft_python
 '''
-
-## @file util.py
-#
-# Helper interfaces for Open FUSION Toolkit (OFT) Python interfaces
 import os
 import subprocess
 import numpy

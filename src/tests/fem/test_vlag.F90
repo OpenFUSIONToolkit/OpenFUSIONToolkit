@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_vlag.F90
 !
 !> Regression tests for vector Lagrange finite elements. Tests are performed
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_vlag
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
@@ -65,9 +67,9 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Invert the mass matrix and output required iterataions and final field energy.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_mop
 !---Create solver objects
 CLASS(oft_solver), POINTER :: minv => NULL()
@@ -111,9 +113,9 @@ CALL minv%pre%delete
 !---Destory solver
 CALL minv%delete
 END SUBROUTINE test_mop
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Invert the mass matrix and output required iterataions and final field energy.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_mopmg
 !---Create solver objects
 CLASS(oft_solver), POINTER :: linv => NULL()
@@ -133,9 +135,9 @@ CLASS(oft_matrix), POINTER :: mop => NULL()
 TYPE(oft_ml_fe_comp_vecspace) :: ml_vecspace
 REAL(r8) :: uu
 INTEGER(i4) :: i,nlevels
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create ML Matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nlevels=ML_oft_lagrange%nlevels-minlev+1
 !---Get FE operators
 ALLOCATE(ml_int(nlevels-1),ml_vlop(nlevels),ml_lop(nlevels))
@@ -148,9 +150,9 @@ DO i=1,nlevels
   !---
   NULLIFY(ml_lop(i)%M)
   CALL oft_lag_getlop(ML_oft_lagrange%current_level,ml_lop(i)%M,'zerob')
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create composite matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   ALLOCATE(graphs(1,1)%g)
   graphs(1,1)%g%nr=ML_oft_lagrange%current_level%ne
   graphs(1,1)%g%nrg=ML_oft_lagrange%current_level%global%ne
@@ -169,9 +171,9 @@ DO i=1,nlevels
   !---Construct matrix
   CALL create_matrix(ml_vlop(i)%M,graphs,fvec,cvec)
   DEALLOCATE(graphs(1,1)%g)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Combine child matrices into composite matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   !---Specify child matrices
   mats(1,1)%m=>ml_lop(i)%M
   mats(2,2)%m=>ml_lop(i)%M

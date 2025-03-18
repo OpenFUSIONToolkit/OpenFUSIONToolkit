@@ -1,13 +1,13 @@
 #!/usr/bin/env python
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 #
 # Script for handling creation of arbitrary order tessellations of the unit
 # Tetrahedron and unit Triangle. Used with plotting methods in the Open FUSION Toolkit (OFT) to map
 # high order Lagrange nodes to a linear representation by subdividing elements.
 #
-#---------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 from __future__ import print_function
 try:
     import numpy
