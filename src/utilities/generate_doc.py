@@ -52,18 +52,17 @@ def parse_fortran_file(fid):
     read_full = False
     incode = False
     indoc = True
-    include_full = True
     line_number = 0
-    entry_count = 0
-    mod_id = 1
+    ex_prefix = None
     for line in fid:
         line_number = line_number + 1
         # Determine documentation prefix
-        if line_number == 1:
-            doc_buffer = line[2:]
-            tmp = line.split('{')[1]
-            tmp = tmp.split('}')[0]
-            ex_prefix = tmp[1:]
+        if ex_prefix is None:
+            if (line.find('{') >= 0) and (line.find('}') >= 0):
+                doc_buffer = line[2:]
+                tmp = line.split('{')[1]
+                tmp = tmp.split('}')[0]
+                ex_prefix = tmp[1:]
             continue
         # Check if full source version should be included
         if line.find("! START SOURCE") == 0:
