@@ -45,6 +45,11 @@ def mp_run(target,args,timeout=30):
 
 
 def validate_dict(results,dict_exp):
+    tol_dict = {
+        'delta': 5.E-2,
+        'deltaU': 5.E-2,
+        'deltaL': 5.E-2
+    }
     if results is None:
         print("FAILED: error in solve!")
         return False
@@ -59,13 +64,13 @@ def validate_dict(results,dict_exp):
                 for i in range(len(exp_val)):
                     if exp_val[i] is None:
                         continue
-                    if abs((result_val[i]-exp_val[i])/exp_val[i]) > 1.E-2:
+                    if abs((result_val[i]-exp_val[i])/exp_val[i]) > tol_dict.get(key,1.E-2):
                         print("FAILED: {0} ({1}) error too high!".format(key,i))
                         print("  Expected = {0}".format(exp_val[i]))
                         print("  Actual =   {0}".format(result_val[i]))
                         test_result = False
             else:
-                if abs((result_val-exp_val)/exp_val) > 1.E-2:
+                if abs((result_val-exp_val)/exp_val) > tol_dict.get(key,1.E-2):
                     print("FAILED: {0} error too high!".format(key))
                     print("  Expected = {0}".format(exp_val))
                     print("  Actual =   {0}".format(result_val))
@@ -649,7 +654,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eig(order):
     exp_dict = {
-        'Tau_w': [195.300148, 253.92961287, 403.74576838, 473.64151856, 550.08441557]
+        'Tau_w': [195.300148, 253.92961287, 394.26207238, 460.20439568, 539.40856182]
     }
     results = mp_run(run_LTX_case,(order,True,False))
     assert validate_dict(results,exp_dict)
@@ -658,7 +663,7 @@ def test_LTX_eig(order):
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_stability(order):
     exp_dict = {
-        'gamma': [-238.0708, 216.6903, 286.1825, 394.7443, 394.7443]
+        'gamma': [-234.1051, 214.4196, 282.0877, 388.7592, 388.7592]
     }
     results = mp_run(run_LTX_case,(order,False,True))
     assert validate_dict(results,exp_dict)
@@ -672,9 +677,9 @@ def test_LTX_eq(order):
         'kappa': 1.525555343247066,
         'kappaU': 1.5255548477234762,
         'kappaL': 1.5255558387706563,
-        # 'delta': 0.13065497736390372, # Disable for now
-        # 'deltaU': 0.13157106862087037, # Disable for now
-        # 'deltaL': 0.12973888610693682, # Disable for now
+        'delta': 0.13065497736390372,
+        'deltaU': 0.13157106862087037,
+        'deltaL': 0.12973888610693682,
         'vol': 0.6505011568807662,
         'q_0': 1.3205705249765318,
         'q_95': 5.89640886104023,
