@@ -507,63 +507,40 @@ def test_ITER_stability(order):
     results = mp_run(run_ITER_case,(1.0,(order,),False,True))
     assert validate_dict(results,exp_dict)
 
+ITER_eq_dict = {
+    'Ip': 15599996.700479196,
+    'Ip_centroid': [6.20274133, 0.5296048],
+    'kappa': 1.86799695311941,
+    'kappaU': 1.7388335731481432,
+    'kappaL': 1.997160333090677,
+    'delta': 0.4642130933423834,
+    'deltaU': 0.38353687624980337,
+    'deltaL': 0.5443629943779958,
+    'vol': 820.0973897169655,
+    'q_0': 0.8234473499435633,
+    'q_95': 2.76048354704068,
+    'P_ax': 619225.0167519478,
+    'W_MHD': 242986888.67690986,
+    'beta_pol': 39.73860565406112,
+    'dflux': 1.5402746036620532,
+    'tflux': 121.86870301036512,
+    'l_i': 0.9048845463517069,
+    'beta_tor': 1.7816206668692283,
+    'beta_n': 1.1868590722509704,
+    'LCS1': 2.485860941880887e-06,
+    'MCS1_plasma': 8.930926092661585e-07,
+    'Lplasma': 1.1899835061690724e-05
+}
+
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_eq(order):
-    exp_dict = {
-        'Ip': 15599996.700479196,
-        'Ip_centroid': [6.20274133, 0.5296048],
-        'kappa': 1.86799695311941,
-        'kappaU': 1.7388335731481432,
-        'kappaL': 1.997160333090677,
-        'delta': 0.4642130933423834,
-        # 'deltaU': 0.3840631923067706, # Disable for now
-        'deltaL': 0.5443629943779958,
-        'vol': 820.0973897169655,
-        'q_0': 0.8234473499435633,
-        'q_95': 2.76048354704068,
-        'P_ax': 619225.0167519478,
-        'W_MHD': 242986888.67690986,
-        'beta_pol': 39.73860565406112,
-        'dflux': 1.5402746036620532,
-        'tflux': 121.86870301036512,
-        'l_i': 0.9048845463517069,
-        'beta_tor': 1.7816206668692283,
-        'beta_n': 1.1868590722509704,
-        'LCS1': 2.485860941880887e-06,
-        'MCS1_plasma': 8.930926092661585e-07,
-        'Lplasma': 1.1899835061690724e-05
-    }
     results = mp_run(run_ITER_case,(1.0,(order,),False,False))
-    assert validate_dict(results,exp_dict)
+    assert validate_dict(results,ITER_eq_dict)
 
 def test_ITER_concurrent():
-    exp_dict = {
-        'Ip': 15599996.700479196,
-        'Ip_centroid': [6.20274133, 0.5296048],
-        'kappa': 1.86799695311941,
-        'kappaU': 1.7388335731481432,
-        'kappaL': 1.997160333090677,
-        'delta': 0.4642130933423834,
-        # 'deltaU': 0.3840631923067706, # Disable for now
-        'deltaL': 0.5443629943779958,
-        'vol': 820.0973897169655,
-        'q_0': 0.8234473499435633,
-        'q_95': 2.76048354704068,
-        'P_ax': 619225.0167519478,
-        'W_MHD': 242986888.67690986,
-        'beta_pol': 39.73860565406112,
-        'dflux': 1.5402746036620532,
-        'tflux': 121.86870301036512,
-        'l_i': 0.9048845463517069,
-        'beta_tor': 1.7816206668692283,
-        'beta_n': 1.1868590722509704,
-        'LCS1': 2.485860941880887e-06,
-        'MCS1_plasma': 8.930926092661585e-07,
-        'Lplasma': 1.1899835061690724e-05
-    }
     results = mp_run(run_ITER_case,(1.0,(2,3),False,False))
-    assert validate_dict(results,exp_dict)
+    assert validate_dict(results,ITER_eq_dict)
 
 #============================================================================
 def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
@@ -572,15 +549,16 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
             LTX_geom = json.load(fid)
         plasma_dx = 0.02
         coil_dx = 0.02
+        vv_dx = 0.015
         vac_dx = 0.05
         gs_mesh = gs_Domain()
         #
         gs_mesh.define_region('air',vac_dx,'boundary')
         gs_mesh.define_region('plasma',plasma_dx,'plasma')
-        gs_mesh.define_region('shellU',2*plasma_dx,'conductor',eta=4.E-7,noncontinuous=True)
-        gs_mesh.define_region('shellL',2*plasma_dx,'conductor',eta=4.E-7,noncontinuous=True)
+        gs_mesh.define_region('shellU',vv_dx,'conductor',eta=4.E-7,noncontinuous=True)
+        gs_mesh.define_region('shellL',vv_dx,'conductor',eta=4.E-7,noncontinuous=True)
         for i, vv_segment in enumerate(LTX_geom['vv']):
-            gs_mesh.define_region('vv{0}'.format(i),2*plasma_dx,'conductor',eta=vv_segment[1])
+            gs_mesh.define_region('vv{0}'.format(i),vv_dx,'conductor',eta=vv_segment[1])
         for key, coil in LTX_geom['coils'].items():
             if key.startswith('OH'):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
@@ -712,7 +690,7 @@ def test_LTX_eq(order):
     results = mp_run(run_LTX_case,(order,False,False))
     assert validate_dict(results,exp_dict)
 
-# Example of how to run single test without pytest
+# # Example of how to run single test without pytest
 # if __name__ == '__main__':
 #     multiprocessing.freeze_support()
 #     mp_q = multiprocessing.Queue()

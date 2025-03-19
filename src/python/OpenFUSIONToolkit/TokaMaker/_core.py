@@ -692,10 +692,21 @@ class TokaMaker():
                 if self.x_points[i,0] < 0.0:
                     break
                 x_active = self.x_points[i,:]
+                iactive = i
             if x_active[1] < zbounds[0,1]:
                 zbounds[0,:] = x_active
+                # Find first X-point on opposite side
+                for i in range(iactive,0,-1):
+                    if self.x_points[i,1] > zbounds[1,1]:
+                        zbounds[1,:] = self.x_points[i,:]
+                        break
             elif x_active[1] > zbounds[1,1]:
                 zbounds[1,:] = x_active
+                # Find first X-point on opposite side
+                for i in range(iactive,0,-1):
+                    if self.x_points[i,1] < zbounds[0,1]:
+                        zbounds[0,:] = self.x_points[i,:]
+                        break
         # Compute normalized inductance
         if li_normalization.lower() == 'std':
             li = (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2)
