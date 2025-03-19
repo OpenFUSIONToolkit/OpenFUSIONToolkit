@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import subprocess
 
@@ -24,7 +25,11 @@ def get_prereqs(filename):
     if errcode == 0:
         for line in ldd_output.splitlines():
             if line.find('=>') > 0:
-                known_libs[line.split('=>')[0].strip()] = line.split('=>')[1].split('(')[0].strip()
+                line_split = line.split('=>')
+                lib_name = line_split[0].strip()
+                lib_path = line_split[1].split('(')[0].strip()
+                if lib_path != 'not found':
+                    known_libs[lib_name] = lib_path
     return preqs, known_libs
 
 print('Copying required dynamic libraries')
@@ -32,7 +37,9 @@ output, error, errcode = run_command('ldconfig -p')
 ld_confoutput = output.splitlines()
 
 MKL_ROOT = None
-for i in range(2):
+for i in range(3):
+    print()
+    print('Pass {0}:'.format(i+1))
     full_prequisites = {}
     known_resolutions = {}
     # Gather prerequisites
@@ -45,11 +52,22 @@ for i in range(2):
         for known_lib in new_known:
             if known_lib not in known_resolutions:
                 known_resolutions[known_lib] = new_known[known_lib]
+    # Utilize build directory for other search paths
+    if len(sys.argv) > 1:
+        build_dir = sys.argv[1]
+        build_files = [f for f in os.listdir(build_dir) if os.path.isfile(f)]
+        for filename in build_files:
+            preqs, new_known = get_prereqs(os.path.abspath(os.path.join(build_dir, filename)))
+            for known_lib in new_known:
+                if known_lib not in known_resolutions:
+                    known_resolutions[known_lib] = new_known[known_lib]
 
     # Find system libraries that are not typically in a base install
     filter_list = [
         'libgomp.','libgfortran.','libquadmath.',
-        'libmkl','libifport','libifcoremt','libimf','libsvml','libintlc','libirng','libiomp5'
+        'libmkl','libifport','libifcoremt','libimf','libsvml','libintlc','libirng','libiomp5',
+        'libhdf5.','libhdf5_fortran.','libhdf5_hl.', # HDF5 libraries
+        'libnetcdf.','libnetcdff.' # NetCDF libraries
     ]
     keep_keys = []
     for key in full_prequisites:
@@ -68,24 +86,32 @@ for i in range(2):
             elif stripped_line.startswith(key):
                 prequisites[key] = stripped_line.split('=>')[1].strip()
     for key in prequisites:
+        if prequisites[key] is None:
+            print('Skipping unknown library: {0}'.format(key))
+            continue
         path = os.path.normpath(prequisites[key])
         realpath = os.path.realpath(prequisites[key])
-        if i == 1:
-            if path == realpath:
-                print('  {0} -> {1}'.format(key, path))
-            else:
-                print('  {0} -> {1} ({2})'.format(key, path, realpath))
-            if (MKL_ROOT is None) and key.startswith('libmkl'):
-                MKL_ROOT = os.path.dirname(realpath)
+        if path == realpath:
+            print('  {0} -> {1}'.format(key, path))
+        else:
+            print('  {0} -> {1}'.format(key, path))
+            print('    Symlink dest: {0}'.format(realpath))
+        if (MKL_ROOT is None) and key.startswith('libmkl'):
+            MKL_ROOT = os.path.dirname(realpath)
+        #
         filename = os.path.basename(realpath)
         symname = os.path.basename(key)
         if filename == symname:
-            shutil.copy(path, key)
+            try:
+                shutil.copy(path, key)
+            except shutil.SameFileError:
+                print('    Skipping existing file: {0} -> {1}'.format(path, key))
+                continue
         else:
             try:
                 shutil.copy(realpath, filename)
             except shutil.SameFileError:
-                print('  Skipping copy for existing file: {0} -> {1}'.format(realpath, filename))
+                print('    Skipping existing file: {0} -> {1}'.format(realpath, filename))
                 continue
             try:
                 os.remove(symname)
