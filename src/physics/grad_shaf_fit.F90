@@ -1335,7 +1335,7 @@ IF(ABS(self%type)==1)THEN
   do j=2,31
     psi_q(j-1)=(psi1-psi0)*((j-1)/REAL(npsi,8)) + psi0
   end do
-  CALL gs_get_qprof(gs,npsi,psi_q,qprof,dl,rbounds,zbounds)
+  CALL gs_get_qprof(gs,npsi,psi_q,qprof)
   qmin = MINVAL(qprof)
   qmax = MAXVAL(qprof)
   IF(qmax<0.d0)THEN
@@ -1347,7 +1347,7 @@ ELSEIF(self%type==2)THEN
   do j=2,31
     psi_q(j-1)=(psi1-psi0)*((j-1)/REAL(npsi,8)) + psi0
   end do
-  CALL gs_get_qprof(gs,npsi,psi_q,qprof,dl,rbounds,zbounds)
+  CALL gs_get_qprof(gs,npsi,psi_q,qprof)
   qmin = MINVAL(qprof)
   qmax = MAXVAL(qprof)
   IF(qmax<0.d0)THEN
@@ -1357,7 +1357,7 @@ ELSEIF(self%type==2)THEN
   END IF
 ELSEIF(self%type==3)THEN
   psi_q(1)=self%loc
-  CALL gs_get_qprof(gs,1,psi_q,qprof,dl,rbounds,zbounds)
+  CALL gs_get_qprof(gs,1,psi_q,qprof)
   val = qprof(1)
   ! val = ABS(linterp(qprof(2,:), qprof(1,:), 30, self%loc))
 END IF
