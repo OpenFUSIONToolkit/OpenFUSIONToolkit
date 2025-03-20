@@ -4812,18 +4812,23 @@ class(gs_eq), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux surfaces to sample
 real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
 real(8), intent(out) :: prof(nr) !< q value at each sampling location
-real(8), intent(out) :: dl !< Arc length of surface `psi_q(1)`
-real(8), intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)`
-real(8), intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)`
+real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should be LCFS)
+real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
+real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: ravgs(nr,2) !< Flux surface averages <R> and <1/R>
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
-real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
+real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
+logical :: lcfs_all,lcfs_any
 type(gsinv_interp), pointer :: field
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
+lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
+lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
+IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passed if any are','gs_get_qprof',__FILE__)
+IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -4859,7 +4864,7 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-!$omp parallel private(psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
+!$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
@@ -4884,25 +4889,40 @@ do j=1,nr
   ! psi_surf=(x2-x1)*((j-1)/REAL(nr,8))
   ! psi_surf=x2 - psi_surf
   psi_surf=psi_q(j)*(x2-x1) + x1
-  IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  IF(gseq%diverted.AND.psi_q(j)<=0.02d0)THEN ! Use higher tracing tolerance near divertor
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
   END IF
   !
   pt=pt_last
-  !$omp critical
+  !!$omp critical
   CALL gs_psi2r(gseq,psi_surf,pt,psi_int)
-  !$omp end critical
-  CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2),ptout)
+  !!$omp end critical
   pt_last=pt
+  IF(j==1)THEN
+    CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2),ptout)
+  ELSE
+    CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2))
+  END IF
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN
     WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
     CALL oft_warn(error_str)
     CYCLE
   end if
-  IF(j==1)THEN
+  IF((j==1).AND.PRESENT(dl))THEN
+    !---Extrapolate to real LCFS
+    IF(psi_q(1)<0.05d0)THEN
+      DO i=1,active_tracer%nsteps
+        pt(1:2)=ptout(2:3,i)
+        pt_proj(1:2)=pt(1:2)-gseq%o_point
+        pt_proj=pt_proj/SQRT(SUM(pt_proj(1:2)**2))
+        CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_proj,psi_int)
+        ptout(2:3,i)=pt(1:2)
+      END DO
+    END IF
+    !---Compute geometric parameters
     dl = 0.d0
     rbounds(:,1)=ptout(2:3,1); rbounds(:,2)=ptout(2:3,1)
     zbounds(:,1)=ptout(2:3,1); zbounds(:,2)=ptout(2:3,1)

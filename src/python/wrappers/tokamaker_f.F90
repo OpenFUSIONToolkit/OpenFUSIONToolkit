@@ -776,13 +776,20 @@ INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 REAL(c_double), INTENT(in) :: psi_q(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: qvals(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: ravgs(npsi,2) !< Needs docs
-REAL(c_double), INTENT(out) :: dl !< Needs docs
+REAL(c_double), INTENT(inout) :: dl !< Needs docs
 REAL(c_double), INTENT(out) :: rbounds(2,2) !< Needs docs
 REAL(c_double), INTENT(out) :: zbounds(2,2) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL gs_get_qprof(tMaker_obj%gs,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
+IF(dl>0.d0)THEN
+  CALL gs_get_qprof(tMaker_obj%gs,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
+ELSE
+  CALL gs_get_qprof(tMaker_obj%gs,npsi,psi_q,qvals,ravgs=ravgs)
+  dl = -1.d0
+  rbounds = 0.d0
+  zbounds = 0.d0
+END IF
 END SUBROUTINE tokamaker_get_q
 !---------------------------------------------------------------------------------
 !> Needs docs
