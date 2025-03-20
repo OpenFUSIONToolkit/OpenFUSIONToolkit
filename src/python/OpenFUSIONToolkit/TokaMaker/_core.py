@@ -686,7 +686,7 @@ class TokaMaker():
         '''
         if lcfs_pad is None:
             lcfs_pad = 0.0
-            if self.diverted:
+            if self.diverted or (not self.settings.free_boundary):
                 lcfs_pad = 0.01
         _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02],compute_geo=True) # Given backward so last point is LCFS (for dl)
         Ip,centroid,vol,pvol,dflux,tflux,Bp_vol = self.get_globals()
