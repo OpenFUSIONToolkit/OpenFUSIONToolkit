@@ -1,12 +1,14 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 '''! Python interface for TokaMaker Grad-Shafranov functionality
 
 @authors Chris Hansen
 @date May 2023
 @ingroup doxy_oft_python
 '''
-
-#
-# Python interface for TokaMaker Grad-Shafranov functionality
 import collections
 import ctypes
 import numpy
@@ -671,29 +673,41 @@ class TokaMaker():
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         return psi
 
-    def get_stats(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):
+    def get_stats(self,lcfs_pad=None,li_normalization='std',geom_type='max'):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
         in [Jackson et al.](https://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
-        @param lcfs_pad Padding at LCFS for boundary calculations
+        @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @result Dictionary of equilibrium parameters
         '''
-        _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02]) # Given backward so last point is LCFS (for dl)
+        if lcfs_pad is None:
+            lcfs_pad = 0.0
+            if self.diverted or (not self.settings.free_boundary):
+                lcfs_pad = 0.01
+        _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02],compute_geo=True) # Given backward so last point is LCFS (for dl)
         Ip,centroid,vol,pvol,dflux,tflux,Bp_vol = self.get_globals()
         _,_,_,p,_ = self.get_profiles(numpy.r_[0.001])
         if self.diverted:
-            for i in range(self.x_points.shape[0]):
-                if self.x_points[i,0] < 0.0:
-                    break
-                x_active = self.x_points[i,:]
+            x_points, _ = self.get_xpoints()
+            x_active = x_points[-1,:]
             if x_active[1] < zbounds[0,1]:
                 zbounds[0,:] = x_active
+                # Find first X-point on opposite side
+                for i in range(x_points.shape[0]-1):
+                    if x_points[-(i+1),1] > zbounds[1,1]:
+                        zbounds[1,:] = x_points[-(i+1),:]
+                        break
             elif x_active[1] > zbounds[1,1]:
                 zbounds[1,:] = x_active
+                # Find first X-point on opposite side
+                for i in range(x_points.shape[0]-1):
+                    if x_points[-(i+1),1] < zbounds[0,1]:
+                        zbounds[0,:] = x_points[-(i+1),:]
+                        break
         # Compute normalized inductance
         if li_normalization.lower() == 'std':
             li = (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2)
@@ -1050,12 +1064,13 @@ class TokaMaker():
         else:
             return None
     
-    def get_q(self,psi=None,psi_pad=0.02,npsi=50):
+    def get_q(self,psi=None,psi_pad=0.02,npsi=50,compute_geo=False):
         r'''! Get q-profile at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
+        @param compute_geo Compute geometric values for LCFS
         @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>]\f$, length of last surface,
         [r(R_min),r(R_max)], [r(z_min),r(z_max)]
         '''
@@ -1070,7 +1085,10 @@ class TokaMaker():
                 psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         ravgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
-        dl = c_double()
+        if compute_geo:
+            dl = c_double(1.0)
+        else:
+            dl = c_double(-1.0)
         rbounds = numpy.zeros((2,2),dtype=numpy.float64)
         zbounds = numpy.zeros((2,2),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
@@ -1078,9 +1096,15 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         if self.psi_convention == 0:
-            return psi_save,qvals,ravgs,dl.value,rbounds,zbounds
+            if compute_geo:
+                return psi_save,qvals,ravgs,dl.value,rbounds,zbounds
+            else:
+                return psi_save,qvals,ravgs,None,None,None
         else:
-            return psi,qvals,ravgs,dl.value,rbounds,zbounds
+            if compute_geo:
+                return psi,qvals,ravgs,dl.value,rbounds,zbounds
+            else:
+                return psi,qvals,ravgs,None,None,None
 
     def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
         r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
@@ -1320,7 +1344,7 @@ class TokaMaker():
     def plot_psi(self,fig,ax,psi=None,normalized=True,
                  plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,plasma_linestyles=None,
                  vacuum_color='darkgray',vacuum_nlevels=8,vacuum_levels=None,vacuum_colormap=None,vacuum_linestyles=None,
-                 xpoint_color='k',xpoint_marker='x',opoint_color='k',opoint_marker='*'):
+                 xpoint_color='k',xpoint_marker='x',xpoint_inactive_alpha=0.5,opoint_color='k',opoint_marker='*'):
         r'''! Plot contours of \f$\hat{\psi}\f$
 
         @param fig Figure to add to
@@ -1332,15 +1356,16 @@ class TokaMaker():
         @param plasma_levels Explicit levels for plasma contours
         @param plasma_colormap Colormap for plasma contours (cannot be specified with `plasma_color`)
         @param plasma_linestyles Linestyle for plasma contours
-        @param vacuum_color Color for plasma contours
-        @param vacuum_nlevels Number of plasma contours
-        @param vacuum_levels Explicit levels for plasma contours (cannot be specified with `vacuum_color`)
-        @param vacuum_colormap Colormap for plasma contours
+        @param vacuum_color Color for vacuum contours
+        @param vacuum_nlevels Number of vacuum contours
+        @param vacuum_levels Explicit levels for vacuum contours (cannot be specified with `vacuum_color`)
+        @param vacuum_colormap Colormap for vacuum contours
         @param vacuum_linestyles Linestyle for vacuum contours
         @param xpoint_color Color for X-point markers (None to disable)
-        @param xpoint_marker Colormap for plasma contours
-        @param opoint_color Colormap for plasma contours (None to disable)
-        @param opoint_marker Colormap for plasma contours
+        @param xpoint_marker Marker style for X-points
+        @param xpoint_inactive_alpha Alpha value for inactive X-points
+        @param opoint_color Color for O-point markers (None to disable)
+        @param opoint_marker Marker style for O-points
         '''
         # Plot poloidal flux
         if psi is None:
@@ -1384,7 +1409,8 @@ class TokaMaker():
         if xpoint_color is not None:
             x_points, _ = self.get_xpoints()
             if x_points is not None:
-                ax.plot(x_points[:,0], x_points[:,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
+                ax.plot(x_points[-1,0], x_points[-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
+                ax.plot(x_points[:-1,0], x_points[:-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
         if (opoint_color is not None) and (self.o_point[0] > 0.0):
             ax.plot(self.o_point[0], self.o_point[1], color=opoint_color, marker=opoint_marker)
         # Make 1:1 aspect ratio

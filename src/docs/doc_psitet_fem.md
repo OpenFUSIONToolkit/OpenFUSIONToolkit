@@ -221,9 +221,9 @@ REAL(r8) :: goptmp(3,4)
 REAL(r8) :: v,f(4),det,vol
 REAL(r8), ALLOCATABLE :: gop(:,:,:),dets(:),lop(:,:)
 LOGICAL :: curved
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate Operator
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL quadratic_lagrange%mat_create(mat)
 ~~~~~~~~~
 
@@ -249,9 +249,9 @@ The first section of the operator integration loop sets up local variables which
 in the OpenMP clause and must be allocated after parallel execution has begun.
 
 ~~~~~~~~~{.F90}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup parallel integration variables
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(j,gop,dets,lop,curved,goptmp,m,v,jc,jr,f)
 ALLOCATE(j(quadratic_lagrange%nce)) ! Local DOF and matrix indices
 ALLOCATE(gop(3,quadratic_lagrange%nce,quadratic_lagrange%quad%np)) ! Reconstructed gradient operator
@@ -278,9 +278,9 @@ point. The weight value is then set by computing the product of the quadrature w
 gradients \f$ \left( \nabla f \right) \f$ are computed for each of the elements in the current cell.
 
 ~~~~~~~~~{.F90}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local reconstructed operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO m=1,quadratic_lagrange%quad%np ! Loop over quadrature points
     IF(curved.OR.(m==1))CALL tetmesh_get_jacobian(quadratic_lagrange%mesh,i,quadratic_lagrange%quad%pts(:,m),goptmp,v)
     dets(m)=v*quadratic_lagrange%quad%wts(m)
@@ -305,9 +305,9 @@ surrounded by an <tt>!$omp critical</tt> clause to prevent data races when added
 of the given region to a single thread at a time.
 
 ~~~~~~~~~{.F90}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute local matrix contributions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO jr=1,quadratic_lagrange%nce
     lop(jr,:)=0.d0
     IF(quadratic_lagrange%global%gbe(j(jr)))CYCLE
@@ -317,9 +317,9 @@ of the given region to a single thread at a time.
       END DO
     END DO
   END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Add local values to global matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   !$omp critical
   CALL mat%add_values(j,j,lop,quadratic_lagrange%nce,quadratic_lagrange%nce)
   !$omp end critical
@@ -337,9 +337,9 @@ DEALLOCATE(j)
 DEALLOCATE(gop,dets,lop)
 !$omp end parallel
 CALL mat%assemble
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set diagonal entries for dirichlet rows
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(lop(1,1),j(1))
 lop(1,1)=1.d0
 DO i=1,quadratic_lagrange%nbe

@@ -1,3 +1,14 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Python interface for Open FUSION Toolkit common runtime functions
+
+@authors Chris Hansen
+@date Feb 2025
+@ingroup doxy_oft_python
+'''
 import platform
 import shutil
 import tempfile

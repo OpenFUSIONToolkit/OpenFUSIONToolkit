@@ -1,13 +1,14 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 '''! General I/O functionality for Open FUSION Toolkit (OFT) Python interfaces
 
 @authors Chris Hansen
 @date July 2024
 @ingroup doxy_oft_python
 '''
-
-## @file io.py
-#
-# General I/O functionality for Open FUSION Toolkit (OFT) Python interfaces
 from __future__ import print_function
 import os
 import sys

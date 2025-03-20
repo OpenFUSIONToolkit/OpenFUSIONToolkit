@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file multigrid_build.F90
 !
 !> Multigrid initialization using nested meshes.
@@ -8,7 +10,7 @@
 !! @authors George Marklin and Chris Hansen
 !! @date December 2009
 !! @ingroup doxy_oft_grid
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 module multigrid_build
 use oft_base
 use oft_mesh_type, only: oft_mesh, oft_bmesh, cell_is_curved
@@ -54,11 +56,11 @@ REAL(r8), PRIVATE :: jac_ratio_tol = 10.d0
 REAL(r8), PRIVATE :: cad_feature_angle = pi/4.d0
 LOGICAL, PRIVATE :: fix_boundary = .TRUE.
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load in mesh and CAD information.
 !! - Read in mesh points and cells
 !! - Read in CAD information for refinement
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_load(mg_mesh,cad_type)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: cad_type !< Mesh type to load
@@ -105,9 +107,9 @@ end select
 !---Mesh load complete
 DEBUG_STACK_POP
 end subroutine multigrid_load
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Adjust boundary points to CAD boundary following refinement.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_reffix(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j
@@ -149,9 +151,9 @@ enddo
 !---Boundary adjustment complete
 DEBUG_STACK_POP
 end subroutine multigrid_reffix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Add node points for quadratic elements
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_add_quad(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 class(oft_mesh), pointer :: mesh
@@ -232,13 +234,13 @@ END IF
 !---Boundary adjustment complete
 DEBUG_STACK_POP
 end subroutine multigrid_add_quad
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Check high order geometric representation
 !!
 !! Validates the high order geometric representation and disables curvature
 !! locally when negative grid jacobians are detected. Cells where ill conditioned
 !! mappings are found are straightened back to their original linear spatial mapping.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_check_ho(mesh)
 class(oft_mesh), intent(inout) :: mesh
 INTEGER(i4) :: i,j,k,cell,nbad,ed,etmp(2)
@@ -320,9 +322,9 @@ DEALLOCATE(eflag,fflag)
 !---Boundary adjustment complete
 DEBUG_STACK_POP
 end subroutine multigrid_check_ho
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set corner flags for distributed and local meshes.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine multigrid_corners(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,jc,jr,je(12)
@@ -420,14 +422,14 @@ END DO
 DEALLOCATE(btrans)
 DEBUG_STACK_POP
 end subroutine multigrid_corners
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct multi-level mesh.
 !! - Read in mesh options
 !! - Load base mesh
 !! - Setup local meshes
 !! - Decompose mesh
 !! - Setup distributed meshes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_construct(mg_mesh,grnd_pt)
 type(multigrid_mesh), intent(inout) :: mg_mesh !< Multi-level mesh object
 real(r8), optional, intent(in) :: grnd_pt(3) !< Reference location for global grounding point (default: [1,0,0])
@@ -626,14 +628,14 @@ fmesh%global%nc=cmesh%global%nc
 fmesh%global%lp=>cmesh%global%lp
 fmesh%global%lc=>cmesh%global%lc
 end subroutine add_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Build a new local mesh.
 !! - Refine mesh to initialize new level
 !! - Build geometry lists
 !! - Adjust boundary points
 !! - Orient geometry
 !! - Print mesh statistics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_shared_level
 !---Set MG information
 mg_mesh%lev=mg_mesh%level
@@ -675,7 +677,7 @@ call mesh_global_stats(mesh)
 call mesh_global_igrnd(mesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_shared_level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Decompose the local mesh into a distributed mesh.
 !! - Decompose and scatter mesh
 !! - Build geometry lists
@@ -684,7 +686,7 @@ end subroutine multigrid_shared_level
 !! - Adjust boundary points
 !! - Orient geometry
 !! - Print mesh statistics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_decomp
 !---Set MG information
 mg_mesh%lev=mg_mesh%level-1
@@ -727,7 +729,7 @@ call mesh_global_stats(mesh)
 call mesh_global_igrnd(mesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_decomp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Build a new distributed level.
 !! - Refine mesh to initialize new level
 !! - Build geometry lists
@@ -735,7 +737,7 @@ end subroutine multigrid_decomp
 !! - Adjust boundary points
 !! - Orient geometry
 !! - Print mesh statistics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_dist_level
 !---Set MG information
 mg_mesh%lev=mg_mesh%level-1
@@ -783,11 +785,11 @@ call mesh_global_igrnd(mesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_dist_level
 end subroutine multigrid_construct
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load in mesh and CAD information.
 !! - Read in mesh points and cells
 !! - Read in CAD information for refinement
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_load_surf(mg_mesh,cad_type)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: cad_type
@@ -835,9 +837,9 @@ end select
 !---Mesh load complete
 DEBUG_STACK_POP
 end subroutine multigrid_load_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Adjust boundary points to CAD boundary following refinement.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_reffix_surf(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 DEBUG_STACK_PUSH
@@ -870,9 +872,9 @@ end select
 !---Boundary adjustment complete
 DEBUG_STACK_POP
 end subroutine multigrid_reffix_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Add node points for quadratic elements
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_add_quad_surf(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 INTEGER(i4) :: i,j
@@ -922,14 +924,14 @@ end select
 !---Boundary adjustment complete
 DEBUG_STACK_POP
 end subroutine multigrid_add_quad_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct multi-level surface mesh
 !! - Read in mesh options
 !! - Load base mesh
 !! - Setup local meshes
 !! - Decompose mesh
 !! - Setup distributed meshes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_construct_surf(mg_mesh,grnd_pt)
 type(multigrid_mesh), intent(inout) :: mg_mesh !< Multi-level mesh object
 real(r8), optional, intent(in) :: grnd_pt(3) !< Reference location for global grounding point (default: [1,0,0])
@@ -1076,14 +1078,14 @@ fmesh%global%nc=cmesh%global%nc
 fmesh%global%lp=>cmesh%global%lp
 fmesh%global%lc=>cmesh%global%lc
 end subroutine add_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Build a new local mesh.
 !! - Refine mesh to initialize new level
 !! - Build geometry lists
 !! - Adjust boundary points
 !! - Orient geometry
 !! - Print mesh statistics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_shared_level
 !---Set MG information
 mg_mesh%lev=mg_mesh%level
@@ -1117,7 +1119,7 @@ call bmesh_global_stats(smesh)
 call mesh_global_igrnd(smesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_shared_level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Decompose the local mesh into a distributed mesh.
 !! - Decompose and scatter mesh
 !! - Build geometry lists
@@ -1126,7 +1128,7 @@ end subroutine multigrid_shared_level
 !! - Adjust boundary points
 !! - Orient geometry
 !! - Print mesh statistics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_decomp
 !---Set MG information
 mg_mesh%lev=mg_mesh%level-1
@@ -1160,7 +1162,7 @@ call bmesh_global_stats(smesh)
 call mesh_global_igrnd(smesh,grnd_pt)
 CALL oft_decrease_indent
 end subroutine multigrid_decomp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Build a new distributed level.
 !! - Refine mesh to initialize new level
 !! - Build geometry lists
@@ -1168,7 +1170,7 @@ end subroutine multigrid_decomp
 !! - Adjust boundary points
 !! - Orient geometry
 !! - Print mesh statistics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine multigrid_dist_level
 !---Set MG information
 mg_mesh%lev=mg_mesh%level-1

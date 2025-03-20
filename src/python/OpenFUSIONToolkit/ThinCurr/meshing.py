@@ -1,7 +1,16 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! ThinCurr utilities for mesh generation and manipulation
+
+@authors Chris Hansen
+@date March 2024
+@ingroup doxy_oft_python
+'''
 import numpy
 import h5py
-
-import numpy.linalg
 from ..util import write_native_mesh
 
 

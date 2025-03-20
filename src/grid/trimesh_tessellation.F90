@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file trimesh_tessellation.F90
 !
 !> Subroutines for nested tesselation of a triangular mesh.
@@ -8,7 +10,7 @@
 !! @author Chris Hansen
 !! @date Summer 2012
 !! @ingroup doxy_oft_grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE trimesh_tessellation
 USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh
@@ -26,13 +28,13 @@ INTEGER(i4), PARAMETER :: tess4(3,16) = RESHAPE((/4,7,12,9,6,12,9,4,12,9,4,2,14,
 !---
 PUBLIC tessellate1, tessellate2, tessellate3, tessellate4
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct point and face lists for a single tessellation
 !!
 !! This corresponds to the input triangulation with no refinement
 !! - np_tess = np
 !! - nc_tess = nc
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tessellate1(self,rtmp,lctmp)
 CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,np_tess]
@@ -55,13 +57,13 @@ DO i=1,self%nc
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE tessellate1
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct point and face lists for a 2 level tessellation
 !!
 !! This corresponds to the input triangulation with no refinement
 !! - np_tess = np + ne
 !! - nc_tess = 4*nc
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tessellate2(self,rtmp,lctmp)
 CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,np_tess]
@@ -106,13 +108,13 @@ DO i=1,self%nc
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE tessellate2
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct point and face lists for a 3 level tessellation
 !!
 !! This corresponds to the input triangulation with no refinement
 !! - np_tess = np + 2*ne + nc
 !! - nc_tess = 9*nc
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tessellate3(self,rtmp,lctmp)
 CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,np_tess]
@@ -180,13 +182,13 @@ DO i=1,self%nc
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE tessellate3
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct point and face lists for a 4 level tessellation
 !!
 !! This corresponds to the input triangulation with no refinement
 !! - np_tess = np + 3*ne + 3*nc
 !! - nc_tess = 16*nc
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tessellate4(self,rtmp,lctmp)
 CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: rtmp !< Tessellated point list [3,np_tess]

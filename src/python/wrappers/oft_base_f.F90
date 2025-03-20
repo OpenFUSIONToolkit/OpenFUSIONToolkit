@@ -1,4 +1,4 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> @file oft_base_f.F90
 !
 !> @defgroup doxy_oft_python Python
@@ -9,7 +9,7 @@
 !! @authors Chris Hansen
 !! @date May 2023
 !! @ingroup doxy_oft_python
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_base_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_funptr, c_associated, c_f_procpointer
@@ -20,9 +20,9 @@ USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
 #include "local.h"
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE copy_string(f_string,c_string)
 CHARACTER(LEN=*), INTENT(in) :: f_string !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: c_string(*) !< Needs docs
@@ -32,9 +32,9 @@ DO i=1,LEN(f_string)
 END DO
 c_string(LEN(f_string)+1)=c_null_char
 END SUBROUTINE copy_string
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE copy_string_rev(c_string,f_string)
 CHARACTER(KIND=c_char), INTENT(in) :: c_string(*) !< Needs docs
 CHARACTER(LEN=*), INTENT(inout) :: f_string !< Needs docs
@@ -46,9 +46,9 @@ DO i=1,LEN(f_string)
 END DO
 IF(i>LEN(f_string))CALL oft_warn("No termination character found when copying C string")
 END SUBROUTINE copy_string_rev
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oftpy_init(nthreads,input_file,slens,abort_fun) BIND(C,NAME="oftpy_init")
 INTEGER(c_int), VALUE, INTENT(in) :: nthreads !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: input_file(OFT_PATH_SLEN) !< Needs docs
@@ -62,9 +62,9 @@ CALL c_f_pointer(slens, slens_tmp, [4])
 IF(c_associated(abort_fun))CALL c_f_procpointer(abort_fun,oft_abort_cb)
 slens_tmp=[OFT_MPI_PLEN,OFT_SLEN,OFT_PATH_SLEN,OFT_ERROR_SLEN]
 END SUBROUTINE oftpy_init
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oftpy_load_xml(xml_file,oft_node_ptr) BIND(C,NAME="oftpy_load_xml")
 CHARACTER(KIND=c_char), INTENT(in) :: xml_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), INTENT(out) :: oft_node_ptr !< Needs docs
@@ -86,16 +86,16 @@ oft_node_ptr=C_LOC(oft_node)
 oft_node_ptr=C_NULL_PTR
 #endif
 END SUBROUTINE oftpy_load_xml
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set debug verbosity level
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oftpy_set_debug(debug_level) BIND(C,NAME="oftpy_set_debug")
 INTEGER(c_int), VALUE, INTENT(in) :: debug_level !< New value for debug level (must be in range [0,3])
 oft_env%debug=debug_level
 END SUBROUTINE oftpy_set_debug
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set the number of OpenMP threads to use
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oftpy_set_nthreads(nthreads) BIND(C,NAME="oftpy_set_nthreads")
 INTEGER(c_int), VALUE, INTENT(in) :: nthreads !< Number of threads to use for subsequent OpenMP parallel regions
 CHARACTER(LEN=4) :: thrd_str,proc_str
@@ -106,9 +106,9 @@ IF(nthreads>omp_get_num_procs())THEN
 END IF
 CALL omp_set_num_threads(nthreads)
 END SUBROUTINE oftpy_set_nthreads
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_setup_smesh(ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nregs,mesh_ptr) BIND(C,NAME="oft_setup_smesh")
 TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs
@@ -139,9 +139,9 @@ CALL multigrid_construct_surf(mg_mesh)
 nregs=mg_mesh%smesh%nreg
 mesh_ptr=C_LOC(mg_mesh)
 END SUBROUTINE oft_setup_smesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_setup_vmesh(ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nregs,mesh_ptr) BIND(C,NAME="oft_setup_vmesh")
 TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs

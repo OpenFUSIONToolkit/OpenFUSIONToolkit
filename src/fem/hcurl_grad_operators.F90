@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file hcurl_grad_operators.F90
 !
 !> FE operators for full H(Curl) + Grad(H^1) space
@@ -21,7 +23,7 @@
 !! @authors Chris Hansen
 !! @date August 2011
 !! @ingroup doxy_oft_hcurl
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_hcurl_grad_operators
 USE oft_base
 USE oft_sort, ONLY: sort_array
@@ -50,9 +52,9 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, &
 USE oft_hcurl_operators, ONLY: oft_hcurl_rop, oft_hcurl_cop
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a H(Curl) + Grad(H^1) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: oft_hcurl_grad_rinterp
   class(oft_vector), pointer :: u => NULL() !< Field to interpolate
   integer(i4), pointer, dimension(:) :: cache_cell => NULL() !< Needs Docs
@@ -72,23 +74,23 @@ contains
   !> Destroy temporary internal storage
   procedure :: delete => rinterp_delete
 end type oft_hcurl_grad_rinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \times \f$ of a H(Curl) + Grad(H^1) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_hcurl_grad_rinterp) :: oft_hcurl_grad_cinterp
 contains
   !> Reconstruct field
   procedure :: interp => cinterp_apply
 end type oft_hcurl_grad_cinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \times \f$ of a H(Curl) + Grad(H^1) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_hcurl_grad_rinterp) :: oft_hcurl_grad_dinterp
 contains
   !> Reconstruct field
   procedure :: interp => dinterp_apply
 end type oft_hcurl_grad_dinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Clean the divergence from a H(Curl) + Grad(H^1) vector field
 !!
 !! Divergence is removed by adding a gradient field, such that \f$ f = f +
@@ -97,7 +99,7 @@ end type oft_hcurl_grad_dinterp
 !! in which case \f$ \nabla^2 \phi = - \nabla^T f \f$ and \f$ f = f + M \nabla
 !! \phi \f$. The mass matrix version is applied if `mop` is associated with the
 !! corresponding mass matrix.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_hcurl_grad_divout
   integer(i4) :: count = 0 !< Number of times apply has been called
   integer(i4) :: app_freq = 1 !< Frequency to apply solver
@@ -119,9 +121,9 @@ contains
   !> Clean-up internal storage
   procedure :: delete => divout_delete
 end type oft_hcurl_grad_divout
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Orthogonalize a H(Curl) + Grad(H^1) vector field by zeroing the gradient subspace
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_hcurl_grad_gzero
 contains
   !> Perform orthoganlization
@@ -129,39 +131,39 @@ contains
   !> Clean-up internal variables
   procedure :: delete => zerograd_delete
 end type oft_hcurl_grad_gzero
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_hcurl_grad_zerob
   class(oft_ml_fem_comp_type), pointer :: ML_hcurl_grad_rep => NULL() !< FE representation
 contains
   procedure :: apply => zerob_apply
   procedure :: delete => zerob_delete
 end type oft_hcurl_grad_zerob
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_hcurl_grad_zerob) :: oft_hcurl_grad_czerob
 contains
   procedure :: apply => curl_zerob_apply
 end type oft_hcurl_grad_czerob
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_hcurl_grad_zerob) :: oft_hcurl_grad_gzerop
 contains
   procedure :: apply => grad_zerop_apply
 end type oft_hcurl_grad_gzerop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_hcurl_grad_zerob) :: oft_hcurl_grad_zeroi
 contains
   procedure :: apply => zeroi_apply
 end type oft_hcurl_grad_zeroi
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, PUBLIC, extends(oft_ml_fe_comp_vecspace) :: oft_ml_hcurl_grad_vecspace
 contains
   !> Needs docs
@@ -173,9 +175,9 @@ end type oft_ml_hcurl_grad_vecspace
 integer(i4), private :: nu_mop(fem_max_levels)=0 !< Needs Docs
 real(r8), private :: df_mop(fem_max_levels)=-1.d99 !< Needs Docs
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Read-in options for the basic H(Curl) + Grad(H^1) space ML preconditioners
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad_mloptions
 integer(i4) :: ierr,io_unit
 namelist/hcurl_grad_op_options/df_mop,nu_mop
@@ -196,11 +198,11 @@ IF(df_mop(1)<-1.d90)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine hcurl_grad_mloptions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator for H(Curl) + Grad(H^1) vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rinterp_setup1(self,hcurl_grad_rep)
 class(oft_hcurl_grad_rinterp), intent(inout) :: self
 class(oft_fem_comp_type), target, intent(inout) :: hcurl_grad_rep
@@ -245,11 +247,11 @@ ELSE
   self%cache_curl=0.d0
 END IF
 end subroutine rinterp_setup1
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator for H(Curl) + Grad(H^1) vector fields
 !!
 !! Fetches local representation used for interpolation from vector object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rinterp_setup2(self,hcurl_rep,hgrad_rep)
 class(oft_hcurl_grad_rinterp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: hcurl_rep
@@ -295,9 +297,9 @@ ELSE
   self%cache_curl=0.d0
 END IF
 end subroutine rinterp_setup2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy temporary internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rinterp_delete(self)
 class(oft_hcurl_grad_rinterp), intent(inout) :: self
 IF(ASSOCIATED(self%parent))THEN
@@ -314,9 +316,9 @@ END IF
 NULLIFY(self%hcurl_rep,self%hgrad_rep,self%u)
 END IF
 end subroutine rinterp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a H(Curl) + Grad(H^1) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rinterp_apply(self,cell,f,gop,val)
 class(oft_hcurl_grad_rinterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -374,9 +376,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine rinterp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct \f$ \nabla \times \f$ of a H(Curl) + Grad(H^1) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cinterp_apply(self,cell,f,gop,val)
 class(oft_hcurl_grad_cinterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -423,9 +425,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine cinterp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct \f$ \nabla \cdot \f$ of a H(Curl) + Grad(H^1) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine dinterp_apply(self,cell,f,gop,val)
 class(oft_hcurl_grad_dinterp), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -464,9 +466,9 @@ do jc=1,self%hgrad_rep%nce
 end do
 DEBUG_STACK_POP
 end subroutine dinterp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a H(Curl) + Grad(H^1) vector field at all boundary nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_apply(self,a)
 class(oft_hcurl_grad_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -495,16 +497,16 @@ CALL a%restore_local(agrad,2)
 DEALLOCATE(acurl,agrad)
 DEBUG_STACK_POP
 end subroutine zerob_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a H(Curl) + Grad(H^1) vector field at all boundary nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_delete(self)
 class(oft_hcurl_grad_zerob), intent(inout) :: self
 NULLIFY(self%ML_hcurl_grad_rep)
 end subroutine zerob_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero the curl components of a H(Curl) + Grad(H^1) vector field at all boundary nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine curl_zerob_apply(self,a)
 class(oft_hcurl_grad_czerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -529,9 +531,9 @@ CLASS DEFAULT
 END SELECT
 DEBUG_STACK_POP
 end subroutine curl_zerob_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero the gradient components of a H(Curl) + Grad(H^1) vector field at all boundary nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine grad_zerop_apply(self,a)
 class(oft_hcurl_grad_gzerop), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -554,9 +556,9 @@ CLASS DEFAULT
 END SELECT
 DEBUG_STACK_POP
 end subroutine grad_zerop_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a H(Curl) + Grad(H^1) vector field at all interior nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zeroi_apply(self,a)
 class(oft_hcurl_grad_zeroi), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
@@ -585,7 +587,7 @@ CALL a%restore_local(agrad,2)
 DEALLOCATE(acurl,agrad)
 DEBUG_STACK_POP
 end subroutine zeroi_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the 0-th order gradient due to a jump plane
 !!
 !! The jump is represented as a circular surface defined by a center possition
@@ -593,7 +595,7 @@ end subroutine zeroi_apply
 !! matching internal surface, such that no edge crosses the jump plane.
 !!
 !! @note The radius of the surface is represented by \f$ \left| hcpv \right| \f$
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad_mc(mesh,a,hcpc,hcpv,new_tol)
 class(oft_mesh), intent(inout) :: mesh
 class(oft_vector), intent(inout) :: a !< Jump field
@@ -627,7 +629,7 @@ CALL a%restore_local(acurl,1)
 DEALLOCATE(acurl)
 DEBUG_STACK_POP
 end subroutine hcurl_grad_mc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the 0-th order gradient due to a jump plane
 !!
 !! The jump is represented as a circular surface defined by a center possition
@@ -635,7 +637,7 @@ end subroutine hcurl_grad_mc
 !! matching internal surface, such that no edge crosses the jump plane.
 !!
 !! @note The radius of the surface is represented by \f$ \left| hcpv \right| \f$
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad_bmc(mesh,a,hcpc,hcpv,new_tol)
 class(oft_mesh), intent(inout) :: mesh
 class(oft_vector), intent(inout) :: a !< Jump field
@@ -671,12 +673,12 @@ CALL a%restore_local(acurl,1)
 DEALLOCATE(acurl)
 DEBUG_STACK_POP
 end subroutine hcurl_grad_bmc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Add the gradient of a H^1 scalar field to a H(Curl) + Grad(H^1) vector field
 !!
 !! @note By default the 0-th order gradient subspace is represented on the
 !! H(Curl) DOF, use the `keep_boundary` flag otherwise
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad_grad(hcurl_grad_fe,a,b,keep_boundary)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_fe
 class(oft_vector), intent(inout) :: a !< Scalar field
@@ -728,9 +730,9 @@ CALL b%restore_local(bgrad,2)
 DEALLOCATE(aloc,bcurl,bgrad)
 DEBUG_STACK_POP
 end subroutine hcurl_grad_grad
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Apply the transposed gradient operator to a H(Curl) + Grad(H^1) vector field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad_gradtp(h1_fe,a,b)
 class(oft_afem_type), intent(inout) :: h1_fe
 class(oft_vector), intent(inout) :: a !< Input field
@@ -784,9 +786,9 @@ CALL b%restore_local(bloc,add=.TRUE.)
 DEALLOCATE(bloc,acurl,agrad)
 DEBUG_STACK_POP
 end subroutine hcurl_grad_gradtp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Apply the divergence operator to a H(Curl) + Grad(H^1) field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad_div(hcurl_grad_fe,a,b)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
@@ -803,9 +805,9 @@ CLASS(oft_h1_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_div",__FILE__)
 IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_div",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate Laplacian Op
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(ac_loc,ag_loc,bloc)
 !---Get local values
 CALL a%get_local(ac_loc,1)
@@ -813,9 +815,9 @@ CALL a%get_local(ag_loc,2)
 !---Zero output and get aliases
 CALL b%set(0.d0)
 CALL b%get_local(bloc)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j_curl,j_grad,rop_curl,rop_grad,det,btmp,ac_tmp,ag_tmp, &
 !$omp aloc,curved,goptmp,vol,m,jr)
@@ -867,9 +869,9 @@ CALL b%restore_local(bloc,add=.TRUE.)
 DEALLOCATE(ac_loc,ag_loc,bloc)
 DEBUG_STACK_POP
 end subroutine hcurl_grad_div
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Apply the curl transpose operator to a H(Curl) + Grad(H^1) field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad_curltp(hcurl_grad_fe,a,b)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_fe
 class(oft_vector), intent(inout) :: a !< Needs docs
@@ -887,9 +889,9 @@ CLASS(oft_h1_fem), POINTER :: grad_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_hcurl_cast(curl_rep,hcurl_grad_fe%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_curltp",__FILE__)
 IF(.NOT.oft_3D_h1_cast(grad_rep,hcurl_grad_fe%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_curltp",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(acurl,agrad,bcurl)
 !---Get local values
 CALL a%get_local(acurl,1)
@@ -897,9 +899,9 @@ CALL a%get_local(agrad,2)
 !---Zero output and get aliases
 CALL b%set(0.d0)
 CALL b%get_local(bcurl,1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j_curl,j_grad,rop_curl,cop_curl,rop_grad,det,btmp,curved,goptmp,cgop,m,v,jc,jr,f)
 allocate(j_curl(curl_rep%nce)) ! Local DOF and matrix indices
@@ -948,13 +950,13 @@ CALL b%restore_local(bcurl,1,add=.TRUE.)
 DEALLOCATE(acurl,agrad,bcurl)
 DEBUG_STACK_POP
 end subroutine hcurl_grad_curltp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct mass matrix for a H(Curl) + Grad(H^1) representation
 !!
 !! Supported boundary conditions
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hcurl_grad_getmop(hcurl_grad_rep,mat,bc)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
@@ -977,17 +979,17 @@ END IF
 !---
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,hcurl_grad_rep%fields(1)%fe))CALL oft_abort("Incorrect Curl FE type","hcurl_grad_getmop",__FILE__)
 IF(.NOT.oft_3D_h1_cast(hgrad_rep,hcurl_grad_rep%fields(2)%fe))CALL oft_abort("Incorrect Grad FE type","hcurl_grad_getmop",__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL hcurl_grad_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Operator integration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(j_curl,j_grad,rop_curl,rop_grad,det,mop11,mop12,mop21,mop22, &
 !$omp curved,goptmp,m,vol,jc,jr)
 allocate(j_curl(hcurl_rep%nce)) ! Local DOF and matrix indices
@@ -1109,13 +1111,13 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine hcurl_grad_getmop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Project a vector field onto a H(Curl) + Grad(H^1) basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! test functions for a H(Curl) + Grad(H^1) basis. To retrieve the correct projection the
 !! result must be multiplied by the inverse of the mass matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_hcurl_grad_project(hcurl_grad_rep,field,x)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep
 class(fem_interp), intent(inout) :: field !< Vector field for projection
@@ -1169,12 +1171,12 @@ call x%restore_local(xgrad,2,add=.TRUE.)
 deallocate(xcurl,xgrad)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_grad_project
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Boundary projection of a vector field onto a H(Curl) + Grad(H^1) basis
 !!
 !! @note This subroutine only performs the integration of the field with
 !! boundary test functions for a H(Curl) + Grad(H^1) basis
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_hcurl_grad_bproject(hcurl_grad_rep,field,x)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep
 CLASS(fem_interp), INTENT(inout) :: field !< Vector field for projection
@@ -1241,9 +1243,9 @@ call x%restore_local(xgrad,2,add=.TRUE.)
 deallocate(xcurl,xgrad)
 DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_grad_bproject
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup matrix and solver with default
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine divout_setup(self,ML_hcurl_grad_rep,bc,solver)
 class(oft_hcurl_grad_divout), intent(inout) :: self
 CLASS(oft_ml_fem_comp_type), target, intent(inout) :: ML_hcurl_grad_rep
@@ -1288,9 +1290,9 @@ SELECT CASE(TRIM(bc))
 END SELECT
 DEBUG_STACK_POP
 end subroutine divout_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Remove divergence from a H(Curl) + Grad(H^1) vector field by adding a gradient correction
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine divout_apply(self,a)
 class(oft_hcurl_grad_divout), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field for divergence cleaning
@@ -1342,9 +1344,9 @@ call g%delete
 DEALLOCATE(tmp,u,g)
 DEBUG_STACK_POP
 end subroutine divout_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Clean-up internal storage for a oft_hcurl_grad_divout object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine divout_delete(self)
 class(oft_hcurl_grad_divout), intent(inout) :: self
 IF(ASSOCIATED(self%solver).AND.self%internal_solver)THEN
@@ -1361,9 +1363,9 @@ IF(ASSOCIATED(self%bc))THEN
 END IF
 NULLIFY(self%ML_hcurl_full,self%ML_curl,self%ML_grad)
 end subroutine divout_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerograd_apply(self,a)
 class(oft_hcurl_grad_gzero), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
@@ -1377,16 +1379,16 @@ CALL a%restore_local(ugrad,2)
 DEALLOCATE(ugrad)
 DEBUG_STACK_POP
 end subroutine zerograd_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerograd_delete(self)
 class(oft_hcurl_grad_gzero), intent(inout) :: self
 ! Do nothing
 end subroutine zerograd_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct interpolation matrices on each MG level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_grad_setup_interp(ML_hcurl_aug_rep,ML_h1_rep,create_full)
 CLASS(oft_ml_fem_comp_type), intent(inout) :: ML_hcurl_aug_rep
 CLASS(oft_ml_fem_type), intent(inout) :: ML_h1_rep
@@ -1418,9 +1420,9 @@ END DO
 IF(full_interp)CALL ML_hcurl_aug_rep%build_interp
 DEBUG_STACK_POP
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hgrad_ginterpmatrix(mat)
 class(oft_matrix), pointer, intent(inout) :: mat !< Interpolation matrix
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,i_ind(1),j_ind(1)
@@ -1529,9 +1531,9 @@ DO i=1,cmesh%nc
     interp_graph%lc(k+j)=cmesh%np+jce(1+j)
   END DO
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Construct matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(hgrad_vec,hgrad_vec_cors)
 CALL ML_grad%vec_create(hgrad_vec)
 CALL ML_grad%vec_create(hgrad_vec_cors,ML_hcurl_aug_rep%level-1)
@@ -1540,9 +1542,9 @@ ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph
 !---
 CALL create_matrix(mat,graphs,hgrad_vec,hgrad_vec_cors)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Construct matrix
 allocate(pmap(cmesh%np))
 CALL get_inverse_map(cmesh%lbp,cmesh%nbp,pmap,cmesh%np)
@@ -1622,11 +1624,11 @@ END DO
 DEBUG_STACK_POP
 END SUBROUTINE hgrad_ginterpmatrix
 END SUBROUTINE hcurl_grad_setup_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
 !! @note The global Lagrange level in incremented by one in this subroutine
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ml_vecspace_interp(self,acors,afine)
 class(oft_ml_hcurl_grad_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to interpolate
@@ -1679,9 +1681,9 @@ IF(ML_curl%current_level%order==1)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine ml_vecspace_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Transfer a base level Lagrange scalar field to the next MPI level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine base_pop(self,acors,afine)
 class(oft_ml_fe_comp_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Vector to transfer
@@ -1716,11 +1718,11 @@ CALL afine%restore_local(array_f,2)
 DEALLOCATE(array_c,array_f)
 DEBUG_STACK_POP
 end subroutine base_pop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a coarse level Lagrange scalar field to the next finest level
 !!
 !! @note The global Lagrange level in incremented by one in this subroutine
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine ml_vecspace_inject(self,afine,acors)
 class(oft_ml_hcurl_grad_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
@@ -1738,9 +1740,9 @@ end if
 CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
 DEBUG_STACK_POP
 end subroutine ml_vecspace_inject
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Transfer a MPI level Lagrange scalar field to the base level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine base_push(self,afine,acors)
 class(oft_ml_fe_comp_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Vector to transfer
@@ -1794,9 +1796,9 @@ call acors%restore_local(array_c)
 deallocate(alias,array_c,array_f)
 DEBUG_STACK_POP
 end subroutine base_push
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the mass matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_grad_mop_eigs(ML_hcurl_aug_obj,minlev)
 type(oft_ml_fem_comp_type), target, intent(inout) :: ML_hcurl_aug_obj
 INTEGER(i4), INTENT(in) :: minlev
@@ -1810,9 +1812,9 @@ CLASS(oft_matrix), POINTER :: md => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 TYPE(oft_hcurl_grad_zerob), TARGET :: bc_tmp
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H(Curl) + Grad(H^1) mass matrix'
 bc_tmp%ML_hcurl_grad_rep=>ML_hcurl_aug_obj
 ALLOCATE(df(ML_hcurl_aug_obj%nlevels))
@@ -1856,10 +1858,10 @@ DEBUG_STACK_POP
 CALL oft_abort("Subroutine requires ARPACK", "lag_lop_eigs", __FILE__)
 #endif
 END SUBROUTINE hcurl_grad_mop_eigs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute eigenvalues and smoothing coefficients for the operator 
 !! H(Curl) + Grad(H^1) mass matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE hcurl_grad_getmop_pre(ML_hcurl_aug_obj,pre,mats,level,nlevels)
 type(oft_ml_fem_comp_type), target, intent(inout) :: ML_hcurl_aug_obj
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
@@ -1892,9 +1894,9 @@ nl=toplev-minlev+1
 !---
 IF(minlev<ML_hcurl_aug_obj%minlev)CALL oft_abort('Minimum level is < minlev','hcurl_grad_getmop_pre',__FILE__)
 IF(toplev>ML_hcurl_aug_obj%nlevels)CALL oft_abort('Maximum level is > nlevels','hcurl_grad_getmop_pre',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create ML Matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 create_mats=.FALSE.
 IF(.NOT.ASSOCIATED(mats))THEN
   create_mats=.TRUE.
@@ -1919,9 +1921,9 @@ DO i=1,nl
   IF(i>1)ml_int(i-1)%M=>ML_hcurl_aug_obj%interp_matrices(ML_hcurl_aug_obj%level)%m
 END DO
 CALL ML_hcurl_aug_obj%set_level(levin,propogate=.TRUE.)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Search for XML-spec
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(pre_node)
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
@@ -1929,9 +1931,9 @@ IF(ASSOCIATED(oft_env%xml))THEN
   IF(ierr==0)CALL xml_get_element(hcurl_grad_node,"mop",pre_node,ierr)
 END IF
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup preconditioner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(pre)
 ALLOCATE(tmp_vecspace)
 tmp_vecspace%ML_FE_rep=>ML_hcurl_aug_obj
@@ -1939,20 +1941,20 @@ tmp_vecspace%base_pop=>base_pop
 tmp_vecspace%base_push=>base_push
 CALL create_mlpre(pre,mats(1:nl),levels,nlevels=nl,ml_vecspace=tmp_vecspace, &
   stype=1,df=df,nu=nu,xml_root=pre_node)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(ml_int,levels,df,nu)
 DEBUG_STACK_POP
 END SUBROUTINE hcurl_grad_getmop_pre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate the jump error in a field over internal faces
 !!
 !! @note Currently faces on domain boundaries are skipped, this is due to the
 !! fact that evaluting the error would require costly communication.
 !!
 !! @return Jump error metric
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION hcurl_grad_jump_error(hcurl_grad_fe,u,quad_order) RESULT(error)
 CLASS(oft_fem_comp_type), INTENT(inout) :: hcurl_grad_fe
 CLASS(oft_vector), INTENT(inout) :: u !< H(Curl) + Grad(H^1) vector field to evaluate

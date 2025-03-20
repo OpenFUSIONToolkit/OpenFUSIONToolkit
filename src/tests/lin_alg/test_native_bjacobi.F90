@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_native_bjacobi.F90
 !
 !> Regression tests for native Block-Jacobi solver. Tests are performed
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date May 2014
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_native_bjacobi
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
@@ -91,10 +93,10 @@ CALL test_lap(nlocal,sol_type)
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_lap(nlocal,sol_type)
 INTEGER(i4), INTENT(in) :: nlocal,sol_type
 !---Create solver objects

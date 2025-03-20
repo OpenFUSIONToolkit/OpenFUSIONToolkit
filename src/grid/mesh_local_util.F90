@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_local_util.F90
 !
 !> Mesh utility functions, entity location and mappings.
@@ -13,7 +15,7 @@
 !! @authors George Marklin and Chris Hansen
 !! @date April 2008 - Present
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_local_util
 USE oft_base
 USE oft_sort, ONLY: search_array
@@ -25,9 +27,9 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: oriented_edges
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: oriented_faces
 !$omp threadprivate(oriented_cell,oriented_edges,oriented_faces)
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_local_orient(self,cell)
 class(oft_mesh), intent(in) :: self !< Mesh object
 integer(i4), intent(in) :: cell
@@ -48,11 +50,11 @@ END DO
 oriented_cell=cell
 DEBUG_STACK_POP
 end subroutine mesh_local_orient
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Find oriented edge connecting points i1 and i2.
 !!
 !! Orientation is (+,-) if [imin,imax] is [i1,i2] or [i2,i1]
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function mesh_local_findedge(self,inds)
 class(oft_amesh), intent(in) :: self !< Mesh to search
 integer(i4), intent(in) :: inds(2) !< Edge points (ordered)
@@ -68,9 +70,9 @@ if(js/=0)js=sign(js+jp-1,inds(2)-inds(1))
 mesh_local_findedge=js
 DEBUG_STACK_POP
 end function mesh_local_findedge
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Find face with corner points `inds` (no orientation is applied)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function mesh_local_findface(self,inds)
 class(oft_mesh), intent(in) :: self !< Mesh to search
 integer(i4), intent(in) :: inds(:) !< Face points (ordered)

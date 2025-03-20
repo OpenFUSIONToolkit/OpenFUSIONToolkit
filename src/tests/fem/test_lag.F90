@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_lag.F90
 !
 !> Regression tests for scalar Lagrange finite elements. Tests are performed
@@ -13,7 +15,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_lag
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
@@ -69,10 +71,10 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_lap
 !---Create solver objects
 CLASS(oft_solver), POINTER :: linv => NULL()
@@ -123,9 +125,9 @@ CALL linv%pre%delete
 !---Destory solver
 CALL linv%delete
 END SUBROUTINE test_lap
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Same as \ref test_lag::test_lap "test_lap" but use MG preconditioning.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_lapmg
 !---Solver object
 CLASS(oft_solver), POINTER :: linv => NULL()
@@ -136,9 +138,9 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 TYPE(oft_matrix_ptr), POINTER :: ml_lop(:) => NULL()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create ML Matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nlevels=ML_oft_lagrange%nlevels-minlev+1
 CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields
@@ -146,9 +148,9 @@ CALL ML_oft_lagrange%vec_create(u)
 CALL ML_oft_lagrange%vec_create(v)
 !---Get FE operators
 CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup matrix solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL create_cg_solver(linv,force_native=.TRUE.)
 linv%its=-3
 !---Setup MG preconditioner
@@ -156,9 +158,9 @@ CALL lag_getlop_pre(ML_oft_lagrange,linv%pre,ml_lop,nlevels=nlevels)
 lop=>ml_lop(nlevels)%M
 linv%A=>lop
 linv%bc=>lag_zerob
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Solve system
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
 CALL lag_zerob%apply(v)

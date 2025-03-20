@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_grad_shaf.F90
 !
 !> Grad-Shafranov implementation for TokaMaker
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date August 2011
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_gs
 USE oft_base
 USE oft_sort, ONLY: sort_matrix, sort_array
@@ -43,15 +45,15 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer, cylinv_interp
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! CLASS oft_scalar_torus
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolation class for an axisymmetric gaussian source in toroidal geometry
 !!
 !! In toroidal coordinates defined by the class the scalar field is defined
 !! as
 !! \f[ S = e^{-\frac{r^2}{\lambda}} \f]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(bfem_interp) :: circular_curr
   real(r8) :: x0(2) = [1.d0,0.d0] !< Circle center
   real(r8) :: a = 0.d0 !< Minor radius
@@ -61,11 +63,11 @@ contains
   !> Reconstruct field
   procedure :: interp => circle_interp
 end type circular_curr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! CLASS flux_func
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Abstract flux function prototype
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, ABSTRACT :: flux_func
   INTEGER(i4) :: ncofs = 0 !< Number of free coefficients
   REAL(r8) :: f_offset = 0.d0
@@ -83,11 +85,11 @@ CONTAINS
   !>
   PROCEDURE(flux_cofs_get), DEFERRED :: get_cofs
 END TYPE flux_func
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! TYPE coil_region
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Internal coil region structure
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: coil_region
   INTEGER(i4) :: nc = 0
   INTEGER(i4) :: id = 0
@@ -96,11 +98,11 @@ TYPE :: coil_region
   REAL(r8) :: vcont_gain = 0.d0
   REAL(r8) :: area = 0.d0
 END TYPE coil_region
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! TYPE cond_region
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Internal wall region structure
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: cond_region
   INTEGER(i4) :: nc = 0
   INTEGER(i4) :: nc_quad = 0
@@ -126,9 +128,9 @@ TYPE :: cond_region
   REAL(r8), POINTER, DIMENSION(:,:,:,:) :: corr_3d => NULL()
   CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_eig => NULL()
 END TYPE cond_region
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: gs_region_info
   INTEGER(i4) :: nnonaxi = 0
   INTEGER(i4) :: block_max = 0
@@ -139,9 +141,9 @@ TYPE :: gs_region_info
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: noaxi_nodes => NULL()
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: bc_nodes => NULL()
 END TYPE gs_region_info
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_gs_zerob
   logical, pointer, dimension(:) :: node_flag => NULL()
   CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< FE representation
@@ -149,11 +151,11 @@ contains
   procedure :: apply => zerob_apply
   procedure :: delete => zerob_delete
 end type oft_gs_zerob
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! CLASS gs_eq
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Grad-Shafranov equilibrium object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: gs_eq
   INTEGER(i4) :: ierr = 0
   INTEGER(i4) :: maxits = 30
@@ -311,11 +313,11 @@ CONTAINS
   !
   PROCEDURE :: delete => gs_destroy
 END TYPE gs_eq
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate G-S profiles at a specific point in space
 !!
 !! @extends fem_base::bfem_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(bfem_interp) :: gs_prof_interp
   INTEGER(i4) :: mode = 0
   class(gs_eq), pointer :: gs => NULL() !< Field for interpolation
@@ -327,21 +329,21 @@ contains
   !> Reconstruct a Lagrange scalar field
   procedure :: interp => gs_prof_interp_apply
 end type gs_prof_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a Lagrange field.
 !!
 !! @extends fem_base::fem_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(gs_prof_interp) :: gs_b_interp
 contains
   !> Reconstruct a Lagrange scalar field
   procedure :: interp => gs_b_interp_apply
 end type gs_b_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! CLASS gsinv_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Need docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(cylinv_interp) :: gsinv_interp
   LOGICAL :: compute_geom = .FALSE.
   real(8), pointer, dimension(:) :: uvals => NULL()
@@ -356,53 +358,53 @@ contains
 end type gsinv_interp
 !---
 abstract interface
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION flux_func_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
    function flux_func_eval(self,psi) result(b)
       import flux_func, r8
       class(flux_func), intent(inout) :: self
       real(r8), intent(in) :: psi
       real(r8) :: b
    end function flux_func_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE flux_func_update
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
    subroutine flux_func_update(self,gseq)
       import flux_func, gs_eq
       class(flux_func), intent(inout) :: self
       class(gs_eq), intent(inout) :: gseq
    end subroutine flux_func_update
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION flux_cofs_set
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
    function flux_cofs_set(self,c) result(ierr)
       import flux_func, r8, i4
       class(flux_func), intent(inout) :: self
       real(r8), intent(in) :: c(:)
       integer(i4) :: ierr
    end function flux_cofs_set
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE flux_cofs_get
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
    subroutine flux_cofs_get(self,c)
       import flux_func, r8
       class(flux_func), intent(inout) :: self
       real(r8), intent(out) :: c(:)
    end subroutine flux_cofs_get
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION region_eta_set
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
    function region_eta_set(rc,id) result(eta)
       import r8, i4
       real(8), intent(in) :: rc(2)
@@ -431,11 +433,11 @@ real(r8), intent(in) :: psi
 real(r8) :: b
 b=0.d0
 end function dummy_fpp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_setup(self,ML_lag_2d)
 class(gs_eq), intent(inout) :: self
 class(oft_ml_fem_type), target, intent(inout) :: ML_lag_2d
@@ -452,11 +454,11 @@ self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
 ALLOCATE(self%zerogrnd_bc)
 self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
 end subroutine gs_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_load_coils(self,ignore_inmesh)
 class(gs_eq), intent(inout) :: self
 logical, optional, intent(in) :: ignore_inmesh
@@ -538,11 +540,11 @@ END DO
 CALL oft_decrease_indent
 CALL gs_load_regions(self)
 end subroutine gs_load_coils
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_load_regions(self)
 class(gs_eq), intent(inout) :: self
 !---XML solver fields
@@ -714,13 +716,13 @@ WRITE(*,'(2A,I4,A)')oft_indent,'Found ',self%ncoil_regs,' coil regions'
 WRITE(*,*)
 CALL oft_decrease_indent
 end subroutine gs_load_regions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_load_limiters
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_load_limiters(self)
 class(gs_eq), intent(inout) :: self
 !---
@@ -740,13 +742,13 @@ CLOSE(io_unit)
 IF(oft_debug_print(1))WRITE(*,'(2A,2X,I4,A)')oft_indent,'Found ', &
   self%nlimiter_pts,' limiter points'
 end subroutine gs_load_limiters
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_setup_walls
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_setup_walls(self,skip_load,make_plot)
 class(gs_eq), intent(inout) :: self
 logical, optional, intent(in) :: skip_load,make_plot
@@ -1082,11 +1084,11 @@ IF(self%region_info%nnonaxi>0)THEN
 END IF
 end subroutine set_noncontinuous
 end subroutine gs_setup_walls
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! ! SUBROUTINE gs_setup_cflag
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! !> Need docs
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! subroutine gs_setup_cflag(self)
 ! class(gs_eq), intent(inout) :: self
 ! integer(4) :: i,j,k,l
@@ -1129,11 +1131,11 @@ end subroutine gs_setup_walls
 !   WRITE(*,'(A,4X,A,I8)')oft_indent,'Total  = ',smesh%nc
 ! END IF
 ! end subroutine gs_setup_cflag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Initialize Grad-Shafranov solution with the Taylor state
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_init(self)
 class(gs_eq), intent(inout) :: self
 ! logical, optional, intent(in) :: compute
@@ -1400,13 +1402,13 @@ deallocate(eflag,tmp_ptr)
 ! END IF
 end subroutine get_limiter
 end subroutine gs_init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_init_psi
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Initialize Grad-Shafranov solution with the Taylor state
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_init_psi(self,ierr,r0,a,kappa,delta,curr_source)
 class(gs_eq), intent(inout) :: self
 integer(4), intent(out) :: ierr
@@ -1530,11 +1532,11 @@ END IF
 ! CALL tmp_vec%delete()
 ! DEALLOCATE(tmp_vec)
 end subroutine gs_init_psi
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all edge nodes
 !!
 !! @param[in,out] a Field to be zeroed
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_apply(self,a)
 class(oft_gs_zerob), intent(inout) :: self
 class(oft_vector), intent(inout) :: a
@@ -1555,24 +1557,24 @@ call a%restore_local(vloc)
 deallocate(vloc)
 DEBUG_STACK_POP
 end subroutine zerob_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all edge nodes
 !!
 !! @param[in,out] a Field to be zeroed
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine zerob_delete(self)
 class(oft_gs_zerob), intent(inout) :: self
 NULLIFY(self%fe_rep)
 IF(ASSOCIATED(self%node_flag))DEALLOCATE(self%node_flag)
 end subroutine zerob_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate torus source
 !!
 !! @param[in] cell Cell for interpolation
 !! @param[in] f Possition in cell in logical coord [4]
 !! @param[in] gop Logical gradient vectors at f [3,4]
 !! @param[out] val Reconstructed field at f [1]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine circle_interp(self,cell,f,gop,val)
 class(circular_curr), intent(inout) :: self
 integer(i4), intent(in) :: cell
@@ -1618,11 +1620,11 @@ deallocate(wa3,wa4,ipvt)
 lam=self%a*10.d0
 val=(1.d0-TANH((coord_tmp(1)-self%a)/lam))/2.d0
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! SUBROUTINE psimax_error
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !>
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE circ_error(m,n,cofs,err,iflag)
 integer(4), intent(in) :: m,n
 real(8), intent(in) :: cofs(n)
@@ -1634,14 +1636,14 @@ pt_eval = cofs(1)*[COS(cofs(2)+ASIN(self%delta)*SIN(cofs(2))), &
 err = pt_eval-pt_con_active
 end subroutine circ_error
 end subroutine circle_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_vacuum_solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux definitions
 !!
 !! @param[in,out] self G-S object
 !! @param[out] ierr Error flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_vacuum_solve(self,pol_flux,source,ierr)
 class(gs_eq), intent(inout) :: self
 class(oft_vector), intent(inout) :: pol_flux,source
@@ -1670,15 +1672,15 @@ oft_env%pm=pm_save
 CALL rhs%delete()
 DEALLOCATE(rhs)
 END SUBROUTINE gs_vacuum_solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_gen_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
 !! @param[in,out] a Psi field
 !! @param[in,out] b Source field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_gen_source(self,source_fun,b)
 class(gs_eq), intent(inout) :: self
 CLASS(bfem_interp), intent(inout) :: source_fun
@@ -1732,11 +1734,11 @@ CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_gen_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_coil_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Calculates coil current source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_coil_source(self,iCoil,b)
 class(gs_eq), intent(inout) :: self !< G-S Object
 integer(4), intent(in) :: iCoil !< Coil index
@@ -1790,9 +1792,9 @@ CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_coil_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Calculates field contribution due to coil with non-uniform current distribution
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_coil_source_distributed(self,iCoil,b,curr_dist)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
@@ -1843,15 +1845,15 @@ deallocate(rhs_loc,j_lag,rop)
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 end subroutine gs_coil_source_distributed
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_cond_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
 !! @param[in,out] a Psi field
 !! @param[in,out] b Source field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_cond_source(self,iCond,iMode,b)
 class(gs_eq), intent(inout) :: self
 integer(4), intent(in) :: iCond,iMode
@@ -1907,9 +1909,9 @@ CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_cond_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_wall_source(self,dpsi_dt,b)
 class(gs_eq), intent(inout) :: self !< G-S object
 CLASS(oft_vector), intent(inout) :: dpsi_dt,b
@@ -1978,9 +1980,9 @@ CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp,psi_vals,eta_reg,reg_source)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_wall_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute inductance between coil and given poloidal flux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_coil_mutual(self,iCoil,b,mutual)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
@@ -2023,9 +2025,9 @@ deallocate(j_lag,rop)
 mutual=mu0*2.d0*pi*mutual
 DEALLOCATE(btmp)
 end subroutine gs_coil_mutual
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute inductance between a coil with non-uniform current distribution and given poloidal flux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_coil_mutual_distributed(self, iCoil, b, curr_dist, mutual)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
@@ -2071,9 +2073,9 @@ deallocate(j_lag,rop)
 mutual=mu0*2.d0*pi*mutual
 DEALLOCATE(btmp)
 end subroutine gs_coil_mutual_distributed
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute inductance between plasma current and given poloidal flux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_plasma_mutual(self,b,mutual,itor)
 class(gs_eq), intent(inout) :: self !< G-S solver object
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
@@ -2135,14 +2137,14 @@ CALL psi_eval%delete()
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_plasma_mutual
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_fit_isoflux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux definitions
 !!
 !! @param[in,out] self G-S object
 !! @param[out] ierr Error flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_fit_isoflux(self,psi_full,ierr)
 class(gs_eq), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: psi_full
@@ -2296,14 +2298,14 @@ DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_fit_isoflux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_fit_walleigs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux definitions
 !!
 !! @param[in,out] self G-S object
 !! @param[out] ierr Error flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_fit_walleigs(self,ierr)
 class(gs_eq), intent(inout) :: self
 integer(4), intent(out) :: ierr
@@ -2371,14 +2373,14 @@ DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_fit_walleigs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux definitions
 !!
 !! @param[in,out] self G-S object
 !! @param[out] ierr Error flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_solve(self,ierr)
 class(gs_eq), intent(inout) :: self
 integer(4), optional, intent(out) :: ierr
@@ -2880,14 +2882,14 @@ ELSE
   END IF
 END IF
 end subroutine gs_solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_lin_solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux definitions
 !!
 !! @param[in,out] self G-S object
 !! @param[out] ierr Error flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_lin_solve(self,adjust_r0,ierr)
 class(gs_eq), intent(inout) :: self
 logical, intent(in) :: adjust_r0
@@ -3169,9 +3171,9 @@ ELSE
   END IF
 END IF
 end subroutine gs_lin_solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for vacuum (no plasma)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_vac_solve(self,psi_sol,rhs_source,ierr)
 class(gs_eq), intent(inout) :: self !< G-S object
 class(oft_vector), intent(inout) :: psi_sol !< Input: BCs for \f$ \psi \f$, Output: solution
@@ -3299,14 +3301,14 @@ IF(self%dt>0.d0)THEN
 END IF
 DEALLOCATE(psi_vac,psi_vcont,psi_eddy)
 end subroutine gs_vac_solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION gs_err_reason
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux definitions
 !!
 !! @param[in,out] self G-S object
 !! @param[out] ierr Error flag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function gs_err_reason(ierr) result(err_reason)
 integer(4), intent(in) :: ierr
 CHARACTER(LEN=40) :: err_reason
@@ -3331,13 +3333,13 @@ SELECT CASE(ierr)
     err_reason='Unknown reason'
 END SELECT
 end function gs_err_reason
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_fixed_vflux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute required vacuum flux for fixed boundary equilibrium
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_fixed_vflux(self,pts,fluxes)
 class(gs_eq), intent(inout) :: self
 real(8), pointer, intent(inout) :: pts(:,:),fluxes(:)
@@ -3387,15 +3389,15 @@ CALL psi_dummy%delete
 DEALLOCATE(rhs,psi_fixed,psi_dummy)
 DEALLOCATE(vals_tmp)
 end subroutine gs_fixed_vflux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_get_cond_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
 !! @param[in,out] a Psi field
 !! @param[in,out] b Source field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_get_cond_source(self,cond_fac)
 CLASS(gs_eq), intent(inout) :: self
 REAL(8), intent(inout) :: cond_fac(:)
@@ -3415,15 +3417,15 @@ DO j=1,self%ncond_regs
   END IF
 END DO
 END SUBROUTINE gs_get_cond_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
 !! @param[in,out] a Psi field
 !! @param[in,out] b Source field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_source(self,a,b,b2,b3,itor_alam,itor_press,estore)
 class(gs_eq), intent(inout) :: self
 class(oft_vector), TARGET, intent(inout) :: a
@@ -3524,13 +3526,13 @@ itor_alam = itor_alam*self%psiscale
 itor_press = itor_press*self%psiscale
 self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_get_chi
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute flux potential from Grad-Shafranov solution
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_get_chi(self)
 class(gs_eq), intent(inout) :: self
 class(oft_solver), POINTER :: solver
@@ -3605,26 +3607,26 @@ call psihat%delete
 call dels_grnd%delete
 DEALLOCATE(rhs,psihat,dels_grnd)
 end subroutine gs_get_chi
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cleanup Grad-Shafranov object internal storage
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_delete(self)
 CLASS(gs_eq), INTENT(inout) :: self
 CALL self%psi%delete
 NULLIFY(self%I,self%P)
 end subroutine gs_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION gs_itor
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute toroidal current for Grad-Shafranov equilibrium
 !!
 !! @param[in,out] self G-S object
 !! @result itor Toroidal current
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function gs_itor(self,psi_vec) result(itor)
 class(gs_eq), intent(inout) :: self
 class(oft_vector), optional, intent(inout) :: psi_vec
@@ -3645,15 +3647,15 @@ itor=sum(vals_tmp)*self%psiscale
 call x%delete()
 DEALLOCATE(x,vals_tmp)
 end function gs_itor
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_itor_nl
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute toroidal current for Grad-Shafranov equilibrium
 !!
 !! @param[in,out] self G-S object
 !! @param[out] itor Toroidal current
 !! @param[out] centroid Current centroid (optional) [2]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_itor_nl(self,itor,centroid)
 class(gs_eq), intent(inout) :: self
 real(8), intent(out) :: itor
@@ -3697,11 +3699,11 @@ end do
 IF(PRESENT(centroid))centroid = curr_cent/itor
 itor=itor*self%psiscale
 end subroutine gs_itor_nl
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_update_bounds
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_update_bounds(self,track_opoint)
 class(gs_eq), intent(inout) :: self
 logical, optional, intent(in) :: track_opoint
@@ -3901,11 +3903,11 @@ IF(oft_debug_print(1).AND.oft_env%pm)THEN
 END IF
 self%timing(4)=self%timing(4)+(omp_get_wtime()-t1)
 end subroutine gs_update_bounds
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_analyze_saddles
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_analyze_saddles(self, o_point, o_psi, x_point, x_psi)
 class(gs_eq), intent(inout) :: self
 real(8), intent(inout) :: o_point(2)
@@ -4023,11 +4025,11 @@ DO m=1,n_unique
 END DO
 IF(oft_debug_print(2))WRITE(*,*)
 end subroutine gs_analyze_saddles
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_find_saddle
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_find_saddle(self,psi_scale_len,psi_x,pt,stype)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_scale_len
@@ -4091,14 +4093,14 @@ psi_x=gpsitmp(1)
 pt=ptmp
 stype=1
 end subroutine gs_find_saddle
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION gs_test_bounds
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Test whether a point is inside the LCFS
 !!
 !! @param[in,out] self G-S object
 !! @param[in] pt Location to test in/out of plasma
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function gs_test_bounds(self,pt) result(in_bounds)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: pt(2)
@@ -4112,16 +4114,16 @@ DO i=1,self%nx_points
   in_bounds=in_bounds.AND.(DOT_PRODUCT(pt-self%x_points(:,i),self%x_vecs(:,i))>0.d0)
 END DO
 end function gs_test_bounds
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_save_fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute magnetic fields from Grad-Shafranov equilibrium
 !!
 !! @param[in,out] self G-S object
 !! @param[in] pts Sampling locations [2,npts]
 !! @param[in] npts Number of points to sample
 !! @param[in] filename Output file for field data
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_save_fields(self,pts,npts,filename)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: pts(2,npts)
@@ -4167,9 +4169,9 @@ DO i=1,npts
 END DO
 CLOSE(io_unit)
 end subroutine gs_save_fields
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE psi2pt_error(m,n,cofs,err,iflag)
 integer(4), intent(in) :: m,n
 real(8), intent(in) :: cofs(n)
@@ -4187,9 +4189,9 @@ END IF
 call psi_eval_active%interp(cell_active,f,goptmp,psitmp)
 err(1)=psitmp(1)-psi_target_active
 end subroutine psi2pt_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Find position of psi along a vector search direction
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_psi2pt(self,psi_target,pt,pt_con,vec,psi_int)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_target !< Target \f$ \psi \f$ value to find
@@ -4244,16 +4246,16 @@ IF(.NOT.PRESENT(psi_int))CALL psi_eval%delete()
 !---Save back result
 pt=pt_con_active+cofs(1)*vec_con_active
 end subroutine gs_psi2pt
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_psi2r
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Find position of psi along a radial chord
 !!
 !! @param[in,out] self G-S object
 !! @param[in] psi_target
 !! @param[in,out] r
 !! @param[in] z
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_psi2r(self,psi_target,pt,psi_int)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_target
@@ -4263,14 +4265,14 @@ real(8) :: vec(2)
 vec=[1.d0,0.d0]
 CALL gs_psi2pt(self,psi_target,pt,[self%o_point(1),pt(2)],vec,psi_int)
 end subroutine gs_psi2r
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION gs_beta
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute plasma Beta
 !!
 !! @param[in] beta_mr Minor radius for optional calculations
 !! @result Beta by several different metrics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function gs_beta(self,beta_mr) result(beta)
 class(gs_eq), intent(inout) :: self
 real(8), optional, intent(in) :: beta_mr
@@ -4338,13 +4340,13 @@ IF(PRESENT(beta_mr))THEN
   END IF
 END IF
 end function gs_beta
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION gs_estored
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute plasma stored energy
 !!
 !! @result Plasma stored energy \f$ \int P dV \f$ [J]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function gs_estored(self) result(wstored)
 class(gs_eq), intent(inout) :: self
 type(oft_lag_brinterp), target :: psi_eval
@@ -4373,13 +4375,13 @@ do i=1,self%fe_rep%mesh%nc
 end do
 wstored = wstored*2.d0*pi*self%psiscale
 end function gs_estored
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION gs_dflux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute diamagentic flux
 !!
 !! @result Toroidal flux increment due to plasma
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function gs_dflux(self) result(dflux)
 class(gs_eq), intent(inout) :: self
 type(oft_lag_brinterp), target :: psi_eval
@@ -4414,13 +4416,13 @@ do i=1,self%fe_rep%mesh%nc
 end do
 dflux=dflux*self%psiscale
 end function gs_dflux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION gs_tflux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute total enclosed toroidal flux
 !!
 !! @result Toroidal flux enclosed by LCFS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function gs_tflux(self) result(tflux)
 class(gs_eq), intent(inout) :: self
 type(oft_lag_brinterp), target :: psi_eval
@@ -4453,11 +4455,11 @@ do i=1,self%fe_rep%mesh%nc
 end do
 tflux=tflux*self%psiscale
 end function gs_tflux
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_li
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_li(self,psi_lim,li)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_lim
@@ -4492,11 +4494,11 @@ do i=1,self%fe_rep%mesh%nc
 end do
 
 end subroutine gs_li
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_epar
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_epar(self,psi_lim,epar)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_lim
@@ -4536,9 +4538,9 @@ do i=1,self%fe_rep%mesh%nc
 end do
 
 end subroutine gs_epar
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_helicity
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the magnetic energy and helicity of a fixed boundary equilibrium
 !!
 !! @note Helicity computed by this subroutine is only valid for equilibria
@@ -4546,7 +4548,7 @@ end subroutine gs_epar
 !!
 !! @param[out] ener Total magnetic energy
 !! @param[out] helic Total magnetic helicity
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_helicity(self,ener,helic)
 class(gs_eq), intent(inout) :: self
 real(8), intent(out) :: ener,helic
@@ -4591,11 +4593,11 @@ do i=1,self%fe_rep%mesh%nc
   end do
 end do
 end subroutine gs_helicity
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! SUBROUTINE psimax_error
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !>
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE psimax_error(m,n,cofs,err,iflag)
 integer(4), intent(in) :: m,n
 real(8), intent(in) :: cofs(n)
@@ -4612,11 +4614,11 @@ call psi_geval_active%mesh%jacobian(cell_active,f,goptmp,v)
 call psi_geval_active%interp(cell_active,f,goptmp,err_tmp)
 err(1:2)=err_tmp(1:2)
 end subroutine psimax_error
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! SUBROUTINE psimax_error
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !>
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE psimax_error_grad(m,n,cofs,err,jac_mat,ldjac_mat,iflag)
 integer(4), intent(in) :: m,n,ldjac_mat
 real(8), intent(in) :: cofs(n)
@@ -4637,11 +4639,11 @@ ELSE
   jac_mat(2,2)=d2_tmp(4)
 END IF
 end subroutine psimax_error_grad
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_psimax
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_psimax(self,psi_max,r,z)
 class(gs_eq), intent(inout) :: self
 real(8), intent(inout) :: psi_max
@@ -4724,11 +4726,11 @@ call psi_eval%delete()
 call psi_geval%delete()
 call psi_g2eval%delete()
 end subroutine gs_psimax
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_find_xpoint
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_find_xpoint(self,psi_x,r,z)
 class(gs_eq), intent(inout) :: self
 real(8), intent(inout) :: psi_x
@@ -4802,26 +4804,31 @@ psi_x=gpsitmp(1)
 r=ptmp(1)
 z=ptmp(2)
 end subroutine gs_find_xpoint
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Get q profile for equilibrium
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs)
 class(gs_eq), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux surfaces to sample
 real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
 real(8), intent(out) :: prof(nr) !< q value at each sampling location
-real(8), intent(out) :: dl !< Arc length of surface `psi_q(1)`
-real(8), intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)`
-real(8), intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)`
+real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should be LCFS)
+real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
+real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: ravgs(nr,2) !< Flux surface averages <R> and <1/R>
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
-real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
+real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
+logical :: lcfs_all,lcfs_any
 type(gsinv_interp), pointer :: field
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
+lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
+lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
+IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passed if any are','gs_get_qprof',__FILE__)
+IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -4857,7 +4864,7 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-!$omp parallel private(psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
+!$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
@@ -4876,31 +4883,46 @@ active_tracer%inv=.TRUE.
 ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Trace contour
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! psi_surf=(x2-x1)*((j-1)/REAL(nr,8))
   ! psi_surf=x2 - psi_surf
   psi_surf=psi_q(j)*(x2-x1) + x1
-  IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  IF(gseq%diverted.AND.psi_q(j)<=0.02d0)THEN ! Use higher tracing tolerance near divertor
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
   END IF
   !
   pt=pt_last
-  !$omp critical
+  !!$omp critical
   CALL gs_psi2r(gseq,psi_surf,pt,psi_int)
-  !$omp end critical
-  CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2),ptout)
+  !!$omp end critical
   pt_last=pt
+  IF(j==1)THEN
+    CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2),ptout)
+  ELSE
+    CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2))
+  END IF
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN
     WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
     CALL oft_warn(error_str)
     CYCLE
   end if
-  IF(j==1)THEN
+  IF((j==1).AND.PRESENT(dl))THEN
+    !---Extrapolate to real LCFS
+    IF(psi_q(1)<0.05d0)THEN
+      DO i=1,active_tracer%nsteps
+        pt(1:2)=ptout(2:3,i)
+        pt_proj(1:2)=pt(1:2)-gseq%o_point
+        pt_proj=pt_proj/SQRT(SUM(pt_proj(1:2)**2))
+        CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_proj,psi_int)
+        ptout(2:3,i)=pt(1:2)
+      END DO
+    END IF
+    !---Compute geometric parameters
     dl = 0.d0
     rbounds(:,1)=ptout(2:3,1); rbounds(:,2)=ptout(2:3,1)
     zbounds(:,1)=ptout(2:3,1); zbounds(:,2)=ptout(2:3,1)
@@ -4941,9 +4963,9 @@ DEALLOCATE(field)
 !$omp end parallel
 CALL psi_int%delete()
 end subroutine gs_get_qprof
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !>
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_trace_surf(gseq,psi_in,points,npoints)
 class(gs_eq), intent(inout) :: gseq
 real(8), intent(in) :: psi_in
@@ -5026,11 +5048,11 @@ DEALLOCATE(ptout)
 !!$omp end parallel
 CALL psi_int%delete
 end subroutine gs_trace_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_set_cond_weights
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_set_cond_weights(self,vals,skip_fixed)
 class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: vals(:)
@@ -5056,11 +5078,11 @@ DO i=1,self%ncond_regs
   END IF
 END DO
 end subroutine gs_set_cond_weights
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_get_cond_weights
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_get_cond_weights(self,vals,skip_fixed)
 class(gs_eq), intent(inout) :: self
 real(8), intent(inout) :: vals(:)
@@ -5081,11 +5103,11 @@ DO i=1,self%ncond_regs
   END IF
 END DO
 end subroutine gs_get_cond_weights
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_get_cond_scales
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_get_cond_scales(self,vals,skip_fixed)
 class(gs_eq), intent(inout) :: self
 real(8), intent(inout) :: vals(:)
@@ -5102,11 +5124,11 @@ DO i=1,self%ncond_regs
   END IF
 END DO
 end subroutine gs_get_cond_scales
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! FUNCTION gs_eta_spitzer
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function gs_eta_spitzer(T,lambda) result(eta)
 real(8), intent(in) :: T
 real(8), optional, intent(in) :: lambda
@@ -5135,16 +5157,16 @@ CALL self%psi_geval%delete()
 DEALLOCATE(self%psi_eval,self%psi_geval)
 NULLIFY(self%gs,self%mesh)
 end subroutine gs_prof_interp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_rinterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a Grad-Shafranov field
 !!
 !! @param[in] cell Cell for interpolation
 !! @param[in] f Possition in cell in logical coord [4]
 !! @param[in] gop Logical gradient vectors at f [3,4]
 !! @param[out] val Reconstructed field at f [1]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_prof_interp_apply(self,cell,f,gop,val)
 class(gs_prof_interp), intent(inout) :: self
 integer(4), intent(in) :: cell
@@ -5189,14 +5211,14 @@ SELECT CASE(self%mode)
     CALL oft_abort('Unknown field mode','gs_prof_interp_apply',__FILE__)
 END SELECT
 end subroutine gs_prof_interp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct a Grad-Shafranov field
 !!
 !! @param[in] cell Cell for interpolation
 !! @param[in] f Possition in cell in logical coord [4]
 !! @param[in] gop Logical gradient vectors at f [3,4]
 !! @param[out] val Reconstructed field at f [1]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_b_interp_apply(self,cell,f,gop,val)
 class(gs_b_interp), intent(inout) :: self
 integer(4), intent(in) :: cell
@@ -5228,9 +5250,9 @@ ELSE
   val(2)=self%gs%psiscale*self%gs%I%f_offset/(pt(1)+gs_epsilon)
 END IF
 end subroutine gs_b_interp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gsinv_setup(self,lag_rep)
 class(gsinv_interp), intent(inout) :: self
 class(oft_afem_type), target, intent(inout) :: lag_rep
@@ -5244,16 +5266,16 @@ self%mesh=>self%lag_rep%mesh
 NULLIFY(self%uvals)
 CALL self%u%get_local(self%uvals)
 end subroutine gsinv_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gsinv_destroy(self)
 class(gsinv_interp), intent(inout) :: self
 IF(ASSOCIATED(self%uvals))DEALLOCATE(self%uvals)
 end subroutine gsinv_destroy
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gsinv_apply(self,cell,f,gop,val)
 class(gsinv_interp), intent(inout) :: self
 integer(4), intent(in) :: cell
@@ -5290,11 +5312,11 @@ END IF
 ! val(3:8)=val(3:8)
 deallocate(j)
 end subroutine gsinv_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_save_fgrid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_save_fgrid(self,filename)
 class(gs_eq), target, intent(inout) :: self
 character(LEN=*), optional, intent(in) :: filename
@@ -5375,11 +5397,11 @@ DEALLOCATE(solver%pre)
 CALL solver%delete
 DEALLOCATE(solver)
 end subroutine gs_save_fgrid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_save_prof
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_save_prof(self,filename,mpsi_sample)
 class(gs_eq), target, intent(inout) :: self
 character(LEN=*), intent(in) :: filename
@@ -5412,9 +5434,9 @@ DO i=0,m
 END DO
 CLOSE(io_unit)
 end subroutine gs_save_prof
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE: build_mrop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct mass matrix for a boundary Lagrange scalar representation
 !!
 !! Supported boundary conditions
@@ -5423,7 +5445,7 @@ end subroutine gs_save_prof
 !!
 !! @param[in,out] mat Matrix object
 !! @param[in] bc Boundary condition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine build_mrop(fe_rep,mat,bc)
 type(oft_scalar_bfem), intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat
@@ -5440,17 +5462,17 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing Boundary LAG::MOP'
   CALL mytimer%tick()
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   CALL fe_rep%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Operator integration loop
 !$omp parallel private(j,rop,det,mop,curved,goptmp,m,vol,jc,jr,pt)
 allocate(j(fe_rep%nce)) ! Local DOF and matrix indices
@@ -5494,9 +5516,9 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine build_mrop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE: build_dels
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct laplacian matrix for Lagrange scalar representation
 !!
 !! Supported boundary conditions
@@ -5506,7 +5528,7 @@ end subroutine build_mrop
 !!
 !! @param[in,out] mat Matrix object
 !! @param[in] bc Boundary condition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine build_dels(mat,self,bc,dt,scale)
 class(oft_matrix), pointer, intent(inout) :: mat
 class(gs_eq), intent(inout) :: self
@@ -5541,9 +5563,9 @@ smesh=>self%fe_rep%mesh
 !
 nnonaxi=0
 IF(dt_in>0.d0)nnonaxi=self%region_info%nnonaxi
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   !---
   graph1%nr=self%fe_rep%ne
@@ -5603,9 +5625,9 @@ IF(dt_in>0.d0)THEN
     eta_reg(jr)=self%cond_regions(i)%eta
   END DO
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Operator integration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(nnonaxi>0)THEN
   ALLOCATE(nonaxi_vals(self%region_info%block_max+1,self%region_info%nnonaxi))
   nonaxi_vals=0.d0
@@ -5744,11 +5766,11 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine build_dels
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Initialize Grad-Shafranov solution with the Taylor state
 !!
 !! @param[in,out] self G-S object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_destroy(self)
 class(gs_eq), intent(inout) :: self
 integer(i4) :: i,j
@@ -5855,15 +5877,15 @@ END IF
 NULLIFY(self%I,self%P)
 NULLIFY(self%set_eta)
 end subroutine gs_destroy
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE compute_bcmat
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
 !! @param[in,out] a Psi field
 !! @param[in,out] b Source field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine compute_bcmat(self)
 class(gs_eq), intent(inout) :: self
 !---
@@ -6281,15 +6303,15 @@ IF(orient(2)>orient(1))THEN
   END DO
 END IF
 end subroutine get_olbp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE set_bcmat
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
 !! @param[in,out] a Psi field
 !! @param[in,out] b Source field
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine set_bcmat(self,mat)
 class(gs_eq), intent(inout) :: self
 class(oft_matrix), intent(inout) :: mat

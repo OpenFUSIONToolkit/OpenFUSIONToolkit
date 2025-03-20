@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_cubit.F90
 !
 !> Regression tests for the CUBIT mesh interface. Test perform refinements
@@ -14,7 +16,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_cubit
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
@@ -90,9 +92,9 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute volume of the current mesh and output
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE compute_volume
 INTEGER(i4) :: i,m
 REAL(r8) :: v,det,goptmp(3,4),volume
@@ -116,9 +118,9 @@ IF(oft_env%head_proc)THEN
   WRITE(io_unit,*)volume
 END IF
 END SUBROUTINE compute_volume
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute surface area of the current mesh and output
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE compute_area
 INTEGER(i4) :: i,j,m
 REAL(r8) :: a,det,goptmp(3,4),area

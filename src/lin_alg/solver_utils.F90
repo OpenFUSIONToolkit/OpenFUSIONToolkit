@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_solver_utils.F90
 !
 !> Matrix and vector management routines
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date December 2012
 !! @ingroup doxy_oft_lin_alg
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_solver_utils
 USE oft_base
 USE oft_stitching, ONLY: oft_seam, seam_list, oft_global_stitch, &
@@ -32,12 +34,12 @@ USE oft_petsc_solvers, ONLY: oft_petsc_sjacobi_solver, oft_petsc_cg_solver, oft_
 IMPLICIT NONE
 #include "local.h"
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct Multi-Grid preconditioner
 !!
 !! This subroutine is a wrapper around specific subroutines for construction
 !! from an XML specification or standard native/PETSc preconditioners
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine create_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu,xml_root)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
@@ -70,9 +72,9 @@ IF(.NOT.ASSOCIATED(pre))THEN
   END IF
 END IF
 end subroutine create_mlpre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct native Multi-Grid preconditioner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine create_native_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
@@ -216,9 +218,9 @@ DO i=nlevels-1,1,-1
 END DO
 DEBUG_STACK_POP
 end subroutine create_native_mlpre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine create_petsc_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
@@ -378,9 +380,9 @@ DEBUG_STACK_POP
 CALL oft_abort("Not compiled with PETSc", "create_petsc_mlpre", __FILE__)
 #endif
 end subroutine create_petsc_mlpre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_native_solver(solver,solver_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
 CHARACTER(LEN=*), INTENT(in) :: solver_type
@@ -401,9 +403,9 @@ SELECT CASE(TRIM(solver_type))
 END SELECT
 DEBUG_STACK_POP
 end subroutine create_native_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_petsc_solver(solver,solver_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
 CHARACTER(LEN=*), INTENT(in) :: solver_type
@@ -428,9 +430,9 @@ DEBUG_STACK_POP
   CALL oft_abort("Not compiled with PETSc", "create_petsc_solver", __FILE__)
 #endif
 end subroutine create_petsc_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_cg_solver(solver,force_native)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
 LOGICAL, OPTIONAL, INTENT(in) :: force_native
@@ -445,9 +447,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine create_cg_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_gmres_solver(solver,nrits,force_native)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
 INTEGER(i4), OPTIONAL, INTENT(in) :: nrits
@@ -477,9 +479,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine create_gmres_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_solver_xml(solver,solver_node,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node
@@ -557,9 +559,9 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','create_solver_xml',__FILE__)
 #endif
 end subroutine create_solver_xml
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_native_pre(pre,pre_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 CHARACTER(LEN=*), INTENT(in) :: pre_type
@@ -578,9 +580,9 @@ SELECT CASE(TRIM(pre_type))
 END SELECT
 DEBUG_STACK_POP
 end subroutine create_native_pre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_petsc_pre(pre,pre_type)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 CHARACTER(LEN=*), INTENT(in) :: pre_type
@@ -610,9 +612,9 @@ DEBUG_STACK_POP
   CALL oft_abort("Not compiled with PETSc", "create_petsc_pre", __FILE__)
 #endif
 end subroutine create_petsc_pre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_diag_pre(pre)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 LOGICAL :: native_solver
@@ -624,9 +626,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine create_diag_pre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create ILU(0) preconditioner (native or MKL)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_ilu_pre(pre)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 LOGICAL :: native_solver
@@ -638,9 +640,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine create_ilu_pre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE create_bjacobi_pre(pre,nlocal)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 INTEGER(i4), INTENT(in) :: nlocal
@@ -664,9 +666,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine create_bjacobi_pre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_pre_xml(pre,pre_node,native_solver,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
 TYPE(xml_node), POINTER, INTENT(in) :: pre_node
@@ -739,9 +741,9 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','create_pre_xml',__FILE__)
 #endif
 end subroutine create_pre_xml
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine create_ml_xml(pre,Mats,levels,nlevels,ml_vecspace,pre_node,bc)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
