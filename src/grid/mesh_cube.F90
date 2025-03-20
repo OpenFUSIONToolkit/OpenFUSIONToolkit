@@ -53,6 +53,7 @@ mesh_type=1
 ni=1
 rscale=1.d0
 shift=0.d0
+packing=1.d0
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)
