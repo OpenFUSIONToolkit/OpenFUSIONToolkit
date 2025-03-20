@@ -4817,7 +4817,7 @@ real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: ravgs(nr,2) !< Flux surface averages <R> and <1/R>
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
-real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
+real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
@@ -4864,7 +4864,7 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-!$omp parallel private(psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
+!$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
@@ -4899,8 +4899,12 @@ do j=1,nr
   !!$omp critical
   CALL gs_psi2r(gseq,psi_surf,pt,psi_int)
   !!$omp end critical
-  CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2),ptout)
   pt_last=pt
+  IF(j==1)THEN
+    CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2),ptout)
+  ELSE
+    CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2))
+  END IF
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN
     WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
@@ -4912,9 +4916,9 @@ do j=1,nr
     IF(psi_q(1)<0.05d0)THEN
       DO i=1,active_tracer%nsteps
         pt(1:2)=ptout(2:3,i)
-        pt_last(1:2)=pt(1:2)-gseq%o_point
-        pt_last=pt_last/SQRT(SUM(pt_last(1:2)**2))
-        CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_last,psi_int)
+        pt_proj(1:2)=pt(1:2)-gseq%o_point
+        pt_proj=pt_proj/SQRT(SUM(pt_proj(1:2)**2))
+        CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_proj,psi_int)
         ptout(2:3,i)=pt(1:2)
       END DO
     END IF
