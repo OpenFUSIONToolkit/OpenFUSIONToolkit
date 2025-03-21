@@ -42,7 +42,9 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: diag_vals(7) = 0.d0 !< Needs docs
 
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
-  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:,:) :: vel_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velz_bc => NULL() !< vel BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: by_bc => NULL() !< by BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: psi_bc => NULL() !< psi BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
@@ -72,7 +74,9 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8) :: lin_tol = 1.d-8 !< Needs docs
   REAL(r8) :: nl_tol = 1.d-5 !< Needs docs
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
-  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:,:) :: vel_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velz_bc => NULL() !< vel BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: psi_bc => NULL() !< psi BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: by_bc => NULL() !< by BC flag
@@ -83,8 +87,8 @@ TYPE, public :: oft_xmhd_2d_sim
   CLASS(oft_matrix), POINTER :: jacobian => NULL() !< Needs docs
   TYPE(oft_mf_matrix), POINTER :: mf_mat => NULL() !< Matrix free operator
   TYPE(xmhd_2d_nlfun), POINTER :: nlfun => NULL() !< Needs docs
-  TYPE(xml_node), POINTER :: xml_root => NULL() !< XML root element
-  TYPE(xml_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
+  TYPE(fox_node), POINTER :: xml_root => NULL() !< XML root element
+  TYPE(fox_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
   contains
   !> Setup
   PROCEDURE :: setup => setup
@@ -160,7 +164,9 @@ self%nlfun%gamma=self%gamma
 self%nlfun%k_boltz=self%k_boltz
 self%nlfun%m_i=self%m_i
 self%nlfun%n_bc=>self%n_bc
-self%nlfun%vel_bc=>self%vel_bc
+self%nlfun%velx_bc=>self%velx_bc
+self%nlfun%vely_bc=>self%vely_bc
+self%nlfun%velz_bc=>self%velz_bc
 self%nlfun%T_bc=>self%T_bc
 self%nlfun%psi_bc=>self%psi_bc
 self%nlfun%by_bc=>self%by_bc
@@ -475,9 +481,9 @@ DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,btmp,&
 IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%n_bc)
 !TODO: check validity of this usage
-CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),vel_res(1, :),self%vel_bc(1,:))
-CALL fem_dirichlet_vec(oft_blagrange,vel_weights(2, :),vel_res(2, :),self%vel_bc(2,:))
-CALL fem_dirichlet_vec(oft_blagrange,vel_weights(3, :),vel_res(3, :),self%vel_bc(3,:))
+CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),vel_res(1, :),self%velx_bc(:))
+CALL fem_dirichlet_vec(oft_blagrange,vel_weights(2, :),vel_res(2, :),self%vely_bc(:))
+CALL fem_dirichlet_vec(oft_blagrange,vel_weights(3, :),vel_res(3, :),self%velz_bc(:))
 CALL fem_dirichlet_vec(oft_blagrange,T_weights,T_res,self%T_bc)
 CALL fem_dirichlet_vec(oft_blagrange,psi_weights,psi_res,self%psi_bc)
 CALL fem_dirichlet_vec(oft_blagrange,by_weights,by_res,self%by_bc)
@@ -505,11 +511,11 @@ INTEGER(i4) :: i,m,jr,jc, k
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
 REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz, m_i
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-dvel(3,3),div_vel,jac_mat(3,4), jac_det, vtmp(3), btmp(3)
+dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
                                     psi_weights_loc, by_weights_loc, res_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
-REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights, psi_weights, by_weights
+REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights, psi_weights, by_weights, vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
 type(oft_1d_int), allocatable, dimension(:) :: iloc
 class(oft_vector), pointer :: tmp
@@ -702,7 +708,9 @@ DO i=1,smesh%nc
     END DO
   END DO
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%n_bc(cell_dofs),1)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%vel_bc(cell_dofs), 2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velx_bc(cell_dofs), 2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velx_bc(cell_dofs), 2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velx_bc(cell_dofs), 2)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%T_bc(cell_dofs),3)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),4)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs), 5)
@@ -720,9 +728,9 @@ END DO
 DEALLOCATE(tlocks)
 IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%n_bc,1)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(1,:),2)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(2,:),3)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vel_bc(3,:),4)
+CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%velx_bc(:),2)
+CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vely_bc(:),3)
+CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%velz_bc(:),4)
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%T_bc,5)
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%psi_bc,6)
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%by_bc,7)
@@ -795,9 +803,14 @@ subroutine mfnk_update(uin)
   CALL self%fe_rep%vec_create(self%u)
   
 !---Set boundary conditions (Dirichlet for now)
+ALLOCATE(self%n_bc(oft_blagrange%ne))
+self%n_bc=.TRUE.
+
 self%n_bc=>oft_blagrange%be
 self%T_bc=>oft_blagrange%be
-self%vel_bc=>oft_blagrange%be
+self%velx_bc=>oft_blagrange%be
+self%vely_bc=>oft_blagrange%be
+self%velz_bc=>oft_blagrange%be
 self%psi_bc=>oft_blagrange%be
 self%by_bc=>oft_blagrange%be
   
