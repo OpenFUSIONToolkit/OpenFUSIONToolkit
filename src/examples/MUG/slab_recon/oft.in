@@ -1,0 +1,65 @@
+&runtime_options
+ ppn=1
+ debug=0
+/
+
+&mesh_options
+ meshname='slab'
+ cad_type=1
+ nlevels=2
+ nbase=1
+ part_meth=2
+/
+
+&t3d_options
+ filename='slab_gem.t3d'
+ inpname='slab_gem.inp'
+ reflect='xyz'     ! Reflect input grid in all directions
+ ref_per=T,T,F     ! Make grid periodic in the X,Y directions
+/
+
+&slab_recon_options
+ order=2           ! FE order
+ minlev=3          ! Minimum level for MG preconditioning
+ linear=F          ! Perform linear simulation?
+ view_ic=F         ! View initial conditions but do not run simulation
+ plot_run=T        ! Run plotting instead of simulation
+/
+
+&xmhd_options
+ mu_ion=1.         ! Ion mass (atomic units)
+ xmhd_adv_temp=T
+ xmhd_adv_den=T
+ xmhd_ohmic=F      ! Include Ohmic heating
+ xmhd_visc_heat=F  ! Include viscous heating
+ xmhd_hall=F       ! Include Hall terms?
+ bbc='bc'          ! Perfectly-conducting BC for B-field
+ vbc='all'         ! Zero-flow BC for velocity
+ nbc='n'           ! Neumann BC for density
+ tbc='n'           ! Neumann BC for temperature
+ dt=8.e-7          ! Maximum time step
+ eta=742.6         ! Constant resistivity
+! eta_hyper=50.0   ! Hyper-resistivity
+! me_factor=73.446  ! M_e/M_i = 25.0 (as per GEM challenge paper)
+ visc_type='iso'   ! Use isotropic viscosity tensor
+ nu_par=7425.9     ! Fluid viscosity
+ d_dens=10.        ! Density diffusion
+ kappa_par=2943.4  ! Parallel thermal conduction (fixed)
+ kappa_perp=2943.4 ! Perpendicular thermal conduction (fixed)
+ nsteps=1200       ! Number of time steps to take
+ rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
+ rst_freq=10       ! Restart file frequency
+ xmhd_mfnk=T       ! Use matrix-free method
+ lin_tol=1.E-8     ! Linear solver tolerance
+ nl_tol=1.E-6      ! Non-linear solver tolerance
+ ittarget=30       ! Target for # of linear iterations per time step
+ xmhd_prefreq=20   ! Preconditioner update frequency
+ nl_update=3       ! # of NL iterations that causes preconditioner update
+/
+
+&xmhd_plot_options
+ t0=1.E-8
+ dt=8.E-6
+ rst_start=0
+ rst_end=1200
+/
