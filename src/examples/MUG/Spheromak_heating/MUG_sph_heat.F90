@@ -14,7 +14,7 @@
 !! including: 1) Temperature dependent resistivity, 2) Anisotropic thermal conduction and 3)
 !! Ohmic and Viscous heating.
 !!
-!! The dynamics in this example will be prdominetly limited to heating. However, if the
+!! The dynamics in this example will be predominetly limited to heating. However, if the
 !! simulation is run long enough evolution of the equilibrium profile will be observed and
 !! eventual instability due to current peaking will occur.
 !!

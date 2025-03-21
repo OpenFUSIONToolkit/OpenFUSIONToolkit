@@ -374,7 +374,7 @@ TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_J => NULL() !< MG Jacobian ope
 CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
 INTEGER(i4) :: xmhd_prefreq = 30 !< Desired update frequency for preconditioner
 INTEGER(i4) :: xmhd_opcount = 1 !< Number of time steps since preconditioner update
-INTEGER(i4) :: xmhd_nparts = 1 !< Number of local partitions for preconditioning
+INTEGER(i4), DIMENSION(fem_max_levels) :: xmhd_nparts = 1 !< Number of local partitions for preconditioning
 REAL(r8) :: xmhd_opdt = 1.d0 !< Time step for current preconditioner object
 LOGICAL :: xmhd_mfnk = .FALSE. !< Use Jacobian free non-linear advance
 !---Interpolator cache variables
@@ -1555,7 +1555,7 @@ DEBUG_STACK_PUSH
 IF(oft_debug_print(2))write(*,'(4X,A,I4)')'Building xMHD Jacobian: ',xmhd_level
 !---
 Jac=>oft_xmhd_ops%J
-quad=>oft_hcurl%quad
+quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
 tgam_fac=temp_gamma - 1.d0
 !------------------------------------------------------------------------------
 ! Reset matrices
@@ -2521,7 +2521,7 @@ do level=levelin,xmhd_minlev,-1
   CALL xmhd_rep%mat_create(ops%J,xmhd_mat_mask)
   ml_J(level-xmhd_minlev+1)%m=>ops%J
   !---Set element coloring
-  IF(xmhd_nparts>1)THEN
+  IF(xmhd_nparts(level)>1)THEN
     SELECT TYPE(this=>ops%J)
       CLASS IS(oft_native_matrix)
         ALLOCATE(this%color(this%nr))
@@ -2531,7 +2531,7 @@ do level=levelin,xmhd_minlev,-1
           ALLOCATE(color_tmp(xmhd_rep%fields(i)%fe%ne))
           SELECT TYPE(this=>xmhd_rep%fields(i)%fe)
           CLASS IS(oft_fem_type)
-            CALL fem_partition(this,color_tmp,xmhd_nparts)
+            CALL fem_partition(this,color_tmp,xmhd_nparts(level))
           CLASS DEFAULT
             CALL oft_abort("Invalid FE representation for partitioning", &
               "xmhd_alloc_ops",__FILE__)
@@ -4604,6 +4604,9 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2X,A)')'Starting xMHD post-processing'
 END IF
 mg_mesh=>xmhd_ML_hcurl%ml_mesh
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_plot",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_plot",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,xmhd_ML_h1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_plot",__FILE__)
 mesh=>oft_hcurl%mesh
 file_list="none"
 open(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -4743,7 +4746,7 @@ IF(linear)THEN
 ! Project magnetic field and plot
 !------------------------------------------------------------------------------
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup(oft_hcurl,oft_hgrad)
+  CALL Bfield%setup(xmhd_ML_hcurl_grad%current_level)
   CALL oft_lag_vproject(oft_lagrange,Bfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
@@ -4756,7 +4759,7 @@ IF(linear)THEN
   CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
-  CALL Jfield%setup(oft_hcurl,oft_hgrad)
+  CALL Jfield%setup(xmhd_ML_hcurl_grad%current_level)
   CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
@@ -4926,7 +4929,7 @@ DO
 ! Project magnetic field and plot
 !------------------------------------------------------------------------------
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup(oft_hcurl,oft_hgrad)
+      CALL Bfield%setup(xmhd_ML_hcurl_grad%current_level)
       CALL oft_lag_vproject(oft_lagrange,Bfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
@@ -4954,7 +4957,7 @@ DO
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
-      CALL Jfield%setup(oft_hcurl,oft_hgrad)
+      CALL Jfield%setup(xmhd_ML_hcurl_grad%current_level)
       CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
