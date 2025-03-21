@@ -1,3 +1,8 @@
+!------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !!MUG Example: Slab Reconnection    {#doc_mug_recon_ex}
 !!============================
 !!
@@ -7,9 +12,15 @@
 !! this example reconnection in a periodic-slab current sheet will be simulated following
 !! the setup used to the [GEM Challange](https://doi.org/10.1029/1999JA900449).
 !!
+!!\section doc_mug_recon_ex_code_helper Code Walk Through
+!!
+!! The code consists of two components. First, a helper module is defined that includes
+!! class implementations and other components for initialization and post-processing and 
+!! the main run program.
+!!
 !!\section doc_mug_recon_ex_code_helper Helper module
 !!
-!! Need docs
+!! As usual, we start with a few module imports for required functionality.
 ! START SOURCE
 MODULE GEM_helpers
 USE oft_base
@@ -22,6 +33,13 @@ USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp
 USE diagnostic, ONLY: flux_probe
 USE xmhd, ONLY: oft_xmhd_driver, oft_xmhd_probe, xmhd_sub_fields, xmhd_ML_hcurl_grad, xmhd_ML_hcurl
 IMPLICIT NONE
+!!\subsection doc_mug_recon_ex_code_helper_classes Class definitions
+!!
+!! Now we define a class for generating the initial condition through an implementation
+!! of \ref fem_utils::fem_interp "fem_interp" for the current sheet and perturbation field.
+!! Additionally, we define a class by extending the abstract \ref xmhd::oft_xmhd_probe "oft_xmhd_probe"
+!! class, which will be used during post-processing (\ref xmhd::xmhd_plot "xmhd_plot") to evaluate
+!! the reconnected flux as a function of time.
 !---------------------------------------------------------------------------
 ! Field interpolation object for intial conditions
 !---------------------------------------------------------------------------
@@ -50,7 +68,16 @@ END TYPE GEM_probe
 CONTAINS
 !!\subsection doc_mug_recon_ex_code_helper_interp Initial condition field interpolator
 !!
-!! Need docs
+!! To set the initial conditions we define a single interpolation object/function, with
+!! a switch for each of the fields with non-uniform initial distributions. Uniform fields
+!! are set in the main run program as they do not require FE projection.
+!!
+!! The non-uniform initial conditions for this case is given by
+!! \f[ n_0 = (cosh(z / \lambda))^{-2} + n_{\infty} \f]
+!! \f[ B_0 = tanh(z / \lambda) \hat{x} \f]
+!!
+!! The perturbation is then given by
+!! \f[ \delta B = -\frac{\pi}{L_z} cos(2 \pi x / L_x) sin(\pi z / L_z) \hat{x} + \frac{2 \pi}{L_x} sin(2 \pi x / L_x) cos(\pi z / L_z) \hat{x} \f]
 SUBROUTINE GEM_interp_apply(self,cell,f,gop,val)
 CLASS(GEM_interp), INTENT(inout) :: self ! Needs docs
 INTEGER(4), INTENT(in) :: cell ! Needs docs
@@ -78,7 +105,12 @@ END SELECT
 END SUBROUTINE GEM_interp_apply
 !!\subsection doc_mug_recon_ex_code_helper_probe Reconnected flux probe
 !!
-!! Need docs
+!! Arbitrary signals can be computed for post-processing by passing an
+!! implementation of \ref xmhd::oft_xmhd_probe "oft_xmhd_probe" to \ref xmhd::xmhd_plot "xmhd_plot".
+!! In this case we compute the flux in the half plane (\f$ z>0; x=0 \f$), which can then be used
+!! to compute the "reconnected flux" as \f$ \Psi(t_0) - Psi(t) \f$. On the first call a
+!! \ref diagnostic::flux_probe "flux_probe" object is initialized and used on subsequent calls,
+!! whose result it save to a history file.
 SUBROUTINE GEM_probe_apply(self,sub_fields,t)
 CLASS(GEM_probe), INTENT(inout) :: self ! Needs docs
 type(xmhd_sub_fields), intent(inout) :: sub_fields ! Needs docs
@@ -124,9 +156,10 @@ IF(oft_env%head_proc)THEN
 END IF
 END SUBROUTINE GEM_probe_apply
 END MODULE GEM_helpers
-!!\section doc_ex6_code_driver Driver program
+!!\section doc_mug_recon_ex_driver Driver program
 !!
-!! Need docs
+!! With supporting infrasturcture defined, we now follow a similar structure to \ref doc_mug_sph_ex1 and \ref doc_mug_sph_ex2
+!! for the main run program.
 PROGRAM MUG_slab_recon
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
@@ -156,6 +189,11 @@ USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_minlev, temp_floor, den_floor, den_sca
 !---Self
 USE GEM_helpers, ONLY: GEM_interp, GEM_probe
 IMPLICIT NONE
+!!\subsection doc_mug_sph_ex2_code_vars Local Variables
+!! Next we define the local variables needed to initialize our case and
+!! run the time-dependent solve and post-processing. Compared to previous
+!! examples, we now have specialized initial condition and post-processing
+!! objects.
 !---Fixed scaling parameters
 REAL(8), PARAMETER :: N0 = 5.196374d16
 REAL(8), PARAMETER :: T0 = 1.d2
@@ -184,9 +222,8 @@ LOGICAL :: linear = .FALSE.
 LOGICAL :: plot_run = .FALSE.
 LOGICAL :: view_ic = .FALSE.
 NAMELIST/slab_recon_options/order,minlev,linear,db,plot_run,view_ic,pm
-!!\subsection doc_ex6_code_driver_init Grid and FE setup
-!!
-!! Need docs
+!!\subsection doc_mug_recon_ex_driver_setup OFT Initialization
+!! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -219,16 +256,23 @@ ALLOCATE(xmhd_ML_hcurl_grad,xmhd_ML_H1grad)
 CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,minlev=minlev)
 CALL hcurl_grad_setup_interp(xmhd_ML_hcurl_grad,xmhd_ML_H1)
 hcurl_grad_gzerop%ML_hcurl_grad_rep=>xmhd_ML_hcurl_grad
-!---------------------------------------------------------------------------
-! If plot run, just run and finish
-!---------------------------------------------------------------------------
+!!\subsection doc_mug_recon_ex_driver_plot Perform post-processing
+!!
+!! To visualize the solution fields once a simulation has completed the \ref xmhd::xmhd_plot
+!! "xmhd_plot" subroutine is used. This subroutine steps through the restart files
+!! produced by \ref xmhd::xmhd_run "xmhd_run" and generates plot files, and in our case
+!! probe signals for the half-plane flux at evenly spaced points in time as specified in
+!! the input file, see \ref xmhd::xmhd_plot "xmhd_plot" and \ref doc_mug_recon_ex_post.
 IF(plot_run)THEN
   CALL xmhd_plot(GEM_probes)
   CALL oft_finalize
 END IF
-!!\subsection doc_ex6_code_driver_ic Initial conditions
+!!\subsection doc_mug_recon_ex_driver_ic Initial conditions
 !!
-!! Need docs
+!! For this simulation we set every field using either uniform fields or using our interpolation
+!! object. As all non-zero uniform fields utilize a nodel basis, they can be set simply using `%set()`
+!! on the relevant vector object. For non-uniform fields, we use the usual projection times mass inverse
+!! method to map the field onto a given FE representation.
 !---Set constant initial temperature
 CALL xmhd_ML_lagrange%vec_create(ic_fields%Ti)
 CALL ic_fields%Ti%set(T0)
@@ -315,9 +359,10 @@ CALL minv%pre%delete ! Destroy preconditioner
 DEALLOCATE(minv%pre)
 CALL minv%delete ! Destroy solver
 DEALLOCATE(minv)
-!---------------------------------------------------------------------------
-! Save initial conditions if desired
-!---------------------------------------------------------------------------
+!!\subsubsection doc_mug_recon_ex_driver_ic_plot Plot initial conditions
+!!
+!! We also add the ability to visualize the initial conditions before running the simulation
+!! to verify expected distribution.
 IF(view_ic)THEN
   !---Set up output arrays for plotting
   NULLIFY(vals)
@@ -396,9 +441,22 @@ IF(view_ic)THEN
   !---Finalize enviroment
   CALL oft_finalize
 END IF
-!!\subsection doc_ex6_code_driver_run Run simulation
+!!\subsection doc_mug_recon_ex_driver_run Run simulation
 !!
-!! Need docs
+!!
+!! Finally, the simulation can be run using either the driver routine for linear
+!! (\ref xmhd::xmhd_lin_run "xmhd_lin_run") or non-linear MHD (\ref xmhd::xmhd_run "xmhd_run").
+!! These routines both advance the solution in time with the physics specified in the input file,
+!! see the documentation for \ref xmhd::xmhd_lin_run "xmhd_lin_run" and \ref xmhd::xmhd_run "xmhd_run",
+!! and produces restart files that contain the solution at different times.
+!!
+!! Several quantities are also recorded to a history file `xmhd.hist` during
+!! the simulation. The data in the history file may be plotted using the script
+!! `plot_mug_hist.py`, which is located in `src/utilities/scripts` or `python` directories for the
+!! repository and an installation respectively.
+!!
+!! \note OFT plotting scripts require the python packages `numpy` and `matplotlib` as well
+!! as path access to the python modules provided in `python` for installations or `src/utilities` in the repo.
 xmhd_minlev=minlev  ! Set minimum level for multigrid preconditioning
 den_scale=N0        ! Set density scale
 oft_env%pm=pm       ! Show linear iteration progress?
@@ -422,9 +480,10 @@ END PROGRAM MUG_slab_recon
 !!\section doc_mug_recon_ex_input Input file
 !!
 !! Below is an input file which can be used with this example in a parallel environment.
-!! As with \ref doc_ex6 "Example 6" this example should only be run with multiple processes.
-!! Some annotation of the options is provided inline below, for more information on the
-!! available options in the \c xmhd_options group see \ref xmhd::xmhd_plot "xmhd_plot".
+!! As with \ref doc_mug_sph_ex1 and \ref doc_mug_sph_ex2 this example should only be run
+!! with multiple processes. Some annotation of the options is provided inline below, for
+!! more information on the available options in the `xmhd_options` group see
+!! \ref xmhd::xmhd_run "xmhd_run".
 !!
 !!\verbatim
 !!&runtime_options
@@ -513,6 +572,8 @@ END PROGRAM MUG_slab_recon
 !!\subsection doc_mug_recon_ex_input_plot Post-Processing options
 !!
 !! When running the code for post-processing additional run time options are available.
+!! Some annotation of the options is provided inline below, for more information on the
+!! available options in the `xmhd_plot_options` group see \ref xmhd::xmhd_plot "xmhd_plot".
 !!
 !!\verbatim
 !!&xmhd_plot_options
@@ -523,4 +584,5 @@ END PROGRAM MUG_slab_recon
 !!/
 !!\endverbatim
 !!
-!! \image html example_gem-result.png "Resulting current distribution for the first eigenmode"
+!! \image html example_gem-result_J.png "Resulting current distribution at t=?"
+!! \image html example_gem-result_V.png "Resulting velocity magnitude distribution at t=?"

@@ -241,7 +241,7 @@ END PROGRAM MUG_sph_tilt
 !! Below is an input file which can be used with this example in a parallel environment. This example
 !! should not be run with only a single process as solving the time-depedent MHD equations is
 !! significantly more challenging than previous examples. For more information on the options in the
-!! `xmhd_options` group see \ref xmhd::xmhd_plot "xmhd_plot".
+!! `xmhd_options` group see \ref xmhd::xmhd_run "xmhd_run".
 !!
 !!\verbatim
 !!&runtime_options
