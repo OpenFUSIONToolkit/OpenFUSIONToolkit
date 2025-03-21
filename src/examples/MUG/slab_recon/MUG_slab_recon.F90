@@ -443,7 +443,6 @@ IF(view_ic)THEN
 END IF
 !!\subsection doc_mug_recon_ex_driver_run Run simulation
 !!
-!!
 !! Finally, the simulation can be run using either the driver routine for linear
 !! (\ref xmhd::xmhd_lin_run "xmhd_lin_run") or non-linear MHD (\ref xmhd::xmhd_run "xmhd_run").
 !! These routines both advance the solution in time with the physics specified in the input file,
@@ -487,55 +486,62 @@ END PROGRAM MUG_slab_recon
 !!
 !!\verbatim
 !!&runtime_options
-!! ppn=1
-!! debug=0
+!! ppn=1               ! Number of processors/tasks per node (used for heirarchical domain decomposition)
+!! debug=0             ! Debug level (0-3)
 !!/
 !!
 !!&mesh_options
-!! meshname='slab'
-!! cad_type=1
-!! nlevels=2
-!! nbase=1
+!! meshname='slab'     ! Meshname (unused at present)
+!! cad_type=1          ! Mesh format type (1 -> native)
+!! nlevels=2           ! Number of total grid levels (see docs for more information)
+!! nbase=1             ! Number grid levels before domain decomposition (see docs for more information)
+!! part_meth=2         ! Partition "uniformly" along x-axis
 !!/
 !!
 !!&t3d_options
 !! filename='slab_gem.t3d'
 !! inpname='slab_gem.inp'
-!! reflect='xyz'     ! Reflect input grid in all directions
-!! ref_per=T,T,F     ! Make grid periodic in the X,Y directions
+!! reflect='xyz'       ! Reflect input grid in all directions
+!! ref_per=T,T,F       ! Make grid periodic in the X,Y directions
 !!/
 !!
 !!&slab_recon_options
-!! order=2           ! FE order
-!! minlev=2          ! Minimum level for MG preconditioning
-!! view_ic=F         ! View initial conditions but do not run simulation
-!! plot_run=F        ! Run plotting instead of simulation
+!! order=2             ! FE order
+!! minlev=2            ! Minimum level for MG preconditioning
+!! linear=F            ! Perform linear simulation?
+!! view_ic=F           ! View initial conditions but do not run simulation
+!! plot_run=F          ! Run plotting instead of simulation
+!! pm=F                ! View extended linear and non-linear iteration output?
 !!/
 !!
 !!&xmhd_options
-!! mu_ion=1.         ! Ion mass (atomic units)
-!! xmhd_ohmic=T      ! Include Ohmic heating
-!! xmhd_visc_heat=T  ! Include viscous heating
-!! bbc='bc'          ! Perfectly-conducting BC for B-field
-!! vbc='all'         ! Zero-flow BC for velocity
-!! nbc='n'           ! Neumann BC for density
-!! tbc='n'           ! Neumann BC for temperature
-!! dt=4.e-7          ! Maximum time step
-!! eta=978.7         ! Constant resistivity
-!! visc_type='iso'   ! Use isotropic viscosity tensor
-!! nu_par=9877.0     ! Fluid viscosity
-!! d_dens=10.        ! Density diffusion
-!! kappa_par=3914.9  ! Parallel thermal conduction (fixed)
-!! kappa_perp=3914.9 ! Perpendicular thermal conduction (fixed)
-!! nsteps=2000       ! Number of time steps to take
-!! rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
-!! rst_freq=10       ! Restart file frequency
-!! xmhd_mfnk=T       ! Use matrix-free method
-!! lin_tol=1.E-8     ! Linear solver tolerance
-!! nl_tol=1.E-6      ! Non-linear solver tolerance
-!! nu_xmhd=0,20,5    ! Number of smoother iterations for default preconditioner
-!! ittarget=30       ! Target for # of linear iterations per time step
-!! xmhd_prefreq=20   ! Preconditioner update frequency
+!! mu_ion=1.           ! Ion mass (atomic units)
+!! xmhd_ohmic=T        ! Include Ohmic heating
+!! xmhd_visc_heat=T    ! Include viscous heating
+!! xmhd_hall=F         ! Include Hall terms?
+!! bbc='bc'            ! Perfectly-conducting BC for B-field
+!! vbc='all'           ! Zero-flow BC for velocity
+!! nbc='n'             ! Neumann BC for density
+!! tbc='n'             ! Neumann BC for temperature
+!! dt=8.e-7            ! Maximum time step
+!! eta=742.6           ! Constant resistivity
+!!! eta_hyper=50.0      ! Hyper-resistivity
+!!! me_factor=73.446    ! M_e/M_i = 25.0 (as per GEM challenge paper)
+!! visc_type='iso'     ! Use isotropic viscosity tensor
+!! nu_par=7425.9       ! Fluid viscosity
+!! d_dens=50.          ! Density diffusion
+!! kappa_par=2943.4    ! Parallel thermal conduction (fixed)
+!! kappa_perp=2943.4   ! Perpendicular thermal conduction (fixed)
+!! nsteps=1000         ! Number of time steps to take
+!! rst_ind=0           ! Index of file to restart from (0 -> use subroutine arguments)
+!! rst_freq=10         ! Restart file frequency
+!! xmhd_mfnk=T         ! Use matrix-free method
+!! lin_tol=1.E-8       ! Linear solver tolerance
+!! nl_tol=1.E-6        ! Non-linear solver tolerance
+!! ittarget=30         ! Target for # of linear iterations per time step
+!! xmhd_prefreq=20     ! Preconditioner update frequency
+!! xmhd_nparts=0,20,40 ! Number of parts for local matrix decomposition
+!! nl_update=3         ! # of NL iterations that causes preconditioner update
 !!/
 !!\endverbatim
 !!
@@ -543,9 +549,8 @@ END PROGRAM MUG_slab_recon
 !!
 !! Time dependent MHD solvers are accelerated significantly by the use of
 !! a more sophisticated preconditioner than the default method. Below is
-!! an example `oft_in.xml` file that constructs an appropriate ILU(0) preconditioner.
-!! Currently, this preconditioner method is the suggest starting preconditioner for all
-!! time-dependent MHD solves.
+!! an example `oft_in.xml` file that constructs an appropriate multi-grid preconditioner
+!! that uses GRMES+Block-Jacobi+LU on each level.
 !!
 !! This solver can be used by specifying both the FORTRAN input and XML input files
 !! to the executable as below.
@@ -557,23 +562,39 @@ END PROGRAM MUG_slab_recon
 !!```xml
 !!<oft>
 !!  <xmhd>
-!!    <pre type="gmres">
-!!      <its>8</its>
-!!      <nrits>8</nrits>
-!!      <pre type="block_jacobi">
-!!        <nlocal>-1</nlocal>
-!!        <solver type="ilu"></solver>
-!!      </pre>
+!!    <pre type="mg">
+!!      <smoother direction="up">
+!!        <solver type="gmres">
+!!          <its>2</its>
+!!          <nrits>2</nrits>
+!!          <pre type="block_jacobi">
+!!            <nlocal>2</nlocal>
+!!            <solver type="lu"></solver>
+!!          </pre>
+!!        </solver>
+!!      </smoother>
 !!    </pre>
 !!  </xmhd>
 !!</oft>
 !!```
 !!
-!!\subsection doc_mug_recon_ex_input_plot Post-Processing options
+!!\section doc_mug_recon_ex_post Post-Processing options
 !!
-!! When running the code for post-processing additional run time options are available.
-!! Some annotation of the options is provided inline below, for more information on the
-!! available options in the `xmhd_plot_options` group see \ref xmhd::xmhd_plot "xmhd_plot".
+!! During the simulation the evolution of some global quantities is written to the history file `xmhd.hist`. A utility
+!! script (`plot_mug_hist.py` located in `bin` after installation) is included as part of OFT for plotting the signals in this file.
+!! This is useful for monitoring general progress of the simulation as well as numerical parameters like the iteration
+!! count and solver time. Using this script we can see the instability growth and relaxation of the initial magnetic
+!! equilibrium to the lowest energy state.
+!!
+!!\verbatim
+!!~$ python plot_mug_hist.py xmhd.hist
+!!\endverbatim
+!!
+!!\subsection doc_mug_recon_ex_post_plot Creating plot files
+!!
+!! To generate 3D plots, and perform additional diagnostic sampling (see \ref xmhd::oft_xmhd_probe "oft_xmhd_probe"), a plot run can
+!! be performed by setting `plot_run=T` in the `slab_recon_options` input group, which calls \ref xmhd::xmhd_plot "xmhd_plot". With this option
+!! additional run time options are available in the `xmhd_plot_options` group that control how restart files are sampled for plotting.
 !!
 !!\verbatim
 !!&xmhd_plot_options
@@ -584,5 +605,8 @@ END PROGRAM MUG_slab_recon
 !!/
 !!\endverbatim
 !!
-!! \image html example_gem-result_J.png "Resulting current distribution at t=?"
-!! \image html example_gem-result_V.png "Resulting velocity magnitude distribution at t=?"
+!! Once the post-processing run is complete `bin/build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
+!! [VisIt](https://visit-dav.github.io/visit-website/index.html), [ParaView](https://www.paraview.org/), or other visualization programs.
+!!
+!! \image html MUG_gem_ex-J.png "Resulting current distribution at final time"
+!! \image html MUG_gem_ex-V.png "Resulting velocity magnitude distribution at final time"

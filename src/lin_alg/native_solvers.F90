@@ -1788,7 +1788,7 @@ IF(.NOT.self%initialized)THEN
       self%nlocal=self%nlocal*ncolors
       color_avail=.TRUE.
     ELSE IF((self%nlocal>1).AND.(ncolors>1))THEN
-      IF(self%nlocal/=ncolors)WRITE(*,'(A,I4,A,X,I4)')'[',oft_env%rank,'] Updating number of local parts to match coloring',ncolors
+      IF(oft_env%head_proc.AND.self%nlocal/=ncolors)WRITE(*,'(A,I4,A,X,I4)')'[',oft_env%rank,'] Updating number of local parts to match coloring',ncolors
       self%nlocal=ncolors
       color_avail=.TRUE.
     END IF
