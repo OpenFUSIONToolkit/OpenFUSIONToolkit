@@ -733,8 +733,8 @@ DO i=1,smesh%nc
   END DO
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%n_bc(cell_dofs),1)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velx_bc(cell_dofs), 2)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velx_bc(cell_dofs), 2)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velx_bc(cell_dofs), 2)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%vely_bc(cell_dofs), 3)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velz_bc(cell_dofs), 4)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%T_bc(cell_dofs),3)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),4)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs), 5)
