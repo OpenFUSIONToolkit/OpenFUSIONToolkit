@@ -193,8 +193,7 @@ IF(oft_env%head_proc)THEN
   IF(ierr<0)CALL oft_abort('No "cubit_options" found in input file.','mesh_cubit_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cubit_options" in input file.','mesh_cubit_load',__FILE__)
   IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','mesh_cubit_load',__FILE__)
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'**** Loading Cubit mesh'
+  WRITE(*,'(2A)')oft_indent,'CUBIT volume mesh:'
   CALL oft_increase_indent
   WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
   WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
@@ -517,8 +516,7 @@ IF(oft_env%head_proc)THEN
   IF(ierr<0)CALL oft_abort('No "cubit_options" found in input file.','smesh_cubit_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cubit_options" in input file.','smesh_cubit_load',__FILE__)
   IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','smesh_cubit_load',__FILE__)
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'**** Loading CUBIT surface mesh'
+  WRITE(*,'(2A)')oft_indent,'CUBIT surface mesh:'
   CALL oft_increase_indent
   WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
 ELSE

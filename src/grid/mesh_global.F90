@@ -1048,12 +1048,8 @@ IF(self%periodic%nper>0)THEN
     child_list=0
     DO m=1,self%nbe
       mm=self%lbe(m)
-      DO
-        IF(self%periodic%le(mm)<=0)EXIT
-        mm=self%periodic%le(mm)
-      END DO
-      IF(mm/=self%lbe(m))THEN
-        mm=bei(mm)
+      IF(self%periodic%le(mm)>0)THEN
+        mm=bei(self%periodic%le(mm))
         DO i=1,4
           IF(child_list(i,mm)==0)THEN
             child_list(i,mm)=m
@@ -1075,8 +1071,8 @@ IF(self%periodic%nper>0)THEN
           lesend(1)%re(child_list(i,m))=-1.d0
           neel=neel+2
           IF(set_gbe)THEN ! Edge is not on global boundary
-            self%global%gbe(mm)=.FALSE.
-            self%global%gbe(self%periodic%le(mm))=.FALSE.
+            self%global%gbe(self%lbe(m))=.FALSE.
+            self%global%gbe(self%lbe(child_list(i,m)))=.FALSE.
           END IF
           !---Link other child edges to eachother
           DO j=i+1,4

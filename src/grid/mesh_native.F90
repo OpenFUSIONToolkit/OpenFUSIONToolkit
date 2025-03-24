@@ -83,9 +83,9 @@ IF(oft_env%head_proc)THEN
         IF(ierr>0)CALL oft_abort('Error parsing "native_mesh_options" in input file.','native_load_vmesh',__FILE__)
         IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','native_load_vmesh',__FILE__)
         !
-        WRITE(*,*)
-        WRITE(*,'(A)')'**** Loading OFT mesh'
-        WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
+        WRITE(*,'(2A)')oft_indent,'Native volume mesh:'
+        CALL oft_increase_indent
+        WRITE(*,'(3A)')oft_indent,'Filename = ',TRIM(filename)
     END IF
 END IF
 !---Broadcast input information
@@ -194,17 +194,16 @@ ELSE
         CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
         ALLOCATE(per_nodes(dim_sizes(1)))
         CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
-        WRITE(*,*)'Found periodic points',dim_sizes(1)
+        WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF
-!
-IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
 IF(reflect)THEN
     call mesh_global_resolution(mesh)
     call native_reflect(mesh,.1d0*mesh%hmin)
 END IF
 IF(oft_env%rank/=0)DEALLOCATE(mesh%r,mesh%lc,mesh%reg)
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine native_load_vmesh
 !---------------------------------------------------------------------------------
@@ -239,9 +238,9 @@ IF(oft_env%head_proc)THEN
         IF(ierr>0)CALL oft_abort('Error parsing "native_mesh_options" in input file.','native_load_smesh',__FILE__)
         IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','native_load_smesh',__FILE__)
         !
-        WRITE(*,*)
-        WRITE(*,'(A)')'**** Loading OFT surface mesh'
-        WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
+        WRITE(*,'(2A)')oft_indent,'Native surface mesh:'
+        CALL oft_increase_indent
+        WRITE(*,'(3A)')oft_indent,'Filename = ',TRIM(filename)
     END IF
 END IF
 !---Broadcast input information
@@ -363,15 +362,16 @@ ELSE
         CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
         ALLOCATE(per_nodes(dim_sizes(1)))
         CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+        WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF
-IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
 IF(reflect)THEN
     call mesh_global_resolution(smesh)
     call native_reflect(smesh,.1d0*smesh%hmin)
 END IF
 IF(oft_env%rank/=0)DEALLOCATE(smesh%r,smesh%lc,smesh%reg)
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine native_load_smesh
 !---------------------------------------------------------------------------------
@@ -582,11 +582,23 @@ end subroutine native_hobase_hex
 subroutine native_reflect(self,tol)
 CLASS(oft_amesh), intent(inout) :: self !< Mesh to reflect
 real(r8), intent(in) :: tol !< tol Tolerance for marking point as on the reflection plane
-integer(i4) :: npold,neold,nfold,ncold,i,j,ic,is,cid_max,sid_max,nreg,npold_ho,ne_ho,nf_ho,np_per
+integer(i4) :: npold,neold,nfold,ncold,i,j,ic,is,cid_max,sid_max,nreg,npold_ho,ne_ho,nf_ho,np_per,ref_index
 integer(i4), allocatable :: newindex(:),hoindex(:),regtmp(:),ltemp(:,:)
 real(r8), allocatable :: rtemp(:,:),rlftemp(:,:),rctemp(:,:)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting mesh -> z'
+SELECT TYPE(self)
+CLASS IS(oft_bmesh)
+  IF(self%dim==2)THEN
+    ref_index=1
+    IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting 2D surface mesh -> x'
+  ELSE
+    ref_index=3
+    IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting 3D surface mesh -> z'
+  END IF
+CLASS IS(oft_mesh)
+  ref_index=3
+  IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting 3D volume mesh -> z'
+END SELECT
 CALL oft_increase_indent
 !---Reflect points that are not on reflection plane
 npold=self%np
@@ -594,13 +606,13 @@ allocate(newindex(2*self%np),rtemp(3,2*self%np))
 rtemp(:,1:self%np)=self%r
 deallocate(self%r)
 do i=1,npold
-    IF(ABS(rtemp(3,i))<=tol)THEN
-        rtemp(3,i)=0.d0
+    IF(ABS(rtemp(ref_index,i))<=tol)THEN
+        rtemp(ref_index,i)=0.d0
         newindex(i)=i
     ELSE
         self%np=self%np+1
         rtemp(:,self%np) = rtemp(:,i)
-        rtemp(3,self%np) =-rtemp(3,i)
+        rtemp(ref_index,self%np) =-rtemp(ref_index,i)
         newindex(i)=self%np
     ENDIF
 enddo
@@ -636,13 +648,13 @@ IF(np_ho>0)THEN
     deallocate(le_ho)
     ne_ho=neold
     DO i=1,neold
-        IF(ABS(rtemp(3,i))<=tol)THEN
-            rtemp(3,i)=0.d0
+        IF(ABS(rtemp(ref_index,i))<=tol)THEN
+            rtemp(ref_index,i)=0.d0
         ELSE
             ne_ho=ne_ho+1
             ltemp(:,ne_ho) = newindex(ltemp(:,i))
             rtemp(:,ne_ho) = rtemp(:,i)
-            rtemp(3,ne_ho) =-rtemp(3,i)
+            rtemp(ref_index,ne_ho) =-rtemp(ref_index,i)
         ENDIF
     END DO
     allocate(le_ho(2,ne_ho))
@@ -688,21 +700,14 @@ IF(np_ho>0)THEN
       CLASS IS(oft_bmesh)
         IF(npold>neold)THEN
             np_ho = ne_ho+self%nc
-            allocate(rctemp(3,np_ho))
+            allocate(rctemp(ref_index,np_ho))
             rctemp(:,1:ne_ho)=rtemp(:,1:ne_ho)
             deallocate(rtemp)
             rctemp(:,ne_ho+1:ne_ho+ncold) = r_ho(:,neold+1:neold+ncold)
-            IF(self%dim==2)THEN
-                DO i=1,ncold
-                    rctemp(:,ne_ho+ncold+i) = rctemp(:,ne_ho+i)
-                    rctemp(1,ne_ho+ncold+i) =-rctemp(1,ne_ho+i)
-                END DO
-            ELSE
-                DO i=1,ncold
-                    rctemp(:,ne_ho+ncold+i) = rctemp(:,ne_ho+i)
-                    rctemp(3,ne_ho+ncold+i) =-rctemp(3,ne_ho+i)
-                END DO
-            END IF
+            DO i=1,ncold
+                rctemp(:,ne_ho+ncold+i) = rctemp(:,ne_ho+i)
+                rctemp(ref_index,ne_ho+ncold+i) =-rctemp(ref_index,ne_ho+i)
+            END DO
             allocate(rtemp(3,np_ho))
             rtemp=rctemp
             deallocate(rctemp)
@@ -738,7 +743,7 @@ integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per
 integer(i4), ALLOCATABLE :: pt_f(:)
 IF(.NOT.ALLOCATED(per_nodes))RETURN
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting native mesh periodicity'
+IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting native volume mesh periodicity'
 CALL oft_increase_indent
 IF(.NOT.ASSOCIATED(mesh%periodic%lp))THEN
     ALLOCATE(mesh%periodic%lp(mesh%np))
@@ -795,4 +800,64 @@ deallocate(pt_f)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine native_set_periodic
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+subroutine native_bset_periodic(mesh)
+class(oft_bmesh), intent(inout) :: mesh
+integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per,ref_index
+real(r8) :: pt1(3),pt2(3)
+IF(.NOT.ALLOCATED(per_nodes))RETURN
+DEBUG_STACK_PUSH
+IF(mesh%dim==2)THEN
+  ref_index=1
+ELSE
+  ref_index=3
+END IF
+IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting native surface mesh periodicity'
+CALL oft_increase_indent
+IF(.NOT.ASSOCIATED(mesh%periodic%lp))THEN
+  ALLOCATE(mesh%periodic%lp(mesh%np))
+  mesh%periodic%lp=-1
+  np_per=SIZE(per_nodes)
+  DO i=1,np_per
+    j=per_nodes(i)
+    pt1=mesh%r(:,j)
+    pt1(ref_index)=0.d0
+    DO k=1,mesh%nbp
+      kk=mesh%lbp(k)
+      IF(kk==j)CYCLE
+      pt2=mesh%r(:,kk)
+      pt2(ref_index)=0.d0
+      IF(ALL(ABS(pt1-pt2)<1.d-8).AND.ABS(mesh%r(ref_index,kk))<1.d-8)THEN
+        IF(kk>j)THEN
+          mesh%periodic%lp(kk)=j
+        ELSE
+          mesh%periodic%lp(j)=kk
+        END IF
+        EXIT
+      END IF
+    END DO
+  END DO
+END IF
+!---Set periodic faces
+mesh%periodic%nper=1
+ALLOCATE(mesh%periodic%le(mesh%ne))
+mesh%periodic%le=-1
+!---Flag periodic edges
+!$omp parallel private(j,pt_e,ind)
+!$omp do
+DO i=1,mesh%nbe
+  j = mesh%lbe(i)
+  pt_e=mesh%periodic%lp(mesh%le(:,j))
+  IF(ALL(pt_e>0))THEN
+    ind=ABS(mesh_local_findedge(mesh,pt_e))
+    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad edge',i,ind
+    mesh%periodic%le(j)=ind
+  END IF
+END DO
+!$omp end parallel
+CALL oft_decrease_indent
+DEBUG_STACK_POP
+end subroutine native_bset_periodic
 end module oft_mesh_native

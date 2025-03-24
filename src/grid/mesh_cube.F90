@@ -60,13 +60,13 @@ IF(oft_env%head_proc)THEN
   CLOSE(io_unit)
   IF(ierr<0)CALL oft_abort('No "cube_options" found in input file.','mesh_cube_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cube_options" in input file.','mesh_cube_load',__FILE__)
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Generating Cube mesh'
-  WRITE(*,'(2X,A,I4)')     'Mesh Type   = ',mesh_type
-  WRITE(*,'(2X,A,3I4)')    'nx, ny, nz  = ',ni
-  WRITE(*,'(2X,A,3ES11.3)')'Scale facs  = ',rscale
-  WRITE(*,'(2X,A,3L)')     'Periodicity = ',ref_per
-  WRITE(*,'(2X,A,3ES11.3)')'Packing     = ',packing
+  WRITE(*,'(2A)')oft_indent,'Cube mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
+  WRITE(*,'(2A,3I4)')oft_indent,    'nx, ny, nz  = ',ni
+  WRITE(*,'(2A,3ES11.3)')oft_indent,'Scale facs  = ',rscale
+  WRITE(*,'(2A,3L)')oft_indent,     'Periodicity = ',ref_per
+  WRITE(*,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -186,6 +186,7 @@ ELSE
   END IF
 END IF
 call mesh_global_resolution(mesh)
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine mesh_cube_load
 !---------------------------------------------------------------------------------

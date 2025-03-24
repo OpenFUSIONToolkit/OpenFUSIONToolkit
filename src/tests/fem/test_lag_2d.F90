@@ -23,8 +23,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
-USE oft_lag_basis, ONLY: oft_lag_setup!, &
-  ! ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zerob
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -47,7 +46,7 @@ READ(io_unit,test_blag_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct_surf(mg_mesh)
-IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+! IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !------------------------------------------------------------------------------
 ! Setup I/0
 !------------------------------------------------------------------------------
@@ -97,6 +96,10 @@ CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vals)
 CALL mg_mesh%smesh%save_vertex_scalar(vals,plot_file,'T')
+CALL u%set(1.d0)
+CALL blag_zerob%apply(u)
+CALL u%get_local(vals)
+CALL mg_mesh%smesh%save_vertex_scalar(vals,plot_file,'O')
 uu=u%dot(u)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='lagrange.results')

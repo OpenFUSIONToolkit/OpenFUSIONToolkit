@@ -171,6 +171,18 @@ def test_cut_1ref(top_lev):
 #============================================================================
 # Test runners for reflection
 @pytest.mark.parametrize("top_lev", (1, 2))
+def test_reflect_tri_base(top_lev,cad_type=0):
+    volume_cubit = 0.0
+    area_cubit =  2.0
+    assert cubit_setup(1,top_lev,'ref_tri3_test',reflect='T',cad_type=cad_type,test_2d='T')
+    assert check_result(volume_cubit, area_cubit)
+@pytest.mark.parametrize("top_lev", (1, 2))
+def test_reflect_quad_base(top_lev,cad_type=0):
+    volume_cubit = 0.0
+    area_cubit =  2.0
+    assert cubit_setup(1,top_lev,'ref_quad4_test',reflect='T',cad_type=cad_type,test_2d='T')
+    assert check_result(volume_cubit, area_cubit)
+@pytest.mark.parametrize("top_lev", (1, 2))
 @pytest.mark.parametrize("cad_type", (0, 2))
 def test_reflect_base(top_lev,cad_type):
     volume_cubit = 3.02070
@@ -202,6 +214,18 @@ def test_reflect_quad(top_lev):
 
 #============================================================================
 # Test runners for periodic reflection
+@pytest.mark.parametrize("top_lev", (1, 2))
+def test_perreflect_tri_base(top_lev,cad_type=0):
+    volume_cubit = 0.0
+    area_cubit =   2.0
+    assert cubit_setup(1,top_lev,'ref_tri3_test',reflect='T',per_ns=1,cad_type=cad_type,test_2d='T')
+    assert check_result(volume_cubit, area_cubit)
+@pytest.mark.parametrize("top_lev", (1, 2))
+def test_perreflect_quad_base(top_lev,cad_type=0):
+    volume_cubit = 0.0
+    area_cubit =   2.0
+    assert cubit_setup(1,top_lev,'ref_quad4_test',reflect='T',per_ns=1,cad_type=cad_type,test_2d='T')
+    assert check_result(volume_cubit, area_cubit)
 @pytest.mark.parametrize("top_lev", (1, 2))
 @pytest.mark.parametrize("cad_type", (0, 2))
 def test_perreflect_base(top_lev,cad_type):
