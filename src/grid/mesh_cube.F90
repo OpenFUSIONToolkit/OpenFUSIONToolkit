@@ -60,12 +60,12 @@ IF(oft_env%head_proc)THEN
   CLOSE(io_unit)
   IF(ierr<0)CALL oft_abort('No "cube_options" found in input file.','mesh_cube_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cube_options" in input file.','mesh_cube_load',__FILE__)
-  WRITE(*,'(2A)')oft_indent,'Cube mesh:'
+  WRITE(*,'(2A)')oft_indent,'Cube volume mesh:'
   CALL oft_increase_indent
   WRITE(*,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
   WRITE(*,'(2A,3I4)')oft_indent,    'nx, ny, nz  = ',ni
   WRITE(*,'(2A,3ES11.3)')oft_indent,'Scale facs  = ',rscale
-  WRITE(*,'(2A,3L)')oft_indent,     'Periodicity = ',ref_per
+  WRITE(*,'(2A,3L2)')oft_indent,    'Periodicity = ',ref_per
   WRITE(*,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
 END IF
 !---Broadcast input information
@@ -108,8 +108,7 @@ IF(mesh_type==1)THEN
     mesh%r(:,9)=(/.5d0,.5d0,.5d0/)
     !---Setup cells
     mesh%nc=12
-    allocate(mesh%lc(4,mesh%nc),mesh%reg(mesh%nc))
-    mesh%reg=1
+    allocate(mesh%lc(4,mesh%nc))
     !---
     mesh%lc(:,1)=(/7,3,9,8/)
     mesh%lc(:,2)=(/4,3,9,7/)
@@ -123,6 +122,19 @@ IF(mesh_type==1)THEN
     mesh%lc(:,10)=(/2,9,5,1/)
     mesh%lc(:,11)=(/9,6,5,1/)
     mesh%lc(:,12)=(/7,6,5,9/)
+    !---
+    DO i=1,3
+      IF(ref_per(i))THEN
+        CALL reflect_tet(i)
+        mesh%r(i,:)=(mesh%r(i,:)+1.d0)/2.d0
+      END IF
+    END DO
+    !---
+    mesh%r(1,:)=mesh%r(1,:)*rscale(1)+shift(1)
+    mesh%r(2,:)=mesh%r(2,:)*rscale(2)+shift(2)
+    mesh%r(3,:)=mesh%r(3,:)*rscale(3)+shift(3)
+    allocate(mesh%reg(mesh%nc))
+    mesh%reg=1
   END IF
 ELSE
   allocate(oft_hexmesh::mg_mesh%meshes(mg_mesh%mgdim))
@@ -188,6 +200,46 @@ END IF
 call mesh_global_resolution(mesh)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
+contains
+subroutine reflect_tet(ref_index)
+integer(i4), intent(in) :: ref_index
+integer(i4) :: npold,ncold,i,j
+integer(i4), allocatable :: newindex(:),ltemp(:,:)
+real(r8), allocatable :: rtemp(:,:)
+IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Reflecting to support periodicity'
+npold=mesh%np
+allocate(newindex(2*mesh%np),rtemp(3,2*mesh%np))
+rtemp(:,1:mesh%np)=mesh%r
+deallocate(mesh%r)
+do i=1,npold
+    IF(ABS(rtemp(ref_index,i))<=1.d-1)THEN
+        rtemp(ref_index,i)=0.d0
+        newindex(i)=i
+    ELSE
+        mesh%np=mesh%np+1
+        rtemp(:,mesh%np) = rtemp(:,i)
+        rtemp(ref_index,mesh%np) =-rtemp(ref_index,i)
+        newindex(i)=mesh%np
+    ENDIF
+enddo
+allocate(mesh%r(3,mesh%np))
+mesh%r=rtemp(:,1:mesh%np)
+deallocate(rtemp)
+!---Reflect cells
+ncold=mesh%nc
+allocate(ltemp(mesh%cell_np,2*mesh%nc))
+ltemp(:,1:mesh%nc)=mesh%lc
+deallocate(mesh%lc)
+do i=1,ncold
+    mesh%nc=mesh%nc+1
+    DO j=1,mesh%cell_np
+        ltemp(j,mesh%nc)=newindex(ltemp(j,i))
+    END DO
+enddo
+allocate(mesh%lc(mesh%cell_np,mesh%nc))
+mesh%lc=ltemp(:,1:mesh%nc)
+deallocate(ltemp)
+end subroutine reflect_tet
 end subroutine mesh_cube_load
 !---------------------------------------------------------------------------------
 !> Setup surface IDs
@@ -341,6 +393,7 @@ mesh_type=1
 ni=1
 rscale=1.d0
 shift=0.d0
+ref_per=.FALSE.
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)
@@ -348,12 +401,12 @@ IF(oft_env%head_proc)THEN
   IF(ierr<0)CALL oft_abort('No "cube_options" found in input file.','smesh_square_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cube_options" in input file.','smesh_square_load',__FILE__)
   ni(3)=1
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Generating 2D Square mesh'
-  WRITE(*,'(2X,A,I4)')     'Mesh Type   = ',mesh_type
-  WRITE(*,'(2X,A,2I4)')    'nx, ny      = ',ni(1:2)
-  WRITE(*,'(2X,A,2ES11.3)')'Scale facs  = ',rscale(1:2)
-  WRITE(*,'(2X,A,3L)')     'Periodicity = ',ref_per
+  WRITE(*,'(2A)')oft_indent,'Square surface mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
+  WRITE(*,'(2A,2I4)')oft_indent,    'nx, ny      = ',ni(1:2)
+  WRITE(*,'(2A,2ES11.3)')oft_indent,'Scale facs  = ',rscale(1:2)
+  WRITE(*,'(2A,2L2)')oft_indent,    'Periodicity = ',ref_per(1:2)
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -517,15 +570,15 @@ logical :: flag(4)
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Setting square periodicity'
 !---Find periodic faces
-smesh%periodic%nper=COUNT(ref_per)
+smesh%periodic%nper=COUNT(ref_per(1:2))
 ALLOCATE(smesh%periodic%le(smesh%ne))
 smesh%periodic%le=-1
-DO iper=1,3
+DO iper=1,2
   IF(.NOT.ref_per(iper))CYCLE
   DO jj=1,smesh%nbe
     j=smesh%lbe(jj)
     IF(smesh%periodic%le(j)>0)CYCLE
-    pt_j=[-smesh%r(2,smesh%le(2,j))+smesh%r(2,smesh%le(1,j)), &
+    pt_i=[-smesh%r(2,smesh%le(2,j))+smesh%r(2,smesh%le(1,j)), &
         smesh%r(1,smesh%le(2,j))-smesh%r(1,smesh%le(1,j)),0.d0]
     IF(MAXLOC(ABS(pt_i),DIM=1)/=iper)CYCLE
     i_cc=0.d0
@@ -558,7 +611,7 @@ END DO
 !---Set periodic points
 ALLOCATE(smesh%periodic%lp(smesh%np))
 smesh%periodic%lp=-1
-DO iper=1,3
+DO iper=1,2
   IF(.NOT.ref_per(iper))CYCLE
   per_dir=0.d0
   per_dir(iper)=1.d0

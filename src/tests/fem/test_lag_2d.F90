@@ -46,7 +46,7 @@ READ(io_unit,test_blag_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct_surf(mg_mesh)
-! IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !------------------------------------------------------------------------------
 ! Setup I/0
 !------------------------------------------------------------------------------
@@ -56,7 +56,7 @@ CALL mg_mesh%smesh%setup_io(plot_file,order)
 CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
 blag_zerob%ML_lag_rep=>ML_oft_blagrange
 !---Run tests
-! oft_env%pm=.FALSE.
+oft_env%pm=.FALSE.
 CALL test_lap
 !---Finalize enviroment
 CALL oft_finalize
