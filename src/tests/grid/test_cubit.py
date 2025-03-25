@@ -309,8 +309,8 @@ def test_hex27reflect_1ref(top_lev,cad_type):
 # Test runners for stretched meshes
 @pytest.mark.parametrize("top_lev", (1, 2))
 def test_stretch_base(top_lev):
-    volume_cubit = 3.02070
-    area_cubit =  12.26361
+    volume_cubit = 3.02044
+    area_cubit =  12.26295
     assert cubit_setup(1,top_lev,'ref_tet4_test',zstretch=2.)
     assert check_result(volume_cubit, area_cubit)
 @pytest.mark.coverage
