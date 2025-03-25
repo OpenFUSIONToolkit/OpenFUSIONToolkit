@@ -11,8 +11,12 @@ volume 1  tetmesh growth_factor 1.0
 volume 1 size .4
 mesh volume 1
 #
-refine parallel fileroot 'sphere_test' overwrite no_execute
+#refine parallel fileroot 'sphere_test' overwrite no_execute
+export Genesis "sphere_tet4_test.g" dimension 3 overwrite block all
 #
 block 1 volume 1
 block 1 element type tetra10
-refine parallel fileroot 'sphere_test2' overwrite no_execute
+#refine parallel fileroot 'sphere_test2' overwrite no_execute
+export Genesis "sphere_tet10_test.g" dimension 3 overwrite block all
+
+

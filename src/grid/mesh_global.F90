@@ -733,12 +733,8 @@ IF(self%periodic%nper>0)THEN
     child_list=0
     DO m=1,self%nbp
       mm=self%lbp(m)
-      DO
-        IF(self%periodic%lp(mm)<=0)EXIT
-        mm=self%periodic%lp(mm)
-      END DO
-      IF(mm/=self%lbp(m))THEN
-        mm=bpi(mm)
+      IF(self%periodic%lp(mm)>0)THEN
+        mm=bpi(self%periodic%lp(mm))
         DO i=1,8
           IF(child_list(i,mm)==0)THEN
             child_list(i,mm)=m

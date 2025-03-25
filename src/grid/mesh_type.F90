@@ -98,6 +98,10 @@ TYPE, PUBLIC :: mesh_global
   INTEGER(i8) :: ne = 0 !< Global edge count
   INTEGER(i8) :: nf = 0 !< Global face count
   INTEGER(i8) :: nc = 0 !< Global cell count
+  INTEGER(i8) :: nbp = 0 !< Global boundary point count
+  INTEGER(i8) :: nbe = 0 !< Global boundary edge count
+  INTEGER(i8) :: nbf = 0 !< Global boundary face count
+  INTEGER(i8) :: nbc = 0 !< Global boundary cell count
   LOGICAL, POINTER, DIMENSION(:) :: gbp => NULL() !< Global boundary point flag (np)
   LOGICAL, POINTER, DIMENSION(:) :: gbe => NULL() !< Global boundary edge flag (ne)
   LOGICAL, POINTER, DIMENSION(:) :: gbf => NULL() !< Global boundary face flag (nf)

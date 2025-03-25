@@ -87,6 +87,8 @@ IF(oft_env%head_proc)THEN
         CALL oft_increase_indent
         WRITE(*,'(3A)')oft_indent,'Filename = ',TRIM(filename)
     END IF
+ELSE
+    CALL oft_increase_indent
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -242,6 +244,8 @@ IF(oft_env%head_proc)THEN
         CALL oft_increase_indent
         WRITE(*,'(3A)')oft_indent,'Filename = ',TRIM(filename)
     END IF
+ELSE
+    CALL oft_increase_indent
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI

@@ -602,6 +602,17 @@ call mesh_global_resolution(self)
 vol = self%volume()
 area = self%bmesh%area()
 if(self%fullmesh)then
+  IF(self%periodic%nper>0)THEN
+    self%global%nbp=COUNT(self%global%gbp(self%lbp).AND.self%pstitch%leo)
+    self%global%nbe=COUNT(self%global%gbe(self%lbe).AND.self%estitch%leo)
+    self%global%nbf=COUNT(self%global%gbf(self%lbf).AND.self%fstitch%leo)
+    self%global%nbc=COUNT(self%global%gbc)
+  ELSE
+    self%global%nbp=COUNT(self%global%gbp)
+    self%global%nbe=COUNT(self%global%gbe)
+    self%global%nbf=COUNT(self%global%gbf)
+    self%global%nbc=COUNT(self%global%gbc)
+  END IF
   if(oft_env%head_proc)then
     write(*,'(2A)')oft_indent,'Mesh statistics:'
     CALL oft_increase_indent
@@ -611,14 +622,10 @@ if(self%fullmesh)then
     write(*,'(2A,I8)')    oft_indent,'# of edges      =',self%global%ne
     write(*,'(2A,I8)')    oft_indent,'# of faces      =',self%global%nf
     write(*,'(2A,I8)')    oft_indent,'# of cells      =',self%global%nc
-    nbtmp=COUNT(self%global%gbp)
-    write(*,'(2A,I8)')    oft_indent,'# of boundary points =',nbtmp
-    nbtmp=COUNT(self%global%gbe)
-    write(*,'(2A,I8)')    oft_indent,'# of boundary edges  =',nbtmp
-    nbtmp=COUNT(self%global%gbf)
-    write(*,'(2A,I8)')    oft_indent,'# of boundary faces  =',nbtmp
-    nbtmp=COUNT(self%global%gbc)
-    write(*,'(2A,I8)')    oft_indent,'# of boundary cells  =',nbtmp
+    write(*,'(2A,I8)')    oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')    oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')    oft_indent,'# of boundary faces  =',self%global%nbf
+    write(*,'(2A,I8)')    oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -673,11 +680,15 @@ else
   !---Get global sums
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmp,4,OFT_MPI_I8,MPI_SUM,oft_env%COMM,ierr)
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmpr,2,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
+  self%global%nbp=tmp(1)
+  self%global%nbe=tmp(2)
+  self%global%nbf=tmp(3)
+  self%global%nbc=tmp(4)
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',tmp(1)
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',tmp(2)
-    write(*,'(2A,I8)')oft_indent,'# of boundary faces  =',tmp(3)
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',tmp(4)
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary faces  =',self%global%nbf
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -904,13 +915,19 @@ if(oft_env%head_proc)then
   write(*,'(2A,I8)')oft_indent,'# of cells   =',self%global%nc
 endif
 if(self%fullmesh)then
+  IF(self%periodic%nper>0)THEN
+    self%global%nbp=COUNT(self%global%gbp(self%lbp).AND.self%pstitch%leo)
+    self%global%nbe=COUNT(self%global%gbe(self%lbe).AND.self%estitch%leo)
+    self%global%nbc=COUNT(self%global%gbc)
+  ELSE
+    self%global%nbp=COUNT(self%global%gbp)
+    self%global%nbe=COUNT(self%global%gbe)
+    self%global%nbc=COUNT(self%global%gbc)
+  END IF
   if(oft_env%head_proc)then
-    nbtmp=COUNT(self%global%gbp)
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',nbtmp
-    nbtmp=COUNT(self%global%gbe)
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',nbtmp
-    nbtmp=COUNT(self%global%gbc)
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',nbtmp
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -948,10 +965,13 @@ else
   !---Get global sums
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmp,3,OFT_MPI_I8,MPI_SUM,oft_env%COMM,ierr)
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmpr,2,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
+  self%global%nbp=tmp(1)
+  self%global%nbe=tmp(2)
+  self%global%nbc=tmp(3)
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',tmp(1)
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',tmp(2)
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',tmp(3)
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent

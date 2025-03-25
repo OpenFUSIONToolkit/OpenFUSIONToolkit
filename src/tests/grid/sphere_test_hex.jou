@@ -6,10 +6,11 @@ volume 1 size .15
 mesh volume 1
 
 set large exodus file on
-export Genesis "sphere_test_hex.g" dimension 3 overwrite block all
+export Genesis "sphere_hex8_test.g" dimension 3 overwrite block all
 
 block 1 volume 1
 block 1 element type hex27
 
 set large exodus file on
-export Genesis "sphere_test_hex2.g" dimension 3 overwrite block all
+export Genesis "sphere_hex27_test.g" dimension 3 overwrite block all
+

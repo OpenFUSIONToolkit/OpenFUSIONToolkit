@@ -65,8 +65,10 @@ subroutine multigrid_load(mg_mesh,cad_type)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: cad_type !< Mesh type to load
 DEBUG_STACK_PUSH
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'**** Loading OFT mesh'
+IF(oft_env%head_proc)THEN
+  WRITE(*,*)
+  WRITE(*,'(2A)')oft_indent,'**** Loading OFT mesh'
+END IF
 CALL oft_increase_indent
 !---Select mesh type and load
 select case(cad_type)
@@ -800,8 +802,10 @@ integer(i4), intent(in) :: cad_type
 integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Select mesh type and load
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'**** Loading OFT surface mesh'
+IF(oft_env%head_proc)THEN
+  WRITE(*,*)
+  WRITE(*,'(2A)')oft_indent,'**** Loading OFT surface mesh'
+END IF
 CALL oft_increase_indent
 select case(cad_type)
   case(mesh_native_id) ! Native Mesh

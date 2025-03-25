@@ -71,7 +71,11 @@ IF(test_surf)THEN
     WRITE(io_unit,*)0.0_r8
   END IF
   CALL compute_area
-  IF(oft_env%head_proc)CLOSE(io_unit)
+  IF(oft_env%head_proc)THEN
+    WRITE(io_unit,*)mg_mesh%smesh%global%nbp
+    WRITE(io_unit,*)mg_mesh%smesh%global%nbe
+    CLOSE(io_unit)
+  END IF
 ELSE
   !---Setup grid
   CALL multigrid_construct(mg_mesh)
@@ -87,7 +91,11 @@ ELSE
   IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='cubit.results')
   CALL compute_volume
   CALL compute_area
-  IF(oft_env%head_proc)CLOSE(io_unit)
+  IF(oft_env%head_proc)THEN
+    WRITE(io_unit,*)mg_mesh%mesh%global%nbp
+    WRITE(io_unit,*)mg_mesh%mesh%global%nbe
+    CLOSE(io_unit)
+  END IF
 END IF
 !---Finalize enviroment
 CALL oft_finalize
