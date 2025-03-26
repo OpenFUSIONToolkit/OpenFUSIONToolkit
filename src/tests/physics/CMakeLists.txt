@@ -30,6 +30,7 @@ if( OFT_BUILD_TESTS )
   configure_file( tw_test-passive.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( tw_test-plate.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( tw_test-torus.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( tCurr_test_mode.dat ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # TokaMaker tests
   configure_file( test_TokaMaker.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
