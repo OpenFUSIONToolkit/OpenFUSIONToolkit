@@ -78,6 +78,75 @@ def validate_dict(results,dict_exp):
     return test_result
 
 
+def validate_eqdsk(file_test,file_ref):
+    from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
+    try:
+        test_data = read_eqdsk(file_test)
+    except:
+        print("FAILED: Could not read result EQDSK")
+        return False
+    try:
+        ref_data = read_eqdsk(file_ref)
+    except:
+        print("FAILED: Could not read reference EQDSK")
+        return False
+    test_result = True
+    for key, exp_val in ref_data.items():
+        result_val = test_data.get(key,None)
+        if result_val is None:
+            print('FAILED: key "{0}" not present in result!'.format(key))
+            result_val = False
+        else:
+            if key == 'case':
+                continue
+            if isinstance(exp_val,np.ndarray):
+                if np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val) > 1.E-2:
+                    print("FAILED: {0} error too high!".format(key))
+                    print("  Actual =   {0}".format(np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val)))
+                    test_result = False
+            else:
+                print(result_val,exp_val)
+                if abs((result_val-exp_val)/exp_val) > 1.E-2:
+                    print("FAILED: {0} error too high!".format(key))
+                    print("  Expected = {0}".format(exp_val))
+                    print("  Actual =   {0}".format(result_val))
+                    test_result = False
+    return test_result
+
+
+def validate_ifile(ifile_test,ifile_ref):
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    try:
+        test_data = read_ifile(ifile_test)
+    except:
+        print("FAILED: Could not read result i-file")
+        return False
+    try:
+        ref_data = read_ifile(ifile_ref)
+    except:
+        print("FAILED: Could not read reference i-file")
+        return False
+    test_result = True
+    for key, exp_val in ref_data.items():
+        result_val = test_data.get(key,None)
+        if result_val is None:
+            print('FAILED: key "{0}" not present in result!'.format(key))
+            result_val = False
+        else:
+            if isinstance(exp_val,np.ndarray):
+                if np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val) > 1.E-2:
+                    print("FAILED: {0} error too high!".format(key))
+                    print("  Actual =   {0}".format(np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val)))
+                    test_result = False
+            else:
+                if result_val != exp_val:
+                    print("FAILED: {0} error too high!".format(key))
+                    print("  Expected = {0}".format(exp_val))
+                    print("  Actual =   {0}".format(result_val))
+                    test_result = False
+    return test_result
+
+
 #============================================================================
 def run_solo_case(mesh_resolution,fe_order,mp_q):
     def solovev_psi(r_grid, z_grid,R,a,b,c0):
@@ -488,6 +557,9 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,mp_q):
     # Test deletion if multiple cases
     if mygs_last is not None:
         del mygs_last
+    # Save equilibrium to gEQDSK and i-file format
+    mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
+    mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
     # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
@@ -544,6 +616,8 @@ ITER_eq_dict = {
 def test_ITER_eq(order):
     results = mp_run(run_ITER_case,(1.0,(order,),False,False))
     assert validate_dict(results,ITER_eq_dict)
+    assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk')
+    assert validate_ifile('tokamaker.ifile','ITER_test.ifile')
 
 def test_ITER_concurrent():
     results = mp_run(run_ITER_case,(1.0,(2,3),False,False))
