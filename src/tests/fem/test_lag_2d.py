@@ -83,12 +83,10 @@ def single_level(levels,order,exp_its,exp_error,grid_type=1,petsc=False,xperiodi
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p1_base(levels, petsc_flag):
     single_level(levels, 1, 3, 3.0669984042999903E-002, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p1_1ref(levels, petsc_flag):
     single_level(levels, 1, 12, 0.12247778581844551, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p1_periodic(levels, petsc_flag):
@@ -101,12 +99,10 @@ def test_tri_p1_periodic(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p2_base(levels, petsc_flag):
     single_level(levels, 2, 12, 0.12223325061763389, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p2_1ref(levels, petsc_flag):
     single_level(levels, 2, 40, 0.49022558771158881, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p2_periodic(levels, petsc_flag):
@@ -119,12 +115,10 @@ def test_tri_p2_periodic(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p3_base(levels, petsc_flag):
     single_level(levels, 3, 26, 0.27578221875222847, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p3_1ref(levels, petsc_flag):
     single_level(levels, 3, 76, 1.1032233406550747, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_tri_p3_periodic(levels, petsc_flag):
@@ -155,12 +149,10 @@ def test_tri_p4_periodic(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p1_base(levels, petsc_flag):
     single_level(levels, 1, 1, 1.7777777777777774E-002, grid_type=2, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p1_1ref(levels, petsc_flag):
     single_level(levels, 1, 6, 6.4027316352716732E-002, grid_type=2, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p1_periodic(levels, petsc_flag):
@@ -173,12 +165,10 @@ def test_quad_p1_periodic(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p2_base(levels, petsc_flag):
     single_level(levels, 2, 6, 6.0977378920293084E-002, grid_type=2, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p2_1ref(levels, petsc_flag):
     single_level(levels, 2, 21, 0.24507299559374232, grid_type=2, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p2_periodic(levels, petsc_flag):
@@ -191,12 +181,10 @@ def test_quad_p2_periodic(levels, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p3_base(levels, petsc_flag):
     single_level(levels, 3, 10, 0.13790992889879716, grid_type=2, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p3_1ref(levels, petsc_flag):
     single_level(levels, 3, 40, 0.55161392909934681, grid_type=2, petsc=petsc_flag)
-@pytest.mark.coverage
 @pytest.mark.parametrize("levels", ((2,2), (2,3), (1,3)))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_quad_p3_periodic(levels, petsc_flag):
