@@ -21,7 +21,7 @@ USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
   gs_fixed_vflux, gs_load_regions, oft_indent
-USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_save_decon, gs_save_eqdsk, &
+USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_save_eqdsk, &
   gs_profile_load, gs_profile_save
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 IMPLICIT NONE
@@ -39,8 +39,6 @@ INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30
 INTEGER(4) :: ninner = 4
 INTEGER(4) :: mode = 0
-INTEGER(4) :: dcon_npsi = -1
-INTEGER(4) :: dcon_ntheta = -1
 INTEGER(4) :: eqdsk_nr = -1
 INTEGER(4) :: eqdsk_nz = -1
 LOGICAL :: pm = .FALSE.
@@ -87,10 +85,10 @@ LOGICAL :: fixed_f = .FALSE.
 LOGICAL :: fixed_p = .FALSE.
 LOGICAL :: fixed_center = .FALSE.
 NAMELIST/tokamaker_options/order,pm,mode,maxits,ninner,urf,nl_tol,itor_target,pnorm, &
-alam,beta_mr,free_boundary,coil_file,limiter_file,f_offset,dcon_npsi,dcon_ntheta, &
-has_plasma,rmin,R0_target,V0_target,save_mug,fast_boundary, &
-limited_only,eqdsk_filename,eqdsk_nr,eqdsk_nz,eqdsk_rbounds,eqdsk_zbounds,eqdsk_run_info, &
-eqdsk_limiter_file,eqdsk_lcfs_pad,init_r0,init_a,init_kappa,init_delta,lim_zmax,estore_target
+alam,beta_mr,free_boundary,coil_file,limiter_file,f_offset,has_plasma,rmin,R0_target, &
+V0_target,save_mug,fast_boundary,limited_only,eqdsk_filename,eqdsk_nr,eqdsk_nz,eqdsk_rbounds, &
+eqdsk_zbounds,eqdsk_run_info,eqdsk_limiter_file,eqdsk_lcfs_pad,init_r0,init_a,init_kappa, &
+init_delta,lim_zmax,estore_target
 NAMELIST/tokamaker_fit_options/psinorm,adjust_pnorm,adjust_alam,adjust_R0,adjust_V0, &
 adjust_coils,adjust_F0,fixed_f,fixed_p,fixed_center
 !------------------------------------------------------------------------------
@@ -262,11 +260,8 @@ IF(file_exists)THEN
 ELSE
     WRITE(*,'(2A)')oft_indent,'No "tokamaker_fields.loc" file found, skipping field output'
 END IF
-!---Save DCON/EQDSK files
+!---Save gEQDSK file
 IF(has_plasma)THEN
-  IF((dcon_npsi>0).AND.(dcon_ntheta>0))THEN
-    CALL gs_save_decon(mygs,dcon_npsi,dcon_ntheta)
-  END IF
   IF((eqdsk_nr>0).AND.(eqdsk_nz>0))THEN
     IF(ANY(eqdsk_rbounds<0.d0))CALL oft_abort('Invalid or unset EQDSK radial extents', &
                                               'tokamaker_fit',__FILE__)

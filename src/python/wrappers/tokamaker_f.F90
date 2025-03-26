@@ -30,7 +30,7 @@ USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_de
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
-  gs_profile_load, sauter_fc, gs_calc_vloop
+  gs_profile_load, sauter_fc, gs_calc_vloop, gs_save_ifile
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE diagnostic, ONLY: bscal_surf_int
@@ -1220,6 +1220,28 @@ END IF
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_eqdsk
 !------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_save_ifile(tMaker_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str) BIND(C,NAME="tokamaker_save_ifile")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: ntheta !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: pack_lcfs !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: single_prec !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_save_ifile(tMaker_obj%gs,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=lcfs_press, &
+  pack_lcfs=LOGICAL(pack_lcfs),single_prec=LOGICAL(single_prec),error_str=error_flag)
+CALL copy_string(TRIM(error_flag),error_str)
+END SUBROUTINE tokamaker_save_ifile
+!---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
