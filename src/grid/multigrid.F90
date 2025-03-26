@@ -1353,8 +1353,8 @@ enddo
 do i=1,self%ne ! Loop over edges to set child edge global index
   fmesh%global%lp(self%np+i)=self%global%np &
     + ABS(self%global%le(i))
-    lecors=self%le(:,i)
-    IF(self%global%le(i)<0)lecors((/2,1/))=lecors((/1,2/))
+  lecors=self%le(:,i)
+  IF(self%global%le(i)<0)lecors((/2,1/))=lecors((/1,2/))
   do j=1,2
     k=mesh_local_findedge(fmesh,(/lecors(j), self%np+i/))
     fmesh%global%le(ABS(k))=j+2*(ABS(self%global%le(i))-1)
@@ -1368,7 +1368,7 @@ do i=1,self%nc ! Loop over faces to set child edge and face global index
     k=mesh_local_findedge(fmesh,(/ABS(self%lce(j,i))+self%np, &
       ABS(self%lce(l,i))+self%np/))
     IF(k==0)CALL oft_abort("Bad edge link", "tetmesh_mg_globals", __FILE__)
-    fmesh%global%le(ABS(k)) = (j+2*self%ne+3*(self%global%lc(i)-1))
+    fmesh%global%le(ABS(k)) = (j+2*self%global%ne+3*(self%global%lc(i)-1))
   enddo
   do j=1,4
     fmesh%global%lc((i-1)*4+j) = (j+4*(self%global%lc(i)-1))

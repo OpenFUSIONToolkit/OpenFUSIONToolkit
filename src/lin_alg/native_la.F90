@@ -2549,6 +2549,7 @@ IF(.NOT.uv%stitch_info%full)THEN
       ELSE
         last=letmp(1,mm)
       END IF
+      IF(m>neout)EXIT
       do while(leout(1,m)<=letmp(1,mm))
         IF(leout(1,m)<letmp(1,mm))jp=m+1
         IF(leout(1,m)==letmp(1,mm))THEN
@@ -2589,6 +2590,7 @@ IF(jn>0)THEN
     ELSE
       last=leout(1,mm)
     END IF
+    IF(m>neout)EXIT
     do while(leout(1,m)<=leout(1,mm))
       IF(leout(1,m)<leout(1,mm))jp=m+1
       IF((leout(1,m)==leout(1,mm)).AND.(m/=mm))THEN
