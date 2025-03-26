@@ -93,7 +93,7 @@ INTEGER(8) :: npp,nep,nfp
 INTEGER(8), ALLOCATABLE :: gtmp(:)
 IF(mesh%periodic%nper==0)RETURN
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2X,A)')'Setting Up Periodic Mesh'
+if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting Up Periodic Mesh'
 !---Faces can only have one periodic parent
 DO i=1,mesh%nbf
   j=mesh%lbf(i)
@@ -167,10 +167,12 @@ END DO
 DEALLOCATE(gtmp)
 !---
 if(oft_debug_print(1))then
-  WRITE(*,'(4X,A,I8)')'  # of Periodic directions =',mesh%periodic%nper
-  WRITE(*,'(4X,A,I8)')'  # of Periodic Points     =',npp
-  WRITE(*,'(4X,A,I8)')'  # of Periodic Edges      =',nep
-  WRITE(*,'(4X,A,I8)')'  # of Periodic Faces      =',nfp
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic directions =',mesh%periodic%nper
+  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
+  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
+  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Faces      =',nfp
+  CALL oft_decrease_indent
 end if
 DEBUG_STACK_POP
 end subroutine mesh_global_periodic
@@ -593,13 +595,24 @@ end subroutine mesh_global_resolution
 subroutine mesh_global_stats(self)
 class(oft_mesh), intent(inout) :: self !< Mesh object
 integer(i8) :: a,i,tmp(4)
-integer(i4) :: ierr
+integer(i4) :: nbtmp,ierr
 real(r8) :: tmpr(2),vol,area
 DEBUG_STACK_PUSH
 call mesh_global_resolution(self)
 vol = self%volume()
 area = self%bmesh%area()
 if(self%fullmesh)then
+  IF(self%periodic%nper>0)THEN
+    self%global%nbp=COUNT(self%global%gbp(self%lbp).AND.self%pstitch%leo)
+    self%global%nbe=COUNT(self%global%gbe(self%lbe).AND.self%estitch%leo)
+    self%global%nbf=COUNT(self%global%gbf(self%lbf).AND.self%fstitch%leo)
+    self%global%nbc=COUNT(self%global%gbc)
+  ELSE
+    self%global%nbp=COUNT(self%global%gbp)
+    self%global%nbe=COUNT(self%global%gbe)
+    self%global%nbf=COUNT(self%global%gbf)
+    self%global%nbc=COUNT(self%global%gbc)
+  END IF
   if(oft_env%head_proc)then
     write(*,'(2A)')oft_indent,'Mesh statistics:'
     CALL oft_increase_indent
@@ -609,10 +622,10 @@ if(self%fullmesh)then
     write(*,'(2A,I8)')    oft_indent,'# of edges      =',self%global%ne
     write(*,'(2A,I8)')    oft_indent,'# of faces      =',self%global%nf
     write(*,'(2A,I8)')    oft_indent,'# of cells      =',self%global%nc
-    write(*,'(2A,I8)')    oft_indent,'# of boundary points =',self%nbp
-    write(*,'(2A,I8)')    oft_indent,'# of boundary edges  =',self%nbe
-    write(*,'(2A,I8)')    oft_indent,'# of boundary faces  =',self%nbf
-    write(*,'(2A,I8)')    oft_indent,'# of boundary cells  =',self%nbc
+    write(*,'(2A,I8)')    oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')    oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')    oft_indent,'# of boundary faces  =',self%global%nbf
+    write(*,'(2A,I8)')    oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -667,11 +680,15 @@ else
   !---Get global sums
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmp,4,OFT_MPI_I8,MPI_SUM,oft_env%COMM,ierr)
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmpr,2,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
+  self%global%nbp=tmp(1)
+  self%global%nbe=tmp(2)
+  self%global%nbf=tmp(3)
+  self%global%nbc=tmp(4)
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',tmp(1)
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',tmp(2)
-    write(*,'(2A,I8)')oft_indent,'# of boundary faces  =',tmp(3)
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',tmp(4)
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary faces  =',self%global%nbf
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -884,7 +901,7 @@ end subroutine bmesh_global_orient
 subroutine bmesh_global_stats(self)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 integer(i8) :: a,i,tmp(3)
-integer(i4) :: ierr
+integer(i4) :: nbtmp,ierr
 real(r8) :: tmpr(2),area
 DEBUG_STACK_PUSH
 call mesh_global_resolution(self)
@@ -898,10 +915,19 @@ if(oft_env%head_proc)then
   write(*,'(2A,I8)')oft_indent,'# of cells   =',self%global%nc
 endif
 if(self%fullmesh)then
+  IF(self%periodic%nper>0)THEN
+    self%global%nbp=COUNT(self%global%gbp(self%lbp).AND.self%pstitch%leo)
+    self%global%nbe=COUNT(self%global%gbe(self%lbe).AND.self%estitch%leo)
+    self%global%nbc=COUNT(self%global%gbc)
+  ELSE
+    self%global%nbp=COUNT(self%global%gbp)
+    self%global%nbe=COUNT(self%global%gbe)
+    self%global%nbc=COUNT(self%global%gbc)
+  END IF
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%nbp
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%nbe
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%nbc
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -939,10 +965,13 @@ else
   !---Get global sums
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmp,3,OFT_MPI_I8,MPI_SUM,oft_env%COMM,ierr)
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmpr,2,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
+  self%global%nbp=tmp(1)
+  self%global%nbe=tmp(2)
+  self%global%nbc=tmp(3)
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',tmp(1)
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',tmp(2)
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',tmp(3)
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
