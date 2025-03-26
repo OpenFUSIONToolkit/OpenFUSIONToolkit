@@ -13,9 +13,9 @@ mesh surface 1
 #
 block 1 surface 1
 block 1 element type tri3
-export Genesis  "sphere_tri3_test.in.e" dimension 3 block 1 overwrite
+export Genesis  "sphere_tri3_test.g" dimension 3 block 1 overwrite
 block 1 element type tri6
-export Genesis  "sphere_tri6_test.in.e" dimension 3 block 1 overwrite
+export Genesis  "sphere_tri6_test.g" dimension 3 block 1 overwrite
 
 #
 delete mesh surface 1 propagate
@@ -26,6 +26,7 @@ mesh surface 1
 #
 block 1 surface 1
 block 1 element type quad4
-export Genesis  "sphere_quad4_test.in.e" dimension 3 block 1 overwrite
+export Genesis  "sphere_quad4_test.g" dimension 3 block 1 overwrite
 block 1 element type quad9
-export Genesis  "sphere_quad9_test.in.e" dimension 3 block 1 overwrite
+export Genesis  "sphere_quad9_test.g" dimension 3 block 1 overwrite
+

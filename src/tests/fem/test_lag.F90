@@ -32,14 +32,16 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 IMPLICIT NONE
 INTEGER(i4) :: minlev,ierr,io_unit
+REAL(r8) :: grnd_pt(3)
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 INTEGER(i4) :: order
+INTEGER(i4) :: grnd_dir = 1
 LOGICAL :: mg_test
-NAMELIST/test_lag_options/order,mg_test
+NAMELIST/test_lag_options/order,mg_test,grnd_dir
 !---Initialize enviroment
 CALL oft_init
 !---Read in options
@@ -47,7 +49,9 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_lag_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-CALL multigrid_construct(mg_mesh)
+grnd_pt=0.d0
+grnd_pt(grnd_dir)=2.d0
+CALL multigrid_construct(mg_mesh,grnd_pt)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
 !---
 minlev=2

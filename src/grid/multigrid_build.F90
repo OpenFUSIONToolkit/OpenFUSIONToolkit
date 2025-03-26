@@ -28,7 +28,7 @@ use multigrid, only: multigrid_mesh, multigrid_refine, multigrid_hybrid_base, &
   multigrid_level, trimesh_mg_globals, quadmesh_mg_globals, multigrid_reffix_ho, &
   multigrid_reffix_ho_surf
 use oft_mesh_native, only: native_load_vmesh, native_load_smesh, mesh_native_id, &
-  native_hobase, native_set_periodic, native_finalize_setup
+  native_hobase, native_set_periodic, native_bset_periodic, native_finalize_setup
 use oft_mesh_t3d, only: mesh_t3d_load, mesh_t3d_cadsync, mesh_t3d_cadlink, &
   mesh_t3d_add_quad, mesh_t3d_reffix, mesh_t3d_add_quad, &
   mesh_t3d_set_periodic, smesh_t3d_load, mesh_t3d_id
@@ -65,6 +65,11 @@ subroutine multigrid_load(mg_mesh,cad_type)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: cad_type !< Mesh type to load
 DEBUG_STACK_PUSH
+IF(oft_env%head_proc)THEN
+  WRITE(*,*)
+  WRITE(*,'(2A)')oft_indent,'**** Loading OFT mesh'
+END IF
+CALL oft_increase_indent
 !---Select mesh type and load
 select case(cad_type)
   case(mesh_native_id) ! Native Mesh
@@ -105,6 +110,7 @@ select case(cad_type)
     CALL oft_abort('Invalid mesh type.','multigrid_load',__FILE__)
 end select
 !---Mesh load complete
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine multigrid_load
 !------------------------------------------------------------------------------
@@ -116,7 +122,7 @@ INTEGER(i4) :: i,j
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 IF(.NOT.fix_boundary)THEN
-  IF(oft_env%head_proc)WRITE(*,*)'Skipping boundary corrections'
+  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Skipping boundary corrections'
   DEBUG_STACK_POP
   RETURN
 END IF
@@ -796,12 +802,17 @@ integer(i4), intent(in) :: cad_type
 integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Select mesh type and load
+IF(oft_env%head_proc)THEN
+  WRITE(*,*)
+  WRITE(*,'(2A)')oft_indent,'**** Loading OFT surface mesh'
+END IF
+CALL oft_increase_indent
 select case(cad_type)
   case(mesh_native_id) ! Native Mesh
     CALL native_load_smesh(mg_mesh)
     CALL smesh_global_init(mg_mesh%smesh)
     CALL native_hobase(mg_mesh%smesh)
-    ! CALL native_set_periodic
+    CALL native_bset_periodic(mg_mesh%smesh)
   case(mesh_t3d_id) ! T3D Mesh
     CALL smesh_t3d_load(mg_mesh)
     CALL smesh_global_init(mg_mesh%smesh)
@@ -834,6 +845,7 @@ select case(cad_type)
   case default ! Invalid Mesh
     CALL oft_abort('Invalid mesh type.','multigrid_load_surf',__FILE__)
 end select
+CALL oft_decrease_indent
 !---Mesh load complete
 DEBUG_STACK_POP
 end subroutine multigrid_load_surf

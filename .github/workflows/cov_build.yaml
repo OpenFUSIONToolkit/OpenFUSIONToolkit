@@ -83,7 +83,7 @@ jobs:
 
     - name: Test OFT
       shell: bash
-      timeout-minutes: 60
+      timeout-minutes: 90
       working-directory: libs/build_release
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate

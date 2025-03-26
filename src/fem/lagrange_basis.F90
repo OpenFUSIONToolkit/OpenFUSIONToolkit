@@ -327,10 +327,12 @@ IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'**** Creating Lagrange FE space'
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Minlev = ',minlev_out
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I4)')oft_indent,'Order  = ',order
+  WRITE(*,'(2A,I4)')oft_indent,'Minlev = ',minlev_out
+ELSE
+  CALL oft_increase_indent
 END IF
-CALL oft_increase_indent
 !---Allocate multigrid operators
 nlevels=mg_mesh%mgdim+(order-1)
 IF(minlev_out<0)minlev_out=nlevels

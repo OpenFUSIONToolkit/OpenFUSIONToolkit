@@ -23,8 +23,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
-USE oft_lag_basis, ONLY: oft_lag_setup!, &
-  ! ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zerob
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -57,7 +56,7 @@ CALL mg_mesh%smesh%setup_io(plot_file,order)
 CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
 blag_zerob%ML_lag_rep=>ML_oft_blagrange
 !---Run tests
-! oft_env%pm=.FALSE.
+oft_env%pm=.FALSE.
 CALL test_lap
 !---Finalize enviroment
 CALL oft_finalize

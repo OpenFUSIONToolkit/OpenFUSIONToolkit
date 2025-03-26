@@ -117,22 +117,24 @@ IF(oft_env%head_proc)THEN
   IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','mesh_t3d_load',__FILE__)
   lenreflag=lnblnk(reflect)
   !
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Loading T3D mesh'
-  WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
-  WRITE(*,'(2X,2A)')'Geom File = ',TRIM(inpname)
+  WRITE(*,'(2A)')oft_indent,'T3D volume mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
+  WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
   IF(lenreflag>0)THEN
-    WRITE(*,'(2X,A)')'Reflection:'
+    WRITE(*,'(2A)')oft_indent,'Reflection:'
+    CALL oft_increase_indent
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(4X,A,L)')'YZ-plane, periodic = ',ref_per(1)
+          WRITE(*,'(2A,L)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(4X,A,L)')'XZ-plane, periodic = ',ref_per(2)
+          WRITE(*,'(2A,L)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(4X,A,L)')'XY-plane, periodic = ',ref_per(3)
+          WRITE(*,'(2A,L)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
+    CALL oft_decrease_indent
   END IF
 END IF
 !---Broadcast input information
@@ -206,7 +208,6 @@ do i=1,mesh%nc
   read(io_unit,*)id,mesh%lc(1,i),mesh%lc(2,i),mesh%lc(3,i),mesh%lc(4,i)
 end do
 close(io_unit)
-IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
 call mesh_t3d_geom
 call mesh_global_resolution(mesh)
@@ -216,6 +217,7 @@ do i=1,lenreflag
   if(reflect(i:i)=='y')call mesh_t3d_reflect(mesh,2,.1d0*mesh%hmin,ref_per(i))
   if(reflect(i:i)=='z')call mesh_t3d_reflect(mesh,3,.1d0*mesh%hmin,ref_per(i))
 end do
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine mesh_t3d_load
 !---------------------------------------------------------------------------------
@@ -241,22 +243,24 @@ IF(oft_env%head_proc)THEN
   IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','smesh_t3d_load',__FILE__)
   lenreflag=lnblnk(reflect)
   !
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Loading T3D mesh'
-  WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
-  WRITE(*,'(2X,2A)')'Geom File = ',TRIM(inpname)
+  WRITE(*,'(2A)')oft_indent,'T3D surface mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
+  WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
   IF(lenreflag>0)THEN
-    WRITE(*,'(2X,A)')'Reflection:'
+    WRITE(*,'(2X,A)')oft_indent,'Reflection:'
+    CALL oft_increase_indent
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(4X,A,L)')'YZ-plane, periodic = ',ref_per(1)
+          WRITE(*,'(4X,A,L)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(4X,A,L)')'XZ-plane, periodic = ',ref_per(2)
+          WRITE(*,'(4X,A,L)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(4X,A,L)')'XY-plane, periodic = ',ref_per(3)
+          WRITE(*,'(4X,A,L)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
+    CALL oft_decrease_indent
   END IF
 END IF
 !---Broadcast input information
@@ -327,7 +331,6 @@ do i=1,smesh%nc
   read(io_unit,*)id,smesh%lc(1,i),smesh%lc(2,i),smesh%lc(3,i)
 end do
 close(io_unit)
-IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
 ! call mesh_t3d_geom
 call mesh_global_resolution(smesh)
@@ -337,6 +340,7 @@ call mesh_global_resolution(smesh)
 !   if(reflect(i:i)=='y')call mesh_t3d_reflect(2,.1d0*mesh%hmin,ref_per(i))
 !   if(reflect(i:i)=='z')call mesh_t3d_reflect(3,.1d0*mesh%hmin,ref_per(i))
 ! end do
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine smesh_t3d_load
 !---------------------------------------------------------------------------------
