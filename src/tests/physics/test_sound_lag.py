@@ -18,21 +18,14 @@ oft_in_template = """
 
 &mesh_options
  meshname='cube'
- cad_type={11}
+ cad_type=92
  nlevels={1}
  nbase={0}
  grid_order=1
 /
 
-&t3d_options
- filename='cube.t3d'
- inpname='cube.inp'
- reflect='xyz'
- ref_per=T,T,T
-/
-
 &cube_options
- mesh_type=2
+ mesh_type={11}
  ni=1,1,4
  rscale=1.,1.,2.
  shift=-0.5,-0.5,-1.
@@ -86,7 +79,7 @@ def sound_setup(nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,pet
     os.chdir(test_dir)
     mesh_type=1
     if hex_mesh:
-        mesh_type=92
+        mesh_type=2
     dt='1.e-6'
     its='100'
     tol='1.E-12'
