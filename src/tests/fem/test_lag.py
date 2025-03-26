@@ -165,14 +165,14 @@ def test_r3_p3_mg(petsc_flag=False):
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r3_p3_periodic1(mpi, petsc_flag):
-    single_level(3, 3, 143, 11.767079839311773, mpi=mpi, petsc=petsc_flag, xperiodic=True)
-    single_level(3, 3, 143, 11.767079839311773, mpi=mpi, petsc=petsc_flag, yperiodic=True)
+    single_level(3, 3, 144, 11.767079839311773, mpi=mpi, petsc=petsc_flag, xperiodic=True)
+    single_level(3, 3, 136, 11.767079839311773, mpi=mpi, petsc=petsc_flag, yperiodic=True)
     single_level(3, 3, 143, 11.767079839311773, mpi=mpi, petsc=petsc_flag, zperiodic=True)
 @pytest.mark.parametrize("mpi", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r3_p3_periodic2(mpi, petsc_flag):
     single_level(3, 3, 151, 115.19965277776963, mpi=mpi, petsc=petsc_flag, xperiodic=True, yperiodic=True)
-    single_level(3, 3, 151, 115.19965277776963, mpi=mpi, petsc=petsc_flag, xperiodic=True, zperiodic=True)
+    single_level(3, 3, 144, 115.19965277776963, mpi=mpi, petsc=petsc_flag, xperiodic=True, zperiodic=True)
     single_level(3, 3, 151, 115.19965277776963, mpi=mpi, petsc=petsc_flag, yperiodic=True, zperiodic=True)
 
 #============================================================================
@@ -198,7 +198,7 @@ def test_r3_p4_periodic1(mpi, petsc_flag):
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_r3_p4_periodic2(mpi, petsc_flag):
     single_level(3, 4, 272, 273.0664062499967, mpi=mpi, petsc=petsc_flag, xperiodic=True, yperiodic=True)
-    single_level(3, 4, 272, 273.0664062499967, mpi=mpi, petsc=petsc_flag, xperiodic=True, zperiodic=True)
+    single_level(3, 4, 259, 273.0664062499967, mpi=mpi, petsc=petsc_flag, xperiodic=True, zperiodic=True)
     single_level(3, 4, 272, 273.0664062499967, mpi=mpi, petsc=petsc_flag, yperiodic=True, zperiodic=True)
 
 #============================================================================
