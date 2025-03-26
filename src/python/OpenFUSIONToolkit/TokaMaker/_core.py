@@ -1560,6 +1560,23 @@ class TokaMaker():
         tokamaker_save_eqdsk(self._tMaker_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+    
+    def save_ifile(self,filename,npsi=65,ntheta=65,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False):
+        r'''! Save current equilibrium to iFile format
+
+        @param filename Filename to save equilibrium to
+        @param npsi Number of radial sampling points
+        @param ntheta Number of vertical sampling points
+        @param lcfs_pad Padding in normalized flux at LCFS
+        @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
+        @param pack_lcfs Pack toward LCFS with quadraturic sampling?
+        @param single_precision Save single precision file? (default: double precision)
+        '''
+        cfilename = self._oft_env.path2c(filename)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_save_ifile(self._tMaker_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def set_coil_current_dist(self,coil_name,curr_dist):
         '''! Overwrite coil with non-uniform current distribution.

@@ -847,15 +847,18 @@ DO i=1,npsi
 END DO
 CLOSE(io_unit)
 END SUBROUTINE gs_analyze
-!------------------------------------------------------------------------------
-! SUBROUTINE gs_save_decon
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
-subroutine gs_save_decon(gseq,npsi,ntheta,error_str)
+!---------------------------------------------------------------------------
+subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
 class(gs_eq), intent(inout) :: gseq
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: npsi
 integer(4), intent(in) :: ntheta
+REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
+REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
+LOGICAL, OPTIONAL, INTENT(in) :: pack_lcfs !< Use quadratic packing toward LCFS?
+LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision fields?
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 type(gsinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
@@ -865,11 +868,16 @@ real(8), allocatable :: ptout(:,:)
 real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
+LOGICAL :: do_pack,save_single
 TYPE(spline_type) :: rz
 !---
 IF(PRESENT(error_str))error_str=""
-WRITE(*,'(2A)')oft_indent,'Saving DCON file'
+WRITE(*,'(3A)')oft_indent,'Saving iFile: ',TRIM(filename)
 CALL oft_increase_indent
+do_pack=.FALSE.
+save_single=.FALSE.
+IF(PRESENT(pack_lcfs))do_pack=pack_lcfs
+IF(PRESENT(single_prec))save_single=single_prec
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -877,9 +885,11 @@ x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
   x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
 END IF
+!
 xr = (x2-x1)
-x1 = x1 + xr*1.d-3
-x2 = x2 - xr*1.d-3
+x1 = x1 + xr*psi_pad
+xr = (x2-x1)
+!
 psi_int%u=>gseq%psi
 CALL psi_int%setup(gseq%fe_rep)
 !---Find Rmax along Zaxis
@@ -905,9 +915,9 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-ALLOCATE(cout(4,npsi))
-ALLOCATE(rout(npsi,ntheta))
-ALLOCATE(zout(npsi,ntheta))
+ALLOCATE(cout(npsi,4))
+ALLOCATE(rout(ntheta,npsi))
+ALLOCATE(zout(ntheta,npsi))
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
@@ -919,16 +929,20 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
-do j=1,npsi-1
+do j=2,npsi
   IF(PRESENT(error_str))THEN
     IF(error_str/="")CYCLE
   END IF
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------
   ! Trace contour
-  !------------------------------------------------------------------------------
-  psi_surf(1)=(x2-x1)*(1.d0-j/REAL(npsi,4))**2
-  psi_surf(1)=x2 - psi_surf(1)
-  IF(gseq%diverted.AND.(psi_surf(1)-x1)/(x2-x1)<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  !---------------------------------------------------------------------------
+  IF(pack_lcfs)THEN
+    psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
+  ELSE
+    psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8)) + x1
+  END IF
+  ! psi_surf(1)=x2 - psi_surf(1)
+  IF(gseq%diverted.AND.ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near divertor
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
@@ -950,9 +964,9 @@ do j=1,npsi-1
       call oft_abort('Trace did not complete.','gs_save_decon',__FILE__)
     END IF
   END IF
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------
   ! Perform cubic spline interpolation
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------
   !---Allocate spline
   CALL spline_alloc(rz,active_tracer%nsteps,2)
   !---Setup Spline
@@ -963,24 +977,24 @@ do j=1,npsi-1
   !---Resample trace
   DO k=0,ntheta-1
     CALL spline_eval(rz,k/REAL(ntheta-1,8),0)
-    rout(j,k+1)=rz%f(1)
-    zout(j,k+1)=rz%f(2)
+    rout(k+1,j)=rz%f(1)
+    zout(k+1,j)=rz%f(2)
   END DO
   !---Destroy Spline
   CALL spline_dealloc(rz)
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------
   ! Save DCON information
-  !------------------------------------------------------------------------------
-  cout(1,j)=psi_surf(1) ! Poloidal flux
+  !---------------------------------------------------------------------------
+  cout(j,1)=psi_surf(1) ! Poloidal flux
   !---Toroidal flux function
   IF(gseq%mode==0)THEN
-    cout(2,j)=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
+    cout(j,2)=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
   ELSE
-    cout(2,j)=SQRT(gseq%alam*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
+    cout(j,2)=SQRT(gseq%alam*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
     + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
   END IF
-  cout(3,j)=gseq%pnorm*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
-  cout(4,j)=cout(2,j)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
+  cout(j,3)=gseq%pnorm*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
+  cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
 end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
@@ -993,47 +1007,58 @@ IF(PRESENT(error_str))THEN
   END IF
 END IF
 !---Information for O-point
-rout(npsi,:)=raxis
-zout(npsi,:)=zaxis
-cout(1,npsi)=x2
+rout(:,1)=raxis
+zout(:,1)=zaxis
+cout(1,1)=x2
 IF(gseq%mode==0)THEN
-  cout(2,npsi)=(gseq%alam*gseq%I%f(x2)+gseq%I%f_offset)
+  cout(1,2)=(gseq%alam*gseq%I%f(x2)+gseq%I%f_offset)
 ELSE
-  cout(2,npsi)=SQRT(gseq%alam*gseq%I%f(x2) + gseq%I%f_offset**2) &
+  cout(1,2)=SQRT(gseq%alam*gseq%I%f(x2) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
 END IF
-cout(3,npsi)=gseq%pnorm*gseq%P%f(x2)/mu0
-cout(4,npsi)=(cout(4,npsi-2)-cout(4,npsi-1))*(x2-cout(1,npsi-1))/(cout(1,npsi-2)-cout(1,npsi-1)) + cout(4,npsi-1)
-!------------------------------------------------------------------------------
+cout(1,3)=gseq%pnorm*gseq%P%f(x2)/mu0
+cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
+!---Add LCFS pressure if specified
+IF(PRESENT(lcfs_press))cout(:,3)=cout(:,3)+lcfs_press
+!---------------------------------------------------------------------------
 ! Create output file
-!------------------------------------------------------------------------------
-OPEN(NEWUNIT=io_unit,FILE='Psitri.dci',FORM='UNFORMATTED')
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------
+OPEN(NEWUNIT=io_unit,FILE=TRIM(filename),FORM='UNFORMATTED')
+!---------------------------------------------------------------------------
 ! Write array lengths
-!------------------------------------------------------------------------------
-WRITE(io_unit)INT(npsi-1,4),INT(ntheta-1,4)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------
+WRITE(io_unit)INT(npsi,4),INT(ntheta,4)
+!---------------------------------------------------------------------------
 ! Write out flux surface quantities
 !
-! cout(1,:) -> psi(0:mpsi)
-! cout(2,:) -> f(0:mpsi)
-! cout(3,:) -> p(0:mpsi)
-! cout(4,:) -> q(0:mpsi)
-!------------------------------------------------------------------------------
+! cout(:,1) -> psi(0:npsi)
+! cout(:,2) -> f(0:npsi)
+! cout(:,3) -> p(0:npsi)
+! cout(:,4) -> q(0:npsi)
+!---------------------------------------------------------------------------
 DO j=1,4
-  WRITE(io_unit)REAL(cout(j,:),4)
+  IF(save_single)THEN
+    WRITE(io_unit)REAL(cout(:,j),4)
+  ELSE
+    WRITE(io_unit)cout(:,j)
+  END IF
 END DO
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------
 ! Write out inverse representation
 !
-! rout -> r(0:mpsi,0:mtheta)
-! zout -> z(0:mpsi,0:mtheta)
-!------------------------------------------------------------------------------
-WRITE(io_unit)REAL(rout,4)
-WRITE(io_unit)REAL(zout,4)
-!------------------------------------------------------------------------------
+! rout -> r(0:ntheta,0:npsi)
+! zout -> z(0:ntheta,0:npsi)
+!---------------------------------------------------------------------------
+IF(save_single)THEN
+  WRITE(io_unit)REAL(rout,4)
+  WRITE(io_unit)REAL(zout,4)
+ELSE
+  WRITE(io_unit)rout
+  WRITE(io_unit)zout
+END IF
+!---------------------------------------------------------------------------
 ! Close output file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------
 CLOSE(io_unit)
 !---
 IF(oft_debug_print(1))THEN
@@ -1045,13 +1070,13 @@ END IF
 CALL oft_decrease_indent
 !---
 DEALLOCATE(cout,rout,zout)
-end subroutine gs_save_decon
-!------------------------------------------------------------------------------
+end subroutine gs_save_ifile
+!---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
 subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
-CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
 integer(4), intent(in) :: nz !< Number of vertical points for flux grid
 real(8), intent(in) :: rbounds(2) !< Radial extents for flux grid
@@ -1083,7 +1108,7 @@ REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 LOGICAL :: do_truncate
 !---
 IF(PRESENT(error_str))error_str=""
-WRITE(*,'(3A)')oft_indent,'Saving EQDSK file: ',TRIM(filename)
+WRITE(*,'(3A)')oft_indent,'Saving gEQDSK: ',TRIM(filename)
 CALL oft_increase_indent
 !---
 ALLOCATE(fpol(nr),pres(nr),ffprim(nr),pprime(nr),qpsi(nr))
