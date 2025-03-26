@@ -124,10 +124,16 @@ IF(mesh_type==1)THEN
     mesh%lc(:,12)=(/7,6,5,9/)
     !---
     DO i=1,3
-      IF(ref_per(i))THEN
+      IF(ref_per(i))ni(i)=MAX(2,ni(i))
+      xtmp=LOG(REAL(ni(i),8))/LOG(2.d0)
+      IF(ABS(INT(xtmp)-xtmp)>1.d-8)CALL oft_abort('For Tet meshes values of "ni" must be a power of 2',"mesh_cube_load",__FILE__)
+      ni(i)=INT(xtmp)
+    END DO
+    DO i=1,3
+      DO j=1,ni(i)
         CALL reflect_tet(i)
         mesh%r(i,:)=(mesh%r(i,:)+1.d0)/2.d0
-      END IF
+      END DO
     END DO
     !---
     mesh%r(1,:)=mesh%r(1,:)*rscale(1)+shift(1)
@@ -384,16 +390,17 @@ subroutine smesh_square_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j,k,ierr,io_unit,nptmp,nctmp,mesh_type,ni(3)
 INTEGER(i4), ALLOCATABLE :: pmap(:,:),lctmp(:,:)
-REAL(r8) :: rscale(3),shift(3)
+REAL(r8) :: rscale(3),shift(3),packing(3),alpha,beta,xtmp,ytmp
 REAL(r8), ALLOCATABLE :: rtmp(:,:)
 class(oft_bmesh), pointer :: smesh
-namelist/cube_options/mesh_type,ni,rscale,shift,ref_per
+namelist/cube_options/mesh_type,ni,rscale,shift,ref_per,packing
 DEBUG_STACK_PUSH
 mesh_type=1
 ni=1
 rscale=1.d0
 shift=0.d0
 ref_per=.FALSE.
+packing=1.d0
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)
@@ -407,6 +414,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(2A,2I4)')oft_indent,    'nx, ny      = ',ni(1:2)
   WRITE(*,'(2A,2ES11.3)')oft_indent,'Scale facs  = ',rscale(1:2)
   WRITE(*,'(2A,2L2)')oft_indent,    'Periodicity = ',ref_per(1:2)
+  WRITE(*,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -439,12 +447,23 @@ IF(oft_env%rank==0)THEN
   ALLOCATE(pmap(ni(1)+1,ni(2)+1))
   pmap=-1
   nptmp=0
+  ! Adjust scales for packing
+  beta = 2.0*(packing(1)-1.0); alpha = -2.0*beta/3.0
+  rscale(1) = rscale(1)/(alpha + beta + 1.d0)
+  beta = 2.0*(packing(2)-1.0); alpha = -2.0*beta/3.0
+  rscale(2) = rscale(2)/(alpha + beta + 1.d0)
   DO i=1,ni(1)+1
+    beta = 2.0*(packing(1)-1.0); alpha = -2.0*beta/3.0
+    xtmp = (i-1)/REAL(ni(1),8)
+    xtmp = rscale(1)*(alpha*(xtmp**3) + beta*(xtmp**2) + xtmp)
     DO j=1,ni(2)+1
+      beta = 2.0*(packing(2)-1.0); alpha = -2.0*beta/3.0
+      ytmp = (j-1)/REAL(ni(2),8)
+      ytmp = rscale(2)*(alpha*(ytmp**3) + beta*(ytmp**2) + ytmp)
+      !
       nptmp=nptmp+1
       pmap(i,j)=nptmp
-      rtmp(:,nptmp)=[(i-1)*rscale(1)/REAL(ni(1),8), &
-        (j-1)*rscale(2)/REAL(ni(2),8)]+shift(1:2)
+      rtmp(:,nptmp)=[xtmp,ytmp]+shift(1:2)
     END DO
   END DO
   !---Setup cells

@@ -59,9 +59,10 @@ def lagrange_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', pet
     nproc = 1
     if nbase != nlevels:
         nproc = 2
-    ni_line = ' ni=2,2,2'
-    if not (xperiodic or yperiodic or zperiodic):
-        ni_line = '!' + ni_line
+    if (grid_type == 2) and (xperiodic or yperiodic or zperiodic):
+        ni_line = ' ni=2,2,2'
+    else:
+        ni_line = '! ni=2,2,2'
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
