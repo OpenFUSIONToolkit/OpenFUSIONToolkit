@@ -126,6 +126,7 @@ TYPE, EXTENDS(fit_constraint) :: itor_constraint
 CONTAINS
   PROCEDURE :: error => fit_itor_error
   PROCEDURE :: eval => fit_itor_eval
+  PROCEDURE :: is_parallel => fit_itor_parallel
 END TYPE itor_constraint
 !---------------------------------------------------------------------------------
 ! TYPE itor_constraint
@@ -1394,8 +1395,8 @@ FUNCTION fit_field_eval(self,gs) RESULT(val)
 CLASS(field_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
-TYPE(oft_lag_brinterp), TARGET :: psi_eval
-TYPE(oft_lag_bginterp), TARGET :: psi_geval
+TYPE(oft_lag_brinterp) :: psi_eval
+TYPE(oft_lag_bginterp) :: psi_geval
 REAL(8) :: goptmp(3,3),v,psi(1),gpsi(3),rmin,rdiff,btmp(3)
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
@@ -1426,6 +1427,8 @@ CALL psi_geval%setup(gs%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 call psi_geval%interp(self%cell,self%f,goptmp,gpsi)
+CALL psi_eval%delete()
+CALL psi_geval%delete()
 btmp(1)= -gs%psiscale*gpsi(2)/self%r(1)
 IF(gs%mode==0)THEN
   btmp(2)= gs%psiscale*gs%alam*(gs%I%f(psi(1))+gs%I%f_offset/gs%alam)/self%r(1)
@@ -1469,7 +1472,7 @@ FUNCTION fit_flux_eval(self,gs) RESULT(val)
 CLASS(flux_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
-TYPE(oft_lag_brinterp), TARGET :: psi_eval
+TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
@@ -1497,6 +1500,7 @@ psi_eval%u=>gs%psi
 CALL psi_eval%setup(gs%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
+CALL psi_eval%delete()
 !---
 val = psi(1)*2.d0*pi
 END FUNCTION fit_flux_eval
@@ -1522,7 +1526,7 @@ FUNCTION fit_saddle_eval(self,gs) RESULT(val)
 CLASS(saddle_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
-TYPE(oft_lag_brinterp), TARGET :: psi_eval
+TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),psi(1,2)
 INTEGER(4) :: i
 IF(self%cells(1)==0)THEN
@@ -1539,6 +1543,7 @@ CALL psi_eval%setup(gs%fe_rep)
 DO i=1,2
   call psi_eval%interp(self%cells(i),self%f(:,i),goptmp,psi(:,i))
 END DO
+CALL psi_eval%delete
 !---
 val = -(psi(1,1)-psi(1,2))*self%width
 END FUNCTION fit_saddle_eval
@@ -1596,6 +1601,14 @@ CALL gs_itor_nl(gs,itor)
 val=itor/mu0
 END FUNCTION fit_itor_eval
 !---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+FUNCTION fit_itor_parallel(self) RESULT(is_parallel)
+CLASS(itor_constraint), INTENT(inout) :: self
+LOGICAL :: is_parallel
+is_parallel=.TRUE.
+END FUNCTION fit_itor_parallel
+!---------------------------------------------------------------------------------
 ! FUNCTION fit_dflux_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
@@ -1627,7 +1640,7 @@ FUNCTION fit_press_error(self,gs) RESULT(err)
 CLASS(press_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: err,press,psi(1),goptmp(3,4)
-TYPE(oft_lag_brinterp), TARGET :: psi_eval
+TYPE(oft_lag_brinterp) :: psi_eval
 LOGICAL :: in_plasma
 press = self%eval(gs)
 !---Handle outside plasma guidance
@@ -1658,7 +1671,7 @@ FUNCTION fit_press_eval(self,gs) RESULT(val)
 CLASS(press_constraint), INTENT(inout) :: self
 TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
-TYPE(oft_lag_brinterp), TARGET :: psi_eval
+TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
@@ -1690,6 +1703,7 @@ psi_eval%u=>gs%psi
 CALL psi_eval%setup(gs%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
+CALL psi_eval%delete
 !---
 val = gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(psi(1))/mu0
 END FUNCTION fit_press_eval
