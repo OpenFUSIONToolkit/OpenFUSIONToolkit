@@ -10,7 +10,8 @@ USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: smesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_bmesh, cell_is_curved
+USE multigrid, ONLY: multigrid_mesh
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_local_mat, oft_vector_ptr, &
   vector_extrapolate
@@ -19,9 +20,10 @@ USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
 !
+USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_blagrange, oft_blag_eval, oft_blag_geval
+USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast
 IMPLICIT NONE
 #include "local.h"
 #if !defined(TDIFF_RST_LEN)
@@ -87,8 +89,8 @@ TYPE, public :: oft_xmhd_2d_sim
   CLASS(oft_matrix), POINTER :: jacobian => NULL() !< Needs docs
   TYPE(oft_mf_matrix), POINTER :: mf_mat => NULL() !< Matrix free operator
   TYPE(xmhd_2d_nlfun), POINTER :: nlfun => NULL() !< Needs docs
-  TYPE(fox_node), POINTER :: xml_root => NULL() !< XML root element
-  TYPE(fox_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
+  TYPE(xml_node), POINTER :: xml_root => NULL() !< XML root element
+  TYPE(xml_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
   contains
   !> Setup
   PROCEDURE :: setup => setup
@@ -100,6 +102,11 @@ TYPE, public :: oft_xmhd_2d_sim
   PROCEDURE :: rst_load => rst_load
 END TYPE oft_xmhd_2d_sim
 TYPE(oft_xmhd_2d_sim), POINTER :: current_sim => NULL()
+!
+CLASS(multigrid_mesh), POINTER :: mg_mesh => NULL()
+CLASS(oft_bmesh), POINTER, PUBLIC :: mesh => NULL()
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_blagrange
+CLASS(oft_scalar_bfem), POINTER :: oft_blagrange => NULL()
 CONTAINS
 !---------------------------------------------------------------------------
 !> TODO: COMPLETE EDIT FOR NEW FIELDS
@@ -149,9 +156,9 @@ CALL self%rst_save(u, self%t, self%dt, 'tDiff_'//rst_char//'.rst', 'U')
 NULLIFY(plot_vals)
 CALL self%xdmf_plot%add_timestep(self%t)
 CALL self%u%get_local(plot_vals,1)
-CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
 CALL self%u%get_local(plot_vals,2)
-CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
 
 !
 ALLOCATE(self%nlfun)
@@ -288,9 +295,9 @@ DO i=1,self%nsteps
     !---
     CALL self%xdmf_plot%add_timestep(self%t)
     CALL self%u%get_local(plot_vals,1)
-    CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
     CALL self%u%get_local(plot_vals,2)
-    CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
   END IF
 END DO
 CALL hist_file%close()
@@ -372,8 +379,8 @@ ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
         vel_weights_loc(3, oft_blagrange%nce))
 ALLOCATE(cell_dofs(oft_blagrange%nce),res_loc(oft_blagrange%nce,7))
 !$omp do schedule(static)
-DO i=1,smesh%nc
-  curved=cell_is_curved(smesh,i) ! Straight cell test
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i) ! Straight cell test
   call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
   res_loc = 0.d0 ! Zero local (cell) contribution to function
   n_weights_loc = n_weights(cell_dofs)
@@ -385,7 +392,7 @@ DO i=1,smesh%nc
   ! Quadrature Loop
   !---------------------------------------------------------------------------
   DO m=1,quad%np
-    if(curved.OR.(m==1))call smesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+    if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
     !---Evaluate value and gradients of basis functions at current point
     DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
       CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
@@ -573,8 +580,8 @@ iloc(1)%v=>cell_dofs
 iloc(2)%v=>cell_dofs
 CALL self%fe_rep%mat_setup_local(jac_loc, self%jacobian_block_mask)
 !$omp do schedule(static)
-DO i=1,smesh%nc
-  curved=cell_is_curved(smesh,i) ! Straight cell test
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i) ! Straight cell test
   call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
   CALL self%fe_rep%mat_zero_local(jac_loc) ! Zero local (cell) contribution to matrix
   n_weights_loc = n_weights(cell_dofs)
@@ -586,7 +593,7 @@ DO i=1,smesh%nc
 ! Quadrature Loop
 !---------------------------------------------------------------------------
   DO m=1,quad%np
-    if(curved.OR.(m==1))call smesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+    if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
     !---Evaluate value and gradients of basis functions at current point
     DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
       CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
@@ -772,75 +779,79 @@ end subroutine build_approx_jacobian
 !> Update Jacobian matrices on all levels with new fields
 !---------------------------------------------------------------------------
 subroutine mfnk_update(uin)
-  class(oft_vector), target, intent(inout) :: uin !< Current field
-  IF(oft_debug_print(1))write(*,*)'Updating 2D MUG MF-Jacobian'
-  CALL current_sim%mf_mat%update(uin)
-  END SUBROUTINE mfnk_update
-  !---------------------------------------------------------------------------
-  !> Update Jacobian matrices on all levels with new solution
-  !---------------------------------------------------------------------------
-  subroutine update_jacobian(uin)
-  class(oft_vector), target, intent(inout) :: uin !< Current solution
-  IF(oft_debug_print(1))write(*,*)'Updating 2D MUG approximate Jacobian'
-  CALL build_approx_jacobian(current_sim,uin)
-  END SUBROUTINE update_jacobian
-  !---------------------------------------------------------------------------
-  !> Setup composite FE representation and ML environment
-  !---------------------------------------------------------------------------
-  subroutine setup(self,order)
-  class(oft_xmhd_2d_sim), intent(inout) :: self
-  integer(i4), intent(in) :: order
-  integer(i4) :: ierr,io_unit
-  IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup",__FILE__)
-  IF(ASSOCIATED(oft_blagrange))CALL oft_abort("FE space already built","setup",__FILE__)
-  
-  !---Look for XML defintion elements
+class(oft_vector), target, intent(inout) :: uin !< Current field
+IF(oft_debug_print(1))write(*,*)'Updating 2D MUG MF-Jacobian'
+CALL current_sim%mf_mat%update(uin)
+END SUBROUTINE mfnk_update
+!---------------------------------------------------------------------------
+!> Update Jacobian matrices on all levels with new solution
+!---------------------------------------------------------------------------
+subroutine update_jacobian(uin)
+class(oft_vector), target, intent(inout) :: uin !< Current solution
+IF(oft_debug_print(1))write(*,*)'Updating 2D MUG approximate Jacobian'
+CALL build_approx_jacobian(current_sim,uin)
+END SUBROUTINE update_jacobian
+!---------------------------------------------------------------------------
+!> Setup composite FE representation and ML environment
+!---------------------------------------------------------------------------
+subroutine setup(self,mg_mesh_in, order)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+CLASS(multigrid_mesh), TARGET, intent(in) :: mg_mesh_in
+integer(i4), intent(in) :: order
+integer(i4) :: ierr,io_unit
+mg_mesh=>mg_mesh_in
+mesh=>mg_mesh%smesh
+IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup",__FILE__)
+IF(ASSOCIATED(oft_blagrange))CALL oft_abort("FE space already built","setup",__FILE__)
+
+!---Look for XML defintion elements
 #ifdef HAVE_XML
-  IF(ASSOCIATED(oft_env%xml))THEN
-    CALL xml_get_element(oft_env%xml,"tdiff",self%xml_root,ierr)
-    IF(ierr==0)THEN
-      !---Look for pre node
-      CALL xml_get_element(self%xml_root,"pre",self%xml_pre_def,ierr)
-      IF(ierr/=0)NULLIFY(self%xml_pre_def)
-    ELSE
-      NULLIFY(self%xml_root)
-    END IF
+IF(ASSOCIATED(oft_env%xml))THEN
+  CALL xml_get_element(oft_env%xml,"tdiff",self%xml_root,ierr)
+  IF(ierr==0)THEN
+    !---Look for pre node
+    CALL xml_get_element(self%xml_root,"pre",self%xml_pre_def,ierr)
+    IF(ierr/=0)NULLIFY(self%xml_pre_def)
+  ELSE
+    NULLIFY(self%xml_root)
   END IF
+END IF
 #endif
-  
-  !---Setup FE representation
-  IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
-  CALL oft_lag_setup(order, -1)
-  CALL self%xdmf_plot%setup("xmhd_2d")
-  CALL smesh%setup_io(self%xdmf_plot,order)
-  
-  !---Build composite FE definition for solution field
-  IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
-  ALLOCATE(self%fe_rep)
-  self%fe_rep%nfields=7
-  ALLOCATE(self%fe_rep%fields(self%fe_rep%nfields))
-  ALLOCATE(self%fe_rep%field_tags(self%fe_rep%nfields))
-  self%fe_rep%fields(1)%fe=>oft_blagrange
-  self%fe_rep%field_tags(1)='n'
-  self%fe_rep%fields(2)%fe=>oft_blagrange
-  self%fe_rep%field_tags(2)='velx'
-  self%fe_rep%fields(3)%fe=>oft_blagrange
-  self%fe_rep%field_tags(3)='vely'
-  self%fe_rep%fields(4)%fe=>oft_blagrange
-  self%fe_rep%field_tags(4)='velz'
-  self%fe_rep%fields(5)%fe=>oft_blagrange
-  self%fe_rep%field_tags(5)='T'
-  self%fe_rep%fields(6)%fe=>oft_blagrange
-  self%fe_rep%field_tags(6)='psi'
-  self%fe_rep%fields(7)%fe=>oft_blagrange
-  self%fe_rep%field_tags(7)='by'
-  
-  !---Create solution vector
-  CALL self%fe_rep%vec_create(self%u)
-  
+
+!---Setup FE representation
+IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
+CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
+IF(.NOT.oft_2D_lagrange_cast(oft_blagrange,ML_oft_blagrange%current_level))CALL oft_abort("Invalid lagrange FE object","setup",__FILE__)
+CALL self%xdmf_plot%setup("xmhd_2d")
+CALL mesh%setup_io(self%xdmf_plot,order)
+
+!---Build composite FE definition for solution field
+IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
+ALLOCATE(self%fe_rep)
+self%fe_rep%nfields=7
+ALLOCATE(self%fe_rep%fields(self%fe_rep%nfields))
+ALLOCATE(self%fe_rep%field_tags(self%fe_rep%nfields))
+self%fe_rep%fields(1)%fe=>oft_blagrange
+self%fe_rep%field_tags(1)='n'
+self%fe_rep%fields(2)%fe=>oft_blagrange
+self%fe_rep%field_tags(2)='velx'
+self%fe_rep%fields(3)%fe=>oft_blagrange
+self%fe_rep%field_tags(3)='vely'
+self%fe_rep%fields(4)%fe=>oft_blagrange
+self%fe_rep%field_tags(4)='velz'
+self%fe_rep%fields(5)%fe=>oft_blagrange
+self%fe_rep%field_tags(5)='T'
+self%fe_rep%fields(6)%fe=>oft_blagrange
+self%fe_rep%field_tags(6)='psi'
+self%fe_rep%fields(7)%fe=>oft_blagrange
+self%fe_rep%field_tags(7)='by'
+
+!---Create solution vector
+CALL self%fe_rep%vec_create(self%u)
+
 !---Set boundary conditions (Dirichlet for now)
 ALLOCATE(self%n_bc(oft_blagrange%ne),self%T_bc(oft_blagrange%ne),self%velx_bc(oft_blagrange%ne),&
-           self%vely_bc(oft_blagrange%ne), self%velz_bc(oft_blagrange%ne), self%by_bc(oft_blagrange%ne))
+          self%vely_bc(oft_blagrange%ne), self%velz_bc(oft_blagrange%ne), self%by_bc(oft_blagrange%ne))
 self%n_bc=.TRUE.
 self%T_bc=.TRUE.
 self%velx_bc=.TRUE.
@@ -855,7 +866,7 @@ self%vely_bc=>oft_blagrange%be
 self%velz_bc=>oft_blagrange%be
 self%psi_bc=>oft_blagrange%be
 self%by_bc=>oft_blagrange%be
-  
+
 !---Create Jacobian matrix
 ALLOCATE(self%jacobian_block_mask(self%fe_rep%nfields,self%fe_rep%nfields))
 self%jacobian_block_mask=1
