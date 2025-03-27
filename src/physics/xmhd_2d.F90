@@ -395,6 +395,8 @@ DO i=1,smesh%nc
     n = 0.d0; dn = 0.d0; vel = 0.d0; dvel = 0.d0
     T = 0.d0; dT = 0.d0; psi = 0.d0; dpsi=0.d0
     by = 0.d0; dby = 0.d0
+    basis_grads(2, :) = basis_grads(3,:)
+    basis_grads(3,:) = 0.d0
     DO jr=1,oft_blagrange%nce
       n = n + n_weights_loc(jr)*basis_vals(jr)
       vel = vel + vel_weights_loc(:, jr)*basis_vals(jr)
@@ -752,9 +754,9 @@ END DO
 DEALLOCATE(tlocks)
 IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%n_bc,1)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%velx_bc(:),2)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vely_bc(:),3)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%velz_bc(:),4)
+CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%velx_bc,2)
+CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vely_bc,3)
+CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%velz_bc,4)
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%T_bc,5)
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%psi_bc,6)
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%by_bc,7)
@@ -771,7 +773,7 @@ end subroutine build_approx_jacobian
 !---------------------------------------------------------------------------
 subroutine mfnk_update(uin)
   class(oft_vector), target, intent(inout) :: uin !< Current field
-  IF(oft_debug_print(1))write(*,*)'Updating tDiff MF-Jacobian'
+  IF(oft_debug_print(1))write(*,*)'Updating 2D MUG MF-Jacobian'
   CALL current_sim%mf_mat%update(uin)
   END SUBROUTINE mfnk_update
   !---------------------------------------------------------------------------
@@ -779,7 +781,7 @@ subroutine mfnk_update(uin)
   !---------------------------------------------------------------------------
   subroutine update_jacobian(uin)
   class(oft_vector), target, intent(inout) :: uin !< Current solution
-  IF(oft_debug_print(1))write(*,*)'Updating tDiff approximate Jacobian'
+  IF(oft_debug_print(1))write(*,*)'Updating 2D MUG approximate Jacobian'
   CALL build_approx_jacobian(current_sim,uin)
   END SUBROUTINE update_jacobian
   !---------------------------------------------------------------------------
@@ -809,26 +811,42 @@ subroutine mfnk_update(uin)
   !---Setup FE representation
   IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
   CALL oft_lag_setup(order, -1)
-  CALL self%xdmf_plot%setup("tdiff")
+  CALL self%xdmf_plot%setup("xmhd_2d")
   CALL smesh%setup_io(self%xdmf_plot,order)
   
   !---Build composite FE definition for solution field
   IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
   ALLOCATE(self%fe_rep)
-  self%fe_rep%nfields=2
+  self%fe_rep%nfields=7
   ALLOCATE(self%fe_rep%fields(self%fe_rep%nfields))
   ALLOCATE(self%fe_rep%field_tags(self%fe_rep%nfields))
   self%fe_rep%fields(1)%fe=>oft_blagrange
-  self%fe_rep%field_tags(1)='Ti'
+  self%fe_rep%field_tags(1)='n'
   self%fe_rep%fields(2)%fe=>oft_blagrange
-  self%fe_rep%field_tags(2)='Te'
+  self%fe_rep%field_tags(2)='velx'
+  self%fe_rep%fields(3)%fe=>oft_blagrange
+  self%fe_rep%field_tags(3)='vely'
+  self%fe_rep%fields(4)%fe=>oft_blagrange
+  self%fe_rep%field_tags(4)='velz'
+  self%fe_rep%fields(5)%fe=>oft_blagrange
+  self%fe_rep%field_tags(5)='T'
+  self%fe_rep%fields(6)%fe=>oft_blagrange
+  self%fe_rep%field_tags(6)='psi'
+  self%fe_rep%fields(7)%fe=>oft_blagrange
+  self%fe_rep%field_tags(7)='by'
   
   !---Create solution vector
   CALL self%fe_rep%vec_create(self%u)
   
 !---Set boundary conditions (Dirichlet for now)
-ALLOCATE(self%n_bc(oft_blagrange%ne))
+ALLOCATE(self%n_bc(oft_blagrange%ne),self%T_bc(oft_blagrange%ne),self%velx_bc(oft_blagrange%ne),&
+           self%vely_bc(oft_blagrange%ne), self%velz_bc(oft_blagrange%ne), self%by_bc(oft_blagrange%ne))
 self%n_bc=.TRUE.
+self%T_bc=.TRUE.
+self%velx_bc=.TRUE.
+self%vely_bc=.TRUE.
+self%velz_bc=.TRUE.
+self%by_bc=.TRUE.
 
 self%n_bc=>oft_blagrange%be
 self%T_bc=>oft_blagrange%be
