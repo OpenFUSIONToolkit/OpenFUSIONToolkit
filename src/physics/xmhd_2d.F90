@@ -859,13 +859,13 @@ self%vely_bc=.TRUE.
 self%velz_bc=.TRUE.
 self%by_bc=.TRUE.
 
-self%n_bc=>oft_blagrange%be
-self%T_bc=>oft_blagrange%be
-self%velx_bc=>oft_blagrange%be
-self%vely_bc=>oft_blagrange%be
-self%velz_bc=>oft_blagrange%be
+! self%n_bc=>oft_blagrange%be
+! self%T_bc=>oft_blagrange%be
+! self%velx_bc=>oft_blagrange%be
+! self%vely_bc=>oft_blagrange%be
+! self%velz_bc=>oft_blagrange%be
 self%psi_bc=>oft_blagrange%be
-self%by_bc=>oft_blagrange%be
+! self%by_bc=>oft_blagrange%be
 
 !---Create Jacobian matrix
 ALLOCATE(self%jacobian_block_mask(self%fe_rep%nfields,self%fe_rep%nfields))
