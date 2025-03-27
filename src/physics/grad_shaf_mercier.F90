@@ -26,8 +26,6 @@ use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
 !------------------------------------------------------------------------------
-! CLASS mercierinv_interp
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(gsinv_interp) :: mercierinv_interp
@@ -36,8 +34,6 @@ contains
   !> Reconstruct the gradient of a Lagrange scalar field
   procedure :: interp => minterpinv_apply
 end type mercierinv_interp
-!------------------------------------------------------------------------------
-! INTERFACE mercier_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -49,8 +45,6 @@ contains
     procedure :: update => mercier_update
 end type mercier_flux_func
 contains
-!------------------------------------------------------------------------------
-! SUBROUTINE create_mercier_ff
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -71,8 +65,6 @@ select type(self=>func)
     END DO
 end select
 END SUBROUTINE create_mercier_ff
-!------------------------------------------------------------------------------
-! SUBROUTINE mercier_update
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -192,8 +184,6 @@ self%xmax=self%funcp%xs(self%npsi)
 IF(oft_debug_print(2))CALL oft_decrease_indent
 end subroutine mercier_update
 ! !------------------------------------------------------------------------------
-! ! SUBROUTINE minterpinv_setup
-! !------------------------------------------------------------------------------
 ! !> Needs Docs
 ! !------------------------------------------------------------------------------
 ! subroutine minterpinv_setup(self,mesh)
@@ -203,8 +193,6 @@ end subroutine mercier_update
 ! CALL self%u%get_local(self%uvals)
 ! self%mesh=>mesh
 ! end subroutine minterpinv_setup
-!------------------------------------------------------------------------------
-! SUBROUTINE minterpinv_apply
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

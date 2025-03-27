@@ -31,33 +31,36 @@ IMPLICIT NONE
 #include "local.h"
 PRIVATE
 !---------------------------------------------------------------------------------
-! TYPE fit_constraint
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE :: fit_constraint
-  INTEGER(4) :: ncomp = 0
-  REAL(8) :: wt = 1.d0
-  REAL(8) :: val = 0.d0
-  REAL(8), POINTER, DIMENSION(:) :: nax_corr => NULL()
-  REAL(8), POINTER, DIMENSION(:,:) :: comp_r => NULL()
-  REAL(8), POINTER, DIMENSION(:,:) :: comp_n => NULL()
+  INTEGER(4) :: ncomp = 0 !< Needs docs
+  REAL(8) :: wt = 1.d0 !< Needs docs
+  REAL(8) :: val = 0.d0 !< Needs docs
+  REAL(8), POINTER, DIMENSION(:) :: nax_corr => NULL() !< Needs docs
+  REAL(8), POINTER, DIMENSION(:,:) :: comp_r => NULL() !< Needs docs
+  REAL(8), POINTER, DIMENSION(:,:) :: comp_n => NULL() !< Needs docs
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_dummy_error
+  !> Needs docs
   PROCEDURE :: eval => fit_dummy_eval
+  !> Needs docs
   PROCEDURE :: setup_comp => fit_dummy_setup_comp
+  !> Needs docs
   PROCEDURE :: get_nax => fit_dummy_nax_corr
+  !> Needs docs
   PROCEDURE :: is_parallel => fit_dummy_parallel
 END TYPE fit_constraint
-!---------------------------------------------------------------------------------
-! TYPE coil_constraint
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE, EXTENDS(fit_constraint) :: coil_constraint
-  INTEGER(4) :: coil = 0
+  INTEGER(4) :: coil = 0 !< Needs docs
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_coil_error
+  !> Needs docs
   PROCEDURE :: eval => fit_coil_eval
 END TYPE coil_constraint
 !---------------------------------------------------------------------------------
@@ -66,103 +69,95 @@ END TYPE coil_constraint
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE, EXTENDS(fit_constraint) :: vcont_constraint
-  INTEGER(4) :: coil = 0
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_vcont_error
+  !> Needs docs
   PROCEDURE :: eval => fit_vcont_eval
 END TYPE vcont_constraint
-!---------------------------------------------------------------------------------
-! TYPE field_constraint
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE, EXTENDS(fit_constraint) :: field_constraint
-  INTEGER(4) :: cell = 0
-  REAL(8) :: phi = 0.d0
-  REAL(8) :: f(3) = 0.d0
-  REAL(8) :: r(3) = [0.d0,0.d0,0.d0]
-  REAL(8) :: v(3) = [0.d0,0.d0,0.d0]
+  INTEGER(4) :: cell = 0 !< Needs docs
+  REAL(8) :: phi = 0.d0 !< Needs docs
+  REAL(8) :: f(3) = 0.d0 !< Needs docs
+  REAL(8) :: r(3) = [0.d0,0.d0,0.d0] !< Needs docs
+  REAL(8) :: v(3) = [0.d0,0.d0,0.d0] !< Needs docs
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_field_error
+  !> Needs docs
   PROCEDURE :: eval => fit_field_eval
+  !> Needs docs
   PROCEDURE :: setup_comp => fit_field_setup_comp
 END TYPE field_constraint
-!---------------------------------------------------------------------------------
-! TYPE flux_constraint
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE, EXTENDS(fit_constraint) :: flux_constraint
-  INTEGER(4) :: cell = 0
-  REAL(8) :: f(3) = 0.d0
-  REAL(8) :: r(3) = [0.d0,0.d0,0.d0]
+  INTEGER(4) :: cell = 0 !< Needs docs
+  REAL(8) :: f(3) = 0.d0 !< Needs docs
+  REAL(8) :: r(3) = [0.d0,0.d0,0.d0] !< Needs docs
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_flux_error
+  !> Needs docs
   PROCEDURE :: eval => fit_flux_eval
 END TYPE flux_constraint
-!---------------------------------------------------------------------------------
-! TYPE saddle_constraint
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE, EXTENDS(fit_constraint) :: saddle_constraint
-  INTEGER(4) :: cells(2) = 0
-  INTEGER(4) :: nr = 10
-  INTEGER(4) :: nt = 10
-  REAL(8) :: f(3,2) = 0.d0
-  REAL(8) :: r(3,2) = 0.d0
-  REAL(8) :: width = 0.d0
+  INTEGER(4) :: cells(2) = 0 !< Needs docs
+  INTEGER(4) :: nr = 10 !< Needs docs
+  INTEGER(4) :: nt = 10 !< Needs docs
+  REAL(8) :: f(3,2) = 0.d0 !< Needs docs
+  REAL(8) :: r(3,2) = 0.d0 !< Needs docs
+  REAL(8) :: width = 0.d0 !< Needs docs
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_saddle_error
+  !> Needs docs
   PROCEDURE :: eval => fit_saddle_eval
+  !> Needs docs
   PROCEDURE :: setup_comp => fit_saddle_setup_comp
 END TYPE saddle_constraint
-!---------------------------------------------------------------------------------
-! TYPE itor_constraint
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE, EXTENDS(fit_constraint) :: itor_constraint
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_itor_error
+  !> Needs docs
   PROCEDURE :: eval => fit_itor_eval
+  !> Needs docs
   PROCEDURE :: is_parallel => fit_itor_parallel
 END TYPE itor_constraint
-!---------------------------------------------------------------------------------
-! TYPE itor_constraint
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE, EXTENDS(fit_constraint) :: dflux_constraint
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_dflux_error
+  !> Needs docs
   PROCEDURE :: eval => fit_dflux_eval
 END TYPE dflux_constraint
-!---------------------------------------------------------------------------------
-! TYPE press_constraint
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE, EXTENDS(fit_constraint) :: press_constraint
-  INTEGER(4) :: cell = 0
-  REAL(8) :: f(3) = 0.d0
-  REAL(8) :: r(3) = [0.d0,0.d0,0.d0]
+  INTEGER(4) :: cell = 0 !< Needs docs
+  REAL(8) :: f(3) = 0.d0 !< Needs docs
+  REAL(8) :: r(3) = [0.d0,0.d0,0.d0] !< Needs docs
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_press_error
+  !> Needs docs
   PROCEDURE :: eval => fit_press_eval
 END TYPE press_constraint
-! !---------------------------------------------------------------------------------
-! ! TYPE injlam_constraint
-! !---------------------------------------------------------------------------------
-! !> Needs Docs
-! !---------------------------------------------------------------------------------
-! TYPE, EXTENDS(fit_constraint) :: injlam_constraint
-! CONTAINS
-!   PROCEDURE :: error => fit_injlam_error
-!   PROCEDURE :: eval => fit_injlam_eval
-! END TYPE injlam_constraint
-!---------------------------------------------------------------------------------
-! TYPE qmin_constraint
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -170,51 +165,50 @@ TYPE, EXTENDS(fit_constraint) :: q_constraint
   INTEGER(4) :: type = 1 !< Type of constraint (1 -> min, 2 -> max, 3 -> rel_flux)
   REAL(8) :: loc = 0.d0 !< Location of constraint in normalized flux
 CONTAINS
+  !> Needs docs
   PROCEDURE :: error => fit_q_error
+  !> Needs docs
   PROCEDURE :: eval => fit_q_eval
+  !> Needs docs
   PROCEDURE :: is_parallel => fit_q_parallel
 END TYPE q_constraint
-!---------------------------------------------------------------------------------
-! TYPE fit_constraint_ptr
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 TYPE :: fit_constraint_ptr
-  CLASS(fit_constraint), POINTER :: con => NULL()
+  CLASS(fit_constraint), POINTER :: con => NULL() !< Needs docs
 END TYPE fit_constraint_ptr
 !---
-TYPE(gs_eq), POINTER, PUBLIC :: gs_active => NULL()
-REAL(8), ALLOCATABLE :: cofs_best(:)
-REAL(8) :: chi_best = 1.d99
-REAL(8) :: alam_best = 1.d99
-REAL(8) :: pnorm_best = 1.d99
-REAL(8) :: vcont_best = 1.d99
-CLASS(oft_vector), POINTER :: psi_best => NULL()
-REAL(8), ALLOCATABLE :: cofs_scale(:)
-REAL(8), ALLOCATABLE :: curr_in(:)
-INTEGER(4), PRIVATE :: ncons = 0
-INTEGER(4), PRIVATE :: ncofs = 0
-INTEGER(4), PRIVATE :: ncond_active = 0
-INTEGER(4), PRIVATE :: feval_count = 0
-INTEGER(4), PRIVATE :: geval_count = 0
-LOGICAL :: fit_pm = .FALSE.
-LOGICAL, PRIVATE :: fit_I = .TRUE.
-LOGICAL, PRIVATE :: fit_P = .TRUE.
-LOGICAL, PRIVATE :: fit_Pnorm = .TRUE.
-LOGICAL, PRIVATE :: fit_Alam = .FALSE.
-LOGICAL, PRIVATE :: fit_R0 = .FALSE.
-LOGICAL, PRIVATE :: fit_coils = .FALSE.
-LOGICAL, PRIVATE :: fit_F0 = .FALSE.
-LOGICAL, PRIVATE :: fit_V0 = .FALSE.
-LOGICAL, PRIVATE :: fixed_centering = .FALSE.
-LOGICAL, PRIVATE :: linearized_fit = .FALSE.
-TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: conlist => NULL()
+TYPE(gs_eq), POINTER, PUBLIC :: gs_active => NULL() !< Needs docs
+REAL(8), ALLOCATABLE :: cofs_best(:) !< Needs docs
+REAL(8) :: chi_best = 1.d99 !< Needs docs
+REAL(8) :: alam_best = 1.d99 !< Needs docs
+REAL(8) :: pnorm_best = 1.d99 !< Needs docs
+REAL(8) :: vcont_best = 1.d99 !< Needs docs
+CLASS(oft_vector), POINTER :: psi_best => NULL() !< Needs docs
+REAL(8), ALLOCATABLE :: cofs_scale(:) !< Needs docs
+REAL(8), ALLOCATABLE :: curr_in(:) !< Needs docs
+INTEGER(4), PRIVATE :: ncons = 0 !< Needs docs
+INTEGER(4), PRIVATE :: ncofs = 0 !< Needs docs
+INTEGER(4), PRIVATE :: ncond_active = 0 !< Needs docs
+INTEGER(4), PRIVATE :: feval_count = 0 !< Needs docs
+INTEGER(4), PRIVATE :: geval_count = 0 !< Needs docs
+LOGICAL :: fit_pm = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fit_I = .TRUE. !< Needs docs
+LOGICAL, PRIVATE :: fit_P = .TRUE. !< Needs docs
+LOGICAL, PRIVATE :: fit_Pnorm = .TRUE. !< Needs docs
+LOGICAL, PRIVATE :: fit_Alam = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fit_R0 = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fit_coils = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fit_F0 = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fit_V0 = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fixed_centering = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: linearized_fit = .FALSE. !< Needs docs
+TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: conlist => NULL() !< Needs docs
 !---
 PUBLIC fit_constraint, field_constraint, itor_constraint, fit_pm
-PUBLIC fit_constraint_ptr, fit_gs, fit_load!, create_driveinterp
+PUBLIC fit_constraint_ptr, fit_gs, fit_load
 CONTAINS
-!---------------------------------------------------------------------------------
-! SUBROUTINE fit_gs
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -519,8 +513,6 @@ END SELECT
 end function minpack_exit_reason
 END SUBROUTINE fit_gs
 !---------------------------------------------------------------------------------
-! SUBROUTINE fit_confidence
-!---------------------------------------------------------------------------------
 !> Estimate confidence in the fit from linearization
 !---------------------------------------------------------------------------------
 SUBROUTINE fit_confidence(m,n,cofs)
@@ -543,9 +535,7 @@ DO i=1,n
 END DO
 END SUBROUTINE fit_confidence
 !---------------------------------------------------------------------------------
-! SUBROUTINE fit_error
-!---------------------------------------------------------------------------------
-!>
+!> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE fit_error(m,n,cofs,err,iflag)
 integer(4), intent(in) :: m,n
@@ -556,9 +546,7 @@ REAL(8) :: jac_mat(m,n)
 CALL fit_error_grad(m,n,cofs,err,jac_mat,m,1)
 END SUBROUTINE fit_error
 !---------------------------------------------------------------------------------
-! SUBROUTINE fit_error_grad
-!---------------------------------------------------------------------------------
-!>
+!> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE fit_error_grad(m,n,cofs,err,jac_mat,ldjac_mat,iflag)
 integer(4), intent(in) :: m,n,ldjac_mat
@@ -996,9 +984,9 @@ ELSE
 END IF
 !---Centering
 CALL reset_eq
-!
 DEALLOCATE(cof_tmp,err_tmp)
 CONTAINS
+!
 SUBROUTINE reset_eq
 gs_active%alam=alam_in
 gs_active%Itor_target=ip_target_in
@@ -1047,8 +1035,6 @@ ELSE
   END DO
 END IF
 END SUBROUTINE run_err
-!---------------------------------------------------------------------------------
-! SUBROUTINE fit_load
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1202,8 +1188,6 @@ RETURN
                    'fit_load',__FILE__)
 END SUBROUTINE fit_load
 !---------------------------------------------------------------------------------
-! FUNCTION fit_dummy_error
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_dummy_error(self,gs) RESULT(err)
@@ -1213,8 +1197,6 @@ REAL(8) :: err
 CALL oft_abort('No constraint type specified.','fit_dummy_error',__FILE__)
 err=0.d0
 END FUNCTION fit_dummy_error
-!---------------------------------------------------------------------------------
-! FUNCTION fit_dummy_eval
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1226,8 +1208,6 @@ CALL oft_abort('No constraint type specified.','fit_dummy_eval',__FILE__)
 val=0.d0
 END FUNCTION fit_dummy_eval
 !---------------------------------------------------------------------------------
-! FUNCTION fit_dummy_nax_corr
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_dummy_nax_corr(self,gs) RESULT(val)
@@ -1238,15 +1218,11 @@ val = 0.d0
 IF(ASSOCIATED(self%nax_corr))val = DOT_PRODUCT(self%nax_corr,gs%cond_weights)
 END FUNCTION fit_dummy_nax_corr
 !---------------------------------------------------------------------------------
-! FUNCTION fit_dummy_setup_comp
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 SUBROUTINE fit_dummy_setup_comp(self)
 CLASS(fit_constraint), INTENT(inout) :: self
 END SUBROUTINE fit_dummy_setup_comp
-!---------------------------------------------------------------------------------
-! FUNCTION fit_dummy_parallel
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1255,8 +1231,6 @@ CLASS(fit_constraint), INTENT(inout) :: self
 LOGICAL :: is_parallel
 is_parallel=.FALSE.
 END FUNCTION fit_dummy_parallel
-!---------------------------------------------------------------------------------
-! FUNCTION fit_coil_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1267,8 +1241,6 @@ REAL(8) :: err
 err = (gs%coil_currs(self%coil)/mu0 - self%val)*self%wt
 END FUNCTION fit_coil_error
 !---------------------------------------------------------------------------------
-! FUNCTION fit_coil_eval
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_coil_eval(self,gs) RESULT(val)
@@ -1277,8 +1249,6 @@ TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
 val = gs%coil_currs(self%coil)/mu0
 END FUNCTION fit_coil_eval
-!---------------------------------------------------------------------------------
-! FUNCTION fit_vcont_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1289,8 +1259,6 @@ REAL(8) :: err
 err = (gs%vcontrol_val - self%val)*self%wt
 END FUNCTION fit_vcont_error
 !---------------------------------------------------------------------------------
-! FUNCTION fit_vcont_eval
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_vcont_eval(self,gs) RESULT(val)
@@ -1299,8 +1267,6 @@ TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
 val = gs%vcontrol_val
 END FUNCTION fit_vcont_eval
-!---------------------------------------------------------------------------------
-! FUNCTION fit_q_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1312,8 +1278,6 @@ qval = self%eval(gs)
 err = (qval - self%val)*self%wt
 IF(self%type==-1.AND.qval>self%val)err=0.d0
 END FUNCTION fit_q_error
-!---------------------------------------------------------------------------------
-! FUNCTION fit_q_eval
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1364,8 +1328,6 @@ ELSEIF(self%type==3)THEN
 END IF
 END FUNCTION fit_q_eval
 !---------------------------------------------------------------------------------
-! FUNCTION fit_q_parallel
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_q_parallel(self) RESULT(is_parallel)
@@ -1373,8 +1335,6 @@ CLASS(q_constraint), INTENT(inout) :: self
 LOGICAL :: is_parallel
 is_parallel=.TRUE.
 END FUNCTION fit_q_parallel
-!---------------------------------------------------------------------------------
-! FUNCTION fit_field_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1386,8 +1346,6 @@ err = self%eval(gs)
 IF(ASSOCIATED(self%nax_corr))err=err+DOT_PRODUCT(self%nax_corr,gs%cond_weights)
 err = (self%val - err)*self%wt
 END FUNCTION fit_field_error
-!---------------------------------------------------------------------------------
-! FUNCTION fit_field_eval
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1440,8 +1398,6 @@ btmp(3)= gs%psiscale*gpsi(1)/self%r(1)
 val = DOT_PRODUCT(btmp,self%v)
 END FUNCTION fit_field_eval
 !---------------------------------------------------------------------------------
-! FUNCTION fit_field_setup_comp
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 SUBROUTINE fit_field_setup_comp(self)
@@ -1452,8 +1408,6 @@ self%comp_r(:,1)=(/self%r(1),self%phi,self%r(2)/)
 self%comp_n(:,1)=self%v/magnitude(self%v)
 END SUBROUTINE fit_field_setup_comp
 !---------------------------------------------------------------------------------
-! FUNCTION fit_flux_error
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_flux_error(self,gs) RESULT(err)
@@ -1463,8 +1417,6 @@ REAL(8) :: err,psitmp
 psitmp = self%eval(gs)
 err = (self%val - psitmp)*self%wt
 END FUNCTION fit_flux_error
-!---------------------------------------------------------------------------------
-! FUNCTION fit_flux_eval
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1505,8 +1457,6 @@ CALL psi_eval%delete()
 val = psi(1)*2.d0*pi
 END FUNCTION fit_flux_eval
 !---------------------------------------------------------------------------------
-! FUNCTION fit_saddle_error
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_saddle_error(self,gs) RESULT(err)
@@ -1517,8 +1467,6 @@ err = self%eval(gs)
 IF(ASSOCIATED(self%nax_corr))err=err+DOT_PRODUCT(self%nax_corr,gs%cond_weights)
 err = (self%val - err)*self%wt
 END FUNCTION fit_saddle_error
-!---------------------------------------------------------------------------------
-! FUNCTION fit_saddle_eval
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1548,8 +1496,6 @@ CALL psi_eval%delete
 val = -(psi(1,1)-psi(1,2))*self%width
 END FUNCTION fit_saddle_eval
 !---------------------------------------------------------------------------------
-! FUNCTION fit_saddle_setup_comp
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 SUBROUTINE fit_saddle_setup_comp(self)
@@ -1577,8 +1523,6 @@ DO i=1,self%nr
 END DO
 END SUBROUTINE fit_saddle_setup_comp
 !---------------------------------------------------------------------------------
-! FUNCTION fit_itor_error
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_itor_error(self,gs) RESULT(err)
@@ -1588,8 +1532,6 @@ REAL(8) :: err,itor
 itor = self%eval(gs)
 err = (self%val - itor)*self%wt
 END FUNCTION fit_itor_error
-!---------------------------------------------------------------------------------
-! FUNCTION fit_itor_eval
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1609,8 +1551,6 @@ LOGICAL :: is_parallel
 is_parallel=.TRUE.
 END FUNCTION fit_itor_parallel
 !---------------------------------------------------------------------------------
-! FUNCTION fit_dflux_error
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_dflux_error(self,gs) RESULT(err)
@@ -1621,8 +1561,6 @@ dflux=self%eval(gs)
 err = (self%val - dflux)*self%wt
 END FUNCTION fit_dflux_error
 !---------------------------------------------------------------------------------
-! FUNCTION fit_dflux_eval
-!---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
 FUNCTION fit_dflux_eval(self,gs) RESULT(val)
@@ -1631,8 +1569,6 @@ TYPE(gs_eq), INTENT(inout) :: gs
 REAL(8) :: val
 val=gs_dflux(gs)
 END FUNCTION fit_dflux_eval
-!---------------------------------------------------------------------------------
-! FUNCTION fit_press_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1662,8 +1598,6 @@ IF(self%r(1)>0.d0)THEN
 END IF
 err = (self%val - press)*self%wt
 END FUNCTION fit_press_error
-!---------------------------------------------------------------------------------
-! FUNCTION fit_press_eval
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1707,29 +1641,4 @@ CALL psi_eval%delete
 !---
 val = gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(psi(1))/mu0
 END FUNCTION fit_press_eval
-! !---------------------------------------------------------------------------------
-! ! FUNCTION fit_injlam_error
-! !---------------------------------------------------------------------------------
-! !> Needs Docs
-! !---------------------------------------------------------------------------------
-! FUNCTION fit_injlam_error(self,gs) RESULT(err)
-! CLASS(injlam_constraint), INTENT(inout) :: self
-! TYPE(gs_eq), INTENT(inout) :: gs
-! REAL(8) :: err,lam
-! !---
-! lam=gs%I%fp(0.d0)*gs%alam
-! IF(oft_debug_print(1))WRITE(*,*)'IL',lam
-! err = (self%val - lam)*self%wt
-! END FUNCTION fit_injlam_error
-! !---------------------------------------------------------------------------------
-! ! FUNCTION fit_injlam_eval
-! !---------------------------------------------------------------------------------
-! !> Needs Docs
-! !---------------------------------------------------------------------------------
-! FUNCTION fit_injlam_eval(self,gs) RESULT(val)
-! CLASS(injlam_constraint), INTENT(inout) :: self
-! TYPE(gs_eq), INTENT(inout) :: gs
-! REAL(8) :: val
-! val=gs%I%fp(0.d0)*gs%alam
-! END FUNCTION fit_injlam_eval
 END MODULE oft_gs_fit

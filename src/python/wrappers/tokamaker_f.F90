@@ -29,8 +29,8 @@ USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_de
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed
-USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
-  gs_profile_load, sauter_fc, gs_calc_vloop, gs_save_ifile
+USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
+  sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE diagnostic, ONLY: bscal_surf_int
@@ -393,16 +393,6 @@ END SUBROUTINE tokamaker_vac_solve
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_analyze(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_analyze")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL gs_analyze(tMaker_obj%gs)
-END SUBROUTINE tokamaker_analyze
-!---------------------------------------------------------------------------------
-!> Needs docs
-!---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_run")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
@@ -436,6 +426,8 @@ tMaker_obj%gs%timing=0.d0
 CALL fit_gs(tMaker_obj%gs,infile,outfile,fitI,fitP,fitPnorm,&
             fitAlam,fitR0,fitV0,fitCoils,fitF0, &
             fixedCentering)
+CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs%I)
+CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs%P)
 tMaker_obj%gs%has_plasma=.TRUE.
 END SUBROUTINE tokamaker_recon_run
 !---------------------------------------------------------------------------------

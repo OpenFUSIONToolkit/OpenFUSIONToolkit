@@ -66,20 +66,20 @@ end type circular_curr
 !------------------------------------------------------------------------------
 TYPE, ABSTRACT :: flux_func
   INTEGER(i4) :: ncofs = 0 !< Number of free coefficients
-  REAL(r8) :: f_offset = 0.d0 !< Needs docs
-  REAL(r8) :: plasma_bounds(2) = (/-1.d99,1.d99/) !< Needs docs
+  REAL(r8) :: f_offset = 0.d0 !< Offset value
+  REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
 CONTAINS
-  !>
+  !> Evaluate function
   PROCEDURE(flux_func_eval), DEFERRED :: f
-  !>
+  !> Evaluate first derivative of function
   PROCEDURE(flux_func_eval), DEFERRED :: fp
-  !>
+  !> Evaluate second derivative of function
   PROCEDURE :: fpp => dummy_fpp
-  !>
+  !> Update function to match new equilibrium solution
   PROCEDURE(flux_func_update), DEFERRED :: update
-  !>
+  !> Update function with new parameterization
   PROCEDURE(flux_cofs_set), DEFERRED :: set_cofs
-  !>
+  !> Get current function parameterization
   PROCEDURE(flux_cofs_get), DEFERRED :: get_cofs
 END TYPE flux_func
 !------------------------------------------------------------------------------
@@ -134,15 +134,15 @@ TYPE :: gs_region_info
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: bc_nodes => NULL() !< Needs docs
 END TYPE gs_region_info
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Zero scalar Lagrange FE field on all boundary nodes and all nodes outside the plasma
 !------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_gs_zerob
-  logical, pointer, dimension(:) :: node_flag => NULL() !< Needs docs
+  logical, pointer, dimension(:) :: node_flag => NULL() !< Flag for nodes to zero
   CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< FE representation
 contains
-  !> Needs docs
+  !> Zero field on marked nodes
   procedure :: apply => zerob_apply
-  !> Needs docs
+  !> Destroy BC object
   procedure :: delete => zerob_delete
 end type oft_gs_zerob
 !------------------------------------------------------------------------------
@@ -188,12 +188,12 @@ TYPE :: gs_eq
   REAL(r8) :: R0_target = -1.d0 !< Needs docs
   REAL(r8) :: V0_target = -1.d99 !< Needs docs
   REAL(r8) :: nl_tol = 1.d-8 !< Needs docs
-  REAL(r8) :: plasma_bounds(2) = (/-1.d99,1.d99/) !< Needs docs
-  REAL(r8) :: spatial_bounds(2,2) = RESHAPE((/-1.d99,1.d99,-1.d99,1.d99/),(/2,2/)) !< Needs docs
+  REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Needs docs
+  REAL(r8) :: spatial_bounds(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99],[2,2]) !< Needs docs
   REAL(r8) :: lim_zmax = 1.d99 !< Needs docs
   REAL(r8) :: lim_area = -1.d0 !< Needs docs
-  REAL(r8) :: o_point(2) = (/-1.d0,1.d99/) !< Needs docs
-  REAL(r8) :: lim_point(2) = (/-1.d0,1.d99/) !< Needs docs
+  REAL(r8) :: o_point(2) = [-1.d0,1.d99] !< Needs docs
+  REAL(r8) :: lim_point(2) = [-1.d0,1.d99] !< Needs docs
   REAL(r8) :: x_points(2,max_xpoints) = 0.d0 !< Needs docs
   REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Needs docs
   REAL(r8) :: vcontrol_val = 0.d0 !< Needs docs
@@ -620,7 +620,7 @@ DO i=1,nreg_defs
         END IF
         !
         ALLOCATE(self%cond_regions(self%ncond_regs)%mind(self%cond_regions(self%ncond_regs)%neigs))
-        self%cond_regions(self%ncond_regs)%mind=(/(j,j=1,self%cond_regions(self%ncond_regs)%neigs)/)
+        self%cond_regions(self%ncond_regs)%mind=[(j,j=1,self%cond_regions(self%ncond_regs)%neigs)]
         CALL xml_get_element(region,"mind",field,ierr)
         IF(ierr==0)THEN
           CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%mind, &
@@ -889,7 +889,7 @@ DO i=1,self%ncond_regs
   END DO
   IF(self%cond_regions(i)%pair<0)THEN
     ALLOCATE(self%cond_regions(i)%eig_map(self%cond_regions(i)%neigs))
-    self%cond_regions(i)%eig_map=(/(j,j=1,self%cond_regions(i)%neigs)/)+self%ncond_eigs
+    self%cond_regions(i)%eig_map=[(j,j=1,self%cond_regions(i)%neigs)]+self%ncond_eigs
     self%ncond_eigs=self%ncond_eigs+self%cond_regions(i)%neigs
   ELSE
     ALLOCATE(self%cond_regions(i)%pair_signs(self%cond_regions(i)%neigs))
@@ -1479,9 +1479,7 @@ deallocate(vloc)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
-!> Zero a surface Lagrange scalar field at all edge nodes
-!!
-!! @param[in,out] a Field to be zeroed
+!> Destroy temporary internal storage and nullify references
 !------------------------------------------------------------------------------
 subroutine zerob_delete(self)
 class(oft_gs_zerob), intent(inout) :: self
@@ -1489,19 +1487,14 @@ NULLIFY(self%fe_rep)
 IF(ASSOCIATED(self%node_flag))DEALLOCATE(self%node_flag)
 end subroutine zerob_delete
 !------------------------------------------------------------------------------
-!> Evaluate torus source
-!!
-!! @param[in] cell Cell for interpolation
-!! @param[in] f Possition in cell in logical coord [4]
-!! @param[in] gop Logical gradient vectors at f [3,4]
-!! @param[out] val Reconstructed field at f [1]
+!> Evaluate uniform source over simple plasma cross-section
 !------------------------------------------------------------------------------
 subroutine circle_interp(self,cell,f,gop,val)
-class(circular_curr), intent(inout) :: self
-integer(i4), intent(in) :: cell
-real(r8), intent(in) :: f(:)
-real(r8), intent(in) :: gop(3,3)
-real(r8), intent(out) :: val(:)
+class(circular_curr), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed field at f [1]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
 real(r8) :: r(2),lam,coord_tmp(2),pt(3)
@@ -2956,7 +2949,7 @@ CALL self%psi%add(1.d0,self%vcontrol_val,psi_vcont)
 !   DO j=1,30
 !     !---Compute initial guess based on zeroing r-gradient
 !     IF(j==1)THEN
-!       pt=(/R0_tmp,self%o_point(2)/)
+!       pt=[R0_tmp,self%o_point(2)]
 !       cell=0
 !       CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
 !       CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
@@ -3352,7 +3345,7 @@ do j=1,self%fe_rep%mesh%nc
           ffp(1:2)=0.5d0*self%alam*self%I%fp(psitmp)
           itor_alam = itor_alam + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*self%fe_rep%quad%wts(m)
         END IF
-        ffp((/1,3/)) = ffp((/1,3/)) + (/self%pnorm,1.d0/)*self%P%fp(psitmp)*(pt(1)**2)
+        ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
         !
         estore = estore + (self%P%F(psitmp))*v*self%fe_rep%quad%wts(m)*pt(1)
         itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*self%fe_rep%quad%wts(m)
@@ -3966,7 +3959,7 @@ DO i=1,npts
   CALL psi_eval%interp(cell,f,goptmp,psitmp)
   CALL psi_geval%interp(cell,f,goptmp,gpsitmp)
   !---
-  B((/1,3/))=(/-gpsitmp(2),gpsitmp(1)/)/pts(1,i)
+  B([1,3])=[-gpsitmp(2),gpsitmp(1)]/pts(1,i)
   IF(self%mode==0)THEN
     B(2)=self%alam*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/pts(1,i)
   ELSE
@@ -4533,7 +4526,7 @@ CALL self%psi_eval%setup(self%gs%fe_rep)
 CALL self%psi_geval%shared_setup(self%psi_eval)
 end subroutine gs_prof_interp_setup
 !------------------------------------------------------------------------------
-!> Needs Docs
+!> Destroy temporary internal storage and nullify references
 !------------------------------------------------------------------------------
 subroutine gs_prof_interp_delete(self)
 class(gs_prof_interp), intent(inout) :: self
@@ -5126,7 +5119,7 @@ END IF
 DEBUG_STACK_POP
 end subroutine build_dels
 !------------------------------------------------------------------------------
-!> Initialize Grad-Shafranov solution with the Taylor state
+!> Destroy internal storage and nullify references for Grad-Shafranov object
 !------------------------------------------------------------------------------
 subroutine gs_destroy(self)
 class(gs_eq), intent(inout) :: self !< G-S object
@@ -5237,13 +5230,7 @@ NULLIFY(self%set_eta)
 #endif
 end subroutine gs_destroy
 !------------------------------------------------------------------------------
-! SUBROUTINE compute_bcmat
-!------------------------------------------------------------------------------
-!> Needs Docs
-!!
-!! @param[in,out] self G-S object
-!! @param[in,out] a Psi field
-!! @param[in,out] b Source field
+!> Compute boundary condition matrix for free-boundary case
 !------------------------------------------------------------------------------
 subroutine compute_bcmat(self)
 class(gs_eq), intent(inout) :: self
@@ -5592,7 +5579,9 @@ val=green(pt1(1),pt1(2),pt2(1),pt2(2))
 itegrand=rop2(1)*val
 end function integrand2
 end subroutine compute_bcmat
-!
+!------------------------------------------------------------------------------
+!> Generate oriented loop from boundary points
+!------------------------------------------------------------------------------
 subroutine get_olbp(smesh,olbp)
 class(oft_bmesh), intent(inout) :: smesh
 integer(4), intent(out) :: olbp(:)
@@ -5663,17 +5652,11 @@ IF(orient(2)>orient(1))THEN
 END IF
 end subroutine get_olbp
 !------------------------------------------------------------------------------
-! SUBROUTINE set_bcmat
-!------------------------------------------------------------------------------
-!> Needs Docs
-!!
-!! @param[in,out] self G-S object
-!! @param[in,out] a Psi field
-!! @param[in,out] b Source field
+!> Add boundary condition terms for free-boundary case to matrix
 !------------------------------------------------------------------------------
 subroutine set_bcmat(self,mat)
-class(gs_eq), intent(inout) :: self
-class(oft_matrix), intent(inout) :: mat
+class(gs_eq), intent(inout) :: self !< G-S object
+class(oft_matrix), intent(inout) :: mat !< Matrix object
 integer(4) :: i,j,i_inds(1),j_inds(1)
 real(8) :: one_val(1,1)
 !---Add to matrix
@@ -5697,7 +5680,9 @@ DO i=1,self%fe_rep%nbe
   END IF
 END DO
 end subroutine set_bcmat
-!
+!------------------------------------------------------------------------------
+!> Create G-S matrix with necessary augmentations for free-boundary BC
+!------------------------------------------------------------------------------
 subroutine gs_mat_create(fe_rep,new)
 class(oft_scalar_bfem), intent(inout) :: fe_rep
 CLASS(oft_matrix), POINTER, INTENT(out) :: new

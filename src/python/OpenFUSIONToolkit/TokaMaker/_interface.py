@@ -73,10 +73,6 @@ tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve,
 tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
     [c_void_p, ctypes_numpy_array(float64,1), c_double_ptr,  c_char_p])
 
-# tokamaker_analyze(tMaker_ptr,error_str)
-tokamaker_analyze = ctypes_subroutine(oftpy_lib.tokamaker_analyze,
-    [c_void_p, c_char_p])
-
 # tokamaker_setup_td(tMaker_ptr,dt,lin_tol,nl_tol,pre_plasma,error_str)
 tokamaker_setup_td = ctypes_subroutine(oftpy_lib.tokamaker_setup_td,
     [c_void_p, c_double, c_double, c_double, c_bool, c_char_p])
