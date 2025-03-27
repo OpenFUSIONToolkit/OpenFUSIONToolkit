@@ -489,6 +489,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         if eig_test:
             eig_vals, _ = mygs.eig_wall(10)
             mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+            oftpy_dump_cov()
             return
         #
         mygs.set_coil_vsc({'VS': 1.0})
@@ -560,6 +561,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
                 sim_time, _, nl_its, lin_its, nretry = mygs.step_td(sim_time,dt)
             psi1 = mygs.get_psi(False)
             mp_q.put([{'gamma': eig_vals[:5,0], 'nl_change': np.linalg.norm(psi1-psi0)}])
+            oftpy_dump_cov()
             return
         mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
         eq_info = mygs.get_stats(li_normalization='ITER')
@@ -778,6 +780,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     if eig_test:
         eig_vals, _ = mygs.eig_wall(10)
         mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+        oftpy_dump_cov()
         return
     #
     mygs.set_coil_vsc({'INTERNALU': 1.0, 'INTERNALL': -1.0})
@@ -814,6 +817,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     if stability_test:
         eig_vals, _ = mygs.eig_td(-1.E3,10,False)
         mp_q.put([{'gamma': eig_vals[:5,0]}])
+        oftpy_dump_cov()
         return
     #
     psi_last = mygs.get_psi(False)

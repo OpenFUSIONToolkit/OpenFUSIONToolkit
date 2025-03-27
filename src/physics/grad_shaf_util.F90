@@ -25,8 +25,8 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
-  gs_set_cond_weights, gs_estored, gs_dflux, gs_tflux, gs_helicity, gs_itor_nl, &
-  gs_psimax, gs_test_bounds, gs_b_interp, oft_indent, gs_get_qprof, gsinv_interp, &
+  gs_set_cond_weights, gs_dflux, gs_itor_nl, &
+  gs_test_bounds, gs_b_interp, oft_indent, gs_get_qprof, gsinv_interp, &
   gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent, gs_psi2pt
 USE oft_gs_profiles
 IMPLICIT NONE
