@@ -866,7 +866,6 @@ CALL exp_setup(mygs)
 mygs%free=.TRUE.
 mygs%pnorm=0.d0
 mygs%alam=1.d-7
-mygs%boundary_limiter=.FALSE.
 mygs%has_plasma=.FALSE.
 mygs%compute_chi=.FALSE.
 IF(TRIM(coil_file)/='none')THEN

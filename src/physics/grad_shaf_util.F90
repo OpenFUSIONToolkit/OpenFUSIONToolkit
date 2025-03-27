@@ -24,10 +24,11 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
   oft_blag_vproject
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
-USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
-  gs_set_cond_weights, gs_dflux, gs_itor_nl, &
-  gs_test_bounds, gs_b_interp, oft_indent, gs_get_qprof, gsinv_interp, &
-  gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent, gs_psi2pt
+USE oft_gs, ONLY: gs_eq, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
+  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon
+#ifdef OFT_TOKAMAKER_LEGACY
+use oft_gs, only: gs_get_cond_source, gs_get_cond_weights, gs_set_cond_weights
+#endif
 USE oft_gs_profiles
 IMPLICIT NONE
 #include "local.h"
@@ -705,10 +706,10 @@ do i=1,smesh%nc
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
       ELSE
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
+        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
       END IF
       itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
       centroid = centroid + itor_loc*pt(1:2)*v*self%fe_rep%quad%wts(m)
@@ -716,14 +717,14 @@ do i=1,smesh%nc
       vol = vol + v*self%fe_rep%quad%wts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
-        Btor = (self%alam*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+self%eps)
+        Btor = (self%alam*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+self%eps)
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+gs_epsilon)
       END IF
       tflux = tflux + Btor*v*self%fe_rep%quad%wts(m)
       !---Compute internal inductance
       call psi_geval%interp(i,self%fe_rep%quad%pts(:,m),goptmp,gpsitmp)
-      Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+self%eps)
+      Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+gs_epsilon)
       bp_vol = bp_vol + SUM(Bpol**2)*v*self%fe_rep%quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
@@ -793,14 +794,14 @@ do i=1,smesh%nc
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
         j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+          + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
       ELSE
         j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+self%eps))
+          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
+          + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
       END IF
       eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(j_NI_loc**2)*v*self%fe_rep%quad%wts(m)*pt(1)
       itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
@@ -828,7 +829,7 @@ REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
 LOGICAL, OPTIONAL, INTENT(in) :: pack_lcfs !< Use quadratic packing toward LCFS?
 LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision fields?
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
-type(gsinv_interp), target :: field
+type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
 real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
@@ -887,6 +888,7 @@ ALLOCATE(cout(npsi,4))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
+ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
 active_tracer%neq=3
@@ -965,7 +967,8 @@ do j=2,npsi
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
 end do
 CALL active_tracer%delete
-DEALLOCATE(ptout)
+CALL field%delete
+DEALLOCATE(ptout,field)
 !$omp end parallel
 CALL psi_int%delete()
 IF(PRESENT(error_str))THEN

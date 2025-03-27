@@ -16,7 +16,6 @@ USE oft_base
 USE oft_sort, ONLY: sort_matrix, sort_array
 USE oft_io, ONLY: hdf5_field_exist, hdf5_read, hdf5_write, &
   xdmf_plot_file
-  ! hdf5_rst_field_exist
 USE oft_quadrature, ONLY: oft_quad_type
 USE oft_gauss_quadrature, ONLY: set_quad_1d
 USE oft_tet_quadrature, ONLY: set_quad_2d
@@ -46,19 +45,15 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
 !------------------------------------------------------------------------------
-!> Interpolation class for an axisymmetric gaussian source in toroidal geometry
-!!
-!! In toroidal coordinates defined by the class the scalar field is defined
-!! as
-!! \f[ S = e^{-\frac{r^2}{\lambda}} \f]
+!> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
 type, extends(bfem_interp) :: circular_curr
-  real(r8) :: x0(2) = [1.d0,0.d0] !< Circle center
+  real(r8) :: x0(2) = [1.d0,0.d0] !< Center point
   real(r8) :: a = 0.d0 !< Minor radius
   real(r8) :: delta = 0.d0 !< Triangularity
   real(r8) :: kappa = 1.d0 !< Elongation
 contains
-  !> Reconstruct field
+  !> Evaluate source
   procedure :: interp => circle_interp
 end type circular_curr
 !------------------------------------------------------------------------------
@@ -86,45 +81,45 @@ END TYPE flux_func
 !> Internal coil region structure
 !------------------------------------------------------------------------------
 TYPE :: coil_region
-  INTEGER(i4) :: nc = 0 !< Needs docs
-  INTEGER(i4) :: id = 0 !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:) :: lc => NULL() !< Needs docs
-  REAL(r8) :: curr = 0.d0 !< Needs docs
-  REAL(r8) :: vcont_gain = 0.d0 !< Needs docs
-  REAL(r8) :: area = 0.d0 !< Needs docs
+  INTEGER(i4) :: nc = 0 !< Number of cells in region
+  INTEGER(i4) :: id = 0 !< Coil id number
+  INTEGER(i4), POINTER, DIMENSION(:) :: lc => NULL() !< Cell list for region
+  REAL(r8) :: area = 0.d0 !< Region area
 END TYPE coil_region
 !------------------------------------------------------------------------------
 !> Internal wall region structure
 !------------------------------------------------------------------------------
 TYPE :: cond_region
-  INTEGER(i4) :: nc = 0 !< Needs docs
-  INTEGER(i4) :: nc_quad = 0 !< Needs docs
-  INTEGER(i4) :: neigs = 0 !< Needs docs
-  INTEGER(i4) :: id = 0 !< Needs docs
-  INTEGER(i4) :: pair = -1 !< Needs docs
-  LOGICAL :: continuous = .TRUE. !< Needs docs
-  REAL(r8) :: coverage = 1.d0 !< Needs docs
-  REAL(r8) :: extent(2) = 0.d0 !< Needs docs
-  REAL(r8) :: eta = -1.d0 !< Needs docs
-  LOGICAL, POINTER, DIMENSION(:) :: fixed => NULL() !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:) :: mtype => NULL() !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:) :: mind => NULL() !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:) :: eig_map => NULL() !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:,:) :: lc => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:) :: weights => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:) :: pair_signs => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:) :: fit_scales => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: cond_vals => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: rc => NULL() !< Needs docs
+  LOGICAL :: continuous = .TRUE. !< Is region toroidally continuous?
+  INTEGER(i4) :: nc = 0 !< Number of cells in region
+  INTEGER(i4) :: id = 0 !< Region ID number
+  INTEGER(i4) :: neigs = 0 !< Number of fixed-shape current modes defined in region
+  REAL(r8) :: eta = -1.d0 !< Resistivity of region
+  CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_eig => NULL() !< Flux for each current mode
+#ifdef OFT_TOKAMAKER_LEGACY
+  INTEGER(i4) :: nc_quad = 0 !< Number of quadrilateral parent cells (if subdivided)
+  INTEGER(i4) :: pair = -1 !< Pair region
+  REAL(r8) :: coverage = 1.d0 !< Toroidal coverage if not toroidally continuous
+  REAL(r8) :: extent(2) = 0.d0 !< Toroidal extent of one section if not toroidally continuous
+  LOGICAL, POINTER, DIMENSION(:) :: fixed => NULL() !< Flag for fixing scale of current modes
+  INTEGER(i4), POINTER, DIMENSION(:) :: mtype => NULL() !< Type of current modes
+  INTEGER(i4), POINTER, DIMENSION(:) :: mind => NULL() !< Index of current modes
+  INTEGER(i4), POINTER, DIMENSION(:) :: eig_map => NULL() !< Mapping for current modes
+  INTEGER(i4), POINTER, DIMENSION(:,:) :: lc => NULL() !< Cell list for region
+  REAL(r8), POINTER, DIMENSION(:) :: weights => NULL() !< Scale factors for current modes
+  REAL(r8), POINTER, DIMENSION(:) :: pair_signs => NULL() !< Pairing signs for current modes
+  REAL(r8), POINTER, DIMENSION(:) :: fit_scales => NULL() !< Fitting scales for current modes
+  REAL(r8), POINTER, DIMENSION(:,:) :: cond_vals => NULL() !< Current distributions for current modes
+  REAL(r8), POINTER, DIMENSION(:,:) :: rc => NULL() !< Centers of quadrilateral parent cells
   REAL(r8), POINTER, DIMENSION(:,:) :: cond_curr => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:,:,:) :: corr_3d => NULL() !< Needs docs
-  CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_eig => NULL() !< Needs docs
+  REAL(r8), POINTER, DIMENSION(:,:,:,:) :: corr_3d => NULL() !< 3D correction for current modes
+#endif
 END TYPE cond_region
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Information for non-continuous regions
 !------------------------------------------------------------------------------
 TYPE :: gs_region_info
-  INTEGER(i4) :: nnonaxi = 0 !< Needs docs
+  INTEGER(i4) :: nnonaxi = 0 !< Number of non-continuous regions
   INTEGER(i4) :: block_max = 0 !< Needs docs
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: reg_map => NULL() !< Needs docs
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: dense_flag => NULL() !< Needs docs
@@ -149,164 +144,143 @@ end type oft_gs_zerob
 !> Grad-Shafranov equilibrium object
 !------------------------------------------------------------------------------
 TYPE :: gs_eq
-  INTEGER(i4) :: ierr = 0 !< Needs docs
-  INTEGER(i4) :: maxits = 30 !< Needs docs
-  INTEGER(i4) :: mode = 0 !< Needs docs
-  INTEGER(i4) :: ninner = 4 !< Needs docs
-  INTEGER(i4) :: nR0_ramp = 6 !< Needs docs
-  INTEGER(i4) :: nlcfs = 100 !< Needs docs
-  INTEGER(i4) :: nx_points = 0 !< Needs docs
-  INTEGER(i4) :: ncoils = 0 !< Needs docs
-  INTEGER(i4) :: ncoils_ext = 0 !< Needs docs
-  INTEGER(i4) :: ncoil_regs = 0 !< Needs docs
-  INTEGER(i4) :: nregularize = 0 !< Needs docs
-  INTEGER(i4) :: nlimiter_pts = 0 !< Needs docs
-  INTEGER(i4) :: nlimiter_nds = 0 !< Needs docs
-  INTEGER(i4) :: ncond_regs = 0 !< Needs docs
-  INTEGER(i4) :: ncond_eigs = 0 !< Needs docs
-  INTEGER(i4) :: bc_nrhs = 0 !< Needs docs
-  INTEGER(i4) :: isoflux_ntargets = 0 !< Needs docs
-  INTEGER(i4) :: saddle_ntargets = 0 !< Needs docs
-  INTEGER(i4) :: flux_ntargets = 0 !< Needs docs
-  INTEGER(i4) :: nlim_con = 0 !< Needs docs
-  INTEGER(i4) :: lim_nloops = 0 !< Needs docs
-  REAL(r8) :: eps = 1.d-12 !< Needs docs
-  REAL(r8) :: rmax = 0.d0 !< Needs docs
-  REAL(r8) :: urf = .2d0 !< Needs docs
-  REAL(r8) :: psimin = 0.d0 !< Needs docs
-  REAL(r8) :: psiscale = 1.d0 !< Needs docs
-  REAL(r8) :: psimax = 1.d0 !< Needs docs
-  REAL(r8) :: alam = 1.d0 !< Needs docs
-  REAL(r8) :: pnorm = 1.d0 !< Needs docs
-  REAL(r8) :: rmin = 0.d0 !< Needs docs
-  REAL(r8) :: dt = -1.d0 !< Needs docs
-  REAL(r8) :: dt_last = -1.d0 !< Needs docs
-  REAL(r8) :: Itor_target = -1.d0 !< Needs docs
-  REAL(r8) :: estore_target = -1.d0 !< Needs docs
-  REAL(r8) :: pax_target = -1.d0 !< Needs docs
-  REAL(r8) :: Ip_ratio_target = -1.d99 !< Needs docs
-  REAL(r8) :: R0_target = -1.d0 !< Needs docs
-  REAL(r8) :: V0_target = -1.d99 !< Needs docs
-  REAL(r8) :: nl_tol = 1.d-8 !< Needs docs
-  REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Needs docs
-  REAL(r8) :: spatial_bounds(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99],[2,2]) !< Needs docs
-  REAL(r8) :: lim_zmax = 1.d99 !< Needs docs
-  REAL(r8) :: lim_area = -1.d0 !< Needs docs
-  REAL(r8) :: o_point(2) = [-1.d0,1.d99] !< Needs docs
-  REAL(r8) :: lim_point(2) = [-1.d0,1.d99] !< Needs docs
-  REAL(r8) :: x_points(2,max_xpoints) = 0.d0 !< Needs docs
-  REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Needs docs
-  REAL(r8) :: vcontrol_val = 0.d0 !< Needs docs
-  REAL(r8) :: vcont_I_gain = 1.d-8 !< Needs docs
-  REAL(r8) :: vcont_D_gain = 0.d0 !< Needs docs
-  REAL(r8) :: timing(4) = 0.d0 !< Needs docs
-  REAL(r8) :: isoflux_grad_wt_lim = -1.d0 !< Needs docs
-  LOGICAL, POINTER, DIMENSION(:) :: fe_flag => NULL() !< Needs docs
-  LOGICAL, POINTER, DIMENSION(:) :: saddle_pmask => NULL() !< Needs docs
-  LOGICAL, POINTER, DIMENSION(:) :: saddle_cmask => NULL() !< Needs docs
-  LOGICAL, POINTER, DIMENSION(:) :: saddle_rmask => NULL() !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:) :: limiter_nds => NULL() !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL() !< Needs docs
+  INTEGER(i4) :: ierr = 0 !< Error flag from most recent solve
+  INTEGER(i4) :: maxits = 30 !< Maximum number of iterations for nonlinear solve
+  INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
+  INTEGER(i4) :: nR0_ramp = 6 !< Number of iterations for R0 ramp if R0 target is used
+  INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
+  INTEGER(i4) :: ncoils = 0 !< Number of coils in device
+  INTEGER(i4) :: ncoils_ext = 0 !< Number of external (non-meshed) coils in device
+  INTEGER(i4) :: ncoil_regs = 0 !< Number of meshed coil regions in device
+  INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
+  INTEGER(i4) :: nlimiter_pts = 0 !< Number of non-node limiter points
+  INTEGER(i4) :: nlimiter_nds = 0 !< Number of grid nodes used as limiter points
+  INTEGER(i4) :: ncond_regs = 0 !< Number of conducting regions
+  INTEGER(i4) :: ncond_eigs = 0 !< Number of total fixed-shape current modes for conducting regions
+  INTEGER(i4) :: bc_nrhs = 0 !< Number of terms in free-boundary BC
+  INTEGER(i4) :: isoflux_ntargets = 0 !< Number of isoflux target locations
+  INTEGER(i4) :: saddle_ntargets = 0 !< Number of saddle target locations
+  INTEGER(i4) :: flux_ntargets = 0 !< Number of \f$ \psi \f$ target locations
+  INTEGER(i4) :: nlim_con = 0 !< Number of node points in limiter contour list
+  INTEGER(i4) :: lim_nloops = 0 !< Number of limiter loops
+  REAL(r8) :: rmin = 0.d0 !< Minimum radial coordinate in model
+  REAL(r8) :: rmax = 0.d0 !< Maximum radial coordinate in model
+  REAL(r8) :: urf = .2d0 !< Under-relaxation factor for Picard iteration
+  REAL(r8) :: psiscale = 1.d0 !< Solution scale factor for homogeneous equilibria
+  REAL(r8) :: psimax = 1.d0 !< Maximum \f$ \psi \f$ value for homogeneous equilibria
+  REAL(r8) :: alam = 1.d0 !< Scale factor for F*F' or F' profile (see mode)
+  REAL(r8) :: pnorm = 1.d0 !< Scale factor for P' profile
+  REAL(r8) :: dt = -1.d0 !< Timestep size for time-dependent and quasi-static solves
+  REAL(r8) :: dt_last = -1.d0 !< Timestep size for current LHS matrix
+  REAL(r8) :: Itor_target = -1.d0 !< Toroidal current target
+  REAL(r8) :: estore_target = -1.d0 !< Stored energy target
+  REAL(r8) :: pax_target = -1.d0 !< On-axis pressure target
+  REAL(r8) :: Ip_ratio_target = -1.d99 !< Ip ratio target
+  REAL(r8) :: R0_target = -1.d0 !< Magnetic axis radial target
+  REAL(r8) :: V0_target = -1.d99 !< Magnetic axis vertical target
+  REAL(r8) :: nl_tol = 1.d-8 !< Tolerance for nonlinear solve
+  REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Boundaing \f$ \psi \f$ values on [LCFS, axis]
+  REAL(r8) :: spatial_bounds(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99],[2,2]) !< Maximum R,Z extents of plasma
+  REAL(r8) :: lim_zmax = 1.d99 !< Vertical position cutoff for limiter points
+  REAL(r8) :: lim_area = -1.d0 !< Area inside the limiter
+  REAL(r8) :: o_point(2) = [-1.d0,1.d99] !< Location of magnetic axis
+  REAL(r8) :: lim_point(2) = [-1.d0,1.d99] !< Location of limiting point or active X-point
+  REAL(r8) :: x_points(2,max_xpoints) = 0.d0 !< Location of tracked X-points
+  REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Vectors point from X-points to O-point
+  REAL(r8) :: vcontrol_val = 0.d0 !< Amplitude of virtual VSC "current"
+  REAL(r8) :: timing(4) = 0.d0 !< Timing for each phase of solve
+  REAL(r8) :: isoflux_grad_wt_lim = -1.d0 !< Limit for isoflux inverse gradient weighting (negative to disable)
+  LOGICAL, POINTER, DIMENSION(:) :: fe_flag => NULL() !< FE boundary flag
+  LOGICAL, POINTER, DIMENSION(:) :: saddle_pmask => NULL() !< Point mask for saddle search
+  LOGICAL, POINTER, DIMENSION(:) :: saddle_cmask => NULL() !< Cell mask for saddle search
+  LOGICAL, POINTER, DIMENSION(:) :: saddle_rmask => NULL() !< Region mask for saddle search
+  INTEGER(i4), POINTER, DIMENSION(:) :: limiter_nds => NULL() !< List of limiter nodes
+  INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL() !< List of terms interacting with free-boundary BC
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
-  INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL() !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Needs docs
+  INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL() !< Limiter contour list (contains all limiters)
+  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each 
   REAL(r8), POINTER, DIMENSION(:) :: cond_weights => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: rlimiter_nds => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: limiter_pts => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: bc_mat => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: bc_coil_mat => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: bc_lmat => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: bc_bmat => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: rlcfs => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: isoflux_targets => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: saddle_targets => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: flux_targets => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: coil_reg_mat => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Needs docs
-  LOGICAL :: free = .FALSE. !< Needs docs
-  LOGICAL :: compute_chi = .FALSE. !< Needs docs
-  LOGICAL :: plot_step = .TRUE. !< Needs docs
-  LOGICAL :: plot_final = .TRUE. !< Needs docs
-  LOGICAL :: boundary_limiter = .TRUE. !< Needs docs
-  LOGICAL :: diverted = .FALSE. !< Needs docs
-  LOGICAL :: has_plasma = .TRUE. !< Needs docs
-  LOGICAL :: full_domain = .FALSE. !< Needs docs
-#if defined( HAVE_SUPERLU ) || defined( HAVE_UMFPACK ) || defined( HAVE_MKL )
-  LOGICAL :: use_lu = .TRUE. !< Needs docs
-#else
-  LOGICAL :: use_lu = .FALSE.
-#endif
-  LOGICAL :: assym = .FALSE. !< Needs docs
-  ! LOGICAL :: active_x = .FALSE.
-  LOGICAL :: limited_only = .FALSE. !< Needs docs
-  LOGICAL :: save_visit = .TRUE. !< Needs docs
-  LOGICAL :: isoflux_grad_weight = .TRUE. !< Needs docs
-  CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none' !< Needs docs
-  CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none' !< Needs docs
-  TYPE(xdmf_plot_file) :: xdmf !< Needs docs
-  TYPE(oft_lusolver) :: lu_solver !< Needs docs
-  TYPE(oft_lusolver) :: lu_solver_dt !< Needs docs
-  TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL() !< Needs docs
-  TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Needs docs
-  TYPE(cond_region), POINTER, DIMENSION(:) :: cond_regions => NULL() !< Needs docs
-  TYPE(gs_region_info) :: region_info !< Needs docs
-  CLASS(oft_vector), POINTER :: psi => NULL() !< Needs docs
-  CLASS(oft_vector), POINTER :: chi => NULL() !< Needs docs
-  CLASS(oft_vector), POINTER :: u_hom => NULL() !< Needs docs
-  CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_coil => NULL() !< Needs docs
-  ! CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_cond => NULL() !< Needs docs
-  CLASS(oft_vector), POINTER :: psi_dt => NULL() !< Needs docs
-  CLASS(oft_matrix), POINTER :: dels => NULL() !< Needs docs
-  CLASS(oft_matrix), POINTER :: dels_dt => NULL() !< Needs docs
-  CLASS(oft_matrix), POINTER :: dels_full => NULL() !< Needs docs
-  CLASS(oft_matrix), POINTER :: mrop => NULL() !< Needs docs
-  CLASS(oft_matrix), POINTER :: mop => NULL() !< Needs docs
+  REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
+  REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
+  REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
+  REAL(r8), POINTER, DIMENSION(:,:) :: rlimiter_nds => NULL() !< Location of limiter nodes
+  REAL(r8), POINTER, DIMENSION(:,:) :: limiter_pts => NULL() !< Location of non-node limiter points
+  REAL(r8), POINTER, DIMENSION(:,:) :: bc_lmat => NULL() !< First part of free-boundary BC matrix
+  REAL(r8), POINTER, DIMENSION(:,:) :: bc_bmat => NULL() !< Second part of free-boundary BC matrix
+  REAL(r8), POINTER, DIMENSION(:,:) :: isoflux_targets => NULL() !< Isoflux target locations
+  REAL(r8), POINTER, DIMENSION(:,:) :: saddle_targets => NULL() !< Saddle target locations
+  REAL(r8), POINTER, DIMENSION(:,:) :: flux_targets => NULL() !< Flux target locations and values
+  REAL(r8), POINTER, DIMENSION(:,:) :: coil_reg_mat => NULL() !< Coil regularization terms
+  REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Coil current bounds
+  REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Number of turns for each coil in each region
+  REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Coil mutual inductance matrix
+  LOGICAL :: free = .FALSE. !< Computing free-boundary equilibrium?
+  LOGICAL :: compute_chi = .FALSE. !< Compute toroidal field potential?
+  LOGICAL :: plot_step = .TRUE. !< Save solver steps for plotting
+  LOGICAL :: plot_final = .TRUE. !< Save solver result for plotting
+  LOGICAL :: diverted = .FALSE. !< Equilibrium is diverted?
+  LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
+  LOGICAL :: full_domain = .FALSE. !< Solve across full domain (for Solov'ev test cases)
+  LOGICAL :: save_visit = .TRUE. !< Save information for plotting?
+  CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none' !< File containing coil definitions
+  CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none' !< File non-node limiter points
+  TYPE(xdmf_plot_file) :: xdmf !< XDMF plotting object
+  TYPE(oft_lusolver) :: lu_solver !< \f$ \frac{1}{R} \Delta^* \f$ inverse solver
+  TYPE(oft_lusolver) :: lu_solver_dt !< LHS inverse solver with time dependence
+  TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL() !< External coil definitions
+  TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Meshed coil regions
+  TYPE(cond_region), POINTER, DIMENSION(:) :: cond_regions => NULL() !< Meshed conducting regions
+  TYPE(gs_region_info) :: region_info !< Region information for non-continuous conductors
+  CLASS(oft_vector), POINTER :: psi => NULL() !< Current \f$ \psi \f$ solution
+  CLASS(oft_vector), POINTER :: chi => NULL() !< Toroidal field potential (if computed)
+  CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_coil => NULL() !< \f$ \psi \f$ for each coil
+  CLASS(oft_vector), POINTER :: psi_dt => NULL() !< Time-dependent contribution to \f$ \psi \f$ from eddy currents
+  CLASS(oft_matrix), POINTER :: dels => NULL() !< \f$ \frac{1}{R} \Delta^* \f$ matrix
+  CLASS(oft_matrix), POINTER :: dels_dt => NULL() !< LHS matrix with time dependence
+  CLASS(oft_matrix), POINTER :: dels_full => NULL() !< \f$ \frac{1}{R} \Delta^* \f$ matrix with no BC
+  CLASS(oft_matrix), POINTER :: mrop => NULL() !< 1/R-scaled Lagrange FE mass matrix
+  CLASS(oft_matrix), POINTER :: mop => NULL() !< Lagrange FE mass matrix
   CLASS(flux_func), POINTER :: I => NULL() !< F*F' flux function
   CLASS(flux_func), POINTER :: P => NULL() !< Pressure flux function
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
-  CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Needs docs
-  TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL() !< Needs docs
-  TYPE(oft_blag_zerob), POINTER :: zerob_bc => NULL() !< Needs docs
-  TYPE(oft_blag_zerogrnd), POINTER :: zerogrnd_bc => NULL() !< Needs docs
-  TYPE(oft_gs_zerob), POINTER :: gs_zerob_bc => NULL() !< Needs docs
+  CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
+  TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL() !< Multi-level Lagrange FE representation (only top level used)
+  TYPE(oft_blag_zerob), POINTER :: zerob_bc => NULL() !< BC object for zeroing boundary nodes
+  TYPE(oft_blag_zerogrnd), POINTER :: zerogrnd_bc => NULL() !< BC object for zeroing grounding node(s)
+  TYPE(oft_gs_zerob), POINTER :: gs_zerob_bc => NULL() !< BC object for zeroing nodes outside plasma region
 #ifdef OFT_TOKAMAKER_LEGACY
   PROCEDURE(region_eta_set), NOPASS, POINTER :: set_eta => NULL() !< Needs docs
 #endif
 CONTAINS
-  !> Needs docs
+  !> Setup G-S object from FE representation
   PROCEDURE :: setup => gs_setup
-  !> Needs docs
+  !> Build operators and allocate storage
   PROCEDURE :: init => gs_init
-  !> Needs docs
+  !> Initialize \f$ \psi \f$ using simple definition
   PROCEDURE :: init_psi => gs_init_psi
+#ifdef OFT_TOKAMAKER_LEGACY
   !> Needs docs
   PROCEDURE :: load_coils => gs_load_coils
-  !> Needs docs
+#endif
+  !> Load non-node limiter points
   PROCEDURE :: load_limiters => gs_load_limiters
-  !> Needs docs
+  !> Solve nonlinear G-S system
   PROCEDURE :: solve => gs_solve
-  !> Needs docs
+  !> Solve linearized version of G-S system (fixed RHS)
   PROCEDURE :: lin_solve => gs_lin_solve
-  !> Needs docs
+  !> Solve vacuum field for given \f$ J_{\phi} \f$
   PROCEDURE :: vac_solve => gs_vac_solve
-  !> Needs docs
+  !> Compute toroidal field potential
   PROCEDURE :: get_chi => gs_get_chi
-  !> Needs docs
+  !> Compute approximate toroidal current as \f$ \int \Delta^* \psi dA \f$
   PROCEDURE :: itor => gs_itor
-  !> Needs docs
+  !> Destory G-S object
   PROCEDURE :: delete => gs_destroy
 END TYPE gs_eq
 !------------------------------------------------------------------------------
 !> Interpolate G-S profiles at a specific point in space
-!!
-!! @extends fem_base::bfem_interp
 !------------------------------------------------------------------------------
 type, extends(bfem_interp) :: gs_prof_interp
   INTEGER(i4) :: mode = 0 !< Needs docs
@@ -318,17 +292,15 @@ contains
   procedure :: setup => gs_prof_interp_setup
   !> Needs docs
   procedure :: delete => gs_prof_interp_delete
-  !> Reconstruct a Lagrange scalar field
+  !> Evaluate field
   procedure :: interp => gs_prof_interp_apply
 end type gs_prof_interp
 !------------------------------------------------------------------------------
-!> Interpolate a Lagrange field.
-!!
-!! @extends fem_base::fem_interp
+!> Interpolate magnetic field for a G-S solution
 !------------------------------------------------------------------------------
 type, extends(gs_prof_interp) :: gs_b_interp
 contains
-  !> Reconstruct a Lagrange scalar field
+  !> Evaluate magnetic field
   procedure :: interp => gs_b_interp_apply
 end type gs_b_interp
 !------------------------------------------------------------------------------
@@ -342,7 +314,7 @@ type, extends(cylinv_interp) :: gsinv_interp
 contains
   !> Needs docs
   procedure :: setup => gsinv_setup
-  !> Reconstruct the gradient of a Lagrange scalar field
+  !> Evaluate field
   procedure :: interp => gsinv_apply
   !> Needs docs
   procedure :: delete => gsinv_destroy
@@ -395,8 +367,7 @@ abstract interface
   end function region_eta_set
 #endif
 end interface
-! logical, allocatable, dimension(:) :: node_flag
-real(r8), PARAMETER :: gs_epsilon = 1.d-12
+real(r8), PARAMETER :: gs_epsilon = 1.d-12 !< Epsilon used for radial coordinate
 !
 integer(i4) :: cell_active = 0
 real(r8) :: pt_con_active(2) = [0.d0,0.d0]
@@ -435,6 +406,7 @@ self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
 ALLOCATE(self%zerogrnd_bc)
 self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
 end subroutine gs_setup
+#ifdef OFT_TOKAMAKER_LEGACY
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -662,28 +634,9 @@ DO i=1,nreg_defs
           END IF
         END IF
       END IF
-      ! !---
-      ! CALL xml_get_element(region,"limiter",field,ierr)
-      ! IF(ierr==0)THEN
-      !   CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%limiter, &
-      !        num=nread,iostat=ierr)
-      ! END IF
     CASE(3)
       self%ncoil_regs=self%ncoil_regs+1
       self%coil_regions(self%ncoil_regs)%id=region_map(i)
-      !---
-      CALL xml_get_element(region,"current",field,ierr)
-      IF(ierr==0)THEN
-        CALL xml_extractDataContent(field,self%coil_regions(self%ncoil_regs)%curr, &
-             num=nread,iostat=ierr)
-        self%coil_regions(self%ncoil_regs)%curr=self%coil_regions(self%ncoil_regs)%curr*mu0
-      END IF
-      !---
-      CALL xml_get_element(region,"vcont_gain",field,ierr)
-      IF(ierr==0)THEN
-        CALL xml_extractDataContent(field,self%coil_regions(self%ncoil_regs)%vcont_gain, &
-             num=nread,iostat=ierr)
-      END IF
   END SELECT
 END DO
 IF(ASSOCIATED(regions%nodes))DEALLOCATE(regions%nodes)
@@ -693,6 +646,7 @@ WRITE(*,'(2A,I4,A)')oft_indent,'Found ',self%ncoil_regs,' coil regions'
 WRITE(*,*)
 CALL oft_decrease_indent
 end subroutine gs_load_regions
+#endif
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -771,9 +725,6 @@ DO i=1,self%ncoil_regs
       self%coil_regions(i)%area=self%coil_regions(i)%area+vol
     END IF
   END DO
-  self%coil_regions(i)%curr=self%coil_regions(i)%curr/self%coil_regions(i)%area
-  self%coil_regions(i)%vcont_gain = &
-    self%coil_regions(i)%vcont_gain/self%coil_regions(i)%area
 END DO
 !---
 IF(do_load.AND.hdf5_field_exist('wall_eig.rst', 'ngrid_3d'))THEN
@@ -790,6 +741,7 @@ DO i=1,self%ncond_regs
     IF(smesh%reg(j)==self%cond_regions(i)%id)self%cond_regions(i)%nc=self%cond_regions(i)%nc+1
   END DO
   IF(self%cond_regions(i)%nc==0)CYCLE
+#ifdef OFT_TOKAMAKER_LEGACY
   IF(MOD(self%cond_regions(i)%nc,4)/=0.OR.(self%cond_regions(i)%neigs==0))THEN
     self%cond_regions(i)%nc_quad=self%cond_regions(i)%nc
     ALLOCATE(self%cond_regions(i)%lc(1,self%cond_regions(i)%nc_quad))
@@ -895,6 +847,7 @@ DO i=1,self%ncond_regs
     ALLOCATE(self%cond_regions(i)%pair_signs(self%cond_regions(i)%neigs))
     self%cond_regions(i)%pair_signs = self%cond_regions(i)%weights
   END IF
+#endif
   !---
   IF(oft_debug_print(2))THEN
     WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%cond_regions(i)%nc,' conductor cells'
@@ -902,14 +855,17 @@ DO i=1,self%ncond_regs
     WRITE(*,*)
   END IF
 END DO
+ALLOCATE(self%cond_weights(self%ncond_eigs))
+self%cond_weights=0.d0
+#ifdef OFT_TOKAMAKER_LEGACY
 DO i=1,self%ncond_regs
   IF(self%cond_regions(i)%pair>0)THEN
     self%cond_regions(i)%eig_map=>self%cond_regions(self%cond_regions(i)%pair)%eig_map
   END IF
 END DO
-ALLOCATE(self%cond_weights(self%ncond_eigs))
 CALL gs_get_cond_weights(self,self%cond_weights,.FALSE.)
 CALL gs_set_cond_weights(self,self%cond_weights,.FALSE.)
+#endif
 !---Setup limiters
 ALLOCATE(eflag(self%fe_rep%ne),j_lag(self%fe_rep%nce))
 eflag=0
@@ -973,6 +929,7 @@ END IF
 !---Mark non-continuous regions
 CALL set_noncontinuous
 !---
+#ifdef OFT_TOKAMAKER_LEGACY
 IF(do_plot)THEN
   ALLOCATE(eigs(smesh%nc))
   ! DO j=1,smesh%nc
@@ -1008,6 +965,7 @@ IF(do_plot)THEN
   ! CALL smesh%save_cell_scalar(eigs,self%xdmf,'Curr')
   DEALLOCATE(eigs)
 END IF
+#endif
 IF(oft_debug_print(2))CALL oft_decrease_indent
 contains
 !
@@ -1054,14 +1012,10 @@ END IF
 end subroutine set_noncontinuous
 end subroutine gs_setup_walls
 !------------------------------------------------------------------------------
-!> Initialize Grad-Shafranov solution with the Taylor state
-!!
-!! @param[in,out] self G-S object
+!> Initialize Grad-Shafranov object by computing operators and allocating storage
 !------------------------------------------------------------------------------
 subroutine gs_init(self)
-class(gs_eq), intent(inout) :: self
-! logical, optional, intent(in) :: compute
-! real(8), optional, intent(in) :: r0(2),a,kappa,delta
+class(gs_eq), intent(inout) :: self !< G-S object
 type(oft_native_cg_eigsolver) :: eigsolver
 class(oft_vector), pointer :: tmp_vec,tmp_vec2
 integer(4), pointer, dimension(:) :: cdofs
@@ -1074,25 +1028,12 @@ real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:)
 character(LEN=3) :: coil_tag
 character(LEN=2) :: cond_tag,eig_tag
 CLASS(oft_bmesh), POINTER :: smesh
-! logical :: do_compute
-! do_compute=.TRUE.
-! IF(PRESENT(compute))do_compute=compute
 smesh=>self%fe_rep%mesh
-! self%ML_fe_rep=>ML_oft_blagrange
-! self%fe_rep=>oft_blagrange
-! ALLOCATE(self%zerob_bc)
-! self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
-! ALLOCATE(self%zerogrnd_bc)
-! self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
 !---Get Vector
 call self%fe_rep%vec_create(self%psi)
 call self%psi%set(0.d0)
 call self%fe_rep%vec_create(self%chi)
 call self%chi%set(0.d0)
-IF(self%free)THEN
-  call self%fe_rep%vec_create(self%u_hom)
-  call self%u_hom%set(0.d0)
-END IF
 self%rmax=-1.d0 !MAXVAL(smesh%r(1,:))
 DO i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
@@ -1180,8 +1121,6 @@ IF(self%ncoils==0)THEN
   self%coil_currs=0.d0
   DO i=1,self%ncoil_regs
     self%coil_nturns(self%coil_regions(i)%id,i)=1.d0
-    self%coil_currs(i)=self%coil_regions(i)%curr*self%coil_regions(i)%area
-    self%coil_vcont(self%coil_regions(i)%id)=self%coil_regions(i)%vcont_gain
   END DO
   DO i=1,self%ncoils_ext
     self%coil_nturns(smesh%nreg+i,self%ncoil_regs+i)=1.d0
@@ -1211,6 +1150,7 @@ DO i=1,self%ncoils
     IF(j>i)self%Lcoils(j,i)=self%Lcoils(i,j)
   END DO
 END DO
+#ifdef OFT_TOKAMAKER_LEGACY
 ! ALLOCATE(self%psi_cond(self%ncond_eigs))
 call self%psi%new(tmp_vec2)
 DO i=1,self%ncond_regs
@@ -1228,25 +1168,7 @@ DO i=1,self%ncond_regs
 END DO
 CALL tmp_vec2%delete()
 DEALLOCATE(tmp_vec2)
-! IF(self%isoflux_ntargets>0)CALL gs_fit_isoflux(self,ierr)
-! IF(do_compute)THEN
-!   !---Add coil/conductor fields to IC
-!   DO i=1,self%ncoil_regs
-!     curr = self%coil_regions(i)%curr & 
-!       + self%coil_regions(i)%vcont_gain*self%vcontrol_val
-!     CALL self%psi%add(1.d0,curr,self%psi_coil(i)%f)
-!   END DO
-!   DO i=1,self%ncond_regs
-!     DO j=1,self%cond_regions(i)%neigs
-!       ! k=self%cond_regions(i)%eig_map(j)
-!       CALL self%psi%add(1.d0,self%cond_regions(i)%weights(j), &
-!         self%cond_regions(i)%psi_eig(j)%f)
-!     END DO
-!   END DO
-! END IF
-! !
-! CALL self%psi%get_local(psi_vals)
-! IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_init')
+#endif
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 contains
@@ -1306,36 +1228,29 @@ ALLOCATE(self%lim_ptr(self%lim_nloops+1))
 self%lim_ptr(self%lim_nloops+1)=self%nlim_con+1
 self%lim_ptr(1:self%lim_nloops)=tmp_ptr(1:self%lim_nloops)
 deallocate(eflag,tmp_ptr)
-! !---Check orientation
-! orient=0.d0
-! DO i=1,smesh%nbp
-!     IF(i<smesh%nbp/2)THEN
-!       orient(1)=orient(1)+smesh%r(2,olbp(i))
-!     ELSE
-!       orient(2)=orient(2)+smesh%r(2,olbp(i))
-!     END IF
-! END DO
-! !---Reverse list if necessary
-! IF(orient(2)>orient(1))THEN
-!   DO i=2,smesh%nbp/2+1
-!     k=olbp(i)
-!     olbp(i)=olbp(smesh%nbp+2-i)
-!     olbp(smesh%nbp+2-i)=k
-!   END DO
-! END IF
 end subroutine get_limiter
 end subroutine gs_init
 !------------------------------------------------------------------------------
-!> Initialize Grad-Shafranov solution with the Taylor state
+!> Initialize \f$ \psi \f$
 !!
-!! @param[in,out] self G-S object
+!! \f$ \psi \f$ can be initialized in one of four ways:
+!! 1. If no optional arguments are passed a Taylor state is computed and used
+!! 2. If `r0 < 0.0` is passed a uniform current across the entire plasma region is used
+!! 3. If `r0` and `a`, and optionally `kappa` and `delta`, are passed then a uniform current across a cross-section defined by those parameters is used
+!! 4. If `curr_source` is passed then the source defined by those values is used
+!!
+!! In all cases the solution is scaled to match the target Ip value
 !------------------------------------------------------------------------------
 subroutine gs_init_psi(self,ierr,r0,a,kappa,delta,curr_source)
-class(gs_eq), intent(inout) :: self
-integer(4), intent(out) :: ierr
-real(8), optional, intent(in) :: r0(2),a,kappa,delta,curr_source(:)
+class(gs_eq), intent(inout) :: self !< G-S object
+integer(4), intent(out) :: ierr !< Error flag
+real(8), optional, intent(in) :: r0(2) !< Center for cross-section initialization
+real(8), optional, intent(in) :: a !< Minor radius for cross-section initialization
+real(8), optional, intent(in) :: kappa !< Elongation for cross-section initialization
+real(8), optional, intent(in) :: delta !< Triangularity for cross-section initialization
+real(8), optional, intent(in) :: curr_source(:) !< Explicit current source
 type(oft_native_cg_eigsolver) :: eigsolver
-class(oft_vector), pointer :: tmp_vec,tmp_vec2
+class(oft_vector), pointer :: tmp_vec
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
 type(circular_curr) :: circle_init
@@ -1352,10 +1267,11 @@ NULLIFY(tmp_vec,psi_vals)
 call self%psi%new(tmp_vec)
 IF(PRESENT(r0))THEN
   IF(r0(1)>0.d0)THEN
+    IF(.NOT.PRESENT(a))CALL oft_abort('"a" required if "r0" is passed',"gs_init_psi",__FILE__)
     circle_init%x0=r0
     circle_init%a=a
-    circle_init%kappa=kappa
-    circle_init%delta=delta
+    IF(PRESENT(kappa))circle_init%kappa=kappa
+    IF(PRESENT(delta))circle_init%delta=delta
     circle_init%mesh=>self%fe_rep%mesh
     CALL gs_gen_source(self,circle_init,tmp_vec)
   ELSE
@@ -1379,11 +1295,7 @@ ELSE
   eigsolver%bc=>self%gs_zerob_bc
   eigsolver%its=-2
   !---Setup Preconditioner
-  ! if(oft_blagrange_level==1)then
-    CALL create_diag_pre(eigsolver%pre)
-  ! else
-  !   call lag_mlprecon_dels(eigsolver%pre,level=oft_blagrange_level)
-  ! end if
+  CALL create_diag_pre(eigsolver%pre)
   !---Compute eigenstate
   CALL self%psi%get_local(psi_vals)
   CALL oft_random_number(psi_vals,self%psi%n)
@@ -1416,8 +1328,6 @@ DEALLOCATE(tmp_vec)
 CALL self%psi%get_local(psi_vals)
 self%plasma_bounds=[0.d0,MAXVAL(ABS(psi_vals))]
 DEALLOCATE(psi_vals)
-! CALL tmp_vec2%delete()
-! DEALLOCATE(tmp_vec2)
 IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
   CALL gs_fit_isoflux(self,self%psi,ierr)
   IF(ierr/=0)THEN
@@ -1427,11 +1337,9 @@ IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
 END IF
 !---Add coil/conductor fields to IC
 DO i=1,self%ncoils
-  ! curr = self%coil_regions(i)%curr & 
-  !   + self%coil_regions(i)%vcont_gain*self%vcontrol_val
   CALL self%psi%add(1.d0,self%coil_currs(i),self%psi_coil(i)%f)
 END DO
-! CALL self%psi%add(1.d0,self%vcontrol_val,self%psi_coil(self%ncoils+1)%f)
+#ifdef OFT_TOKAMAKER_LEGACY
 DO i=1,self%ncond_regs
   DO j=1,self%cond_regions(i)%neigs
     ! k=self%cond_regions(i)%eig_map(j)
@@ -1439,6 +1347,7 @@ DO i=1,self%ncond_regs
       self%cond_regions(i)%psi_eig(j)%f)
   END DO
 END DO
+#endif
 !
 self%plasma_bounds=[-1.d99,1.d99]
 CALL gs_update_bounds(self)
@@ -1450,17 +1359,13 @@ IF(self%save_visit)THEN
   CALL self%fe_rep%mesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_init')
   DEALLOCATE(psi_vals)
 END IF
-! CALL tmp_vec%delete()
-! DEALLOCATE(tmp_vec)
 end subroutine gs_init_psi
 !------------------------------------------------------------------------------
-!> Zero a surface Lagrange scalar field at all edge nodes
-!!
-!! @param[in,out] a Field to be zeroed
+!> Zero a 2D Lagrange scalar field at all nodes outside the plasma or on the global boundary
 !------------------------------------------------------------------------------
 subroutine zerob_apply(self,a)
-class(oft_gs_zerob), intent(inout) :: self
-class(oft_vector), intent(inout) :: a
+class(oft_gs_zerob), intent(inout) :: self !< BC object
+class(oft_vector), intent(inout) :: a !< Field to be zeroed
 integer(i4) :: i,j
 real(r8), pointer, dimension(:) :: vloc
 DEBUG_STACK_PUSH
@@ -1482,7 +1387,7 @@ end subroutine zerob_apply
 !> Destroy temporary internal storage and nullify references
 !------------------------------------------------------------------------------
 subroutine zerob_delete(self)
-class(oft_gs_zerob), intent(inout) :: self
+class(oft_gs_zerob), intent(inout) :: self !< BC object
 NULLIFY(self%fe_rep)
 IF(ASSOCIATED(self%node_flag))DEALLOCATE(self%node_flag)
 end subroutine zerob_delete
@@ -1534,11 +1439,10 @@ deallocate(wa3,wa4,ipvt)
 lam=self%a*10.d0
 val=(1.d0-TANH((coord_tmp(1)-self%a)/lam))/2.d0
 CONTAINS
-!---------------------------------------------------------------------------------
-!> Needs docs
-!---------------------------------------------------------------------------------
+!---
 SUBROUTINE circ_error(m,n,cofs,err,iflag)
-integer(4), intent(in) :: m,n
+integer(4), intent(in) :: m
+integer(4), intent(in) :: n
 real(8), intent(in) :: cofs(n)
 real(8), intent(out) :: err(m)
 integer(4), intent(inout) :: iflag
@@ -1549,21 +1453,24 @@ err = pt_eval-pt_con_active
 end subroutine circ_error
 end subroutine circle_interp
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Solve for \f$ \psi \f$ in vacuum for a given source \f$ \int \phi^T J_{\phi} dA \f$
+!!
+!! Source field must already be projected onto the appropriate Lagrange FE basis
 !------------------------------------------------------------------------------
 subroutine gs_vacuum_solve(self,pol_flux,source,ierr)
-class(gs_eq), intent(inout) :: self
-class(oft_vector), intent(inout) :: pol_flux,source
-integer(4), optional, intent(out) :: ierr
+class(gs_eq), intent(inout) :: self !< G-S object
+class(oft_vector), intent(inout) :: pol_flux !< \f$ \psi \f$ (output)
+class(oft_vector), intent(inout) :: source !< Current source
+integer(4), optional, intent(out) :: ierr !< Error flag
 class(oft_vector), pointer :: rhs,u_hom,psi_bc
 logical :: pm_save
-IF(self%use_lu)THEN
+IF(TRIM(self%lu_solver%package)=='none')THEN
+  CALL oft_abort("LU solver required for GS solve","gs_vacuum_solve",__FILE__)
+ELSE
   IF(.NOT.ASSOCIATED(self%lu_solver%A))THEN
     self%lu_solver%A=>self%dels
     ALLOCATE(self%lu_solver%sec_rhs(self%psi%n,2))
   END IF
-ELSE
-  CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 END IF
 !---Create worker vectors
 CALL pol_flux%new(rhs)
@@ -1580,12 +1487,12 @@ CALL rhs%delete()
 DEALLOCATE(rhs)
 END SUBROUTINE gs_vacuum_solve
 !------------------------------------------------------------------------------
-!> Needs Docs
+!> Compute RHS source from an arbitrary current distribution \f$ J_{\phi} \f$
 !------------------------------------------------------------------------------
 subroutine gs_gen_source(self,source_fun,b)
-class(gs_eq), intent(inout) :: self
-CLASS(bfem_interp), intent(inout) :: source_fun
-CLASS(oft_vector), intent(inout) :: b
+class(gs_eq), intent(inout) :: self !< G-S object
+CLASS(bfem_interp), intent(inout) :: source_fun !< Interpolation object for \f$ J_{\phi} \f$
+CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,source_tmp(1)
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
@@ -1636,12 +1543,12 @@ DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_gen_source
 !------------------------------------------------------------------------------
-!> Calculates coil current source
+!> Calculates coil current source for given coil
 !------------------------------------------------------------------------------
 subroutine gs_coil_source(self,iCoil,b)
 class(gs_eq), intent(inout) :: self !< G-S Object
 integer(4), intent(in) :: iCoil !< Coil index
-CLASS(oft_vector), intent(inout) :: b !< Coil current source
+CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,nturns
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
@@ -1692,12 +1599,12 @@ DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_coil_source
 !------------------------------------------------------------------------------
-!> Calculates field contribution due to coil with non-uniform current distribution
+!> Calculates coil current source for given coil with non-uniform current distribution
 !------------------------------------------------------------------------------
 subroutine gs_coil_source_distributed(self,iCoil,b,curr_dist)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
-CLASS(oft_vector), intent(inout) :: b !< Coil current source
+CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns
@@ -1744,8 +1651,9 @@ deallocate(rhs_loc,j_lag,rop)
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 end subroutine gs_coil_source_distributed
+#ifdef OFT_TOKAMAKER_LEGACY
 !------------------------------------------------------------------------------
-!> Needs Docs
+!> Needs docs
 !------------------------------------------------------------------------------
 subroutine gs_cond_source(self,iCond,iMode,b)
 class(gs_eq), intent(inout) :: self
@@ -1803,13 +1711,14 @@ CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_cond_source
+#endif
 !------------------------------------------------------------------------------
-!> Needs Docs
+!> Calculate RHS source for quasi-static solve from previous \f$ \psi \f$
 !------------------------------------------------------------------------------
 subroutine gs_wall_source(self,dpsi_dt,b)
 class(gs_eq), intent(inout) :: self !< G-S object
-CLASS(oft_vector), intent(inout) :: dpsi_dt !< Needs docs
-CLASS(oft_vector), intent(inout) :: b !< Needs docs
+CLASS(oft_vector), intent(inout) :: dpsi_dt !< \f$ \psi \f$ at start of step
+CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:),eta_reg(:),reg_source(:)
@@ -2045,15 +1954,6 @@ integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta,gpsi(3),wt_max,wt_min
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:),wt_tmp(:)
 logical :: pm_save
-! !---Read coil constraint matrix
-! IF(.NOT.ASSOCIATED(self%coil_reg_mat))THEN
-!   ALLOCATE(self%coil_reg_mat(self%ncoil_regs+1,self%ncoil_regs+1))
-!   OPEN(NEWUNIT=io_unit,FILE='coil_reg_mat.dat')
-!   DO i=1,self%ncoil_regs+1
-!     READ(io_unit,*)self%coil_reg_mat(i,:)
-!   END DO
-!   CLOSE(io_unit)
-! END IF
 !
 nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize
 ALLOCATE(err_mat(nCon,self%ncoils+1),err_inv(self%ncoils+1,self%ncoils+1))
@@ -2075,7 +1975,7 @@ END IF
 DO j=1,self%isoflux_ntargets
   CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%isoflux_targets(1:2,j),f)
   CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
-  rhs(j)=pol_val(1)!*self%isoflux_targets(3,j)
+  rhs(j)=pol_val(1)
   IF(self%isoflux_grad_wt_lim>0.d0)THEN
     CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
     CALL psi_geval2%interp(cells(j),f,goptmp,gpsi)
@@ -2087,12 +1987,7 @@ coffset=self%isoflux_ntargets
 DO j=1,self%flux_ntargets
   CALL bmesh_findcell(self%fe_rep%mesh,cells(coffset+j),self%flux_targets(1:2,j),f)
   CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
-  rhs(roffset+j)=pol_val(1)-self%flux_targets(3,j)!*self%isoflux_targets(3,j)
-  ! IF(self%isoflux_grad_wt_lim>0.d0)THEN
-  !   CALL self%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
-  !   CALL psi_geval2%interp(cells(coffset+j),f,goptmp,gpsi)
-  !   wt_tmp(roffset+j)=SQRT(SUM(gpsi(1:2)**2))
-  ! END IF
+  rhs(roffset+j)=pol_val(1)-self%flux_targets(3,j)
 END DO
 roffset=roffset+self%flux_ntargets
 coffset=coffset+self%flux_ntargets
@@ -2111,15 +2006,13 @@ DO i=1,self%ncoils
   CALL psi_geval%setup(self%fe_rep)
   DO j=1,self%isoflux_ntargets
     CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%isoflux_targets(1:2,j),f)
-    ! CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
     CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
-    err_mat(j,i)=pol_val(1)!*self%isoflux_targets(3,j)
+    err_mat(j,i)=pol_val(1)
   END DO
   roffset=self%isoflux_ntargets
   coffset=self%isoflux_ntargets
   DO j=1,self%flux_ntargets
     CALL bmesh_findcell(self%fe_rep%mesh,cells(coffset+j),self%flux_targets(1:2,j),f)
-    ! CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
     CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
     err_mat(roffset+j,i)=pol_val(1)
   END DO
@@ -2148,14 +2041,14 @@ DEALLOCATE(wt_tmp)
 !---Apply weights to flux constraints
 roffset=self%isoflux_ntargets
 DO j=1,self%flux_ntargets
-  err_mat(roffset+j,:)=err_mat(roffset+j,:)*self%flux_targets(4,j)!*wt_max/MAX(wt_min,wt_tmp(j+1))
-  rhs(roffset+j)=rhs(roffset+j)*self%flux_targets(4,j)!*wt_max/MAX(wt_min,wt_tmp(j+1))
+  err_mat(roffset+j,:)=err_mat(roffset+j,:)*self%flux_targets(4,j)
+  rhs(roffset+j)=rhs(roffset+j)*self%flux_targets(4,j)
 END DO
 !---Coil regularization
 roffset=self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets
 DO i=1,self%nregularize
   DO j=1,self%ncoils
-    err_mat(roffset+i,j)=self%coil_reg_mat(i,j) !*self%coil_regions(j)%area
+    err_mat(roffset+i,j)=self%coil_reg_mat(i,j)
   END DO
   err_mat(roffset+i,self%ncoils+1)=self%coil_reg_mat(i,self%ncoils+1)
   rhs(roffset+i)=-self%coil_reg_targets(i)
@@ -2187,76 +2080,6 @@ DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_fit_isoflux
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine gs_fit_walleigs(self,ierr)
-! class(gs_eq), intent(inout) :: self
-! integer(4), intent(out) :: ierr
-! type(oft_lag_brinterp) :: psi_eval
-! type(oft_lag_bginterp) :: psi_geval
-! integer(4) :: i,j,k,kk,mind,nCon,io_unit
-! integer(4), allocatable :: cells(:)
-! real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta,gpsi(3)
-! real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:)
-! logical :: pm_save
-! ! !---Read coil constraint matrix
-! ! IF(.NOT.ASSOCIATED(self%coil_reg_mat))THEN
-! !   ALLOCATE(self%coil_reg_mat(self%ncoil_regs+1,self%ncoil_regs+1))
-! !   OPEN(NEWUNIT=io_unit,FILE='coil_reg_mat.dat')
-! !   DO i=1,self%ncoil_regs+1
-! !     READ(io_unit,*)self%coil_reg_mat(i,:)
-! !   END DO
-! !   CLOSE(io_unit)
-! ! END IF
-! !
-! nCon = self%flux_ntargets+self%ncond_eigs
-! ALLOCATE(err_mat(nCon,self%ncond_eigs),err_inv(self%ncond_eigs,self%ncond_eigs))
-! ALLOCATE(rhs(nCon),currs(self%ncond_eigs),cells(self%flux_ntargets))
-! err_mat=0.d0
-! rhs=0.d0
-! cells=-1
-! psi_eval%u=>self%psi
-! CALL psi_eval%setup(self%fe_rep)
-! ! CALL psi_geval%shared_setup(psi_eval)
-! !---Get RHS
-! DO j=1,self%flux_ntargets
-!   CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%flux_targets(1:2,j),f)
-!   ! CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
-!   CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
-!   rhs(j)=self%flux_targets(3,j)-pol_val(1)
-! END DO
-! !---Build L-S Matrix
-! kk=0
-! DO i=1,self%ncond_regs
-!   DO k=1,self%cond_regions(i)%neigs
-!     kk=kk+1
-!     err_mat(self%flux_ntargets+kk,kk)=1.E-5 ! Coil regularization
-!     psi_eval%u=>self%cond_regions(i)%psi_eig(k)%f
-!     CALL psi_eval%setup(self%fe_rep)
-!     DO j=1,self%flux_ntargets
-!       CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%flux_targets(1:2,j),f)
-!       ! CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
-!       CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
-!       err_mat(j,kk)=pol_val(1)
-!     END DO
-!     END DO
-!   END DO
-! !---Solve L-S system
-! err_inv=MATMUL(TRANSPOSE(err_mat),err_mat)
-! pm_save=oft_env%pm; oft_env%pm=.FALSE.
-! CALL lapack_matinv(self%ncond_eigs,err_inv,ierr)
-! oft_env%pm=pm_save
-! CALL gs_get_cond_weights(self,currs,.FALSE.)
-! ! WRITE(*,*)'Before',currs
-! currs=MATMUL(err_inv,MATMUL(TRANSPOSE(err_mat),rhs))
-! ! WRITE(*,*)'After',currs
-! !---Add coil/conductor fields to IC
-! CALL gs_set_cond_weights(self,currs,.FALSE.)
-! DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
-! CALL psi_eval%delete
-! CALL psi_geval%delete
-! end subroutine gs_fit_walleigs
 !------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux function definitions and targets
 !------------------------------------------------------------------------------
@@ -2278,13 +2101,13 @@ CHARACTER(LEN=40) :: err_reason
 logical :: pm_save,fail_test
 !---
 error_flag=0
-IF(self%use_lu)THEN
+IF(TRIM(self%lu_solver%package)=='none')THEN
+  CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
+ELSE
   IF(.NOT.ASSOCIATED(self%lu_solver%A))THEN
     self%lu_solver%A=>self%dels
     ALLOCATE(self%lu_solver%sec_rhs(self%psi%n,2))
   END IF
-ELSE
-  CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 END IF
 !---
 ALLOCATE(vals_tmp(self%psi%n))
@@ -2341,6 +2164,7 @@ DO j=1,self%ncoils
 END DO
 !
 CALL psi_eddy%set(0.d0)
+#ifdef OFT_TOKAMAKER_LEGACY
 DO j=1,self%ncond_regs
   DO k=1,self%cond_regions(j)%neigs
     ! ii=self%cond_regions(j)%eig_map(k)
@@ -2350,6 +2174,7 @@ DO j=1,self%ncond_regs
       self%cond_regions(j)%psi_eig(k)%f)
   END DO
 END DO
+#endif
 CALL psi_vac%add(1.d0,1.d0,psi_eddy)
 !
 CALL psi_vcont%set(0.d0)
@@ -2585,6 +2410,7 @@ DO i=1,self%maxits
   IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
     !---Update vacuum field part
     CALL psi_eddy%set(0.d0)
+#ifdef OFT_TOKAMAKER_LEGACY
     DO j=1,self%ncond_regs
       DO k=1,self%cond_regions(j)%neigs
         ! ii=self%cond_regions(j)%eig_map(k)
@@ -2594,6 +2420,7 @@ DO i=1,self%maxits
           self%cond_regions(j)%psi_eig(k)%f)
       END DO
     END DO
+#endif
     CALL psi_vac%add(1.d0,1.d0,psi_eddy)
   END IF
 
@@ -2815,6 +2642,7 @@ DO j=1,self%ncoils
   ! curr = self%coil_regions(j)%curr
   CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
 END DO
+#ifdef OFT_TOKAMAKER_LEGACY
 DO j=1,self%ncond_regs
   DO k=1,self%cond_regions(j)%neigs
     ii=self%cond_regions(j)%eig_map(k)
@@ -2822,6 +2650,7 @@ DO j=1,self%ncond_regs
       self%cond_regions(j)%psi_eig(k)%f)
   END DO
 END DO
+#endif
 CALL psi_vcont%set(0.d0)
 DO j=1,self%ncoils
   ! curr = self%coil_regions(j)%vcont_gain
@@ -3059,13 +2888,13 @@ REAL(8) :: psimax
 logical :: pm_save
 !---
 ierr=0
-IF(self%use_lu)THEN
+IF(TRIM(self%lu_solver%package)=='none')THEN
+  CALL oft_abort("LU solver required for GS solve","gs_vac_solve",__FILE__)
+ELSE
   IF(.NOT.ASSOCIATED(self%lu_solver%A))THEN
     self%lu_solver%A=>self%dels
     ALLOCATE(self%lu_solver%sec_rhs(self%psi%n,2))
   END IF
-ELSE
-  CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 END IF
 !
 ! self%o_point(1)=-1.d0
@@ -3094,6 +2923,7 @@ DO j=1,self%ncoils
   CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
 END DO
 CALL psi_eddy%set(0.d0)
+#ifdef OFT_TOKAMAKER_LEGACY
 DO j=1,self%ncond_regs
   DO k=1,self%cond_regions(j)%neigs
     ! ii=self%cond_regions(j)%eig_map(k)
@@ -3103,6 +2933,7 @@ DO j=1,self%ncond_regs
     self%cond_regions(j)%psi_eig(k)%f)
   END DO
 END DO
+#endif
 CALL psi_vac%add(1.d0,1.d0,psi_eddy)
 !
 CALL psi_vcont%set(0.d0)
@@ -3255,6 +3086,7 @@ CALL psi_dummy%delete
 DEALLOCATE(rhs,psi_fixed,psi_dummy)
 DEALLOCATE(vals_tmp)
 end subroutine gs_fixed_vflux
+#ifdef OFT_TOKAMAKER_LEGACY
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -3277,6 +3109,7 @@ DO j=1,self%ncond_regs
   END IF
 END DO
 END SUBROUTINE gs_get_cond_source
+#endif
 !------------------------------------------------------------------------------
 !> Compute plasma component of RHS source for Grad-Shafranov equation
 !------------------------------------------------------------------------------
@@ -3544,7 +3377,7 @@ logical, allocatable :: x_masked(:)
 t1=omp_get_wtime()
 trace_err=0
 old_bounds=self%plasma_bounds
-IF(.NOT.ASSOCIATED(self%rlcfs))ALLOCATE(self%rlcfs(self%nlcfs,3))
+! IF(.NOT.ASSOCIATED(self%rlcfs))ALLOCATE(self%rlcfs(self%nlcfs,3))
 !---Check boundary as limiter
 NULLIFY(psi_vals)
 CALL self%psi%get_local(psi_vals)
@@ -3646,12 +3479,12 @@ END IF
 psi_interp%u=>self%psi
 CALL psi_interp%setup(self%fe_rep)
 
-!---Get plasma boundary contour
-IF(self%plasma_bounds(1)>-1.d98)THEN
-  ! CALL get_lcfs
-  self%rlcfs(1,1)=zmin
-  self%rlcfs(self%nlcfs,1)=zmax
-END IF
+! !---Get plasma boundary contour
+! IF(self%plasma_bounds(1)>-1.d98)THEN
+!   ! CALL get_lcfs
+!   self%rlcfs(1,1)=zmin
+!   self%rlcfs(self%nlcfs,1)=zmax
+! END IF
 ! t1=omp_get_wtime()
 ! WRITE(*,*)'LCFS',t1-t2
 
@@ -4442,6 +4275,7 @@ DEALLOCATE(ptout)
 !!$omp end parallel
 CALL psi_int%delete
 end subroutine gs_trace_surf
+#ifdef OFT_TOKAMAKER_LEGACY
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -4512,6 +4346,7 @@ DO i=1,self%ncond_regs
   END IF
 END DO
 end subroutine gs_get_cond_scales
+#endif
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -5126,7 +4961,6 @@ class(gs_eq), intent(inout) :: self !< G-S object
 integer(i4) :: i,j
 IF(ASSOCIATED(self%gs_zerob_bc%node_flag))DEALLOCATE(self%gs_zerob_bc%node_flag)
 !
-! IF(ASSOCIATED(self%cflag))DEALLOCATE(self%cflag)
 IF(ASSOCIATED(self%lim_con))DEALLOCATE(self%lim_con)
 IF(ASSOCIATED(self%lim_ptr))DEALLOCATE(self%lim_ptr)
 IF(ASSOCIATED(self%limiter_nds))DEALLOCATE(self%limiter_nds)
@@ -5136,9 +4970,6 @@ IF(ASSOCIATED(self%olbp))DEALLOCATE(self%olbp)
 IF(ASSOCIATED(self%rlimiter_nds))DEALLOCATE(self%rlimiter_nds)
 IF(ASSOCIATED(self%limiter_pts))DEALLOCATE(self%limiter_pts)
 IF(ASSOCIATED(self%cond_weights))DEALLOCATE(self%cond_weights)
-IF(ASSOCIATED(self%bc_mat))DEALLOCATE(self%bc_mat)
-IF(ASSOCIATED(self%bc_coil_mat))DEALLOCATE(self%bc_coil_mat)
-IF(ASSOCIATED(self%rlcfs))DEALLOCATE(self%rlcfs)
 IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
 IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
 IF(ASSOCIATED(self%coil_reg_mat))DEALLOCATE(self%coil_reg_mat)
@@ -5178,6 +5009,7 @@ END IF
 !---
 IF(self%ncond_regs>0)THEN
   DO i=1,self%ncond_regs
+#ifdef OFT_TOKAMAKER_LEGACY
     IF(ASSOCIATED(self%cond_regions(i)%fixed))DEALLOCATE(self%cond_regions(i)%fixed)
     IF(ASSOCIATED(self%cond_regions(i)%mtype))DEALLOCATE(self%cond_regions(i)%mtype)
     IF(ASSOCIATED(self%cond_regions(i)%mind))DEALLOCATE(self%cond_regions(i)%mind)
@@ -5190,6 +5022,7 @@ IF(self%ncond_regs>0)THEN
     IF(ASSOCIATED(self%cond_regions(i)%rc))DEALLOCATE(self%cond_regions(i)%rc)
     IF(ASSOCIATED(self%cond_regions(i)%cond_curr))DEALLOCATE(self%cond_regions(i)%cond_curr)
     IF(ASSOCIATED(self%cond_regions(i)%corr_3d))DEALLOCATE(self%cond_regions(i)%corr_3d)
+#endif
     IF(self%cond_regions(i)%neigs>0)THEN
       DO j=1,self%cond_regions(i)%neigs
         IF(ASSOCIATED(self%cond_regions(i)%psi_eig(j)%f))CALL self%cond_regions(i)%psi_eig(j)%f%delete()
@@ -5209,10 +5042,6 @@ END IF
 IF(ASSOCIATED(self%chi))THEN
   CALL self%chi%delete()
   DEALLOCATE(self%chi)
-END IF
-IF(ASSOCIATED(self%u_hom))THEN
-  CALL self%u_hom%delete()
-  DEALLOCATE(self%u_hom)
 END IF
 !---
 CALL self%dels%delete()

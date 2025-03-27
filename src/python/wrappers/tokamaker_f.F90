@@ -26,9 +26,12 @@ USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
-  gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
+  gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed
+#ifdef OFT_TOKAMAKER_LEGACY
+USE oft_gs, ONLY: gs_load_regions
+#endif
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
@@ -206,7 +209,11 @@ IF(TRIM(tMaker_obj%gs%coil_file)=='none')THEN
     END IF
   END DO
 ELSE
+#ifdef OFT_TOKAMAKER_LEGACY
   CALL gs_load_regions(tMaker_obj%gs)
+#else
+  CALL oft_abort("OFT not compiled with legacy TokaMaker support","tokamaker_setup_regions",__FILE__)
+#endif
 END IF
 END SUBROUTINE tokamaker_setup_regions
 !---------------------------------------------------------------------------------
@@ -1006,7 +1013,6 @@ tMaker_obj%gs%mode=settings%mode
 tMaker_obj%gs%urf=settings%urf
 tMaker_obj%gs%maxits=settings%maxits
 tMaker_obj%gs%nl_tol=settings%nl_tol
-tMaker_obj%gs%limited_only=settings%limited_only
 CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(limfile_c,tMaker_obj%gs%limiter_file)
 END SUBROUTINE tokamaker_set_settings
