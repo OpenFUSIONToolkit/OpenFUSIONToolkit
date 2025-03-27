@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_t3d.F90
 !
 !> Mesh handling for T3D meshes
@@ -13,27 +15,26 @@
 !! @authors George Marklin and Chris Hansen
 !! @date April 2008 - Present
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_t3d
 USE oft_base
 USE bezier_cad, ONLY: cad_vertex, cad_curve, cad_surf, cad_entity_ptr, &
-cad_curve_midpoint, cad_surf_midpoint, cad_surf_center, cad_curve_cast, cad_surf_cast
-USE oft_mesh_type, ONLY: oft_mesh, mesh, oft_bmesh, smesh
+  cad_curve_midpoint, cad_surf_midpoint, cad_surf_center, cad_curve_cast, cad_surf_cast
+USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_mesh_local_util, ONLY: mesh_local_findedge, mesh_local_findface
 USE oft_mesh_global_util, ONLY: mesh_global_resolution
-USE multigrid, ONLY: mg_mesh
+USE multigrid, ONLY: multigrid_mesh, multigrid_level
 !---End include modules
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
-! TYPE T3D_cadgeom
-!------------------------------------------------------------------------------
+PRIVATE
+!---------------------------------------------------------------------------------
 !> T3D CAD boundary structure
 !! - CAD entity counts
 !! - CAD wireframe entities
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type :: T3D_cadgeom
   integer(i4) :: ngme = 0 !< Number of geometry model edges
   integer(i4) :: ngmf = 0 !< Number of geometry model faces
@@ -47,21 +48,17 @@ type :: T3D_cadgeom
   type(cad_curve), pointer, dimension(:) :: curve => NULL() !< List of CAD wireframe curves
   type(cad_surf), pointer, dimension(:) :: surf => NULL() !< List of CAD wireframe surfaces
 end type T3D_cadgeom
-!------------------------------------------------------------------------------
-! TYPE T3D_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> T3D CAD linkage structure
 !! - Linkage of mesh entities to CAD model
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type :: T3D_cadlink
   type(cad_entity_ptr), pointer, dimension(:) :: lbeg => NULL() !< Linkage of mesh edges to CAD entities
   type(cad_entity_ptr), pointer, dimension(:) :: lbfg => NULL() !< Linkage of mesh faces to CAD entities
 end type T3D_cadlink
-!------------------------------------------------------------------------------
-! TYPE T3D_cad
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> T3D raw CAD structure
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type :: T3D_cad
   integer(i4) :: ngwv = 0 !< number of CAD wireframe vertices
   integer(i4) :: ngww = 0 !< number of CAD wireframe weight points
@@ -81,7 +78,6 @@ type :: T3D_cad
   real(r8), pointer, dimension(:,:) :: lgwv => NULL() !< List of CAD wireframe vertices
   real(r8), pointer, dimension(:,:) :: lgww => NULL() !< List of CAD wireframe weight points
 end type T3D_cad
-private
 INTEGER(i4), PARAMETER, PUBLIC :: mesh_t3d_id = 1
 PUBLIC mesh_t3d_load, mesh_t3d_reffix, mesh_t3d_cadsync, mesh_t3d_set_periodic
 PUBLIC mesh_t3d_cadlink, mesh_t3d_add_quad, smesh_t3d_load
@@ -97,16 +93,17 @@ type(T3D_cadlink), pointer :: cad_link => NULL() !< Linkage of mesh to CAD geome
 type(T3D_cadgeom), pointer, dimension(:) :: ML_cad_rep => NULL() !< ML CAD representation array
 type(T3D_cadlink), pointer, dimension(:) :: ML_cad_link => NULL() !< ML CAD linkage
 contains
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Read in t3d mesh file from file "filename"
 !! - Read in T3D options from input file
 !! - Read in mesh points and cells
 !! - Read in surface IDs for CAD edges and faces
-!------------------------------------------------------------------------------
-subroutine mesh_t3d_load
+!---------------------------------------------------------------------------------
+subroutine mesh_t3d_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,id,lenreflag,ierr,io_unit
+class(oft_mesh), pointer :: mesh
+class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
 namelist/t3d_options/filename,inpname,reflect,ref_per,zstretch
 DEBUG_STACK_PUSH
@@ -120,22 +117,24 @@ IF(oft_env%head_proc)THEN
   IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','mesh_t3d_load',__FILE__)
   lenreflag=lnblnk(reflect)
   !
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Loading T3D mesh'
-  WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
-  WRITE(*,'(2X,2A)')'Geom File = ',TRIM(inpname)
+  WRITE(*,'(2A)')oft_indent,'T3D volume mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
+  WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
   IF(lenreflag>0)THEN
-    WRITE(*,'(2X,A)')'Reflection:'
+    WRITE(*,'(2A)')oft_indent,'Reflection:'
+    CALL oft_increase_indent
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(4X,A,L)')'YZ-plane, periodic = ',ref_per(1)
+          WRITE(*,'(2A,L)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(4X,A,L)')'XZ-plane, periodic = ',ref_per(2)
+          WRITE(*,'(2A,L)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(4X,A,L)')'XY-plane, periodic = ',ref_per(3)
+          WRITE(*,'(2A,L)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
+    CALL oft_decrease_indent
   END IF
 END IF
 !---Broadcast input information
@@ -159,6 +158,7 @@ DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_t3d_id,.TRUE.)
   mg_mesh%meshes(i)%bmesh=>mg_mesh%smeshes(i)
 END DO
+CALL multigrid_level(mg_mesh,1)
 mesh=>mg_mesh%meshes(1)
 smesh=>mg_mesh%smeshes(1)
 IF(.NOT.oft_env%head_proc)THEN
@@ -208,26 +208,28 @@ do i=1,mesh%nc
   read(io_unit,*)id,mesh%lc(1,i),mesh%lc(2,i),mesh%lc(3,i),mesh%lc(4,i)
 end do
 close(io_unit)
-IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
 call mesh_t3d_geom
 call mesh_global_resolution(mesh)
 !---
 do i=1,lenreflag
-  if(reflect(i:i)=='x')call mesh_t3d_reflect(1,.1d0*mesh%hmin,ref_per(i))
-  if(reflect(i:i)=='y')call mesh_t3d_reflect(2,.1d0*mesh%hmin,ref_per(i))
-  if(reflect(i:i)=='z')call mesh_t3d_reflect(3,.1d0*mesh%hmin,ref_per(i))
+  if(reflect(i:i)=='x')call mesh_t3d_reflect(mesh,1,.1d0*mesh%hmin,ref_per(i))
+  if(reflect(i:i)=='y')call mesh_t3d_reflect(mesh,2,.1d0*mesh%hmin,ref_per(i))
+  if(reflect(i:i)=='z')call mesh_t3d_reflect(mesh,3,.1d0*mesh%hmin,ref_per(i))
 end do
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine mesh_t3d_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Read in t3d mesh file from file "filename"
 !! - Read in T3D options from input file
 !! - Read in mesh points and cells
 !! - Read in surface IDs for CAD edges and faces
-!------------------------------------------------------------------------------
-subroutine smesh_t3d_load
+!---------------------------------------------------------------------------------
+subroutine smesh_t3d_load(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,id,lenreflag,ierr,io_unit
+class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
 namelist/t3d_options/filename,inpname,reflect,ref_per,zstretch
 DEBUG_STACK_PUSH
@@ -241,22 +243,24 @@ IF(oft_env%head_proc)THEN
   IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','smesh_t3d_load',__FILE__)
   lenreflag=lnblnk(reflect)
   !
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Loading T3D mesh'
-  WRITE(*,'(2X,2A)')'Mesh File = ',TRIM(filename)
-  WRITE(*,'(2X,2A)')'Geom File = ',TRIM(inpname)
+  WRITE(*,'(2A)')oft_indent,'T3D surface mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
+  WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
   IF(lenreflag>0)THEN
-    WRITE(*,'(2X,A)')'Reflection:'
+    WRITE(*,'(2X,A)')oft_indent,'Reflection:'
+    CALL oft_increase_indent
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(4X,A,L)')'YZ-plane, periodic = ',ref_per(1)
+          WRITE(*,'(4X,A,L)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(4X,A,L)')'XZ-plane, periodic = ',ref_per(2)
+          WRITE(*,'(4X,A,L)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(4X,A,L)')'XY-plane, periodic = ',ref_per(3)
+          WRITE(*,'(4X,A,L)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
+    CALL oft_decrease_indent
   END IF
 END IF
 !---Broadcast input information
@@ -277,6 +281,7 @@ allocate(oft_trimesh::mg_mesh%smeshes(mg_mesh%mgdim))
 DO i=1,mg_mesh%mgdim
   CALL mg_mesh%smeshes(i)%setup(mesh_t3d_id,.FALSE.)
 END DO
+CALL multigrid_level(mg_mesh,1)
 smesh=>mg_mesh%smeshes(1)
 IF(.NOT.oft_env%head_proc)THEN
   DEBUG_STACK_POP
@@ -290,14 +295,14 @@ cad_link=>ML_cad_link(mg_mesh%level)
 !---Read in T3D mesh
 open(NEWUNIT=io_unit,FILE=trim(filename))
 read(io_unit,*)
-read(io_unit,*)mesh%np,cad_rep%ngme,mesh%nc
+read(io_unit,*)smesh%np,cad_rep%ngme,smesh%nc
 read(io_unit,*)
 !---Read in points
-if(mesh%np==0)call oft_abort('No points in T3D file','smesh_t3d_load',__FILE__)
-allocate(mesh%r(3,mesh%np))
-do i=1,mesh%np
-  read(io_unit,*)id,mesh%r(1,i),mesh%r(2,i),mesh%r(3,i)
-  mesh%r(3,i)=mesh%r(3,i)*zstretch
+if(smesh%np==0)call oft_abort('No points in T3D file','smesh_t3d_load',__FILE__)
+allocate(smesh%r(3,smesh%np))
+do i=1,smesh%np
+  read(io_unit,*)id,smesh%r(1,i),smesh%r(2,i),smesh%r(3,i)
+  smesh%r(3,i)=smesh%r(3,i)*zstretch
 end do
 read(io_unit,*)
 !---Read in CAD model edges
@@ -319,28 +324,26 @@ cad_rep%ngmf=0 ! No faces in surface model
 !   read(io_unit,*)
 ! end if
 !---Read in cells
-if(mesh%nc==0)call oft_abort('No cells in T3D file','smesh_t3d_load',__FILE__)
-allocate(mesh%lc(3,mesh%nc),mesh%reg(mesh%nc))
-mesh%reg=1
-do i=1,mesh%nc
-  read(io_unit,*)id,mesh%lc(1,i),mesh%lc(2,i),mesh%lc(3,i)
+if(smesh%nc==0)call oft_abort('No cells in T3D file','smesh_t3d_load',__FILE__)
+allocate(smesh%lc(3,smesh%nc),smesh%reg(smesh%nc))
+smesh%reg=1
+do i=1,smesh%nc
+  read(io_unit,*)id,smesh%lc(1,i),smesh%lc(2,i),smesh%lc(3,i)
 end do
 close(io_unit)
-IF(oft_debug_print(2))WRITE(*,*)'  Complete'
 !---
-call mesh_t3d_geom
-call mesh_global_resolution(mesh)
-!---
-do i=1,lenreflag
-  if(reflect(i:i)=='x')call mesh_t3d_reflect(1,.1d0*mesh%hmin,ref_per(i))
-  if(reflect(i:i)=='y')call mesh_t3d_reflect(2,.1d0*mesh%hmin,ref_per(i))
-  if(reflect(i:i)=='z')call mesh_t3d_reflect(3,.1d0*mesh%hmin,ref_per(i))
-end do
+! call mesh_t3d_geom
+call mesh_global_resolution(smesh)
+! !---
+! do i=1,lenreflag
+!   if(reflect(i:i)=='x')call mesh_t3d_reflect(1,.1d0*mesh%hmin,ref_per(i))
+!   if(reflect(i:i)=='y')call mesh_t3d_reflect(2,.1d0*mesh%hmin,ref_per(i))
+!   if(reflect(i:i)=='z')call mesh_t3d_reflect(3,.1d0*mesh%hmin,ref_per(i))
+! end do
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine smesh_t3d_load
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_geom
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Read in T3D geometry information from file 'inpname'
 !! - CAD vertices
 !! - Weight points
@@ -349,7 +352,7 @@ end subroutine smesh_t3d_load
 !!
 !! @note Limited to quadratic curves and dual quadratic surfaces.
 !! Cubic curves and surfaces are not implemented at this time.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_t3d_geom
 integer(i4) :: i,k,id,eo,eid(2),sid(4),io_unit
 real(r8) :: cords(3),weight
@@ -489,12 +492,11 @@ if(oft_env%head_proc)then
 end if
 DEBUG_STACK_POP
 end subroutine mesh_t3d_geom
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_cadsync
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Synchronize T3D geometry information.
-!------------------------------------------------------------------------------
-subroutine mesh_t3d_cadsync
+!---------------------------------------------------------------------------------
+subroutine mesh_t3d_cadsync(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: tmp(11),ierr
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2X,A)')'Syncing T3D geometry'
@@ -558,12 +560,10 @@ call MPI_Bcast(ref_per,3,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr) ! Broadcast period
 call mesh_t3d_cadconv
 DEBUG_STACK_POP
 end subroutine mesh_t3d_cadsync
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_cadconv
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Convert T3D CAD representation to code represenation.
 !! - Convert CAD entities to bezier_cad objects.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_t3d_cadconv
 integer(i4) :: i,k
 DEBUG_STACK_PUSH
@@ -621,12 +621,11 @@ end do
 deallocate(cad_tmp%lgwc,cad_tmp%lgws,cad_tmp%lgww,cad_tmp%lgwv)
 DEBUG_STACK_POP
 end subroutine mesh_t3d_cadconv
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Link T3D CAD objects to mesh entities for use in refinement.
-!------------------------------------------------------------------------------
-subroutine mesh_t3d_cadlink
+!---------------------------------------------------------------------------------
+subroutine mesh_t3d_cadlink(mesh)
+class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,ind,k,ep(2),fp(3),ind_par
 integer(i4), allocatable :: emap(:),fmap(:)
 DEBUG_STACK_PUSH
@@ -706,17 +705,12 @@ deallocate(cad_tmp%vtmp,cad_tmp%ctmp,cad_tmp%stmp)
 deallocate(emap,fmap)
 DEBUG_STACK_POP
 end subroutine mesh_t3d_cadlink
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_surfconst
-!------------------------------------------------------------------------------
-!> Construct CAD surface object.
-!!
-!! @param[in] si Index of CAD surface to use as source
-!! @param[out] surf Surface object
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+!> Construct CAD surface object
+!---------------------------------------------------------------------------------
 subroutine mesh_t3d_surfconst(si,surf)
-type(cad_surf), intent(out) :: surf
-integer(i4), intent(in) :: si
+integer(i4), intent(in) :: si !< Index of CAD surface to use as source
+type(cad_surf), intent(out) :: surf !< Surface object
 real(r8) :: wcheck(2),tmp(3),p(3,3,3),w(3,3)
 integer(i4) :: k,n,m,cind,wind,ind,ctemp(2),ccheck(2)
 logical :: flip
@@ -817,22 +811,22 @@ if(cad_tmp%lgws(1,si)>0)then
 endif
 DEBUG_STACK_POP
 end subroutine mesh_t3d_surfconst
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_reffix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Adjust boundary points to CAD boundary.
-!------------------------------------------------------------------------------
-subroutine mesh_t3d_reffix
+!---------------------------------------------------------------------------------
+subroutine mesh_t3d_reffix(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8) :: pt(3)
 integer(i4) :: i,ierr,j,k,ind,ed,ep(2),fp(3),npcors,nerr
 integer(i4), pointer :: tmp(:)
 integer(i4), allocatable :: emap(:),fmap(:)
-class(oft_mesh), pointer :: pmesh
+class(oft_mesh), pointer :: pmesh,mesh
 type(T3D_cadgeom), pointer :: pmesh_cad_rep
 type(T3D_cadlink), pointer :: pmesh_cad_link
 CHARACTER(LEN=60) :: error_str
 DEBUG_STACK_PUSH
 !---Get parent mesh
+mesh=>mg_mesh%mesh
 pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 !---If only one level do nothing
 if(mg_mesh%level==1)THEN
@@ -971,19 +965,20 @@ deallocate(emap,fmap)
 if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_t3d_reffix
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_add_quad
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add quadratic mesh node points using CAD model
-!------------------------------------------------------------------------------
-subroutine mesh_t3d_add_quad
+!---------------------------------------------------------------------------------
+subroutine mesh_t3d_add_quad(mg_mesh)
+type(multigrid_mesh), intent(inout) :: mg_mesh
 real(r8) :: pt(3)
 integer(i4) :: i,j,k,ierr,nerr
 integer(i4), allocatable :: emap(:)
+class(oft_mesh), pointer :: mesh
 CHARACTER(LEN=60) :: error_str
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,*)'Setting T3D quadratic nodes'
 !---Get CAD representation alias
+mesh=>mg_mesh%mesh
 cad_rep=>ML_cad_rep(mg_mesh%level)
 cad_link=>ML_cad_link(mg_mesh%level)
 !---Get edge boundary mapping
@@ -1037,19 +1032,14 @@ END IF
 if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_t3d_add_quad
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_reflect
-!------------------------------------------------------------------------------
-!> Reflect a T3D mesh and CAD model across a plane.
-!!
-!! @param[in] k Index of plane normal coordinate ( eg. 1 -> y-z plane )
-!! @param[in] tol Tolerance for marking point as on the reflection plane
-!! @param[in] per_flag Flag for periodicity
-!------------------------------------------------------------------------------
-subroutine mesh_t3d_reflect(k,tol,per_flag)
-integer(i4), intent(in) :: k
-real(r8), intent(in) :: tol
-logical, intent(in) :: per_flag
+!---------------------------------------------------------------------------------
+!> Reflect a T3D mesh and CAD model across a plane
+!---------------------------------------------------------------------------------
+subroutine mesh_t3d_reflect(mesh,k,tol,per_flag)
+class(oft_mesh), intent(inout) :: mesh
+integer(i4), intent(in) :: k !< Index of plane normal coordinate ( eg. 1 -> y-z plane )
+real(r8), intent(in) :: tol !< Tolerance for marking point as on the reflection plane
+logical, intent(in) :: per_flag !< Flag for periodicity
 integer(i4) :: k1,k2,npold,ncold,i
 integer(i4) :: ngme,ngmf,ngwv,ngww,ngwc,ngws,ngwp
 integer(i4) :: ngmeold,ngmfold,ngwvold,ngwwold,ngwcold,ngwsold,ngwpold
@@ -1332,12 +1322,11 @@ mesh%reg=1
 deallocate(ltemp,newindex)
 DEBUG_STACK_POP
 end subroutine mesh_t3d_reflect
-!------------------------------------------------------------------------------
-! SUBROUTINE: mesh_t3d_set_periodic
-!------------------------------------------------------------------------------
-!>
-!------------------------------------------------------------------------------
-subroutine mesh_t3d_set_periodic
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+subroutine mesh_t3d_set_periodic(mesh)
+class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,jj,k,l,m,n,iper
 real(r8) :: pt_i(3),pt_j(3),d_plane,per_dir(3)
 real(r8), parameter :: tol=1.d-6

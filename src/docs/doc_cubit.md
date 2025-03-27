@@ -32,8 +32,8 @@ The options available in this group are listed below.
 **Option group:** `cubit_options`
 |  Option  |  Description  | Type [dim] |
 |------------|------------|-----|
-| `filename=""`  | Name of mesh file | str(40) |
-| `inpname=""`   | Name of OpenNURBS geometry file | str(40) |
+| `filename=""`  | Name of mesh file | str(OFT_PATH_SLEN) |
+| `inpname=""`   | Name of OpenNURBS geometry file | str(OFT_PATH_SLEN) |
 | `lf_file=T`    | Large file format flag | bool |
 | `reflect=F`    | Reflect mesh about xy-plane | bool |
 | `per_ns=-1`    | Nodeset ID for periodic surfaces | int |

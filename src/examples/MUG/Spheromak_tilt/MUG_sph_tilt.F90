@@ -1,3 +1,8 @@
+!------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !!MUG Example: Spheromak Tilt    {#doc_mug_sph_ex1}
 !!=========================
 !!
@@ -27,7 +32,7 @@ PROGRAM MUG_sph_tilt
 !---Runtime
 USE oft_base
 !---Grid
-USE oft_mesh_type, ONLY: mesh, rgrnd
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_add_quad
 !---Linear algebra
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -35,33 +40,32 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pre, &
   create_ilu_pre
 !---Lagrange FE space
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level
-USE oft_lag_fields, ONLY: oft_lag_vcreate, oft_lag_create
-!---H1(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_level, oft_hcurl_nlevels
-USE oft_hcurl_operators, ONLY: hcurl_zerob
-!---H1(Grad) FE space
-USE oft_h0_basis, ONLY: oft_h0_setup
-USE oft_h0_operators, ONLY: oft_h0_getlop, h0_zerogrnd
-!---H1 FE space
+USE oft_lag_basis, ONLY: oft_lag_setup
+!---H1 FE space (Grad(H^1) subspace)
 USE oft_h1_basis, ONLY: oft_h1_setup
-USE oft_h1_fields, ONLY: oft_h1_create
-USE oft_h1_operators, ONLY: oft_h1_divout, h1_zeroi, h1_mc, h1curl_zerob
+USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd
+!---Full H(Curl) FE space
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
 !---Physics
-USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
-USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields
+USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
+USE xmhd, ONLY: xmhd_run, xmhd_lin_run, xmhd_plot, xmhd_taxis, xmhd_sub_fields, &
+  xmhd_ML_hcurl, xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex1_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
 !! run the time-dependent solve and post-processing.
-!---H1 divergence cleaner
+!---H(Curl) divergence cleaner
 CLASS(oft_solver), POINTER :: linv => NULL()
-TYPE(oft_h1_divout) :: divout
+TYPE(oft_hcurl_grad_divout) :: divout
 CLASS(oft_matrix), pointer :: lop => NULL()
 !---Local variables
 INTEGER(i4) :: ierr,io_unit
 REAL(r8), POINTER, DIMENSION(:) :: tmp => NULL()
 TYPE(xmhd_sub_fields) :: ic_fields,pert_fields
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_taylor_hmodes) :: taylor_states
+TYPE(oft_h1_zerogrnd), TARGET :: h1_zerogrnd
 !---Runtime options
 INTEGER(i4) :: order = 2
 REAL(r8) :: b0_scale = 1.E-1_r8
@@ -79,22 +83,22 @@ CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,sph_tilt_options,IOSTAT=ierr)
 CLOSE(io_unit)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup grid
-!---------------------------------------------------------------------------
-rgrnd=(/2.d0,0.d0,0.d0/)
-CALL multigrid_construct
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
+!------------------------------------------------------------------------------
 ! Build FE structures
-!---------------------------------------------------------------------------
-!---Lagrange
-CALL oft_lag_setup(order, -1)
-!---H1(Curl) subspace
-CALL oft_hcurl_setup(order, -1)
-!---H1(Grad) subspace
-CALL oft_h0_setup(order+1, -1)
-!---H1 full space
-CALL oft_h1_setup(order, -1)
+!------------------------------------------------------------------------------
+!--- Lagrange
+CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=-1)
+!--- Grad(H^1) subspace
+CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=-1)
+!--- H(Curl) subspace
+CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=-1)
+!--- Full H(Curl) space
+CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,-1)
+h1_zerogrnd%ML_H1_rep=>xmhd_ML_H1grad
 !!\subsection doc_mug_sph_ex1_code_plot Perform post-processing
 !!
 !! To visualize the solution fields once a simulation has completed, the \ref xmhd::xmhd_plot
@@ -120,8 +124,9 @@ END IF
 !! that will drive the configuration toward one of these minimum energy states.
 !! This also leads us to our choice of an intial perturbation to the equilibrium,
 !! which we will chose to match field of the lowest eigenstate.
-CALL taylor_hmodes(3)
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL taylor_states%setup(xmhd_ML_hcurl,xmhd_ML_lagrange)
+CALL taylor_hmodes(taylor_states,3)
+CALL xmhd_ML_lagrange%set_level(xmhd_ML_lagrange%nlevels)
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" subroutine computes the vector
 !! potential for each of the requested eignestates. However, the MHD
 !! solver uses magnetic field as the primary variable. With force-free eigenstate
@@ -130,18 +135,18 @@ CALL oft_lag_set_level(oft_lagrange_nlevels)
 !! condition from the vector potential without changing the representation
 !! order or projecting the field.
 !!
-!! The gauge is transformed using a \ref oft_h1_operators::h1_divout "divergence cleaning"
+!! The gauge is transformed using a \ref oft_hcurl_grad_operators::hcurl_grad_divout "divergence cleaning"
 !! procedure to remove divergence from the vector potential by adding a gradient.
 !! The \ref taylor::taylor_hmodes "taylor_hmodes" already sets the gauge such that
 !! \f$ \nabla \cdot \textbf{A} = 0 \f$, however it does so while enforcing \f$ \textbf{A} \times \hat{\textbf{n}} = 0 \f$.
 !! We now recompute the desired gauge fixing with the boundary condition \f$ \textbf{A} \cdot \hat{\textbf{n}} = 0 \f$,
 !! which provides a suitable initialization magnetic field. This process is performed
 !! on both the equilibrium and perturbing fields.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create divergence cleaner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(lop)
-CALL oft_h0_getlop(lop,"grnd")
+CALL oft_h1_getlop(xmhd_ML_H1%current_level,lop,"grnd")
 CALL create_cg_solver(linv)
 linv%A=>lop
 linv%its=-2
@@ -149,19 +154,19 @@ CALL create_bjacobi_pre(linv%pre,-1)
 DEALLOCATE(linv%pre%pre)
 CALL create_ilu_pre(linv%pre%pre)
 divout%solver=>linv
-divout%bc=>h0_zerogrnd
+divout%bc=>h1_zerogrnd
 divout%pm=.TRUE.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup initial conditions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Apply to equilibrium field
-CALL oft_h1_create(ic_fields%B)
-CALL taylor_hffa(3,oft_hcurl_level)%f%get_local(tmp)
+CALL xmhd_ML_hcurl_grad%vec_create(ic_fields%B)
+CALL taylor_states%hffa(3,xmhd_ML_hcurl%level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)
 CALL divout%apply(ic_fields%B)
 !---Apply to perturbation field
-CALL oft_h1_create(pert_fields%B)
-CALL taylor_hffa(1,oft_hcurl_level)%f%get_local(tmp)
+CALL xmhd_ML_hcurl_grad%vec_create(pert_fields%B)
+CALL taylor_states%hffa(1,xmhd_ML_hcurl%level)%f%get_local(tmp)
 CALL pert_fields%B%restore_local(tmp,1)
 CALL divout%apply(pert_fields%B)
 !---Clean up solver
@@ -180,24 +185,24 @@ DEALLOCATE(linv)
 !! density fields are also created. The velocity field is initialized to zero everywhere,
 !! while the temperature and density fields, which are not evolved in this case, are set to
 !! uniform values for the equilibrium and zero for the perturbation.
-CALL ic_fields%B%scale(b0_scale*taylor_hlam(3,oft_hcurl_level))
-CALL pert_fields%B%scale(b1_scale*taylor_hlam(1,oft_hcurl_level))
+CALL ic_fields%B%scale(b0_scale*taylor_states%hlam(3,xmhd_ML_hcurl%level))
+CALL pert_fields%B%scale(b1_scale*taylor_states%hlam(1,xmhd_ML_hcurl%level))
 IF(.NOT.linear)THEN
   CALL ic_fields%B%add(1.d0,1.d0,pert_fields%B)
   CALL pert_fields%B%delete
   DEALLOCATE(pert_fields%B)
 END IF
 !---Create velocity field
-CALL oft_lag_vcreate(ic_fields%V)
-IF(linear)CALL oft_lag_vcreate(pert_fields%V)
+CALL xmhd_ML_vlagrange%vec_create(ic_fields%V)
+IF(linear)CALL xmhd_ML_vlagrange%vec_create(pert_fields%V)
 !---Create static density/temperature
-CALL oft_lag_create(ic_fields%Ne)
-CALL oft_lag_create(ic_fields%Ti)
+CALL xmhd_ML_lagrange%vec_create(ic_fields%Ne)
+CALL xmhd_ML_lagrange%vec_create(ic_fields%Ti)
 CALL ic_fields%Ne%set(n0)
 CALL ic_fields%Ti%set(t0)
 IF(linear)THEN
-  CALL oft_lag_create(pert_fields%Ne)
-  CALL oft_lag_create(pert_fields%Ti)
+  CALL xmhd_ML_lagrange%vec_create(pert_fields%Ne)
+  CALL xmhd_ML_lagrange%vec_create(pert_fields%Ti)
 END IF
 !---Clean up temporary matrices and fields
 CALL lop%delete
@@ -236,7 +241,7 @@ END PROGRAM MUG_sph_tilt
 !! Below is an input file which can be used with this example in a parallel environment. This example
 !! should not be run with only a single process as solving the time-depedent MHD equations is
 !! significantly more challenging than previous examples. For more information on the options in the
-!! `xmhd_options` group see \ref xmhd::xmhd_plot "xmhd_plot".
+!! `xmhd_options` group see \ref xmhd::xmhd_run "xmhd_run".
 !!
 !!\verbatim
 !!&runtime_options

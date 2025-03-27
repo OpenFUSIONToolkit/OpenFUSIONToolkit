@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file thincurr_from_mode.F90
 !
 !> Project DCON mode on to ThinCurr triangular grid for thin-wall studies
@@ -15,7 +17,7 @@
 !! @authors Chris Hansen
 !! @date May 2017
 !! @ingroup doxy_thincurr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM thincurr_from_mode
 USE oft_base
 USE spline_mod
@@ -67,7 +69,7 @@ ALLOCATE(tw_sim%closures(tw_sim%nclosures))
 tw_sim%closures(1)=1 !INT(tw_sim%mesh%nc/2.d0,4)
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL tw_sim%xdmf%setup("ThinCurr")
+CALL tw_sim%xdmf%setup("thincurr")
 CALL tw_sim%mesh%setup_io(tw_sim%xdmf,1)
 !---Compute face mutuals
 CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat)
@@ -148,11 +150,9 @@ DEALLOCATE(utmp,vtmp)
 DEALLOCATE(tw_sim%Lmat)
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE setup_mode_mesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE setup_mode_mesh(filename,nsample,nphi,bmesh,bnorm)
 CHARACTER(LEN=*), INTENT(in) :: filename
 INTEGER(4), INTENT(in) :: nsample,nphi
@@ -287,11 +287,9 @@ DO i=1,nsample
   END DO
 END DO
 END SUBROUTINE setup_mode_mesh
-!------------------------------------------------------------------------------
-! SUBROUTINE solve_inv
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE solve_inv(self,u,g)
 TYPE(tw_type), INTENT(in) :: self
 REAL(8), TARGET, INTENT(inout) :: u(:,:),g(:,:)
@@ -336,11 +334,9 @@ CALL uloc%delete()
 CALL gloc%delete()
 DEALLOCATE(uloc,gloc)
 END SUBROUTINE solve_inv
-!------------------------------------------------------------------------------
-! SUBROUTINE get_torus_loop
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE get_torus_loop(bmesh,dir,plist,n)
 CLASS(oft_bmesh), INTENT(in) :: bmesh
 INTEGER(4), INTENT(in) :: dir
@@ -363,9 +359,9 @@ ELSE IF(dir==2)THEN
   END DO
 END IF
 END SUBROUTINE get_torus_loop
-! !------------------------------------------------------------------------------
+! !---------------------------------------------------------------------------------
 ! !> Needs Docs
-! !------------------------------------------------------------------------------
+! !---------------------------------------------------------------------------------
 ! SUBROUTINE svd_mat(m,n,A)
 ! INTEGER(4), INTENT(in) :: M,N
 ! REAL(8), INTENT(inout) :: A(M,N)

@@ -1,13 +1,14 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 '''! General I/O functionality for Open FUSION Toolkit (OFT) Python interfaces
 
 @authors Chris Hansen
 @date July 2024
 @ingroup doxy_oft_python
 '''
-
-## @file io.py
-#
-# General I/O functionality for Open FUSION Toolkit (OFT) Python interfaces
 from __future__ import print_function
 import os
 import sys
@@ -387,9 +388,9 @@ class XDMF_plot_file:
         self._groups = {}
         with h5py.File(self.filepath,'r') as h5_file:
             for group_key, group_obj in h5_file.items():
-                self._groups[group_key] = {}
+                self._groups[group_key.lower()] = {}
                 for mesh_key, mesh_obj in group_obj.items():
-                    self._groups[group_key][mesh_key] = XDMF_plot_mesh(mesh_obj)
+                    self._groups[group_key.lower()][mesh_key.lower()] = XDMF_plot_mesh(mesh_obj)
     
     def get(self, keyname, value=None):
         '''! Get plotting group (list of @ref XDMF_plot_mesh "meshes")
@@ -397,7 +398,7 @@ class XDMF_plot_file:
         @param keyname Name of group
         @param value Return value if not found
         '''
-        return self._groups.get(keyname,value)
+        return self._groups.get(keyname.lower(),value)
 
     def keys(self):
         '''! Get plotting groups in file'''
@@ -408,7 +409,7 @@ class XDMF_plot_file:
         return self._groups.items()
 
     def __getitem__(self, key):
-        return self._groups[key]
+        return self._groups[key.lower()]
     
     def __iter__(self):
         return iter(self._groups)

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_cubit.F90
 !
 !> Regression tests for the CUBIT mesh interface. Test perform refinements
@@ -14,21 +16,22 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_cubit
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, smesh
 #ifdef HAVE_NCDF
 USE oft_mesh_cubit, ONLY: mesh_cubit_id, inpname
 #endif
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
 #include "local.h"
 INTEGER(i4) :: io_unit
 INTEGER(i4) :: ierr
 TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
 #if !defined(HAVE_NCDF)
 CHARACTER(LEN=OFT_PATH_SLEN) :: inpname = 'none'
 #endif
@@ -53,8 +56,8 @@ IF(cad_type==2)THEN
 END IF
 #endif
 IF(test_surf)THEN
-  CALL multigrid_construct_surf
-  IF(smesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
+  CALL multigrid_construct_surf(mg_mesh)
+  IF(mg_mesh%smesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
 #if !defined(HAVE_ONURBS)
   IF(TRIM(inpname)/='none')THEN
     WRITE(*,*)'SKIP TEST'
@@ -62,17 +65,21 @@ IF(test_surf)THEN
   END IF
 #endif
   CALL plot_file%setup("Test")
-  CALL smesh%setup_io(plot_file,1)
+  CALL mg_mesh%smesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)THEN
     OPEN(NEWUNIT=io_unit,FILE='cubit.results')
     WRITE(io_unit,*)0.0_r8
   END IF
   CALL compute_area
-  IF(oft_env%head_proc)CLOSE(io_unit)
+  IF(oft_env%head_proc)THEN
+    WRITE(io_unit,*)mg_mesh%smesh%global%nbp
+    WRITE(io_unit,*)mg_mesh%smesh%global%nbe
+    CLOSE(io_unit)
+  END IF
 ELSE
   !---Setup grid
-  CALL multigrid_construct
-  IF(mesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
+  CALL multigrid_construct(mg_mesh)
+  IF(mg_mesh%mesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
 #if !defined(HAVE_ONURBS)
   IF(TRIM(inpname)/='none')THEN
     WRITE(*,*)'SKIP TEST'
@@ -80,32 +87,34 @@ ELSE
   END IF
 #endif
   CALL plot_file%setup("Test")
-  CALL mesh%setup_io(plot_file,1)
+  CALL mg_mesh%mesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='cubit.results')
   CALL compute_volume
   CALL compute_area
-  IF(oft_env%head_proc)CLOSE(io_unit)
+  IF(oft_env%head_proc)THEN
+    WRITE(io_unit,*)mg_mesh%mesh%global%nbp
+    WRITE(io_unit,*)mg_mesh%mesh%global%nbe
+    CLOSE(io_unit)
+  END IF
 END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
-! SUBROUTINE compute_volume
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute volume of the current mesh and output
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE compute_volume
 INTEGER(i4) :: i,m
 REAL(r8) :: v,det,goptmp(3,4),volume
 LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 volume=0._r8
-CALL mesh%quad_rule(8,quad)
+CALL mg_mesh%mesh%quad_rule(8,quad)
 !---
-DO i=1,mesh%nc
+DO i=1,mg_mesh%mesh%nc
   !---Get local reconstructed operators
   DO m=1,quad%np ! Loop over quadrature points
-    CALL mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    CALL mg_mesh%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
     det=v*quad%wts(m)
     volume=volume+det
   END DO
@@ -117,23 +126,21 @@ IF(oft_env%head_proc)THEN
   WRITE(io_unit,*)volume
 END IF
 END SUBROUTINE compute_volume
-!---------------------------------------------------------------------------
-! SUBROUTINE compute_area
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute surface area of the current mesh and output
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE compute_area
 INTEGER(i4) :: i,j,m
 REAL(r8) :: a,det,goptmp(3,4),area
 LOGICAL :: curved
 TYPE(oft_quad_type) :: quad
 area=0._r8
-CALL smesh%quad_rule(8,quad)
+CALL mg_mesh%smesh%quad_rule(8,quad)
 !---
-DO i=1,smesh%nc
+DO i=1,mg_mesh%smesh%nc
   !---Get local reconstructed operators
   DO m=1,quad%np ! Loop over quadrature points
-    CALL smesh%jacobian(i,quad%pts(:,m),goptmp,a)
+    CALL mg_mesh%smesh%jacobian(i,quad%pts(:,m),goptmp,a)
     det=a*quad%wts(m)
     area=area+det
   END DO

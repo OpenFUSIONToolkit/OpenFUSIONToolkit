@@ -40,7 +40,7 @@ automated and relies only on the mesh and association of the elements to geometr
 
 Shown below is an example of the finite element setup procedure for the quadratic Lagrange set presented above.
 First the mesh is linked to the structure and the order of the representation is set, quadratic in this case. The
-number of basis functions per geometric primitive is then set in the \c gstruct field. Where \c gstruct is a 4 value
+number of basis functions per geometric primitive is then set in the `gstruct` field. Where `gstruct` is a 4 value
 integer array containing the number of basis functions associated with each vertex, edge, face and cell respectively.
 Finally, the remaining setup can be completed using the \ref fem_base::oft_fem_type::setup "setup" method, where the
 argument is the desired quadrature order.
@@ -72,10 +72,10 @@ are evaluated using the chain rule as
 \f$ \frac{\partial f}{\partial x_i} = \frac{\partial f}{\partial u_j} \frac{\partial u_j}{\partial x_i} \f$
 
 Spatial derivatives of the logical coordinates are computed using the subroutine \ref tetmesh_mapping::tetmesh_get_jacobian
-"tetmesh_get_jacobian" and passed to the routines through the \c gop parameter. In order to evaluate the function the position in
-the mesh must be specified, by the cell index \c cell and logical coordinates within the cell \c f, along with the desired basis
-function within the cell to evaluate \c dof. Basis functions are numbered by the \ref fem_base::fem_setup "fem_setup" routine
-according to their geometric linkage. The resulting gradient is then returned using the \c val parameter. For the existing finite
+"tetmesh_get_jacobian" and passed to the routines through the `gop` parameter. In order to evaluate the function the position in
+the mesh must be specified, by the cell index `cell` and logical coordinates within the cell `f`, along with the desired basis
+function within the cell to evaluate `dof`. Basis functions are numbered by the \ref fem_base::fem_setup "fem_setup" routine
+according to their geometric linkage. The resulting gradient is then returned using the `val` parameter. For the existing finite
 element representations element specific evaluation routines are called from this driver routine depending on the element linkage,
 specified in the \ref fem_base::oft_fem_type::cmap "cmap" structure.
 
@@ -221,9 +221,9 @@ REAL(r8) :: goptmp(3,4)
 REAL(r8) :: v,f(4),det,vol
 REAL(r8), ALLOCATABLE :: gop(:,:,:),dets(:),lop(:,:)
 LOGICAL :: curved
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate Operator
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL quadratic_lagrange%mat_create(mat)
 ~~~~~~~~~
 
@@ -231,7 +231,7 @@ The \ref fem_base::oft_fem_type::mat_create "mat_create" method returns a bare m
 between all FE weights that share a common cell. It contains all of the required mapping and structural information to support computing
 matrix entries and performing matrix-vector operations.
 
-\note At this point the matix is not usable for linear algebra operations, all entries must be set and \c assemble called at least
+\note At this point the matix is not usable for linear algebra operations, all entries must be set and `assemble` called at least
 once before matrix vector products may be computed.
 
 \subsection doc_oft_fem_ops_int Computing Entries
@@ -243,15 +243,15 @@ Matrix entries for the desired operator correpsond to the result of the above vo
 where \f$ f_i \f$ and \f$ f_j \f$ are independent Lagrange basis functions. As each function only has a non-zero value in cells
 which contain that particular element this integral simplfies to sum of contributions from each individual cell. Integration with in each
 cell is then carried out using a numerical integration with a given quadrature stencil. The desired order of the quadrature scheme for this
-case was set during finite element setup, so the appropriate quadrature object is already bound to the \c quadratic_lagrange structure.
+case was set during finite element setup, so the appropriate quadrature object is already bound to the `quadratic_lagrange` structure.
 
 The first section of the operator integration loop sets up local variables which are unique in each cell. These variables are declared private
 in the OpenMP clause and must be allocated after parallel execution has begun.
 
 ~~~~~~~~~{.F90}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup parallel integration variables
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(j,gop,dets,lop,curved,goptmp,m,v,jc,jr,f)
 ALLOCATE(j(quadratic_lagrange%nce)) ! Local DOF and matrix indices
 ALLOCATE(gop(3,quadratic_lagrange%nce,quadratic_lagrange%quad%np)) ! Reconstructed gradient operator
@@ -278,9 +278,9 @@ point. The weight value is then set by computing the product of the quadrature w
 gradients \f$ \left( \nabla f \right) \f$ are computed for each of the elements in the current cell.
 
 ~~~~~~~~~{.F90}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local reconstructed operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO m=1,quadratic_lagrange%quad%np ! Loop over quadrature points
     IF(curved.OR.(m==1))CALL tetmesh_get_jacobian(quadratic_lagrange%mesh,i,quadratic_lagrange%quad%pts(:,m),goptmp,v)
     dets(m)=v*quadratic_lagrange%quad%wts(m)
@@ -305,9 +305,9 @@ surrounded by an <tt>!$omp critical</tt> clause to prevent data races when added
 of the given region to a single thread at a time.
 
 ~~~~~~~~~{.F90}
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute local matrix contributions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO jr=1,quadratic_lagrange%nce
     lop(jr,:)=0.d0
     IF(quadratic_lagrange%global%gbe(j(jr)))CYCLE
@@ -317,9 +317,9 @@ of the given region to a single thread at a time.
       END DO
     END DO
   END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Add local values to global matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   !$omp critical
   CALL mat%add_values(j,j,lop,quadratic_lagrange%nce,quadratic_lagrange%nce)
   !$omp end critical
@@ -337,9 +337,9 @@ DEALLOCATE(j)
 DEALLOCATE(gop,dets,lop)
 !$omp end parallel
 CALL mat%assemble
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set diagonal entries for dirichlet rows
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(lop(1,1),j(1))
 lop(1,1)=1.d0
 DO i=1,quadratic_lagrange%nbe

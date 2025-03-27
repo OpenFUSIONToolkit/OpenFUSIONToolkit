@@ -1,9 +1,15 @@
-'''! Python interface for TokaMaker Grad-Shafranov functionality
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! General utility and supporting functions for TokaMaker
 
 @authors Chris Hansen
-@date May 2023
+@date April 2024
 @ingroup doxy_oft_python
 '''
+import struct
 import numpy
 from .._interface import *
 
@@ -155,6 +161,59 @@ def read_eqdsk(filename):
         # Read limiting corners
         eqdsk_obj['rzlim'] = read_2d(fid, eqdsk_obj['nlim'], 2)
     return eqdsk_obj
+
+
+def read_ifile(filename):
+    '''! Read i-file inverse equilibrium file
+
+    @param filename Path to file
+    @result Dictionary containing i-file information
+    '''
+    def read_array(content,offset,var_type,count):
+        if var_type in ("i", "f"):
+            var_size = 4
+        elif var_type in ("l", "d"):
+            var_size = 8
+        else:
+            raise ValueError("Invalid variable type")
+        array_size = var_size*count
+        #
+        head_val = struct.unpack_from("i",content,offset=offset)
+        if head_val[0] != array_size:
+            raise ValueError("Dataframe size does not match array size")
+        offset += 4
+        body_val = struct.unpack_from("="+var_type*count,content,offset=offset)
+        offset += array_size
+        tail_val = struct.unpack_from("i",content,offset=offset)
+        if head_val[0] != tail_val[0]:
+            raise ValueError("Head and tail values disagree")
+        offset += 4
+        return numpy.array(body_val), offset
+    #
+    with open(filename, 'rb') as handle:
+        content = handle.read()
+    out_dict = {}
+    offset = 0
+    sizes, offset = read_array(content,offset,"i",2)
+    out_dict["npsi"] = sizes[0]
+    out_dict["ntheta"] = sizes[1]
+    var_type = "d"
+    try:
+        out_dict["psi"], offset = read_array(content,offset,var_type,sizes[0])
+    except ValueError:
+        try:
+            var_type = "f"
+            out_dict["psi"], offset = read_array(content,offset,var_type,sizes[0])
+        except ValueError:
+            raise ValueError("Unable to determine float point datatype")
+    out_dict["f"], offset = read_array(content,offset,var_type,sizes[0])
+    out_dict["p"], offset = read_array(content,offset,var_type,sizes[0])
+    out_dict["q"], offset = read_array(content,offset,var_type,sizes[0])
+    R, offset = read_array(content,offset,var_type,sizes[0]*sizes[1])
+    Z, offset = read_array(content,offset,var_type,sizes[0]*sizes[1])
+    out_dict["R"] = R.reshape(sizes)
+    out_dict["Z"] = Z.reshape(sizes)
+    return out_dict
 
 
 def eval_green(x,xc):

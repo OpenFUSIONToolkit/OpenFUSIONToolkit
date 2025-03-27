@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file tokamaker_gs.F90
 !
 !> @defgroup doxy_tokamaker TokaMaker
@@ -12,20 +14,19 @@
 !! @authors Chris Hansen
 !! @date March 2014
 !! @ingroup doxy_tokamaker
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 program tokamaker_gs
 USE oft_base
-USE oft_mesh_type, ONLY: smesh
-USE multigrid, ONLY: multigrid_reset
+USE multigrid, ONLY: multigrid_mesh, multigrid_reset
 USE multigrid_build, ONLY: multigrid_construct_surf
-USE fem_base, ONLY: oft_afem_type
+USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_la_base, ONLY: oft_vector
-USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_blagrange, &
-  oft_lag_setup
+USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
   gs_fixed_vflux, gs_load_regions
-USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_save_decon, gs_save_eqdsk, &
+USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_save_eqdsk, &
   gs_profile_load
 IMPLICIT NONE
 #include "local.h"
@@ -36,13 +37,14 @@ REAL(8), ALLOCATABLE, DIMENSION(:,:) :: pts
 TYPE(gs_eq) :: mygs
 CLASS(oft_afem_type), POINTER :: lag_fem
 real(r8), POINTER :: vals_tmp(:)
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
 !---Input options
 INTEGER(4) :: order = 1
 INTEGER(4) :: maxits = 30
 INTEGER(4) :: ninner = 4
 INTEGER(4) :: mode = 0
-INTEGER(4) :: dcon_npsi = -1
-INTEGER(4) :: dcon_ntheta = -1
 INTEGER(4) :: eqdsk_nr = -1
 INTEGER(4) :: eqdsk_nz = -1
 LOGICAL :: pm = .FALSE.
@@ -78,18 +80,18 @@ CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
 CHARACTER(LEN=40) :: eqdsk_run_info = ''
 CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = ''
 NAMELIST/tokamaker_options/order,pm,mode,maxits,ninner,urf,nl_tol,itor_target,pnorm, &
-alam,beta_mr,free_boundary,coil_file,limiter_file,f_offset,dcon_npsi,dcon_ntheta, &
-has_plasma,rmin,R0_target,V0_target,save_mug,fast_boundary, &
-limited_only,eqdsk_filename,eqdsk_nr,eqdsk_nz,eqdsk_rbounds,eqdsk_zbounds,eqdsk_run_info, &
-eqdsk_limiter_file,eqdsk_lcfs_pad,init_r0,init_a,init_kappa,init_delta,lim_zmax,estore_target
-!---------------------------------------------------------------------------
+alam,beta_mr,free_boundary,coil_file,limiter_file,f_offset,has_plasma,rmin,R0_target, &
+V0_target,save_mug,fast_boundary,limited_only,eqdsk_filename,eqdsk_nr,eqdsk_nz,eqdsk_rbounds, &
+eqdsk_zbounds,eqdsk_run_info,eqdsk_limiter_file,eqdsk_lcfs_pad,init_r0,init_a,init_kappa, &
+init_delta,lim_zmax,estore_target
+!------------------------------------------------------------------------------
 ! Initialize enviroment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_init
 NULLIFY(vals_tmp)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load settings
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,tokamaker_options,IOSTAT=ierr)
 CLOSE(io_unit)
@@ -98,9 +100,9 @@ IF(ierr<0)CALL oft_abort('No "tokamaker_options" found in input file.', &
 IF(ierr>0)CALL oft_abort('Error parsing "tokamaker_options" in input file.', &
   'tokamaker_gs',__FILE__)
 oft_env%pm=pm
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Check input files
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(TRIM(coil_file)/='none')THEN
   INQUIRE(EXIST=file_exists,FILE=TRIM(coil_file))
   IF(.NOT.file_exists)CALL oft_abort('Specified "coil_file" cannot be found', &
@@ -116,23 +118,24 @@ IF(TRIM(eqdsk_limiter_file)/='')THEN
   IF(.NOT.file_exists)CALL oft_abort('Specified "eqdsk_limiter_file" cannot be found', &
     'tokamaker_gs', __FILE__)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Mesh
-!---------------------------------------------------------------------------
-CALL multigrid_construct_surf
+!------------------------------------------------------------------------------
+CALL multigrid_construct_surf(mg_mesh)
 CALL mygs%xdmf%setup("TokaMaker")
-CALL smesh%setup_io(mygs%xdmf,order)
-!---------------------------------------------------------------------------
+CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
+!------------------------------------------------------------------------------
 ! Setup Lagrange Elements
-!---------------------------------------------------------------------------
-CALL oft_lag_setup(order, -1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange,-1)
+CALL mygs%setup(ML_oft_blagrange)
+!------------------------------------------------------------------------------
 ! Compute optimized smoother coefficients
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! CALL lag_mloptions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup experimental geometry
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! CALL exp_setup(mygs)
 mygs%compute_chi=.FALSE.
 mygs%free=free_boundary
@@ -172,30 +175,30 @@ IF(file_exists)THEN
     CLOSE(io_unit)
   END IF
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup profiles
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'*** Loading flux and pressure profiles ***'
 CALL gs_profile_load('f_prof.in',mygs%I)
 mygs%I%f_offset=f_offset
 CALL gs_profile_load('p_prof.in',mygs%P)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Initialize GS solution
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'*** Initializing GS solution ***'
 INQUIRE(EXIST=file_exists,FILE='tokamaker_psi_in.rst')
 CALL mygs%init()!compute=(.NOT.file_exists),r0=init_r0,a=init_a,kappa=init_kappa,delta=init_delta)
 IF(file_exists)THEN
-  CALL oft_blagrange%vec_load(mygs%psi,'tokamaker_psi_in.rst','psi')
+  CALL ML_oft_blagrange%current_level%vec_load(mygs%psi,'tokamaker_psi_in.rst','psi')
 ELSE
   CALl mygs%init_psi(ierr,r0=init_r0,a=init_a,kappa=init_kappa,delta=init_delta)
   IF(ierr/=0)CALL oft_abort("Flux initialization failed","tokamaker_gs",__FILE__)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute GS solution
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'*** Computing GS solution ***'
 mygs%mode=mode
@@ -224,21 +227,21 @@ mygs%V0_target=V0_target
 IF(mygs%free)mygs%alam=alam
 !---Solve
 CALL mygs%solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Post-solution analysis
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'*** Post-solution analysis ***'
 !---Equilibrium information
 CALL gs_analyze(mygs)
 !---Save equilibrium and flux function
 CALL gs_save(mygs,'tokamaker_gs.rst')
-CALL oft_blagrange%vec_save(mygs%psi,'tokamaker_psi.rst','psi')
+CALL ML_oft_blagrange%current_level%vec_save(mygs%psi,'tokamaker_psi.rst','psi')
 !---Save final flux profiles
 CALL gs_save_prof(mygs,'gs.prof')
 !---Save output grid
 IF(save_mug)THEN
-  CALL smesh%save_to_file('gs_trans_mesh.dat')
+  CALL mg_mesh%smesh%save_to_file('gs_trans_mesh.dat')
   CALL gs_save_fgrid(mygs,'gs_trans_fields.dat')
 ELSE
   CALL gs_save_fgrid(mygs)
@@ -260,11 +263,8 @@ IF(file_exists)THEN
 ELSE
     WRITE(*,'(2A)')oft_indent,'No "tokamaker_fields.loc" file found, skipping field output'
 END IF
-!---Save DCON/EQDSK files
+!---Save gEQDSK file
 IF(has_plasma)THEN
-  IF((dcon_npsi>0).AND.(dcon_ntheta>0))THEN
-    CALL gs_save_decon(mygs,dcon_npsi,dcon_ntheta)
-  END IF
   IF((eqdsk_nr>0).AND.(eqdsk_nz>0))THEN
     IF(ANY(eqdsk_rbounds<0.d0))CALL oft_abort('Invalid or unset EQDSK radial extents', &
                                               'tokamaker_gs',__FILE__)
@@ -274,8 +274,8 @@ IF(has_plasma)THEN
       eqdsk_run_info,eqdsk_limiter_file,eqdsk_lcfs_pad)
   END IF
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Terminate
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_finalize
 end program tokamaker_gs

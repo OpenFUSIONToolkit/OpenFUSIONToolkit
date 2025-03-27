@@ -4,7 +4,7 @@ Regression Tests     {#doc_tests}
 [TOC]
 
 The Open FUSION Toolkit includes a set of regression tests which are used to monitor the main API automatically. These
-tests are located in sub-folders \c src/*/tests and documented in \ref testing "regression tests". Tests
+tests are located in sub-folders `src/*/tests` and documented in \ref testing "regression tests". Tests
 are run automatically each time the master branch is updated and ensure that certain basic cases produce
 the expected results.
 
@@ -12,7 +12,7 @@ the expected results.
 
 The tests are setup to be run as a batch using the Python testing framework
 [pytest](https://docs.pytest.org/en/latest/). With pytest installed the tests may be built and run from the
-\c src folder with the following commands. The flag \c "-m 'not slow'" filters the tests so that time consuming
+`src` folder with the following commands. The flag `"-m 'not slow'"` filters the tests so that time consuming
 tests, such as those for time-dependent MHD modules, are not run.
 
 \verbatim

@@ -1,3 +1,14 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Python interface for Open FUSION Toolkit common runtime functions
+
+@authors Chris Hansen
+@date Feb 2025
+@ingroup doxy_oft_python
+'''
 import platform
 import shutil
 import tempfile
@@ -8,7 +19,7 @@ from .util import run_shell_command
 
 class OFT_env():
     '''! OpenFUSIONToolkit runtime environment class'''
-    def __init__(self,debug_level=0,nthreads=2,unique_tempfiles='global'):
+    def __init__(self,debug_level=0,nthreads=2,unique_tempfiles='global',abort_callback=True):
         '''! Initialize OFT runtime object
 
         @param debug_level Level of debug printing (0-3)
@@ -17,6 +28,7 @@ class OFT_env():
         in global temporary space, 'local_dir': Create unique folder in current working directory,
         'local_file': Use current working directory and append unique identifier to filenames,
         'none': Use non-unique names in local directory; can lead to conflict with multiple instances)
+        @param abort_callback Use callback for "graceful" abort
         '''
         ## OS type
         self.os = platform.uname()[0]
@@ -91,7 +103,10 @@ class OFT_env():
         # Initialize OFT
         slens = numpy.zeros((4,), dtype=numpy.int32)
         ifile_c = c_char_p(self.oft_ifile.encode())
-        oft_init(c_int(nthreads),ifile_c,slens)
+        if abort_callback:
+            oft_init(c_int(nthreads),ifile_c,slens,oft_python_abort)
+        else:
+            oft_init(c_int(nthreads),ifile_c,slens,c_void_p())
         ## General string size
         self.oft_slen = slens[1]
         ## Path string size
