@@ -25,7 +25,7 @@ TYPE, PUBLIC :: axi_coil_set
   REAL(r8), POINTER, DIMENSION(:,:) :: pt => NULL()
 END TYPE axi_coil_set
 REAL(r8), PARAMETER :: ROFF = 1.d-13
-PUBLIC green, grad_green, decay_eigenmodes, green_brute
+PUBLIC green, grad_green, green_brute
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Computes Carlson's elliptic integral of the first kind, RF(x; y; z). x, y, and z must be
@@ -226,49 +226,4 @@ DO i=1,360
 END DO
 green_brute=green_brute*r/(4.d0*pi)
 END FUNCTION green_brute
-!---------------------------------------------------------------------------------
-!> Needs docs
-!---------------------------------------------------------------------------------
-SUBROUTINE decay_eigenmodes(ncoils,rc,eig_val,eig_vec,eta)
-INTEGER(i4), INTENT(in) :: ncoils
-REAL(r8), INTENT(in) :: rc(2,ncoils)
-REAL(r8), intent(out) :: eig_val(ncoils),eig_vec(ncoils,ncoils)
-REAL(r8), OPTIONAL, INTENT(in) :: eta(ncoils)
-!---
-INTEGER(i4) :: i,j,info,N,LDVL,LDVR,LDA,LWORK
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: WR,WI,WORK
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: Amat,VL,VR
-CHARACTER(LEN=1) :: JOBVL,JOBVR
-!--- Create coupling matrix
-ALLOCATE(Amat(ncoils,ncoils))
-!$omp parallel do private(j)
-DO i=1,ncoils
-  DO j=1,ncoils
-    Amat(i,j)=green(rc(1,i),rc(2,i),rc(1,j),rc(2,j))/rc(1,i)
-  END DO
-END DO
-!---Set eta profile
-IF(PRESENT(eta))THEN
-  DO i=1,ncoils
-    Amat(i,:)=Amat(i,:)/eta(i)
-  END DO
-END IF
-!--- Compute eigenvalues
-JOBVL = 'V'
-JOBVR = 'V'
-N = ncoils
-LDA = ncoils
-LDVL = ncoils
-LDVR = ncoils
-ALLOCATE(WR(N),WI(N),VL(LDVL,N),VR(LDVR,N),WORK(1))
-LWORK=-1
-CALL DGEEV(JOBVL, JOBVR, N, Amat, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
-LWORK=INT(WORK(1),4)
-DEALLOCATE(WORK)
-ALLOCATE(WORK(LWORK))
-CALL DGEEV(JOBVL, JOBVR, N, Amat, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
-eig_val=-1.d0/WR
-eig_vec=REAL(VR,8)
-DEALLOCATE(WI,WR,VL,VR,WORK,Amat)
-END SUBROUTINE decay_eigenmodes
 END MODULE axi_green

@@ -18,47 +18,54 @@ USE oft_gs, ONLY: flux_func, gs_eq, oft_indent, oft_increase_indent, &
   oft_decrease_indent
 implicit none
 !------------------------------------------------------------------------------
-! CLASS zero_flux_func
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: zero_flux_func
 contains
-    procedure :: f => zero_f
-    procedure :: fp => zero_fp
-    procedure :: update => zero_update
-    procedure :: set_cofs => zero_cofs_update
-    procedure :: get_cofs => zero_cofs_get
+  !> Needs docs
+  procedure :: f => zero_f
+  !> Needs docs
+  procedure :: fp => zero_fp
+  !> Needs docs
+  procedure :: update => zero_update
+  !> Needs docs
+  procedure :: set_cofs => zero_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => zero_cofs_get
 end type zero_flux_func
-!------------------------------------------------------------------------------
-! CLASS flat_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: flat_flux_func
 contains
-    procedure :: f => flat_f
-    procedure :: fp => flat_fp
-    procedure :: update => flat_update
-    procedure :: set_cofs => flat_cofs_update
-    procedure :: get_cofs => flat_cofs_get
+  !> Needs docs
+  procedure :: f => flat_f
+  !> Needs docs
+  procedure :: fp => flat_fp
+  !> Needs docs
+  procedure :: update => flat_update
+  !> Needs docs
+  procedure :: set_cofs => flat_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => flat_cofs_get
 end type flat_flux_func
-!------------------------------------------------------------------------------
-! CLASS linear_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: linear_flux_func
   real(8) :: alpha = 0.d0 !< Slope parameter
 contains
-    procedure :: f => linear_f
-    procedure :: fp => linear_fp
-    procedure :: update => linear_update
-    procedure :: set_cofs => linear_cofs_update
-    procedure :: get_cofs => linear_cofs_get
+  !> Needs docs
+  procedure :: f => linear_f
+  !> Needs docs
+  procedure :: fp => linear_fp
+  !> Needs docs
+  procedure :: update => linear_update
+  !> Needs docs
+  procedure :: set_cofs => linear_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => linear_cofs_get
 end type linear_flux_func
-!------------------------------------------------------------------------------
-! CLASS poly_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -68,82 +75,100 @@ type, extends(flux_func) :: poly_flux_func
   real(8), pointer, dimension(:) :: cofs => NULL() !< Coefficients [deg]
   logical :: zero_grad = .FALSE. !< Force zero gradient at boundary
 contains
-    procedure :: f => poly_f
-    procedure :: fp => poly_fp
-    procedure :: update => poly_update
-    procedure :: set_cofs => poly_cofs_update
-    procedure :: get_cofs => poly_cofs_get
+  !> Needs docs
+  procedure :: f => poly_f
+  !> Needs docs
+  procedure :: fp => poly_fp
+  !> Needs docs
+  procedure :: update => poly_update
+  !> Needs docs
+  procedure :: set_cofs => poly_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => poly_cofs_get
 end type poly_flux_func
-!------------------------------------------------------------------------------
-! CLASS spline_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: spline_flux_func
-    INTEGER(4) :: npsi = 0
-    REAL(8) :: xmin = 0.d0
-    REAL(8) :: xmax = 0.d0
-    REAL(8) :: f1 = 0.d0
-    REAL(8) :: fn = 0.d0
-    REAL(8) :: yp1 = 0.d0
-    REAL(8) :: ypn = 0.d0
-    TYPE(spline_type) :: func
-    TYPE(spline_type) :: fun_loc(24)
+  INTEGER(4) :: npsi = 0 !< Needs docs
+  REAL(8) :: xmin = 0.d0 !< Needs docs
+  REAL(8) :: xmax = 0.d0 !< Needs docs
+  REAL(8) :: f1 = 0.d0 !< Needs docs
+  REAL(8) :: fn = 0.d0 !< Needs docs
+  REAL(8) :: yp1 = 0.d0 !< Needs docs
+  REAL(8) :: ypn = 0.d0 !< Needs docs
+  TYPE(spline_type) :: func !< Needs docs
+  TYPE(spline_type) :: fun_loc(24) !< Needs docs
 contains
-    procedure :: f => spline_f
-    procedure :: fp => spline_fp
-    procedure :: update => spline_update
-    procedure :: set_cofs => spline_cofs_update
-    procedure :: get_cofs => spline_cofs_get
+  !> Needs docs
+  procedure :: f => spline_f
+  !> Needs docs
+  procedure :: fp => spline_fp
+  !> Needs docs
+  procedure :: update => spline_update
+  !> Needs docs
+  procedure :: set_cofs => spline_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => spline_cofs_get
 end type spline_flux_func
-!------------------------------------------------------------------------------
-! CLASS linterp_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: linterp_flux_func
-    integer(4) :: npsi = 0
-    real(8) :: y0 = 1.d0
-    real(8), pointer, dimension(:) :: x => NULL()
-    real(8), pointer, dimension(:) :: yp => NULL()
-    real(8), pointer, dimension(:) :: y => NULL()
+  integer(4) :: npsi = 0 !< Needs docs
+  real(8) :: y0 = 1.d0 !< Needs docs
+  real(8), pointer, dimension(:) :: x => NULL() !< Needs docs
+  real(8), pointer, dimension(:) :: yp => NULL() !< Needs docs
+  real(8), pointer, dimension(:) :: y => NULL() !< Needs docs
 contains
-    procedure :: f => linterp_f
-    procedure :: fp => linterp_fp
-    procedure :: fpp => linterp_fpp
-    procedure :: update => linterp_update
-    procedure :: set_cofs => linterp_cofs_update
-    procedure :: get_cofs => linterp_cofs_get
+  !> Needs docs
+  procedure :: f => linterp_f
+  !> Needs docs
+  procedure :: fp => linterp_fp
+  !> Needs docs
+  procedure :: fpp => linterp_fpp
+  !> Needs docs
+  procedure :: update => linterp_update
+  !> Needs docs
+  procedure :: set_cofs => linterp_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => linterp_cofs_get
 end type linterp_flux_func
-!------------------------------------------------------------------------------
-! CLASS twolam_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: twolam_flux_func
-    real(8) :: alpha = 0.d0 !< Jump height
-    real(8) :: sep = .5d0 !< Jump location (poloidal flux)
-    real(8) :: width = 200.d0 !< Width factor for TANH
+  real(8) :: alpha = 0.d0 !< Jump height
+  real(8) :: sep = .5d0 !< Jump location (poloidal flux)
+  real(8) :: width = 200.d0 !< Width factor for TANH
 contains
-    procedure :: f => twolam_f
-    procedure :: fp => twolam_fp
-    procedure :: update => twolam_update
-    procedure :: set_cofs => twolam_cofs_update
-    procedure :: get_cofs => twolam_cofs_get
+  !> Needs docs
+  procedure :: f => twolam_f
+  !> Needs docs
+  procedure :: fp => twolam_fp
+  !> Needs docs
+  procedure :: update => twolam_update
+  !> Needs docs
+  procedure :: set_cofs => twolam_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => twolam_cofs_get
 end type twolam_flux_func
-!------------------------------------------------------------------------------
-! CLASS stepslant_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(twolam_flux_func) :: stepslant_flux_func
-    real(8) :: beta = 0.d0
+  real(8) :: beta = 0.d0
 contains
-    procedure :: f => stepslant_f
-    procedure :: fp => stepslant_fp
-    procedure :: update => stepslant_update
-    procedure :: set_cofs => stepslant_cofs_update
-    procedure :: get_cofs => stepslant_cofs_get
+  !> Needs docs
+  procedure :: f => stepslant_f
+  !> Needs docs
+  procedure :: fp => stepslant_fp
+  !> Needs docs
+  procedure :: update => stepslant_update
+  !> Needs docs
+  procedure :: set_cofs => stepslant_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => stepslant_cofs_get
 end type stepslant_flux_func
 !------------------------------------------------------------------------------
 ! CLASS wesson_flux_func
@@ -161,8 +186,6 @@ contains
 end type wesson_flux_func
 contains
 !------------------------------------------------------------------------------
-! FUNCTION linear_f
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function zero_f(self,psi) result(b)
@@ -171,8 +194,6 @@ real(8), intent(in) :: psi
 real(8) :: b
 b=0.d0
 end function zero_f
-!------------------------------------------------------------------------------
-! FUNCTION linear_fp
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -183,16 +204,12 @@ real(8) :: b
 b=0.d0
 end function zero_fp
 !------------------------------------------------------------------------------
-! SUBROUTINE zero_update
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine zero_update(self,gseq)
 class(zero_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 end subroutine zero_update
-!------------------------------------------------------------------------------
-! FUNCTION zero_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -203,16 +220,12 @@ integer(4) :: ierr
 ierr=0
 end function zero_cofs_update
 !------------------------------------------------------------------------------
-! SUBROUTINE zero_cofs_get
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine zero_cofs_get(self,c)
 class(zero_flux_func), intent(inout) :: self
 real(8), intent(out) :: c(:)
 end subroutine zero_cofs_get
-!------------------------------------------------------------------------------
-! SUBROUTINE create_flat_f
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -224,8 +237,6 @@ select type(self=>func)
     self%ncofs=0
 end select
 END SUBROUTINE create_flat_f
-!------------------------------------------------------------------------------
-! FUNCTION flat_f
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -246,8 +257,6 @@ ELSE
 END IF
 end function flat_f
 !------------------------------------------------------------------------------
-! FUNCTION linear_fp
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function flat_fp(self,psi) result(b)
@@ -267,8 +276,6 @@ ELSE
 END IF
 end function flat_fp
 !------------------------------------------------------------------------------
-! SUBROUTINE flat_update
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine flat_update(self,gseq)
@@ -276,8 +283,6 @@ class(flat_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine flat_update
-!------------------------------------------------------------------------------
-! FUNCTION flat_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -288,8 +293,6 @@ integer(4) :: ierr
 ierr=0
 end function flat_cofs_update
 !------------------------------------------------------------------------------
-! SUBROUTINE flat_cofs_get
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine flat_cofs_get(self,c)
@@ -297,25 +300,18 @@ class(flat_flux_func), intent(inout) :: self
 real(8), intent(out) :: c(:)
 end subroutine flat_cofs_get
 !------------------------------------------------------------------------------
-! SUBROUTINE create_linear_ff
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_linear_ff(func,alpha)
 CLASS(flux_func), POINTER, INTENT(out) :: func
 REAL(8), INTENT(in) :: alpha
-
 ALLOCATE(linear_flux_func::func)
 select type(self=>func)
   type is(linear_flux_func)
-    !---
     self%ncofs=1
     self%alpha=alpha
 end select
-
 END SUBROUTINE create_linear_ff
-!------------------------------------------------------------------------------
-! FUNCTION linear_f
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -337,8 +333,6 @@ ELSE
 END IF
 end function linear_f
 !------------------------------------------------------------------------------
-! FUNCTION linear_fp
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function linear_fp(self,psi) result(b)
@@ -358,8 +352,6 @@ ELSE
 END IF
 end function linear_fp
 !------------------------------------------------------------------------------
-! SUBROUTINE linear_update
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine linear_update(self,gseq)
@@ -367,8 +359,6 @@ class(linear_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine linear_update
-!------------------------------------------------------------------------------
-! FUNCTION linear_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -380,8 +370,6 @@ ierr=0
 self%alpha=c(1)
 end function linear_cofs_update
 !------------------------------------------------------------------------------
-! SUBROUTINE linear_cofs_get
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine linear_cofs_get(self,c)
@@ -389,8 +377,6 @@ class(linear_flux_func), intent(inout) :: self
 real(8), intent(out) :: c(:)
 c(1)=self%alpha
 end subroutine linear_cofs_get
-!------------------------------------------------------------------------------
-! SUBROUTINE create_poly_ff
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -434,8 +420,6 @@ end select
 
 END SUBROUTINE create_poly_ff
 !------------------------------------------------------------------------------
-! FUNCTION poly_f
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function poly_f(self,psi) result(b)
@@ -474,8 +458,6 @@ ELSE
 END IF
 end function poly_f
 !------------------------------------------------------------------------------
-! FUNCTION poly_fp
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function poly_fp(self,psi) result(b)
@@ -513,8 +495,6 @@ ELSE
 END IF
 end function poly_fp
 !------------------------------------------------------------------------------
-! SUBROUTINE poly_update
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine poly_update(self,gseq)
@@ -522,8 +502,6 @@ class(poly_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine poly_update
-!------------------------------------------------------------------------------
-! FUNCTION poly_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -544,8 +522,6 @@ END IF
 ierr=0
 end function poly_cofs_update
 !------------------------------------------------------------------------------
-! SUBROUTINE poly_cofs_get
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine poly_cofs_get(self,c)
@@ -556,8 +532,6 @@ DO i=1,self%ncofs
   c(i)=self%cofs(i)
 END DO
 end subroutine poly_cofs_get
-!------------------------------------------------------------------------------
-! SUBROUTINE create_spline_ff
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -616,8 +590,6 @@ end select
 
 END SUBROUTINE create_spline_ff
 !------------------------------------------------------------------------------
-! FUNCTION linear_f
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function spline_f(self,psi) result(b)
@@ -634,8 +606,6 @@ ELSE
 END IF
 end function spline_f
 !------------------------------------------------------------------------------
-! FUNCTION linear_fp
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function spline_fp(self,psi) result(b)
@@ -651,8 +621,6 @@ ELSE
   b=self%ypn
 END IF
 end function spline_fp
-!------------------------------------------------------------------------------
-! SUBROUTINE spline_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -681,8 +649,6 @@ DO i=1,omp_get_max_threads()
   CALL spline_copy(self%func,self%fun_loc(i))
 END DO
 end subroutine spline_update
-!------------------------------------------------------------------------------
-! FUNCTION spline_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -719,8 +685,6 @@ END DO
 ierr=0
 end function spline_cofs_update
 !------------------------------------------------------------------------------
-! SUBROUTINE spline_cofs_get
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine spline_cofs_get(self,c)
@@ -731,8 +695,6 @@ DO i=0,self%npsi-1
   c(i+1)=self%func%fs(i,1)
 END DO
 end subroutine spline_cofs_get
-!------------------------------------------------------------------------------
-! SUBROUTINE create_linterp_ff
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -770,8 +732,6 @@ END SELECT
 
 END SUBROUTINE create_linterp_ff
 !------------------------------------------------------------------------------
-! FUNCTION linear_f
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function linterp_f(self,psi) result(b)
@@ -804,8 +764,6 @@ IF(self%plasma_bounds(1)>-1.d97)THEN
 END IF
 end function linterp_f
 !------------------------------------------------------------------------------
-! FUNCTION linear_fp
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function linterp_fp(self,psi) result(b)
@@ -835,8 +793,6 @@ else
   end do
 end if
 end function linterp_fp
-!------------------------------------------------------------------------------
-! FUNCTION linear_fpp
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -868,8 +824,6 @@ else
 end if
 end function linterp_fpp
 !------------------------------------------------------------------------------
-! SUBROUTINE linterp_update
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine linterp_update(self,gseq)
@@ -877,8 +831,6 @@ class(linterp_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine linterp_update
-!------------------------------------------------------------------------------
-! FUNCTION linterp_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -920,8 +872,6 @@ END IF
 ierr=0
 end function linterp_cofs_update
 !------------------------------------------------------------------------------
-! SUBROUTINE linterp_cofs_get
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine linterp_cofs_get(self,c)
@@ -935,8 +885,6 @@ DO i=1,self%ncofs
   c(i)=self%yp(i+offset)
 END DO
 end subroutine linterp_cofs_get
-!------------------------------------------------------------------------------
-! SUBROUTINE create_twolam_ff
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -956,8 +904,6 @@ end select
 
 END SUBROUTINE create_twolam_ff
 !------------------------------------------------------------------------------
-! FUNCTION twolam_f
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function twolam_f(self,psi) result(b)
@@ -968,8 +914,6 @@ b=(1.d0+self%alpha/2.d0)*psi + self%alpha*LOG(COSH(self%width*(psi-self%sep)))/2
 - self%alpha*LOG(COSH(-self%width*self%sep))/2.d0/self%width
 end function twolam_f
 !------------------------------------------------------------------------------
-! FUNCTION twolam_fp
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function twolam_fp(self,psi) result(b)
@@ -979,8 +923,6 @@ real(8) :: b
 b=1.d0 + self%alpha*(1.d0 + TANH(self%width*(psi-self%sep)))/2.d0
 end function twolam_fp
 !------------------------------------------------------------------------------
-! SUBROUTINE twolam_update
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine twolam_update(self,gseq)
@@ -988,8 +930,6 @@ class(twolam_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine twolam_update
-!------------------------------------------------------------------------------
-! FUNCTION twolam_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1004,8 +944,6 @@ self%sep=c(1)
 self%alpha=c(2)
 end function twolam_cofs_update
 !------------------------------------------------------------------------------
-! SUBROUTINE twolam_cofs_get
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine twolam_cofs_get(self,c)
@@ -1014,8 +952,6 @@ real(8), intent(out) :: c(:)
 c(1)=self%sep
 c(2)=self%alpha
 end subroutine twolam_cofs_get
-!------------------------------------------------------------------------------
-! SUBROUTINE create_stepslant_ff
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1037,8 +973,6 @@ end select
 
 END SUBROUTINE create_stepslant_ff
 !------------------------------------------------------------------------------
-! FUNCTION stepslant_f
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function stepslant_f(self,psi) result(b)
@@ -1051,8 +985,6 @@ else
   b=self%sep + (1.d0+self%alpha)*(self%sep-psi)*((self%beta-2)*self%sep-self%beta*psi)/(2*self%sep)
 end if
 end function stepslant_f
-!------------------------------------------------------------------------------
-! FUNCTION stepslant_fp
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1067,8 +999,6 @@ else
 end if
 end function stepslant_fp
 !------------------------------------------------------------------------------
-! SUBROUTINE twolam_update
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine stepslant_update(self,gseq)
@@ -1076,8 +1006,6 @@ class(stepslant_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine stepslant_update
-!------------------------------------------------------------------------------
-! FUNCTION stepslant_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1091,8 +1019,6 @@ self%beta=c(3)
 ierr=0
 end function stepslant_cofs_update
 !------------------------------------------------------------------------------
-! SUBROUTINE stepslant_cofs_get
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine stepslant_cofs_get(self,c)
@@ -1102,8 +1028,6 @@ c(1)=self%sep
 c(2)=self%alpha
 c(3)=self%beta
 end subroutine stepslant_cofs_get
-!------------------------------------------------------------------------------
-! SUBROUTINE create_wesson_ff
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1121,8 +1045,6 @@ select type(self=>func)
 end select
 
 END SUBROUTINE create_wesson_ff
-!------------------------------------------------------------------------------
-! FUNCTION wesson_f
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1144,8 +1066,6 @@ ELSE
 END IF
 end function wesson_f
 !------------------------------------------------------------------------------
-! FUNCTION wesson_fp
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function wesson_fp(self,psi) result(b)
@@ -1166,8 +1086,6 @@ ELSE
 END IF
 end function wesson_fp
 !------------------------------------------------------------------------------
-! SUBROUTINE wesson_update
-!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine wesson_update(self,gseq)
@@ -1175,8 +1093,6 @@ class(wesson_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine wesson_update
-!------------------------------------------------------------------------------
-! FUNCTION wesson_cofs_update
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1187,8 +1103,6 @@ integer(4) :: ierr
 self%gamma=c(1)
 ierr=0
 end function wesson_cofs_update
-!------------------------------------------------------------------------------
-! SUBROUTINE wesson_cofs_get
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
