@@ -59,7 +59,7 @@ tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,
 
 # tokamaker_load_profiles(tMaker_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
-    [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p, c_char_p])
 
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
