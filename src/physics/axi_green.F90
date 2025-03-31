@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file axi_green.F90
 !
 !> Object and supporting functions for axisymmetric coil sets.
@@ -8,14 +10,14 @@
 !! @authors Chris Hansen
 !! @date March 2014
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE axi_green
 USE oft_base
 IMPLICIT NONE
 PRIVATE
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC :: axi_coil_set
   INTEGER(i4) :: ncoils = 0
   REAL(r8) :: curr = 0.d0
@@ -23,13 +25,13 @@ TYPE, PUBLIC :: axi_coil_set
   REAL(r8), POINTER, DIMENSION(:,:) :: pt => NULL()
 END TYPE axi_coil_set
 REAL(r8), PARAMETER :: ROFF = 1.d-13
-PUBLIC green, grad_green, decay_eigenmodes, green_brute
+PUBLIC green, grad_green, green_brute
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Computes Carlson's elliptic integral of the first kind, RF(x; y; z). x, y, and z must be
 !! nonnegative, and at most one can be zero. TINY must be at least 5 times the machine
 !! undeflow limit, BIG at most one fifth the machine overflow limit.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION rf(x,y,z)
 REAL(r8), INTENT(in) :: x,y,z
 REAL(r8) :: rf,alamb,ave,delx,dely,delz,e2
@@ -69,12 +71,12 @@ e2=delx*dely-delz**2
 e3=delx*dely*delz
 rf=(1.d0+(C1*e2-C2-C3*e3)*e2+C4*e3)/SQRT(ave)
 END FUNCTION rf
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Computes Carlson's elliptic integral of the second kind, RD(x; y; z). x and y must be
 !! nonnegative, and at most one can be zero. z must be positive. TINY must be at least twice
 !! the negative 2/3 power of the machine overflow limit. BIG must be at most 0:1ERRTOL
 !! times the negative 2/3 power of the machine underflow limit.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION rd(x,y,z)
 REAL(r8), INTENT(in) :: x,y,z
 REAL(r8) :: rd,alamb,ave,delx,dely,delz,ea,eb
@@ -123,20 +125,20 @@ ee=ed+ec+ec
 rd=3.d0*loc_sum+fac*(1.d0+ed*(-C1+C5*ed-C6*delz*ee) &
   + delz*(C2*ee+delz*(-C3*ec+delz*C4*ea)))/(ave*SQRT(ave))
 END FUNCTION rd
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Legendre elliptic integral of the 1st kind F(; k), evaluated using Carlson's function RF.
 !! The argument ranges are 0 =2, 0 ksin 1.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION ellf(phi,ak)
 REAL(r8), INTENT(in) :: phi,ak
 REAL(r8) :: ellf,s
 s=sin(phi)
 ellf=s*rf(cos(phi)**2,(1.d0-s*ak)*(1.d0+s*ak),1.d0)
 END FUNCTION ellf
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Legendre elliptic integral of the 2nd kind E(; j), evaluated using Carlson's functions RD
 !! and RF. The argument ranges are 0 =2, 0 ksin 1.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION elle(phi,ak)
 REAL(r8), INTENT(in) :: phi,ak
 REAL(r8) :: elle,cc,q,s
@@ -145,12 +147,12 @@ cc=cos(phi)**2
 q=(1.d0-s*ak)*(1.d0+s*ak)
 elle=s*(rf(cc,q,1.d0)-((s*ak)**2)*rd(cc,q,1.d0)/3.d0)
 END FUNCTION elle
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Evaluate Green's function for axisymmetric current filament
 !!
 !! Legendre elliptic integral of the 2nd kind E(; k), evaluated using Carlson's functions RD
 !! and RF. The argument ranges are 0    =2, 0  ksin  1.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION green(r,z,rc,zc)
 REAL(r8), intent(in) :: r !< Radial location of observation point
 REAL(r8), intent(in) :: z !< Vertical location of observation point
@@ -174,11 +176,11 @@ ellipe = elle(pi/2.d0,k);
 green = -SQRT(r*rc/k2)*((2.d0 - k2)*ellipk-2.d0*ellipe)/(2.d0*pi)
 IF(kextrap>0.d0)green=green*LOG(kextrap)/LOG(1.d0-k2)
 END FUNCTION green
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Evaluate gradient of Green's function for axisymmetric current filament
 !!
 !! @sa green
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE grad_green(r,z,rc,zc,Fg,Gg)
 REAL(r8), intent(in) :: r !< Radial location of observation point
 REAL(r8), intent(in) :: z !< Vertical location of observation point
@@ -203,9 +205,9 @@ Gg(1) = 0.25d0*(Fg*k2*(r + rc)/(r*rc) - sqrt(k2/(r*rc))*(2.d0*rc-k2*(r + rc))*dK
 Gg(2) = 0.25d0*k2*((z - zc)/(r*rc))*(Fg + sqrt(k2*r*rc)*dKE)/(2.d0*pi)
 Fg=Fg/(2.d0*pi)
 END SUBROUTINE grad_green
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Evaluate Green's function using brute force integration with 360 points
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION green_brute(r,z,rc,zc)
 REAL(r8), intent(in) :: r !< Radial location of observation point
 REAL(r8), intent(in) :: z !< Vertical location of observation point
@@ -224,49 +226,4 @@ DO i=1,360
 END DO
 green_brute=green_brute*r/(4.d0*pi)
 END FUNCTION green_brute
-!------------------------------------------------------------------------------
-!> Needs docs
-!------------------------------------------------------------------------------
-SUBROUTINE decay_eigenmodes(ncoils,rc,eig_val,eig_vec,eta)
-INTEGER(i4), INTENT(in) :: ncoils
-REAL(r8), INTENT(in) :: rc(2,ncoils)
-REAL(r8), intent(out) :: eig_val(ncoils),eig_vec(ncoils,ncoils)
-REAL(r8), OPTIONAL, INTENT(in) :: eta(ncoils)
-!---
-INTEGER(i4) :: i,j,info,N,LDVL,LDVR,LDA,LWORK
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: WR,WI,WORK
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: Amat,VL,VR
-CHARACTER(LEN=1) :: JOBVL,JOBVR
-!--- Create coupling matrix
-ALLOCATE(Amat(ncoils,ncoils))
-!$omp parallel do private(j)
-DO i=1,ncoils
-  DO j=1,ncoils
-    Amat(i,j)=green(rc(1,i),rc(2,i),rc(1,j),rc(2,j))/rc(1,i)
-  END DO
-END DO
-!---Set eta profile
-IF(PRESENT(eta))THEN
-  DO i=1,ncoils
-    Amat(i,:)=Amat(i,:)/eta(i)
-  END DO
-END IF
-!--- Compute eigenvalues
-JOBVL = 'V'
-JOBVR = 'V'
-N = ncoils
-LDA = ncoils
-LDVL = ncoils
-LDVR = ncoils
-ALLOCATE(WR(N),WI(N),VL(LDVL,N),VR(LDVR,N),WORK(1))
-LWORK=-1
-CALL DGEEV(JOBVL, JOBVR, N, Amat, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
-LWORK=INT(WORK(1),4)
-DEALLOCATE(WORK)
-ALLOCATE(WORK(LWORK))
-CALL DGEEV(JOBVL, JOBVR, N, Amat, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
-eig_val=-1.d0/WR
-eig_vec=REAL(VR,8)
-DEALLOCATE(WI,WR,VL,VR,WORK,Amat)
-END SUBROUTINE decay_eigenmodes
 END MODULE axi_green

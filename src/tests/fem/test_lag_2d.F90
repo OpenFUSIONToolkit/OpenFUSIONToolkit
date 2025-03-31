@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_blag.F90
 !
 !> Regression tests for boundary scalar Lagrange finite elements. Tests are
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_lag_2d
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
@@ -21,8 +23,7 @@ USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
-USE oft_lag_basis, ONLY: oft_lag_setup!, &
-  ! ML_oft_lagrange, ML_oft_blagrange, ML_oft_vlagrange
+USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zerob
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
@@ -46,24 +47,24 @@ CLOSE(io_unit)
 !---Setup grid
 CALL multigrid_construct_surf(mg_mesh)
 IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup I/0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL plot_file%setup("Test")
 CALL mg_mesh%smesh%setup_io(plot_file,order)
 !---
 CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
 blag_zerob%ML_lag_rep=>ML_oft_blagrange
 !---Run tests
-! oft_env%pm=.FALSE.
+oft_env%pm=.FALSE.
 CALL test_lap
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_lap
 !---Create solver objects
 CLASS(oft_solver), POINTER :: linv => NULL()

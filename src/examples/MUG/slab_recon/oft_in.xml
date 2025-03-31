@@ -1,0 +1,12 @@
+<oft>
+  <xmhd>
+    <pre type="gmres">
+      <its>8</its>
+      <nrits>8</nrits>
+      <pre type="block_jacobi">
+        <nlocal>-1</nlocal>
+        <solver type="ilu"></solver>
+      </pre>
+    </pre>
+  </xmhd>
+</oft>

@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_petsc_solvers.F90
 !
 !> PETSc solver implementations
@@ -22,7 +24,7 @@
 !! @authors Chris Hansen
 !! @date January 2013
 !! @ingroup doxy_oft_petsc_la
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_petsc_solvers
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
@@ -51,18 +53,18 @@ USE petscpc
 #endif
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc factorization package information
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: oft_petsc_factordef
   CHARACTER(LEN=6) :: type = 'lu' !< Factor type
   CHARACTER(LEN=6) :: package = 'superd' !< Factor package
 end type oft_petsc_factordef
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc abstract preconditioner class
 !!
 !! @note If called from a native solver a solver wrapper will be created
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, abstract, public, extends(oft_solver) :: oft_petsc_precond
   TYPE(tpc) :: pre_obj !< PETSc preconditioner object
   TYPE(tksp) :: solver !< PETSc solver object
@@ -76,12 +78,12 @@ contains
   !> Destory wrapper solver
   PROCEDURE :: delete => precond_delete
 end type oft_petsc_precond
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc multi-grid preconditioner
 !!
 !! Use PETSc multi-grid framework for preconditioning. V and W cycle types are
 !! supported. Galerkin construction of sub-level matrices is also available.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_mgprecond
   TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: I => NULL() !< Interpolation matrices
   TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: Mats => NULL() !< Operator matrices
@@ -96,9 +98,9 @@ contains
    !> Setup preconditioner
   procedure :: setup => mgprecond_setup
 end type oft_petsc_mgprecond
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc diagonal preconditioning
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_diagprecond
 contains
   !> Setup preconditioner
@@ -106,17 +108,17 @@ contains
   !> Print solver information
   PROCEDURE :: view => diagprecond_view
 end type oft_petsc_diagprecond
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc LU factorization/solve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_luprecond
 contains
   !> Setup preconditioner
   procedure :: setup => luprecond_setup
 end type oft_petsc_luprecond
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc Additive-Schwarz preconditioner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_asprecond
   INTEGER(i4) :: overlap = 1 !< Size of domain overlap
   INTEGER(i4) :: n_local = 0 !< Use local field partitioning?
@@ -127,9 +129,9 @@ contains
   !> Setup solver from XML node
   PROCEDURE :: setup_from_xml => asprecond_setup_xml
 end type oft_petsc_asprecond
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc abstract solver class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, abstract, public, extends(oft_solver) :: oft_petsc_solver
   TYPE(tksp) :: solver !< PETSc solver object
   LOGICAL :: dist = .FALSE. !< Matrix/Vector are distributed
@@ -141,11 +143,11 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => petsc_solver_delete
 end type oft_petsc_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc Conjugate-Gradient solver
 !!
 !! @note Matrix must be SPD, otherwise solver will fail.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_solver) :: oft_petsc_cg_solver
 contains
   !> Solve system
@@ -157,9 +159,9 @@ contains
   !> Setup PETSc solver object
   PROCEDURE :: setup_ksp => cg_setup_ksp
 end type oft_petsc_cg_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc GMRES solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_solver) :: oft_petsc_gmres_solver
   integer(i4) :: nrits=10 !< Number of iterations before restart
   integer(i4) :: algorithm=1 !< Algorithm type
@@ -173,20 +175,20 @@ contains
   !> Setup PETSc solver object
   PROCEDURE :: setup_ksp => gmres_setup_ksp
 end type oft_petsc_gmres_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc Point-Jacobi solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_solver) :: oft_petsc_jacobi_solver
   REAL(r8) :: df = .9d0 !< Damping factor
 contains
   !> Solve system
   procedure :: apply => jacobi_solver_apply
 end type oft_petsc_jacobi_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc symmetric Point-Jacobi solver
 !!
 !! @sa oft_native_solvers::oft_jblock_precond
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_solver) :: oft_petsc_sjacobi_solver
   REAL(r8) :: df = .9d0 !< Damping factor
   logical, private :: down=.TRUE. !< Internal flag for smoother step
@@ -200,12 +202,12 @@ contains
   !> Setup solver from XML node
   procedure :: setup_from_xml => sjacobi_setup_xml
 end type oft_petsc_sjacobi_solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> PETSc direct solver (LU factorization)
 !!
 !! Use PETSc direct solver, LU decomposition, to invert system. Actual solve
 !! employs a GMRES method preconditioned by an LU factorization.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public, extends(oft_petsc_solver) :: oft_petsc_direct_solver
   TYPE(oft_petsc_factordef) :: pre_factor !< PETSc factor definition
 contains
@@ -220,12 +222,12 @@ contains
 end type oft_petsc_direct_solver
 !---Start subroutines
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cast a vector object to a oft_petsc_vector
 !!
 !! The source vector must be @ref oft_petsc_vector or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION petsc_solver_cast(self,source) result(success)
 CLASS(oft_petsc_solver), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_solver), target, intent(in) :: source !< Source solver to cast
@@ -240,9 +242,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION petsc_solver_cast
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine petsc_solver_setup(self)
 class(oft_petsc_solver), intent(inout) :: self !< Solver object
 CLASS(oft_petsc_matrix), pointer :: mat,pmat
@@ -280,9 +282,9 @@ CALL KSPGetPC(self%solver,pc,ierr)
 CALL PCSetType(pc,PCNONE,ierr)
 DEBUG_STACK_POP
 end subroutine petsc_solver_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update solver after updating settings/matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 recursive subroutine petsc_solver_update(self,new_pattern)
 class(oft_petsc_solver), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
@@ -314,16 +316,16 @@ IF(self%initialized)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine petsc_solver_update
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup PETSc ksp object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine petsc_solver_setup_ksp(self,ksp)
 class(oft_petsc_solver), intent(inout) :: self !< Solver object
 TYPE(tksp), intent(inout) :: ksp
 end subroutine petsc_solver_setup_ksp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete PETSc solver
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine petsc_solver_delete(self)
 class(oft_petsc_solver), intent(inout) :: self !< Solver object
 integer(i4) :: ierr
@@ -333,9 +335,9 @@ NULLIFY(self%A)
 self%initialized=.FALSE.
 DEBUG_STACK_POP
 end subroutine petsc_solver_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup performance monitor for PETSc solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine petsc_solver_setup_pm(ksp)
 TYPE(tksp), INTENT(inout) :: ksp
 INTEGER(i4) :: ierr
@@ -343,12 +345,12 @@ TYPE(tPetscViewer) :: vf
 CALL PetscViewerAndFormatCreate(PETSC_VIEWER_STDOUT_WORLD,PETSC_VIEWER_DEFAULT,vf,ierr)
 CALL KSPMonitorSet(ksp,KSPMonitorResidual,vf,PetscViewerAndFormatDestroy,ierr)
 end subroutine petsc_solver_setup_pm
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_cg_solver
 !!
 !! The source solver must be @ref oft_petsc_cg_solver or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION petsc_cg_solver_cast(self,source) result(success)
 type(oft_petsc_cg_solver), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_solver), target, intent(in) :: source !< Source solver to cast
@@ -363,10 +365,10 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION petsc_cg_solver_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve a linear system using PETSc's implementation of the Conjugate-Gradient
 !! method
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cg_solver_apply(self,u,g)
 class(oft_petsc_cg_solver), intent(inout) :: self !< Solver object
 CLASS(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
@@ -405,9 +407,9 @@ IF(self%full_residual)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine cg_solver_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup CG solver from XML definition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cg_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_cg_solver), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
@@ -470,9 +472,9 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','cg_setup_xml',__FILE__)
 #endif
 end subroutine cg_setup_xml
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Print solver configuration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cg_view(self)
 class(oft_petsc_cg_solver), intent(inout) :: self !< Solver object
 !---
@@ -483,9 +485,9 @@ IF(ASSOCIATED(self%pre))THEN
   CALL self%pre%view
 END IF
 end subroutine cg_view
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup PETSc ksp object for CG
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cg_setup_ksp(self,ksp)
 CLASS(oft_petsc_cg_solver), INTENT(inout) :: self !< Solver object
 TYPE(tksp), INTENT(inout) :: ksp !< PETSc KSP object
@@ -514,12 +516,12 @@ IF(ASSOCIATED(pre))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine cg_setup_ksp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_gmres_solver
 !!
 !! The source solver must be @ref oft_petsc_gmres_solver or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION petsc_gmres_solver_cast(self,source) result(success)
 type(oft_petsc_gmres_solver), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_solver), target, intent(in) :: source !< Source solver to cast
@@ -534,9 +536,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION petsc_gmres_solver_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve a linear system using PETSc's implementation of the FGMRES method
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine gmres_solver_apply(self,u,g)
 class(oft_petsc_gmres_solver), intent(inout) :: self !< Solver object
 CLASS(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
@@ -579,9 +581,9 @@ IF(self%full_residual)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine gmres_solver_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup FGMRES solver from XML definition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gmres_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_gmres_solver), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
@@ -656,9 +658,9 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','gmres_setup_xml',__FILE__)
 #endif
 end subroutine gmres_setup_xml
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Print solver configuration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gmres_view(self)
 class(oft_petsc_gmres_solver), intent(inout) :: self !< Solver object
 !---
@@ -670,9 +672,9 @@ IF(ASSOCIATED(self%pre))THEN
   CALL self%pre%view
 END IF
 end subroutine gmres_view
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup PETSc ksp object for FGMRES
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gmres_setup_ksp(self,ksp)
 class(oft_petsc_gmres_solver), intent(inout) :: self !< Solver object
 TYPE(tksp), INTENT(inout) :: ksp !< PETSc KSP object
@@ -711,12 +713,12 @@ IF(ASSOCIATED(pre))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine gmres_setup_ksp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_jacobi_solver
 !!
 !! The source solver must be @ref oft_petsc_jacobi_solver or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION petsc_jacobi_solver_cast(self,source) result(success)
 type(oft_petsc_jacobi_solver), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_solver), target, intent(in) :: source !< Source solver to cast
@@ -731,9 +733,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION petsc_jacobi_solver_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve a linear system using PETSc's implementation of the Point-Jacobi method
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine jacobi_solver_apply(self,u,g)
 class(oft_petsc_jacobi_solver), intent(inout) :: self !< Solver object
 class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
@@ -802,12 +804,12 @@ uv%loc_current=.FALSE.
 gv%loc_current=.FALSE.
 DEBUG_STACK_POP
 end subroutine jacobi_solver_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_sjacobi_solver
 !!
 !! The source solver must be @ref oft_petsc_sjacobi_solver or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION petsc_sjacobi_solver_cast(self,source) result(success)
 type(oft_petsc_sjacobi_solver), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_solver), target, intent(in) :: source !< Source solver to cast
@@ -822,9 +824,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION petsc_sjacobi_solver_cast
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Apply 1-step of a symmetric Jacobi smoother with PETSc matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine sjacobi_solver_apply(self,u,g)
 class(oft_petsc_sjacobi_solver), intent(inout) :: self !< Solver object
 class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
@@ -892,9 +894,9 @@ call q%delete
 nullify(p,q)
 DEBUG_STACK_POP
 end subroutine sjacobi_solver_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup symmetric Jacobi solver from XML definition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine sjacobi_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_sjacobi_solver), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
@@ -946,12 +948,12 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','sjacobi_setup_xml',__FILE__)
 #endif
 end subroutine sjacobi_setup_xml
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_direct_solver
 !!
 !! The source solver must be @ref oft_petsc_direct_solver or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION petsc_direct_solver_cast(self,source) result(success)
 type(oft_petsc_direct_solver), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_solver), target, intent(in) :: source !< Source solver to cast
@@ -966,9 +968,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION petsc_direct_solver_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve a linear system using a direct solver through PETSc (LU factorization)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine direct_solver_apply(self,u,g)
 class(oft_petsc_direct_solver), intent(inout) :: self !< Solver object
 class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
@@ -1006,9 +1008,9 @@ IF(self%full_residual)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine direct_solver_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup direct solver from XML definition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine direct_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_direct_solver), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
@@ -1037,9 +1039,9 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','direct_setup_xml',__FILE__)
 #endif
 end subroutine direct_setup_xml
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Print solver configuration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine direct_view(self)
 class(oft_petsc_direct_solver), intent(inout) :: self !< Solver object
 !---
@@ -1051,9 +1053,9 @@ IF(ASSOCIATED(self%pre))THEN
   CALL self%pre%view
 END IF
 end subroutine direct_view
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup PETSc ksp object for direct solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine direct_setup_ksp(self,ksp)
 class(oft_petsc_direct_solver), intent(inout) :: self !< Solver object
 TYPE(tksp), INTENT(inout) :: ksp !< PETSc KSP solver object
@@ -1070,12 +1072,12 @@ CALL KSPSetTolerances(ksp,self%rtol,self%atol, &
 PETSC_DEFAULT_REAL,its,ierr)
 DEBUG_STACK_POP
 end subroutine direct_setup_ksp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_precond
 !!
 !! The source solver must be @ref oft_petsc_precond or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION petsc_precond_cast(self,source) result(success)
 class(oft_petsc_precond), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_solver), target, intent(in) :: source !< Source solver to cast
@@ -1090,9 +1092,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION petsc_precond_cast
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update preconditioner after changing settings/operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 recursive subroutine precond_update(self,new_pattern)
 class(oft_petsc_precond), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
@@ -1117,9 +1119,9 @@ IF(self%initialized)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine precond_update
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Precondition a linear system using one iteration of a PETSc preconditioner
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine precond_apply(self,u,g)
 class(oft_petsc_precond), intent(inout) :: self !< Solver object
 class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
@@ -1161,9 +1163,9 @@ uv%loc_current=.FALSE.
 gv%loc_current=.FALSE.
 DEBUG_STACK_POP
 end subroutine precond_apply
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete PETSc solver
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine precond_delete(self)
 class(oft_petsc_precond), intent(inout) :: self !< Solver object
 integer(i4) :: ierr
@@ -1173,21 +1175,21 @@ NULLIFY(self%A)
 self%initialized=.FALSE.
 DEBUG_STACK_POP
 end subroutine precond_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup preconditioner
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine precond_dummy_setup(self,pc,dist)
 CLASS(oft_petsc_precond), INTENT(inout) :: self !< Solver object
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
 LOGICAL, INTENT(in) :: dist !< Flag for local vs distributed solve?
 CALL oft_abort('No preconditioner type set.','precond_dummy_setup',__FILE__)
 end subroutine precond_dummy_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_diagprecond
 !!
 !! The source solver must be @ref oft_petsc_diagprecond or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION petsc_diagprecond_cast(self,source) result(success)
 type(oft_petsc_diagprecond), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_solver), target, intent(in) :: source !< Source solver to cast
@@ -1202,9 +1204,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION petsc_diagprecond_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup diagonal preconditioner
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine diagprecond_setup(self,pc,dist)
 CLASS(oft_petsc_diagprecond), INTENT(inout) :: self !< Solver object
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
@@ -1216,16 +1218,16 @@ DEBUG_STACK_PUSH
 CALL PCSetType(pc,PCJACOBI,ierr)
 DEBUG_STACK_POP
 end subroutine diagprecond_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Print solver configuration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine diagprecond_view(self)
 class(oft_petsc_diagprecond), intent(inout) :: self !< Solver object
 WRITE(*,*)'PETSc Point-Jacobi'
 end subroutine diagprecond_view
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup LU factorization preconditioner
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine luprecond_setup(self,pc,dist)
 CLASS(oft_petsc_luprecond), INTENT(inout) :: self !< Solver object
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
@@ -1239,9 +1241,9 @@ CALL PCSetType(pc,PCLU,ierr)
 CALL set_solver_package(pc,OFT_PETSC_LU,ierr)
 DEBUG_STACK_POP
 end subroutine luprecond_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup multi-grid preconditioner
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mgprecond_setup(self,pc,dist)
 CLASS(oft_petsc_mgprecond), INTENT(inout) :: self !< Solver object
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
@@ -1252,9 +1254,9 @@ TYPE(tpc) :: pc_local,sub_pc
 INTEGER(i4) :: i,j,n_local,ierr
 CHARACTER(LEN=20) :: prefix
 DEBUG_STACK_PUSH
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Basic preconditioner setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 CALL PCSetType(pc,PCMG,ierr)
 CALL PCMGSetLevels(pc,self%nlevels,PETSC_NULL_INTEGER,ierr)
 CALL PCMGSetType(pc,PC_MG_MULTIPLICATIVE,ierr)
@@ -1270,9 +1272,9 @@ ELSE IF(self%cycle_type=="w".OR.self%cycle_type=="W")THEN
 ELSE
   CALL oft_abort('Invalid cycle type.','mgprecond_setup',__FILE__)
 END IF
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Loop over levels
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 DO i=1,self%nlevels
   IF(i>1)THEN
     !---Set interpolation matrices
@@ -1340,9 +1342,9 @@ CALL PCMGGetCoarseSolve(pc,ksp,ierr)
 !CALL PCView(pc,PETSC_VIEWER_STDOUT_SELF,ierr)
 DEBUG_STACK_POP
 end subroutine mgprecond_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup additiv Schwarz preconditioner
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine asprecond_setup(self,pc,dist)
 CLASS(oft_petsc_asprecond), INTENT(inout) :: self !< Solver object
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
@@ -1411,9 +1413,9 @@ END DO
 DEALLOCATE(ksp)
 DEBUG_STACK_POP
 end subroutine asprecond_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup additive Schwarz preconditioner from XML definition
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine asprecond_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_asprecond), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
@@ -1467,18 +1469,18 @@ DEBUG_STACK_POP
 CALL oft_abort('OFT not compiled with xml support.','asprecond_setup_xml',__FILE__)
 #endif
 end subroutine asprecond_setup_xml
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set factorization package for PETSc PC object
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine set_solver_package(pc,sol_type,ierr)
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
 CHARACTER(LEN=*), INTENT(IN) :: sol_type !< Solver type
 INTEGER(i4), INTENT(out) :: ierr !< Error flag
 CALL PCFactorSetMatSolverType(pc,sol_type,ierr)
 end subroutine set_solver_package
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Create PETSc LU PC object
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine create_lu_pc(self,pc)
 CLASS(oft_petsc_factordef), INTENT(inout) :: self !< Solver object
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
@@ -1513,9 +1515,9 @@ IF(factor_req)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine create_lu_pc
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup LU preconditioner object from XML definition
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine lu_pc_load_xml(self,solver_node,level)
 CLASS(oft_petsc_factordef), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition

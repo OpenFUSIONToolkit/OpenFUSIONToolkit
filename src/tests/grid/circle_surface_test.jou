@@ -15,19 +15,18 @@ mesh surface 1
 #
 block 1 surface 1
 block 1 element type tri3
-export Genesis  "circle_tri3_test.in.e" block 1 overwrite
+export Genesis  "circle_tri3_test.g" block 1 overwrite
 block 1 element type tri6
-export Genesis  "circle_tri6_test.in.e" block 1 overwrite
+export Genesis  "circle_tri6_test.g" block 1 overwrite
 
 #
 delete mesh surface 1 propagate
 surface 1 scheme pave
-mesh surface 1
 surface 1 size .05
 mesh surface 1
 #
 block 1 surface 1
 block 1 element type quad4
-export Genesis  "circle_quad4_test.in.e" block 1 overwrite
+export Genesis  "circle_quad4_test.g" block 1 overwrite
 block 1 element type quad9
-export Genesis  "circle_quad9_test.in.e" block 1 overwrite
+export Genesis  "circle_quad9_test.g" block 1 overwrite

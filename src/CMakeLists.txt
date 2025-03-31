@@ -20,6 +20,7 @@ option(OFT_DOCS_ONLY "Build documentation only?" OFF)
 option(OFT_PACKAGE_BUILD "Perform a destributable package?" OFF)
 option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" ON)
 option(OFT_COVERAGE "Build with code coverage information?" OFF)
+option(OFT_TOKAMAKER_LEGACY "Build legacy TokaMaker executables?" OFF)
 set(OFT_MPI_PLEN "4" CACHE STRING "Size of strings for MPI processor index")
 set(OFT_PATH_SLEN "200" CACHE STRING "Size of path strings")
 set(OFT_ERROR_SLEN "200" CACHE STRING "Size of error strings")
@@ -294,6 +295,10 @@ endif()
 ########################
 # Setup component libraries
 ########################
+# Setup component flags
+if( OFT_TOKAMAKER_LEGACY )
+  add_definitions( -DOFT_TOKAMAKER_LEGACY )
+endif()
 # Include files
 add_subdirectory( include )
 include_directories( ${CMAKE_BINARY_DIR}/include )

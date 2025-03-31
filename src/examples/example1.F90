@@ -1,3 +1,8 @@
+!------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !!API Example 1: Helmholtz solve    {#doc_api_ex1}
 !!========================
 !!

@@ -1,12 +1,14 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> Experiment specific components.
 !!
 !! @authors Chris Hansen
 !! @date March 2015
 !! @ingroup doxy_tokamaker
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE exp_geom
 USE oft_base
 USE oft_gs, ONLY: gs_eq
@@ -16,17 +18,17 @@ INTEGER(4) :: ltx_vv_reg = 6
 REAL(8) :: ltx_vv_amp = 2.d1
 PUBLIC exp_setup
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE exp_setup(gs)
 CLASS(gs_eq), INTENT(inout) :: gs
 INTEGER(4) :: ierr
 CALL ltx_setup(gs,ierr)
 END SUBROUTINE exp_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE ltx_setup(gs,ierr)
 CLASS(gs_eq), INTENT(inout) :: gs
 INTEGER(4), INTENT(out) :: ierr
@@ -41,9 +43,9 @@ WRITE(*,*)
 WRITE(*,'(A)')'*** Setting options for the Lithium Tokamak eXperiment ***'
 gs%set_eta=>ltx_eta_set
 END SUBROUTINE ltx_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION ltx_eta_set(rc,id) RESULT(eta)
 real(8), intent(in) :: rc(2)
 integer(4), intent(in) :: id
@@ -55,23 +57,25 @@ IF(id==ltx_vv_reg)THEN
 END IF
 END FUNCTION ltx_eta_set
 END MODULE exp_geom  
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> Handle non-axisymmetric walls
 !!
 !! @authors Chris Hansen
 !! @date July 2017
 !! @ingroup doxy_tokamaker
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE nonax_wall
 USE oft_base
 USE axi_green, ONLY: green
 IMPLICIT NONE
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function biot_savart_elem(rc,thetas,ri_xyz) result(bout)
 real(8), intent(in) :: rc(2,2)
 real(8), intent(in) :: thetas(2)
@@ -116,9 +120,9 @@ bout = bout + cross_product(dl,rsep)/(rmag**3)
 !
 bout=bout/(4.d0*pi)
 end function biot_savart_elem
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE nonax_rescouple(ncoils,rc,extent,result,drivers,ndriver,correction, &
                             sensors,nsensor,inc_mirror,eta,grid_rz,grid_correction)
 INTEGER(4), INTENT(in) :: ncoils
@@ -308,9 +312,9 @@ END IF
 WRITE(*,*)'  Finished'
 DEALLOCATE(vert_couple,etatmp,corr_mat)
 END SUBROUTINE nonax_rescouple
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE nonax_indcouple(ncoils,rc,extent,result,drivers,ndriver,correction, &
                             sensors,nsensor,inc_mirror,grid_rz,grid_correction)
 INTEGER(4), INTENT(in) :: ncoils
@@ -460,9 +464,9 @@ END IF
 WRITE(*,*)'  Finished'
 DEALLOCATE(vert_couple,corr_mat)
 END SUBROUTINE nonax_indcouple
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE nonax_eigs(ncoils,rc,extent,result,eig_ind,correction,sensors,nsensor, &
                       inc_mirror,eta,grid_rz,grid_correction)
 INTEGER(4), INTENT(in) :: ncoils
@@ -697,16 +701,63 @@ END IF
 WRITE(*,*)'  Finished'
 DEALLOCATE(eig_vec,etatmp,corr_mat)
 END SUBROUTINE nonax_eigs
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE decay_eigenmodes(ncoils,rc,eig_val,eig_vec,eta)
+INTEGER(i4), INTENT(in) :: ncoils
+REAL(r8), INTENT(in) :: rc(2,ncoils)
+REAL(r8), intent(out) :: eig_val(ncoils),eig_vec(ncoils,ncoils)
+REAL(r8), OPTIONAL, INTENT(in) :: eta(ncoils)
+!---
+INTEGER(i4) :: i,j,info,N,LDVL,LDVR,LDA,LWORK
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: WR,WI,WORK
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: Amat,VL,VR
+CHARACTER(LEN=1) :: JOBVL,JOBVR
+!--- Create coupling matrix
+ALLOCATE(Amat(ncoils,ncoils))
+!$omp parallel do private(j)
+DO i=1,ncoils
+  DO j=1,ncoils
+    Amat(i,j)=green(rc(1,i),rc(2,i),rc(1,j),rc(2,j))/rc(1,i)
+  END DO
+END DO
+!---Set eta profile
+IF(PRESENT(eta))THEN
+  DO i=1,ncoils
+    Amat(i,:)=Amat(i,:)/eta(i)
+  END DO
+END IF
+!--- Compute eigenvalues
+JOBVL = 'V'
+JOBVR = 'V'
+N = ncoils
+LDA = ncoils
+LDVL = ncoils
+LDVR = ncoils
+ALLOCATE(WR(N),WI(N),VL(LDVL,N),VR(LDVR,N),WORK(1))
+LWORK=-1
+CALL DGEEV(JOBVL, JOBVR, N, Amat, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
+LWORK=INT(WORK(1),4)
+DEALLOCATE(WORK)
+ALLOCATE(WORK(LWORK))
+CALL DGEEV(JOBVL, JOBVR, N, Amat, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
+eig_val=-1.d0/WR
+eig_vec=REAL(VR,8)
+DEALLOCATE(WI,WR,VL,VR,WORK,Amat)
+END SUBROUTINE decay_eigenmodes
 END MODULE nonax_wall
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> Driver program for GS equilibria
 !!
 !! @authors Chris Hansen
 !! @date March 2014
 !! @ingroup doxy_tokamaker
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 program tokamaker_wall
 USE oft_base
 USE oft_sort, ONLY: sort_array
@@ -720,8 +771,7 @@ USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE oft_gs_profiles, ONLY: zero_flux_func
 USE oft_gs, ONLY: gs_eq, gs_setup_walls, gs_cond_source, gs_vacuum_solve
 USE oft_gs_fit, ONLY: fit_load, fit_constraint_ptr, gs_active
-USE axi_green, ONLY: decay_eigenmodes
-USE nonax_wall, ONLY: nonax_rescouple, nonax_indcouple, nonax_eigs
+USE nonax_wall, ONLY: nonax_rescouple, nonax_indcouple, nonax_eigs, decay_eigenmodes
 USE exp_geom, ONLY: exp_setup
 IMPLICIT NONE
 #include "local.h"
@@ -777,13 +827,13 @@ has_plasma,rbounds,zbounds,rmin,R0_target,V0_target,save_mug,fast_boundary, &
 limited_only,eqdsk_filename,eqdsk_nr,eqdsk_nz,eqdsk_rbounds,eqdsk_zbounds,eqdsk_run_info, &
 eqdsk_limiter_file,init_r0,init_a,init_kappa,init_delta
 NAMELIST/tokamaker_wall_options/mirror_wall,grid_3d
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Initialize enviroment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load settings
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,tokamaker_options,IOSTAT=ierr)
 CLOSE(io_unit)
@@ -798,25 +848,24 @@ IF(ierr<0)CALL oft_abort('No "tokamaker_wall_options" found in input file.', &
   'tokamaker_wall',__FILE__)
 IF(ierr>0)CALL oft_abort('Error parsing "tokamaker_wall_options" in input file.', &
   'tokamaker_wall',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Mesh
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL multigrid_construct_surf(mg_mesh)
 CALL mygs%xdmf%setup("TokaMaker")
 CALL mg_mesh%smesh%setup_io(mygs%xdmf,order)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Lagrange Elements
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_oft_blagrange,ML_oft_vlagrange)
 CALL mygs%setup(ML_oft_blagrange)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup experimental geometry
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL exp_setup(mygs)
 mygs%free=.TRUE.
 mygs%pnorm=0.d0
 mygs%alam=1.d-7
-mygs%boundary_limiter=.FALSE.
 mygs%has_plasma=.FALSE.
 mygs%compute_chi=.FALSE.
 IF(TRIM(coil_file)/='none')THEN
@@ -838,14 +887,14 @@ ALLOCATE(zero_flux_func::mygs%I)
 mygs%I%f_offset=0.d0
 ALLOCATE(zero_flux_func::mygs%P)
 CALL compute_eddy(mygs)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Terminate
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine compute_eddy(self)
 type(gs_eq), target, intent(inout) :: self
 TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: conlist => NULL()

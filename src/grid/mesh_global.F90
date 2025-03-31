@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_global.F90
 !
 !> MPI constructs and subroutines for global operations
@@ -16,7 +18,7 @@
 !! @author Chris Hansen
 !! @date Spring 2010
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_global
 USE oft_base
 USE oft_sort, ONLY: sort_array
@@ -27,14 +29,14 @@ USE oft_stitching, ONLY: oft_seam, oft_stitch_check
 IMPLICIT NONE
 #include "local.h"
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Driver for global mesh initialization
 !!
 !! Initialize global mesh enviroment
 !! - Sync mesh information from proc 0 to all
 !! - Set base global geometry counts, indices and boundary info
 !! - Construct lowest level mesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_init(self)
 class(oft_mesh), intent(inout) :: self !< Mesh object
 integer(i4) :: i
@@ -81,14 +83,14 @@ self%global%gbc=self%bc
 self%save%nbf=self%nbf
 DEBUG_STACK_POP
 end subroutine mesh_global_init
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Driver for global mesh initialization
 !!
 !! Initialize global mesh enviroment
 !! - Sync mesh information from proc 0 to all
 !! - Set base global geometry counts, indices and boundary info
 !! - Construct lowest level mesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine bmesh_global_init(self)
 class(oft_mesh), intent(inout) :: self !< Mesh object
 INTEGER(i4) :: i,j,np,nc
@@ -165,14 +167,14 @@ IF(ASSOCIATED(self%ho_info%r))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine bmesh_global_init
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Driver for global mesh initialization
 !!
 !! Initialize global mesh enviroment
 !! - Sync mesh information from proc 0 to all
 !! - Set base global geometry counts, indices and boundary info
 !! - Construct lowest level mesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_global_init(self)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 integer(i4) :: i
@@ -215,12 +217,12 @@ self%pstitch%leo=.TRUE.
 self%estitch%leo=.TRUE.
 DEBUG_STACK_POP
 end subroutine smesh_global_init
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Driver for global seam linkage construction
 !!
 !! Construct inter-processor linkage information
 !! - Link seam points, edges and faces
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_link(self)
 class(oft_mesh), intent(inout) :: self !< Mesh object
 DEBUG_STACK_PUSH
@@ -232,12 +234,12 @@ call mesh_global_flinkage(self) ! Link seam faces
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine mesh_global_link
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Driver for global seam linkage construction
 !!
 !! Construct inter-processor linkage information
 !! - Link seam points, edges and faces
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine bmesh_global_link(self,parent)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 class(oft_mesh), optional, intent(inout) :: parent !< Parent volume mesh (if present)
@@ -254,12 +256,12 @@ END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine bmesh_global_link
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Scatters base mesh information to all processors.
 !!
 !! Scatters mesh information from head task to all other tasks using MPI_BCAST calls.
 !! - Communicates base mesh information (np,nc,lc,r)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_sync(self)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 #ifdef HAVE_MPI
@@ -289,7 +291,7 @@ IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_global_sync',__FILE__)
 DEBUG_STACK_POP
 #endif
 end subroutine mesh_global_sync
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Perform mesh decomposition (METIS) and local construction.
 !! - Decompose domain of head task using METIS library.
 !! - Scatter decomposition to all tasks.
@@ -298,7 +300,7 @@ end subroutine mesh_global_sync
 !! - `part_meth==1`: Partition using METIS library
 !! - `2 <= part_meth <= 4`: Axial spatial partitioning along coordinate `part_meth-1`
 !! - `part_meth==5`: Cylindrical spatial partitioning in azimuthal direction
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_partition(self,meshpart,part_meth)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(i4), intent(inout) :: meshpart(:) !< Partition flag [self%nc]
@@ -437,11 +439,11 @@ call MPI_Bcast(meshpart,self%nc,OFT_MPI_I4,0,oft_env%COMM,ierr) ! Broadcast cell
 #endif
 DEBUG_STACK_POP
 end subroutine mesh_global_partition
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Perform mesh decomposition and local construction.
 !! - Decompose global mesh
 !! - Perform mesh construction of local domain
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_decomp(self,part_meth)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(i4), intent(in) :: part_meth !< Method to use for partitioning (see @ref mesh_global_partition)
@@ -527,9 +529,9 @@ deallocate(lptmp,lctmp,lcctmp,rtmp)
 deallocate(pflag,conflag)
 DEBUG_STACK_POP
 end subroutine mesh_global_decomp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Determine neighboring processors for MPI linkage
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_proccon(self,lptmp,np)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(i4), intent(in) :: lptmp(np) !< List of global point indices from initialization
@@ -593,11 +595,11 @@ enddo
 DEALLOCATE(b)
 DEBUG_STACK_POP
 end subroutine mesh_global_proccon
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct processor to processor point linkage for stitching operations.
 !! - Create linkage of boundary points to other processors
 !! - Determine ownership for shared points
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE mesh_global_plinkage(self)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 TYPE :: pout
@@ -616,9 +618,9 @@ DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Point linkage'
 CALL oft_increase_indent
 IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Determine maximum boundary point count
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nptmp=self%nbp
 nbpmax=self%nbp
 IF(.NOT.self%fullmesh)nbpmax=oft_mpi_max(nptmp)
@@ -626,9 +628,9 @@ IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam points =',nbpm
 self%pstitch%nbemax=nbpmax
 !---Initialize seam structure from mesh
 CALL oft_init_seam(self,self%pstitch)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Temporary linkage array
 ALLOCATE(linktmp(2,(self%periodic%nper+2)*self%nbp,0:self%pstitch%nproc_con))
 linktmp = 0
@@ -673,18 +675,18 @@ IF(.NOT.self%fullmesh)THEN
   END DO
   !---Wait for all processes
   CALL oft_mpi_barrier(ierr)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create Send and Recv calls
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO j=1,self%pstitch%nproc_con
     CALL MPI_ISEND(lpsend(j)%lp,nbpmax,OFT_MPI_I8,self%pstitch%proc_con(j),1,oft_env%COMM,self%pstitch%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','mesh_global_plinkage',__FILE__)
     CALL MPI_IRECV(lprecv(j)%lp,nbpmax,OFT_MPI_I8,self%pstitch%proc_con(j),1,oft_env%COMM,self%pstitch%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','mesh_global_plinkage',__FILE__)
   END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Loop over each connected processor
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO WHILE(.TRUE.)
     !---All recieves have been processed
     IF(oft_mpi_check_reqs(self%pstitch%nproc_con,self%pstitch%recv_reqs))EXIT
@@ -714,9 +716,9 @@ IF(.NOT.self%fullmesh)THEN
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_plinkage",__FILE__)
 #endif
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Check internal connections
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(self%pstitch%leo(self%nbp))
 self%pstitch%leo = .TRUE. ! Default to ownership
 !---Determine location of periodic points on current processor
@@ -731,12 +733,8 @@ IF(self%periodic%nper>0)THEN
     child_list=0
     DO m=1,self%nbp
       mm=self%lbp(m)
-      DO
-        IF(self%periodic%lp(mm)<=0)EXIT
-        mm=self%periodic%lp(mm)
-      END DO
-      IF(mm/=self%lbp(m))THEN
-        mm=bpi(mm)
+      IF(self%periodic%lp(mm)>0)THEN
+        mm=bpi(self%periodic%lp(mm))
         DO i=1,8
           IF(child_list(i,mm)==0)THEN
             child_list(i,mm)=m
@@ -811,9 +809,9 @@ IF(.NOT.self%fullmesh)THEN
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_plinkage",__FILE__)
 #endif
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Condense linkage to sparse rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 self%pstitch%nle=SUM(self%pstitch%kle)
 self%pstitch%kle(self%pstitch%nproc_con+1)=self%pstitch%nle+1
 !---Cumulative unique point linkage count
@@ -860,9 +858,9 @@ DO i=0,self%pstitch%nproc_con
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Clean-up transfers
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(lpsend(1)%lp)
 DEALLOCATE(lpsend(1)%rp)
 IF(.NOT.self%fullmesh)THEN
@@ -879,11 +877,11 @@ DEALLOCATE(lpsend,lprecv)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE mesh_global_plinkage
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct processor to processor edge linkage for stitching operations.
 !! - Create linkage of boundary edges to other processors with orientation.
 !! - Determine ownership for shared edges
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE mesh_global_elinkage(self)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 TYPE :: eout
@@ -903,9 +901,9 @@ DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Edge linkage'
 CALL oft_increase_indent
 IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Determine maximum boundary edge count
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 netmp=self%nbe
 nbemax=self%nbe
 IF(.NOT.self%fullmesh)nbemax=oft_mpi_max(netmp)
@@ -913,9 +911,9 @@ IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam edges =',nbema
 self%estitch%nbemax=nbemax
 !---Initialize seam structure from mesh
 CALL oft_init_seam(self,self%estitch)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Temporary linkage array
 ALLOCATE(linktmp(2,(self%periodic%nper+2)*self%nbe,0:self%estitch%nproc_con))
 linktmp = 0
@@ -987,18 +985,18 @@ IF(.NOT.self%fullmesh)THEN
   END DO
   !---Wait for all processes
   CALL oft_mpi_barrier(ierr)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create Send and Recv calls
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO j=1,self%estitch%nproc_con
     CALL MPI_ISEND(lesend(j)%le,nbemax,OFT_MPI_I8,self%estitch%proc_con(j),1,oft_env%COMM,self%estitch%send_reqs(j), ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','mesh_global_elinkage',__FILE__)
     CALL MPI_IRECV(lerecv(j)%le,nbemax,OFT_MPI_I8,self%estitch%proc_con(j),1,oft_env%COMM,self%estitch%recv_reqs(j), ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','mesh_global_elinkage',__FILE__)
   END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Loop over each connected processor
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO WHILE(.TRUE.)
     !---All recieves have been processed
     IF(oft_mpi_check_reqs(self%estitch%nproc_con,self%estitch%recv_reqs))EXIT
@@ -1029,9 +1027,9 @@ IF(.NOT.self%fullmesh)THEN
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_elinkage",__FILE__)
 #endif
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Check internal connections
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(self%estitch%leo(self%nbe))
 self%estitch%leo = .TRUE. ! Default to ownership
 !---Determine location of periodic edges on current processor
@@ -1046,12 +1044,8 @@ IF(self%periodic%nper>0)THEN
     child_list=0
     DO m=1,self%nbe
       mm=self%lbe(m)
-      DO
-        IF(self%periodic%le(mm)<=0)EXIT
-        mm=self%periodic%le(mm)
-      END DO
-      IF(mm/=self%lbe(m))THEN
-        mm=bei(mm)
+      IF(self%periodic%le(mm)>0)THEN
+        mm=bei(self%periodic%le(mm))
         DO i=1,4
           IF(child_list(i,mm)==0)THEN
             child_list(i,mm)=m
@@ -1073,8 +1067,8 @@ IF(self%periodic%nper>0)THEN
           lesend(1)%re(child_list(i,m))=-1.d0
           neel=neel+2
           IF(set_gbe)THEN ! Edge is not on global boundary
-            self%global%gbe(mm)=.FALSE.
-            self%global%gbe(self%periodic%le(mm))=.FALSE.
+            self%global%gbe(self%lbe(m))=.FALSE.
+            self%global%gbe(self%lbe(child_list(i,m)))=.FALSE.
           END IF
           !---Link other child edges to eachother
           DO j=i+1,4
@@ -1135,9 +1129,9 @@ IF(.NOT.self%fullmesh)THEN
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_elinkage",__FILE__)
 #endif
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Condense linkage to sparse rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 self%estitch%nle=SUM(self%estitch%kle)
 self%estitch%kle(self%estitch%nproc_con+1)=self%estitch%nle+1
 DO i=self%estitch%nproc_con,0,-1 ! cumulative unique edge linkage count
@@ -1183,9 +1177,9 @@ DO i=0,self%estitch%nproc_con
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Clean-up transfers
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(lesend(1)%le)
 DEALLOCATE(lesend(1)%re)
 IF(.NOT.self%fullmesh)THEN
@@ -1202,12 +1196,12 @@ DEALLOCATE(lesend,lerecv)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE mesh_global_elinkage
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct processor to processor face linkage for stitching operations.
 !! - Create linkage of boundary faces to other processors.
 !! - Determine ownership for shared faces
 !! - Set global boundary face flag
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE mesh_global_flinkage(self)
 class(oft_mesh), intent(inout) :: self !< Mesh object
 TYPE :: fout
@@ -1227,9 +1221,9 @@ DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Face linkage'
 CALL oft_increase_indent
 IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Determine maximum boundary face count
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nftmp=self%nbf
 nbfmax=self%nbf
 IF(.NOT.self%fullmesh)nbfmax=oft_mpi_max(nftmp)
@@ -1237,9 +1231,9 @@ IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam faces =',nbfma
 self%fstitch%nbemax=nbfmax
 !---Initialize seam structure from mesh
 CALL oft_init_seam(self,self%fstitch)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Temporary linkage array
 ALLOCATE(linktmp(2,self%nbf,0:self%fstitch%nproc_con))
 linktmp = 0
@@ -1305,18 +1299,18 @@ IF(.NOT.self%fullmesh)THEN
   END DO
   !---Wait for all processes
   CALL oft_mpi_barrier(ierr)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create Send and Recv calls
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO j=1,self%fstitch%nproc_con
     CALL MPI_ISEND(lfsend(j)%lf,nbfmax,OFT_MPI_I8,self%fstitch%proc_con(j),1,oft_env%COMM,self%fstitch%send_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','mesh_global_flinkage',__FILE__)
     CALL MPI_IRECV(lfrecv(j)%lf,nbfmax,OFT_MPI_I8,self%fstitch%proc_con(j),1,oft_env%COMM,self%fstitch%recv_reqs(j),ierr)
     IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','mesh_global_flinkage',__FILE__)
   END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Loop over each connected processor
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO WHILE(.TRUE.)
     IF(oft_mpi_check_reqs(self%fstitch%nproc_con,self%fstitch%recv_reqs))EXIT ! All recieves have been processed
     CALL oft_mpi_waitany(self%fstitch%nproc_con,self%fstitch%recv_reqs,j,ierr) ! Wait for completed recieve
@@ -1345,9 +1339,9 @@ IF(.NOT.self%fullmesh)THEN
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_flinkage",__FILE__)
 #endif
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Check internal connections
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(self%fstitch%leo(self%nbf))
 self%fstitch%leo = .TRUE. ! Default to ownership
 !---Determine location of periodic faces on current processor
@@ -1422,9 +1416,9 @@ IF(.NOT.self%fullmesh)THEN
 CALL oft_abort("Distributed mesh requires MPI","mesh_global_flinkage",__FILE__)
 #endif
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Condense linkage to sparse rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 self%fstitch%nle=sum(self%fstitch%kle)
 self%fstitch%kle(self%fstitch%nproc_con+1)=self%fstitch%nle+1
 DO i=self%fstitch%nproc_con,0,-1 ! cumulative unique edge linkage count
@@ -1475,9 +1469,9 @@ DO i=0,self%fstitch%nproc_con
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Clean-up transfers
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(lfsend(1)%lf)
 DEALLOCATE(lfsend(1)%rf)
 IF(.NOT.self%fullmesh)THEN
@@ -1504,11 +1498,11 @@ DEALLOCATE(lfsend,lfrecv)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE mesh_global_flinkage
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct processor to processor point linkage for stitching operations.
 !! - Create linkage of boundary points to other processors
 !! - Determine ownership for shared points
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE plinkage_from_parent(self,parent)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 class(oft_mesh), intent(inout) :: parent !< Parent volume mesh
@@ -1535,9 +1529,9 @@ DO i=1,self%pstitch%nproc_con
   END DO
   self%pstitch%kle(i)=m
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Condense linkage to sparse rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 self%pstitch%nle=SUM(self%pstitch%kle)
 self%pstitch%kle(self%pstitch%nproc_con+1)=self%pstitch%nle+1
 !---Cumulative unique point linkage count
@@ -1567,9 +1561,9 @@ DO i=1,self%pstitch%nproc_con
   ALLOCATE(self%pstitch%recv(i)%v(self%pstitch%recv(i)%n))
 END DO
 !!$omp end parallel
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Assemble ownership tag of local boundary points
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(lpbound)
 ALLOCATE(lpbound(parent%np))
 CALL get_inverse_map(parent%lbp,parent%nbp,lpbound,parent%np)
@@ -1580,18 +1574,18 @@ DO i=1,self%nbp
     self%pstitch%leo(i) = parent%pstitch%leo(lpbound(k))
   END IF
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Clean-up
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Deallocate temporary work arrays
 DEALLOCATE(lpbound,lploc)
 DEBUG_STACK_POP
 END SUBROUTINE plinkage_from_parent
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Construct processor to processor edge linkage for stitching operations.
 !! - Create linkage of boundary edges to other processors with orientation.
 !! - Determine ownership for shared edges
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE elinkage_from_parent(self,parent)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 class(oft_mesh), intent(inout) :: parent !< Parent volume mesh
@@ -1618,9 +1612,9 @@ DO i=1,self%estitch%nproc_con
   END DO
   self%estitch%kle(i)=m
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Condense linkage to sparse rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 self%estitch%nle=SUM(self%estitch%kle)
 self%estitch%kle(self%estitch%nproc_con+1)=self%estitch%nle+1
 !---Cumulative unique point linkage count
@@ -1650,9 +1644,9 @@ DO i=1,self%estitch%nproc_con
   ALLOCATE(self%estitch%recv(i)%v(self%estitch%recv(i)%n))
 END DO
 !!$omp end parallel
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Assemble ownership tag of local boundary points
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(lebound)
 ALLOCATE(lebound(parent%ne))
 CALL get_inverse_map(parent%lbe,parent%nbe,lebound,parent%ne)
@@ -1663,9 +1657,9 @@ DO i=1,self%nbe
     self%estitch%leo(i) = parent%estitch%leo(lebound(k))
   END IF
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Clean-up
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Deallocate temporary work arrays
 DEALLOCATE(lebound,leloc)
 DEBUG_STACK_POP

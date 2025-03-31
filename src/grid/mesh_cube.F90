@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_cube.F90
 !
 !> Mesh handling for a 1x1x1 cube test mesh.
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date August 2012
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_cube
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
@@ -32,37 +34,39 @@ public mesh_cube_load, mesh_cube_cadlink, mesh_cube_set_periodic
 public smesh_square_load, smesh_square_cadlink
 public smesh_square_set_periodic
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup a 1x1x1 cube test mesh
 !! The mesh is initialized with a basic set of cells
 !! - 9 Points
 !! - 12 Cells
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_cube_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j,k,ierr,io_unit,mesh_type,ni(3)
 INTEGER(i4), ALLOCATABLE :: pmap(:,:,:)
-REAL(r8) :: rscale(3),shift(3)
+REAL(r8) :: rscale(3),shift(3),packing(3),alpha,beta,xtmp,ytmp,ztmp
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
-namelist/cube_options/mesh_type,ni,rscale,shift,ref_per
+namelist/cube_options/mesh_type,ni,rscale,shift,ref_per,packing
 DEBUG_STACK_PUSH
 mesh_type=1
 ni=1
 rscale=1.d0
 shift=0.d0
+packing=1.d0
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)
   CLOSE(io_unit)
   IF(ierr<0)CALL oft_abort('No "cube_options" found in input file.','mesh_cube_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cube_options" in input file.','mesh_cube_load',__FILE__)
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Generating Cube mesh'
-  WRITE(*,'(2X,A,I4)')     'Mesh Type   = ',mesh_type
-  WRITE(*,'(2X,A,3I4)')    'nx, ny, nz  = ',ni
-  WRITE(*,'(2X,A,3ES11.3)')'Scale facs  = ',rscale
-  WRITE(*,'(2X,A,3L)')     'Periodicity = ',ref_per
+  WRITE(*,'(2A)')oft_indent,'Cube volume mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
+  WRITE(*,'(2A,3I4)')oft_indent,    'nx, ny, nz  = ',ni
+  WRITE(*,'(2A,3ES11.3)')oft_indent,'Scale facs  = ',rscale
+  WRITE(*,'(2A,3L2)')oft_indent,    'Periodicity = ',ref_per
+  WRITE(*,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -104,8 +108,7 @@ IF(mesh_type==1)THEN
     mesh%r(:,9)=(/.5d0,.5d0,.5d0/)
     !---Setup cells
     mesh%nc=12
-    allocate(mesh%lc(4,mesh%nc),mesh%reg(mesh%nc))
-    mesh%reg=1
+    allocate(mesh%lc(4,mesh%nc))
     !---
     mesh%lc(:,1)=(/7,3,9,8/)
     mesh%lc(:,2)=(/4,3,9,7/)
@@ -119,6 +122,25 @@ IF(mesh_type==1)THEN
     mesh%lc(:,10)=(/2,9,5,1/)
     mesh%lc(:,11)=(/9,6,5,1/)
     mesh%lc(:,12)=(/7,6,5,9/)
+    !---
+    DO i=1,3
+      IF(ref_per(i))ni(i)=MAX(2,ni(i))
+      xtmp=LOG(REAL(ni(i),8))/LOG(2.d0)
+      IF(ABS(INT(xtmp)-xtmp)>1.d-8)CALL oft_abort('For Tet meshes values of "ni" must be a power of 2',"mesh_cube_load",__FILE__)
+      ni(i)=INT(xtmp)
+    END DO
+    DO i=1,3
+      DO j=1,ni(i)
+        CALL reflect_tet(i)
+        mesh%r(i,:)=(mesh%r(i,:)+1.d0)/2.d0
+      END DO
+    END DO
+    !---
+    mesh%r(1,:)=mesh%r(1,:)*rscale(1)+shift(1)
+    mesh%r(2,:)=mesh%r(2,:)*rscale(2)+shift(2)
+    mesh%r(3,:)=mesh%r(3,:)*rscale(3)+shift(3)
+    allocate(mesh%reg(mesh%nc))
+    mesh%reg=1
   END IF
 ELSE
   allocate(oft_hexmesh::mg_mesh%meshes(mg_mesh%mgdim))
@@ -138,13 +160,29 @@ ELSE
     ALLOCATE(pmap(ni(1)+1,ni(2)+1,ni(3)+1))
     pmap=-1
     mesh%np=0
+    ! Adjust scales for packing
+    beta = 2.0*(packing(1)-1.0); alpha = -2.0*beta/3.0
+    rscale(1) = rscale(1)/(alpha + beta + 1.d0)
+    beta = 2.0*(packing(2)-1.0); alpha = -2.0*beta/3.0
+    rscale(2) = rscale(2)/(alpha + beta + 1.d0)
+    beta = 2.0*(packing(3)-1.0); alpha = -2.0*beta/3.0
+    rscale(3) = rscale(3)/(alpha + beta + 1.d0)
     DO i=1,ni(1)+1
+      beta = 2.0*(packing(1)-1.0); alpha = -2.0*beta/3.0
+      xtmp = (i-1)/REAL(ni(1),8)
+      xtmp = rscale(1)*(alpha*(xtmp**3) + beta*(xtmp**2) + xtmp)
       DO j=1,ni(2)+1
+        beta = 2.0*(packing(2)-1.0); alpha = -2.0*beta/3.0
+        ytmp = (j-1)/REAL(ni(2),8)
+        ytmp = rscale(2)*(alpha*(ytmp**3) + beta*(ytmp**2) + ytmp)
         DO k=1,ni(3)+1
+          beta = 2.0*(packing(3)-1.0); alpha = -2.0*beta/3.0
+          ztmp = (k-1)/REAL(ni(3),8)
+          ztmp = rscale(3)*(alpha*(ztmp**3) + beta*(ztmp**2) + ztmp)
+          !
           mesh%np=mesh%np+1
           pmap(i,j,k)=mesh%np
-          mesh%r(:,mesh%np)=(/(i-1)*rscale(1)/REAL(ni(1),8), &
-            (j-1)*rscale(2)/REAL(ni(2),8),(k-1)*rscale(3)/REAL(ni(3),8)/)+shift
+          mesh%r(:,mesh%np)=(/xtmp,ytmp,ztmp/)+shift
         END DO
       END DO
     END DO
@@ -166,11 +204,52 @@ ELSE
   END IF
 END IF
 call mesh_global_resolution(mesh)
+CALL oft_decrease_indent
 DEBUG_STACK_POP
+contains
+subroutine reflect_tet(ref_index)
+integer(i4), intent(in) :: ref_index
+integer(i4) :: npold,ncold,i,j
+integer(i4), allocatable :: newindex(:),ltemp(:,:)
+real(r8), allocatable :: rtemp(:,:)
+IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Reflecting to support periodicity'
+npold=mesh%np
+allocate(newindex(2*mesh%np),rtemp(3,2*mesh%np))
+rtemp(:,1:mesh%np)=mesh%r
+deallocate(mesh%r)
+do i=1,npold
+    IF(ABS(rtemp(ref_index,i))<=1.d-1)THEN
+        rtemp(ref_index,i)=0.d0
+        newindex(i)=i
+    ELSE
+        mesh%np=mesh%np+1
+        rtemp(:,mesh%np) = rtemp(:,i)
+        rtemp(ref_index,mesh%np) =-rtemp(ref_index,i)
+        newindex(i)=mesh%np
+    ENDIF
+enddo
+allocate(mesh%r(3,mesh%np))
+mesh%r=rtemp(:,1:mesh%np)
+deallocate(rtemp)
+!---Reflect cells
+ncold=mesh%nc
+allocate(ltemp(mesh%cell_np,2*mesh%nc))
+ltemp(:,1:mesh%nc)=mesh%lc
+deallocate(mesh%lc)
+do i=1,ncold
+    mesh%nc=mesh%nc+1
+    DO j=1,mesh%cell_np
+        ltemp(j,mesh%nc)=newindex(ltemp(j,i))
+    END DO
+enddo
+allocate(mesh%lc(mesh%cell_np,mesh%nc))
+mesh%lc=ltemp(:,1:mesh%nc)
+deallocate(ltemp)
+end subroutine reflect_tet
 end subroutine mesh_cube_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup surface IDs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_cube_cadlink(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j
@@ -191,9 +270,9 @@ DO i=1,mesh%nbf
   END IF
 END DO
 end subroutine mesh_cube_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !>
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_cube_set_periodic(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,jj,k,kk,l,m,n,iper
@@ -301,25 +380,27 @@ DO iper=1,3
 END DO
 DEBUG_STACK_POP
 end subroutine mesh_cube_set_periodic
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup a 1x1x1 cube test mesh
 !! The mesh is initialized with a basic set of cells
 !! - 9 Points
 !! - 12 Cells
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_square_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,j,k,ierr,io_unit,nptmp,nctmp,mesh_type,ni(3)
 INTEGER(i4), ALLOCATABLE :: pmap(:,:),lctmp(:,:)
-REAL(r8) :: rscale(3),shift(3)
+REAL(r8) :: rscale(3),shift(3),packing(3),alpha,beta,xtmp,ytmp
 REAL(r8), ALLOCATABLE :: rtmp(:,:)
 class(oft_bmesh), pointer :: smesh
-namelist/cube_options/mesh_type,ni,rscale,shift,ref_per
+namelist/cube_options/mesh_type,ni,rscale,shift,ref_per,packing
 DEBUG_STACK_PUSH
 mesh_type=1
 ni=1
 rscale=1.d0
 shift=0.d0
+ref_per=.FALSE.
+packing=1.d0
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
   READ(io_unit,cube_options,IOSTAT=ierr)
@@ -327,12 +408,13 @@ IF(oft_env%head_proc)THEN
   IF(ierr<0)CALL oft_abort('No "cube_options" found in input file.','smesh_square_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cube_options" in input file.','smesh_square_load',__FILE__)
   ni(3)=1
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Generating 2D Square mesh'
-  WRITE(*,'(2X,A,I4)')     'Mesh Type   = ',mesh_type
-  WRITE(*,'(2X,A,2I4)')    'nx, ny      = ',ni(1:2)
-  WRITE(*,'(2X,A,2ES11.3)')'Scale facs  = ',rscale(1:2)
-  WRITE(*,'(2X,A,3L)')     'Periodicity = ',ref_per
+  WRITE(*,'(2A)')oft_indent,'Square surface mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
+  WRITE(*,'(2A,2I4)')oft_indent,    'nx, ny      = ',ni(1:2)
+  WRITE(*,'(2A,2ES11.3)')oft_indent,'Scale facs  = ',rscale(1:2)
+  WRITE(*,'(2A,2L2)')oft_indent,    'Periodicity = ',ref_per(1:2)
+  WRITE(*,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -365,12 +447,23 @@ IF(oft_env%rank==0)THEN
   ALLOCATE(pmap(ni(1)+1,ni(2)+1))
   pmap=-1
   nptmp=0
+  ! Adjust scales for packing
+  beta = 2.0*(packing(1)-1.0); alpha = -2.0*beta/3.0
+  rscale(1) = rscale(1)/(alpha + beta + 1.d0)
+  beta = 2.0*(packing(2)-1.0); alpha = -2.0*beta/3.0
+  rscale(2) = rscale(2)/(alpha + beta + 1.d0)
   DO i=1,ni(1)+1
+    beta = 2.0*(packing(1)-1.0); alpha = -2.0*beta/3.0
+    xtmp = (i-1)/REAL(ni(1),8)
+    xtmp = rscale(1)*(alpha*(xtmp**3) + beta*(xtmp**2) + xtmp)
     DO j=1,ni(2)+1
+      beta = 2.0*(packing(2)-1.0); alpha = -2.0*beta/3.0
+      ytmp = (j-1)/REAL(ni(2),8)
+      ytmp = rscale(2)*(alpha*(ytmp**3) + beta*(ytmp**2) + ytmp)
+      !
       nptmp=nptmp+1
       pmap(i,j)=nptmp
-      rtmp(:,nptmp)=[(i-1)*rscale(1)/REAL(ni(1),8), &
-        (j-1)*rscale(2)/REAL(ni(2),8)]+shift(1:2)
+      rtmp(:,nptmp)=[xtmp,ytmp]+shift(1:2)
     END DO
   END DO
   !---Setup cells
@@ -432,9 +525,9 @@ IF(oft_env%rank==0)DEALLOCATE(rtmp,lctmp)
 call mesh_global_resolution(smesh)
 DEBUG_STACK_POP
 end subroutine smesh_square_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup surface IDs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_square_cadlink(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j
@@ -451,10 +544,10 @@ DO i=1,smesh%nbe
   END IF
 END DO
 end subroutine smesh_square_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add quadratic mesh node points
 !! @note All edges are straight so construction is trivial
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_square_add_quad(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j
@@ -484,9 +577,9 @@ END IF
 if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine smesh_square_add_quad
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_square_set_periodic(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j,jj,k,kk,l,m,n,iper
@@ -496,15 +589,15 @@ logical :: flag(4)
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Setting square periodicity'
 !---Find periodic faces
-smesh%periodic%nper=COUNT(ref_per)
+smesh%periodic%nper=COUNT(ref_per(1:2))
 ALLOCATE(smesh%periodic%le(smesh%ne))
 smesh%periodic%le=-1
-DO iper=1,3
+DO iper=1,2
   IF(.NOT.ref_per(iper))CYCLE
   DO jj=1,smesh%nbe
     j=smesh%lbe(jj)
     IF(smesh%periodic%le(j)>0)CYCLE
-    pt_j=[-smesh%r(2,smesh%le(2,j))+smesh%r(2,smesh%le(1,j)), &
+    pt_i=[-smesh%r(2,smesh%le(2,j))+smesh%r(2,smesh%le(1,j)), &
         smesh%r(1,smesh%le(2,j))-smesh%r(1,smesh%le(1,j)),0.d0]
     IF(MAXLOC(ABS(pt_i),DIM=1)/=iper)CYCLE
     i_cc=0.d0
@@ -537,7 +630,7 @@ END DO
 !---Set periodic points
 ALLOCATE(smesh%periodic%lp(smesh%np))
 smesh%periodic%lp=-1
-DO iper=1,3
+DO iper=1,2
   IF(.NOT.ref_per(iper))CYCLE
   per_dir=0.d0
   per_dir(iper)=1.d0

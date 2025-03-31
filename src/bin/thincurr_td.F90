@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file thincurr_td.F90
 !
 !> @defgroup doxy_thincurr ThinCurr
@@ -26,7 +28,7 @@
 !! @authors Chris Hansen
 !! @date Feb 2022
 !! @ingroup doxy_thincurr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM thincurr_td
 USE oft_base
 USE oft_io, ONLY: oft_bin_file
@@ -138,9 +140,9 @@ IF((TRIM(curr_file)=="none").AND.(tw_sim%n_icoils>0))CALL oft_abort("No waveform
 CALL tw_sim%xdmf%setup("thincurr")
 CALL mg_mesh%smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Time-dependent run
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Load drivers and sensors
 CALL tw_load_sensors('floops.loc',tw_sim,sensors)
 !---Compute inductances
@@ -157,9 +159,9 @@ IF(save_Msen)THEN
 ELSE
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load or build element to element mutual matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 tw_hodlr%tw_obj=>tw_sim
 CALL tw_hodlr%setup(.FALSE.)
 IF(.NOT.plot_run)THEN
@@ -178,9 +180,9 @@ IF(.NOT.plot_run)THEN
     END IF
   END IF
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Run main calculation or plots
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(plot_run)THEN
   NULLIFY(sensor_waveform)
   IF(tw_hodlr%L_svd_tol>0.d0)THEN

@@ -3,11 +3,11 @@ Mesh Construction       {#doc_mesh_construction}
 
 [TOC]
 
-Mesh construction in OFT consist of four phases: 1) loading, where the initial mesh is imported
-and any associated geometry information is loaded and linked to the internal representation.
-2) Local construction, where the local grid is refined and the mesh graph and linkage lists are created.
-3) Decomposition, where the grid is partitioned and scattered amongst the available processors.
-4) Global linking, where seam information is assembled linking common mesh entities on adjacent domains.
+Mesh construction in OFT consist of four phases:
+  1) loading, where the initial mesh is imported and any associated geometry information is loaded and linked to the internal representation.
+  2) Local construction, where the local grid is refined and the mesh graph and linkage lists are created.
+  3) Decomposition, where the grid is partitioned and scattered amongst the available processors.
+  4) Global linking, where seam information is assembled linking common mesh entities on adjacent domains.
 
 \section doc_mesh_construction_load Mesh Import and Loading
 
@@ -16,6 +16,13 @@ the general actions performed during this phase are outlined here. The initial m
 and loaded into the internal representation. Currently, OFT does not support domain identifiers so
 any block information is discarded at import. An internal geometry representation is then constructed,
 which is unique to each CAD type.
+
+In most cases the \subpage doc_mesh_native "Native mesh format" should be used, along with included
+python conversion scripts to map from other formats. Some direct legacy interfaces are also available,
+but should only be used after interacting with an OFT developer.
+  - \subpage doc_t3d
+  - \subpage doc_cubit
+  - \subpage doc_gmsh
 
 \section doc_mesh_construction_local Local Construction
 
@@ -43,9 +50,3 @@ and maintained. This is done by locating boundary points on adjacent domains whi
 global index. A consistent global index is maintained across all processors by refining the global
 indices created on the base mesh, which is constructed on each process. Adjacent domains are known by
 analyzing the grid partitioning to locate domains which share at least one vertex.
-
-\subpage doc_t3d
-
-\subpage doc_cubit
-
-\subpage doc_gmsh

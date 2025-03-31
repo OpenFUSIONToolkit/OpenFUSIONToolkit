@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_hcurl.F90
 !
 !> Regression tests for vector H(Curl) finite elements. Tests are performed
@@ -12,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 program test_hcurl
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
@@ -62,11 +64,11 @@ END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the equation \f$ \nabla \times \nabla \times B = K \hat{I} \f$, where
 !! \f$ K \f$ is the helicity matrix and \f$ \hat{I} \f$ is the identity vector
 !! using H(Curl) elements.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_wop
 !---Create solver objects
 CLASS(oft_solver), POINTER :: winv => NULL()
@@ -115,9 +117,9 @@ CALL winv%pre%delete
 !---Destory solver
 CALL winv%delete
 END SUBROUTINE test_wop
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Same as \ref test_hcurl::test_wop "test_wop" but use MG preconditioning.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_wopmg
 !---Solver object
 CLASS(oft_solver), POINTER :: winv => NULL()
@@ -128,9 +130,9 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: wop => NULL()
 CLASS(oft_matrix), POINTER :: kop => NULL()
 TYPE(oft_matrix_ptr), POINTER :: ml_wop(:) => NULL()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create ML Matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nlevels=ML_oft_hcurl%nlevels-minlev+1
 CALL ML_oft_hcurl%set_level(ML_oft_hcurl%nlevels)
 !---Create solver fields
@@ -138,18 +140,18 @@ CALL ML_oft_hcurl%vec_create(u)
 CALL ML_oft_hcurl%vec_create(v)
 !---Get FE operators
 CALL oft_hcurl_getkop(ML_oft_hcurl%current_level,kop,'none')
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup matrix solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL create_cg_solver(winv,force_native=.TRUE.)
 winv%its=-3
 !---Setup MG preconditioner
 CALL hcurl_getwop_pre(ML_oft_hcurl,winv%pre,ml_wop,nlevels=nlevels)
 wop=>ml_wop(nlevels)%M
 winv%A=>wop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Solve system
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL u%set(1.d0)
 CALL kop%apply(u,v)
 CALL hcurl_zerob%apply(v)

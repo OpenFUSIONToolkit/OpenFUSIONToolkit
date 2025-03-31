@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_type.F90
 !
 !> @defgroup doxy_oft_grid Meshing
@@ -22,7 +24,7 @@
 !! @author Chris Hansen
 !! @date June 2010
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_type
 USE oft_base
 USE oft_stitching, ONLY: oft_seam, destory_seam
@@ -33,27 +35,27 @@ IMPLICIT NONE
 #include "local.h"
 PRIVATE
 PUBLIC cell_is_curved, oft_init_seam, mesh_findcell, mesh_findcell2, bmesh_findcell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Global mesh information and indicies
 !!
 !! Contains global mexh context information.
 !! - Global counts
 !! - Global element indices
 !! - Global boundary flags
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC :: mesh_per
   INTEGER(i4) :: nper = 0 !< Number of periodic directions
   INTEGER(i4), POINTER, DIMENSION(:) :: lp => NULL() !< Global index of points (np)
   INTEGER(i4), POINTER, DIMENSION(:) :: le => NULL() !< Global index of edges (ne)
   INTEGER(i4), POINTER, DIMENSION(:) :: lf => NULL() !< Global index of faces (nf)
 END TYPE mesh_per
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> MPI global index information (For I/O Only)
 !!
 !! Contains global indices for HDF5 I/O.
 !! - Local starting and closing index
 !! - Maximum counts
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC :: mesh_save_index
   INTEGER(i8) :: npb = 0 !< Index of first point on proc
   INTEGER(i8) :: neb = 0 !< Index of first edge on proc
@@ -68,9 +70,9 @@ TYPE, PUBLIC :: mesh_save_index
   INTEGER(i8) :: nfmax = 0 !< Max # of faces on one proc
   INTEGER(i8) :: ncmax = 0 !< Max # of cells on one proc
 END TYPE mesh_save_index
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Processor-processor connectivity information for mesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC :: mesh_seam
   INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
   INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
@@ -83,19 +85,23 @@ TYPE, PUBLIC :: mesh_seam
   INTEGER(i4), POINTER, DIMENSION(:) :: recv_reqs => NULL() !< Asynchronous MPI Recv tags
 #endif
 END TYPE mesh_seam
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Global mesh information and indicies
 !!
 !! Contains global mexh context information.
 !! - Global counts
 !! - Global element indices
 !! - Global boundary flags
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC :: mesh_global
   INTEGER(i8) :: np = 0 !< Global point count
   INTEGER(i8) :: ne = 0 !< Global edge count
   INTEGER(i8) :: nf = 0 !< Global face count
   INTEGER(i8) :: nc = 0 !< Global cell count
+  INTEGER(i8) :: nbp = 0 !< Global boundary point count
+  INTEGER(i8) :: nbe = 0 !< Global boundary edge count
+  INTEGER(i8) :: nbf = 0 !< Global boundary face count
+  INTEGER(i8) :: nbc = 0 !< Global boundary cell count
   LOGICAL, POINTER, DIMENSION(:) :: gbp => NULL() !< Global boundary point flag (np)
   LOGICAL, POINTER, DIMENSION(:) :: gbe => NULL() !< Global boundary edge flag (ne)
   LOGICAL, POINTER, DIMENSION(:) :: gbf => NULL() !< Global boundary face flag (nf)
@@ -106,14 +112,14 @@ TYPE, PUBLIC :: mesh_global
   INTEGER(i8), POINTER, DIMENSION(:) :: lc => NULL() !< Global index of cells (nc)
   TYPE(mesh_seam), POINTER :: seam => NULL() !< Global domain-domain connectivity information
 END TYPE mesh_global
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Base mesh information and indicies
 !!
 !! Contains global mexh context information.
 !! - Global counts
 !! - Global element indices
 !! - Global boundary flags
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC :: mesh_base
   INTEGER(i4) :: np = 0 !< Global point count
   INTEGER(i4) :: nc = 0 !< Global cell count
@@ -123,14 +129,14 @@ TYPE, PUBLIC :: mesh_base
   INTEGER(i4), POINTER, DIMENSION(:) :: lc => NULL() !< Global index of cells (nc)
   INTEGER(i4), POINTER, DIMENSION(:) :: lcpart => NULL() !< Global index of cells (nc)
 END TYPE mesh_base
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> High order tet geometry information
 !!
 !! Contains additional data for high order tetrahedra.
 !! - Number of additional nodes per geometry primative
 !! - List of high-order node locations
 !! - List of node points
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC :: ho_mesh
   INTEGER(i4) :: nep = 0 !< Number of nodes per edge
   INTEGER(i4) :: nfp = 0 !< Number of nodes per face
@@ -141,7 +147,7 @@ TYPE, PUBLIC :: ho_mesh
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lcp => NULL() !< List of cell points
   REAL(r8), POINTER, DIMENSION(:,:) :: r => NULL() !< List of high-order points
 END TYPE ho_mesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Abstrac mesh type (surface or volume)
 !!
 !! Contains geometry information for the computational grid.
@@ -149,7 +155,7 @@ END TYPE ho_mesh
 !! - Mesh type and order
 !! - Global mesh information
 !! - Linkage of geometric primatives
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC, ABSTRACT :: oft_amesh
   LOGICAL :: fullmesh = .TRUE. !< Local mesh flag (False if distributed)
   INTEGER(i4) :: cad_type = 1 !< Type of CAD geometry
@@ -216,14 +222,14 @@ TYPE, PUBLIC, ABSTRACT :: oft_amesh
   TYPE(mesh_per) :: periodic !< Periodic information
   TYPE(ho_mesh) :: ho_info !< High order geometry information
 END TYPE oft_amesh
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Global mesh information and indicies
 !!
 !! Contains global mexh context information.
 !! - Global counts
 !! - Global element indices
 !! - Global boundary flags
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC :: bmesh_parent
   INTEGER(i4) :: np = 0 !< Global point count
   INTEGER(i4) :: ne = 0 !< Global edge count
@@ -232,7 +238,7 @@ TYPE, PUBLIC :: bmesh_parent
   INTEGER(i4), POINTER, DIMENSION(:) :: le => NULL() !< Global index of edges (ne) [oriented]
   INTEGER(i4), POINTER, DIMENSION(:) :: lf => NULL() !< Global index of faces (nf)
 END TYPE bmesh_parent
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Surface mesh type
 !!
 !! Contains geometry information for the computational grid.
@@ -240,7 +246,7 @@ END TYPE bmesh_parent
 !! - Mesh type and order
 !! - Global mesh information
 !! - Linkage of geometric primatives
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC, ABSTRACT, EXTENDS(oft_amesh) :: oft_bmesh
   LOGICAL :: skip = .FALSE. !< Skip mesh on this processor
   INTEGER(i4) :: dim = 3 !< Spatial dimension of grid (2 or 3)
@@ -299,50 +305,50 @@ CONTAINS
 END TYPE oft_bmesh
 ! Class procedure interfaces
 ABSTRACT INTERFACE
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_setup(self,cad_type,has_parent)
   IMPORT oft_bmesh, i4
   CLASS(oft_bmesh), INTENT(inout) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: cad_type !< CAD/mesh interface ID number
   LOGICAL, INTENT(in) :: has_parent !< Is this mesh the/a surface of a volume mesh?
   END SUBROUTINE bmesh_setup
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Save mesh to transfer file
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_save(self,filename)
   IMPORT oft_bmesh
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
   CHARACTER(LEN=*), INTENT(in) :: filename !< File to save mesh to
   END SUBROUTINE bmesh_save
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Load mesh from transfer file
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_load(self,filename)
   IMPORT oft_bmesh
   CLASS(oft_bmesh), INTENT(inout) :: self !< Mesh object
   CHARACTER(LEN=*), INTENT(in) :: filename !< File to load mesh from
   END SUBROUTINE bmesh_load
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Set maximum order of spatial mapping
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_set_order(self,order)
   IMPORT oft_bmesh, i4
   CLASS(oft_bmesh), INTENT(inout) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: order !< Maximum order of spatial mapping
   END SUBROUTINE bmesh_set_order
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Turn cell "inside out", used to ensure consistent orientations
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_invert_cell(self,cell)
   IMPORT oft_bmesh, i4
   CLASS(oft_bmesh), INTENT(inout) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: cell !< Index of cell to invert
   END SUBROUTINE bmesh_invert_cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Map from logical to physical coordinates in a given cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   FUNCTION bmesh_log2phys(self,cell,f) RESULT(pt)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
@@ -350,9 +356,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: f(:) !< Logical coordinate in cell [4]
   REAL(r8) :: pt(3) !< Physical position [3]
   END FUNCTION bmesh_log2phys
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Map from physical to logical coordinates in a given cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_phys2log(self,cell,pt,f)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
@@ -360,9 +366,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: pt(3) !< Physical position [3]
   REAL(r8), INTENT(out) :: f(:) !< Logical coordinates within the cell [4]
   END SUBROUTINE bmesh_phys2log
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Compute the spatial jacobian matrix and its determinant for a given cell at a given logical position
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_jacobian(self,cell,f,gop,j)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
@@ -371,9 +377,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(out) :: gop(:,:) !< Jacobian matrix \f$ (\frac{\partial x_i}{\partial \lambda_j})^{-1} \f$ [3,4]
   REAL(r8), INTENT(out) :: j !< Jacobian of transformation from logical to physical coordinates
   END SUBROUTINE bmesh_jacobian
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Compute the spatial hessian matrices for a given cell at a given logical position
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_hessian(self,cell,f,g2op,K)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
@@ -384,9 +390,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(out) :: K(:,:) !< Gradient correction matrix
   !! \f$ \frac{\partial^2 x_i}{\partial \lambda_k \partial \lambda_l}\f$ [10,3]
   END SUBROUTINE bmesh_hessian
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get unit normal for surface at a given point in a given cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_norm(self,cell,f,n)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), TARGET, INTENT(in) :: self !< Mesh object
@@ -394,9 +400,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: f(:) !< Logical coordinates in cell
   REAL(r8), INTENT(out) :: n(3) !< Unit normal [3]
   END SUBROUTINE bmesh_norm
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get tangent basis set for surface at a given point in a given cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_tang(self,cell,f,t)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), TARGET, INTENT(in) :: self !< Mesh object
@@ -404,29 +410,29 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: f(:) !< Logical coordinates in cell
   REAL(r8), INTENT(out) :: t(3,2) !< Unit tangent basis set [3,2]
   END SUBROUTINE bmesh_tang
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Retrieve suitable quadrature rule for mesh with given order
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_quad_rule(self,order,quad_rule)
   IMPORT oft_bmesh, oft_quad_type, i4
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: order !< Desired order of quadrature rule
   TYPE(oft_quad_type), INTENT(out) :: quad_rule !< Resulting quadrature rule
   END SUBROUTINE bmesh_quad_rule
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get position in logical space of vertex `i`
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_vlog(self,i,f)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: i !< Vertex to locate
   REAL(r8), INTENT(out) :: f(:) !< Logical coordinates of vertex `i`
   END SUBROUTINE bmesh_vlog
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Test if logical position lies within the base cell
   !!
   !! @returns Position `f` is inside the base cell?
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   FUNCTION bmesh_in_cell(self,f,tol) RESULT(eedge)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
@@ -434,14 +440,14 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: tol !< Tolerance for test
   INTEGER(i4) :: eedge
   END FUNCTION bmesh_in_cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Tessellate mesh onto lagrange FE nodes of specified order (usually for plotting)
   !!
   !! @note The maximum tessellation order currently supported is 4
   !! (may be lower for certain mesh types).
   !!
   !! @warning Cell lists are returned with zero based indexing
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE bmesh_tessellate(self,rtmp,lctmp,order)
   IMPORT oft_bmesh, i4, r8
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
@@ -449,16 +455,16 @@ ABSTRACT INTERFACE
   INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp !< Cell list for tessellation [self%cell_np,:]
   INTEGER(i4), INTENT(in) :: order !< Tessellation order
   END SUBROUTINE bmesh_tessellate
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get variable sizes following tessellation
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   function bmesh_tessellated_sizes(self) result(sizes)
   IMPORT oft_bmesh, i4
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
   integer(i4) :: sizes(2) !< Array sizes following tessellation [np_tess,nc_tess]
   end function bmesh_tessellated_sizes
 END INTERFACE
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Tetrahedral Mesh type
 !!
 !! Contains geometry information for the computational grid.
@@ -466,7 +472,7 @@ END INTERFACE
 !! - Mesh type and order
 !! - Global mesh information
 !! - Linkage of geometric primatives
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE, PUBLIC, ABSTRACT, EXTENDS(oft_amesh) :: oft_mesh
   INTEGER(i4) :: cell_nf = 0 !< Number of faces per cell
   INTEGER(i4) :: face_np = 0 !< Number of points per face
@@ -541,33 +547,33 @@ CONTAINS
 END TYPE oft_mesh
 !
 ABSTRACT INTERFACE
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_setup(self,cad_type)
   IMPORT oft_mesh, i4
   CLASS(oft_mesh), INTENT(inout) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: cad_type !< CAD/mesh interface ID number
   END SUBROUTINE mesh_setup
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Set maximum order of spatial mapping
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_set_order(self,order)
   IMPORT oft_mesh, i4
   CLASS(oft_mesh), INTENT(inout) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: order !< Maximum order of spatial mapping
   END SUBROUTINE mesh_set_order
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Turn cell "inside out", used to ensure consistent orientations
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_invert_cell(self,cell)
   IMPORT oft_mesh, i4
   CLASS(oft_mesh), INTENT(inout) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: cell !< Index of cell to invert
   END SUBROUTINE mesh_invert_cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Map from logical to physical coordinates in a given cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   FUNCTION mesh_log2phys(self,cell,f) RESULT(pt)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -575,9 +581,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: f(:) !< Logical coordinate in cell [4]
   REAL(r8) :: pt(3) !< Physical position [3]
   END FUNCTION mesh_log2phys
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Map from physical to logical coordinates in a given cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_phys2log(self,cell,pt,f)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -585,9 +591,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: pt(3) !< Physical position [3]
   REAL(r8), INTENT(out) :: f(:) !< Logical coordinates within the cell [4]
   END SUBROUTINE mesh_phys2log
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Compute the spatial jacobian matrix and its determinant for a given cell at a given logical position
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_jacobian(self,cell,f,gop,j)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -596,9 +602,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(out) :: gop(:,:) !< Jacobian matrix \f$ (\frac{\partial x_i}{\partial \lambda_j})^{-1} \f$ [3,4]
   REAL(r8), INTENT(out) :: j !< Jacobian of transformation from logical to physical coordinates
   END SUBROUTINE mesh_jacobian
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Compute the spatial hessian matrices for a given cell at a given logical position
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_hessian(self,cell,f,g2op,K)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -609,14 +615,14 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(out) :: K(:,:) !< Gradient correction matrix
   !! \f$ \frac{\partial^2 x_i}{\partial \lambda_k \partial \lambda_l}\f$ [10,3]
   END SUBROUTINE mesh_hessian
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Compute the surface normal vector for a given face on a cell
   !!
   !! If face is not a global boundary face the function returns with `norm = 0`
   !!
   !! @note The logical position in the cell must be on the chosen face for this
   !! subroutine, else an error will be thrown
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_snormal(self,cell,ind,f,norm)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -625,14 +631,14 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: f(:) !< Logical coordinate in cell [4]
   REAL(r8), INTENT(out) :: norm(3) !< Unit vector normal to the face [3]
   END SUBROUTINE mesh_snormal
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Compute the curve tangent vector for a given edge on a cell
   !!
   !! If edge is not a global boundary edge the function returns with `tang = 0`
   !!
   !! @note The logical position in the cell must be on the chosen edge for this
   !! subroutine to return a meaningful result
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_ctang(self,cell,ind,f,tang)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -641,9 +647,9 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: f(:) !< Logical coordinate in cell [4]
   REAL(r8), INTENT(out) :: tang(3) !< Unit vector tangent to the edge [3]
   END SUBROUTINE mesh_ctang
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   !> Get mapping between boundary and volume logical coordinates
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   SUBROUTINE mesh_get_surf_map(self,face,cell,lmap)
   IMPORT oft_mesh, i4
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -651,9 +657,9 @@ ABSTRACT INTERFACE
   INTEGER(i4), INTENT(out) :: cell !< Cell containing face
   INTEGER(i4), INTENT(out) :: lmap(3) !< Coordinate mapping
   END SUBROUTINE mesh_get_surf_map
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   !> Map between surface and volume logical coordinates
-  !------------------------------------------------------------------------------
+  !---------------------------------------------------------------------------------
   SUBROUTINE mesh_surf_to_vol(self,fsurf,lmap,fvol)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -661,20 +667,20 @@ ABSTRACT INTERFACE
   INTEGER(i4), INTENT(in) :: lmap(3) !< Coordinate mapping
   REAL(r8), INTENT(out) :: fvol(:) !< Volume coordinates [4]
   END SUBROUTINE mesh_surf_to_vol
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get position in logical space of vertex `i`
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_vlog(self,i,f)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: i !< Vertex to locate
   REAL(r8), INTENT(out) :: f(:) !< Logical coordinates of vertex `i`
   END SUBROUTINE mesh_vlog
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Test if logical position lies within the base cell
   !!
   !! @returns Position `f` is inside the base cell?
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   FUNCTION mesh_in_cell(self,f,tol) RESULT(eface)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -682,23 +688,23 @@ ABSTRACT INTERFACE
   REAL(r8), INTENT(in) :: tol !< Tolerance for test
   INTEGER(i4) :: eface
   END FUNCTION mesh_in_cell
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Retrieve suitable quadrature rule for mesh with given order
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_quad_rule(self,order,quad_rule)
   IMPORT oft_mesh, oft_quad_type, i4
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
   INTEGER(i4), INTENT(in) :: order !< Desired order of quadrature rule
   TYPE(oft_quad_type), INTENT(out) :: quad_rule !< Resulting quadrature rule
   END SUBROUTINE mesh_quad_rule
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Tessellate mesh onto lagrange FE nodes of specified order (usually for plotting)
   !!
   !! @note The maximum tessellation order currently supported is 4
   !! (may be lower for certain mesh types).
   !!
   !! @warning Cell lists are returned with zero based indexing
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE mesh_tessellate(self,rtmp,lctmp,order)
   IMPORT oft_mesh, i4, r8
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -706,9 +712,9 @@ ABSTRACT INTERFACE
   INTEGER(i4), POINTER, DIMENSION(:,:), INTENT(out) :: lctmp !< Tessellated cell list [self%ncp,:]
   INTEGER(i4), INTENT(in) :: order !< Tessellation order
   END SUBROUTINE mesh_tessellate
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get sizes of arrays returned by @ref mesh_tessellate
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   function mesh_tessellated_sizes(self) result(sizes)
   IMPORT oft_mesh, i4
   CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
@@ -723,11 +729,11 @@ LOGICAL, PARAMETER :: PLOT_R4_FLAG=.FALSE.
 LOGICAL, PARAMETER :: PLOT_R4_FLAG=.TRUE.
 #endif
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Checks if a global mesh cell is curved or not
 !!
 !! @result (T/F) cell is curved?
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function cell_is_curved(self,cell) result(curved)
 class(oft_amesh), intent(in) :: self !< Mesh containing cell
 integer(i4), intent(in) :: cell !< Index of cell to check
@@ -745,9 +751,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end function cell_is_curved
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Create @ref oft_seam object from mesh connectivity
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine oft_init_seam(self,seam_obj)
 class(oft_amesh), intent(in) :: self !< Mesh containing cell
 type(oft_seam), intent(out) :: seam_obj !< Resulting seam object
@@ -763,9 +769,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_init_seam
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Estimate mesh volume
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function mesh_volume(self) result(vol)
 class(oft_mesh), INTENT(IN) :: self !< Needs docs
 REAL(r8) :: vol
@@ -787,9 +793,9 @@ IF(.NOT.self%fullmesh)vol=oft_mpi_sum(vol)
 CALL quad%delete()
 DEBUG_STACK_POP
 end function mesh_volume
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Estimate mesh volume
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE mesh_setup_io(self,xdmf_obj,tess_order)
 class(oft_mesh), INTENT(inout) :: self !< Needs docs
 class(xdmf_plot_file), intent(inout) :: xdmf_obj !< Needs docs
@@ -848,9 +854,9 @@ END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE mesh_setup_io
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Write scalar vertex data out to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine mesh_save_vertex_scalar(self,p,xdmf_obj,path)
 class(oft_mesh), INTENT(IN) :: self
 real(r8), intent(in) :: p(:) !< Vertex data [np]
@@ -864,9 +870,9 @@ IF(SIZE(p,DIM=1)/=sizes(1))CALL oft_abort("Incorrect array size","mesh_save_vert
 CALL xdmf_obj%write(p,self%meshname,path,1,PLOT_R4_FLAG)
 DEBUG_STACK_POP
 end subroutine mesh_save_vertex_scalar
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Write scalar cell data out to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine mesh_save_cell_scalar(self,p,xdmf_obj,path)
 class(oft_mesh), INTENT(IN) :: self
 real(r8), intent(in) :: p(:) !< Cell data [nc]
@@ -880,9 +886,9 @@ IF(SIZE(p,DIM=1)/=sizes(2))CALL oft_abort("Incorrect array size","mesh_save_cell
 CALL xdmf_obj%write(p,self%meshname,path,2,PLOT_R4_FLAG)
 DEBUG_STACK_POP
 end subroutine mesh_save_cell_scalar
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Write vector vertex data out to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine mesh_save_vertex_vector(self,bv,xdmf_obj,path)
 class(oft_mesh), INTENT(IN) :: self
 real(r8), intent(in) :: bv(:,:) !< Vertex data [3,np]
@@ -897,9 +903,9 @@ IF(SIZE(bv,DIM=2)/=sizes(1))CALL oft_abort("Incorrect array size","mesh_save_ver
 CALL xdmf_obj%write(bv,self%meshname,path,1,PLOT_R4_FLAG)
 DEBUG_STACK_POP
 end subroutine mesh_save_vertex_vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Write vector cell data out to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine mesh_save_cell_vector(self,bcc,xdmf_obj,path)
 class(oft_mesh), INTENT(IN) :: self
 real(r8), intent(in) :: bcc(:,:) !< Cell data [3,nc]
@@ -914,9 +920,9 @@ IF(SIZE(bcc,DIM=2)/=sizes(2))CALL oft_abort("Incorrect array size","mesh_save_ce
 CALL xdmf_obj%write(bcc,self%meshname,path,2,PLOT_R4_FLAG)
 DEBUG_STACK_POP
 end subroutine mesh_save_cell_vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy mesh object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE mesh_destroy(self)
 CLASS(oft_mesh), INTENT(inout) :: self
 INTEGER(i4) :: i
@@ -952,7 +958,7 @@ END IF
 NULLIFY(self%bmesh)
 DEBUG_STACK_POP
 END SUBROUTINE mesh_destroy
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Find physical point in mesh.
 !!
 !! For high order grids an approximate guess is first computed using only the linear
@@ -962,7 +968,7 @@ END SUBROUTINE mesh_destroy
 !! by the module variable @ref tetmesh_mapping::ho_find_retry "ho_find_retry". For
 !! more information see the documentation for @ref tetmesh_mapping::tetmesh_phys2logho
 !! "tetmesh_phys2logho"
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_findcell(self,cell,pt,fout)
 class(oft_mesh), target, intent(inout) :: self !< Mesh to search
 integer(i4), intent(inout) :: cell !< Cell containing point on output, guess on input
@@ -1020,14 +1026,14 @@ end if
 if(PRESENT(fout))fout=f
 DEBUG_STACK_POP
 end subroutine mesh_findcell
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Find physical point in mesh using robust method
 !!
 !! First, a collection of the `nclosest` mesh vertices is found. Then the surrounding
 !! cells are searched for the specified point. If the point is not found the
 !! standard @ref tetmesh_mapping::tetmesh_findcell "tetmesh_findcell" subroutine is
 !! used as a fallback.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_findcell2(self,cell,pt,nclosest,fout)
 class(oft_mesh), target, intent(inout) :: self !< Mesh to search
 integer(i4), intent(inout) :: cell !< Cell containing point on output, guess on input
@@ -1082,9 +1088,9 @@ end if
 if(PRESENT(fout))fout=f
 DEBUG_STACK_POP
 end subroutine mesh_findcell2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Estimate mesh area
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function bmesh_area(self) result(area)
 class(oft_bmesh), intent(in) :: self
 REAL(r8) :: area
@@ -1106,11 +1112,11 @@ IF(.NOT.self%fullmesh)area=oft_mpi_sum(area)
 CALL quad%delete()
 DEBUG_STACK_POP
 end function bmesh_area
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Find physical point in mesh.
 !!
 !! @warning Only works for 2D meshes and uses linear logical mapping
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine bmesh_findcell(self,cell,pt,fout)
 class(oft_bmesh), intent(in) :: self !< Mesh to search
 integer(i4), intent(inout) :: cell !< Cell containing point on output, guess on input
@@ -1153,9 +1159,9 @@ if(i>=self%nc)then
   fout=-1.d0
 endif
 end subroutine bmesh_findcell
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE bmesh_setup_io(self,xdmf_obj,tess_order)
 CLASS(oft_bmesh), INTENT(inout) :: self !< Needs docs
 class(xdmf_plot_file), intent(inout) :: xdmf_obj !< Needs docs
@@ -1200,9 +1206,9 @@ DEALLOCATE(reg_tmp)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE bmesh_setup_io
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Write scalar vertex data out to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bmesh_save_vertex_scalar(self,p,xdmf_obj,path)
 class(oft_bmesh), INTENT(IN) :: self
 real(r8), intent(in) :: p(:) !< Vertex data [np]
@@ -1216,9 +1222,9 @@ IF(SIZE(p,DIM=1)/=sizes(1))CALL oft_abort("Incorrect array size","bmesh_save_ver
 CALL xdmf_obj%write(p,self%meshname,path,1,PLOT_R4_FLAG)
 DEBUG_STACK_POP
 end subroutine bmesh_save_vertex_scalar
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Write scalar cell data out to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bmesh_save_cell_scalar(self,p,xdmf_obj,path)
 class(oft_bmesh), INTENT(IN) :: self
 real(r8), intent(in) :: p(:) !< Cell data [nc]
@@ -1232,9 +1238,9 @@ IF(SIZE(p,DIM=1)/=sizes(2))CALL oft_abort("Incorrect array size","bmesh_save_cel
 CALL xdmf_obj%write(p,self%meshname,path,2,PLOT_R4_FLAG)
 DEBUG_STACK_POP
 end subroutine bmesh_save_cell_scalar
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Write vector vertex data out to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bmesh_save_vertex_vector(self,bv,xdmf_obj,path)
 class(oft_bmesh), INTENT(IN) :: self
 real(r8), intent(in) :: bv(:,:) !< Vertex data [3,np]
@@ -1249,9 +1255,9 @@ IF(SIZE(bv,DIM=2)/=sizes(1))CALL oft_abort("Incorrect array size","bmesh_save_ve
 CALL xdmf_obj%write(bv,self%meshname,path,1,PLOT_R4_FLAG)
 DEBUG_STACK_POP
 end subroutine bmesh_save_vertex_vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Write vector cell data out to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bmesh_save_cell_vector(self,bcc,xdmf_obj,path)
 class(oft_bmesh), INTENT(IN) :: self
 real(r8), intent(in) :: bcc(:,:) !< Cell data [3,nc]
@@ -1266,9 +1272,9 @@ IF(SIZE(bcc,DIM=2)/=sizes(2))CALL oft_abort("Incorrect array size","bmesh_save_c
 CALL xdmf_obj%write(bcc,self%meshname,path,2,PLOT_R4_FLAG)
 DEBUG_STACK_POP
 end subroutine bmesh_save_cell_vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE bmesh_destroy(self)
 CLASS(oft_bmesh), INTENT(inout) :: self
 DEBUG_STACK_PUSH
@@ -1286,9 +1292,9 @@ IF(ASSOCIATED(self%parent))THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE bmesh_destroy
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE amesh_destroy(self)
 CLASS(oft_amesh), INTENT(inout) :: self
 INTEGER(i4) :: i

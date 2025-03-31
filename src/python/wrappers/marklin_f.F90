@@ -1,4 +1,4 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> @file marklin_f.F90
 !
 !> Fortran part of Python wrapper for Marklin force-free ideal MHD equilibrium functionality
@@ -6,7 +6,7 @@
 !! @authors Chris Hansen
 !! @date May 2023
 !! @ingroup doxy_oft_python
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE marklin_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_associated
@@ -66,9 +66,9 @@ TYPE :: marklin_obj
   TYPE(oft_ml_fem_comp_type), POINTER :: ML_vlagrange => NULL()
 END TYPE marklin_obj
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION marklin_ccast(marklin_cptr,marklin_fptr,error_str) RESULT(success)
 TYPE(c_ptr), INTENT(in) :: marklin_cptr !< C pointer to TokaMaker object
 TYPE(marklin_obj), POINTER, INTENT(out) :: marklin_fptr
@@ -84,9 +84,9 @@ END IF
 CALL c_f_pointer(marklin_cptr,marklin_fptr)
 success=.TRUE.
 END FUNCTION marklin_ccast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_setup(marklin_ptr,mesh_ptr,order,minlev,error_str) BIND(C,NAME="marklin_setup")
 TYPE(c_ptr), INTENT(out) :: marklin_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
@@ -127,9 +127,9 @@ END IF
 !
 marklin_ptr=C_LOC(self)
 END SUBROUTINE marklin_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_destroy(marklin_ptr,error_str) BIND(C,NAME="marklin_destroy")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Pointer to Marklin object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
@@ -171,9 +171,9 @@ IF(ASSOCIATED(self%ml_mesh))THEN
 END IF
 DEALLOCATE(self)
 END SUBROUTINE marklin_destroy
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_compute_eig(marklin_ptr,nmodes,eig_vals,cache_file,error_str) BIND(C,NAME="marklin_compute_eig")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nmodes !< Needs docs
@@ -207,9 +207,9 @@ END IF
 CALL c_f_pointer(eig_vals, vals_tmp, [nmodes])
 vals_tmp=self%eig_obj%hlam(:,self%ML_hcurl%level)
 END SUBROUTINE marklin_compute_eig
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_compute_vac(marklin_ptr,nh,hcpc,hcpv,cache_file,error_str) BIND(C,NAME="marklin_compute_vac")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nh !< Needs docs
@@ -263,9 +263,9 @@ ELSE
   CALL taylor_vacuum(self%ff_obj,rst_filename=rst_filename)
 END IF
 END SUBROUTINE marklin_compute_vac
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_compute_pardiff(marklin_ptr,int_obj,int_type,k_perp,error_str) BIND(C,NAME="marklin_compute_pardiff")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
@@ -338,9 +338,9 @@ CALL u%delete()
 CALL v%delete()
 DEALLOCATE(u,v,mop,pdop,pdinv)
 END SUBROUTINE marklin_compute_pardiff
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_setup_io(marklin_ptr,basepath,error_str) BIND(C,NAME="marklin_setup_io")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
@@ -358,9 +358,9 @@ ELSE
   CALL self%ml_mesh%mesh%setup_io(self%xdmf_plot,self%ML_hcurl%current_level%order)
 END IF
 END SUBROUTINE marklin_setup_io
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_save_visit(marklin_ptr,int_obj,int_type,key,error_str) BIND(C,NAME="marklin_save_visit")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
@@ -421,9 +421,9 @@ CALL lmop%delete()
 CALL lminv%delete()
 DEALLOCATE(u,v,lmop,lminv)
 END SUBROUTINE marklin_save_visit
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_get_aint(marklin_ptr,hmode_facs,int_obj,zero_norm,error_str) BIND(C,NAME="marklin_get_aint")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hmode_facs !< Needs docs
@@ -451,9 +451,9 @@ IF(.NOT.ASSOCIATED(self%ML_hcurl_grad))THEN
   CALL oft_hcurl_grad_setup(self%ML_hcurl,self%ML_h1,self%ML_hcurl_grad,self%ML_h1grad,self%ML_hcurl%minlev)
   CALL hcurl_grad_setup_interp(self%ML_hcurl_grad,self%ML_h1)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create divergence cleaner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(lop,tmp)
 IF(zero_norm)THEN
   CALL oft_h1_getlop(self%ML_h1%current_level,lop,"grnd")
@@ -473,9 +473,9 @@ ELSE
   h1_zerob%ML_H1_rep=>self%ML_h1grad
   divout%bc=>h1_zerob
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup initial conditions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(interp_obj)
 CALL self%ML_hcurl_grad%vec_create(interp_obj%u)
 CALL self%ML_hcurl_grad%vec_create(utmp)
@@ -503,9 +503,9 @@ CALL divout%bc%delete()
 NULLIFY(divout%bc)
 CALL divout%delete()
 END SUBROUTINE marklin_get_aint
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_get_bint(marklin_ptr,hmode_facs,vac_facs,int_obj,error_str) BIND(C,NAME="marklin_get_bint")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hmode_facs !< Needs docs
@@ -531,9 +531,9 @@ END DO
 CALL interp_obj%setup(self%ML_hcurl_grad%current_level)
 int_obj=C_LOC(interp_obj)
 END SUBROUTINE marklin_get_bint
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE marklin_apply_int(marklin_ptr,int_obj,int_type,pt,fbary_tol,cell,field) BIND(C,NAME="marklin_apply_int")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs

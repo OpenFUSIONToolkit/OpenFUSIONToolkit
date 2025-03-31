@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_mapping_find.F90
 !
 !> Regression tests for tetmesh . Tests are performed
@@ -13,7 +15,7 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_mapping_find
 USE oft_base
 USE oft_quadrature
@@ -35,11 +37,11 @@ CALL check_surface_points(4,1.d-6)
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Validates @ref tetmesh_mapping::tetmesh_findcell "tetmesh_findcell" by
 !! creating points on the boundary of the mesh and comparing them to the
 !! locations found by @ref tetmesh_mapping::tetmesh_findcell "tetmesh_findcell".
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE check_surface_points(order,tol)
 INTEGER(i4), INTENT(in) :: order
 REAL(r8), INTENT(in) :: tol

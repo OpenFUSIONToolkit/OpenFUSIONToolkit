@@ -45,6 +45,11 @@ def mp_run(target,args,timeout=30):
 
 
 def validate_dict(results,dict_exp):
+    tol_dict = {
+        'delta': 5.E-2,
+        'deltaU': 5.E-2,
+        'deltaL': 5.E-2
+    }
     if results is None:
         print("FAILED: error in solve!")
         return False
@@ -59,13 +64,82 @@ def validate_dict(results,dict_exp):
                 for i in range(len(exp_val)):
                     if exp_val[i] is None:
                         continue
-                    if abs((result_val[i]-exp_val[i])/exp_val[i]) > 1.E-2:
+                    if abs((result_val[i]-exp_val[i])/exp_val[i]) > tol_dict.get(key,1.E-2):
                         print("FAILED: {0} ({1}) error too high!".format(key,i))
                         print("  Expected = {0}".format(exp_val[i]))
                         print("  Actual =   {0}".format(result_val[i]))
                         test_result = False
             else:
+                if abs((result_val-exp_val)/exp_val) > tol_dict.get(key,1.E-2):
+                    print("FAILED: {0} error too high!".format(key))
+                    print("  Expected = {0}".format(exp_val))
+                    print("  Actual =   {0}".format(result_val))
+                    test_result = False
+    return test_result
+
+
+def validate_eqdsk(file_test,file_ref):
+    from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
+    try:
+        test_data = read_eqdsk(file_test)
+    except:
+        print("FAILED: Could not read result EQDSK")
+        return False
+    try:
+        ref_data = read_eqdsk(file_ref)
+    except:
+        print("FAILED: Could not read reference EQDSK")
+        return False
+    test_result = True
+    for key, exp_val in ref_data.items():
+        result_val = test_data.get(key,None)
+        if result_val is None:
+            print('FAILED: key "{0}" not present in result!'.format(key))
+            result_val = False
+        else:
+            if key == 'case':
+                continue
+            if isinstance(exp_val,np.ndarray):
+                if np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val) > 1.E-2:
+                    print("FAILED: {0} error too high!".format(key))
+                    print("  Actual =   {0}".format(np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val)))
+                    test_result = False
+            else:
+                print(result_val,exp_val)
                 if abs((result_val-exp_val)/exp_val) > 1.E-2:
+                    print("FAILED: {0} error too high!".format(key))
+                    print("  Expected = {0}".format(exp_val))
+                    print("  Actual =   {0}".format(result_val))
+                    test_result = False
+    return test_result
+
+
+def validate_ifile(ifile_test,ifile_ref):
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    try:
+        test_data = read_ifile(ifile_test)
+    except:
+        print("FAILED: Could not read result i-file")
+        return False
+    try:
+        ref_data = read_ifile(ifile_ref)
+    except:
+        print("FAILED: Could not read reference i-file")
+        return False
+    test_result = True
+    for key, exp_val in ref_data.items():
+        result_val = test_data.get(key,None)
+        if result_val is None:
+            print('FAILED: key "{0}" not present in result!'.format(key))
+            result_val = False
+        else:
+            if isinstance(exp_val,np.ndarray):
+                if np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val) > 1.E-2:
+                    print("FAILED: {0} error too high!".format(key))
+                    print("  Actual =   {0}".format(np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val)))
+                    test_result = False
+            else:
+                if result_val != exp_val:
                     print("FAILED: {0} error too high!".format(key))
                     print("  Expected = {0}".format(exp_val))
                     print("  Actual =   {0}".format(result_val))
@@ -362,7 +436,7 @@ def test_coil_h3(order,dist_coil):
 
 
 #============================================================================
-def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,mp_q):
+def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,mp_q):
     def create_mesh():
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
@@ -415,6 +489,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,mp_q):
         if eig_test:
             eig_vals, _ = mygs.eig_wall(10)
             mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+            oftpy_dump_cov()
             return
         #
         mygs.set_coil_vsc({'VS': 1.0})
@@ -471,8 +546,22 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,mp_q):
             mp_q.put(None)
             return
         if stability_test:
-            eig_vals, _ = mygs.eig_td(-1.E2,10,False)
-            mp_q.put([{'gamma': eig_vals[:5,0]}])
+            eig_vals, eig_vecs = mygs.eig_td(-1.E2,10,False)
+            # Run brief nonlinear evolution
+            psi0 = mygs.get_psi(False)
+            eig_sign = eig_vecs[0,(mygs.r[:,1]-R0)>0.0][abs(eig_vecs[0,(mygs.r[:,1]-R0)>0.0]).argmax()]
+            psi_ic = psi0-0.01*eig_vecs[0,:]*(mygs.psi_bounds[1]-mygs.psi_bounds[0])/eig_sign
+            mygs.set_psi(psi_ic)
+            mygs.set_saddles(None)
+            mygs.set_isoflux(None)
+            dt = 0.1/abs(eig_vals[0,0])
+            mygs.setup_td(dt,1.E-13,1.E-11)
+            sim_time = 0.0
+            for i in range(5):
+                sim_time, _, nl_its, lin_its, nretry = mygs.step_td(sim_time,dt)
+            psi1 = mygs.get_psi(False)
+            mp_q.put([{'gamma': eig_vals[:5,0], 'nl_change': np.linalg.norm(psi1-psi0)}])
+            oftpy_dump_cov()
             return
         mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
         eq_info = mygs.get_stats(li_normalization='ITER')
@@ -480,9 +569,87 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,mp_q):
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
         eq_info['Lplasma'] = Lmat[-1,-1]
+    if test_recon:
+        import random
+        from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
+        # Sample constraint locations
+        with open('ITER_geom.json','r') as fid:
+            ITER_geom = json.load(fid)
+            probe_contour = np.asarray(ITER_geom['inner_vv'][0])
+        dl_contour = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(probe_contour,axis=0),axis=1))]
+        probe_contour_new = np.zeros((100,2))
+        probe_contour_new[:,0] = np.interp(np.linspace(0.0,dl_contour[-1],100),dl_contour,probe_contour[:,0])
+        probe_contour_new[:,1] = np.interp(np.linspace(0.0,dl_contour[-1],100),dl_contour,probe_contour[:,1])
+        B_locs = []
+        for i, pt in enumerate(probe_contour_new):
+            if i % 5 == 0:
+                B_locs.append(pt)
+        B_locs = np.asarray(B_locs)
+        # Setup constraints
+        random.seed(42)
+        myrecon = reconstruction(mygs)
+        noise_amp = (random.random()-0.5)*2.0
+        Ip_noised = eq_info['Ip']*(1.0+noise_amp*0.05)
+        myrecon.set_Ip(Ip_noised, err=0.05*eq_info['Ip'])
+        flux_vals = []
+        field_eval = mygs.get_field_eval('PSI')
+        for i in range(B_locs.shape[0]):
+            B_tmp = field_eval.eval(B_locs[i,:])
+            noise_amp = (random.random()-0.5)*2.0
+            flux_vals.append(B_tmp[0])
+            psi_val = B_tmp[0]*2.0*np.pi
+            myrecon.add_flux_loop(B_locs[i,:], psi_val*(1.0 + noise_amp*0.05), err=abs(psi_val*0.05))
+        field_eval = mygs.get_field_eval('B')
+        for i in range(B_locs.shape[0]):
+            B_tmp = field_eval.eval(B_locs[i,:])
+            noise_amp = (random.random()-0.5)*2.0
+            myrecon.add_Mirnov(B_locs[i,:], np.r_[1.0,0.0,0.0], B_tmp[0] + noise_amp*abs(B_tmp[0]*0.05), err=abs(B_tmp[0]*0.05))
+            noise_amp = (random.random()-0.5)*2.0
+            myrecon.add_Mirnov(B_locs[i,:], np.r_[0.0,0.0,1.0], B_tmp[2] + noise_amp*abs(B_tmp[2]*0.05), err=abs(B_tmp[2]*0.05))
+        coil_currents, _ = mygs.get_coil_currents()
+        for key in coil_currents:
+            noise_amp = (random.random()-0.5)*2.0
+            coil_currents[key] *= 1.0+noise_amp*0.05
+        # Compute starting equilibrium
+        mygs.set_isoflux(None)
+        mygs.set_saddles(None)
+        mygs.set_targets(Ip=Ip_noised,Ip_ratio=2.0)
+        mygs.set_flux(B_locs,np.array(flux_vals))
+        regularization_terms = []
+        for name in coil_currents:
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=coil_currents[name],weight=1.E-1))
+        regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E2))
+        mygs.set_coil_reg(reg_terms=regularization_terms)
+        R0 = 6.3
+        Z0 = 0.5
+        a = 1.0
+        kappa = 1.0
+        delta = 0.0
+        err_flag = mygs.init_psi(R0, Z0, a, kappa, delta)
+        mygs.settings.maxits=100
+        mygs.update_settings()
+        mygs.solve()
+        # Perform reconstruction
+        mygs.set_isoflux(None)
+        mygs.set_flux(None,None)
+        mygs.set_saddles(None)
+        mygs.set_targets(R0=mygs.o_point[0],V0=mygs.o_point[1])
+        myrecon.settings.fitPnorm = False
+        myrecon.settings.fitR0 = True
+        myrecon.settings.fitCoils = True
+        myrecon.settings.pm = False
+        err_flag = myrecon.reconstruct()
+        #
+        eq_info = mygs.get_stats(li_normalization='ITER')
+        eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
+        eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
+        eq_info['Lplasma'] = Lmat[-1,-1]
     # Test deletion if multiple cases
     if mygs_last is not None:
         del mygs_last
+    # Save equilibrium to gEQDSK and i-file format
+    mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
+    mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
     # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
@@ -495,75 +662,69 @@ def test_ITER_eig(order):
     exp_dict = {
         'Tau_w': [1.51083009, 2.87431718, 3.91493237, 5.23482507, 5.61049374]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),True,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),True,False,False))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_stability(order):
     exp_dict = {
-        'gamma': [-12.3620, 1.83981, 3.41613, 5.12470, 6.53393]
+        'gamma': [-12.3620, 1.83981, 3.41613, 5.12470, 6.53393],
+        'nl_change': [225.4421413167051, 338.0113029638385][order-2]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),False,True))
+    results = mp_run(run_ITER_case,(1.0,(order,),False,True,False))
     assert validate_dict(results,exp_dict)
+
+ITER_eq_dict = {
+    'Ip': 15599996.692463942,
+    'Ip_centroid': [6.20273409, 0.52959503],
+    'kappa': 1.8728151512244395,
+    'kappaU': 1.7634853298971116,
+    'kappaL': 1.9821449725517677,
+    'delta': 0.4721203463868737,
+    # 'deltaU': 0.40521771808760293,
+    'deltaL': 0.5390229746861446,
+    'R_geo': 6.222328618622752,
+    'a_geo': 1.9835670211775267,
+    'vol': 820.212921617247,
+    'q_0': 0.8232444101221106,
+    'q_95': 2.7602989886308738,
+    'P_ax': 619225.017325726,
+    'W_MHD': 242986393.97329777,
+    'beta_pol': 42.443587820489455,
+    'dflux': 1.540293464599462,
+    'tflux': 121.86081608235014,
+    'l_i': 0.9054096856166233,
+    'beta_tor': 1.7798144109869558,
+    'beta_n': 1.1951205307278518,
+    'LCS1': 2.4858609418809336e-06,
+    'MCS1_plasma': 8.931779419000401e-07,
+    'Lplasma': 1.1900576990802187e-05
+}
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_eq(order):
-    exp_dict = {
-        'Ip': 15599996.700479196,
-        'Ip_centroid': [6.20274133, 0.5296048],
-        'kappa': 1.86799695311941,
-        'kappaU': 1.7388335731481432,
-        'kappaL': 1.997160333090677,
-        'delta': 0.4642130933423834,
-        # 'deltaU': 0.3840631923067706, # Disable for now
-        'deltaL': 0.5443629943779958,
-        'vol': 820.0973897169655,
-        'q_0': 0.8234473499435633,
-        'q_95': 2.76048354704068,
-        'P_ax': 619225.0167519478,
-        'W_MHD': 242986888.67690986,
-        'beta_pol': 39.73860565406112,
-        'dflux': 1.5402746036620532,
-        'tflux': 121.86870301036512,
-        'l_i': 0.9048845463517069,
-        'beta_tor': 1.7816206668692283,
-        'beta_n': 1.1868590722509704,
-        'LCS1': 2.485860941880887e-06,
-        'MCS1_plasma': 8.930926092661585e-07,
-        'Lplasma': 1.1899835061690724e-05
-    }
-    results = mp_run(run_ITER_case,(1.0,(order,),False,False))
-    assert validate_dict(results,exp_dict)
+    results = mp_run(run_ITER_case,(1.0,(order,),False,False,False))
+    assert validate_dict(results,ITER_eq_dict)
+    assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk')
+    assert validate_ifile('tokamaker.ifile','ITER_test.ifile')
+
+@pytest.mark.coverage
+def test_ITER_recon():
+    ITER_recon_dict = ITER_eq_dict.copy()
+    ITER_recon_dict['q_95'] = 2.727373194556296
+    ITER_recon_dict['P_ax'] = 653312.4614673054
+    ITER_recon_dict['W_MHD'] = 256930543.79179734
+    ITER_recon_dict['beta_pol'] = 44.08617559839085
+    ITER_recon_dict['beta_tor'] = 1.887092454605829
+    ITER_recon_dict['beta_n'] = 1.2523366970906669
+    results = mp_run(run_ITER_case,(1.0,(2,),False,False,True))
+    assert validate_dict(results,ITER_recon_dict)
 
 def test_ITER_concurrent():
-    exp_dict = {
-        'Ip': 15599996.700479196,
-        'Ip_centroid': [6.20274133, 0.5296048],
-        'kappa': 1.86799695311941,
-        'kappaU': 1.7388335731481432,
-        'kappaL': 1.997160333090677,
-        'delta': 0.4642130933423834,
-        # 'deltaU': 0.3840631923067706, # Disable for now
-        'deltaL': 0.5443629943779958,
-        'vol': 820.0973897169655,
-        'q_0': 0.8234473499435633,
-        'q_95': 2.76048354704068,
-        'P_ax': 619225.0167519478,
-        'W_MHD': 242986888.67690986,
-        'beta_pol': 39.73860565406112,
-        'dflux': 1.5402746036620532,
-        'tflux': 121.86870301036512,
-        'l_i': 0.9048845463517069,
-        'beta_tor': 1.7816206668692283,
-        'beta_n': 1.1868590722509704,
-        'LCS1': 2.485860941880887e-06,
-        'MCS1_plasma': 8.930926092661585e-07,
-        'Lplasma': 1.1899835061690724e-05
-    }
-    results = mp_run(run_ITER_case,(1.0,(2,3),False,False))
-    assert validate_dict(results,exp_dict)
+    results = mp_run(run_ITER_case,(1.0,(2,3),False,False,False))
+    assert validate_dict(results,ITER_eq_dict)
 
 #============================================================================
 def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
@@ -572,15 +733,16 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
             LTX_geom = json.load(fid)
         plasma_dx = 0.02
         coil_dx = 0.02
+        vv_dx = 0.015
         vac_dx = 0.05
         gs_mesh = gs_Domain()
         #
         gs_mesh.define_region('air',vac_dx,'boundary')
         gs_mesh.define_region('plasma',plasma_dx,'plasma')
-        gs_mesh.define_region('shellU',2*plasma_dx,'conductor',eta=4.E-7,noncontinuous=True)
-        gs_mesh.define_region('shellL',2*plasma_dx,'conductor',eta=4.E-7,noncontinuous=True)
+        gs_mesh.define_region('shellU',vv_dx,'conductor',eta=4.E-7,noncontinuous=True)
+        gs_mesh.define_region('shellL',vv_dx,'conductor',eta=4.E-7,noncontinuous=True)
         for i, vv_segment in enumerate(LTX_geom['vv']):
-            gs_mesh.define_region('vv{0}'.format(i),2*plasma_dx,'conductor',eta=vv_segment[1])
+            gs_mesh.define_region('vv{0}'.format(i),vv_dx,'conductor',eta=vv_segment[1])
         for key, coil in LTX_geom['coils'].items():
             if key.startswith('OH'):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
@@ -618,6 +780,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     if eig_test:
         eig_vals, _ = mygs.eig_wall(10)
         mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+        oftpy_dump_cov()
         return
     #
     mygs.set_coil_vsc({'INTERNALU': 1.0, 'INTERNALL': -1.0})
@@ -654,6 +817,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     if stability_test:
         eig_vals, _ = mygs.eig_td(-1.E3,10,False)
         mp_q.put([{'gamma': eig_vals[:5,0]}])
+        oftpy_dump_cov()
         return
     #
     psi_last = mygs.get_psi(False)
@@ -671,7 +835,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eig(order):
     exp_dict = {
-        'Tau_w': [195.300148, 253.92961287, 403.74576838, 473.64151856, 550.08441557]
+        'Tau_w': [195.300148, 253.92961287, 394.26207238, 460.20439568, 539.40856182]
     }
     results = mp_run(run_LTX_case,(order,True,False))
     assert validate_dict(results,exp_dict)
@@ -680,39 +844,42 @@ def test_LTX_eig(order):
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_stability(order):
     exp_dict = {
-        'gamma': [-238.0708, 216.6903, 286.1825, 394.7443, 394.7443]
+        'gamma': [-234.1051, 214.4196, 282.0877, 388.7592, 388.7592]
     }
     results = mp_run(run_LTX_case,(order,False,True))
     assert validate_dict(results,exp_dict)
 
+LTX_eq_dict = {
+    'Ip': 90002.51679781199,
+    'Ip_centroid': [ 4.05458767e-01, None],
+    'kappa': 1.525595596236063,
+    'kappaU': 1.5256161060199729,
+    'kappaL': 1.5255750864521527,
+    # 'delta': 0.1274386709874723,
+    # 'deltaU': 0.13292909306765727,
+    # 'deltaL': 0.1219482489072871,
+    'R_geo': 0.39198831687969443,
+    'a_geo': 0.2378387910900877,
+    'vol': 0.6507554668762836,
+    'q_0': 1.3280540982807334,
+    'q_95': 5.901997513881755,
+    'P_ax': 1720.958666106632,
+    'W_MHD': 563.2852958452944,
+    'beta_pol': 41.4052788464515,
+    'dflux': 0.0009601908294886685,
+    'tflux': 0.08551496495989133,
+    'l_i': 1.0271521431711803,
+    'beta_tor': 1.9276444168027145,
+    'beta_n': 1.3972402635015146
+}
+
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eq(order):
-    exp_dict = {
-        'Ip': 90000.1298205169,
-        'Ip_centroid': [4.05471907e-01, None],
-        'kappa': 1.5213293087744595,
-        'kappaU': 1.5215960005535605,
-        'kappaL': 1.5210626169953587,
-        # 'delta': 0.12295683642943968, # Disable for now
-        # 'deltaU': 0.12289529426354395, # Disable for now
-        # 'deltaL': 0.12301837859533517, # Disable for now
-        'vol': 0.6511641559778095,
-        'q_0': 1.3276880560032807,
-        'q_95': 5.897372049554493,
-        'P_ax': 1721.5000219840285,
-        'W_MHD': 563.3140773902292,
-        'beta_pol': 40.358078684354965,
-        'dflux': 0.0009602066573419095,
-        'tflux': 0.08571976036037239,
-        'l_i': 1.002735427186787,
-        'beta_tor': 1.9398553532544882,
-        'beta_n': 1.38790732317241
-    }
     results = mp_run(run_LTX_case,(order,False,False))
-    assert validate_dict(results,exp_dict)
+    assert validate_dict(results,LTX_eq_dict)
 
-# Example of how to run single test without pytest
+# # Example of how to run single test without pytest
 # if __name__ == '__main__':
 #     multiprocessing.freeze_support()
 #     mp_q = multiprocessing.Queue()

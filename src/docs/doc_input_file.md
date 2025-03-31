@@ -66,7 +66,7 @@ created by edge division will remain at the mid point of the coarse level edge r
 |  Option  |  Description  | Type |
 |------------|------------|-----|
 | `meshname=""`     | Name of mesh for use with I/O | str(40) |
-| `cad_type=1`      | Type of mesh for import (1 = T3D, 2 = Exodus, 3 = GMSH, 91 = Sphere, 92 = Cube) | int |
+| `cad_type=1`      | Type of mesh for import (0 = Native, 1 = T3D, 2 = Exodus, 3 = GMSH, 91 = Sphere, 92 = Cube) | int |
 | `nlevels=2`       | Total number of MG levels | int |
 | `nbase=1`         | Number of base refinements before decomposition to MPI | int |
 | `grid_order=1`    | Order of finest level tetrahedra (1-2) | int |

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_la_utils.F90
 !
 !> Matrix and vector management routines
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date December 2012
 !! @ingroup doxy_oft_lin_alg
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_la_utils
 USE oft_local
 USE oft_base
@@ -30,19 +32,19 @@ use petscmat
 #endif
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create a new vector by combining a set of vectors.
 !!
 !! @param[in,out] vec Resulting vector
 !! @param[in,out] stitch_info Array of seam structures
 !! @param[in,out] maps Mapping from sub-vectors into full vector
 !! @param[in] native Force native representation
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE create_vector
   MODULE PROCEDURE create_vector_real
   MODULE PROCEDURE create_vector_comp
 END INTERFACE create_vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create a matrix using a set of non-overlapping graphs.
 !!
 !! Native and PETSc (real only)s matrices are supported.
@@ -52,12 +54,12 @@ END INTERFACE create_vector
 !! @param[in] row_vec Vector representing matrix rows
 !! @param[in] col_vec Vector representing matrix columns
 !! @param[in] native Force native representation [optional]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE create_matrix
   MODULE PROCEDURE create_matrix_real
   MODULE PROCEDURE create_matrix_comp
 END INTERFACE create_matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Combine a set of non-overlapping sub-matrices into a single matrix.
 !!
 !! Native and PETSc (real only) matrices are supported. The matrix should be created using
@@ -67,15 +69,15 @@ END INTERFACE create_matrix
 !! @param[in] nr Number of row blocks
 !! @param[in] nc Number of column blocks
 !! @param[in,out] mat Resulting matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE combine_matrices
   MODULE PROCEDURE combine_matrices_real
   MODULE PROCEDURE combine_matrices_comp
 END INTERFACE combine_matrices
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Real implementation for \ref create_vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE create_vector_real(vec,stitch_info,maps,native)
 CLASS(oft_vector), POINTER, INTENT(inout) :: vec
 TYPE(seam_list), INTENT(inout) :: stitch_info(:)
@@ -204,9 +206,9 @@ DEALLOCATE(is0)
 END SUBROUTINE setup_petsc_vec
 #endif
 END SUBROUTINE create_vector_real
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Complex implementation for \ref create_vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE create_vector_comp(vec,stitch_info,maps,native)
 CLASS(oft_cvector), POINTER, INTENT(inout) :: vec
 TYPE(seam_list), INTENT(inout) :: stitch_info(:)
@@ -288,9 +290,9 @@ DO i=1,this%n
 END DO
 END SUBROUTINE setup_native_vec
 END SUBROUTINE create_vector_comp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Combine seam information for a set of vectors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE condense_stitch(stitch_info,map,stitcher)
 TYPE(seam_list), INTENT(in) :: stitch_info(:) !< Array of seam structures
 type(oft_map), INTENT(in) :: map(:) !< Mapping from sub-vectors into full vector
@@ -396,9 +398,9 @@ allocate(stitcher%recv(0)%v(stitcher%recv(0)%n))
 CALL oft_stitch_check(stitcher)
 DEBUG_STACK_POP
 END SUBROUTINE condense_stitch
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Real implementation for \ref create_matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE create_matrix_real(mat,ingraphs,row_vec,col_vec,native)
 CLASS(oft_matrix), POINTER, INTENT(inout) :: mat
 TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:)
@@ -564,9 +566,9 @@ CALL MatGetSize(this%M,m,n,ierr)
 END SUBROUTINE setup_petsc
 #endif
 END SUBROUTINE create_matrix_real
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Real implementation for \ref create_matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE create_matrix_comp(mat,ingraphs,row_vec,col_vec,native)
 CLASS(oft_cmatrix), POINTER, INTENT(inout) :: mat
 TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:)
@@ -698,9 +700,9 @@ ELSE
 END IF
 END SUBROUTINE setup_native
 END SUBROUTINE create_matrix_comp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE csr_remove_redundant(nr,kr,nnz,lc)
 INTEGER(4), INTENT(in) :: nr
 INTEGER(4), INTENT(inout) :: kr(nr+1)
@@ -728,9 +730,9 @@ ALLOCATE(lc(kr(nr+1)-1))
 lc=lctmp(1:kr(nr+1)-1)
 DEALLOCATE(lctmp)
 END SUBROUTINE csr_remove_redundant
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Combine a set of non-overlapping CRS-graphs into a graph
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE condense_graph(ingraphs,outgraph,maps,row_map,col_map)
 TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing submatrices
 TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
@@ -836,9 +838,9 @@ DO i=1,ni
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE condense_graph
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Modify a CSR graph by adding dense blocks
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine graph_add_dense_blocks(graph_in,graph_out,dense_flag,dense_nodes)
 TYPE(oft_graph), INTENT(inout) :: graph_in !< Input graph to augment
 TYPE(oft_graph), INTENT(inout) :: graph_out !< Output graph
@@ -907,9 +909,9 @@ END DO
 DEALLOCATE(ltmp)
 DEBUG_STACK_POP
 end subroutine graph_add_dense_blocks
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Modify a CSR graph by adding dense columns at specified indices
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine graph_add_full_col(graph_in,graph_out,nadd,nodes_add)
 TYPE(oft_graph), INTENT(inout) :: graph_in !< Input graph to augment
 TYPE(oft_graph), INTENT(inout) :: graph_out !< Output graph
@@ -964,9 +966,9 @@ END DO
 DEALLOCATE(ltmp)
 DEBUG_STACK_POP
 end subroutine graph_add_full_col
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Real implementation for \ref combine_matrices
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_real(mats,nr,nc,mat)
 TYPE(oft_matrix_ptr), INTENT(in) :: mats(:,:)
 INTEGER(i4), INTENT(in) :: nr
@@ -1139,9 +1141,9 @@ CALL this%assemble()
 END SUBROUTINE combine_petsc
 #endif
 END SUBROUTINE combine_matrices_real
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Real implementation for \ref combine_matrices
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_comp(mats,nr,nc,mat)
 TYPE(oft_cmatrix_ptr), INTENT(in) :: mats(:,:)
 INTEGER(i4), INTENT(in) :: nr
@@ -1179,9 +1181,9 @@ DO i=1,nr
 END DO
 END SUBROUTINE combine_native
 END SUBROUTINE combine_matrices_comp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Create an identity graph for a given vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE create_identity_graph(outgraph,vec)
 TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
 CLASS(oft_vector), POINTER, INTENT(in) :: vec !< Vector representing matrix rows/columns

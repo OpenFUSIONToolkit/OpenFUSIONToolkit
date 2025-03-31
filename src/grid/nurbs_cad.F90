@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file nurbs_cad.F90
 !
 !> CAD utility functions and class definition for reconstruction of
@@ -14,7 +16,7 @@
 !! @author Chris Hansen
 !! @date May 2012
 !! @ingroup doxy_oft_grid
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 MODULE nurbs_cad
 #ifdef HAVE_ONURBS
 USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_double, c_char
@@ -25,9 +27,9 @@ PRIVATE
 !---
 INTEGER(i4), PARAMETER :: nurbs_ngrid = 20 !< Number of grid points to use for object meshes
 REAL(r8), PARAMETER :: nurbs_singstep = .1d0 !< Distance to offset guesses from singular edges
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> CAD entity class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, ABSTRACT :: nurbs_entity
   INTEGER(i4) :: id !< Input ID of CAD object
   INTEGER(i4) :: reflect = -1 !< Index to reflect
@@ -44,9 +46,9 @@ CONTAINS
   !> Parametric point evaluation
   PROCEDURE(nurbs_dummy_unwrap), DEFERRED :: unwrap
 END TYPE nurbs_entity
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> CAD curve class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, EXTENDS(nurbs_entity) :: nurbs_curve
   INTEGER(i4) :: cid !< Curve ID in OFT indexing
   INTEGER(i4) :: nspan !< Size of span vector
@@ -67,9 +69,9 @@ CONTAINS
   !> Parametric point evaluation
   PROCEDURE :: unwrap => nurbs_curve_unwrap
 END TYPE nurbs_curve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> CAD surface class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, EXTENDS(nurbs_entity) :: nurbs_surf
   INTEGER(i4) :: sid !< Surface ID in OFT indexing
   INTEGER(i4) :: nspan(2) !< Size of span vectors
@@ -92,19 +94,19 @@ CONTAINS
   !> Parametric point evaluation
   PROCEDURE :: unwrap => nurbs_surf_unwrap
 END TYPE nurbs_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> List of CAD entities
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: nurbs_entity_ptr
   CLASS(nurbs_entity), POINTER :: wo => NULL() !< OpenNURBS CAD entity
 END TYPE nurbs_entity_ptr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Abstract subroutine definitions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ABSTRACT INTERFACE
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Evaluate position from a NURBS object
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_dummy_eval(self,pt,u,v)
     IMPORT nurbs_entity, r8
     CLASS(nurbs_entity), INTENT(in) :: self !< NURBS object
@@ -112,16 +114,16 @@ ABSTRACT INTERFACE
     REAL(r8), INTENT(in) :: u !< Parametric coordinate 1
     REAL(r8), INTENT(in) :: v !< Parametric coordinate 2 (unused if curve)
   END SUBROUTINE nurbs_dummy_eval
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Create a grid of points evenly spaced in parametric space
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_dummy_grid(self)
     IMPORT nurbs_entity
     CLASS(nurbs_entity), INTENT(inout) :: self !< NURBS object
   END SUBROUTINE nurbs_dummy_grid
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Find the nearest location on a NURBS object to a given point
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_dummy_find(self,pt,u,v,ierr)
     IMPORT nurbs_entity, i4, r8
     CLASS(nurbs_entity), TARGET, INTENT(in) :: self !< NURBS object
@@ -130,20 +132,20 @@ ABSTRACT INTERFACE
     REAL(r8), INTENT(out) :: v !< Parametric coordinate 2 (unused if curve)
     INTEGER(i4), INTENT(out) :: ierr !< Error status (point not found if ierr<0)
   END SUBROUTINE nurbs_dummy_find
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Wrap the periodic coordinates of a NURBS object into a single span
   !! - Example: For a periodic domain of \f$ [0,2 \pi] (-\pi/4,0) -> (3 \pi/4,0) \f$
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_dummy_wrap(self,u,v)
     IMPORT nurbs_entity, r8
     CLASS(nurbs_entity), INTENT(in) :: self !< NURBS object
     REAL(r8), INTENT(inout) :: u !< Parametric coordinate 1
     REAL(r8), INTENT(inout) :: v !< Parametric coordinate 2 (unused if curve)
   END SUBROUTINE nurbs_dummy_wrap
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Unwrap the periodic coordinates of a NURBS object to avoid parameter cuts
   !! - Example: For a periodic domain of \f$ [0,2 \pi] (3 \pi/4,0) -> (-\pi/4,0) \f$
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_dummy_unwrap(self,u1,u2,v1,v2)
     IMPORT nurbs_entity, r8
     CLASS(nurbs_entity), INTENT(in) :: self !< NURBS object
@@ -153,53 +155,53 @@ ABSTRACT INTERFACE
     REAL(r8), INTENT(inout) :: v2 !< Parametric coordinate 2 of second point (unused if curve)
   END SUBROUTINE nurbs_dummy_unwrap
 END INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Interfaces to C++ NURBS subroutines
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Initialize the OpenNURBS library
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_init(ierr) BIND(C)
     IMPORT c_int
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_init
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Finalize the OpenNURBS library
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_finalize(ierr) BIND(C)
     IMPORT c_int
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_finalize
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Read-in a OpenNURBS *.3dm geometry file set objects as active
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_read_in(filename,ierr) BIND(C)
     IMPORT c_int, c_char
     CHARACTER(KIND=c_char), INTENT(in) :: filename !< Name of geometry file
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_read_in
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get a count of OpenNURBS objects in current file
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_get_count(nc,ns,ierr) BIND(C)
     IMPORT c_int
     INTEGER(c_int), INTENT(inout) :: nc !< Number of NURBS curves
     INTEGER(c_int), INTENT(inout) :: ns !< Number of NURBS surfaces
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_get_count
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get the name of a OpenNURBS curve
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_curve_name(ind,name,ierr) BIND(C)
     IMPORT c_int, c_char
     INTEGER(c_int), INTENT(in) :: ind !< Index of curve
     CHARACTER(KIND=c_char), INTENT(inout) :: name !< Name of curve
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_curve_name
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Evalute the position along a NURBS curve
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_eval_curve(ind,u,r,ierr) BIND(C)
     IMPORT c_int, c_double
     INTEGER(c_int), INTENT(in) :: ind !< Index of curve
@@ -207,45 +209,45 @@ INTERFACE
     REAL(c_double), DIMENSION(3), INTENT(inout) :: r !< Position in physical space [3]
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_eval_curve
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get the parametric domain of a NURBS curve
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_curve_domain(ind,domain,ierr) BIND(C)
     IMPORT c_int, c_double
     INTEGER(c_int), INTENT(in) :: ind !< Index of curve
     REAL(c_double), DIMENSION(2), INTENT(inout) :: domain !< Domain of parametric variable [2] 
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_curve_domain
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Test periodicity of a NURBS curve
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_curve_periodic(ind,p,ierr) BIND(C)
     IMPORT c_int
     INTEGER(c_int), INTENT(in) :: ind !< Index of curve
     INTEGER(c_int), INTENT(inout) :: p !< Periodic flag (1 if true, 0 if false)
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_curve_periodic
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Test if NURBS curve is straight
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_curve_linear(ind,p,ierr) BIND(C)
     IMPORT c_int
     INTEGER(c_int), INTENT(in) :: ind !< Index of curve
     INTEGER(c_int), INTENT(inout) :: p !< Straight flag (1 if true, 0 if false)
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_curve_linear
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get the name of a OpenNURBS surface
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_surf_name(ind,name,ierr) BIND(C)
     IMPORT c_int, c_char
     INTEGER(c_int), INTENT(in) :: ind !< Index of surface
     CHARACTER(KIND=c_char), INTENT(inout) :: name !< Name of surface
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_surf_name
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Evalute the position on a NURBS surface
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_eval_surf(ind,u,v,r,ierr) BIND(C)
     IMPORT c_int, c_double
     INTEGER(c_int), INTENT(in) :: ind !< Index of surface
@@ -254,9 +256,9 @@ INTERFACE
     REAL(c_double), DIMENSION(3), INTENT(inout) :: r !< Position in physical space [3]
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_eval_surf
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Get the parametric domain of a NURBS surface
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_surf_domain(ind,domain1,domain2,ierr) BIND(C)
     IMPORT c_int, c_double
     INTEGER(c_int), INTENT(in) :: ind !< Index of surface
@@ -264,9 +266,9 @@ INTERFACE
     REAL(c_double), DIMENSION(2), INTENT(inout) :: domain2 !< Domain of parametric variable 2 [2]
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_surf_domain
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Test periodicity of a NURBS surface
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_surf_periodic(ind,p1,p2,ierr) BIND(C)
     IMPORT c_int
     INTEGER(c_int), INTENT(in) :: ind !< Index of surface
@@ -274,18 +276,18 @@ INTERFACE
     INTEGER(c_int), INTENT(inout) :: p2 !< Periodic flag for direction 2 (1 if true, 0 if false)
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_surf_periodic
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Test if edges of a NURBS surface are degenerate
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_surf_singular(ind,p,ierr) BIND(C)
     IMPORT c_int
     INTEGER(c_int), INTENT(in) :: ind !< Index of surface
     INTEGER(c_int), DIMENSION(4), INTENT(inout) :: p !< Singular flag (1 if true, 0 if false) [4]
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_surf_singular
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !> Test if NURBS surface is planar
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   SUBROUTINE nurbs_surf_planar(ind,p,ierr) BIND(C)
     IMPORT c_int
     INTEGER(c_int), INTENT(in) :: ind !< Index of surface
@@ -293,9 +295,9 @@ INTERFACE
     INTEGER(c_int), INTENT(inout) :: ierr !< Error status
   END SUBROUTINE nurbs_surf_planar
 END INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Declare public interfaces
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PUBLIC nurbs_entity, nurbs_curve, nurbs_surf, nurbs_entity_ptr, &
   nurbs_init, nurbs_finalize, nurbs_read_in, nurbs_get_count, &
   nurbs_curve_name, nurbs_eval_curve, nurbs_curve_domain, &
@@ -311,10 +313,10 @@ real(r8) :: active_wts(3) !< Active constraint weights for MINPACK fitting
 !$omp threadprivate(active_pt,active_endpts,active_wts,active_curve,active_surf)
 PUBLIC nurbs_surf_avg, nurbs_surf_midpoint, nurbs_curve_midpoint, nurbs_surf_center
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Map the parametric position on a curve to physical coordinates.
 !! - (u,v) -> (x,y,z)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_curve_eval(self,pt,u,v)
 class(nurbs_curve), intent(in) :: self
 real(r8), intent(out) :: pt(3) !< Position vector [3]
@@ -334,10 +336,10 @@ pt=pt*self%coord_scales
 IF(self%reflect>0)pt(self%reflect)=-pt(self%reflect)
 DEBUG_STACK_POP
 end subroutine nurbs_curve_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Find the parametric representation of a boundary point in CAD representation on a curve
 !! - (x,y,z) -> (u,v)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_curve_find(self,pt,u,v,ierr)
 class(nurbs_curve), target, intent(in) :: self
 real(r8), intent(in) :: pt(3) !< Position vector [3]
@@ -422,14 +424,14 @@ if(i>40)then
 endif
 DEBUG_STACK_POP
 end subroutine nurbs_curve_find
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the weighted midpoint of a curve edge
 !!
 !! Locates the point on a given CAD curve which minimizes the weighted sum
 !! of distances to 2 constraint points.
 !!
 !! \f[ \sum_i w_i*(r_n - p_i)^2 \f]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_curve_midpoint(self,pt,pt1,pt2,wt1,wt2,ierr)
 class(nurbs_curve),target, intent(in) :: self !< Curve object
 real(r8), intent(inout) :: pt(3) !< Solution point
@@ -496,13 +498,13 @@ v=0.d0
 call self%eval(pt,u,v)
 DEBUG_STACK_POP
 end subroutine nurbs_curve_midpoint
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute the error between a curve point and the current active points
 !! used in a 2 point minimization.
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref nurbs_cad::nurbs_curve_midpoint "nurbs_curve_midpoint"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_cmid_error(m,n,uv,err,iflag)
 integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
 integer(i4), intent(in) :: n !< Number of parametric dimensions (2)
@@ -516,10 +518,10 @@ err(1:3)=(active_endpts(1,:)-pt)*SQRT(active_wts(1))
 err(4:6)=(active_endpts(2,:)-pt)*SQRT(active_wts(2))
 DEBUG_STACK_POP
 end subroutine nurbs_cmid_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Unwrap the coordinate of a periodic NURBS curve to avoid parameter cuts
 !! - Example: For a periodic domain of \f$ [0,2 \pi] (3 \pi/4,0) -> (-\pi/4,0) \f$
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_curve_unwrap(self,u1,u2,v1,v2)
 class(nurbs_curve), intent(in) :: self !< Curve object
 real(r8), intent(inout) :: u1 !< Parametric coordinate 1 of first point
@@ -537,13 +539,13 @@ if(self%periodic)then
 end if
 DEBUG_STACK_POP
 end subroutine nurbs_curve_unwrap
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Wrap the coordinate of a periodic NURBS curve into a single span
 !! - Example: For a periodic domain of \f$ [0,2 \pi] (-\pi/4,0) -> (3 \pi/4,0) \f$
 !!
 !! @param[in,out] u Parametric coordinate 1
 !! @param[in,out] v Parametric coordinate 2 (unused)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_curve_wrap(self,u,v)
 class(nurbs_curve), intent(in) :: self !< Curve object
 real(r8), intent(inout) :: u !<  Parametric coordinate 1
@@ -558,9 +560,9 @@ if(self%periodic)then
 end if
 DEBUG_STACK_POP
 end subroutine nurbs_curve_wrap
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute a grid of points evenly spaced in parametric space
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_curve_grid(self)
 class(nurbs_curve), intent(inout) :: self !< Curve object
 real(r8) :: u,v
@@ -573,10 +575,10 @@ do i=1,nurbs_ngrid
 end do
 DEBUG_STACK_POP
 end subroutine nurbs_curve_grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Map the parametric position on a surface to physical coordinates
 !! - (u,v) -> (x,y,z)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_eval(self,pt,u,v)
 class(nurbs_surf), intent(in) :: self !< Surface object
 real(r8), intent(out) :: pt(3) !< Physical position [3]
@@ -621,10 +623,10 @@ pt=pt*self%coord_scales
 IF(self%reflect>0)pt(self%reflect)=-pt(self%reflect)
 DEBUG_STACK_POP
 end subroutine nurbs_surf_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Find the parametric representation of a boundary point in CAD representation on a surface
 !! - (x,y,z) -> (u,v)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_find(self,pt,u,v,ierr)
 class(nurbs_surf), target, intent(in) :: self !< Surface object
 real(r8), intent(in) :: pt(3) !<  Position vector [3]
@@ -730,14 +732,14 @@ call self%eval(rt,u,v)
 val(2)=sqrt(sum((pt-rt)**2))
 DEBUG_STACK_POP
 end subroutine nurbs_surf_find
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the weighted midpoint of a surface edge
 !!
 !! Locates the point on a given CAD surface which minimizes the weighted sum
 !! of distances to 2 constraint points.
 !!
 !! \f[ \sum_i w_i*(r_n - p_i)^2 \f]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_midpoint(self,pt,pt1,pt2,wt1,wt2,ierr)
 class(nurbs_surf), target, intent(in) :: self !< Surface object
 real(r8), intent(inout) :: pt(3) !< Solution point
@@ -816,13 +818,13 @@ call self%eval(rt,u,v)
 pt=rt
 DEBUG_STACK_POP
 end subroutine nurbs_surf_midpoint
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute the error between a surface point and the current active points
 !! used in a 2 point minimization.
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref nurbs_cad::nurbs_surf_midpoint "nurbs_surf_midpoint"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_smid_error(m,n,uv,err,iflag)
 integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
 integer(i4), intent(in) :: n !< Number of parametric dimensions (2)
@@ -836,14 +838,14 @@ err(1:3)=(active_endpts(1,:)-pt)*SQRT(active_wts(1))
 err(4:6)=(active_endpts(2,:)-pt)*SQRT(active_wts(2))
 DEBUG_STACK_POP
 end subroutine nurbs_smid_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the weighted center point of a surface triangle
 !!
 !! Locates the point on a given CAD surface which minimizes the weighted sum
 !! of distances to 3 constraint points.
 !!
 !! \f[ \sum_i w_i*(r_n - p_i)^2 \f]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_center(self,pt,pt1,pt2,pt3,wt1,wt2,wt3,ierr)
 class(nurbs_surf), target, intent(in) :: self !< Surface object
 real(r8), intent(inout) :: pt(3) !< Solution point
@@ -920,13 +922,13 @@ v=uv(2)
 call self%eval(pt,u,v)
 DEBUG_STACK_POP
 end subroutine nurbs_surf_center
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute the error between a surface point and the current active points
 !! used in a 3 point minimization.
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref nurbs_cad::nurbs_surf_center "nurbs_surf_center"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_scenter_error(m,n,uv,err,iflag)
 integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
 integer(i4), intent(in) :: n !< Number of parametric dimensions (2)
@@ -941,13 +943,13 @@ err(4:6)=(active_endpts(2,:)-pt)*SQRT(active_wts(2))
 err(7:9)=(active_endpts(3,:)-pt)*SQRT(active_wts(3))
 DEBUG_STACK_POP
 end subroutine nurbs_scenter_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute the error between a surface point and the current active point
 !! used in a minimization.
 !!
 !! @note Designed to be used with MINPACK for non-linear least square location
 !! of nearest surface point
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_error(m,n,uv,err,iflag)
 integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
 integer(i4), intent(in) :: n !< Number of parametric dimensions (2)
@@ -960,9 +962,9 @@ call active_surf%eval(pt,uv(1),uv(2))
 err=active_pt-pt
 DEBUG_STACK_POP
 end subroutine nurbs_surf_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs?
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_avg(self,n,uin,vin,uavg,vavg)
 class(nurbs_entity), TARGET, intent(in) :: self !< Surface object
 integer(i4), intent(in) :: n !< Needs docs
@@ -1010,9 +1012,9 @@ select type(this=>self)
 end select
 DEBUG_STACK_POP
 end subroutine nurbs_surf_avg
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Detect if parametric location is at singular point
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function nurbs_surf_atsingular(self,u,v) result(test)
 class(nurbs_surf), intent(in) :: self !< Surface object
 real(r8), intent(inout) :: u !< Parametric coordinate 1
@@ -1036,10 +1038,10 @@ if(self%singular(2,2))then
 end if
 DEBUG_STACK_POP
 end function nurbs_surf_atsingular
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Unwrap the periodic coordinates of a NURBS surface to avoid parameter cuts
 !! - Example: For a periodic domain of \f$ [0,2 \pi] (3 \pi/4,0) -> (-\pi/4,0) \f$
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_unwrap(self,u1,u2,v1,v2)
 class(nurbs_surf), intent(in) :: self !< Surface object
 real(r8), intent(inout) :: u1 !< Parametric coordinate 1 of first point
@@ -1086,10 +1088,10 @@ if(self%periodic(2))then
 end if
 DEBUG_STACK_POP
 end subroutine nurbs_surf_unwrap
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Wrap the periodic coordinates of a NURBS surface into a single span
 !! - Example: For a periodic domain of \f$ [0,2 \pi] (-\pi/4,0) -> (3 \pi/4,0) \f$
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_wrap(self,u,v)
 class(nurbs_surf), intent(in) :: self !< Surface object
 real(r8), intent(inout) :: u !< Parametric coordinate 1
@@ -1109,9 +1111,9 @@ if(self%periodic(2))then
 end if
 DEBUG_STACK_POP
 end subroutine nurbs_surf_wrap
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute a grid of points evenly spaced in parametric space
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nurbs_surf_grid(self)
 class(nurbs_surf), intent(inout) :: self !< Surface object
 real(r8) :: u,v

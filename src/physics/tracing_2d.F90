@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file tracing.F90
 !
 !> 2D tracing implementation for Open FUSION Toolkit (OFT)
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date Feburary 2012
 !! @ingroup doxy_oft_physics
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 module tracing_2d
 USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
@@ -16,9 +18,9 @@ USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 USE oft_lag_basis, ONLY: oft_blag_eval, oft_blag_geval
 implicit none
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Abstract tracer class for 2D grids
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, abstract :: tracer
   integer :: neq = 2 !< Number of ODE equations to advance
   logical :: initialized = .FALSE. !< Has tracer been initialized
@@ -49,26 +51,26 @@ contains
 end type tracer
 !
 abstract interface
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Interface definition for \ref tracer::setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
    subroutine tracer_setup(self,y,cell)
       import tracer
       class(tracer), intent(inout) :: self !< Tracer object
       real(8), intent(in) :: y(2) !< Initial position in physical coordinates
       integer(4), optional, intent(in) :: cell !< Starting guess for cell
    end subroutine tracer_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Interface definition for \ref tracer::step and \ref tracer::delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
    subroutine tracer_step(self)
       import tracer
       class(tracer), intent(inout) :: self !< Tracer object
    end subroutine tracer_step
 end interface
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Tracer implementation using LSODE as the ODE solver
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, extends(tracer) :: tracer_lsode
   integer :: lrw = 0 !< Needs docs
   integer :: liw = 0 !< Needs docs
@@ -82,9 +84,9 @@ contains
   procedure :: step => trace_advance_lsode
   procedure :: delete => trace_delete_lsode
 end type tracer_lsode
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Abstract interpolation class for inverse mappings
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, abstract, extends(bfem_interp) :: cylinv_interp
   real(r8) :: rho = 0.d0 !< Radial position
   real(r8) :: t = 0.d0 !< Poloidal angle
@@ -94,9 +96,9 @@ class(tracer), pointer :: active_tracer => NULL() !< Current tracer for thread (
 !$omp threadprivate(active_tracer)
 ! integer(4), parameter, private :: nlocpts = 2e4
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Allocate tracer for current thread
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine set_tracer(type)
 integer(i4), intent(in) :: type !< Desired type (1-> LSODE)
 !$omp parallel
@@ -113,9 +115,9 @@ select case(type)
 end select
 !$omp end parallel
 end subroutine set_tracer
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! !> Trace field line for one flux surface transit
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! subroutine tracing_fs(pt)
 ! real(8), intent(in) :: pt(2) !< Starting point [2]
 ! real(8) :: z,yp(2)
@@ -140,9 +142,9 @@ end subroutine set_tracer
 ! end do
 ! if(active_tracer%status==0)active_tracer%status=3
 ! end subroutine tracing_fs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Trace field line for one flux surface transit in inverse coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tracinginv_fs(mesh,pt,ptout)
 class(oft_bmesh), target, intent(in) :: mesh !< Mesh for tracing
 real(8), intent(in) :: pt(2) !< Starting point [2]
@@ -184,9 +186,9 @@ do while(active_tracer%nsteps<active_tracer%maxsteps)
 end do
 IF(active_tracer%nsteps>=active_tracer%maxsteps)active_tracer%status=-1
 end subroutine tracinginv_fs
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! !> Needs docs
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! subroutine tracing_surf(pt,filename)
 ! real(8), intent(in) :: pt(2)
 ! character(*), intent(in) :: filename
@@ -212,9 +214,9 @@ end subroutine tracinginv_fs
 ! !---
 ! close(io_unit)
 ! end subroutine tracing_surf
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! !> Needs docs
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! subroutine tracing_surfpts(pt,pts,b)
 ! real(8), intent(in) :: pt(2)
 ! real(8), pointer, intent(out) :: pts(:,:)
@@ -246,9 +248,9 @@ end subroutine tracinginv_fs
 ! b=pttmp(3:4,1:active_tracer%nsteps)
 ! DEALLOCATE(pttmp)
 ! end subroutine tracing_surfpts
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! !> Needs docs
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! subroutine tracinginv_surf(pt,filename,ntheta)
 ! real(8), intent(in) :: pt(2)
 ! character(*), intent(in) :: filename
@@ -284,9 +286,9 @@ end subroutine tracinginv_fs
 ! !---
 ! close(io_unit)
 ! end subroutine tracinginv_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Trace field line and save path to file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tracing_line(pt,filename)
 real(r8), intent(in) :: pt(2) !< Starting point
 character(LEN=*), intent(in) :: filename !< Output filename
@@ -300,9 +302,9 @@ do while(active_tracer%nsteps<active_tracer%maxsteps)
 end do
 close(io_unit)
 end subroutine tracing_line
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate B-field for tracing using LSODE (called by LSODE)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tracing_eval_B(neq,t,y,ydot)
 integer, intent(in) :: neq !< Number of total ODE eqns (from LSODE)
 real(r8), intent(in) :: t !< Current time (from LSODE)
@@ -324,9 +326,9 @@ active_tracer%dy=ydot(1:2)
 active_tracer%dv=ydot
 if(.NOT.(( fmax<=1.d0+tol ).AND.( fmin>=-tol )))active_tracer%cell=0
 end subroutine tracing_eval_B
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate B-field for tracing in inverse coordinates using LSODE (called by LSODE)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tracing_eval_Binv(neq,t,y,ydot)
 integer, intent(in) :: neq !< Number of total ODE eqns (from LSODE)
 real(r8), intent(in) :: t !< Current time (from LSODE)
@@ -365,9 +367,9 @@ END SELECT
 active_tracer%dv=ydot
 if(.NOT.(( fmax<=1.d0+tol ).AND.( fmin>=-tol )))active_tracer%cell=0
 end subroutine tracing_eval_Binv
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Initialize tracer using LSODE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine trace_setup_lsode(self,y,cell)
 class(tracer_lsode), intent(inout) :: self !< LSODE tracer object
 real(8), intent(in) :: y(2) !< Initial position
@@ -412,9 +414,9 @@ call bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
 self%initialized=.TRUE.
 active_tracer%status=0
 end subroutine trace_setup_lsode
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Advance the tracer one step using LSODE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine trace_advance_lsode(self)
 class(tracer_lsode), intent(inout) :: self !< LSODE tracer object
 IF(self%inv)THEN
@@ -429,9 +431,9 @@ END IF
 self%nsteps=self%nsteps+1
 IF(self%istate<0)self%status=-4
 end subroutine trace_advance_lsode
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy LSODE tracer and deallocate internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine trace_delete_lsode(self)
 class(tracer_lsode), intent(inout) :: self !< LSODE tracer object
 self%nsteps=0

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file oft_lag_basis.F90
 !
 !> @defgroup doxy_oft_lag Lagrange
@@ -16,7 +18,7 @@
 !! @authors Chris Hansen
 !! @date August 2011
 !! @ingroup doxy_oft_lag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_lag_basis
 USE, INTRINSIC :: iso_c_binding, only: c_int, c_double
 USE oft_base
@@ -36,9 +38,9 @@ USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_ml_fem_type, oft_bfem_type,
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Lagrange operator container
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_fem_type) :: oft_scalar_fem
   INTEGER(i4) :: inodesp(3,8) !< Needs docs
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodese => NULL() !< Needs docs
@@ -54,9 +56,9 @@ contains
   !> Destory FE type
   PROCEDURE :: delete => scalar_fem_delete
 end type oft_scalar_fem
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Lagrange operator container
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(oft_bfem_type) :: oft_scalar_bfem
   INTEGER(i4) :: inodesp(2,4) !< Needs docs
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: inodese => NULL() !< Needs docs
@@ -69,12 +71,12 @@ end type oft_scalar_bfem
 !---Global Variables
 integer(i4), parameter :: oft_lagrange_id = 1 !< FE type ID
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast abstract FE type to 3D lagrange finite element type
 !!
 !! The source matrix must be @ref oft_scalar_fem or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_3D_lagrange_cast(self,source) RESULT(success)
 CLASS(oft_scalar_fem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
 CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
@@ -90,12 +92,12 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_3D_lagrange_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast abstract FE type to 2D lagrange finite element type
 !!
 !! The source matrix must be @ref oft_scalar_bfem or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_2D_lagrange_cast(self,source) RESULT(success)
 CLASS(oft_scalar_bfem), POINTER, INTENT(out) :: self !< Reference to source object with desired class
 CLASS(oft_afem_type), TARGET, INTENT(in) :: source !< Source object to reference
@@ -111,9 +113,9 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_lagrange_cast
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute surface normals for use in boundary conditions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_lag_boundary(lag_rep)
 class(oft_scalar_fem), intent(inout) :: lag_rep
 INTEGER(i4), PARAMETER :: i2(3)=(/2,3,1/),i3(3)=(/3,1,2/)
@@ -306,11 +308,11 @@ DO i=1,mesh%np
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE oft_lag_boundary
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct lagrange scalar FE on each mesh level
 !!
 !! @note Highest supported representation is quartic
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine  oft_lag_setup(mg_mesh,order,ML_lag_obj,ML_blag_obj,ML_vlag_obj,minlev)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh
 integer(i4), intent(in) :: order !< Order of representation desired
@@ -325,10 +327,12 @@ IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'**** Creating Lagrange FE space'
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Minlev = ',minlev_out
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I4)')oft_indent,'Order  = ',order
+  WRITE(*,'(2A,I4)')oft_indent,'Minlev = ',minlev_out
+ELSE
+  CALL oft_increase_indent
 END IF
-CALL oft_increase_indent
 !---Allocate multigrid operators
 nlevels=mg_mesh%mgdim+(order-1)
 IF(minlev_out<0)minlev_out=nlevels
@@ -407,11 +411,11 @@ IF(oft_env%head_proc)WRITE(*,*)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine oft_lag_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct lagrange scalar FE for a given order
 !!
 !! @note Highest supported representation is quartic
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_setup_vol(self,tmesh,order)
 class(oft_afem_type), pointer, intent(out) :: self !< Needs docs
 class(oft_mesh), target, intent(in) :: tmesh !< Needs docs
@@ -467,11 +471,11 @@ call self%setup(self%order*2+1)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine oft_lag_setup_vol
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Construct lagrange scalar FE for a given order
 !!
 !! @note Highest supported representation is quartic
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_setup_bmesh(self,tmesh,order)
 class(oft_afem_type), pointer, intent(out) :: self !< Needs docs
 class(oft_bmesh), target, intent(in) :: tmesh !< Needs docs
@@ -528,11 +532,11 @@ call self%setup(order*2+1)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine oft_lag_setup_bmesh
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate lagrange interpolation function
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_eval(self,cell,dof,f,val)
 class(oft_scalar_fem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -580,11 +584,11 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate lagrange interpolation function
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_blag_eval(self,face,dof,f,val)
 class(oft_scalar_bfem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: face !< Cell for evaluation
@@ -629,11 +633,11 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_eval_all(self,cell,f,rop)
 class(oft_scalar_fem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -731,9 +735,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tet_eval_all2()!self,cell,f,rop)
 ! class(oft_scalar_fem), intent(in) :: self
 ! integer(i4), intent(in) :: cell
@@ -757,9 +761,9 @@ DO i=1,6
 END DO
 DEBUG_STACK_POP
 end subroutine tet_eval_all2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tet_eval_all3()!self,cell,f,rop)
 ! class(oft_scalar_fem), intent(in) :: self
 ! integer(i4), intent(in) :: cell
@@ -793,9 +797,9 @@ DO i=1,4
 END DO
 DEBUG_STACK_POP
 end subroutine tet_eval_all3
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tet_eval_all4()!self,cell,f,rop)
 ! class(oft_scalar_fem), intent(in) :: self
 ! integer(i4), intent(in) :: cell
@@ -838,12 +842,12 @@ rop(offset+1) = PRODUCT(f-self%xnodes(1))/((self%xnodes(2)-self%xnodes(1))**4)
 DEBUG_STACK_POP
 end subroutine tet_eval_all4
 end subroutine oft_lag_eval_all
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate lagrange gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! gradient with respect to physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_geval(self,cell,dof,f,val,gop)
 class(oft_scalar_fem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -912,12 +916,12 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_geval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate lagrange gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! gradient with respect to physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_blag_geval(self,face,dof,f,val,gop)
 class(oft_scalar_bfem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: face !< Cell for evaluation
@@ -979,11 +983,11 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_geval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions
 !!
 !! @note Evaluation is performed in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_geval_all(self,cell,f,rop,gop)
 class(oft_scalar_fem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1125,9 +1129,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tet_geval_all2()!self,cell,f,gop,rop)
 ! class(oft_scalar_fem), intent(in) :: self
 ! integer(i4), intent(in) :: cell
@@ -1156,9 +1160,9 @@ DO i=1,6
 END DO
 DEBUG_STACK_POP
 end subroutine tet_geval_all2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tet_geval_all3()!self,cell,f,gop,rop)
 ! class(oft_scalar_fem), intent(in) :: self
 ! integer(i4), intent(in) :: cell
@@ -1198,9 +1202,9 @@ DO i=1,4
 END DO
 DEBUG_STACK_POP
 end subroutine tet_geval_all3
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine tet_geval_all4()!self,cell,f,gop,rop)
 ! class(oft_scalar_fem), intent(in) :: self
 ! integer(i4), intent(in) :: cell
@@ -1259,12 +1263,12 @@ rop(:,offset+1) = MATMUL(gop,cofs4)/((self%xnodes(2)-self%xnodes(1))**4)
 DEBUG_STACK_POP
 end subroutine tet_geval_all4
 end subroutine oft_lag_geval_all
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate lagrange gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! gradient with respect to physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_d2eval(self,cell,dof,f,val,g2op)
 class(oft_scalar_fem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1358,12 +1362,12 @@ ELSE
   end do
 END IF
 end subroutine oft_lag_d2eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate lagrange gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
 !! gradient with respect to physical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_blag_d2eval(self,cell,dof,f,val,g2op)
 class(oft_scalar_bfem), intent(in) :: self !<  Lagrange type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1445,9 +1449,9 @@ ELSE
   end do
 END IF
 end subroutine oft_blag_d2eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Retrieve lagrange node locations in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_npos(self,cell,dof,f)
 class(oft_scalar_fem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1498,9 +1502,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_npos
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Retrieve all lagrange node locations in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_lag_nodes(order,ed_nodes,fc_nodes,c_nodes)
 integer(i4), intent(in) :: order !< Needs docs
 real(r8), pointer, intent(out) :: ed_nodes(:,:) !< Needs docs
@@ -1574,9 +1578,9 @@ END IF
 ! end select
 DEBUG_STACK_POP
 end subroutine oft_lag_nodes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Retrieve lagrange node locations in logical coordinates
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_blag_npos(self,cell,dof,f)
 class(oft_scalar_bfem), intent(in) :: self !< Lagrange type for evaluation
 integer(i4), intent(in) :: cell !< Cell for evaluation
@@ -1620,9 +1624,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_npos
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy boundary FE object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE scalar_bfem_delete(self)
 CLASS(oft_scalar_bfem), INTENT(inout) :: self
 DEBUG_STACK_PUSH
@@ -1632,9 +1636,9 @@ IF(ASSOCIATED(self%inodesf))DEALLOCATE(self%inodesf)
 IF(ASSOCIATED(self%xnodes))DEALLOCATE(self%xnodes)
 DEBUG_STACK_POP
 END SUBROUTINE scalar_bfem_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy FE object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE scalar_fem_delete(self)
 CLASS(oft_scalar_fem), INTENT(inout) :: self
 DEBUG_STACK_PUSH

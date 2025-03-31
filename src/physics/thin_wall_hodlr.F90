@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file thin_wall_hodlr.F90
 !
 !> Hierarchical Off-Diagonal Low Rank matrix approximation functionality for ThinCurr
@@ -10,14 +12,14 @@
 !! @authors Chris Hansen
 !! @date Feb 2024
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE thin_wall_hodlr
 USE thin_wall
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type :: oft_tw_block
   INTEGER(4) :: np = 0
   INTEGER(4) :: nelems = 0
@@ -30,17 +32,17 @@ type :: oft_tw_block
   INTEGER(4), POINTER :: ipts(:) => NULL()
   INTEGER(4), POINTER :: icell(:) => NULL()
 end type oft_tw_block
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type oft_tw_level
   INTEGER(4) :: nblocks = 0
   INTEGER(4), POINTER, DIMENSION(:,:) :: mat_mask => NULL()
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL()
 end type oft_tw_level
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   INTEGER(4) :: nlevels = 0 !< Number of levels in block heirarchy
   INTEGER(4) :: nblocks = 0 !< Number of blocks on the lowest level
@@ -83,15 +85,15 @@ contains
   !> Assemble matrix (L)
   procedure :: assemble => tw_hodlr_Lassemble
 end type oft_tw_hodlr_op
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: cmat_container
   COMPLEX(c8), POINTER, DIMENSION(:,:) :: M => NULL()
 END TYPE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Complex block-Jacobi preconditioner for ThinCurr HODLR matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_csolver) :: oft_tw_hodlr_bjpre
   INTEGER(4) :: max_block_size = 0
   COMPLEX(c8) :: alpha = (1.d0,0.d0)
@@ -105,15 +107,15 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => bjprecond_delete
 END TYPE oft_tw_hodlr_bjpre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: rmat_container
   REAL(r8), POINTER, DIMENSION(:,:) :: M => NULL()
 END TYPE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Real block-Jacobi preconditioner for ThinCurr HODLR matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   INTEGER(4) :: max_block_size = 0
   REAL(r8) :: alpha = 1.d0
@@ -128,9 +130,9 @@ CONTAINS
   PROCEDURE :: delete => rbjprecond_delete
 END TYPE oft_tw_hodlr_rbjpre
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_LmatHole(row_obj,col_obj,Lmat)
 TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
 TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
@@ -281,9 +283,9 @@ DEALLOCATE(quads)
 ! WRITE(*,*)'  Time = ',elapsed_time
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_LmatHole
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Lmatblock(row_obj,col_obj,Lmat,row_block,col_block)
 TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
 TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
@@ -400,9 +402,9 @@ DEALLOCATE(quads) !,rpmap,cpmap)
 ! WRITE(*,*)'  Time = ',elapsed_time
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmatblock
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Bops_hole(self,Bop,Bop_dr)
 TYPE(tw_type), INTENT(inout) :: self
 REAL(8), INTENT(out) :: Bop(:,:,:) !< Magnetic field evaluation matrix
@@ -572,9 +574,9 @@ IF(self%n_icoils>0)THEN
 END IF
 Bop_dr=Bop_dr*mu0/(4.d0*pi)
 END SUBROUTINE tw_compute_Bops_hole
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Bops_block(self,Bop,row_block,col_block,dir)
 TYPE(tw_type), INTENT(inout) :: self
 REAL(8), INTENT(out) :: Bop(:,:) !< Magnetic field evaluation matrix
@@ -687,9 +689,9 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 END SUBROUTINE tw_compute_Bops_block
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_hodlr_setup(self,required)
 class(oft_tw_hodlr_op), intent(inout) :: self
 LOGICAL, INTENT(in) :: required
@@ -870,9 +872,9 @@ DO j=1,self%nlevels
 END DO
 DEALLOCATE(cell_mark)
 END SUBROUTINE tw_hodlr_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_hodlr_Lcompute(self,save_file)
 class(oft_tw_hodlr_op), intent(inout) :: self
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
@@ -1541,9 +1543,9 @@ size_out=INT(i,8)*INT(M+N,8)
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp,QU,QV,RU,RV)
 END SUBROUTINE compress_aca
 END SUBROUTINE tw_hodlr_Lcompute
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_hodlr_Bcompute(self,save_file)
 class(oft_tw_hodlr_op), intent(inout) :: self
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
@@ -2222,7 +2224,7 @@ size_out=INT(i,8)*INT(M+N,8)
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp,QU,QV,RU,RV)
 END SUBROUTINE compress_aca
 END SUBROUTINE tw_hodlr_Bcompute
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
@@ -2232,7 +2234,7 @@ END SUBROUTINE tw_hodlr_Bcompute
 !!
 !! @param[in] a Source field
 !! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tw_hodlr_Lapply(self,a,b)
 class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a
@@ -2338,7 +2340,7 @@ END IF
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine tw_hodlr_Lapply
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
@@ -2348,7 +2350,7 @@ end subroutine tw_hodlr_Lapply
 !!
 !! @param[in] a Source field
 !! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tw_hodlr_Bapply(self,a,bx,by,bz)
 class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a
@@ -2450,9 +2452,9 @@ CALL by%restore_local(bvals(:,2))
 CALL bz%restore_local(bvals(:,3))
 DEALLOCATE(avals,bvals)
 end subroutine tw_hodlr_Bapply
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine tw_hodlr_Lassemble(self,diag)
 class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), optional, target, intent(inout) :: diag
@@ -2483,9 +2485,9 @@ END IF
 self%nr=self%tw_obj%nelems; self%nrg=self%tw_obj%nelems
 self%nc=self%tw_obj%nelems; self%ncg=self%tw_obj%nelems
 end subroutine tw_hodlr_Lassemble
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_part_mesh(self,leaf_target,nlevels,levels)
 TYPE(tw_type), INTENT(inout) :: self
 INTEGER(4), INTENT(in) :: leaf_target
@@ -2495,9 +2497,9 @@ INTEGER(4) :: i,j
 REAL(8) :: xs
 ! INTEGER(4), ALLOCATABLE, DIMENSION(:) :: child_inds
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: active_pts
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Need docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: tw_oct_tree
   INTEGER(4) :: npts = 0
   INTEGER(4) :: nchildren = 0
@@ -2511,9 +2513,9 @@ TYPE :: tw_oct_tree
   TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: children => NULL()
   TYPE(tw_oct_tree), POINTER :: parent => NULL()
 END TYPE tw_oct_tree
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Need docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 TYPE :: tw_oct_tree_level
   INTEGER(4) :: nblocks = 0
   INTEGER(4) :: nc_dense = 0
@@ -2855,9 +2857,9 @@ CALL DORGQR( M, N, N, Q, M, TAU, WORK, LWORK, INFO )
 IF(INFO/=0)CALL oft_abort("QR factorization failed","tw_Lmat_MF_setup::get_qr",__FILE__)
 DEALLOCATE(WORK,TAU)
 END SUBROUTINE get_qr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method (complex)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE bjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_cvector), INTENT(inout) :: u !< Guess/Solution field
@@ -2977,9 +2979,9 @@ CALL g%set((0.d0,0.d0))
 DEALLOCATE(utmp,gtmp)
 DEBUG_STACK_POP
 END SUBROUTINE bjprecond_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine bjprecond_delete(self)
 class(oft_tw_hodlr_bjpre), intent(inout) :: self
 INTEGER(i4) :: i
@@ -2996,9 +2998,9 @@ self%max_block_size=0
 NULLIFY(self%mf_obj)
 DEBUG_STACK_POP
 end subroutine bjprecond_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method (real)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE rbjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
@@ -3118,9 +3120,9 @@ CALL g%set(0.d0)
 DEALLOCATE(utmp,gtmp)
 DEBUG_STACK_POP
 END SUBROUTINE rbjprecond_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rbjprecond_delete(self)
 class(oft_tw_hodlr_rbjpre), intent(inout) :: self
 INTEGER(i4) :: i

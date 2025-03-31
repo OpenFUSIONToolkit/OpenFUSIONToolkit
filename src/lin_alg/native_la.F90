@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_native_la.F90
 !
 !> @defgroup doxy_oft_native_la Native backend
@@ -21,7 +23,7 @@
 !! @authors Chris Hansen
 !! @date Feburary 2012
 !! @ingroup doxy_oft_native_la
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_native_la
 USE, INTRINSIC :: iso_c_binding, only: c_int
 USE oft_local
@@ -35,11 +37,11 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr,
 IMPLICIT NONE
 #include "local.h"
 private
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Native vector class
 !!
 !! Used for implementing global vector operations in OFT
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_vector) :: oft_native_vector
   real(r8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
   real(r8), pointer, contiguous, dimension(:) :: local_tmp => NULL() !< Local value cache
@@ -75,11 +77,11 @@ contains
   !> Delete vector
   procedure :: delete => vec_delete
 end type oft_native_vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Native complex vector class
 !!
 !! Used for implementing global vector operations in OFT
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_cvector) :: oft_native_cvector
   complex(c8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
   complex(c8), pointer, contiguous, dimension(:) :: local_tmp => NULL() !< Local value cache
@@ -115,9 +117,9 @@ contains
   !> Delete vector
   procedure :: delete => cvec_delete
 end type oft_native_cvector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Native CRS matrix class
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_matrix) :: oft_native_matrix
   logical :: full_current = .FALSE. !< Is full matrix current?
   integer(i4) :: nnz = 0 !< Number of non-zero entries
@@ -156,9 +158,9 @@ contains
   !> Delete matrix
   procedure :: delete => mat_delete
 end type oft_native_matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Native CRS complex matrix class
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_cmatrix) :: oft_native_cmatrix
   logical :: full_current = .FALSE. !< Is full matrix current?
   integer(i4) :: nnz = 0 !< Number of non-zero entries
@@ -195,9 +197,9 @@ contains
   !> Delete matrix
   procedure :: delete => cmat_delete
 end type oft_native_cmatrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Class for extracting a submatrix of @ref oft_native_matrix (eg. for block solvers)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_native_matrix) :: oft_native_submatrix
   integer(i4) :: slice = -1 !< Slice of parent matrix
   integer(i4), pointer, dimension(:) :: lcmap => NULL() !< Column list
@@ -211,9 +213,9 @@ contains
   !> Delete matrix
   procedure :: delete => submatrix_delete
 end type oft_native_submatrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Native dense matrix implementation
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_matrix) :: oft_native_dense_matrix
   real(r8), pointer, CONTIGUOUS, DIMENSION(:,:) :: M => NULL() !< Matrix values
 contains
@@ -234,9 +236,9 @@ contains
   !> Zero all elements in a given row
   procedure :: zero_rows => dense_mat_zero_rows
 end type oft_native_dense_matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Native dense complex matrix implementation
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_cmatrix) :: oft_native_dense_cmatrix
   complex(c8), pointer, CONTIGUOUS, DIMENSION(:,:) :: M => NULL() !< Matrix values
 contains
@@ -258,9 +260,9 @@ contains
   procedure :: zero_rows => dense_cmat_zero_rows
 end type oft_native_dense_cmatrix
 INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Parition CRS graph using METIS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE oft_metis_partgraph(nr,nnz,kr,lc,npart,part,type,info) BIND(C,NAME="oft_metis_partGraph")
   IMPORT c_int
   INTEGER(c_int), INTENT(in) :: nr !< Number of rows
@@ -279,12 +281,12 @@ public native_vector_cast, native_cvector_cast, native_matrix_cast, native_cmatr
 public partition_graph, native_matrix_setup_full
 public native_vector_slice_push, native_vector_slice_pop
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_vector
 !!
 !! The source vector must be @ref oft_native_vector or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION native_vector_cast(self,source) result(success)
 class(oft_native_vector), pointer, intent(out) :: self !< Cast pointer
 class(oft_vector), target, intent(in) :: source !< Abstract vector object
@@ -300,9 +302,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION native_vector_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Create a new vector as a bare copy of `self`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_new_vec(self,new)
 class(oft_native_vector), intent(in) :: self !< Vector object
 class(oft_vector), pointer, intent(out) :: new !< New vector
@@ -323,9 +325,9 @@ select type(this=>new)
 end select
 DEBUG_STACK_POP
 end subroutine vec_new_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Create a new complex vector as a bare copy of `self`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_new_cvec(self,new)
 class(oft_native_vector), intent(in) :: self !< Vector object
 class(oft_cvector), pointer, intent(out) :: new !< New vector
@@ -346,9 +348,9 @@ select type(this=>new)
 end select
 DEBUG_STACK_POP
 end subroutine vec_new_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set all elements to a scalar
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_set(self,alpha,iblock,random)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), intent(in) :: alpha !< Updated vector value
@@ -383,9 +385,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine vec_set
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get values for locally-owned portion of vector (slice)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_get_slice(self,array,iblock)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), pointer, intent(inout) :: array(:) !< Slice values
@@ -419,9 +421,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine vec_get_slice
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set/add values for locally-owned portion of vector (slice)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_restore_slice(self,array,iblock,wait)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), intent(in) :: array(:) !< Slice values
@@ -455,9 +457,9 @@ END IF
 IF(.NOT.do_wait)call self%stitch(0)
 DEBUG_STACK_POP
 end subroutine vec_restore_slice
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get local values from vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_get_local(self,array,iblock)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), pointer, intent(inout) :: array(:) !< Local values
@@ -482,9 +484,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine vec_get_local
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set/add local values to vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_restore_local(self,array,iblock,add,wait)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), intent(in) :: array(:) !< Local values
@@ -554,11 +556,11 @@ ELSE
 END IF
 end subroutine full_restore_local
 end subroutine vec_restore_local
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add vectors
 !!
 !! self = \f$ \gamma \f$ self + \f$ \alpha \f$ a + \f$ \beta \f$ b
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_add(self,gamma,alpha,a,beta,b)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), intent(in) :: gamma !< Scale of source vector
@@ -608,11 +610,11 @@ IF(dealloc_flag(1))DEALLOCATE(atmp)
 IF(dealloc_flag(2))DEALLOCATE(btmp)
 DEBUG_STACK_POP
 end subroutine vec_add
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Elementwise multiplication with another vector
 !!
 !! \f$ self_i = self_i * a_i \f$
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_mult(self,a,div_flag)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< vector for multiplication
@@ -653,9 +655,9 @@ end if
 IF(dealloc_flag)DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine vec_mult
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Scale vector by a scalar
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_scale(self,alpha)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8), intent(in) :: alpha !< Scale factor
@@ -669,9 +671,9 @@ end do
 !$omp end parallel
 DEBUG_STACK_POP
 end subroutine vec_scale
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with a vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function vec_dot_vec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
@@ -686,9 +688,9 @@ select type(this=>a)
 end select
 DEBUG_STACK_POP
 end function vec_dot_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with a complex vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function vec_dot_cvec(self,a) result(dot)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
@@ -707,9 +709,9 @@ end select
 deallocate(vtmp)
 DEBUG_STACK_POP
 end function vec_dot_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with an array of vectors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function vec_mdot_vec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
@@ -729,9 +731,9 @@ END DO
 IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function vec_mdot_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with an array of complex vectors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function vec_mdot_cvec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
@@ -755,9 +757,9 @@ deallocate(vtmp)
 IF(.NOT.self%stitch_info%full)dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function vec_mdot_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Sum reduction over vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function vec_sum(self) result(sum)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 real(r8) :: sum !< Sum of vector elements
@@ -765,9 +767,9 @@ DEBUG_STACK_PUSH
 sum=oft_global_reduction(self%stitch_info,self%v,self%n)
 DEBUG_STACK_POP
 end function vec_sum
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute norm of vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function vec_norm(self,itype) result(norm)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
@@ -795,9 +797,9 @@ SELECT CASE(itype)
 END SELECT
 DEBUG_STACK_POP
 end function vec_norm
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Perform global stitching
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_stitch(self,up_method)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: up_method !< Type of stitching to perform
@@ -805,9 +807,9 @@ DEBUG_STACK_PUSH
 call oft_global_stitch(self%stitch_info,self%v,up_method)
 DEBUG_STACK_POP
 end subroutine vec_stitch
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finalize vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine vec_delete(self)
 class(oft_native_vector), intent(inout) :: self !< Vector object
 DEBUG_STACK_PUSH
@@ -820,12 +822,12 @@ self%nblocks=1
 NULLIFY(self%map,self%stitch_info)
 DEBUG_STACK_POP
 end subroutine vec_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Insert vector data into a restart structure for output
 !!
 !! Vector data and associated offsets are copied into the restart structure
 !! for use with \ref oft_io::hdf5_rst_write "hdf5_rst_write".
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine native_vector_slice_push(self,ig,rst_info,alloc_only)
 class(oft_native_vector), pointer, intent(in) :: self !< Source vector
 integer(i8), intent(in) :: ig(:) !< Global indices for `self`
@@ -967,7 +969,7 @@ CALL oft_abort("Distributed vectors require MPI","native_vector_slice_push",__FI
 end if
 DEBUG_STACK_POP
 end subroutine native_vector_slice_push
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Insert data from a restart structure into a vector
 !!
 !! Vector data is copied from the restart structure following a call to
@@ -975,7 +977,7 @@ end subroutine native_vector_slice_push
 !!
 !! @note The restart structure should be setup first using a call to
 !! \ref oft_native_vectors::vector_slice_push "vector_slice_push"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine native_vector_slice_pop(self,ig,rst_info)
 class(oft_native_vector), pointer, intent(inout) :: self !< Destination vector
 integer(i8), intent(in) :: ig(:) !< Global indices for `self`
@@ -1057,12 +1059,12 @@ CALL oft_abort("Distributed vectors require MPI","native_vector_slice_pop",__FIL
 end if
 DEBUG_STACK_POP
 end subroutine native_vector_slice_pop
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_cvector
 !!
 !! The source vector must be @ref oft_native_vector or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION native_cvector_cast(self,source) result(success)
 class(oft_native_cvector), pointer, intent(out) :: self !< Cast pointer
 class(oft_cvector), target, intent(in) :: source !< Abstract vector object
@@ -1077,9 +1079,9 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION native_cvector_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Create a new vector as a bare copy of `self`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_new_vec(self,new)
 class(oft_native_cvector), intent(in) :: self !< Vector object
 class(oft_vector), pointer, intent(out) :: new !< New vector
@@ -1100,9 +1102,9 @@ select type(this=>new)
 end select
 DEBUG_STACK_POP
 end subroutine cvec_new_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Create a new vector as a bare copy of `self`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_new_cvec(self,new)
 class(oft_native_cvector), intent(in) :: self !< Vector object
 class(oft_cvector), pointer, intent(out) :: new !< New vector
@@ -1123,9 +1125,9 @@ select type(this=>new)
 end select
 DEBUG_STACK_POP
 end subroutine cvec_new_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set all elements to a scalar
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_set(self,alpha,iblock,random)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: alpha !< Updated vector value
@@ -1160,9 +1162,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine cvec_set
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get values for locally-owned portion of vector (slice)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_get_slice(self,array,iblock)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), pointer, intent(inout) :: array(:) !< Slice values
@@ -1193,9 +1195,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine cvec_get_slice
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set/add values for locally-owned portion of vector (slice)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_restore_slice(self,array,iblock,wait)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: array(:) !< Slice values
@@ -1226,9 +1228,9 @@ END IF
 IF(.NOT.do_wait)call self%stitch(0)
 DEBUG_STACK_POP
 end subroutine cvec_restore_slice
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get local values from vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_get_local(self,array,iblock)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), pointer, intent(inout) :: array(:) !< Local values
@@ -1252,9 +1254,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine cvec_get_local
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set/add local values to vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_restore_local(self,array,iblock,add,wait)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: array(:) !< Local values
@@ -1325,11 +1327,11 @@ END IF
 DEBUG_STACK_POP
 end subroutine full_restore_local
 end subroutine cvec_restore_local
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add vectors
 !!
 !! self = \f$ \gamma \f$ self + \f$ \alpha \f$ a + \f$ \beta \f$ b
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_add_vec(self,gamma,alpha,a,beta,b)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: gamma !< Scale of source vector
@@ -1375,11 +1377,11 @@ IF(dealloc_flag(1))DEALLOCATE(atmp)
 IF(dealloc_flag(2))DEALLOCATE(btmp)
 DEBUG_STACK_POP
 end subroutine cvec_add_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add vectors
 !!
 !! self = \f$ \gamma \f$ self + \f$ \alpha \f$ a + \f$ \beta \f$ b
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_add_cvec(self,gamma,alpha,a,beta,b)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: gamma !< Scale of source vector
@@ -1425,11 +1427,11 @@ IF(dealloc_flag(1))DEALLOCATE(atmp)
 IF(dealloc_flag(2))DEALLOCATE(btmp)
 DEBUG_STACK_POP
 end subroutine cvec_add_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Elementwise multiplication with another vector
 !!
 !! \f$ self_i = self_i * a_i \f$
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_mult_vec(self,a,div_flag)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< vector for multiplication
@@ -1466,11 +1468,11 @@ end if
 IF(dealloc_flag)DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine cvec_mult_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Elementwise multiplication with another vector
 !!
 !! \f$ self_i = self_i * a_i \f$
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_mult_cvec(self,a,div_flag)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< vector for multiplication
@@ -1507,9 +1509,9 @@ end if
 IF(dealloc_flag)DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end subroutine cvec_mult_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Scale vector by a scalar
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_scale(self,alpha)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8), intent(in) :: alpha !< Scale factor
@@ -1521,9 +1523,9 @@ do i=1,self%n
 end do
 DEBUG_STACK_POP
 end subroutine cvec_scale
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with a vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function cvec_dot_vec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_vector), target, intent(inout) :: a !< Second vector for dot product
@@ -1542,9 +1544,9 @@ end select
 DEALLOCATE(atmp)
 DEBUG_STACK_POP
 end function cvec_dot_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with a vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function cvec_dot_cvec(self,a) result(dot)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 class(oft_cvector), target, intent(inout) :: a !< Second vector for dot product
@@ -1559,9 +1561,9 @@ select type(this=>a)
 end select
 DEBUG_STACK_POP
 end function cvec_dot_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with an array of vectors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function cvec_mdot_vec(self,a,n) result(dots)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
@@ -1585,9 +1587,9 @@ DEALLOCATE(atmp)
 dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function cvec_mdot_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with an array of vectors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function cvec_mdot_cvec(self,a,n) result(dots)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
@@ -1607,9 +1609,9 @@ END DO
 dots=oft_mpi_sum(dots,n)
 DEBUG_STACK_POP
 end function cvec_mdot_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Sum reduction over vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function cvec_sum(self) result(sum)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 complex(c8) :: sum !< Sum of vector elements
@@ -1617,9 +1619,9 @@ DEBUG_STACK_PUSH
 sum=oft_global_reduction(self%stitch_info,self%v,self%n)
 DEBUG_STACK_POP
 end function cvec_sum
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute norm of vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function cvec_norm(self,itype) result(norm)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: itype !< Type of norm (1-> 1-norm, 2-> 2-norm, 3-> Inf-norm)
@@ -1649,9 +1651,9 @@ SELECT CASE(itype)
 END SELECT
 DEBUG_STACK_POP
 end function cvec_norm
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finalize vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_stitch(self,up_method)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 integer(i4), intent(in) :: up_method
@@ -1659,9 +1661,9 @@ DEBUG_STACK_PUSH
 call oft_global_stitch(self%stitch_info,self%v,up_method)
 DEBUG_STACK_POP
 end subroutine cvec_stitch
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finalize vector
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cvec_delete(self)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
 DEBUG_STACK_PUSH
@@ -1674,12 +1676,12 @@ self%nblocks=1
 NULLIFY(self%map,self%stitch_info)
 DEBUG_STACK_POP
 end subroutine cvec_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast an abstract matrix object to @ref oft_native_matrix
 !!
 !! The source matrix must be @ref oft_native_matrix or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION native_matrix_cast(self,source) result(success)
 class(oft_native_matrix), pointer, intent(out) :: self !< Reference to source object with desired class
 class(oft_matrix), target, intent(in) :: source !< Abstract vector object
@@ -1694,11 +1696,11 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION native_matrix_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute matrix-vector product
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_apply_vec(self,a,b)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source vector
@@ -1757,11 +1759,11 @@ END IF
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_apply_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute matrix-vector product (complex)
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_apply_cvec(self,a,b)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source vector
@@ -1820,11 +1822,11 @@ END IF
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_apply_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply matrix vector product for matrix transpose
 !!
 !! b = self^T * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_applyt_vec(self,a,b)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Source vector
@@ -1882,11 +1884,11 @@ END IF
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_applyt_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply matrix vector product for matrix transpose (complex vector)
 !!
 !! b = self^T * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_applyt_cvec(self,a,b)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_cvector), target, intent(inout) :: a !< Source vector
@@ -1944,9 +1946,9 @@ END IF
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine mat_applyt_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set values of a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
@@ -1984,9 +1986,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine mat_set_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -2046,9 +2048,9 @@ END IF
 IF(fail_test)CALL oft_abort('Entry not found!','mat_add_values',__FILE__)
 DEBUG_STACK_POP
 end subroutine mat_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_matrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -2110,9 +2112,9 @@ END IF
 IF(fail_test)CALL oft_abort('Entry not found!','mat_add_values',__FILE__)
 DEBUG_STACK_POP
 end subroutine mat_atomic_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_assemble(self,diag)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
@@ -2152,9 +2154,9 @@ IF(self%nc<2*lc_offset)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine mat_assemble
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_zero(self)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 DEBUG_STACK_PUSH
@@ -2162,9 +2164,9 @@ self%full_current=.FALSE.
 self%M=0.d0
 DEBUG_STACK_POP
 end subroutine mat_zero
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 integer(i4), intent(in) :: nrows !< Number of rows to zero
@@ -2198,9 +2200,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine mat_zero_rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_zero_cols(self,ncols,icols,jblock,keep_diag)
 class(oft_native_matrix), intent(inout) :: self
 integer(i4), intent(in) :: ncols !< Number of columns to zero
@@ -2237,9 +2239,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine mat_zero_cols
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_delete(self)
 class(oft_native_matrix), intent(inout) :: self
 integer(i4) :: i,j
@@ -2284,10 +2286,10 @@ IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
 self%nred=0
 DEBUG_STACK_POP
 end subroutine mat_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Build full local submatrix for matrix
 !! - Create stitching structures
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine native_matrix_setup_full(self,u)
 class(oft_native_matrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: u !< Constructed vector for parent row space
@@ -2547,6 +2549,7 @@ IF(.NOT.uv%stitch_info%full)THEN
       ELSE
         last=letmp(1,mm)
       END IF
+      IF(m>neout)EXIT
       do while(leout(1,m)<=letmp(1,mm))
         IF(leout(1,m)<letmp(1,mm))jp=m+1
         IF(leout(1,m)==letmp(1,mm))THEN
@@ -2587,6 +2590,7 @@ IF(jn>0)THEN
     ELSE
       last=leout(1,mm)
     END IF
+    IF(m>neout)EXIT
     do while(leout(1,m)<=leout(1,mm))
       IF(leout(1,m)<leout(1,mm))jp=m+1
       IF((leout(1,m)==leout(1,mm)).AND.(m/=mm))THEN
@@ -2696,9 +2700,9 @@ END IF
 ! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine native_matrix_setup_full
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Update full local matrix with values from other processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine matrix_update_slice(self)
 class(oft_native_matrix), intent(inout) :: self
 integer(i4) :: i,j,k
@@ -2726,10 +2730,10 @@ self%full_current=.TRUE.
 ! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine matrix_update_slice
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup local submatrix from parent matrix
 !! - Create stitching structures for parent matrix if necessary
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine submatrix_setup(self,mat,u,slice,part)
 class(oft_native_submatrix), intent(inout) :: self
 class(oft_matrix), intent(inout) :: mat !< Parent matrix
@@ -2769,9 +2773,9 @@ CALL self%update_slice
 ! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine submatrix_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Update matrix with values from parent matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine submatrix_update_slice(self)
 class(oft_native_submatrix), intent(inout) :: self
 class(oft_native_matrix), pointer :: parent
@@ -2854,9 +2858,9 @@ self%full_current=.FALSE.
 ! IF(oft_debug_print(3))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine submatrix_update_slice
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine submatrix_delete(self)
 class(oft_native_submatrix), intent(inout) :: self
 DEBUG_STACK_PUSH
@@ -2866,9 +2870,9 @@ IF(ASSOCIATED(self%part))NULLIFY(self%part)
 NULLIFY(self%parent)
 DEBUG_STACK_POP
 end subroutine submatrix_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Perform graph partitioning (METIS)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine partition_graph(graph,n,part)
 type(oft_graph), intent(inout) :: graph !< Graph to partition
 integer(i4), intent(in) :: n !< Desired number of partitions
@@ -2880,11 +2884,11 @@ CALL oft_metis_partGraph(graph%nr,graph%nnz,graph%kr,graph%lc,n,part,ptype,ierr)
 IF(ierr<0)CALL oft_abort('Graph paritioning failed','partition_graph',__FILE__)
 DEBUG_STACK_POP
 end subroutine partition_graph
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast a matrix object to a oft_native_matrix
 !!
 !! The source matrix must be oft_native_matrix or a child class, otherwise an error will be thrown
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION native_cmatrix_cast(self,source) result(ierr)
 class(oft_native_cmatrix), pointer, intent(out) :: self !< Pointer to cast crsmatrix
 class(oft_cmatrix), target, intent(in) :: source !< Source matrix to cast
@@ -2899,11 +2903,11 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION native_cmatrix_cast
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_apply_vec(self,a,b)
 class(oft_native_cmatrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -2963,11 +2967,11 @@ END IF
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_apply_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_apply_cvec(self,a,b)
 class(oft_native_cmatrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
@@ -3026,11 +3030,11 @@ END IF
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_apply_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_applyt_vec(self,a,b)
 class(oft_native_cmatrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -3089,11 +3093,11 @@ END IF
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_applyt_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_applyt_cvec(self,a,b)
 class(oft_native_cmatrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
@@ -3151,9 +3155,9 @@ END IF
 IF(.NOT.self%force_local)call b%stitch(1)
 DEBUG_STACK_POP
 end subroutine cmat_applyt_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set values of a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
@@ -3191,9 +3195,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine cmat_set_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -3253,9 +3257,9 @@ END IF
 IF(fail_test)CALL oft_abort('Entry not found!','cmat_add_values',__FILE__)
 DEBUG_STACK_POP
 end subroutine cmat_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -3317,9 +3321,9 @@ END IF
 IF(fail_test)CALL oft_abort('Entry not found!','cmat_atomic_add_values',__FILE__)
 DEBUG_STACK_POP
 end subroutine cmat_atomic_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_assemble(self,diag)
 class(oft_native_cmatrix), intent(inout) :: self
 class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
@@ -3358,9 +3362,9 @@ IF(self%nc<2*lc_offset)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine cmat_assemble
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_zero(self)
 class(oft_native_cmatrix), intent(inout) :: self
 DEBUG_STACK_PUSH
@@ -3368,9 +3372,9 @@ self%full_current=.FALSE.
 self%M=(0.d0,0.d0)
 DEBUG_STACK_POP
 end subroutine cmat_zero
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_native_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: nrows !< Number of rows to zero
@@ -3404,9 +3408,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine cmat_zero_rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_zero_cols(self,ncols,icols,jblock,keep_diag)
 class(oft_native_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: ncols !< Number of columns to zero
@@ -3443,9 +3447,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine cmat_zero_cols
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cmat_delete(self)
 class(oft_native_cmatrix), intent(inout) :: self
 integer(i4) :: i,j
@@ -3490,11 +3494,11 @@ IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
 self%nred=0
 DEBUG_STACK_POP
 end subroutine cmat_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_apply_vec(self,a,b)
 class(oft_native_dense_matrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -3522,11 +3526,11 @@ END DO
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_mat_apply_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_apply_cvec(self,a,b)
 class(oft_native_dense_matrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
@@ -3554,11 +3558,11 @@ END DO
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_mat_apply_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_applyt_vec(self,a,b)
 class(oft_native_dense_matrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -3589,11 +3593,11 @@ END DO
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_mat_applyt_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_applyt_cvec(self,a,b)
 class(oft_native_dense_matrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
@@ -3624,9 +3628,9 @@ END DO
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_mat_applyt_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set values of a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_dense_matrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
@@ -3661,9 +3665,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_set_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_matrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -3699,9 +3703,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_matrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -3741,9 +3745,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_atomic_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_assemble(self,diag)
 class(oft_native_dense_matrix), intent(inout) :: self
 class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
@@ -3771,18 +3775,18 @@ if(present(diag))then
 end if
 DEBUG_STACK_POP
 end subroutine dense_mat_assemble
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_zero(self)
 class(oft_native_dense_matrix), intent(inout) :: self
 DEBUG_STACK_PUSH
 self%M=0.d0
 DEBUG_STACK_POP
 end subroutine dense_mat_zero
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_native_dense_matrix), intent(inout) :: self
 integer(i4), intent(in) :: nrows !< Number of rows to zero
@@ -3814,9 +3818,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_zero_rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_zero_cols(self,ncols,icols,jblock,keep_diag)
 class(oft_native_dense_matrix), intent(inout) :: self
 integer(i4), intent(in) :: ncols !< Number of columns to zero
@@ -3850,9 +3854,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_zero_cols
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_mat_delete(self)
 class(oft_native_dense_matrix), intent(inout) :: self
 DEBUG_STACK_PUSH
@@ -3863,11 +3867,11 @@ IF(ASSOCIATED(self%D))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine dense_mat_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_apply_vec(self,a,b)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -3896,11 +3900,11 @@ END DO
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_cmat_apply_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_apply_cvec(self,a,b)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
@@ -3928,11 +3932,11 @@ END DO
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_cmat_apply_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_applyt_vec(self,a,b)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -3964,11 +3968,11 @@ END DO
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_cmat_applyt_vec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_applyt_cvec(self,a,b)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
@@ -3999,9 +4003,9 @@ END DO
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 end subroutine dense_cmat_applyt_cvec
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set values of a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
@@ -4036,9 +4040,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_set_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -4074,9 +4078,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
@@ -4116,9 +4120,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_atomic_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_assemble(self,diag)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
@@ -4146,18 +4150,18 @@ if(present(diag))then
 end if
 DEBUG_STACK_POP
 end subroutine dense_cmat_assemble
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_zero(self)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 DEBUG_STACK_PUSH
 self%M=(0.d0,0.d0)
 DEBUG_STACK_POP
 end subroutine dense_cmat_zero
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: nrows !< Number of rows to zero
@@ -4189,9 +4193,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_zero_rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified columns
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_zero_cols(self,ncols,icols,jblock,keep_diag)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 integer(i4), intent(in) :: ncols !< Number of columns to zero
@@ -4225,9 +4229,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine dense_cmat_zero_cols
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine dense_cmat_delete(self)
 class(oft_native_dense_cmatrix), intent(inout) :: self
 DEBUG_STACK_PUSH

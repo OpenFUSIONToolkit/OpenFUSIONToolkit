@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_global_util.F90
 !
 !> Global context creation and utility functions for distributed meshes.
@@ -15,7 +17,7 @@
 !! @author Chris Hansen
 !! @date Spring 2010
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_global_util
 USE oft_base
 USE oft_mesh_type, ONLY: oft_amesh, oft_mesh, oft_bmesh
@@ -24,18 +26,18 @@ USE oft_stitching, ONLY: oft_global_stitch
 IMPLICIT NONE
 #include "local.h"
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set global boundary flags for distributed meshes.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_boundary(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,k
 real(r8), allocatable, dimension(:) :: btrans
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Constructing global boundary'
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set global boundary points and cells
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(ASSOCIATED(mesh%global%gbc))DEALLOCATE(mesh%global%gbc)
 allocate(mesh%global%gbc(mesh%nc)) ! Allocate boundary cell flag
 mesh%global%gbc = .FALSE. ! Initiliaze boundary flag
@@ -58,9 +60,9 @@ do i=1,mesh%nbp
   if(btrans(mesh%lbp(i))>0.d0)mesh%global%gbp(mesh%lbp(i))=.TRUE. ! Point is a global boundary point
 enddo
 deallocate(btrans)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set global boundary edges
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 allocate(btrans(mesh%ne))
 btrans=0.d0
 !---Mark global boundary edges on local processor
@@ -81,9 +83,9 @@ enddo
 deallocate(btrans)
 DEBUG_STACK_POP
 end subroutine mesh_global_boundary
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set global indexing from mesh periodicity
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_periodic(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,iper
@@ -91,7 +93,7 @@ INTEGER(8) :: npp,nep,nfp
 INTEGER(8), ALLOCATABLE :: gtmp(:)
 IF(mesh%periodic%nper==0)RETURN
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2X,A)')'Setting Up Periodic Mesh'
+if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting Up Periodic Mesh'
 !---Faces can only have one periodic parent
 DO i=1,mesh%nbf
   j=mesh%lbf(i)
@@ -165,16 +167,18 @@ END DO
 DEALLOCATE(gtmp)
 !---
 if(oft_debug_print(1))then
-  WRITE(*,'(4X,A,I8)')'  # of Periodic directions =',mesh%periodic%nper
-  WRITE(*,'(4X,A,I8)')'  # of Periodic Points     =',npp
-  WRITE(*,'(4X,A,I8)')'  # of Periodic Edges      =',nep
-  WRITE(*,'(4X,A,I8)')'  # of Periodic Faces      =',nfp
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic directions =',mesh%periodic%nper
+  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
+  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
+  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Faces      =',nfp
+  CALL oft_decrease_indent
 end if
 DEBUG_STACK_POP
 end subroutine mesh_global_periodic
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set global orientations for edges and faces
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_orient(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,k,ind,ed(2)
@@ -278,9 +282,9 @@ end do
 deallocate(kc,kf,ltmp)
 DEBUG_STACK_POP
 end subroutine mesh_global_orient
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set cell curvature flag for common cases
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_set_curved(self,flag)
 CLASS(oft_amesh), INTENT(inout) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: flag !< How to set curvature (1 -> all cells, 2 -> contains boundary edge)
@@ -299,11 +303,11 @@ CASE DEFAULT
   CALL oft_abort("Unknown setup flag","mesh_global_set_curved",__FILE__)
 END SELECT
 end subroutine mesh_global_set_curved
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get I/O scope for current mesh
 !! - Element offsets for each geometric type
 !! - Element span for each geometric type
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_save(self)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 integer(8) :: nloc(6),ntmp(4),nfb,nfl,nfg,nfmax
@@ -431,9 +435,9 @@ CLASS IS(oft_mesh)
 END SELECT
 DEBUG_STACK_POP
 end subroutine mesh_global_save
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Determine location of grounding point on mesh.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE mesh_global_igrnd(self,grnd_pt)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 real(r8), optional, intent(in) :: grnd_pt(3)
@@ -534,9 +538,9 @@ ELSE
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE mesh_global_igrnd
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute mesh resolution statistics.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_resolution(self)
 class(oft_amesh), intent(inout) :: self !< Mesh object
 real(r8) :: hmax,hrms,a,b,c,hmin
@@ -585,19 +589,30 @@ CALL oft_abort("Distributed mesh requires MPI","mesh_global_resolution",__FILE__
 endif
 DEBUG_STACK_POP
 end subroutine mesh_global_resolution
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Display mesh statistics and counts.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_global_stats(self)
 class(oft_mesh), intent(inout) :: self !< Mesh object
 integer(i8) :: a,i,tmp(4)
-integer(i4) :: ierr
+integer(i4) :: nbtmp,ierr
 real(r8) :: tmpr(2),vol,area
 DEBUG_STACK_PUSH
 call mesh_global_resolution(self)
 vol = self%volume()
 area = self%bmesh%area()
 if(self%fullmesh)then
+  IF(self%periodic%nper>0)THEN
+    self%global%nbp=COUNT(self%global%gbp(self%lbp).AND.self%pstitch%leo)
+    self%global%nbe=COUNT(self%global%gbe(self%lbe).AND.self%estitch%leo)
+    self%global%nbf=COUNT(self%global%gbf(self%lbf).AND.self%fstitch%leo)
+    self%global%nbc=COUNT(self%global%gbc)
+  ELSE
+    self%global%nbp=COUNT(self%global%gbp)
+    self%global%nbe=COUNT(self%global%gbe)
+    self%global%nbf=COUNT(self%global%gbf)
+    self%global%nbc=COUNT(self%global%gbc)
+  END IF
   if(oft_env%head_proc)then
     write(*,'(2A)')oft_indent,'Mesh statistics:'
     CALL oft_increase_indent
@@ -607,10 +622,10 @@ if(self%fullmesh)then
     write(*,'(2A,I8)')    oft_indent,'# of edges      =',self%global%ne
     write(*,'(2A,I8)')    oft_indent,'# of faces      =',self%global%nf
     write(*,'(2A,I8)')    oft_indent,'# of cells      =',self%global%nc
-    write(*,'(2A,I8)')    oft_indent,'# of boundary points =',self%nbp
-    write(*,'(2A,I8)')    oft_indent,'# of boundary edges  =',self%nbe
-    write(*,'(2A,I8)')    oft_indent,'# of boundary faces  =',self%nbf
-    write(*,'(2A,I8)')    oft_indent,'# of boundary cells  =',self%nbc
+    write(*,'(2A,I8)')    oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')    oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')    oft_indent,'# of boundary faces  =',self%global%nbf
+    write(*,'(2A,I8)')    oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -665,11 +680,15 @@ else
   !---Get global sums
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmp,4,OFT_MPI_I8,MPI_SUM,oft_env%COMM,ierr)
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmpr,2,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
+  self%global%nbp=tmp(1)
+  self%global%nbe=tmp(2)
+  self%global%nbf=tmp(3)
+  self%global%nbc=tmp(4)
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',tmp(1)
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',tmp(2)
-    write(*,'(2A,I8)')oft_indent,'# of boundary faces  =',tmp(3)
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',tmp(4)
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary faces  =',self%global%nbf
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -684,18 +703,18 @@ CALL oft_abort("Distributed mesh requires MPI","mesh_global_stats",__FILE__)
 endif
 DEBUG_STACK_POP
 end subroutine mesh_global_stats
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set global boundary flags for distributed meshes.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine bmesh_global_boundary(self)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 integer(i4) :: i,j,k
 real(r8), allocatable, dimension(:) :: btrans
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Constructing global boundary'
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set global boundary points and cells
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(ASSOCIATED(self%global%gbc))DEALLOCATE(self%global%gbc)
 allocate(self%global%gbc(self%nc)) ! Allocate boundary cell flag
 self%global%gbc = .FALSE. ! Initiliaze boundary flag
@@ -720,9 +739,9 @@ enddo
 deallocate(btrans)
 DEBUG_STACK_POP
 end subroutine bmesh_global_boundary
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set global indexing from mesh periodicity
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine bmesh_global_periodic(self)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 integer(i4) :: i,j,iper
@@ -789,9 +808,9 @@ if(oft_debug_print(1))then
 end if
 DEBUG_STACK_POP
 end subroutine bmesh_global_periodic
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set global orientations for edges and faces
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine bmesh_global_orient(self,parent)
 CLASS(oft_bmesh), intent(inout) :: self !< Mesh object
 CLASS(oft_mesh), optional, intent(in) :: parent !< Parent volume mesh (if present)
@@ -876,13 +895,13 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine bmesh_global_orient
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Display mesh statistics and counts.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine bmesh_global_stats(self)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 integer(i8) :: a,i,tmp(3)
-integer(i4) :: ierr
+integer(i4) :: nbtmp,ierr
 real(r8) :: tmpr(2),area
 DEBUG_STACK_PUSH
 call mesh_global_resolution(self)
@@ -896,10 +915,19 @@ if(oft_env%head_proc)then
   write(*,'(2A,I8)')oft_indent,'# of cells   =',self%global%nc
 endif
 if(self%fullmesh)then
+  IF(self%periodic%nper>0)THEN
+    self%global%nbp=COUNT(self%global%gbp(self%lbp).AND.self%pstitch%leo)
+    self%global%nbe=COUNT(self%global%gbe(self%lbe).AND.self%estitch%leo)
+    self%global%nbc=COUNT(self%global%gbc)
+  ELSE
+    self%global%nbp=COUNT(self%global%gbp)
+    self%global%nbe=COUNT(self%global%gbe)
+    self%global%nbc=COUNT(self%global%gbc)
+  END IF
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%nbp
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%nbe
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%nbc
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
@@ -937,10 +965,13 @@ else
   !---Get global sums
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmp,3,OFT_MPI_I8,MPI_SUM,oft_env%COMM,ierr)
   call MPI_ALLREDUCE(MPI_IN_PLACE,tmpr,2,OFT_MPI_R8,MPI_SUM,oft_env%COMM,ierr)
+  self%global%nbp=tmp(1)
+  self%global%nbe=tmp(2)
+  self%global%nbc=tmp(3)
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',tmp(1)
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',tmp(2)
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',tmp(3)
+    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
     write(*,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent

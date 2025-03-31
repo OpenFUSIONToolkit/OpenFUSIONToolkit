@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_gs_td.F90
 !
 !> Time-dependent G-S equilibria
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date May 2023
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_gs_td
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array
@@ -31,16 +33,16 @@ USE fem_utils, ONLY: bfem_map_flag
 USE oft_lag_basis, ONLY: oft_blag_geval, oft_blag_eval, oft_blag_npos, &
   oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_lag_brinterp
-USE axi_green, ONLY: green, grad_green
+USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_epsilon, flux_func, gs_eq, gs_update_bounds, &
     gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, build_dels
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
 #include "local.h"
 integer(i4), parameter :: maxextrap = 2
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, extends(oft_noop_matrix) :: oft_tmaker_td_mfop
     real(r8) :: dt = 1.E-3_r8 !< Time step size [s]
     real(r8) :: f_scale = 1.d0 !< Scale factor for \f$ F*F' \f$ term
@@ -67,9 +69,9 @@ contains
     !
     ! procedure :: update_lims => update_lims
 end type oft_tmaker_td_mfop
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, extends(oft_noop_matrix) :: tMaker_td_mat
     integer(4), pointer, dimension(:) :: lim_nodes => NULL() !< List of nodes defining limiter flux
     integer(4), pointer, dimension(:) :: ax_nodes => NULL() !< List of nodes defining O-point flux
@@ -82,9 +84,9 @@ contains
     !> Delete operator, deallocating internal storage
     procedure :: delete => delete_gs_mat
 end type tMaker_td_mat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, extends(oft_noop_matrix) :: eig_wrapper
     class(oft_matrix), pointer :: rhs_mat => NULL() !< Needs Docs
     class(oft_solver), pointer :: lhs_inv => NULL() !< Needs Docs
@@ -92,9 +94,9 @@ contains
     !> Apply the operator
     procedure :: apply_real => apply_wrap
 end type eig_wrapper
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type :: oft_tmaker_td
     CLASS(oft_vector), POINTER :: rhs => NULL() !< Temporary RHS vector
     CLASS(oft_vector), POINTER :: psi_sol => NULL() !< Current solution vector
@@ -122,9 +124,9 @@ end type oft_tmaker_td
 TYPE(oft_tmaker_td), POINTER :: active_tMaker_td => NULL()
 !$omp threadprivate(active_tMaker_td)
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine setup_gs_td(self,eq_in,dt,lin_tol,nl_tol,pre_plasma)
 class(oft_tmaker_td), intent(inout) :: self !< NL operator object
 TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in !< Needs Docs
@@ -141,23 +143,23 @@ REAL(8), ALLOCATABLE, DIMENSION(:,:) :: pts
 REAL(8), POINTER, DIMENSION(:) :: vals_out,vals2,rhs_tmp
 !---
 IF(ASSOCIATED(self%mfop))CALL self%delete()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create operator
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(self%mfop)
 self%mfop%dt=dt
 CALL self%mfop%setup(eq_in)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create Solver fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(vals_out)
 self%psi_sol=>self%mfop%gs_eq%psi
 call eq_in%fe_rep%vec_create(self%rhs)
 call eq_in%fe_rep%vec_create(self%psi_tmp)
 call eq_in%fe_rep%vec_create(self%tmp_vec)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create extrapolation fields (Unused)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(maxextrap>0)THEN
     ALLOCATE(self%extrap_fields(maxextrap),self%extrapt(maxextrap))
     DO i=1,maxextrap
@@ -208,9 +210,9 @@ self%nksolver%backtrack=.FALSE.
 self%nksolver%J_update=>tMaker_td_mfnk_update
 self%nksolver%up_freq=1
 end subroutine setup_gs_td
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine delete_gs_td(self)
 class(oft_tmaker_td), intent(inout) :: self !< NL operator object
 INTEGER(4) :: i
@@ -258,7 +260,9 @@ IF(ASSOCIATED(self%rhs))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine delete_gs_td
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 subroutine step_gs_td(self,time,dt,nl_its,lin_its,nretry)
 class(oft_tmaker_td), target, intent(inout) :: self !< NL operator object
 REAL(8), INTENT(inout) :: time,dt
@@ -326,7 +330,9 @@ END IF
 !     self%mfop%ip_target=-1.d0
 ! END IF
 end subroutine step_gs_td
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 subroutine eig_gs_td(eq_in,neigs,eigs,eig_vecs,omega,include_bounds,eta_plasma)
 TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
 INTEGER(4), INTENT(in) :: neigs
@@ -398,9 +404,9 @@ eigs=0.d0
 eig_vecs=0.d0
 #endif
 end subroutine eig_gs_td
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine apply_rhs(self,a,b)
 class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -417,9 +423,9 @@ CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 mesh=>self%gs_eq%mesh
 lag_rep=>self%gs_eq%fe_rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local vector values
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(pol_vals,rhs_vals)
 CALL a%get_local(pol_vals)
 CALL b%set(0.d0)
@@ -433,9 +439,9 @@ IF(ASSOCIATED(self%gs_eq%region_info%nonaxi_vals))THEN
         reg_source(i)=DOT_PRODUCT(pol_vals,self%gs_eq%region_info%nonaxi_vals(:,i))
     END DO
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Operator integration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt,eta_tmp,psi_tmp,eta_source)
 allocate(j(lag_rep%nce),vals_loc(lag_rep%nce)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
@@ -480,128 +486,9 @@ CALL b%restore_local(rhs_vals,add=.TRUE.)
 DEALLOCATE(pol_vals,rhs_vals,reg_source)
 DEBUG_STACK_POP
 end subroutine apply_rhs
-! !---------------------------------------------------------------------------
-! !> Needs docs
-! !---------------------------------------------------------------------------
-! subroutine picard_step(self,a,b,p_scale,f_scale,ip_target)
-! class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
-! class(oft_vector), target, intent(inout) :: a !< Source field
-! class(oft_vector), intent(inout) :: b !< Result of metric function
-! real(8), intent(in) :: p_scale
-! real(8), intent(inout) :: f_scale
-! real(8), optional, intent(in) :: ip_target
-! integer(i4) :: i,m,jr,jc
-! integer(i4), allocatable :: j(:)
-! real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),eta_tmp,psi_tmp,ip_p,ip_f
-! real(r8) :: dpsi_tmp(2),p_source,f_source,psi_lim,psi_max,eta_source,max_tmp,lim_tmp
-! real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),vals_loc(:,:)
-! real(r8), pointer, dimension(:) :: pol_vals,rhs_vals,pvals
-! class(oft_vector), pointer :: ptmp
-! logical :: curved,in_bounds
-! ! type(oft_timer) :: mytimer
-! DEBUG_STACK_PUSH
-! ! WRITE(*,*)'Hi'
-! ! IF(oft_debug_print(1))THEN
-! !   WRITE(*,'(2X,A)')'Constructing Poloidal flux time-advance operator'
-! !   CALL mytimer%tick()
-! ! END IF
-! !---------------------------------------------------------------------------
-! ! Get local vector values
-! !---------------------------------------------------------------------------
-! NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
-! CALL a%get_local(pol_vals)
-! !---
-! self%gs_eq%psi=>a ! HERE
-! CALL gs_update_bounds(self%gs_eq)
-! ! WRITE(*,*)'Full',self%gs_eq%plasma_bounds
-! self%F%plasma_bounds=self%gs_eq%plasma_bounds
-! self%P%plasma_bounds=self%gs_eq%plasma_bounds
-! CALL b%set(0.d0)
-! CALL b%get_local(rhs_vals)
-! CALL b%new(ptmp)
-! CALL ptmp%get_local(pvals)
-! !---------------------------------------------------------------------------
-! ! Operator integration
-! !---------------------------------------------------------------------------
-! ip_p=0.d0
-! ip_f=0.d0
-! !$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt, &
-! !$omp eta_tmp,psi_tmp,dpsi_tmp,p_source,f_source,eta_source,in_bounds) &
-! !$omp reduction(+:ip_p) reduction(+:ip_f)
-! allocate(j(oft_blagrange%nce),vals_loc(oft_blagrange%nce,2)) ! Local DOF and matrix indices
-! allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
-! !$omp do schedule(static,1)
-! do i=1,oft_blagrange%mesh%nc
-!     IF(oft_blagrange%mesh%reg(i)/=1)CYCLE
-!     !---Get local to global DOF mapping
-!     call oft_blagrange%ncdofs(i,j)
-!     !---Get local reconstructed operators
-!     vals_loc=0.d0
-!     do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-!     call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-!     det=vol*oft_blagrange%quad%wts(m)
-!     pt=oft_blagrange%mesh%log2phys(i,oft_blagrange%quad%pts(:,m))
-!     psi_tmp=0.d0; dpsi_tmp=0.d0; eta_tmp=0.d0; p_source=0.d0; f_source=0.d0; eta_source=0.d0
-!     do jr=1,oft_blagrange%nce ! Loop over degrees of freedom
-!         call oft_blag_eval(oft_blagrange,i,jr,oft_blagrange%quad%pts(:,m),rop(jr))
-!         psi_tmp = psi_tmp + pol_vals(j(jr))*rop(jr)
-!     end do
-!     !---Compute local matrix contributions
-!     ! IF(oft_blagrange%mesh%reg(i)==1.AND.psi_tmp>psi_lim)THEN
-!     ! IF(self%allow_xpoints)THEN
-!         in_bounds=gs_test_bounds(self%gs_eq,pt).AND.(psi_tmp>self%gs_eq%plasma_bounds(1))
-!     ! ELSE
-!     !     in_bounds=psi_tmp>psi_lim
-!     ! END IF
-!     IF(in_bounds)THEN
-!         ! gs_source=self%dt*self%lam_amp*(psi_tmp-psi_lim)/(psi_max-psi_lim)/(pt(1)+gs_epsilon)
-!         ! p_source=p_scale*pt(1)*self%P%Fp((psi_tmp-psi_lim)/(psi_max-psi_lim))
-!         ! f_source=0.5d0*self%F%fp((psi_tmp-psi_lim)/(psi_max-psi_lim))/(pt(1)+gs_epsilon)
-!         p_source=p_scale*pt(1)*self%P%Fp(psi_tmp)
-!         f_source=0.5d0*self%F%fp(psi_tmp)/(pt(1)+gs_epsilon)
-!         ip_p=ip_p+p_source*det
-!         ip_f=ip_f+f_source*det
-!     END IF
-!     do jr=1,oft_blagrange%nce
-!         vals_loc(jr,1) = vals_loc(jr,1) - rop(jr)*self%dt*p_source*det
-!         vals_loc(jr,2) = vals_loc(jr,2) - rop(jr)*self%dt*f_source*det
-!     end do
-!     end do
-!     do jr=1,oft_blagrange%nce
-!     !$omp atomic
-!     pvals(j(jr)) = pvals(j(jr)) + vals_loc(jr,1)
-!     !$omp atomic
-!     rhs_vals(j(jr)) = rhs_vals(j(jr)) + vals_loc(jr,2)
-!     end do
-! end do
-! deallocate(j,vals_loc,rop,gop)
-! !$omp end parallel
-! DO i=1,oft_blagrange%nbe
-!     rhs_vals(oft_blagrange%lbe(i))=0.d0
-!     pvals(oft_blagrange%lbe(i))=0.d0
-! END DO
-! CALL b%restore_local(rhs_vals,add=.TRUE.)
-! CALL ptmp%restore_local(pvals,add=.TRUE.)
-! IF(PRESENT(ip_target))THEN
-!     f_scale=(ip_target-ip_p)/ip_f
-! !  WRITE(*,*)'Ip',ip_target,ip_p,ip_f,(ip_target-ip_p)/ip_f
-! ELSE
-! !  WRITE(*,*)'Ip',(ip_p+f_scale*ip_f)/mu0
-! END IF
-! CALL b%add(f_scale,1.d0,ptmp)
-! DEALLOCATE(pol_vals,rhs_vals,pvals)
-! CALL ptmp%delete
-! DEALLOCATE(ptmp)
-! !---Report time
-! ! IF(oft_debug_print(1))THEN
-! !   elapsed_time=mytimer%tock()
-! !   WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
-! ! END IF
-! DEBUG_STACK_POP
-! end subroutine picard_step
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine setup_mfop(self,eq_in)
 class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
 TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
@@ -635,9 +522,9 @@ END DO
 CALL build_vac_op(self,self%vac_op)
 DEBUG_STACK_POP
 end subroutine setup_mfop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine update_mfop(self)
 class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
 INTEGER(4) :: i,j,k
@@ -661,9 +548,9 @@ self%f_scale=self%gs_eq%alam
 self%p_scale=self%gs_eq%pnorm
 DEBUG_STACK_POP
 end subroutine update_mfop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine delete_mfop(self)
 class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
 DEBUG_STACK_PUSH
@@ -686,9 +573,9 @@ IF(ASSOCIATED(self%vac_op))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine delete_mfop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine apply_mfop(self,a,b)
 class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -709,9 +596,9 @@ DEBUG_STACK_PUSH
 mesh=>self%gs_eq%mesh
 lag_rep=>self%gs_eq%fe_rep
 CALL mytimer%tick()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local vector values
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
 CALL a%get_local(pol_vals)
 !---
@@ -725,9 +612,9 @@ CALL b%get_local(rhs_vals)
 CALL b%new(ptmp)
 ALLOCATE(alam_vals(b%n))
 alam_vals=0.d0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Operator integration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 diag=0.d0
 !$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt, &
 !$omp psi_tmp,dpsi_tmp,p_source,f_source,eta_source,in_bounds) &
@@ -814,9 +701,9 @@ DEALLOCATE(pol_vals,rhs_vals,ptmp,alam_vals)
 ! END IF
 DEBUG_STACK_POP
 end subroutine apply_mfop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine apply_gs_mat(self,a,b)
 class(tMaker_td_mat), intent(inout) :: self !< NL operator object
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -837,9 +724,9 @@ CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
 DEBUG_STACK_POP
 end subroutine apply_gs_mat
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine delete_gs_mat(self)
 class(tMaker_td_mat), intent(inout) :: self !< NL operator object
 IF(ASSOCIATED(self%mat))THEN
@@ -851,9 +738,9 @@ IF(ASSOCIATED(self%lim_vals))DEALLOCATE(self%lim_vals)
 IF(ASSOCIATED(self%ax_nodes))DEALLOCATE(self%ax_nodes)
 IF(ASSOCIATED(self%ax_vals))DEALLOCATE(self%ax_vals)
 end subroutine delete_gs_mat
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! !> Needs docs
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! subroutine update_lims(self,a)
 ! class(oft_tmaker_td), intent(inout) :: self !< NL operator object
 ! class(oft_vector), target, intent(inout) :: a !< Source field
@@ -872,9 +759,9 @@ end subroutine delete_gs_mat
 ! !   WRITE(*,'(2X,A)')'Constructing Poloidal flux time-advance operator'
 ! !   CALL mytimer%tick()
 ! ! END IF
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! ! Get local vector values
-! !---------------------------------------------------------------------------
+! !------------------------------------------------------------------------------
 ! IF(self%allow_xpoints)THEN
 !     self%gs_eq%psi=>a
 !     CALL gs_update_bounds(self%gs_eq)
@@ -949,9 +836,9 @@ end subroutine delete_gs_mat
 ! ! END IF
 ! DEBUG_STACK_POP
 ! end subroutine update_lims
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE tMaker_td_mfnk_update(a)
 CLASS(oft_vector), TARGET, INTENT(inout) :: a
 ! CALL active_tMaker_td%mfop%update_lims(a)
@@ -959,9 +846,9 @@ CALL active_tMaker_td%mfmat%update(a)
 ! CALL build_jop(active_tMaker_td%mfop,adv_op,a)
 !CALL active_tMaker_td%adv_solver%update(.TRUE.)
 END SUBROUTINE tMaker_td_mfnk_update
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine build_jop(self,mat,a)
 class(oft_tmaker_td_mfop), intent(inout) :: self
 class(tMaker_td_mat), intent(inout) :: mat
@@ -987,9 +874,9 @@ IF(oft_debug_print(1))THEN
     WRITE(*,'(2X,A)')'Constructing Toroidal flux time-advance operator'
     CALL mytimer%tick()
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat%mat))THEN
     CALL gs_mat_create(self%gs_eq%fe_rep,mat%mat)
     ALLOCATE(mat%lim_nodes(lag_rep%nce),mat%lim_vals(a%n,lag_rep%nce))
@@ -1032,9 +919,9 @@ end do
 self%F%plasma_bounds=self%gs_eq%plasma_bounds
 self%P%plasma_bounds=self%gs_eq%plasma_bounds
 psi_norm=self%gs_eq%plasma_bounds(2)-self%gs_eq%plasma_bounds(1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Operator integration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(j,rop,gop,det,lop,curved,goptmp,m,vol,jc,jr,pt,psi_tmp, &
 !$omp in_bounds,eta_tmp,eta_source,gs_source,lim_loc,ax_loc)
 allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
@@ -1126,17 +1013,17 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine build_jop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine build_vac_op(self,mat)
 class(oft_tmaker_td_mfop), intent(inout) :: self
 class(oft_matrix), pointer, intent(inout) :: mat
 CALL build_dels(mat,self%gs_eq,'free',self%dt,self%dt)
 end subroutine build_vac_op
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine build_linearized(self,lhs_mat,rhs_mat,a,sigma,include_bounds,sigma_plasma)
 class(oft_tmaker_td_mfop), intent(inout) :: self
 class(oft_matrix), pointer, intent(inout) :: rhs_mat,lhs_mat
@@ -1188,9 +1075,9 @@ IF(include_bounds)THEN
 END IF
 !---
 nnonaxi=self%gs_eq%region_info%nnonaxi
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Allocate matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(lhs_mat))THEN
     CALL lag_rep%vec_create(oft_lag_vec)
     !---
@@ -1266,9 +1153,9 @@ CALL a%get_local(pol_vals)
 self%F%plasma_bounds=self%gs_eq%plasma_bounds
 self%P%plasma_bounds=self%gs_eq%plasma_bounds
 psi_norm=self%gs_eq%plasma_bounds(2)-self%gs_eq%plasma_bounds(1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Operator integration
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(nnonaxi>0)THEN
     ALLOCATE(nonaxi_vals(self%gs_eq%region_info%block_max+1,nnonaxi))
     nonaxi_vals=0.d0
@@ -1432,9 +1319,9 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine build_linearized
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine apply_wrap(self,a,b)
 class(eig_wrapper), intent(inout) :: self !< NL operator object
 class(oft_vector), target, intent(inout) :: a !< Source field

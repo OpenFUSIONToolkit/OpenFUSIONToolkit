@@ -1,3 +1,8 @@
+!------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !!MUG Example: Spheromak Tilt    {#doc_mug_sph_ex1}
 !!=========================
 !!
@@ -78,13 +83,13 @@ CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,sph_tilt_options,IOSTAT=ierr)
 CLOSE(io_unit)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Build FE structures
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !--- Lagrange
 CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=-1)
 !--- Grad(H^1) subspace
@@ -137,9 +142,9 @@ CALL xmhd_ML_lagrange%set_level(xmhd_ML_lagrange%nlevels)
 !! We now recompute the desired gauge fixing with the boundary condition \f$ \textbf{A} \cdot \hat{\textbf{n}} = 0 \f$,
 !! which provides a suitable initialization magnetic field. This process is performed
 !! on both the equilibrium and perturbing fields.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create divergence cleaner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(lop)
 CALL oft_h1_getlop(xmhd_ML_H1%current_level,lop,"grnd")
 CALL create_cg_solver(linv)
@@ -151,9 +156,9 @@ CALL create_ilu_pre(linv%pre%pre)
 divout%solver=>linv
 divout%bc=>h1_zerogrnd
 divout%pm=.TRUE.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup initial conditions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Apply to equilibrium field
 CALL xmhd_ML_hcurl_grad%vec_create(ic_fields%B)
 CALL taylor_states%hffa(3,xmhd_ML_hcurl%level)%f%get_local(tmp)
@@ -236,7 +241,7 @@ END PROGRAM MUG_sph_tilt
 !! Below is an input file which can be used with this example in a parallel environment. This example
 !! should not be run with only a single process as solving the time-depedent MHD equations is
 !! significantly more challenging than previous examples. For more information on the options in the
-!! `xmhd_options` group see \ref xmhd::xmhd_plot "xmhd_plot".
+!! `xmhd_options` group see \ref xmhd::xmhd_run "xmhd_run".
 !!
 !!\verbatim
 !!&runtime_options

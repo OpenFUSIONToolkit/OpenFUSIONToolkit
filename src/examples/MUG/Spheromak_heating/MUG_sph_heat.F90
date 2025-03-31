@@ -1,3 +1,8 @@
+!------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !!MUG Example: Spheromak Heating    {#doc_mug_sph_ex2}
 !!============================
 !!
@@ -9,7 +14,7 @@
 !! including: 1) Temperature dependent resistivity, 2) Anisotropic thermal conduction and 3)
 !! Ohmic and Viscous heating.
 !!
-!! The dynamics in this example will be prdominetly limited to heating. However, if the
+!! The dynamics in this example will be predominetly limited to heating. However, if the
 !! simulation is run long enough evolution of the equilibrium profile will be observed and
 !! eventual instability due to current peaking will occur.
 !!
@@ -80,13 +85,13 @@ CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,sph_heat_options,IOSTAT=ierr)
 CLOSE(io_unit)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Build FE structures
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !--- Lagrange
 CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=-1)
 !--- Grad(H^1) subspace
@@ -120,9 +125,9 @@ CALL xmhd_ML_lagrange%set_level(xmhd_ML_lagrange%nlevels)
 !! As in \ref doc_mug_sph_ex1 we must transform the gauge of the Taylor
 !! state solution to the appropriate magnetic field BCs. For more information
 !! on this see the description in \ref doc_mug_sph_ex1_ic of that example.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create divergence cleaner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(lop)
 CALL oft_h1_getlop(xmhd_ML_H1%current_level,lop,"grnd")
 CALL create_cg_solver(linv)
@@ -135,9 +140,9 @@ CALL create_ilu_pre(linv%pre%pre)
 divout%solver=>linv
 divout%bc=>h1_zerogrnd
 divout%keep_boundary=.TRUE.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup initial conditions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL xmhd_ML_hcurl_grad%vec_create(ic_fields%B)
 CALL taylor_states%hffa(1,xmhd_ML_hcurl%level)%f%get_local(tmp)
 CALL ic_fields%B%restore_local(tmp,1)

@@ -1,7 +1,12 @@
-'''! Python interface for TokaMaker equilibrium reconstruction functionality
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Functionality for performing equilibrium reconstructions using TokaMaker
 
 @authors Chris Hansen
-@date May 2023
+@date April 2024
 @ingroup doxy_oft_python
 '''
 from .._interface import *
@@ -364,6 +369,18 @@ class reconstruction():
         # Update settings
         self.settings.infile = self._tMaker_obj._oft_env.path2c(self.con_file)
         self.settings.outfile = self._tMaker_obj._oft_env.path2c(self.out_file)
+        # Fit-specific input file settings
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options'] = {
+            'ftol': '1.E-3',
+            'xtol': '1.E-3',
+            'gtol': '1.E-3',
+            'maxfev': '100',
+            'epsfcn': '1.E-3',
+            'factor': '1.0',
+            'comp_var': 'F',
+            'linearized_fit': 'F'
+        }
+        self._tMaker_obj._oft_env.update_oft_in()
     
     def __del__(self):
         '''! Destroy reconstruction object'''
@@ -479,9 +496,27 @@ class reconstruction():
                 else:
                     raise ValueError("Unknown constraint type")
 
-    def reconstruct(self, vacuum=False):
-        '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.'''
+    def reconstruct(self, vacuum=False, linearized_fit=False, maxits=100, eps=1.E-3, ftol=1.E-3, xtol=1.E-3, gtol=1.E-3):
+        '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.
+        
+        @param vacuum Perform vacuum reconstruction
+        @param linearized_fit Use linearized solve for suitable terms
+        @param maxits Maximum number of iterations
+        @param eps Epsilong factor for finite difference derivative calculations
+        @param ftol Stopping condition: termination occurs when both the actual and predicted relative reductions in the sum of squares are at most `ftol`
+        @param xtol Stopping condition: termination occurs when the relative error between two consecutive iterates is at most `xtol`
+        @param gtol Stopping condition: termination occurs when the cosine of the angle between fvec and any column of the jacobian is at most `gtol` in absolute value
+        @result Error flag
+        '''
         self.write_fit_in()
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['linearized_fit'] = 'T' if linearized_fit else 'F'
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['maxfev'] = '{0:d}'.format(maxits)
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['epsfcn'] = '{0:.5E}'.format(eps)
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['ftol'] = '{0:.5E}'.format(ftol)
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['xtol'] = '{0:.5E}'.format(xtol)
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['gtol'] = '{0:.5E}'.format(gtol)
+        self._tMaker_obj._oft_env.update_oft_in()
+        #
         error_flag = c_int()
         tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings,ctypes.byref(error_flag))
         return error_flag.value

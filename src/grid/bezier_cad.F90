@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file bezier_cad.F90
 !
 !> CAD utility functions and class definition for reconstruction of
@@ -13,15 +15,15 @@
 !! @author Chris Hansen
 !! @date June 2010
 !! @ingroup doxy_oft_grid
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 module bezier_cad
 use oft_base
 implicit none
 #include "local.h"
 INTEGER(i4), PARAMETER :: cad_ngrid = 20 !< Number of grid points to use for object meshes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> CAD entity class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, abstract :: cad_entity
   integer(i4) :: id !< Input ID of CAD object
 contains
@@ -30,9 +32,9 @@ contains
   !> Parametric point evaluation
   procedure(cad_dummy_eval), deferred :: eval
 end type cad_entity
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> CAD vertex class
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(cad_entity) :: cad_vertex
   real(r8), pointer :: pt(:) !< Vertex location [3]
 contains
@@ -43,7 +45,7 @@ contains
   !> Reflect vertex
   procedure :: reflect => cad_vertex_reflect
 end type cad_vertex
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> CAD curve class
 !!
 !! A curve is defined in terms of the parametric coordinate \f$ u \f$ as
@@ -52,7 +54,7 @@ end type cad_vertex
 !! where \f$ n+1 \f$ is the order of the curve, \f$ \omega_i, x_i \f$ are
 !! the weights and positions of the control points, and \f$ f^k_l \f$ is
 !! the Bernstein polynomial of degree \f$ k \f$ and kind \f$ l \f$.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(cad_entity) :: cad_curve
   integer(i4) :: order !< Curve order
   real(r8), pointer :: pt(:,:) !< Vertex locations [3,order]
@@ -68,7 +70,7 @@ contains
   !> Reflect curve
   procedure :: reflect => cad_curve_reflect
 end type cad_curve
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> CAD surface class
 !!
 !! A surface is defined in terms of the parametric coordinates \f$ u,v \f$ as
@@ -77,7 +79,7 @@ end type cad_curve
 !! where \f$ n+1, m+1 \f$ are the orders of each bounding curve, \f$ \omega_{ij},
 !! x_{ij} \f$ are the weights and positions of the control points, and \f$ f^k_l \f$
 !! is the Bernstein polynomial of degree \f$ k \f$ and kind \f$ l \f$.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(cad_entity) :: cad_surf
   integer(i4) :: order(2) !< Surface order [2]
   real(r8), pointer :: pt(:,:,:) !< Vertex locations [3,order(1),order(2)]
@@ -93,18 +95,18 @@ contains
   !> Reflect surface
   procedure :: reflect => cad_surf_reflect
 end type cad_surf
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> List of CAD entities
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: cad_entity_ptr
   class(cad_entity), pointer :: wo => NULL() !< CAD object
 end type cad_entity_ptr
 !---CAD function prototypes
 abstract interface
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Map the parametric possition on an entity to physical coordinates
 !! - (u,v) -> (x,y,z)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   subroutine cad_dummy_eval(self,pt,u,v)
     import :: cad_entity, r8
     class(cad_entity), intent(in) :: self
@@ -112,10 +114,10 @@ abstract interface
     real(r8), intent(in) :: u !< Parametric coordinate 1
     real(r8), intent(in) :: v !< Parametric coordinate 2
   end subroutine cad_dummy_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Find the parametric representation of a boundary point in CAD representation
 !! - (x,y,z) -> (u,v)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   subroutine cad_dummy_find(self,pt,u,v)
     import :: cad_entity, r8
     class(cad_entity), intent(in) :: self
@@ -134,10 +136,10 @@ REAL(r8) :: active_wts(3) !< Active constraint weights for MINPACK fitting
 public cad_entity, cad_vertex, cad_curve, cad_surf, cad_entity_ptr, bernstein
 public cad_curve_midpoint, cad_surf_midpoint, cad_surf_center, cad_curve_cast, cad_surf_cast
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Map parametric possition of a vertex to physical coordinates
 !! - (u,v) -> (x,y,z)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_vertex_eval(self,pt,u,v)
 class(cad_vertex), intent(in) :: self
 real(r8), intent(out) :: pt(3) !< Position vector [3]
@@ -147,10 +149,10 @@ DEBUG_STACK_PUSH
 pt=self%pt
 DEBUG_STACK_POP
 end subroutine cad_vertex_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Find the parametric representation of a boundary point in CAD representation on a vertex
 !! - (x,y,z) -> (u,v)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_vertex_find(self,pt,u,v)
 class(cad_vertex), intent(in) :: self
 real(r8), intent(in) :: pt(3) !< Position vector [3]
@@ -161,9 +163,9 @@ u=0.d0
 v=0.d0
 DEBUG_STACK_POP
 end subroutine cad_vertex_find
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reflect a vertex object across a given plane
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_vertex_reflect(self,copy,tol,k)
 class(cad_vertex), intent(in) :: self !< Source object to copy
 class(cad_vertex), intent(out) :: copy !< Reflected copy of the source vertex
@@ -183,12 +185,12 @@ else ! Object not on Ref-Plane
 end if
 DEBUG_STACK_POP
 end subroutine cad_vertex_reflect
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast \ref bezier_cad::cad_entity "cad_entity" to \ref bezier_cad::cad_curve
 !! "cad_curve"
 !!
 !! @result Error flag
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION cad_curve_cast(self,source) result(ierr)
 class(cad_curve), pointer, intent(out) :: self !< Object of desired type, unassociated if cast fails
 class(cad_entity), target, intent(in) :: source !< Source object to cast
@@ -203,10 +205,10 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION cad_curve_cast
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Map the parametric possition on a curve to physical coordinates.
 !! - (u,v) -> (x,y,z)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_curve_eval(self,pt,u,v)
 class(cad_curve), intent(in) :: self
 real(r8), intent(out) :: pt(3) !< Position vector [3]
@@ -226,9 +228,9 @@ end do
 pt=pt/norm
 DEBUG_STACK_POP
 end subroutine cad_curve_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reflect a curve object across a given plane
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_curve_reflect(self,copy,tol,k)
 class(cad_curve), intent(in) :: self !< Source object to copy
 class(cad_curve), intent(out) :: copy !< Reflected copy of the source curve
@@ -252,9 +254,9 @@ do i=1,self%order
 end do
 DEBUG_STACK_POP
 end subroutine cad_curve_reflect
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute a grid of points evenly spaced in parametric space
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_curve_grid(self)
 class(cad_curve), intent(inout) :: self
 real(r8) :: u,v
@@ -267,9 +269,9 @@ do i=1,cad_ngrid
 end do
 DEBUG_STACK_POP
 end subroutine cad_curve_grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute unit tangent vector for a CAD curve at a given location
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_curve_tang(self,tang,u)
 class(cad_curve), intent(in) :: self
 real(r8), intent(out) :: tang(3) !< Curve tangent unit vector [3]
@@ -284,10 +286,10 @@ tang=pt2-pt1
 tang=tang/SQRT(SUM(tang**2))
 DEBUG_STACK_POP
 end subroutine cad_curve_tang
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Find the parametric representation of a boundary point in CAD representation on a curve
 !! - (x,y,z) -> (u,v)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_curve_find(self,pt,u,v)
 class(cad_curve), intent(in) :: self
 real(r8), intent(in) :: pt(3) !< Position vector [3]
@@ -357,14 +359,14 @@ if(i>40)then
 endif
 DEBUG_STACK_POP
 end subroutine cad_curve_find
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the weighted midpoint of a curve edge
 !!
 !! Locates the point on a given CAD curve which minimizes the weighted sum
 !! of distances to 2 constraint points.
 !!
 !! \f[ \sum_i w_i*(r_n - p_i)^2 \f]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_curve_midpoint(self,pt,pt1,pt2,wt1,wt2,ierr)
 class(cad_curve),target, intent(in) :: self !< Curve object
 real(r8), intent(inout) :: pt(3) !< Solution point [3]
@@ -429,13 +431,13 @@ v=0.d0
 call self%eval(pt,u,v)
 DEBUG_STACK_POP
 end subroutine cad_curve_midpoint
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute the error between a curve point and the current active points
 !! used in a 2 point minimization.
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref bezier_cad::cad_curve_midpoint "cad_curve_midpoint"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_cmid_error(m,n,uv,err,iflag)
 integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
 integer(i4), intent(in) :: n !< Number of parametric dimensions (2)
@@ -449,12 +451,12 @@ err(1:3)=(active_endpts(1,:)-pt)*SQRT(active_wts(1))
 err(4:6)=(active_endpts(2,:)-pt)*SQRT(active_wts(2))
 DEBUG_STACK_POP
 end subroutine cad_cmid_error
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Cast \ref bezier_cad::cad_entity "cad_entity" to \ref bezier_cad::cad_surf
 !! "cad_surf"
 !!
 !! @result Error flag
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION cad_surf_cast(self,source) result(ierr)
 class(cad_surf), pointer, intent(out) :: self !< Object of desired type, unassociated if cast fails
 class(cad_entity), target, intent(in) :: source !< Source object to cast
@@ -469,10 +471,10 @@ select type(source)
 end select
 DEBUG_STACK_POP
 end FUNCTION cad_surf_cast
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Map the parametric possition on a surface to physical coordinates.
 !! - (u,v) -> (x,y,z)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_surf_eval(self,pt,u,v)
 class(cad_surf), intent(in) :: self
 real(r8), intent(out) :: pt(3) !< Position vector [3]
@@ -494,10 +496,10 @@ end do
 pt=pt/norm
 DEBUG_STACK_POP
 end subroutine cad_surf_eval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Find the parametric representation of a boundary point in CAD representation on a surface.
 !! - (x,y,z) -> (u,v)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_surf_find(self,pt,u,v)
 class(cad_surf), intent(in) :: self
 real(r8), intent(in) :: pt(3) !< Position vector [3]
@@ -593,9 +595,9 @@ if(i>2000)then
 end if
 DEBUG_STACK_POP
 end subroutine cad_surf_find
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reflect a surface object across a given plane
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_surf_reflect(self,copy,tol,k)
 class(cad_surf), intent(in) :: self !< Source surface to copy
 class(cad_surf), intent(out) :: copy !< Reflected copy of the source surface
@@ -621,9 +623,9 @@ do i=1,self%order(1)
 end do
 DEBUG_STACK_POP
 end subroutine cad_surf_reflect
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute unit normal vector for a CAD surface at a specified position
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_surf_norm(self,norm,u,v)
 class(cad_surf), intent(in) :: self
 real(r8), intent(out) :: norm(3) !< Surface normal unit vector [3]
@@ -645,9 +647,9 @@ rv=rv/SQRT(SUM(rv**2))
 norm=-1.d99
 DEBUG_STACK_POP
 end subroutine cad_surf_norm
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute a grid of points evenly spaced in parametric space
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_surf_grid(self)
 class(cad_surf), intent(inout) :: self
 real(r8) :: u,v
@@ -662,14 +664,14 @@ do i=1,cad_ngrid
 end do
 DEBUG_STACK_POP
 end subroutine cad_surf_grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the weighted midpoint of a surface edge
 !!
 !! Locates the point on a given CAD surface which minimizes the weighted sum
 !! of distances to 2 constraint points.
 !!
 !! \f[ \sum_i w_i*(r_n - p_i)^2 \f]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_surf_midpoint(self,pt,pt1,pt2,wt1,wt2,ierr)
 class(cad_surf), target, intent(in) :: self !< Surface object
 real(r8), intent(inout) :: pt(3) !< Solution point [3]
@@ -737,13 +739,13 @@ v=uv(2)
 call self%eval(pt,u,v)
 DEBUG_STACK_POP
 end subroutine cad_surf_midpoint
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute the error between a surface point and the current active points
 !! used in a 2 point minimization.
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref bezier_cad::cad_surf_midpoint "cad_surf_midpoint"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_smid_error(m,n,uv,err,iflag)
 integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
 integer(i4), intent(in) :: n !< Number of parametric dimensions (2)
@@ -757,14 +759,14 @@ err(1:3)=(active_endpts(1,:)-pt)*SQRT(active_wts(1))
 err(4:6)=(active_endpts(2,:)-pt)*SQRT(active_wts(2))
 DEBUG_STACK_POP
 end subroutine cad_smid_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the weighted center point of a surface triangle
 !!
 !! Locates the point on a given CAD surface which minimizes the weighted sum
 !! of distances to 3 constraint points.
 !!
 !! \f[ \sum_i w_i*(r_n - p_i)^2 \f]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_surf_center(self,pt,pt1,pt2,pt3,wt1,wt2,wt3,ierr)
 class(cad_surf), target, intent(in) :: self !< Surface object
 real(r8), intent(inout) :: pt(3) !< Solution point [3]
@@ -837,13 +839,13 @@ v=uv(2)
 call self%eval(pt,u,v)
 DEBUG_STACK_POP
 end subroutine cad_surf_center
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute the error between a surface point and the current active points
 !! used in a 3 point minimization.
 !!
 !! @note Designed to be used as the error function for minimization in
 !! @ref bezier_cad::cad_surf_center "cad_surf_center"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cad_scenter_error(m,n,uv,err,iflag)
 integer(i4), intent(in) :: m !< Number of spatial dimensions (3)
 integer(i4), intent(in) :: n !< Number of parametric dimensions (2)
@@ -858,13 +860,13 @@ err(4:6)=(active_endpts(2,:)-pt)*SQRT(active_wts(2))
 err(7:9)=(active_endpts(3,:)-pt)*SQRT(active_wts(3))
 DEBUG_STACK_POP
 end subroutine cad_scenter_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluates the bernstein polynomial.
 !!
 !! f(x) = \f$ B_{ij}(x) \f$
 !!
 !! @result \f$ B_{ij}(x) \f$
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 real(r8) function bernstein(x,i,j)
 real(r8), intent(in) :: x !< Point to evaluate
 integer(i4), intent(in) :: i !< Polynomial degree

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_scalar_inits.F90
 !
 !> Field initializations and evaluation for common scalar analytic field types
@@ -8,19 +10,19 @@
 !! @authors Chris Hansen
 !! @date September 2012
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 module oft_scalar_inits
 use oft_base
 use oft_mesh_type, only: oft_mesh
 use fem_utils, only: fem_interp
 implicit none
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolation class for an axisymmetric gaussian source in toroidal geometry
 !!
 !! In toroidal coordinates defined by the class the scalar field is defined
 !! as
 !! \f[ S = e^{-\frac{r^2}{\lambda}} \f]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: oft_scalar_torus
   real(r8) :: r0 = 1.d0 !< Major radius
   real(r8) :: z = 0.d0 !< Z-axis offset
@@ -30,9 +32,9 @@ contains
   procedure :: interp => torus_interp
 end type oft_scalar_torus
 contains
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evaluate torus source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine torus_interp(self,cell,f,gop,val)
 class(oft_scalar_torus), intent(inout) :: self
 integer(i4), intent(in) :: cell !< Cell for interpolation

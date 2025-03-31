@@ -1,0 +1,31 @@
+reset
+undo off
+set node constraint on
+#
+create surface rectangle width 1 height 1 zplane
+move Surface 1  x 0.5 y 0 z 0 include_merged
+#
+nodeset 1 add curve 4
+#
+surface all  scheme TriMesh
+set Trimesher Surface Gradation 1.1
+surface 1 size .05
+mesh surface 1
+#
+block 1 surface 1
+block 1 element type tri3
+export Genesis "ref_tri3_test.g" overwrite block all
+block 1 element type tri6
+export Genesis "ref_tri6_test.g" overwrite block all
+
+#
+delete mesh surface 1 propagate
+surface 1 scheme map
+surface 1 size .05
+mesh surface 1
+#
+block 1 surface 1
+block 1 element type quad4
+export Genesis "ref_quad4_test.g" overwrite block all
+block 1 element type quad9
+export Genesis "ref_quad9_test.g" overwrite block all

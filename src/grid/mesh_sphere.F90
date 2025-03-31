@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_mesh_sphere.F90
 !
 !> Mesh handling for a spherical test mesh.
@@ -12,7 +14,7 @@
 !! @authors George Marklin and Chris Hansen
 !! @date April 2008 - Present
 !! @ingroup doxy_oft_grid
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_mesh_sphere
 USE oft_base
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
@@ -31,12 +33,12 @@ public mesh_sphere_load, mesh_sphere_cadlink, mesh_sphere_reffix
 public mesh_sphere_add_quad, smesh_circle_load, smesh_circle_cadlink
 public smesh_circle_reffix, smesh_circle_add_quad
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup a spherical test mesh
 !! The mesh is initialized with a minimal "wheel" of cells
 !! - 7 Points
 !! - 8 Cells
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_sphere_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,ierr,io_unit,mesh_type
@@ -51,9 +53,9 @@ IF(oft_env%head_proc)THEN
   CLOSE(io_unit)
   !IF(ierr<0)CALL oft_abort('No "sphere_options" found in input file.','mesh_sphere_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "sphere_options" in input file.','mesh_sphere_load',__FILE__)
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Generating Sphere mesh'
-  WRITE(*,'(2X,A,I4)')'Mesh Type = ',mesh_type
+  WRITE(*,'(2A)')oft_indent,'Sphere volume mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I4)')oft_indent,'Mesh Type = ',mesh_type
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -156,18 +158,19 @@ ELSE
   END IF
 END IF
 call mesh_global_resolution(mesh)
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine mesh_sphere_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup surface IDs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_sphere_cadlink(mesh)
 class(oft_mesh), intent(inout) :: mesh
 mesh%bfs=1
 end subroutine mesh_sphere_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Refine boundary points onto the sphere
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_sphere_reffix(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j
@@ -180,7 +183,7 @@ pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN
   ! Do nothing
 ELSE
-  if(oft_debug_print(1))write(*,*)'Adjusting points to sphere boundary'
+  if(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Adjusting points to sphere boundary'
   !---Locate edge end points and place daughter point
   !$omp parallel do private(pt)
   do i=1,mesh%nbp
@@ -195,19 +198,18 @@ ELSE
   !   IF(i<=pmesh%bmesh%np)CYCLE
   !   mesh%bmesh%r(:,i)=mesh%r(:,mesh%bmesh%parent%lp(i))
   ! enddo
-  if(oft_debug_print(1))write(*,*)'Complete'
 END IF
 DEBUG_STACK_POP
 end subroutine mesh_sphere_reffix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add quadratic mesh node points
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mesh_sphere_add_quad(mesh)
 class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,k
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,*)'Setting Sphere Quadratic Nodes'
+if(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting Sphere Quadratic Nodes'
 !---Setup quadratic mesh
 ! CALL mesh%set_order(2)
 ! CALL mesh_global_set_curved(mesh,2)
@@ -249,15 +251,14 @@ IF(mesh%ho_info%ncp==1)THEN
     mesh%ho_info%r(:,i+mesh%ne+mesh%nf)=pt/REAL(mesh%cell_np,8)
   end do
 END IF
-if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_sphere_add_quad
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup a spherical test mesh
 !! The mesh is initialized with a minimal "wheel" of cells
 !! - 7 Points
 !! - 8 Cells
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_circle_load(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 INTEGER(i4) :: i,ierr,io_unit,mesh_type
@@ -271,9 +272,9 @@ IF(oft_env%head_proc)THEN
   CLOSE(io_unit)
   !IF(ierr<0)CALL oft_abort('No "sphere_options" found in input file.','smesh_circle_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "sphere_options" in input file.','smesh_circle_load',__FILE__)
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Generating Sphere mesh'
-  WRITE(*,'(2X,A,I4)')'Mesh Type = ',mesh_type
+  WRITE(*,'(2A)')oft_indent,'Circle surface mesh:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,I4)')oft_indent,'Mesh Type = ',mesh_type
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -338,18 +339,19 @@ ELSE
   END IF
 END IF
 call mesh_global_resolution(smesh)
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine smesh_circle_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup surface IDs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_circle_cadlink(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 smesh%bes=1
 end subroutine smesh_circle_cadlink
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Refine boundary points onto the sphere
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_circle_reffix(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: i,j
@@ -362,7 +364,7 @@ pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
 IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN
   ! Do nothing
 ELSE
-  if(oft_debug_print(1))write(*,*)'Adjusting points to circle boundary'
+  if(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Adjusting points to circle boundary'
   !---Locate edge end points and place daughter point
   !$omp parallel do private(pt)
   do i=1,smesh%nbp
@@ -371,19 +373,18 @@ ELSE
       smesh%r(:,smesh%lbp(i))=pt/sqrt(sum(pt**2))
     endif
   enddo
-  if(oft_debug_print(1))write(*,*)'Complete'
 END IF
 DEBUG_STACK_POP
 end subroutine smesh_circle_reffix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add quadratic mesh node points
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine smesh_circle_add_quad(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j,k
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,*)'Setting circle quadratic nodes'
+if(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting circle quadratic nodes'
 !---Setup quadratic mesh
 CALL smesh%set_order(2)
 !---Locate edge end points and place daughter point
@@ -414,7 +415,6 @@ IF(smesh%ho_info%ncp>0)THEN
     ! endif
   end do
 END IF
-if(oft_debug_print(1))write(*,*)'Complete'
 DEBUG_STACK_POP
 end subroutine smesh_circle_add_quad
 end module oft_mesh_sphere

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file thincurr_coupling.F90
 !
 !> Run thin wall frequency response simulations using ThinCurr
@@ -19,7 +21,7 @@
 !! @authors Chris Hansen
 !! @date Feb 2022
 !! @ingroup doxy_thincurr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM thincurr_coupling
 USE oft_base
 USE oft_io, ONLY: hdf5_field_get_sizes
@@ -110,9 +112,9 @@ CALL tw_sim%setup(hole_nsets)
 CALL tw_sim%xdmf%setup("thincurr",'Model1/')
 CALL mg_mesh%smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load second model
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(oft_trimesh::tw_sim2%mesh)
 CALL tw_sim2%mesh%setup(-1,.FALSE.)
 CALL hdf5_field_get_sizes(TRIM(mesh_file),"mesh/R",ndims,dim_sizes)
@@ -164,9 +166,9 @@ IF(plot_run)THEN
   DEALLOCATE(uio)
   CALL oft_finalize()
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Build mutual coupling matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat,col_model=tw_sim2,save_file='Lmat_coupling.save')
 !
 CALL tw_get_getMat
@@ -179,9 +181,9 @@ CLOSE(io_unit)
 !---
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_get_getMat()
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
