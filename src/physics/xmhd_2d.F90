@@ -136,6 +136,7 @@ current_sim=>self
 !---------------------------------------------------------------------------
 ! Create solver fields
 !---------------------------------------------------------------------------
+print *, '===================== SOLVER FIELDS ====================='
 call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)
@@ -150,13 +151,14 @@ nextrap=0
 self%t=0.d0
 CALL u%add(0.d0,1.d0,self%u)
 !---Create initial conditions restart file
+print *, '===================== RESTART FILE ====================='
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'tDiff_'//rst_char//'.rst', 'U')
 NULLIFY(plot_vals)
 CALL self%xdmf_plot%add_timestep(self%t)
-CALL self%u%get_local(plot_vals,1)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
+CALL self%u%get_local(plot_vals,6)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Psi')
 CALL self%u%get_local(plot_vals,2)
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
 
@@ -178,10 +180,12 @@ self%nlfun%T_bc=>self%T_bc
 self%nlfun%psi_bc=>self%psi_bc
 self%nlfun%by_bc=>self%by_bc
 !---
+print *, '===================== BUILD JACOBIAN ====================='
 CALL build_approx_jacobian(self,u) ! What is this u vector for?
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
+print *, '===================== LIN SOLVE SETUP ====================='
 IF(self%mfnk)THEN
   ALLOCATE(self%mf_mat)
   CALL up%set(1.d0)
@@ -263,6 +267,7 @@ DO i=1,self%nsteps
   extrapt(1)=self%t
   IF(i>maxextrap)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,self%t+self%dt,u)
   CALL nksolver%apply(u,v)
+  IF(nksolver%cits<0)CALL oft_abort("Nonlinear solve failed","run_simulation",__FILE__)
   !---------------------------------------------------------------------------
   ! Write out initial solution progress
   !---------------------------------------------------------------------------
@@ -294,8 +299,9 @@ DO i=1,self%nsteps
     END IF
     !---
     CALL self%xdmf_plot%add_timestep(self%t)
-    CALL self%u%get_local(plot_vals,1)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
+    CALL self%u%get_local(plot_vals,6)
+    WRITE(*,*)'CHK',MAXVAL(plot_vals)
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Psi')
     CALL self%u%get_local(plot_vals,2)
     CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
   END IF
@@ -321,7 +327,8 @@ type(oft_quad_type), pointer :: quad
 LOGICAL :: curved
 INTEGER(i4) :: i,m,jr, k,l
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
-REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz, m_i, diag_vals(7)
+REAL(r8) :: m_i = -1.d0
+REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz, diag_vals(7)
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
          dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3), tmp1(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
@@ -334,6 +341,7 @@ quad=>oft_blagrange%quad
 NULLIFY(n_weights, vel_weights, T_weights, psi_weights, by_weights, &
 n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res)
 !---Get weights from solution vector
+ALLOCATE(vel_weights(3,oft_blagrange%ne))
 CALL a%get_local(n_weights,1)
 vtmp => vel_weights(1, :)
 CALL a%get_local(vtmp ,2)
@@ -402,8 +410,8 @@ DO i=1,mesh%nc
     n = 0.d0; dn = 0.d0; vel = 0.d0; dvel = 0.d0
     T = 0.d0; dT = 0.d0; psi = 0.d0; dpsi=0.d0
     by = 0.d0; dby = 0.d0
-    basis_grads(2, :) = basis_grads(3,:)
-    basis_grads(3,:) = 0.d0
+    basis_grads(3, :) = basis_grads(2,:)
+    basis_grads(2,:) = 0.d0
     DO jr=1,oft_blagrange%nce
       n = n + n_weights_loc(jr)*basis_vals(jr)
       vel = vel + vel_weights_loc(:, jr)*basis_vals(jr)
@@ -520,7 +528,8 @@ class(oft_vector), intent(inout) :: a !< Solution for computing jacobian
 LOGICAL :: curved
 INTEGER(i4) :: i,m,jr,jc, k,l
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
-REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz, m_i
+REAL(r8) :: m_i = -1.d0
+REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
 dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3), tmp2(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
@@ -536,11 +545,15 @@ type(oft_quad_type), pointer :: quad
 quad=>oft_blagrange%quad
 CALL self%jacobian%zero
 NULLIFY(n_weights,vel_weights, T_weights, &
-         psi_weights, by_weights)
+         psi_weights, by_weights, vtmp)
+print *, '===================== GET WEIGHTS ====================='
 !---Get weights from solution vector
 CALL a%get_local(n_weights,1)
+ALLOCATE(vel_weights(3,oft_blagrange%ne))
 vtmp => vel_weights(1, :)
+print *, '===================== GET WEIGHTS2 ====================='
 CALL a%get_local(vtmp ,2)
+print *, '===================== GET WEIGHTS3 ====================='
 vtmp => vel_weights(2, :)
 CALL a%get_local(vtmp ,3)
 vtmp => vel_weights(3, :)
@@ -556,6 +569,7 @@ mu_0 = self%mu_0 !< Needs docs
 gamma = self%gamma !< Needs docs
 D_diff = self%D_diff !< Needs docs
 k_boltz = self%k_boltz !< Needs docs
+print *, '===================== DOOOO ====================='
 ! IF(self%tau_eq>0.d0)THEN
 !   tau_eq_inv=1.d0/self%tau_eq
 ! ELSE
@@ -576,8 +590,9 @@ ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),
 ALLOCATE(cell_dofs(oft_blagrange%nce))
 ALLOCATE(jac_loc(self%fe_rep%nfields,self%fe_rep%nfields))
 ALLOCATE(iloc(self%fe_rep%nfields))
-iloc(1)%v=>cell_dofs
-iloc(2)%v=>cell_dofs
+DO i=1,self%fe_rep%nfields
+   iloc(i)%v=>cell_dofs
+END DO
 CALL self%fe_rep%mat_setup_local(jac_loc, self%jacobian_block_mask)
 !$omp do schedule(static)
 DO i=1,mesh%nc
@@ -599,6 +614,8 @@ DO i=1,mesh%nc
       CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
       CALL oft_blag_geval(oft_blagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
     END DO
+    basis_grads(3, :) = basis_grads(2,:)
+    basis_grads(2,:) = 0.d0
     !---Reconstruct values of solution fields
     n = 0.d0; dn = 0.d0; vel = 0.d0; dvel = 0.d0
     T = 0.d0; dT = 0.d0; psi = 0.d0; dpsi=0.d0
@@ -744,9 +761,9 @@ DO i=1,mesh%nc
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velx_bc(cell_dofs), 2)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%vely_bc(cell_dofs), 3)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velz_bc(cell_dofs), 4)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%T_bc(cell_dofs),3)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),4)
-  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs), 5)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%T_bc(cell_dofs),5)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),6)
+  CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs), 7)
   CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
 END DO
 !---Cleanup thread-local storage

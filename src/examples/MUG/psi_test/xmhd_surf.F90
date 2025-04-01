@@ -17,7 +17,7 @@ INTEGER(i4) :: io_unit,ierr
 REAL(r8), POINTER :: vec_vals(:)
 TYPE(oft_xmhd_2d_sim) :: mhd_sim
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_blag_zerob), TARGET :: blag_zerob
+TYPE(oft_blag_zerob), TARGET :: blag_zerob ! setting boundary vals to zero
 !---Mass matrix solver
 TYPE(poss_scalar_bfield) :: field_init
 CLASS(oft_solver), POINTER :: minv => NULL()
@@ -63,7 +63,7 @@ blag_zerob%ML_lag_rep=>ML_oft_blagrange
 ! Set intial conditions from analytic functions
 !---------------------------------------------------------------------------
 !---Generate mass matrix
-NULLIFY(u,v,mop) ! Ensure the matrix is unallocated (pointer is NULL)
+NULLIFY(u,v,mop,vec_vals) ! Ensure the matrix is unallocated (pointer is NULL)
 CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
 !---Setup linear solver
 CALL create_cg_solver(minv)
@@ -80,7 +80,7 @@ field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL blag_zerob%apply(u)
+! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'n0')
 CALL mhd_sim%u%restore_local(vec_vals,1)
@@ -120,7 +120,7 @@ field_init%func=>T_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL blag_zerob%apply(u)
+! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'T0')
 CALL mhd_sim%u%restore_local(vec_vals,5)
@@ -170,7 +170,9 @@ mhd_sim%nsteps=nsteps
 mhd_sim%rst_freq=rst_freq
 mhd_sim%mfnk=use_mfnk
 oft_env%pm=pm
+print *, '===================== HELP 173 ====================='
 CALL mhd_sim%run_simulation()
+print *, '===================== HELP 175 ====================='
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS

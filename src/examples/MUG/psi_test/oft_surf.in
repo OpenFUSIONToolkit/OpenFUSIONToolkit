@@ -1,6 +1,6 @@
 &runtime_options
   ppn=1
-  debug=0
+  debug=3
 /
 
 &mesh_options
