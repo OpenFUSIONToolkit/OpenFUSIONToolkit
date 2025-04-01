@@ -718,8 +718,7 @@ class CMAKE(package):
 class METIS(package):
     def __init__(self, comp_wrapper=False):
         self.name = "METIS"
-        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/metis-5.1.0-mod.tar.gz"
-        self.build_dir = "metis-5.1.0"
+        self.url = "https://karypis.github.io/glaros/files/sw/metis/metis-5.1.0.tar.gz"
         self.comp_wrapper = comp_wrapper
 
     def detect_sizes(self):
@@ -770,6 +769,8 @@ class METIS(package):
             '-DGKRAND:BOOL=ON',
             '-DGKLIB_PATH=$GKLIB_PATH'
         ]
+        if ver_gt(self.config_dict["CMAKE_VERSION"], "3.99"):
+            cmake_options.append("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
         if 'MACOS_SDK_PATH' in self.config_dict:
             cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         build_lines = [
