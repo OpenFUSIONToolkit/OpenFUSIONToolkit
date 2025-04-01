@@ -238,6 +238,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--test_run', help='Run without writing any changes.', action="store_true")
     parser.add_argument('-d', '--debug', help='Display debug information.', action="store_true")
     parser.add_argument('-c', '--clean', help='Clean stack declarations from sources.', action="store_true")
+    parser.add_argument('-l', '--lint', help='Perform linting check to ensure no markers are present.', action="store_true")
     parser.add_argument('-o', '--out_path', help='Output path for stack include file.', type=str, default="include")
     args=parser.parse_args()
     #
@@ -247,6 +248,9 @@ if __name__ == '__main__':
         debug = True
     if args.clean:
         clean = True
+    if args.lint:
+        clean = True
+        test_run = True
     # Check for correct run path
     correct_path = os.path.isfile("base/oft_local.F90")
     if not(correct_path):
@@ -264,6 +268,8 @@ if __name__ == '__main__':
     if clean:
         if debug:
             print("Cleaning stack from source files")
+        elif args.lint:
+            print("Checking for stack in source files")
     # Otherwise parse source files and add STACK definitions
     else:
         if debug:
@@ -288,10 +294,17 @@ if __name__ == '__main__':
                         modules, functions, new_file, file_unchanged = parse_fortran_file(fid,modules,functions,debug)
                 # If in test mode do not replace file
                 if test_run or file_unchanged:
+                    if args.lint and (not file_unchanged):
+                        print('  Found in: '+path)
+                        nupdate += 1
                     continue
                 nupdate += 1
                 with open(path,"w+") as fid:
                     fid.write(new_file)
+    if args.lint and (nupdate > 0):
+        print()
+        print("Linting error: Found updates in {0} files".format(nupdate))
+        sys.exit(1)
     if nupdate == 0:
         print("  No updates")
     else:
