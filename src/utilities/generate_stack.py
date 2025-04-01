@@ -303,7 +303,7 @@ if __name__ == '__main__':
                     fid.write(new_file)
     if args.lint and (nupdate > 0):
         print()
-        print("Linting error: Found updates in {0} files".format(nupdate))
+        print("Linting error: Found errors in {0} file(s)".format(nupdate))
         sys.exit(1)
     if nupdate == 0:
         print("  No updates")
