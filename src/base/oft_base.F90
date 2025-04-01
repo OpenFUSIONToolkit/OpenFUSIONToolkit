@@ -21,6 +21,8 @@
 !! @ingroup doxy_oft_base
 !--------------------------------------------------------------------------------
 MODULE oft_base
+#undef DEBUG_STACK_MOD_IND
+#define DEBUG_STACK_MOD_IND 5
 USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit
 USE omp_lib
 USE oft_local
