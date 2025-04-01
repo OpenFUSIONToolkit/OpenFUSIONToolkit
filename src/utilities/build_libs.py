@@ -769,7 +769,7 @@ class METIS(package):
             '-DGKRAND:BOOL=ON',
             '-DGKLIB_PATH=$GKLIB_PATH'
         ]
-        if ver_gt(self.config_dict["CMAKE_VERSION"], "3.99"):
+        if ver_gt(self.config_dict.get("CMAKE_VERSION","0.0"), "3.99"):
             cmake_options.append("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
         if 'MACOS_SDK_PATH' in self.config_dict:
             cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
@@ -1945,6 +1945,8 @@ class PETSC(package):
         return self.config_dict
 
     def build(self):
+        if ver_gt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.99"):
+            error_exit('CMAKE >= 4.0 not presently supported with PETSc', ('Update or retry with "--build_cmake=1" to build a compatible version',))
         #
         def_lines = []
         options = []
