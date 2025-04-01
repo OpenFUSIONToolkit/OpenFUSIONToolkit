@@ -50,7 +50,7 @@ jobs:
 
     - name: Build external
       shell: bash
-      timeout-minutes: 30
+      timeout-minutes: 60
       working-directory: libs
       run: >
         python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=2
