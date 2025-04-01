@@ -871,7 +871,6 @@ real(r8) function bernstein(x,i,j)
 real(r8), intent(in) :: x !< Point to evaluate
 integer(i4), intent(in) :: i !< Polynomial degree
 integer(i4), intent(in) :: j !< Polynomial kind
-DEBUG_STACK_PUSH
 bernstein=0.d0
 select case(i)
   case(1) ! Degree 1
@@ -899,6 +898,5 @@ select case(i)
       bernstein = x**3
     endif
 end select
-DEBUG_STACK_POP
 end function bernstein
 end module bezier_cad

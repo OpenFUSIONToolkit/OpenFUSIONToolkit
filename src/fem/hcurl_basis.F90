@@ -20,7 +20,6 @@
 !! @ingroup doxy_oft_hcurl
 !------------------------------------------------------------------------------
 MODULE oft_hcurl_basis
-! USE timer
 USE oft_base
 USE oft_lag_poly
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh
@@ -796,15 +795,9 @@ contains
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_eval_all2()!self,cell,f,rop,gop)
-! class(oft_fem_type), intent(in) :: self
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(in) :: gop(3,4)
-! real(r8), intent(out) :: rop(3,14)
+subroutine oft_hcurl_eval_all2()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,u1(3),u2(3),u3(3)
-DEBUG_STACK_PUSH
 DO i=1,6
   etmp=oriented_edges(:,i)
   rop(:,i) = -f(etmp(2))*gop(:,etmp(1)) &
@@ -823,22 +816,15 @@ DO i=1,4
                -f1*f3*u2 &
               + 0*u3
 END DO
-DEBUG_STACK_POP
 end subroutine oft_hcurl_eval_all2
 !------------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (cubic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_eval_all3()!self,cell,f,rop,gop)
-! class(oft_fem_type), intent(in) :: self
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(in) :: gop(3,4)
-! real(r8), intent(out) :: rop(3,29)
+subroutine oft_hcurl_eval_all3()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,f4,u1(3),u2(3),u3(3)
-DEBUG_STACK_PUSH
 DO i=1,6
   etmp=oriented_edges(:,i)
   rop(:,i) = -f(etmp(2))*gop(:,etmp(1)) &
@@ -885,22 +871,15 @@ rop(:,29) = f2*f3*f4*gop(:,1) &
             -f1*f3*f4*gop(:,2) &
           +  0*gop(:,3) &
           +  0*gop(:,4)
-DEBUG_STACK_POP
 end subroutine oft_hcurl_eval_all3
 !------------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_eval_all4()!self,cell,f,rop,gop)
-! class(oft_fem_type), intent(in) :: self
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(in) :: gop(3,4)
-! real(r8), intent(out) :: rop(3,53)
+subroutine oft_hcurl_eval_all4()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,f4,u1(3),u2(3),u3(3)
-DEBUG_STACK_PUSH
 DO i=1,6
   etmp=oriented_edges(:,i)
   rop(:,i) = -f(etmp(2))*gop(:,etmp(1)) &
@@ -1003,7 +982,6 @@ rop(:,53) = f2*f3*f4*(-4.d0*f1 + 2.d0*f2)*gop(:,1) &
           + f1*f3*f4*(-2.d0*f1 + 4.d0*f2)*gop(:,2) &
           + f1*f2*f4*(2.d0*f1 - 2.d0*f2)*gop(:,3) &
           + f1*f2*f3*(2.d0*f1 - 2.d0*f2)*gop(:,4)
-DEBUG_STACK_POP
 end subroutine oft_hcurl_eval_all4
 end subroutine oft_hcurl_eval_all
 !------------------------------------------------------------------------------
@@ -1587,16 +1565,10 @@ contains
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_ceval_all2()!self,cell,f,rop,cgop)
-! class(oft_fem_type), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(4)
-! real(r8), intent(in) :: cgop(3,6)
-! real(r8), intent(out) :: rop(3,14)
+subroutine oft_hcurl_ceval_all2()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3
 real(r8) :: g1xg2(3),g1xg3(3),g2xg3(3)
-DEBUG_STACK_PUSH
 DO i=1,6
   etmp=oriented_edges(:,i)
   rop(:,i) = 2.d0*cgop(:,ABS(cgop_map(etmp(1),etmp(2))))*SIGN(1,cgop_map(etmp(1),etmp(2)))
@@ -1616,23 +1588,16 @@ DO i=1,4
               - f2*g1xg3 &
               + f1*g2xg3
 END DO
-DEBUG_STACK_POP
 end subroutine oft_hcurl_ceval_all2
 !------------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (cubic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_ceval_all3()!self,cell,f,rop,cgop)
-! class(oft_fem_type), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(4)
-! real(r8), intent(in) :: cgop(3,6)
-! real(r8), intent(out) :: rop(3,29)
+subroutine oft_hcurl_ceval_all3()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,f4
 real(r8) :: g1xg2(3),g1xg3(3),g2xg3(3)
-DEBUG_STACK_PUSH
 DO i=1,6
   etmp=oriented_edges(:,i)
   rop(:,i) = 2.d0*cgop(:,ABS(cgop_map(etmp(1),etmp(2))))*SIGN(1,cgop_map(etmp(1),etmp(2)))
@@ -1686,23 +1651,16 @@ rop(:,29) = -2*f3*f4*cgop(:,1) &
           + f1*f4*cgop(:,4) &
           + f1*f3*cgop(:,5) &
           + 0*cgop(:,6)
-DEBUG_STACK_POP
 end subroutine oft_hcurl_ceval_all3
 !------------------------------------------------------------------------------
 !> Evaluate all lagrange interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_ceval_all4()!self,cell,f,rop,cgop)
-! class(oft_fem_type), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(4)
-! real(r8), intent(in) :: cgop(3,6)
-! real(r8), intent(out) :: rop(3,53)
+subroutine oft_hcurl_ceval_all4()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: f1,f2,f3,f4
 real(r8) :: g1xg2(3),g1xg3(3),g2xg3(3)
-DEBUG_STACK_PUSH
 DO i=1,6
   etmp=oriented_edges(:,i)
   rop(:,i) = 2.d0*cgop(:,ABS(cgop_map(etmp(1),etmp(2))))*SIGN(1,cgop_map(etmp(1),etmp(2)))
@@ -1828,7 +1786,6 @@ rop(:,53) = 0*cgop(:,1) &
           + f1*f4*(4.d0*f1 - 8.d0*f2)*cgop(:,4) &
           + f1*f3*(4.d0*f1 - 8.d0*f2)*cgop(:,5) &
           + 0*cgop(:,6)
-DEBUG_STACK_POP
 end subroutine oft_hcurl_ceval_all4
 end subroutine oft_hcurl_ceval_all
 end module oft_hcurl_basis

@@ -738,14 +738,9 @@ contains
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine tet_eval_all2()!self,cell,f,rop)
-! class(oft_scalar_fem), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(:)
-! real(r8), intent(out) :: rop(10)
+subroutine tet_eval_all2()
 integer(i4) :: i,offset,etmp(2)
 real(r8) :: pnorm,nodes1(4)
-DEBUG_STACK_PUSH
 !---Vertices
 pnorm = 1.d0/PRODUCT(self%xnodes(3)-self%xnodes(1:2))
 DO i=1,4
@@ -759,19 +754,13 @@ DO i=1,6
   etmp=self%mesh%cell_ed(:,i)
   rop(offset+1) = nodes1(etmp(1))*nodes1(etmp(2))*pnorm
 END DO
-DEBUG_STACK_POP
 end subroutine tet_eval_all2
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine tet_eval_all3()!self,cell,f,rop)
-! class(oft_scalar_fem), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(:)
-! real(r8), intent(out) :: rop(20)
+subroutine tet_eval_all3()
 integer(i4) :: i,offset,etmp(2),ftmp(3)
 real(r8) :: pnorm,enorm,fnorm,nodes1(4),nodes2(4)
-DEBUG_STACK_PUSH
 IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
 !---Vertices
 pnorm = 1.d0/PRODUCT(self%xnodes(4)-self%xnodes(1:3))
@@ -795,19 +784,13 @@ DO i=1,4
   ftmp=oriented_faces(:,i)
   rop(offset+1) = nodes1(ftmp(1))*nodes1(ftmp(2))*nodes1(ftmp(3))*fnorm
 END DO
-DEBUG_STACK_POP
 end subroutine tet_eval_all3
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine tet_eval_all4()!self,cell,f,rop)
-! class(oft_scalar_fem), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(:)
-! real(r8), intent(out) :: rop(35)
+subroutine tet_eval_all4()
 integer(i4) :: i,offset,etmp(2),ftmp(3)
 real(r8) :: pnorm,enorm(2),fnorm,nodes1(4),nodes2(4),nodes3(4)
-DEBUG_STACK_PUSH
 IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
 !---Vertices
 pnorm = 1.d0/PRODUCT(self%xnodes(5)-self%xnodes(1:4))
@@ -839,7 +822,6 @@ END DO
 !---Cell
 offset=4*3 + 6*3 + 4
 rop(offset+1) = PRODUCT(f-self%xnodes(1))/((self%xnodes(2)-self%xnodes(1))**4)
-DEBUG_STACK_POP
 end subroutine tet_eval_all4
 end subroutine oft_lag_eval_all
 !------------------------------------------------------------------------------
@@ -1132,18 +1114,9 @@ contains
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine tet_geval_all2()!self,cell,f,gop,rop)
-! class(oft_scalar_fem), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(:)
-! real(r8), intent(in) :: gop(3,4)
-! real(r8), intent(out) :: rop(3,10)
-! integer(i4) :: i,j,k,offset,ind,inc,etmp(2),ftmp(3)
-! integer(i4), ALLOCATABLE, DIMENSION(:) :: finds
-! real(r8) :: cof1,cofs2(2),pnorm,nodes1(4)
+subroutine tet_geval_all2()
 integer(i4) :: i,offset,etmp(2)
 real(r8) :: cof1,cofs2(2),pnorm,nodes1(4)
-DEBUG_STACK_PUSH
 !---Vertices
 pnorm = 1.d0/PRODUCT(self%xnodes(3)-self%xnodes(1:2))
 DO i=1,4
@@ -1158,20 +1131,13 @@ DO i=1,6
   rop(:,offset+1) = (gop(:,etmp(1))*nodes1(etmp(2)) &
     + gop(:,etmp(2))*nodes1(etmp(1)))*pnorm
 END DO
-DEBUG_STACK_POP
 end subroutine tet_geval_all2
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine tet_geval_all3()!self,cell,f,gop,rop)
-! class(oft_scalar_fem), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(:)
-! real(r8), intent(in) :: gop(3,4)
-! real(r8), intent(out) :: rop(3,20)
+subroutine tet_geval_all3()
 integer(i4) :: i,offset,etmp(2),ftmp(3)
 real(r8) :: pnorm,enorm,fnorm,nodes1(4),nodes2(4),dnodes2(4)
-DEBUG_STACK_PUSH
 IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
 !---Vertices
 pnorm = 1.d0/PRODUCT(self%xnodes(4)-self%xnodes(1:3))
@@ -1200,22 +1166,14 @@ DO i=1,4
     + gop(:,ftmp(2))*nodes1(ftmp(1))*nodes1(ftmp(3)) &
     + gop(:,ftmp(3))*nodes1(ftmp(1))*nodes1(ftmp(2)))*fnorm
 END DO
-DEBUG_STACK_POP
 end subroutine tet_geval_all3
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine tet_geval_all4()!self,cell,f,gop,rop)
-! class(oft_scalar_fem), intent(in) :: self
-! integer(i4), intent(in) :: cell
-! real(r8), intent(in) :: f(:)
-! real(r8), intent(in) :: gop(3,4)
-! real(r8), intent(out) :: rop(3,35)
-! integer(i4) :: i,offset,etmp(2),ftmp(3)
+subroutine tet_geval_all4()
 integer(i4) :: i,offset,etmp(2),ftmp(3)
 real(r8) :: pnorm,enorm(2),fnorm,cofs4(4)
 real(r8) :: nodes1(4),nodes2(4),nodes3(4),dnodes2(4),dnodes3(4)
-DEBUG_STACK_PUSH
 IF(oriented_cell/=cell)CALL mesh_local_orient(self%mesh,cell)
 !---Vertices
 pnorm = 1.d0/PRODUCT(self%xnodes(5)-self%xnodes(1:4))
@@ -1260,7 +1218,6 @@ offset=4*3 + 6*3 + 4
 cofs4 = (/PRODUCT(nodes1(2:4)),PRODUCT(nodes1((/1,3,4/))), &
   PRODUCT(nodes1((/1,2,4/))),PRODUCT(nodes1(1:3))/)
 rop(:,offset+1) = MATMUL(gop,cofs4)/((self%xnodes(2)-self%xnodes(1))**4)
-DEBUG_STACK_POP
 end subroutine tet_geval_all4
 end subroutine oft_lag_geval_all
 !------------------------------------------------------------------------------

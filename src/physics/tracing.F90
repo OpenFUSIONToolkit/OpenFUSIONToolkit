@@ -1067,7 +1067,10 @@ ALLOCATE(ydot(self%neq))
 call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
-IF(self%cell==0)RETURN
+IF(self%cell==0)THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
 CALL self%ml_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
 CALL self%B%interp(self%cell,self%f,goptmp,B)
 self%dyp=self%dy
@@ -1083,7 +1086,10 @@ self%y=self%y+self%dt*self%dy
 call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
-IF(self%cell==0)RETURN
+IF(self%cell==0)THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
 CALL self%ml_mesh%mesh%jacobian(self%cell,self%f,goptmp,v)
 CALL self%B%interp(self%cell,self%f,goptmp,B)
 IF(ASSOCIATED(active_tracer%ydot))THEN
@@ -1352,7 +1358,10 @@ real(r8) :: goptmp(3,4),v,B(3)
 DEBUG_STACK_PUSH
 ydot=active_tracer%dy
 call mesh_findcell(active_tracer%ml_mesh%mesh,active_tracer%cell,y(1:3),active_tracer%f)
-IF(active_tracer%cell==0)RETURN
+IF(active_tracer%cell==0)THEN
+  DEBUG_STACK_POP
+  RETURN
+END IF
 CALL active_tracer%ml_mesh%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 CALL active_tracer%B%interp(active_tracer%cell,active_tracer%f,goptmp,B)
 IF(ASSOCIATED(active_tracer%ydot))THEN
