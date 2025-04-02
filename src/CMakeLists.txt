@@ -13,7 +13,7 @@ option(OFT_MPI_HEADER "Use MPI header interface instead of F08?" OFF)
 option(OFT_HDF5_HL "Search for and link with HDF5 HL interface?" OFF)
 option(OFT_USE_OpenMP "Build with OpenMP support?" ON)
 option(OFT_DEBUG_STACK "Build with internal debugging stack?" OFF)
-option(OFT_PROFILE "Build with internal profiling enabled?" OFF)
+option(OFT_PROFILING "Build with internal profiling enabled?" OFF)
 option(OFT_BUILD_PYTHON "Build experimental Python wrappers?" OFF)
 option(OFT_BUILD_DOCS "Build documentation?" OFF)
 option(OFT_DOCS_ONLY "Build documentation only?" OFF)
@@ -38,6 +38,10 @@ if(OFT_PACKAGE_NIGHTLY)
   set( OFT_VER_SUFFIX "-${GIT_REV_HASH}" CACHE INTERNAL "Version suffix" )
 endif()
 
+if(OFT_BUILD_DOCS OR OFT_PACKAGE_BUILD OR OFT_DEBUG_STACK)
+  find_package(Python REQUIRED)
+endif()
+
 ########################
 # Build documentation
 ########################
@@ -49,7 +53,6 @@ if(OFT_BUILD_DOCS)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/mainpage.in ${CMAKE_CURRENT_SOURCE_DIR}/docs/generated/mainpage.md @ONLY)
 
-  find_package(Python)
   add_custom_target( build_ex_docs
     COMMAND Python::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/utilities/generate_doc.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -126,7 +129,7 @@ elseif("${CMAKE_Fortran_COMPILER_ID}" MATCHES "GNU")
   endif()
 endif()
 # Internal profiling
-if( OFT_PROFILE )
+if( OFT_PROFILING )
   add_definitions( -DOFT_STACK -DOFT_PROFILE )
 endif()
 # Internal debugging stack
@@ -331,7 +334,6 @@ set( OFT_LIBS oftphysics oftfem oftla oftgrid oftbase oftext )
 add_subdirectory( utilities )
 # Build master lib for packaging to reduce size
 if(OFT_PACKAGE_BUILD)
-  find_package( Python REQUIRED )
   if (Python_VERSION_MAJOR VERSION_LESS 3)
     message( FATAL_ERROR "Python 3 required for packaging" )
   endif ()

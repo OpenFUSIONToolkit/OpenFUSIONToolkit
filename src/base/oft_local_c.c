@@ -33,11 +33,29 @@ void oft_signal_handler(int signum)
 		oft_finalize();
 	} else {
 		// Print signal type
-		fprintf(stderr,"OFT caught signal %d\n",signum);
+		switch (signum) {
+		case SIGSEGV:
+			fprintf(stderr,"OFT caught SIGSEGV signal\n");
+			break;
+		case SIGABRT:
+			fprintf(stderr,"OFT caught SIGABRT signal\n");
+			break;
+		case SIGBUS:
+			fprintf(stderr,"OFT caught SIGBUS signal\n");
+			break;
+		case SIGFPE:
+			fprintf(stderr,"OFT caught SIGFPE signal\n");
+			break;
+		default:
+			fprintf(stderr,"OFT caught unknown signal %d\n",signum);
+			break;
+		}
 		// Print stacktrace
 		oft_stack_print();
-		// Abort program
-		abort();
+		if (signum != SIGABRT) {
+			// Abort program
+			abort();
+		}
 	}
 }
 
@@ -47,6 +65,7 @@ void oft_set_signal_handlers()
 	signal(SIGINT, oft_signal_handler);
 	signal(SIGTERM, oft_signal_handler);
 	signal(SIGSEGV, oft_signal_handler);
+	signal(SIGABRT, oft_signal_handler);
 	signal(SIGBUS, oft_signal_handler);
 	signal(SIGFPE, oft_signal_handler);
 }
