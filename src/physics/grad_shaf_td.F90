@@ -153,17 +153,31 @@ CALL self%mfop%setup(eq_in)
 ! Create Solver fields
 !------------------------------------------------------------------------------
 NULLIFY(vals_out)
-self%psi_sol=>self%mfop%gs_eq%psi
-call eq_in%fe_rep%vec_create(self%rhs)
-call eq_in%fe_rep%vec_create(self%psi_tmp)
-call eq_in%fe_rep%vec_create(self%tmp_vec)
+IF(eq_in%ncoils>0)THEN
+    call eq_in%aug_vec%new(self%psi_sol)
+    call eq_in%aug_vec%new(self%rhs)
+    call eq_in%aug_vec%new(self%psi_tmp)
+    call eq_in%aug_vec%new(self%tmp_vec)
+ELSE
+    call eq_in%fe_rep%vec_create(self%psi_sol) !self%psi_sol=>eq_in%psi
+    call eq_in%fe_rep%vec_create(self%rhs)
+    call eq_in%fe_rep%vec_create(self%psi_tmp)
+    call eq_in%fe_rep%vec_create(self%tmp_vec)
+END IF
+call eq_in%psi%get_local(vals_out)
+CALL self%psi_sol%restore_local(vals_out,1)
+DEALLOCATE(vals_out)
 !------------------------------------------------------------------------------
 ! Create extrapolation fields (Unused)
 !------------------------------------------------------------------------------
 IF(maxextrap>0)THEN
     ALLOCATE(self%extrap_fields(maxextrap),self%extrapt(maxextrap))
     DO i=1,maxextrap
-        CALL eq_in%fe_rep%vec_create(self%extrap_fields(i)%f)
+        IF(eq_in%ncoils>0)THEN
+            CALL eq_in%aug_vec%new(self%extrap_fields(i)%f)
+        ELSE
+            CALL eq_in%fe_rep%vec_create(self%extrap_fields(i)%f)
+        END IF
         self%extrapt(i)=0.d0
     END DO
     self%nextrap=0
@@ -268,6 +282,7 @@ class(oft_tmaker_td), target, intent(inout) :: self !< NL operator object
 REAL(8), INTENT(inout) :: time,dt
 INTEGER(4), INTENT(out) :: nl_its,lin_its,nretry
 INTEGER(4) :: i,j,k,ierr
+REAL(r8), POINTER :: vals_out(:)
 active_tMaker_td=>self
 ! Update time-advance operator
 CALL self%mfop%update()
@@ -316,6 +331,12 @@ dt=self%mfop%dt
 nl_its=self%nksolver%nlits
 lin_its=self%nksolver%lits
 nretry=j-1
+!
+NULLIFY(vals_out)
+CALL self%psi_sol%get_local(vals_out,1)
+CALL self%mfop%gs_eq%psi%restore_local(vals_out)
+DEALLOCATE(vals_out)
+!
 IF(j>4)THEN
     nretry=-nretry
 ELSE
@@ -602,7 +623,8 @@ CALL mytimer%tick()
 NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
 CALL a%get_local(pol_vals)
 !---
-self%gs_eq%psi=>a ! HERE
+! self%gs_eq%psi=>a ! HERE
+CALL self%gs_eq%psi%restore_local(pol_vals(1:self%gs_eq%psi%n))
 CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 !
 self%F%plasma_bounds=self%gs_eq%plasma_bounds
@@ -889,7 +911,8 @@ END IF
 NULLIFY(pol_vals)
 CALL a%get_local(pol_vals)
 !---Update plasma boundary
-self%gs_eq%psi=>a
+! self%gs_eq%psi=>a
+CALL self%gs_eq%psi%restore_local(pol_vals(1:self%gs_eq%psi%n))
 CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 allocate(lim_weights(lag_rep%nce))
 cell=0
@@ -1002,7 +1025,7 @@ CALL set_bcmat(self%gs_eq,mat%mat)
 ! END DO
 ! DEALLOCATE(j,lop)
 !---Assemble matrix
-CALL lag_rep%vec_create(oft_lag_vec)
+CALL a%new(oft_lag_vec)
 CALL mat%mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
@@ -1055,8 +1078,12 @@ IF(oft_debug_print(1))THEN
     WRITE(*,'(2X,A)')'Constructing Toroidal flux time-advance operator'
     CALL mytimer%tick()
 END IF
+NULLIFY(pol_vals,eta_vals)
+! CALL eta_vec%get_local(eta_vals)
+CALL a%get_local(pol_vals)
 !---Update plasma boundary
-self%gs_eq%psi=>a
+! self%gs_eq%psi=>a
+CALL self%gs_eq%psi%restore_local(pol_vals(1:self%gs_eq%psi%n))
 CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 allocate(bnd_nodes(2*lag_rep%nce),lim_weights(lag_rep%nce),ax_weights(lag_rep%nce))
 IF(include_bounds)THEN
@@ -1146,9 +1173,6 @@ ELSE
     ! CALL lhs_mat%mat%zero
     ! lhs_mat%lim_vals=0.d0
 END IF
-NULLIFY(pol_vals,eta_vals)
-! CALL eta_vec%get_local(eta_vals)
-CALL a%get_local(pol_vals)
 ! WRITE(*,*)mat%lim_node
 self%F%plasma_bounds=self%gs_eq%plasma_bounds
 self%P%plasma_bounds=self%gs_eq%plasma_bounds
