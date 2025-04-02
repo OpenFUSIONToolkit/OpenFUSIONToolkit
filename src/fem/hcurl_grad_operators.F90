@@ -1437,7 +1437,6 @@ integer(i4), pointer :: lcdg(:),lfde(:,:),lede(:,:),lcde(:,:)
 real(r8) :: f(4),incr,val,d(3),h_rop(3),goptmp(3,4),v,mop(1)
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), pointer :: interp_graph
-DEBUG_STACK_PUSH
 !---
 if(ML_grad%ml_mesh%level<1)call oft_abort('Invalid mesh level','hgrad_ginterpmatrix',__FILE__)
 mesh=>ML_grad%ml_mesh%mesh
@@ -1621,7 +1620,6 @@ DO i=1,cmesh%nc ! loop over coarse cells
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
   END DO
 END DO
-DEBUG_STACK_POP
 END SUBROUTINE hgrad_ginterpmatrix
 END SUBROUTINE hcurl_grad_setup_interp
 !------------------------------------------------------------------------------

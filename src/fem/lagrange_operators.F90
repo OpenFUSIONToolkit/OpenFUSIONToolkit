@@ -1541,7 +1541,6 @@ class(oft_mesh), pointer :: cmesh
 CLASS(oft_vector), POINTER :: lag_vec_fine,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
-DEBUG_STACK_PUSH
 !---
 if(ML_lag_rep%ml_mesh%level<1)call oft_abort('Invalid mesh level','lag_ginterpmatrix',__FILE__)
 cmesh=>ML_lag_rep%ml_mesh%meshes(ML_lag_rep%ml_mesh%level-1)
@@ -1640,7 +1639,6 @@ DO i=1,cmesh%ne
   END DO
 END DO
 deallocate(emap)
-DEBUG_STACK_POP
 END SUBROUTINE lag_ginterpmatrix
 !------------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
@@ -1658,7 +1656,6 @@ CLASS(oft_vector), POINTER :: lag_vec_fine,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
 class(oft_mesh), pointer :: mesh
-DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("Incorrect fine FE type","lag_pinterpmatrix",__FILE__)
 mesh=>lag_fine%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
@@ -1947,7 +1944,6 @@ END DO
 !---
 DEALLOCATE(ed_nodes,fc_nodes,c_nodes)
 DEALLOCATE(ftmp,fetmp,ctmp)
-DEBUG_STACK_POP
 END SUBROUTINE lag_pinterpmatrix
 END SUBROUTINE lag_setup_interp
 !------------------------------------------------------------------------------

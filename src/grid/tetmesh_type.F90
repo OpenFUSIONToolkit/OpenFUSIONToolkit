@@ -370,12 +370,10 @@ integer(i4), intent(in) :: i
 real(r8), intent(in) :: pt(3)
 real(r8) :: f(4),gop(3,4),v
 integer(i4) :: k
-DEBUG_STACK_PUSH
 call tetmesh_jacl(self,i,gop,v)
 do k=1,4
   f(k)=1.d0+dot_product(pt-self%r(:,self%lc(k,i)),gop(:,k))
 end do
-DEBUG_STACK_POP
 end function tetmesh_phys2logl
 !---------------------------------------------------------------------------------
 ! General high-order implementation of @ref tetmesh_phys2log
@@ -401,7 +399,6 @@ real(r8) :: wa1(neq),wa2(neq),wa3(neq),wa4(nerr),error(nerr)
 integer(i4) :: ipvt(neq)
 real(r8) :: ftol,xtol,gtol,epsfcn,factor,dmin
 integer :: info,ldfjac,maxfev,mode,nfev,nprint
-DEBUG_STACK_PUSH
 !---
 mode = 1
 factor = 1.d0
@@ -423,7 +420,6 @@ call lmdif(tm_findcell_error,nerr,neq,uv,error, &
             nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 !IF(info>4)WRITE(*,*)'High-order find failed',i,info,nfev
 f(1:3)=uv; f(4)=1.d0-SUM(uv)
-DEBUG_STACK_POP
 end function tetmesh_phys2logho
 !------------------------------------------------------------------------------
 !> Evalute the error between a logical point and the current active point
@@ -438,11 +434,9 @@ real(r8), intent(in) :: uv(n) !< Parametric possition [n]
 real(r8), intent(out) :: err(m) !< Error vector between current and desired point [3]
 integer(i4), intent(inout) :: iflag !< Unused flag
 real(r8) :: pt(3),f(4)
-DEBUG_STACK_PUSH
 f(1:3)=uv; f(4)=1.d0-SUM(uv)
 pt=tetmesh_log2phys(active_mesh,active_cell,f)
 err=active_pt-pt
-DEBUG_STACK_POP
 end subroutine tm_findcell_error
 end subroutine tetmesh_phys2log
 !---------------------------------------------------------------------------------

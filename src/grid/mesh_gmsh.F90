@@ -271,8 +271,8 @@ subroutine mesh_gmsh_hobase(mesh)
 class(oft_mesh), intent(inout) :: mesh
 real(r8) :: pt(3)
 integer(i4) :: i,j,k,etmp(2),ind
-DEBUG_STACK_PUSH
 IF(order==1)RETURN
+DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,*)'Quadratic mesh nodes imported'
 !---Setup quadratic mesh
 mesh%order=1
