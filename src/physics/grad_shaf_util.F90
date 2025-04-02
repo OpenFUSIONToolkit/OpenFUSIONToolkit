@@ -1323,26 +1323,25 @@ END IF
 2022 format(2i5)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 WRITE (io_unit,2000) eqdsk_case,0,nr,nz
-WRITE (io_unit,2020) rdim,zdim,rcentr,rleft,zmid
-WRITE (io_unit,2020) raxis,zaxis,x2,x1,bcentr
-WRITE (io_unit,2020) itor,x2,xdum,raxis,xdum
-WRITE (io_unit,2020) zaxis,xdum,x1,xdum,xdum
-WRITE (io_unit,2020) (fpol(i),i=1,nr)
-WRITE (io_unit,2020) (pres(i),i=1,nr)
-WRITE (io_unit,2020) (ffprim(i),i=1,nr)
-WRITE (io_unit,2020) (pprime(i),i=1,nr)
-WRITE (io_unit,2020) ((psirz(i,j),i=1,nr),j=1,nz)
-WRITE (io_unit,2020) (qpsi(i),i=1,nr)
+WRITE (io_unit,2020) REAL([rdim,zdim,rcentr,rleft,zmid],4)
+WRITE (io_unit,2020) REAL([raxis,zaxis,x2,x1,bcentr],4)
+WRITE (io_unit,2020) REAL([itor,x2,xdum,raxis,xdum],4)
+WRITE (io_unit,2020) REAL([zaxis,xdum,x1,xdum,xdum],4)
+WRITE (io_unit,2020) (REAL(fpol(i),4),i=1,nr)
+WRITE (io_unit,2020) (REAL(pres(i),4),i=1,nr)
+WRITE (io_unit,2020) (REAL(ffprim(i),4),i=1,nr)
+WRITE (io_unit,2020) (REAL(pprime(i),4),i=1,nr)
+WRITE (io_unit,2020) ((REAL(psirz(i,j),4),i=1,nr),j=1,nz)
+WRITE (io_unit,2020) (REAL(qpsi(i),4),i=1,nr)
 WRITE (io_unit,2022) nr,nlim
-WRITE (io_unit,2020) (rout(i),zout(i),i=1,nr)
-WRITE (io_unit,2020) (rlim(i),zlim(i),i=1,nlim)
+WRITE (io_unit,2020) (REAL([rout(i),zout(i)],4),i=1,nr)
+WRITE (io_unit,2020) (REAL([rlim(i),zlim(i)],4),i=1,nlim)
 CLOSE (io_unit)
 !---
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
   WRITE(*,'(2A,ES11.3)')oft_indent,'Qmin = ',MINVAL(qpsi)
   WRITE(*,'(2A,ES11.3)')oft_indent,'Qmax = ',MAXVAL(qpsi)
-  ! WRITE(*,'(2A)')oft_indent,'Done'
 END IF
 CALL oft_decrease_indent
 !---
