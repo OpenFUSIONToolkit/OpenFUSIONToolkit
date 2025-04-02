@@ -445,8 +445,8 @@ END SUBROUTINE native_read_sidesets
 !---------------------------------------------------------------------------------
 subroutine native_hobase(self)
 CLASS(oft_amesh), INTENT(inout) :: self
-DEBUG_STACK_PUSH
 IF(np_ho==0)RETURN
+DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Importing quadratic mesh nodes'
 SELECT CASE(self%type)
 CASE(1) ! Tet/Tri
