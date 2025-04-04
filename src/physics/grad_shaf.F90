@@ -2473,7 +2473,7 @@ DO i=1,self%maxits
       DO j=1,self%ncoils+1
         IF(self%Rcoils(j)>0.d0)THEN
           self%coil_currs(j)=vals_tmp(j)
-          CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+          CALL psi_dt%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
         END IF
       END DO
     ELSE
