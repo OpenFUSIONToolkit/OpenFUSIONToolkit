@@ -994,6 +994,10 @@ IF(dt>0.d0)THEN
   CALL c_f_pointer(rcoils, rtmp, [tMaker_obj%gs%ncoils+1])
   CALL c_f_pointer(icoils, ictmp, [tMaker_obj%gs%ncoils+1])
   CALL c_f_pointer(vcoils, vtmp, [tMaker_obj%gs%ncoils+1])
+  IF(ANY(rtmp>0.d0).AND.(tMaker_obj%gs%region_info%nnonaxi>0))THEN
+    CALL copy_string("Vcoils not supported with toroidally non-continuous regions",error_str)
+    RETURN
+  END IF
   tMaker_obj%gs%Rcoils=rtmp
   tMaker_obj%gs%coils_dt=ictmp*mu0
   tMaker_obj%gs%coils_volt=vtmp*mu0

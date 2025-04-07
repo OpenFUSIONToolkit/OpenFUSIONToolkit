@@ -1997,6 +1997,7 @@ integer(4) :: i,j,k,mind,nCon,io_unit,coffset,roffset
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta,gpsi(3),wt_max,wt_min
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:),wt_tmp(:)
+real(r8), allocatable :: err_mat_old(:,:),coil_rhs(:),coil_op_inv(:,:)
 logical :: pm_save
 !
 nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize
@@ -2097,6 +2098,66 @@ DO i=1,self%nregularize
   err_mat(roffset+i,self%ncoils+1)=self%coil_reg_mat(i,self%ncoils+1)
   rhs(roffset+i)=-self%coil_reg_targets(i)
 END DO
+! !---Convert appropriate terms to voltages
+! ! L*(I^1-I^0)/dt + R*I^1 = V
+! ! (L+dt*R)*I^1 = dt*V + L*I^0 - L*I_i^1
+! ! I^1 = (L+dt*R)^-1 * (dt*V + L*I^0 - L*I_i^1)
+! !
+! ! Vcoil RHS (for coil i)
+! ! ((L+dt*R)^-1 * (L*I^0))_i
+! ! Vcoil LHS (for coil i; sum over voltage coils j)
+! ! ((L+dt*R)^-1 * (dt*V_i))_j
+! ! Icoil LHS (for coil i; sum over voltage coils j)
+! ! ((L+dt*R)^-1 * (-L*I_i))_j
+! ! coil_rhs = MATMUL(coil_op_inv,MATMUL(Lcoil,I_last))
+! ! FOR i in vcoils: rhs(1:roffset) = rhs(1:roffset) + err_mat(1:roffset,i)*coil_rhs(i)
+! ! FOR i in vcoils: err_mat(1:roffset,i) = err_mat(1:roffset,i) + FOR j in vcoils: err_mat(1:roffset,j)*dt*coil_op_inv(j,i)
+! ! FOR i in icoils: err_mat(1:roffset,i) = err_mat(1:roffset,i) + FOR j in vcoils: err_mat(1:roffset,j)*DOT_PRODUCT(coil_op_inv(j,:),-Lcoil(:,i))
+! IF(ANY(self%Rcoils>0.d0))THEN
+!   ALLOCATE(coil_op_inv(self%ncoils,self%ncoils))
+!   coil_op_inv=0.d0
+!   DO i=1,self%ncoils
+!     IF(self%Rcoils(i)>0.d0)THEN
+!       DO j=i,self%ncoils
+!         IF(self%Rcoils(j)>0.d0)THEN
+!           coil_op_inv(i,j) = self%Lcoils(i,j)
+!           coil_op_inv(j,i) = self%Lcoils(i,j)
+!           IF(i==j)coil_op_inv(i,j) = coil_op_inv(i,j) + self%dt*self%Rcoils(i)
+!         END IF
+!       END DO
+!     ELSE
+!       coil_op_inv(i,i)=1.d0
+!     END IF
+!   END DO
+!   pm_save=oft_env%pm; oft_env%pm=.FALSE.
+!   CALL lapack_matinv(self%ncoils,coil_op_inv,ierr)
+!   oft_env%pm=pm_save
+!   !
+!   ALLOCATE(coil_rhs(self%ncoils+1),wt_tmp(self%ncoils))
+!   coil_rhs = 0.d0
+!   wt_tmp = self%coils_dt(1:self%ncoils)
+!   ! DO i=1,self%ncoils
+!   !   IF(self%Rcoils(i)<=0.d0)wt_tmp(i)=0.d0
+!   ! END DO
+!   coil_rhs(1:self%ncoils) = MATMUL(coil_op_inv,MATMUL(self%Lcoils(1:self%ncoils,1:self%ncoils),wt_tmp))
+!   !
+!   ALLOCATE(err_mat_old(nCon,self%ncoils+1))
+!   err_mat_old = err_mat
+!   DO i=1,self%ncoils
+!     IF(self%Rcoils(i)>0.d0)THEN
+!       err_mat(1:roffset,i)=0.d0
+!       rhs(1:roffset) = rhs(1:roffset) - err_mat_old(1:roffset,i)*coil_rhs(i)
+!       DO j=1,self%ncoils
+!         IF(self%Rcoils(j)>0.d0)err_mat(1:roffset,i) = err_mat(1:roffset,i) + err_mat_old(1:roffset,j)*self%dt*coil_op_inv(j,i)*mu0
+!       END DO
+!     ELSE
+!       ! DO j=1,self%ncoils
+!       !   IF(self%Rcoils(j)>0.d0)err_mat(1:roffset,i) = err_mat(1:roffset,i) - err_mat_old(1:roffset,j)*DOT_PRODUCT(coil_op_inv(j,:),self%Lcoils(1:self%ncoils,i))
+!       ! END DO
+!     END IF
+!   END DO
+!   DEALLOCATE(err_mat_old,coil_rhs,coil_op_inv,wt_tmp)
+! END IF
 !---Solve L-S system
 IF(ASSOCIATED(self%coil_bounds))THEN
 BLOCK
@@ -2119,7 +2180,24 @@ ELSE
 END IF
 !---Add coil/conductor fields to IC
 self%vcontrol_val=-currs(self%ncoils+1)
-self%coil_currs=-currs(1:self%ncoils)
+IF(self%dt>0.d0)THEN
+  ALLOCATE(coil_rhs(self%ncoils),wt_tmp(self%ncoils))
+  wt_tmp=(-currs(1:self%ncoils)-self%coils_dt(1:self%ncoils))/self%dt
+  coil_rhs = MATMUL(self%Lcoils(1:self%ncoils,1:self%ncoils),wt_tmp)
+  DO i=1,self%ncoils
+    IF(self%Rcoils(i)>0.d0)THEN
+      self%coils_volt(i)=coil_rhs(i)+self%Rcoils(i)*(-currs(i))
+      ! self%coils_volt(i)=-currs(i)
+    ELSE
+      self%coil_currs(i)=-currs(i)
+    END IF
+  END DO
+  DEALLOCATE(coil_rhs,wt_tmp)
+ELSE
+  DO i=1,self%ncoils
+    self%coil_currs(i)=-currs(i)
+  END DO
+END IF
 DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
 CALL psi_eval%delete
 CALL psi_geval%delete
@@ -2439,26 +2517,35 @@ DO i=1,self%maxits
     CALL psi_dt%set(0.d0)
     CALL psi_dt%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
     IF(self%ncoils>0)THEN
+      !---Set Vcoil currents at previous step and remove associated flux
+      CALL psi_dt%get_local(vals_tmp)
+      IF(ANY(self%Rcoils>0.d0))THEN
+        DO j=1,self%ncoils
+          vals_tmp(j)=self%coils_dt(j)/self%dt
+          IF(self%Rcoils(j)<=0.d0)CALL psi_dt%add(1.d0,self%coil_currs(j)/self%dt,self%psi_coil(j)%f)
+        END DO
+        vals_tmp(self%ncoils+1)=(self%coils_dt(self%ncoils+1)-self%vcontrol_val)/self%dt
+      ELSE
+        vals_tmp=0.d0
+      END IF
+      CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
       CALL psi_dt%get_local(vals_tmp)
       CALL psi_aug%restore_local(vals_tmp,1)
-      !---Set Vcoil currents at previous step and remove associated flux
-      DO j=1,self%ncoils+1
-        IF(self%Rcoils(j)>0.d0)THEN
-          CALL psi_aug%add(1.d0,-self%coils_dt(j)/self%dt,self%psi_coil(j)%f)
-          vals_tmp(j)=self%coils_dt(j)/self%dt
-        ELSE
-          vals_tmp(j)=0.d0
-        END IF
-      END DO
-      CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
       CALL gs_wall_source(self,psi_aug,tmp_aug)
       !---Add voltages for Vcoils
       CALL tmp_aug%get_local(vals_tmp,2)
-      DO j=1,self%ncoils+1
-        IF(self%Rcoils(j)>0.d0)THEN
-          vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
-        END IF
-      END DO
+      IF(ANY(self%Rcoils>0.d0))THEN
+        DO j=1,self%ncoils
+          IF(self%Rcoils(j)>0.d0)THEN
+            vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+          ELSE
+            vals_tmp(j)=self%coil_currs(j)
+          END IF
+        END DO
+        vals_tmp(self%ncoils+1)=0.d0
+      ELSE
+        vals_tmp=0.d0
+      END IF
       CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
       CALL self%zerob_bc%apply(tmp_aug)
       !---Solve in augmented space (flux + coils)
@@ -2470,12 +2557,16 @@ DO i=1,self%maxits
       CALL psi_dt%restore_local(vals_tmp)
       CALL psi_aug%get_local(vals_tmp,2)
       !---Update coil currents in solution for Vcoils
-      DO j=1,self%ncoils+1
+      DO j=1,self%ncoils
         IF(self%Rcoils(j)>0.d0)THEN
           self%coil_currs(j)=vals_tmp(j)
           CALL psi_dt%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
         END IF
       END DO
+      IF(self%Rcoils(self%ncoils+1)>0.d0)THEN
+        self%vcontrol_val=vals_tmp(self%ncoils+1)
+        CALL psi_dt%add(1.d0,self%vcontrol_val,psi_vcont)
+      END IF
     ELSE
       CALL gs_wall_source(self,psi_dt,tmp_vec)
       CALL self%zerob_bc%apply(tmp_vec)
@@ -2981,7 +3072,7 @@ DO j=1,self%ncond_regs
     ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
     !   self%cond_regions(j)%psi_eig(k)%f)
     CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-    self%cond_regions(j)%psi_eig(k)%f)
+      self%cond_regions(j)%psi_eig(k)%f)
   END DO
 END DO
 #endif
@@ -3023,23 +3114,32 @@ IF(self%dt>0.d0)THEN
   CALL tmp_vec%add(0.d0,-1.d0/self%dt,psi_sol,1.d0/self%dt,self%psi_dt)
   IF(self%ncoils>0)THEN
     CALL tmp_vec%get_local(vals_tmp)
-    CALL psi_aug%restore_local(vals_tmp,1)
-    DO j=1,self%ncoils+1
-      IF(self%Rcoils(j)>0.d0)THEN
-        CALL tmp_vec%add(1.d0,-self%coils_dt(j)/self%dt,self%psi_coil(j)%f)
+    IF(ANY(self%Rcoils>0.d0))THEN
+      DO j=1,self%ncoils
         vals_tmp(j)=self%coils_dt(j)/self%dt
-      ELSE
-        vals_tmp(j)=0.d0
-      END IF
-    END DO
+        IF(self%Rcoils(j)<=0.d0)CALL tmp_vec%add(1.d0,self%coil_currs(j)/self%dt,self%psi_coil(j)%f)
+      END DO
+      vals_tmp(self%ncoils+1)=(self%coils_dt(self%ncoils+1)-self%vcontrol_val)/self%dt
+    ELSE
+      vals_tmp=0.d0
+    END IF
     CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+    CALL tmp_vec%get_local(vals_tmp)
+    CALL psi_aug%restore_local(vals_tmp,1)
     CALL gs_wall_source(self,psi_aug,tmp_aug)
     CALL tmp_aug%get_local(vals_tmp,2)
-    DO j=1,self%ncoils+1
-      IF(self%Rcoils(j)>0.d0)THEN
-        vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
-      END IF
-    END DO
+    IF(ANY(self%Rcoils>0.d0))THEN
+      DO j=1,self%ncoils
+        IF(self%Rcoils(j)>0.d0)THEN
+          vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+        ELSE
+          vals_tmp(j)=self%coil_currs(j)
+        END IF
+      END DO
+      vals_tmp(self%ncoils+1)=0.d0
+    ELSE
+      vals_tmp=0.d0
+    END IF
     CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
     IF(PRESENT(rhs_source))THEN
       CALL gs_gen_source(self,rhs_source,tmp_vec)
@@ -3056,12 +3156,16 @@ IF(self%dt>0.d0)THEN
     CALL psi_aug%get_local(vals_tmp,1)
     CALL tmp_vec%restore_local(vals_tmp)
     CALL psi_aug%get_local(vals_tmp,2)
-    DO j=1,self%ncoils+1
+    DO j=1,self%ncoils
       IF(self%Rcoils(j)>0.d0)THEN
         self%coil_currs(j)=vals_tmp(j)
         CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
       END IF
     END DO
+    IF(self%Rcoils(self%ncoils+1)>0.d0)THEN
+      self%vcontrol_val=vals_tmp(self%ncoils+1)
+      CALL tmp_vec%add(1.d0,self%vcontrol_val,psi_vcont)
+    END IF
   ELSE
     CALL psi_dt%add(0.d0,1.d0,tmp_vec)
     CALL gs_wall_source(self,psi_dt,tmp_vec)
@@ -5055,28 +5159,34 @@ IF(nnonaxi>0)THEN
 END IF
 !---Add inductance and resistance terms for Vcoils
 IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
+  !$omp parallel do
+  DO i=1,self%ncoils
+    IF(nnonaxi>0)THEN
+      CALL dels_coil_part(self,mat,i,dt_in,bc,nonaxi_vals)
+    ELSE
+      CALL dels_coil_part(self,mat,i,dt_in,bc)
+    END IF
+  END DO
+  !
   ALLOCATE(j2(1))
   DO i=1,self%ncoils+1
     j=self%fe_rep%ne+i
     IF(self%Rcoils(i)<=0.d0)THEN
+      CALL mat%zero_rows(1,j)
       lop(1,1)=1.d0
       CALL mat%add_values(j,j,lop,1,1)
     ELSE
-      DO jc=1,self%ncoils+1
-        IF(self%Rcoils(jc)<=0.d0)CYCLE
-        j2=self%fe_rep%ne+jc
+      DO jc=1,self%ncoils
         lop(1,1)=self%Lcoils(i,jc)/dt_in
+        j2=self%fe_rep%ne+self%ncoils+1
+        CALL mat%add_values(j,j2,self%coil_vcont(jc)*lop,1,1) ! VSC contribution
         IF(i==jc)lop(1,1)=lop(1,1)+self%Rcoils(i)
+        j2=self%fe_rep%ne+jc
         CALL mat%add_values(j,j2,lop,1,1)
       END DO
     END IF
   END DO
   DEALLOCATE(j2)
-  !$omp parallel do
-  DO i=1,self%ncoils
-    IF(self%Rcoils(i)<=0.d0)CYCLE
-    CALL dels_coil_part(self,mat,i,dt_in,bc)
-  END DO
 END IF
 !---Set diagonal entries for dirichlet rows
 SELECT CASE(TRIM(bc))
@@ -5109,16 +5219,17 @@ end subroutine build_dels
 !---------------------------------------------------------------------------
 !> Compute inductance between coil and given poloidal flux
 !---------------------------------------------------------------------------
-subroutine dels_coil_part(self,mat,iCoil,dt_in,bc)
+subroutine dels_coil_part(self,mat,iCoil,dt_in,bc,nonaxi_vals)
 class(gs_eq), intent(inout) :: self !< G-S solver object
 class(oft_matrix), pointer, intent(inout) :: mat
 integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
 real(8), intent(in) :: dt_in
 character(LEN=*), intent(in) :: bc
+real(r8), optional, intent(in) :: nonaxi_vals(:,:)
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns,eta_wt,pt(3)
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),row_tmp(:,:),col_tmp(:,:),eta_reg(:)
-integer(4) :: j,m,l,k,j2(1)
+integer(4) :: i,j,m,l,k,j2(1),jvsc(1)
 integer(4), allocatable :: j_lag(:)
 logical :: curved
 CLASS(oft_bmesh), POINTER :: smesh
@@ -5128,6 +5239,7 @@ smesh=>self%fe_rep%mesh
 NULLIFY(btmp)
 CALL self%psi_coil(iCoil)%f%get_local(btmp)
 j2=self%fe_rep%ne+iCoil
+jvsc=self%fe_rep%ne+self%ncoils+1
 !
 ALLOCATE(eta_reg(smesh%nreg))
 eta_reg=-1.d0
@@ -5180,8 +5292,40 @@ DO j=1,smesh%nc
   !!$omp critical
   call mat%add_values(j2,j_lag,col_tmp,1,self%fe_rep%nce)
   call mat%add_values(j_lag,j2,row_tmp,self%fe_rep%nce,1)
+  !---VSC contributions
+  call mat%add_values(jvsc,j_lag,self%coil_vcont(iCoil)*col_tmp,1,self%fe_rep%nce)
+  call mat%add_values(j_lag,jvsc,self%coil_vcont(iCoil)*row_tmp,self%fe_rep%nce,1)
   !!$omp end critical
 end do
+! IF(PRESENT(nonaxi_vals))THEN
+!   do i=1,self%fe_rep%mesh%nc
+!     IF(self%region_info%reg_map(smesh%reg(i))==0)CYCLE
+!     eta_wt=0.d0
+!     IF(eta_reg(smesh%reg(i))>0.d0)eta_wt=1.d0/(dt_in*eta_reg(smesh%reg(i)))
+!     IF(eta_reg(smesh%reg(i))<=0.d0)CYCLE
+!     !---Get local to global DOF mapping
+!     call self%fe_rep%ncdofs(i,j_lag)
+!     !---Get local reconstructed operators
+!     row_tmp(1,1)=0.d0
+!     do m=1,self%fe_rep%quad%np ! Loop over quadrature points
+!       call self%fe_rep%mesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
+!       det=v*self%fe_rep%quad%wts(m)
+!       psi_tmp=0.d0
+!       do l=1,self%fe_rep%nce ! Loop over degrees of freedom
+!         call oft_blag_eval(self%fe_rep,i,l,self%fe_rep%quad%pts(:,m),rop(l))
+!         psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
+!       end do
+!       row_tmp(1,1)=row_tmp(1,1)+eta_wt*psi_tmp*det/(pt(1)+gs_epsilon)
+!     end do
+!     !---Add local values to global matrix
+!     m=self%region_info%reg_map(smesh%reg(i))
+!     psi_tmp=-row_tmp(1,1)/nonaxi_vals(self%region_info%block_max+1,m)
+!     psi_tmp=psi_tmp!*main_scale
+!     row_tmp(:,1)=psi_tmp*nonaxi_vals(:,m)
+!     call mat%add_values(self%region_info%noaxi_nodes(m)%v,j2, &
+!       row_tmp,self%region_info%noaxi_nodes(m)%n,1)
+!   end do
+! END IF
 deallocate(j_lag,rop,row_tmp,col_tmp)
 !!$omp end parallel
 DEALLOCATE(btmp,eta_reg)
