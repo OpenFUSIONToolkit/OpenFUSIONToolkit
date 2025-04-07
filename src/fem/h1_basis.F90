@@ -551,14 +551,9 @@ contains
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_h1_eval_all2()!self,cell,f,rop)
-! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(out) :: rop(10) !< Value of interpolation functions at point (f) [ncdofs]
+subroutine oft_h1_eval_all2()
 integer(i4) :: i
 real(r8) :: x1,x2
-DEBUG_STACK_PUSH
 DO i=1,4
   rop(i) = f(i)
 END DO
@@ -566,21 +561,15 @@ DO i=1,6
   x1 = f(self%mesh%cell_ed(1,i)); x2 = f(self%mesh%cell_ed(2,i))
   rop(i+4) = -2.d0*x1*x2
 END DO
-DEBUG_STACK_POP
 end subroutine oft_h1_eval_all2
 !------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (cubic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_h1_eval_all3()!self,cell,f,rop)
-! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(out) :: rop(20) !< Value of interpolation functions at point (f) [ncdofs]
+subroutine oft_h1_eval_all3()
 integer(i4) :: i
 real(r8) :: x1,x2,x3
-DEBUG_STACK_PUSH
 DO i=1,4
   rop(i) = f(i)
 END DO
@@ -595,21 +584,15 @@ DO i=1,4
   x3 = f(self%mesh%cell_fc(3,i))
   rop(i+16) = -2.d0*x1*x2*x3
 END DO
-DEBUG_STACK_POP
 end subroutine oft_h1_eval_all3
 !------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_h1_eval_all4()!self,cell,f,rop)
-! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(out) :: rop(35) !< Value of interpolation functions at point (f) [ncdofs]
+subroutine oft_h1_eval_all4()
 integer(i4) :: i
 real(r8) :: x1,x2,x3,x4
-DEBUG_STACK_PUSH
 DO i=1,4
   rop(i) = f(i)
 END DO
@@ -627,21 +610,15 @@ DO i=1,4
 END DO
 x1 = f(1); x2 = f(2); x3 = f(3); x4 = f(4)
 rop(35) = -2.d0*x1*x2*x3*x4
-DEBUG_STACK_POP
 end subroutine oft_h1_eval_all4
 !------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_h1_eval_all5()!self,cell,f,rop)
-! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(out) :: rop(56) !< Value of interpolation functions at point (f) [ncdofs]
+subroutine oft_h1_eval_all5()
 integer(i4) :: i
 real(r8) :: x1,x2,x3,x4
-DEBUG_STACK_PUSH
 DO i=1,4
   rop(i) = f(i)
 END DO
@@ -666,7 +643,6 @@ rop(53) = -2.d0*x1*x2*x3*x4
 rop(54) = 2.d0*x1*x2*x3*x4*(x1 + x2 + x3 - x4)
 rop(55) = 2.d0*x1*x2*x3*x4*(x1 + x2 - x3)
 rop(56) = 2.d0*x1*x2*x3*x4*(-x1 + x2)
-DEBUG_STACK_POP
 end subroutine oft_h1_eval_all5
 end subroutine oft_h1_eval_all
 !------------------------------------------------------------------------------
@@ -1045,15 +1021,9 @@ contains
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_h1_geval_all2()!self,cell,f,rop,gop)
-! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(out) :: rop(3,10) !< Value of interpolation functions at point (f) [ncdofs]
-! real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
+subroutine oft_h1_geval_all2()
 integer(i4) :: i,etmp(2)
 real(r8) :: x1,x2,u1(3),u2(3)
-DEBUG_STACK_PUSH
 DO i=1,4
   rop(:,i)=gop(:,i)
 END DO
@@ -1066,22 +1036,15 @@ DO i=1,6
   rop(:,i+4) = -2.d0*x2*u1 &
                -2.d0*x1*u2
 END DO
-DEBUG_STACK_POP
 end subroutine oft_h1_geval_all2
 !------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (cubic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_h1_geval_all3()!self,cell,f,rop,gop)
-! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(out) :: rop(3,20) !< Value of interpolation functions at point (f) [ncdofs]
-! real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
+subroutine oft_h1_geval_all3()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: x1,x2,x3,u1(3),u2(3),u3(3)
-DEBUG_STACK_PUSH
 DO i=1,4
   rop(:,i)=gop(:,i)
 END DO
@@ -1105,22 +1068,15 @@ DO i=1,4
                 -2.d0*x1*x3*u2 &
                 -2.d0*x1*x2*u3
 END DO
-DEBUG_STACK_POP
 end subroutine oft_h1_geval_all3
 !------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_h1_geval_all4()!self,cell,f,rop,gop)
-! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(out) :: rop(3,35) !< Value of interpolation functions at point (f) [ncdofs]
-! real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
+subroutine oft_h1_geval_all4()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: x1,x2,x3,x4,u1(3),u2(3),u3(3)
-DEBUG_STACK_PUSH
 DO i=1,4
   rop(:,i)=gop(:,i)
 END DO
@@ -1161,22 +1117,15 @@ rop(:,35) = -2.d0*x2*x3*x4*gop(:,1) &
             -2.d0*x1*x3*x4*gop(:,2) &
             -2.d0*x1*x2*x4*gop(:,3) &
             -2.d0*x1*x2*x3*gop(:,4)
-DEBUG_STACK_POP
 end subroutine oft_h1_geval_all4
 !------------------------------------------------------------------------------
 !> Evaluate all H^1 interpolation functions (quartic)
 !!
 !! @note Evaluation is performed in logical coordinates
 !------------------------------------------------------------------------------
-subroutine oft_h1_geval_all5()!self,cell,f,rop,gop)
-! class(oft_fem_type), intent(in) :: self !< H^1 type for evaluation
-! integer(i4), intent(in) :: cell !< Cell for evaluation
-! real(r8), intent(in) :: f(4) !< Position in cell in logical space
-! real(r8), intent(out) :: rop(3,56) !< Value of interpolation functions at point (f) [ncdofs]
-! real(r8), intent(in) :: gop(3,4) !< Cell Jacobian matrix at point (f) [3,4]
+subroutine oft_h1_geval_all5()
 integer(i4) :: i,etmp(2),ftmp(3)
 real(r8) :: x1,x2,x3,x4,u1(3),u2(3),u3(3)
-DEBUG_STACK_PUSH
 DO i=1,4
   rop(:,i)=gop(:,i)
 END DO
@@ -1247,7 +1196,6 @@ rop(:,56) = 2.d0*x2*x3*x4*(-2.d0*x1 + x2)*gop(:,1) &
           + 2.d0*x1*x3*x4*(-x1 + 2.d0*x2)*gop(:,2) &
           + 2.d0*x1*x2*x4*(-x1 + x2)*gop(:,3) &
           + 2.d0*x1*x2*x3*(-x1 + x2)*gop(:,4)
-DEBUG_STACK_POP
 end subroutine oft_h1_geval_all5
 end subroutine oft_h1_geval_all
 !------------------------------------------------------------------------------

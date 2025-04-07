@@ -357,7 +357,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
 
 
 def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False, 
-                       build_examples=False,build_docs=False,build_coverage=False,package_build=False,package_release=False):
+                       build_examples=False,build_docs=False,build_coverage=False,package_build=False,
+                       package_release=False,enable_debug_stack=False,enable_profiling=False):
     def bool_to_string(val):
         if val:
             return "TRUE"
@@ -384,6 +385,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DOFT_PACKAGE_BUILD:BOOL={0}".format(bool_to_string(package_build)),
         "-DOFT_PACKAGE_NIGHTLY:BOOL={0}".format(bool_to_string(not package_release)),
         "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
+        "-DOFT_DEBUG_STACK:BOOL={0}".format(bool_to_string(enable_debug_stack)),
+        "-DOFT_PROFILING:BOOL={0}".format(bool_to_string(enable_profiling)),
         "-DCMAKE_C_COMPILER:FILEPATH={CC}",
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
         "-DCMAKE_Fortran_COMPILER:FILEPATH={FC}"
@@ -715,8 +718,7 @@ class CMAKE(package):
 class METIS(package):
     def __init__(self, comp_wrapper=False):
         self.name = "METIS"
-        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/metis-5.1.0-mod.tar.gz"
-        self.build_dir = "metis-5.1.0"
+        self.url = "https://karypis.github.io/glaros/files/sw/metis/metis-5.1.0.tar.gz"
         self.comp_wrapper = comp_wrapper
 
     def detect_sizes(self):
@@ -767,6 +769,8 @@ class METIS(package):
             '-DGKRAND:BOOL=ON',
             '-DGKLIB_PATH=$GKLIB_PATH'
         ]
+        if ver_gt(self.config_dict.get("CMAKE_VERSION","0.0"), "3.99"):
+            cmake_options.append("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
         if 'MACOS_SDK_PATH' in self.config_dict:
             cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
         build_lines = [
@@ -1941,6 +1945,8 @@ class PETSC(package):
         return self.config_dict
 
     def build(self):
+        if ver_gt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.99"):
+            error_exit('CMAKE >= 4.0 not presently supported with PETSc', ('Update or retry with "--build_cmake=1" to build a compatible version',))
         #
         def_lines = []
         options = []
@@ -2025,6 +2031,8 @@ group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help=
 group.add_argument("--oft_package", action="store_true", default=False, help="Perform a packaging build of OFT?")
 group.add_argument("--oft_package_release", action="store_true", default=False, help="Perform a release package of OFT?")
 group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
+group.add_argument("--oft_debug_stack", action="store_true", default=False, help="Enable internal debug stack?")
+group.add_argument("--oft_profiling", action="store_true", default=False, help="Enable internal profiling?")
 #
 group = parser.add_argument_group("MPI", "MPI package options")
 group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=(0,1), help="Build MPICH libraries?")
@@ -2218,5 +2226,7 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         build_docs=(options.oft_build_docs == 1),
         build_coverage=options.oft_build_coverage,
         package_build=options.oft_package,
-        package_release=options.oft_package_release
+        package_release=options.oft_package_release,
+        enable_debug_stack=options.oft_debug_stack,
+        enable_profiling=options.oft_profiling,
     )

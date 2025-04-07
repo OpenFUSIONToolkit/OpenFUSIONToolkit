@@ -1310,7 +1310,6 @@ contains
 subroutine full_restore_local(array_loc)
 complex(c8), intent(inout) :: array_loc(:)
 integer(i4) :: i
-DEBUG_STACK_PUSH
 IF(do_add)THEN
   call oft_global_stitch(self%stitch_info,array_loc,1)
   !$omp parallel do if(self%n>OFT_OMP_VTHRESH)
@@ -1324,7 +1323,6 @@ ELSE
   END DO
   IF(.NOT.do_wait)CALL self%stitch(0)
 END IF
-DEBUG_STACK_POP
 end subroutine full_restore_local
 end subroutine cvec_restore_local
 !---------------------------------------------------------------------------------
@@ -2549,6 +2547,7 @@ IF(.NOT.uv%stitch_info%full)THEN
       ELSE
         last=letmp(1,mm)
       END IF
+      IF(m>neout)EXIT
       do while(leout(1,m)<=letmp(1,mm))
         IF(leout(1,m)<letmp(1,mm))jp=m+1
         IF(leout(1,m)==letmp(1,mm))THEN
@@ -2589,6 +2588,7 @@ IF(jn>0)THEN
     ELSE
       last=leout(1,mm)
     END IF
+    IF(m>neout)EXIT
     do while(leout(1,m)<=leout(1,mm))
       IF(leout(1,m)<leout(1,mm))jp=m+1
       IF((leout(1,m)==leout(1,mm)).AND.(m/=mm))THEN

@@ -585,7 +585,6 @@ integer(i4), pointer :: lfde(:,:),lede(:,:)
 real(r8) :: f(4),incr,val,d(3),h_rop(3),goptmp(3,4),v,mop(1)
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
-DEBUG_STACK_PUSH
 !---
 if(ML_h1_rep%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','h1_setup_interp::build_ginterpmatrix',__FILE__)
@@ -688,7 +687,6 @@ DO i=1,cmesh%ne
   END DO
 END DO
 deallocate(emap)
-DEBUG_STACK_POP
 END SUBROUTINE build_ginterpmatrix
 !------------------------------------------------------------------------------
 !> Construct interpolation matrix for transfer between polynomial levels
@@ -707,7 +705,6 @@ CLASS(oft_vector), POINTER :: h1_vec_fine,h1_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 class(oft_mesh), pointer :: mesh
 type(oft_graph), POINTER :: interp_graph
-DEBUG_STACK_PUSH
 !---
 IF(.NOT.oft_3D_h1_cast(h1_fine,ML_h1_rep%levels(ML_h1_rep%level)%fe))CALL oft_abort("Error casting fine level", "h1_setup_interp::build_pinterpmatrix",__FILE__)
 IF(.NOT.oft_3D_h1_cast(h1_cors,ML_h1_rep%levels(ML_h1_rep%level-1)%fe))CALL oft_abort("Error casting coarse level", "h1_setup_interp::build_pinterpmatrix",__FILE__)
@@ -855,7 +852,6 @@ DO i=1,mesh%nc
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
   END DO
 END DO
-DEBUG_STACK_POP
 END SUBROUTINE build_pinterpmatrix
 END SUBROUTINE h1_setup_interp
 !------------------------------------------------------------------------------

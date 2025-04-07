@@ -560,6 +560,7 @@ call h5open_f(error)
 call h5fopen_f(TRIM(filepath), H5F_ACC_RDONLY_F, file_id, error)
 IF(error/=0)THEN
   call h5close_f(error)
+  DEBUG_STACK_POP
   RETURN
 END IF
 CALL H5Fget_filesize_f(file_id,sizes(1),error)
@@ -612,9 +613,9 @@ integer(4), allocatable, dimension(:), intent(out) :: dim_sizes !< Size of each 
 integer(4) :: access_flag,error
 integer(hsize_t), allocatable, dimension(:) :: tmp_sizes,maxdims
 integer(HID_T) :: file_id,dset_id,dspace_id
-DEBUG_STACK_PUSH
 ndims=-1
 IF(.NOT.hdf5_field_exist(filepath,path))RETURN
+DEBUG_STACK_PUSH
 !---Try to open file as HDF5 file
 access_flag=H5F_ACC_RDONLY_F
 call h5open_f(error)

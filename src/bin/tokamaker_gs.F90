@@ -73,7 +73,6 @@ LOGICAL :: free_boundary = .FALSE.
 LOGICAL :: has_plasma = .TRUE.
 LOGICAL :: save_mug = .FALSE.
 LOGICAL :: fast_boundary = .TRUE.
-LOGICAL :: limited_only = .FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
 CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_filename = 'gTokaMaker'
@@ -81,7 +80,7 @@ CHARACTER(LEN=40) :: eqdsk_run_info = ''
 CHARACTER(LEN=OFT_PATH_SLEN) :: eqdsk_limiter_file = ''
 NAMELIST/tokamaker_options/order,pm,mode,maxits,ninner,urf,nl_tol,itor_target,pnorm, &
 alam,beta_mr,free_boundary,coil_file,limiter_file,f_offset,has_plasma,rmin,R0_target, &
-V0_target,save_mug,fast_boundary,limited_only,eqdsk_filename,eqdsk_nr,eqdsk_nz,eqdsk_rbounds, &
+V0_target,save_mug,fast_boundary,eqdsk_filename,eqdsk_nr,eqdsk_nz,eqdsk_rbounds, &
 eqdsk_zbounds,eqdsk_run_info,eqdsk_limiter_file,eqdsk_lcfs_pad,init_r0,init_a,init_kappa, &
 init_delta,lim_zmax,estore_target
 !------------------------------------------------------------------------------
@@ -206,14 +205,12 @@ mygs%urf=urf
 mygs%maxits=maxits
 mygs%nl_tol=nl_tol
 mygs%pnorm=pnorm
-mygs%limited_only=limited_only
 mygs%R0_target=R0_target
 mygs%V0_target=V0_target
 mygs%limiter_file=limiter_file
 CALL mygs%load_limiters
 IF(mygs%free)THEN
   mygs%alam=alam
-  mygs%boundary_limiter=.FALSE.
 ELSE
   IF(f_offset/=0.d0)mygs%alam=alam
 END IF
