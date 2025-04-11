@@ -177,12 +177,6 @@ print *, '===================== HELP 175 ====================='
 CALL oft_finalize
 CONTAINS
 !
-SUBROUTINE psi_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = psi0*EXP(-SUM(pt**2)/8.d0)
-END SUBROUTINE psi_init
-!
 SUBROUTINE n_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
@@ -207,16 +201,22 @@ REAL(r8), INTENT(out) :: val
 val = velz0*(1.d0)
 END SUBROUTINE velz_init
 !
+SUBROUTINE t_init(pt,val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = t0*(1.d0)
+END SUBROUTINE t_init  
+!
 SUBROUTINE by_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
 val = by0*(1.d0)
 END SUBROUTINE by_init
 !
-SUBROUTINE t_init(pt,val)
+SUBROUTINE psi_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = t0*(1.d0)
-END SUBROUTINE t_init
-
+val = psi0*EXP(-((pt(1)-0.5)**2+pt(2)**2))
+END SUBROUTINE psi_init
+!
 END PROGRAM xmhd_circle

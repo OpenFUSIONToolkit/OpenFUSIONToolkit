@@ -154,13 +154,16 @@ CALL u%add(0.d0,1.d0,self%u)
 print *, '===================== RESTART FILE ====================='
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
-CALL self%rst_save(u, self%t, self%dt, 'tDiff_'//rst_char//'.rst', 'U')
+CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
 NULLIFY(plot_vals)
 CALL self%xdmf_plot%add_timestep(self%t)
+CALL self%u%get_local(plot_vals,1)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
 CALL self%u%get_local(plot_vals,6)
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Psi')
-CALL self%u%get_local(plot_vals,2)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
+CALL self%u%get_local(plot_vals,7)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'by')
+
 
 !
 ALLOCATE(self%nlfun)
@@ -228,7 +231,7 @@ END IF
 ! Setup history file
 !---------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
-  CALL hist_file%setup('oft_tdiff.hist', desc="History file for non-linear thermal diffusion run")
+  CALL hist_file%setup('oft_xmhd2d.hist', desc="History file for non-linear thermal diffusion run")
   CALL hist_file%add_field('ts',   'i4', desc="Time step index")
   CALL hist_file%add_field('lits', 'i4', desc="Linear iteration count")
   CALL hist_file%add_field('nlits','i4', desc="Non-linear iteration count")
@@ -252,6 +255,7 @@ DO i=1,self%nsteps
   T_avg = self%nlfun%diag_vals(5)
   psi_avg = self%nlfun%diag_vals(6)
   by_avg = self%nlfun%diag_vals(7)
+  write(*,*) by_avg
   self%nlfun%dt=self%dt
   IF((.NOT.self%mfnk).OR.MOD(i,2)==0)THEN
     CALL update_jacobian(u)
@@ -291,7 +295,7 @@ DO i=1,self%nsteps
     WRITE(rst_char,104)self%rst_base+i
     READ(rst_char,104,IOSTAT=io_stat)rst_tmp
     IF((io_stat/=0).OR.(rst_tmp/=self%rst_base+i))CALL oft_abort("Step count exceeds format width", "run_simulation", __FILE__)
-    CALL self%rst_save(u, self%t, self%dt, 'tDiff_'//rst_char//'.rst', 'U')
+    CALL self%rst_save(u, self%t, self%dt, 'xhmd2d_'//rst_char//'.rst', 'U')
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
@@ -299,11 +303,13 @@ DO i=1,self%nsteps
     END IF
     !---
     CALL self%xdmf_plot%add_timestep(self%t)
+    CALL self%u%get_local(plot_vals,1)
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
     CALL self%u%get_local(plot_vals,6)
     WRITE(*,*)'CHK',MAXVAL(plot_vals)
     CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Psi')
-    CALL self%u%get_local(plot_vals,2)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
+    CALL self%u%get_local(plot_vals,7)
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'by')
   END IF
 END DO
 CALL hist_file%close()
@@ -349,8 +355,8 @@ vtmp => vel_weights(2, :)
 CALL a%get_local(vtmp ,3)
 vtmp => vel_weights(3, :)
 CALL a%get_local(vtmp, 4)
-CALL a%get_local(psi_weights,5)
-CALL a%get_local(T_weights,6)
+CALL a%get_local(T_weights,5)
+CALL a%get_local(psi_weights,6)
 CALL a%get_local(by_weights,7)
 !---
 chi = self%chi !< Needs docs
@@ -558,8 +564,8 @@ vtmp => vel_weights(2, :)
 CALL a%get_local(vtmp ,3)
 vtmp => vel_weights(3, :)
 CALL a%get_local(vtmp, 4)
-CALL a%get_local(psi_weights,5)
-CALL a%get_local(T_weights,6)
+CALL a%get_local(T_weights,5)
+CALL a%get_local(psi_weights,6)
 CALL a%get_local(by_weights,7)
 !---
 chi = self%chi !< Needs docs
@@ -824,7 +830,7 @@ IF(ASSOCIATED(oft_blagrange))CALL oft_abort("FE space already built","setup",__F
 !---Look for XML defintion elements
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  CALL xml_get_element(oft_env%xml,"tdiff",self%xml_root,ierr)
+  CALL xml_get_element(oft_env%xml,"xmhd2d",self%xml_root,ierr)
   IF(ierr==0)THEN
     !---Look for pre node
     CALL xml_get_element(self%xml_root,"pre",self%xml_pre_def,ierr)
@@ -874,6 +880,7 @@ self%T_bc=.TRUE.
 self%velx_bc=.TRUE.
 self%vely_bc=.TRUE.
 self%velz_bc=.TRUE.
+! self%psi_bc=.TRUE.
 self%by_bc=.TRUE.
 
 ! self%n_bc=>oft_blagrange%be

@@ -34,7 +34,7 @@
   k_boltz=1.0
   m_i=1.0
   dt=1.E-3
-  nsteps=20
+  nsteps=50
   rst_freq=1
   use_mfnk=F
   pm=F
