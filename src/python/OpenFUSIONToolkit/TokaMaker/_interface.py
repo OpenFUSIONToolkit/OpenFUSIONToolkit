@@ -85,9 +85,10 @@ tokamaker_eig_td = ctypes_subroutine(oftpy_lib.tokamaker_eig_td,
 tokamaker_eig_wall = ctypes_subroutine(oftpy_lib.tokamaker_eig_wall,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_char_p])
 
-# tokamaker_step_td(tMaker_ptr,time,dt,nl_its,lin_its,nretry,error_str)
+# tokamaker_step_td(tMaker_ptr,curr_ptr,volt_ptr,time,dt,nl_its,lin_its,nretry,error_str)
 tokamaker_step_td = ctypes_subroutine(oftpy_lib.tokamaker_step_td,
-    [c_void_p, c_double_ptr, c_double_ptr, c_int_ptr, c_int_ptr, c_int_ptr, c_char_p])
+    [c_void_p, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr,
+     c_int_ptr, c_int_ptr, c_int_ptr, c_char_p])
 
 # tokamaker_get_mesh(tMaker_ptr,np,r_loc,nc,lc_loc,reg_loc,error_str)
 tokamaker_get_mesh = ctypes_subroutine(oftpy_lib.tokamaker_get_mesh,
@@ -164,10 +165,10 @@ tokamaker_apply_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_apply_field_e
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
-# tokamaker_set_psi_dt(tMaker_ptr,psi_vals,rcoils,icoils,vcoils,dt,error_str)
+# tokamaker_set_psi_dt(tMaker_ptr,psi_vals,icoils,vcoils,dt,error_str)
 tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
-     ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_double, c_char_p])
+     ctypes_numpy_array(numpy.float64,1), c_double, c_char_p])
 
 # tokamaker_set_settings(tMaker_ptr,settings,error_str)
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
@@ -203,6 +204,10 @@ tokamaker_set_coil_bounds = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_bound
 
 # tokamaker_set_coil_vsc(tMaker_ptr,coil_gains,error_str)
 tokamaker_set_coil_vsc = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_vsc,
+    [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
+
+# tokamaker_set_vcoil(tMaker_ptr,rcoils,error_str)
+tokamaker_set_vcoil = ctypes_subroutine(oftpy_lib.tokamaker_set_vcoil,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
 # tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str)

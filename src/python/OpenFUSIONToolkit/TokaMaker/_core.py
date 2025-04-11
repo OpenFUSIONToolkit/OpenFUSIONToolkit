@@ -434,14 +434,15 @@ class TokaMaker():
         else:
             return None
     
-    def coil_dict2vec(self,coil_dict,always_virtual=False):
+    def coil_dict2vec(self,coil_dict,always_virtual=False,default_value=0.0):
         '''! Create coil vector from dictionary of values
 
         @param coil_vec Input dictionary
         @param always_virtual Always include virtual coils even if not present in dictionary
+        @param default_value Fill value for unspecified entries
         @returns `coil_dict` Ouput vector
         '''
-        vector = numpy.zeros((self.ncoils+len(self._virtual_coils),))
+        vector = default_value*numpy.ones((self.ncoils+len(self._virtual_coils),))
         keep_virtual = always_virtual
         for coil_key, value in coil_dict.items():
             if coil_key in self.coil_sets:
@@ -573,6 +574,17 @@ class TokaMaker():
         gains_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_gains), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_coil_vsc(self._tMaker_ptr,gains_array,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+    
+    def set_vcoils(self,coil_resistivities):
+        '''! Set or unset one or more coils as Vcoils
+
+        @param coil_resistivities Resistivities for Vcoils [Ohms] (dictionary of form `{coil_name: coil_res}`)
+        '''
+        res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,True,default_value=-1.0), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_vcoil(self._tMaker_ptr,res_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -1016,31 +1028,28 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
     
-    def set_psi_dt(self,psi0,dt,coil_resistivities=None,coil_currents=None,coil_voltages=None):
+    def set_psi_dt(self,psi0,dt,coil_currents=None,coil_voltages=None):
         '''! Set reference poloidal flux and time step for eddy currents in .solve()
 
         @param psi0 Reference poloidal flux at t-dt (unnormalized)
         @param dt Time since reference poloidal flux
-        @param coil_resistivities Resistivities for Vcoils [Ohms] (dictionary of form `{coil_name: coil_res}`)
         @param coil_currents Currents for Vcoils [A] (dictionary of form `{coil_name: coil_curr}`)
         @param coil_voltages Voltages for Vcoils [V] (dictionary of form `{coil_name: coil_volt}`)
         '''
         if psi0.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi0", should be [np]')
         psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
-        if coil_resistivities is None:
-            res_array = -numpy.ones((self.ncoils+1,), dtype=numpy.float64)
+        if coil_currents is None:
             curr_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
             volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
         else:
-            res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,True), dtype=numpy.float64)
             curr_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents,True), dtype=numpy.float64)
             if coil_voltages is not None:
                 volt_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages,True), dtype=numpy.float64)
             else:
                 volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_psi_dt(self._tMaker_ptr,psi0,res_array,curr_array,volt_array,c_double(dt),error_string)
+        tokamaker_set_psi_dt(self._tMaker_ptr,psi0,curr_array,volt_array,c_double(dt),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1695,7 +1704,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
     
-    def step_td(self,time,dt):
+    def step_td(self,time,dt,coil_currents=None,coil_voltages=None):
         '''! Compute eigenvalues for the time-dependent system
 
         @param time Growth rate enhancement point (should be approximately expected value)
@@ -1708,7 +1717,15 @@ class TokaMaker():
         lin_its = c_int()
         nretry = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_step_td(self._tMaker_ptr,ctypes.byref(time),ctypes.byref(dt),ctypes.byref(nl_its),ctypes.byref(lin_its),ctypes.byref(nretry),error_string)
+        if coil_currents is None:
+            coil_currents, _ = self.get_coil_currents()
+        coil_currents = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents), dtype=numpy.float64)
+        if coil_voltages is None:
+            coil_voltages = numpy.zeros((self.ncoils,), dtype=numpy.float64)
+        else:
+            coil_voltages = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages), dtype=numpy.float64)
+        tokamaker_step_td(self._tMaker_ptr,coil_currents,coil_voltages,ctypes.byref(time),ctypes.byref(dt),
+                          ctypes.byref(nl_its),ctypes.byref(lin_its),ctypes.byref(nretry),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value

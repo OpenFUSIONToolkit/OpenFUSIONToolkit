@@ -507,17 +507,27 @@ END SUBROUTINE tokamaker_eig_wall
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_step_td(tMaker_ptr,time,dt,nl_its,lin_its,nretry,error_str) BIND(C,NAME="tokamaker_step_td")
+SUBROUTINE tokamaker_step_td(tMaker_ptr,curr_ptr,volt_ptr,time,dt,nl_its,lin_its,nretry,error_str) BIND(C,NAME="tokamaker_step_td")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: curr_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: volt_ptr !< Needs docs
 REAL(c_double), INTENT(inout) :: time !< Needs docs
 REAL(c_double), INTENT(inout) :: dt !< Needs docs
 INTEGER(c_int), INTENT(out) :: nl_its !< Needs docs
 INTEGER(c_int), INTENT(out) :: lin_its !< Needs docs
 INTEGER(c_int), INTENT(out) :: nretry !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_currents,coil_voltages
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL tMaker_obj%gs_td%step(time,dt,nl_its,lin_its,nretry)
+ALLOCATE(coil_currents(tMaker_obj%gs%ncoils),coil_voltages(tMaker_obj%gs%ncoils))
+CALL c_f_pointer(curr_ptr, vals_tmp, [tMaker_obj%gs%ncoils])
+coil_currents=vals_tmp*mu0
+CALL c_f_pointer(volt_ptr, vals_tmp, [tMaker_obj%gs%ncoils])
+coil_voltages=vals_tmp*mu0
+CALL tMaker_obj%gs_td%step(coil_currents,coil_voltages,time,dt,nl_its,lin_its,nretry)
+DEALLOCATE(coil_currents,coil_voltages)
 END SUBROUTINE tokamaker_step_td
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -975,15 +985,15 @@ END SUBROUTINE tokamaker_set_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi_dt(tMaker_ptr,psi_vals,rcoils,icoils,vcoils,dt,error_str) BIND(C,NAME="tokamaker_set_psi_dt")
+SUBROUTINE tokamaker_set_psi_dt(tMaker_ptr,psi_vals,icoils,vcoils,dt,error_str) BIND(C,NAME="tokamaker_set_psi_dt")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: rcoils !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: icoils !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vcoils !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: dt !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rtmp,ictmp,vtmp
+INTEGER(i4) :: i
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp,ictmp,vtmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 tMaker_obj%gs%dt=dt
@@ -991,21 +1001,20 @@ IF(dt>0.d0)THEN
   IF(.NOT.ASSOCIATED(tMaker_obj%gs%psi_dt))CALL tMaker_obj%gs%psi%new(tMaker_obj%gs%psi_dt)
   CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
   CALL tMaker_obj%gs%psi_dt%restore_local(vals_tmp)
-  CALL c_f_pointer(rcoils, rtmp, [tMaker_obj%gs%ncoils+1])
   CALL c_f_pointer(icoils, ictmp, [tMaker_obj%gs%ncoils+1])
   CALL c_f_pointer(vcoils, vtmp, [tMaker_obj%gs%ncoils+1])
-  IF(ANY(rtmp>0.d0).AND.(tMaker_obj%gs%region_info%nnonaxi>0))THEN
-    CALL copy_string("Vcoils not supported with toroidally non-continuous regions",error_str)
-    RETURN
-  END IF
-  tMaker_obj%gs%Rcoils=rtmp
+  DO i=1,tMaker_obj%gs%ncoils
+    IF(ABS(vtmp(i))>1.d-10.AND.tMaker_obj%gs%Rcoils(i)<=0.d0)THEN
+      CALL copy_string("Non-zero voltage given in fixed-current coil.",error_str)
+      RETURN
+    END IF
+  END DO
   tMaker_obj%gs%coils_dt=ictmp*mu0
   tMaker_obj%gs%coils_volt=vtmp*mu0
 ELSE
   IF(ASSOCIATED(tMaker_obj%gs%psi_dt))THEN
     CALL tMaker_obj%gs%psi_dt%delete()
     DEALLOCATE(tMaker_obj%gs%psi_dt)
-    tMaker_obj%gs%Rcoils=-1.d0
     tMaker_obj%gs%coils_dt=0.d0
     tMaker_obj%gs%coils_volt=0.d0
   END IF
@@ -1199,6 +1208,23 @@ IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL c_f_pointer(coil_gains, vals_tmp, [tMaker_obj%gs%ncoils])
 tMaker_obj%gs%coil_vcont=vals_tmp
 END SUBROUTINE tokamaker_set_coil_vsc
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_vcoil(tMaker_ptr,rcoils,error_str) BIND(C,NAME="tokamaker_set_vcoil")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+TYPE(c_ptr), VALUE, INTENT(in) :: rcoils !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: rtmp
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL c_f_pointer(rcoils, rtmp, [tMaker_obj%gs%ncoils])
+IF(ANY(rtmp>0.d0).AND.(tMaker_obj%gs%region_info%nnonaxi>0))THEN
+  CALL copy_string("Vcoils not supported with toroidally non-continuous regions",error_str)
+  RETURN
+END IF
+tMaker_obj%gs%Rcoils(1:tMaker_obj%gs%ncoils)=rtmp
+END SUBROUTINE tokamaker_set_vcoil
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------

@@ -141,6 +141,7 @@ REAL(8) :: err_tmp,ip_target,p_scale,f_scale,time_val,pt(2)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: np_count,res_in
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: pts
 REAL(8), POINTER, DIMENSION(:) :: vals_out,vals2,rhs_tmp
+CLASS(oft_vector), POINTER :: psi_tmp
 !---
 IF(ASSOCIATED(self%mfop))CALL self%delete()
 !------------------------------------------------------------------------------
@@ -152,19 +153,32 @@ CALL self%mfop%setup(eq_in)
 !------------------------------------------------------------------------------
 ! Create Solver fields
 !------------------------------------------------------------------------------
-NULLIFY(vals_out)
+NULLIFY(vals_out,psi_tmp)
+call eq_in%fe_rep%vec_create(psi_tmp)
 IF(eq_in%ncoils>0)THEN
     call eq_in%aug_vec%new(self%psi_sol)
     call eq_in%aug_vec%new(self%rhs)
     call eq_in%aug_vec%new(self%psi_tmp)
     call eq_in%aug_vec%new(self%tmp_vec)
+    !---
+    call psi_tmp%add(0.d0,1.d0,eq_in%psi)
+    CALL self%psi_sol%get_local(vals_out,2)
+    DO i=1,eq_in%ncoils
+        CALL psi_tmp%add(1.d0,-eq_in%coil_currs(i)-eq_in%vcontrol_val*eq_in%coil_vcont(i),eq_in%psi_coil(i)%f)
+        vals_out(i)=eq_in%coil_currs(i)+eq_in%vcontrol_val*eq_in%coil_vcont(i)
+    END DO
+    eq_in%vcontrol_val=0.d0
+    CALL self%psi_sol%restore_local(vals_out,2)
+    DEALLOCATE(vals_out)
 ELSE
     call eq_in%fe_rep%vec_create(self%psi_sol) !self%psi_sol=>eq_in%psi
     call eq_in%fe_rep%vec_create(self%rhs)
     call eq_in%fe_rep%vec_create(self%psi_tmp)
     call eq_in%fe_rep%vec_create(self%tmp_vec)
+    !---
+    call psi_tmp%add(0.d0,1.d0,eq_in%psi)
 END IF
-call eq_in%psi%get_local(vals_out)
+call psi_tmp%get_local(vals_out)
 CALL self%psi_sol%restore_local(vals_out,1)
 DEALLOCATE(vals_out)
 !------------------------------------------------------------------------------
@@ -277,12 +291,14 @@ end subroutine delete_gs_td
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine step_gs_td(self,time,dt,nl_its,lin_its,nretry)
+subroutine step_gs_td(self,coil_currents,coil_voltages,time,dt,nl_its,lin_its,nretry)
 class(oft_tmaker_td), target, intent(inout) :: self !< NL operator object
+REAL(r8), INTENT(in) :: coil_currents(:)
+REAL(r8), INTENT(in) :: coil_voltages(:)
 REAL(8), INTENT(inout) :: time,dt
 INTEGER(4), INTENT(out) :: nl_its,lin_its,nretry
 INTEGER(4) :: i,j,k,ierr
-REAL(r8), POINTER :: vals_out(:)
+REAL(r8), POINTER :: vals_out(:),currs_tmp(:)
 active_tMaker_td=>self
 ! Update time-advance operator
 CALL self%mfop%update()
@@ -299,7 +315,6 @@ END IF
 !
 CALL self%psi_tmp%add(0.d0,1.d0,self%psi_sol)
 CALL apply_rhs(self%mfop,self%psi_sol,self%rhs)
-CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
 ! ! Extrapolate solution (linear)
 ! DO j=maxextrap,2,-1
 !   CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
@@ -308,8 +323,25 @@ CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
 ! IF(nextrap<maxextrap)nextrap=nextrap+1
 ! CALL extrap_fields(1)%f%add(0.d0,1.d0,psi_sol)
 ! extrapt(1)=time_val
+NULLIFY(currs_tmp)
 DO j=1,4
     ! CALL vector_extrapolate(extrapt,extrap_fields,nextrap,time_val+self%dt,psi_sol)
+    !---Apply BCs
+    CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
+    IF(self%mfop%gs_eq%ncoils>0)THEN
+        ! Add voltage to RHS
+        CALL self%rhs%get_local(currs_tmp,2)
+        DO i=1,self%mfop%gs_eq%ncoils
+            currs_tmp(i)=currs_tmp(i)+self%mfop%dt*coil_voltages(i)
+        END DO
+        CALL self%rhs%restore_local(currs_tmp,2)
+        ! Set Icoil BCs
+        CALL self%psi_sol%get_local(currs_tmp,2)
+        DO i=1,self%mfop%gs_eq%ncoils
+            currs_tmp(i)=coil_currents(i)
+        END DO
+        CALL self%psi_sol%restore_local(currs_tmp,2)
+    END IF
     !---MFNK iteration
     CALL self%nksolver%apply(self%psi_sol,self%rhs)
     IF(self%nksolver%cits<0)THEN
@@ -319,22 +351,31 @@ DO j=1,4
         IF(ASSOCIATED(self%adv_op))CALL build_jop(self%mfop,self%adv_op,self%psi_sol)
         CALL self%vac_pre%update(.TRUE.)
         CALL apply_rhs(self%mfop,self%psi_sol,self%rhs)
-        CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
         CYCLE
     ELSE
         EXIT
     END IF
 END DO
+DEALLOCATE(currs_tmp)
 !
 time=time+self%mfop%dt
 dt=self%mfop%dt
 nl_its=self%nksolver%nlits
 lin_its=self%nksolver%lits
 nretry=j-1
-!
+!---Update psi and coil currents
 NULLIFY(vals_out)
 CALL self%psi_sol%get_local(vals_out,1)
 CALL self%mfop%gs_eq%psi%restore_local(vals_out)
+CALL self%psi_sol%get_local(vals_out,2)
+! self%mfop%gs_eq%vcontrol_val=vals_out(self%mfop%gs_eq%ncoils+1)
+! WRITE(*,'(A,I4,2ES14.6)')'vCHK',0,self%mfop%gs_eq%vcontrol_val/mu0,vals_out(self%mfop%gs_eq%ncoils+1)/mu0
+DO i=1,self%mfop%gs_eq%ncoils
+    ! WRITE(*,'(A,I4,2ES14.6)')'CHK',i,self%mfop%gs_eq%coil_currs(i)/mu0,vals_out(i)/mu0
+  self%mfop%gs_eq%coil_currs(i)=vals_out(i)
+  CALL self%mfop%gs_eq%psi%add(1.d0,self%mfop%gs_eq%coil_currs(i),self%mfop%gs_eq%psi_coil(i)%f)
+  ! +self%mfop%gs_eq%vcontrol_val*self%mfop%gs_eq%coil_vcont(i)
+END DO
 DEALLOCATE(vals_out)
 !
 IF(j>4)THEN
@@ -435,7 +476,7 @@ class(oft_vector), intent(inout) :: b !< Result of metric function
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),eta_tmp,psi_tmp,eta_source,psi_lim,psi_max
-real(8) :: max_tmp,lim_tmp
+real(8) :: max_tmp,lim_tmp,vcont_val,nturns
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),vals_loc(:),reg_source(:)
 real(r8), pointer, dimension(:) :: pol_vals,rhs_vals
 logical :: curved
@@ -449,8 +490,25 @@ lag_rep=>self%gs_eq%fe_rep
 !------------------------------------------------------------------------------
 NULLIFY(pol_vals,rhs_vals)
 CALL a%get_local(pol_vals)
+IF(self%gs_eq%ncoils>0)THEN
+    DO i=1,self%gs_eq%ncoils
+        CALL self%gs_eq%psi_coil(i)%f%get_local(rhs_vals)
+        ! vcont_val=pol_vals(lag_rep%ne+self%gs_eq%ncoils+1)*self%gs_eq%coil_vcont(i)
+        pol_vals(1:lag_rep%ne)=pol_vals(1:lag_rep%ne)+pol_vals(lag_rep%ne+i)*rhs_vals
+    END DO
+    DEALLOCATE(rhs_vals)
+END IF
 CALL b%set(0.d0)
 CALL b%get_local(rhs_vals)
+IF(self%gs_eq%ncoils>0)THEN
+    DO i=1,self%gs_eq%ncoils
+        IF(self%gs_eq%Rcoils(i)<=0.d0)THEN
+            rhs_vals(lag_rep%ne+i)=pol_vals(lag_rep%ne+i)
+        ! ELSE
+        !     rhs_vals(lag_rep%ne+i)=DOT_PRODUCT(pol_vals(lag_rep%ne+1:lag_rep%ne+self%gs_eq%ncoils),self%gs_eq%Lcoils(1:self%gs_eq%ncoils,i))
+        END IF
+    END DO
+END IF
 !
 ALLOCATE(reg_source(mesh%nreg))
 reg_source=0.d0
@@ -463,8 +521,8 @@ END IF
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
-!$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt,eta_tmp,psi_tmp,eta_source)
-allocate(j(lag_rep%nce),vals_loc(lag_rep%nce)) ! Local DOF and matrix indices
+!$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt,eta_tmp,psi_tmp,eta_source,nturns)
+allocate(j(lag_rep%nce),vals_loc(lag_rep%nce+self%gs_eq%ncoils)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
 !$omp do schedule(static,1)
 do i=1,mesh%nc
@@ -486,16 +544,28 @@ do i=1,mesh%nc
         eta_tmp=self%eta_reg(mesh%reg(i))
         IF(eta_tmp>0.d0)THEN
             eta_source=(psi_tmp/eta_tmp/(pt(1)+gs_epsilon) + reg_source(mesh%reg(i)))*det
-        ELSE
-            eta_source=self%dt*self%curr_reg(mesh%reg(i))*det
+        ! ELSE
+        !     eta_source=self%dt*self%curr_reg(mesh%reg(i))*det
         END IF
         do jr=1,lag_rep%nce
             vals_loc(jr) = vals_loc(jr) + rop(jr)*eta_source
         end do
+        DO jr=1,self%gs_eq%ncoils
+            IF(self%gs_eq%Rcoils(jr)<=0.d0)CYCLE
+            nturns = self%gs_eq%coil_nturns(mesh%reg(i),jr)
+            IF(ABS(nturns)>1.d-8)THEN
+                vals_loc(lag_rep%nce+jr)=vals_loc(lag_rep%nce+jr)+mu0*2.d0*pi*psi_tmp*nturns*det
+            END IF
+        END DO
     end do
     do jr=1,lag_rep%nce
         !$omp atomic
         rhs_vals(j(jr)) = rhs_vals(j(jr)) + vals_loc(jr)
+    end do
+    do jr=1,self%gs_eq%ncoils
+        IF(self%gs_eq%Rcoils(jr)<=0.d0)CYCLE
+        !$omp atomic
+        rhs_vals(lag_rep%ne+jr) = rhs_vals(lag_rep%ne+jr) + vals_loc(lag_rep%nce+jr)
     end do
 end do
 deallocate(j,vals_loc,rop,gop)
@@ -603,7 +673,7 @@ class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 integer(i4) :: i,m,jr,jc,cell
 integer(i4), allocatable :: j(:)
-real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),alam_new,psi_tmp,diag(3),f(3)
+real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),alam_new,psi_tmp,diag(3),f(3),vcont_val
 real(r8) :: dpsi_tmp(2),p_source,f_source,psi_lim,psi_max,eta_source,max_tmp,lim_tmp
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),vals_loc(:,:)
 real(r8), pointer, dimension(:) :: pol_vals,rhs_vals,alam_vals,pvals
@@ -624,7 +694,16 @@ NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
 CALL a%get_local(pol_vals)
 !---
 ! self%gs_eq%psi=>a ! HERE
-CALL self%gs_eq%psi%restore_local(pol_vals(1:self%gs_eq%psi%n))
+IF(self%gs_eq%ncoils>0)THEN
+    DO i=1,self%gs_eq%ncoils
+        CALL self%gs_eq%psi_coil(i)%f%get_local(rhs_vals)
+        ! vcont_val=pol_vals(lag_rep%ne+self%gs_eq%ncoils+1)*self%gs_eq%coil_vcont(i)
+        pol_vals(1:lag_rep%ne)=pol_vals(1:lag_rep%ne)+pol_vals(lag_rep%ne+i)*rhs_vals
+        ! IF(self%gs_eq%Rcoils(i)>0.d0)WRITE(*,*)'CHK',pol_vals(lag_rep%ne+i)/mu0
+    END DO
+    DEALLOCATE(rhs_vals)
+END IF
+CALL self%gs_eq%psi%restore_local(pol_vals(1:lag_rep%ne))
 CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 !
 self%F%plasma_bounds=self%gs_eq%plasma_bounds
@@ -878,11 +957,11 @@ class(oft_vector), target, intent(inout) :: a
 integer(i4) :: i,m,jr,jc,cell
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),eta_tmp,eta_source,gs_source,ftmp(3)
-real(r8) :: psi_lim,psi_max,psi_tmp,max_tmp,lim_tmp,psi_norm
+real(r8) :: psi_lim,psi_max,psi_tmp,max_tmp,lim_tmp,psi_norm,vcont_val
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),lim_loc(:),ax_loc(:)
 real(r8), allocatable :: lim_weights(:),ax_weights(:)
 logical :: curved,in_bounds
-real(r8), pointer, dimension(:) :: pol_vals
+real(r8), pointer, dimension(:) :: pol_vals,rhs_vals
 CLASS(oft_vector), POINTER :: oft_lag_vec
 type(oft_timer) :: mytimer
 CLASS(oft_bmesh), POINTER :: mesh
@@ -912,6 +991,15 @@ NULLIFY(pol_vals)
 CALL a%get_local(pol_vals)
 !---Update plasma boundary
 ! self%gs_eq%psi=>a
+IF(self%gs_eq%ncoils>0)THEN
+    NULLIFY(rhs_vals)
+    DO i=1,self%gs_eq%ncoils
+        CALL self%gs_eq%psi_coil(i)%f%get_local(rhs_vals)
+        vcont_val=pol_vals(lag_rep%ne+self%gs_eq%ncoils+1)*self%gs_eq%coil_vcont(i)
+        pol_vals(1:lag_rep%ne)=pol_vals(1:lag_rep%ne)+(pol_vals(lag_rep%ne+i)+vcont_val)*rhs_vals
+    END DO
+    DEALLOCATE(rhs_vals)
+END IF
 CALL self%gs_eq%psi%restore_local(pol_vals(1:self%gs_eq%psi%n))
 CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 allocate(lim_weights(lag_rep%nce))
@@ -1082,8 +1170,8 @@ NULLIFY(pol_vals,eta_vals)
 ! CALL eta_vec%get_local(eta_vals)
 CALL a%get_local(pol_vals)
 !---Update plasma boundary
-! self%gs_eq%psi=>a
-CALL self%gs_eq%psi%restore_local(pol_vals(1:self%gs_eq%psi%n))
+self%gs_eq%psi=>a
+! CALL self%gs_eq%psi%restore_local(pol_vals(1:self%gs_eq%psi%n))
 CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
 allocate(bnd_nodes(2*lag_rep%nce),lim_weights(lag_rep%nce),ax_weights(lag_rep%nce))
 IF(include_bounds)THEN
