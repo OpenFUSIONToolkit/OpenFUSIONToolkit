@@ -24,6 +24,7 @@ USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast
+USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
 IMPLICIT NONE
 #include "local.h"
 #if !defined(TDIFF_RST_LEN)
@@ -36,11 +37,10 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: chi !< Needs docs
   REAL(r8) :: eta !< Needs docs
   REAL(r8) :: nu !< Needs docs
-  REAL(r8) :: mu_0
   REAL(r8) :: gamma
   REAL(r8) :: D_diff
-  REAL(r8) :: k_boltz
-  REAL(r8) :: m_i
+  REAL(r8) :: k_boltz=elec_charge
+  REAL(r8) :: m_i=proton_mass
   REAL(r8) :: diag_vals(7) = 0.d0 !< Needs docs
 
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
@@ -68,11 +68,10 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8) :: chi = -1.d0 !< Needs docs
   REAL(r8) :: eta = -1.d0 !< Needs docs
   REAL(r8) :: nu = -1.d0 !< Needs docs
-  REAL(r8) :: mu_0 = -1.d0 !< Needs docs
   REAL(r8) :: gamma = -1.d0 !< Needs docs
   REAL(r8) :: D_diff = -1.d0 !< Needs docs
-  REAL(r8) :: k_boltz = -1.d0 !< Needs docs
-  REAL(r8) :: m_i = -1.d0
+  REAL(r8) :: k_boltz = elec_charge !< Needs docs
+  REAL(r8) :: m_i=proton_mass
   REAL(r8) :: lin_tol = 1.d-8 !< Needs docs
   REAL(r8) :: nl_tol = 1.d-5 !< Needs docs
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
@@ -136,7 +135,6 @@ current_sim=>self
 !---------------------------------------------------------------------------
 ! Create solver fields
 !---------------------------------------------------------------------------
-print *, '===================== SOLVER FIELDS ====================='
 call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)
@@ -151,7 +149,6 @@ nextrap=0
 self%t=0.d0
 CALL u%add(0.d0,1.d0,self%u)
 !---Create initial conditions restart file
-print *, '===================== RESTART FILE ====================='
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
@@ -159,8 +156,16 @@ NULLIFY(plot_vals)
 CALL self%xdmf_plot%add_timestep(self%t)
 CALL self%u%get_local(plot_vals,1)
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
+CALL self%u%get_local(plot_vals,2)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'velx')
+CALL self%u%get_local(plot_vals,3)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'vely')
+CALL self%u%get_local(plot_vals,4)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'velz')
+CALL self%u%get_local(plot_vals,5)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
 CALL self%u%get_local(plot_vals,6)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Psi')
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
 CALL self%u%get_local(plot_vals,7)
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'by')
 
@@ -171,10 +176,7 @@ self%nlfun%chi=self%chi
 self%nlfun%eta=self%eta
 self%nlfun%nu=self%nu
 self%nlfun%D_diff=self%D_diff
-self%nlfun%mu_0=self%mu_0
 self%nlfun%gamma=self%gamma
-self%nlfun%k_boltz=self%k_boltz
-self%nlfun%m_i=self%m_i
 self%nlfun%n_bc=>self%n_bc
 self%nlfun%velx_bc=>self%velx_bc
 self%nlfun%vely_bc=>self%vely_bc
@@ -183,12 +185,10 @@ self%nlfun%T_bc=>self%T_bc
 self%nlfun%psi_bc=>self%psi_bc
 self%nlfun%by_bc=>self%by_bc
 !---
-print *, '===================== BUILD JACOBIAN ====================='
 CALL build_approx_jacobian(self,u) ! What is this u vector for?
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
-print *, '===================== LIN SOLVE SETUP ====================='
 IF(self%mfnk)THEN
   ALLOCATE(self%mf_mat)
   CALL up%set(1.d0)
@@ -255,7 +255,6 @@ DO i=1,self%nsteps
   T_avg = self%nlfun%diag_vals(5)
   psi_avg = self%nlfun%diag_vals(6)
   by_avg = self%nlfun%diag_vals(7)
-  write(*,*) by_avg
   self%nlfun%dt=self%dt
   IF((.NOT.self%mfnk).OR.MOD(i,2)==0)THEN
     CALL update_jacobian(u)
@@ -303,11 +302,19 @@ DO i=1,self%nsteps
     END IF
     !---
     CALL self%xdmf_plot%add_timestep(self%t)
+    WRITE(*,*)'CHK',MAXVAL(plot_vals)
     CALL self%u%get_local(plot_vals,1)
     CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
+    CALL self%u%get_local(plot_vals,2)
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'velx')
+    CALL self%u%get_local(plot_vals,3)
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'vely')
+    CALL self%u%get_local(plot_vals,4)
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'velz')
+    CALL self%u%get_local(plot_vals,5)
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
     CALL self%u%get_local(plot_vals,6)
-    WRITE(*,*)'CHK',MAXVAL(plot_vals)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Psi')
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
     CALL self%u%get_local(plot_vals,7)
     CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'by')
   END IF
@@ -333,8 +340,9 @@ type(oft_quad_type), pointer :: quad
 LOGICAL :: curved
 INTEGER(i4) :: i,m,jr, k,l
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
-REAL(r8) :: m_i = -1.d0
-REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz, diag_vals(7)
+REAL(r8) :: k_boltz = elec_charge
+REAL(r8) :: m_i=proton_mass
+REAL(r8) :: chi, eta, nu, D_diff, gamma, diag_vals(7)
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
          dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3), tmp1(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
@@ -362,10 +370,8 @@ CALL a%get_local(by_weights,7)
 chi = self%chi !< Needs docs
 eta = self%eta !< Needs docs
 nu = self%nu !< Needs docs
-mu_0 = self%mu_0 !< Needs docs
 gamma = self%gamma !< Needs docs
 D_diff = self%D_diff !< Needs docs
-k_boltz = self%k_boltz !< Needs docs
 ! might need a version of this logic for eta or suchlike
 ! IF(self%tau_eq>0.d0)THEN
 !   tau_eq_inv=1.d0/self%tau_eq
@@ -449,10 +455,10 @@ DO i=1,mesh%nc
       !---Momentum
       res_loc(jr, 2:4) = res_loc(jr, 2:4) &
         + basis_vals(jr)*vel*jac_det*quad%wts(m) &
-        + self%dt*DOT_PRODUCT(btmp,basis_grads(:,jr))*btmp*jac_det*quad%wts(m)/(mu_0*m_i*n) &
-        - self%dt*DOT_PRODUCT(btmp,btmp)*basis_grads(:,jr)*jac_det*quad%wts(m)/(2*mu_0*m_i*n) &
-        - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*jac_det*quad%wts(m)/(mu_0*m_i*n**2) &
-        + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*jac_det*quad%wts(m)/(2*mu_0*m_i*n**2) &
+        + self%dt*DOT_PRODUCT(btmp,basis_grads(:,jr))*btmp*jac_det*quad%wts(m)/(mu0*m_i*n) &
+        - self%dt*DOT_PRODUCT(btmp,btmp)*basis_grads(:,jr)*jac_det*quad%wts(m)/(2*mu0*m_i*n) &
+        - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*jac_det*quad%wts(m)/(mu0*m_i*n**2) &
+        + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*jac_det*quad%wts(m)/(2*mu0*m_i*n**2) &
         + 2*self%dt*k_boltz*n*basis_vals(jr)*dT*jac_det*quad%wts(m)&
         + 2*self%dt*k_boltz*T*basis_vals(jr)*dn*jac_det*quad%wts(m)
       DO k=1,3
@@ -472,13 +478,13 @@ DO i=1,mesh%nc
       res_loc(jr, 6) = res_loc(jr, 6) &
         + basis_vals(jr)*psi*jac_det*quad%wts(m) &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dpsi)*jac_det*quad%wts(m) &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dpsi)*jac_det*quad%wts(m)/mu_0
+        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dpsi)*jac_det*quad%wts(m)/mu0
       tmp1 = cross_product(dpsi,dvel(2, :))
       res_loc(jr, 7) = res_loc(jr, 7) &
         + basis_vals(jr)*by*jac_det*quad%wts(m) &
         - basis_vals(jr)*self%dt*tmp1(2)*jac_det*quad%wts(m) &
         + basis_vals(jr)*self%dt*(DOT_PRODUCT(dby,vel) + by*div_vel)*jac_det*quad%wts(m) &
-        + basis_vals(jr)*self%dt*nu*DOT_PRODUCT(basis_grads(:,jr), dby)*jac_det*quad%wts(m)/mu_0
+        + basis_vals(jr)*self%dt*nu*DOT_PRODUCT(basis_grads(:,jr), dby)*jac_det*quad%wts(m)/mu0
     END DO
   END DO
     !---Add local values to full vector
@@ -505,7 +511,6 @@ DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
 !$omp end parallel
 IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%n_bc)
-!TODO: check validity of this usage
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),velx_res,self%velx_bc(:))
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(2, :),vely_res,self%vely_bc(:))
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(3, :),velz_res,self%velz_bc(:))
@@ -534,8 +539,9 @@ class(oft_vector), intent(inout) :: a !< Solution for computing jacobian
 LOGICAL :: curved
 INTEGER(i4) :: i,m,jr,jc, k,l
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
-REAL(r8) :: m_i = -1.d0
-REAL(r8) :: chi, eta, nu, D_diff, gamma, mu_0, k_boltz
+REAL(r8) :: k_boltz=elec_charge
+REAL(r8) :: m_i = proton_mass
+REAL(r8) :: chi, eta, nu, D_diff, gamma
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
 dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3), tmp2(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
@@ -552,14 +558,11 @@ quad=>oft_blagrange%quad
 CALL self%jacobian%zero
 NULLIFY(n_weights,vel_weights, T_weights, &
          psi_weights, by_weights, vtmp)
-print *, '===================== GET WEIGHTS ====================='
 !---Get weights from solution vector
 CALL a%get_local(n_weights,1)
 ALLOCATE(vel_weights(3,oft_blagrange%ne))
 vtmp => vel_weights(1, :)
-print *, '===================== GET WEIGHTS2 ====================='
 CALL a%get_local(vtmp ,2)
-print *, '===================== GET WEIGHTS3 ====================='
 vtmp => vel_weights(2, :)
 CALL a%get_local(vtmp ,3)
 vtmp => vel_weights(3, :)
@@ -571,11 +574,8 @@ CALL a%get_local(by_weights,7)
 chi = self%chi !< Needs docs
 eta = self%eta !< Needs docs
 nu = self%nu !< Needs docs
-mu_0 = self%mu_0 !< Needs docs
 gamma = self%gamma !< Needs docs
 D_diff = self%D_diff !< Needs docs
-k_boltz = self%k_boltz !< Needs docs
-print *, '===================== DOOOO ====================='
 ! IF(self%tau_eq>0.d0)THEN
 !   tau_eq_inv=1.d0/self%tau_eq
 ! ELSE
@@ -665,12 +665,12 @@ DO i=1,mesh%nc
           + self%dt*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*jac_det*quad%wts(m)/(n*m_i) &
           - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*jac_det*quad%wts(m)/(n**2.d0*m_i) &
           - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*jac_det*quad%wts(m)/(n**2.d0*m_i) &
-          - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*jac_det*quad%wts(m)/(m_i*n**2.d0*mu_0) &
-          - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*jac_det*quad%wts(m)/(m_i*n**2.d0*mu_0) &
-          + self%dt*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*jac_det*quad%wts(m)/(m_i*n**3.d0*mu_0) &
-          + self%dt*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*m_i*n**2.d0*mu_0) &
-          + self%dt*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*m_i*n**2.d0*mu_0) &
-          - self%dt*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(m_i*n**3.d0*mu_0)
+          - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*jac_det*quad%wts(m)/(m_i*n**2.d0*mu0) &
+          - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*jac_det*quad%wts(m)/(m_i*n**2.d0*mu0) &
+          + self%dt*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*jac_det*quad%wts(m)/(m_i*n**3.d0*mu0) &
+          + self%dt*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*m_i*n**2.d0*mu0) &
+          + self%dt*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*m_i*n**2.d0*mu0) &
+          - self%dt*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(m_i*n**3.d0*mu0)
         END DO 
         DO k=1,3
           jac_loc(k+1,1)%m(jr,jc) = jac_loc(k+1,1)%m(jr,jc) &
@@ -699,23 +699,23 @@ DO i=1,mesh%nc
         DO l=1,3
           tmp2 = cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0])
           jac_loc(l+1,6)%m(jr,jc) = jac_loc(l+1,6)%m(jr,jc) &
-          + self%dt*DOT_PRODUCT(basis_grads(:,jr), cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0]))*btmp(l)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-          + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-          - self%dt*basis_grads(l,jr)*DOT_PRODUCT(cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0]), btmp)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-          - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0]))*btmp(l)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
-          - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
-          + self%dt*basis_vals(jc)*dn(l)*DOT_PRODUCT(cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0]), btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) 
+          + self%dt*DOT_PRODUCT(basis_grads(:,jr), cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0]))*btmp(l)*jac_det*quad%wts(m)/(m_i*n*mu0) &
+          + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n*mu0) &
+          - self%dt*basis_grads(l,jr)*DOT_PRODUCT(cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0]), btmp)*jac_det*quad%wts(m)/(m_i*n*mu0) &
+          - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0]))*btmp(l)*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
+          - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
+          + self%dt*basis_vals(jc)*dn(l)*DOT_PRODUCT(cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0]), btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu0) 
         END DO
         ! --Momentum, By
         DO l=1,3
           tmp2 = [0.d0,basis_vals(jc),0.d0]
           jac_loc(l+1,7)%m(jr,jc) = jac_loc(l+1,7)%m(jr,jc) &
-          + self%dt*DOT_PRODUCT(basis_grads(:,jr),[0.d0,basis_vals(jc),0.d0])*btmp(l)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-          + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-          - self%dt*basis_grads(l,jr)*DOT_PRODUCT([0.d0,basis_vals(jc),0.d0], btmp)*jac_det*quad%wts(m)/(m_i*n*mu_0) &
-          - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, [0.d0,basis_vals(jc),0.d0])*btmp(l)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
-          - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) &
-          + self%dt*basis_vals(jc)*dn(l)*DOT_PRODUCT([0.d0,basis_vals(jc),0.d0], btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu_0) 
+          + self%dt*DOT_PRODUCT(basis_grads(:,jr),[0.d0,basis_vals(jc),0.d0])*btmp(l)*jac_det*quad%wts(m)/(m_i*n*mu0) &
+          + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n*mu0) &
+          - self%dt*basis_grads(l,jr)*DOT_PRODUCT([0.d0,basis_vals(jc),0.d0], btmp)*jac_det*quad%wts(m)/(m_i*n*mu0) &
+          - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, [0.d0,basis_vals(jc),0.d0])*btmp(l)*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
+          - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
+          + self%dt*basis_vals(jc)*dn(l)*DOT_PRODUCT([0.d0,basis_vals(jc),0.d0], btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu0) 
         END DO
         ! Temperature: delta_n
         jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
@@ -743,7 +743,7 @@ DO i=1,mesh%nc
         jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
         + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
         + self%dt*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*jac_det*quad%wts(m) &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu_0
+        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu0
         ! B_y rows
         DO l=1,3
           tmp2 = cross_product(dpsi,basis_grads(:,jc))
@@ -759,7 +759,7 @@ DO i=1,mesh%nc
         + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(basis_grads(:,jc),vel)*jac_det*quad%wts(m) &
         + basis_vals(jr)*self%dt*basis_vals(jc)*div_vel*jac_det*quad%wts(m) &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu_0
+        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu0
       END DO
     END DO
   END DO
@@ -873,21 +873,21 @@ self%fe_rep%field_tags(7)='by'
 CALL self%fe_rep%vec_create(self%u)
 
 !---Set boundary conditions (Dirichlet for now)
-ALLOCATE(self%n_bc(oft_blagrange%ne),self%T_bc(oft_blagrange%ne),self%velx_bc(oft_blagrange%ne),&
+ALLOCATE(self%n_bc(oft_blagrange%ne), self%T_bc(oft_blagrange%ne),self%velx_bc(oft_blagrange%ne), &
           self%vely_bc(oft_blagrange%ne), self%velz_bc(oft_blagrange%ne), self%by_bc(oft_blagrange%ne))
 self%n_bc=.TRUE.
-self%T_bc=.TRUE.
 self%velx_bc=.TRUE.
 self%vely_bc=.TRUE.
 self%velz_bc=.TRUE.
+self%T_bc=.TRUE.
 ! self%psi_bc=.TRUE.
 self%by_bc=.TRUE.
 
 ! self%n_bc=>oft_blagrange%be
-! self%T_bc=>oft_blagrange%be
 ! self%velx_bc=>oft_blagrange%be
 ! self%vely_bc=>oft_blagrange%be
 ! self%velz_bc=>oft_blagrange%be
+! self%T_bc=>oft_blagrange%be
 self%psi_bc=>oft_blagrange%be
 ! self%by_bc=>oft_blagrange%be
 

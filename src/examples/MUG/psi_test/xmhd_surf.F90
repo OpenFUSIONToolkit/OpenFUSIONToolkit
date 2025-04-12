@@ -37,15 +37,12 @@ REAL(r8) :: by0 = 1.d0
 REAL(r8) :: chi=1.d0 !< Needs docs
 REAL(r8) :: eta=1.d0 !< Needs docs
 REAL(r8) :: nu=1.d0 !< Needs docs
-REAL(r8) :: mu_0=1.d0
 REAL(r8) :: gamma=1.d0
 REAL(r8) :: D_diff=1.d0
-REAL(r8) :: k_boltz=1.d0
-REAL(r8) :: m_i=1.d0
 REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
-NAMELIST/xmhd_options/order,chi,eta,nu,mu_0,gamma, D_diff, k_boltz, m_i, &
+NAMELIST/xmhd_options/order,chi,eta,nu,gamma, D_diff, &
 dt,nsteps,rst_freq,use_mfnk,pm, n0, psi0, velx0,vely0,velz0, t0, by0
 CALL oft_init
 !---Read in options
@@ -160,19 +157,14 @@ DEALLOCATE(minv)
 mhd_sim%chi=chi
 mhd_sim%eta=eta
 mhd_sim%nu=nu
-mhd_sim%mu_0=mu_0
 mhd_sim%gamma=gamma
 mhd_sim%D_diff=D_diff
-mhd_sim%k_boltz=k_boltz
-mhd_sim%m_i=m_i
 mhd_sim%dt=dt
 mhd_sim%nsteps=nsteps
 mhd_sim%rst_freq=rst_freq
 mhd_sim%mfnk=use_mfnk
 oft_env%pm=pm
-print *, '===================== HELP 173 ====================='
 CALL mhd_sim%run_simulation()
-print *, '===================== HELP 175 ====================='
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS

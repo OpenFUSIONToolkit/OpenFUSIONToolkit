@@ -26,13 +26,10 @@
   t0=1,
   by0=1,
   chi=1.0
-  eta=1.0
+  eta=1.E-8
   nu=1.0
-  mu_0=1.0
-  gamma=1.0
-  D_diff=1.0
-  k_boltz=1.0
-  m_i=1.0
+  gamma=10.0
+  D_diff=1.E-20
   dt=1.E-3
   nsteps=50
   rst_freq=1
