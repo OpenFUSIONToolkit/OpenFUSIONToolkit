@@ -41,7 +41,7 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: D_diff
   REAL(r8) :: k_boltz=elec_charge
   REAL(r8) :: m_i=proton_mass
-  REAL(r8) :: diag_vals(7) = 0.d0 !< Needs docs
+  REAL(r8) :: diag_vals(1) = 0.d0 !< Needs docs
 
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
@@ -430,13 +430,13 @@ DO i=1,mesh%nc
       T = T + T_weights_loc(jr)*basis_vals(jr)
       psi = psi + psi_weights_loc(jr)*basis_vals(jr)
       by = by + by_weights_loc(jr)*basis_vals(jr)
-      dn = dn + n_weights_loc(jr)*basis_vals(jr)
       ! Note this is actually $(\nabla u)^T = jac(\vec(u))$
       ! Choosing this convention to make index contractions
       ! more consistent with Fortran convention
+      dn = dn + n_weights_loc(jr)*basis_grads(:,jr)
       dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
       dvel(:, 2) = 0.d0
-      dvel(:, 3) = dvel(:, 2) + vel_weights_loc(:, jr)*basis_grads(3, jr)
+      dvel(:, 3) = dvel(:, 3) + vel_weights_loc(:, jr)*basis_grads(3, jr)
       dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
       dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
       dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
@@ -586,8 +586,8 @@ ALLOCATE(tlocks(self%fe_rep%nfields))
 DO i=1,self%fe_rep%nfields
   call omp_init_lock(tlocks(i))
 END DO
-!$omp parallel private(m,jr,jc,curved,cell_dofs,basis_vals,basis_grads,n_weights_loc, &
-!$omp vel_weights_loc, T_weights_loc, psi_weights_loc, by_weights_loc, btmp, &
+!$omp parallel private(m,jr,jc,curved,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
+!$omp n_weights_loc,vel_weights_loc, psi_weights_loc, by_weights_loc, btmp, &
 !$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,dn, dT, dvel, dpsi, dby,iloc)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),&
@@ -632,10 +632,10 @@ DO i=1,mesh%nc
       T = T + T_weights_loc(jr)*basis_vals(jr)
       psi = psi + psi_weights_loc(jr)*basis_vals(jr)
       by = by + by_weights_loc(jr)*basis_vals(jr)
-      dn = dn + n_weights_loc(jr)*basis_vals(jr)
+      dn = dn + n_weights_loc(jr)*basis_grads(:,jr)
       dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
       dvel(:, 2) = 0.d0
-      dvel(:, 3) = dvel(:, 2) + vel_weights_loc(:, jr)*basis_grads(3, jr)
+      dvel(:, 3) = dvel(:, 3) + vel_weights_loc(:, jr)*basis_grads(3, jr)
       dT = dT + T_weights_loc(jr)*basis_grads(:,jr)
       dpsi = dpsi + psi_weights_loc(jr)*basis_grads(:,jr)
       dby = dby + by_weights_loc(jr)*basis_grads(:,jr)
@@ -873,22 +873,22 @@ self%fe_rep%field_tags(7)='by'
 CALL self%fe_rep%vec_create(self%u)
 
 !---Set boundary conditions (Dirichlet for now)
-ALLOCATE(self%n_bc(oft_blagrange%ne), self%T_bc(oft_blagrange%ne),self%velx_bc(oft_blagrange%ne), &
-          self%vely_bc(oft_blagrange%ne), self%velz_bc(oft_blagrange%ne), self%by_bc(oft_blagrange%ne))
-self%n_bc=.TRUE.
+ALLOCATE(self%T_bc(oft_blagrange%ne),self%velx_bc(oft_blagrange%ne), &
+          self%vely_bc(oft_blagrange%ne), self%velz_bc(oft_blagrange%ne), self%psi_bc(oft_blagrange%ne), self%by_bc(oft_blagrange%ne))
+! self%n_bc=.TRUE.
 self%velx_bc=.TRUE.
 self%vely_bc=.TRUE.
 self%velz_bc=.TRUE.
 self%T_bc=.TRUE.
-! self%psi_bc=.TRUE.
+self%psi_bc=.TRUE.
 self%by_bc=.TRUE.
 
-! self%n_bc=>oft_blagrange%be
+self%n_bc=>oft_blagrange%be
 ! self%velx_bc=>oft_blagrange%be
 ! self%vely_bc=>oft_blagrange%be
 ! self%velz_bc=>oft_blagrange%be
 ! self%T_bc=>oft_blagrange%be
-self%psi_bc=>oft_blagrange%be
+! self%psi_bc=>oft_blagrange%be
 ! self%by_bc=>oft_blagrange%be
 
 !---Create Jacobian matrix

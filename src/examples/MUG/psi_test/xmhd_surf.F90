@@ -208,7 +208,7 @@ END SUBROUTINE by_init
 SUBROUTINE psi_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = psi0*EXP(-((pt(1)-0.5)**2+pt(2)**2))
+val = psi0*(1.d0)
 END SUBROUTINE psi_init
 !
 END PROGRAM xmhd_circle

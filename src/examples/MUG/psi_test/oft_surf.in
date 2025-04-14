@@ -29,7 +29,7 @@
   eta=1.E-8
   nu=1.0
   gamma=10.0
-  D_diff=1.E-20
+  D_diff=1.E-8
   dt=1.E-3
   nsteps=50
   rst_freq=1
