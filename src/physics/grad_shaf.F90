@@ -5170,7 +5170,6 @@ IF(nnonaxi>0)THEN
         -nonaxi_vals(jc,self%region_info%reg_map(i))*dt_in/nonaxi_vals(self%region_info%block_max+1,self%region_info%reg_map(i))
     END DO
   END DO
-  DEALLOCATE(nonaxi_vals)
 END IF
 !---Add inductance and resistance terms for Vcoils
 IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
@@ -5203,6 +5202,7 @@ IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
   END DO
   DEALLOCATE(j2)
 END IF
+IF(nnonaxi>0)DEALLOCATE(nonaxi_vals)
 !---Set diagonal entries for dirichlet rows
 SELECT CASE(TRIM(bc))
 CASE("zerob")
@@ -5315,35 +5315,33 @@ DO j=1,smesh%nc
   call mat%add_values(j_lag,jvsc,self%coil_vcont(iCoil)*row_tmp,self%fe_rep%nce,1)
   !!$omp end critical
 end do
-! IF(PRESENT(nonaxi_vals))THEN
-!   do i=1,self%fe_rep%mesh%nc
-!     IF(self%region_info%reg_map(smesh%reg(i))==0)CYCLE
-!     eta_wt=0.d0
-!     IF(eta_reg(smesh%reg(i))>0.d0)eta_wt=1.d0/(dt_in*eta_reg(smesh%reg(i)))
-!     IF(eta_reg(smesh%reg(i))<=0.d0)CYCLE
-!     !---Get local to global DOF mapping
-!     call self%fe_rep%ncdofs(i,j_lag)
-!     !---Get local reconstructed operators
-!     row_tmp(1,1)=0.d0
-!     do m=1,self%fe_rep%quad%np ! Loop over quadrature points
-!       call self%fe_rep%mesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
-!       det=v*self%fe_rep%quad%wts(m)
-!       psi_tmp=0.d0
-!       do l=1,self%fe_rep%nce ! Loop over degrees of freedom
-!         call oft_blag_eval(self%fe_rep,i,l,self%fe_rep%quad%pts(:,m),rop(l))
-!         psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
-!       end do
-!       row_tmp(1,1)=row_tmp(1,1)+eta_wt*psi_tmp*det/(pt(1)+gs_epsilon)
-!     end do
-!     !---Add local values to global matrix
-!     m=self%region_info%reg_map(smesh%reg(i))
-!     psi_tmp=-row_tmp(1,1)/nonaxi_vals(self%region_info%block_max+1,m)
-!     psi_tmp=psi_tmp!*main_scale
-!     row_tmp(:,1)=psi_tmp*nonaxi_vals(:,m)
-!     call mat%add_values(self%region_info%noaxi_nodes(m)%v,j2, &
-!       row_tmp,self%region_info%noaxi_nodes(m)%n,1)
-!   end do
-! END IF
+IF(PRESENT(nonaxi_vals))THEN
+  do i=1,self%fe_rep%mesh%nc
+    IF(self%region_info%reg_map(smesh%reg(i))==0)CYCLE
+    !---Get local to global DOF mapping
+    call self%fe_rep%ncdofs(i,j_lag)
+    !---Get local reconstructed operators
+    row_tmp(:,1)=0.d0
+    do m=1,self%fe_rep%quad%np ! Loop over quadrature points
+      call self%fe_rep%mesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
+      det=v*self%fe_rep%quad%wts(m)
+      do l=1,self%fe_rep%nce ! Loop over degrees of freedom
+        call oft_blag_eval(self%fe_rep,i,l,self%fe_rep%quad%pts(:,m),rop(l))
+        row_tmp(l,1)=row_tmp(l,1)+rop(l)*det
+      end do
+    end do
+    !---Add local values to global matrix
+    m=self%region_info%reg_map(smesh%reg(i))
+    row_tmp(:,1)=-row_tmp(:,1)/nonaxi_vals(self%region_info%block_max+1,m)
+    row_tmp(:,1)=row_tmp(:,1)*main_scale
+    col_tmp(1,1)=0.d0
+    do l=1,self%region_info%noaxi_nodes(m)%n
+      col_tmp(1,1)=col_tmp(1,1)+nonaxi_vals(l,m)*btmp(self%region_info%noaxi_nodes(m)%v(l))
+    end do
+    row_tmp(:,1)=row_tmp(:,1)*col_tmp(1,1)
+    call mat%atomic_add_values(j_lag,j2,row_tmp(:,1),self%fe_rep%nce,1)
+  end do
+END IF
 deallocate(j_lag,rop,row_tmp,col_tmp)
 !!$omp end parallel
 DEALLOCATE(btmp,eta_reg)

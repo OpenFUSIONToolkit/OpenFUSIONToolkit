@@ -1219,10 +1219,6 @@ REAL(8), POINTER, DIMENSION(:) :: rtmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL c_f_pointer(rcoils, rtmp, [tMaker_obj%gs%ncoils])
-IF(ANY(rtmp>0.d0).AND.(tMaker_obj%gs%region_info%nnonaxi>0))THEN
-  CALL copy_string("Vcoils not supported with toroidally non-continuous regions",error_str)
-  RETURN
-END IF
 tMaker_obj%gs%Rcoils(1:tMaker_obj%gs%ncoils)=rtmp
 END SUBROUTINE tokamaker_set_vcoil
 !---------------------------------------------------------------------------------

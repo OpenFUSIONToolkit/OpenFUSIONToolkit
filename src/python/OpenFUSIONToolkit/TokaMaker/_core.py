@@ -1033,21 +1033,19 @@ class TokaMaker():
 
         @param psi0 Reference poloidal flux at t-dt (unnormalized)
         @param dt Time since reference poloidal flux
-        @param coil_currents Currents for Vcoils [A] (dictionary of form `{coil_name: coil_curr}`)
+        @param coil_currents Currents for Vcoils [A] (dictionary of form `{coil_name: coil_curr}`, defaults to current solution)
         @param coil_voltages Voltages for Vcoils [V] (dictionary of form `{coil_name: coil_volt}`)
         '''
         if psi0.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi0", should be [np]')
         psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
         if coil_currents is None:
-            curr_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
-            volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
+            coil_currents, _ = self.get_coil_currents()
+        curr_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents,True), dtype=numpy.float64)
+        if coil_voltages is not None:
+            volt_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages,True), dtype=numpy.float64)
         else:
-            curr_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents,True), dtype=numpy.float64)
-            if coil_voltages is not None:
-                volt_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages,True), dtype=numpy.float64)
-            else:
-                volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
+            volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_psi_dt(self._tMaker_ptr,psi0,curr_array,volt_array,c_double(dt),error_string)
         if error_string.value != b'':
