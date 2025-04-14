@@ -1474,6 +1474,31 @@ class TokaMaker():
                 mask = numpy.logical_or(mask,mask_tmp)
         return mask, mesh_currents
     
+    def get_strike_points(self):
+        lim = self.lim_contours[0] # Assume one limiter
+        lim = [numpy.array(pt) for pt in lim]
+
+        psi_eval = self.get_field_eval('PSI')
+        psi_LCFS = self.psi_bounds[0]
+
+        strike_pts = []
+        prev_pt = lim[-1]
+        prev_psi = psi_eval.eval(prev_pt)
+
+        for pt in lim:
+            psi = psi_eval.eval(pt)[0]
+            if prev_psi < psi_LCFS and psi > psi_LCFS:
+                psi_diff = (psi_LCFS - prev_psi) / (psi - prev_psi)
+                strike_pt = (1.0-psi_diff) * prev_pt + psi_diff * pt
+                strike_pts.append(strike_pt)
+            elif prev_psi > psi_LCFS and psi < psi_LCFS:
+                psi_diff = (psi_LCFS - psi) / (prev_psi - psi)
+                strike_pt = (1.0-psi_diff) * pt + psi_diff * prev_pt
+                strike_pts.append(strike_pt)
+            prev_pt = pt
+            prev_psi = psi
+        return strike_pts
+    
     def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
         r'''! Plot contours of \f$\hat{\psi}\f$
 
@@ -1879,4 +1904,3 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
             raise TypeError('H-mode equilibrium solve did not converge')
     
     return flag, j_BS
-
