@@ -11,6 +11,7 @@
 '''
 import struct
 import numpy
+from collections import OrderedDict
 from .._interface import *
 
 ## @cond
@@ -504,60 +505,74 @@ def read_mhdin(path, e_coil_names, f_coil_names):
 		
 	e_coil_dict = OrderedDict()
 	for name in e_coil_names:
-		e_coil_dict	[name] = []
+		e_coil_dict[name] = []
+
+	raw['ECID'] = [x for x in raw['ECID'] if len(x.strip()) > 0]
+	e_coil_vars = ['RE', 'ZE', 'WE', 'HE']
+	for var in e_coil_vars:
+		raw[var] = raw[var].split()
+
 	for i in range(len(raw['ECID'])):
+		if raw['ECID'][i].strip() == '':
+			continue
 		idx = int(raw['ECID'][i]) - 1
-		e_coil_dict[e_coil_names[idx]].append([raw['RE'][i], raw['ZE'][i], raw['WE'][i], raw['HE'][i]])
+		e_coil_dict[e_coil_names[idx]].append([float(raw['RE'][i]), float(raw['ZE'][i]), float(raw['WE'][i]), float(raw['HE'][i])])
 	machine_dict['ECOIL'] = e_coil_dict
+
+
+	f_coil_vars = ['RF', 'ZF', 'WF', 'HF', 'TURNFC']
+	for var in f_coil_vars:
+		raw[var] = raw[var].split()
 
 	f_coil_dict = OrderedDict()
 	for i in range(len(f_coil_names)):
-		f_coil_dict[f_coil_names[i]] = [raw['RF'][i], raw['ZF'][i], raw['WF'][i], raw['HF'][i], raw['TURNFC'][i]]
+		f_coil_dict[f_coil_names[i]] = [float(raw['RF'][i]), float(raw['ZF'][i]), float(raw['WF'][i]), float(raw['HF'][i]), float(raw['TURNFC'][i])]
 	machine_dict['FCOIL'] = f_coil_dict
 
 	probe_angle_dict = OrderedDict()
 	i = 0
+	probe_angles = raw['AMP2'].split()
 	for probe_name in machine_dict['MPNAM2']:
-		probe_angle_dict[probe_name] = raw['AMP2'][i]
+		probe_angle_dict[probe_name] = float(probe_angles[i])
 		i = i + 1
 	machine_dict['AMP2'] = probe_angle_dict
 
 	return machine_dict
 
 def read_kfile(path, e_coil_names, f_coil_names, machine_dict):	
-	print("READ K FILE")	
 	raw = namelist_read(path)
 	
 	probe_names = machine_dict['MPNAM2']
-	probe_vals = raw['EXPMP2']
-	probe_errs = raw['BITMPI']
-	probe_selected = raw['FWTMP2']
+	probe_vals = raw['EXPMP2'].split()
+	probe_errs = raw['BITMPI'].split()
+	probe_selected = raw['FWTMP2'].split()
 	probes_dict = OrderedDict()
+
 	for i in range(len(probe_names)):
-		if not probe_selected[i]:
+		if not float(probe_selected[i]):
 			continue
-		probes_dict[probe_names[i]] = [probe_vals[i], probe_errs[i]]
+		probes_dict[probe_names[i]] = [float(probe_vals[i]), float(probe_errs[i])]
 
 	loop_names = machine_dict['LPNAME']
-	loop_vals = raw['COILS']
-	loop_errs = raw['PSIBIT']
-	loop_selected = raw['FWTSI']
+	loop_vals = raw['COILS'].split()
+	loop_errs = raw['PSIBIT'].split()
+	loop_selected = raw['FWTSI'].split()
 	loops_dict = OrderedDict()
 	for i in range(len(loop_names)):
-		if not loop_selected[i]:
+		if not float(loop_selected[i]):
 			continue
-		loops_dict[loop_names[i]] = [loop_vals[i], loop_errs[i]]
+		loops_dict[loop_names[i]] = [float(loop_vals[i]), float(loop_errs[i])]
 		
-	e_coil_vals = raw['ECURRT']
-	e_coil_errs = raw['BITEC']
+	e_coil_vals = raw['ECURRT'].split()
+	e_coil_errs = raw['BITEC'].split()
 	e_coil_dict = OrderedDict()
 	for i in range(len(e_coil_names)):
-		e_coil_dict[e_coil_names[i]] = [e_coil_vals[i], e_coil_errs[i]]
+		e_coil_dict[e_coil_names[i]] = [float(e_coil_vals[i]), float(e_coil_errs[i])]
 	
-	f_coil_vals = raw['BRSP']
-	f_coil_errs = raw['BITFC']
+	f_coil_vals = raw['BRSP'].split()
+	f_coil_errs = raw['BITFC'].split()
 	f_coil_dict = OrderedDict()
 
 	for i in range(len(f_coil_names)):
-		f_coil_dict[f_coil_names[i]] = [f_coil_vals[i], f_coil_errs[i]]
+		f_coil_dict[f_coil_names[i]] = [float(f_coil_vals[i]), float(f_coil_errs[i])]
 	return probes_dict, loops_dict, e_coil_dict, f_coil_dict

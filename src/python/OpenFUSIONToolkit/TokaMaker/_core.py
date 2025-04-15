@@ -10,6 +10,7 @@
 @ingroup doxy_oft_python
 '''
 import collections
+from collections import OrderedDict
 import ctypes
 import numpy
 from ._interface import *
