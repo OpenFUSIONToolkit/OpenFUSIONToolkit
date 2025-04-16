@@ -172,7 +172,7 @@ CONTAINS
 SUBROUTINE n_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = n0*(1.d0)
+val = n0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
 END SUBROUTINE n_init
 !
 SUBROUTINE velx_init(pt,val)
@@ -199,16 +199,15 @@ REAL(r8), INTENT(out) :: val
 val = t0*(1.d0)
 END SUBROUTINE t_init  
 !
-SUBROUTINE by_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = by0*(1.d0)
-END SUBROUTINE by_init
-!
 SUBROUTINE psi_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = psi0*(1.d0)
+val = psi0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
 END SUBROUTINE psi_init
 !
+SUBROUTINE by_init(pt,val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = by0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
+END SUBROUTINE by_init
 END PROGRAM xmhd_circle
