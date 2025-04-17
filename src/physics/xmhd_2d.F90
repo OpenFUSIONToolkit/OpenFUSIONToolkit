@@ -451,7 +451,7 @@ DO i=1,mesh%nc
       res_loc(jr,1) = res_loc(jr, 1) &
         + basis_vals(jr)*n*jac_det*quad%wts(m) &
         +self%dt*basis_vals(jr)*DOT_PRODUCT(dn, vel)*jac_det*quad%wts(m) &
-        ! +self%dt*basis_vals(jr)*n*div_vel*jac_det*quad%wts(m) & ! works without this line
+        +self%dt*basis_vals(jr)*n*div_vel*jac_det*quad%wts(m) &
         +self%dt*D_diff*DOT_PRODUCT(dn,basis_grads(:,jr))*jac_det*quad%wts(m)
       !---Momentum
       res_loc(jr, 2:4) = res_loc(jr, 2:4) &
@@ -460,7 +460,7 @@ DO i=1,mesh%nc
         - self%dt*DOT_PRODUCT(btmp,btmp)*basis_grads(:,jr)*jac_det*quad%wts(m)/(2*mu0*m_i*n) &
         - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*jac_det*quad%wts(m)/(mu0*m_i*n**2) &
         + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*jac_det*quad%wts(m)/(2*mu0*m_i*n**2) &
-        + 2*self%dt*k_boltz*n*basis_vals(jr)*dT*jac_det*quad%wts(m)&
+        + 2*self%dt*k_boltz*n*basis_vals(jr)*dT*jac_det*quad%wts(m) &
         + 2*self%dt*k_boltz*T*basis_vals(jr)*dn*jac_det*quad%wts(m)
       DO k=1,3
         res_loc(jr,2:4) = res_loc(jr, 2:4) &
@@ -470,8 +470,8 @@ DO i=1,mesh%nc
       END DO
       !---Temperature
       res_loc(jr,5) = res_loc(jr, 5) &
-        + basis_vals(jr)*T*jac_det*quad%wts(m)/(gamma+1) &
-        + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, dT)*jac_det*quad%wts(m)/(gamma+1) &
+        + basis_vals(jr)*T*jac_det*quad%wts(m)/(gamma-1) &
+        + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, dT)*jac_det*quad%wts(m)/(gamma-1) &
         ! - self%dt*k_boltz*basis_vals(jr)*T*div_vel &
         + self%dt*chi*DOT_PRODUCT(dT, basis_grads(:,jr)) !&
         ! - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(dn, dT)/n
@@ -485,7 +485,7 @@ DO i=1,mesh%nc
         + basis_vals(jr)*by*jac_det*quad%wts(m) &
         - basis_vals(jr)*self%dt*tmp1(2)*jac_det*quad%wts(m) &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dby)*jac_det*quad%wts(m) &
-        ! + basis_vals(jr)*self%dt*by*div_vel*jac_det*quad%wts(m) &
+        + basis_vals(jr)*self%dt*by*div_vel*jac_det*quad%wts(m) &
         + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dby)*jac_det*quad%wts(m)/mu0
     END DO
   END DO
@@ -652,11 +652,13 @@ DO i=1,mesh%nc
       DO jc=1,oft_blagrange%nce
         ! Diffusion
         ! dx = jac_det*quad%wts(m)
+        ! n, n
         jac_loc(1, 1)%m(jr,jc) = jac_loc(1, 1)%m(jr, jc) &
         + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
         + self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), vel)*jac_det*quad%wts(m) & !delta_n*div(u)
         + self%dt*basis_vals(jr)*basis_vals(jc)*div_vel*jac_det*quad%wts(m) & ! u dot grad(delta_n)
         + self%dt*D_diff*DOT_PRODUCT(basis_grads(:, jr),basis_grads(:, jc))*jac_det*quad%wts(m)
+        ! n, vel
         DO l=1,3
           jac_loc(1, l+1)%m(jr,jc) = jac_loc(1, l+1)%m(jr, jc) &
           + basis_vals(jr)*self%dt*n*SUM(basis_grads(:, jc))*jac_det*quad%wts(m) & ! n*div(delta_u) = n*SUM(basis_grads)?
@@ -722,23 +724,23 @@ DO i=1,mesh%nc
           - self%dt*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*tmp2(l)*jac_det*quad%wts(m)/(m_i*n**2*mu0) &
           + self%dt*basis_vals(jc)*dn(l)*DOT_PRODUCT([0.d0,basis_vals(jc),0.d0], btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu0) 
         END DO
-        ! Temperature: delta_n
-        jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
-        - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*jac_det*quad%wts(m)/n & ! grad(delta_n)
-        + self%dt*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)/(n**2)*jac_det*quad%wts(m) ! delta_n
-        ! delta_u
+        ! T, n
+        ! jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
+        ! - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*jac_det*quad%wts(m)/n & ! grad(delta_n)
+        ! + self%dt*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)*jac_det*quad%wts(m)/(n**2) ! delta_n
+        ! T, vel
         DO l=1,3
           jac_loc(5, l+1)%m(jr,jc) = jac_loc(5, l+1)%m(jr, jc) &  
-          + basis_vals(jr) * self%dt*basis_vals(jc)*SUM(dT)/(gamma-1)*jac_det*quad%wts(m) & ! delta_u dot Delta_T
-          - basis_vals(jr) * self%dt*k_boltz*T*SUM(basis_grads(:, jc))*jac_det*quad%wts(m) ! div(delta u) = SUM(basis_grads)?
+          + basis_vals(jr) * self%dt*basis_vals(jc)*SUM(dT)*jac_det*quad%wts(m)/(gamma-1) & ! delta_u dot Delta_T
+          + basis_vals(jr) * self%dt*k_boltz*T*SUM(basis_grads(:, jc))*jac_det*quad%wts(m) ! div(delta u) = SUM(basis_grads)?
         END DO
-        ! delta_T
+        ! T, T
         jac_loc(5, 5)%m(jr,jc) = jac_loc(5,5)%m(jr, jc) &  
         + basis_vals(jr) * basis_vals(jc)*jac_det*quad%wts(m)/(gamma-1) &! delta_T
         + basis_vals(jr) * self%dt*DOT_PRODUCT(vel, basis_grads(:, jc))*jac_det*quad%wts(m)/(gamma-1) & ! nabla(dT)
-        - basis_vals(jr) * self%dt*k_boltz*basis_vals(jc)*div_vel*jac_det*quad%wts(m) & ! dT != nabla(dT)
-        + self%dt * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*jac_det*quad%wts(m) & ! dT_Chi
-        - self%dt*basis_vals(jr)*chi*DOT_PRODUCT(dn, basis_grads(:, jc))*jac_det*quad%wts(m)/n
+        + basis_vals(jr) * self%dt*k_boltz*basis_vals(jc)*div_vel*jac_det*quad%wts(m) & ! dT != nabla(dT)
+        + self%dt * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*jac_det*quad%wts(m) !& ! dT_Chi
+        ! - self%dt*basis_vals(jr)*chi*DOT_PRODUCT(dn, basis_grads(:, jc))*jac_det*quad%wts(m)/n
         ! Induction
         ! Psi rows
         DO l=1,3
@@ -881,22 +883,22 @@ self%fe_rep%field_tags(7)='by'
 CALL self%fe_rep%vec_create(self%u)
 
 !---Set boundary conditions (Dirichlet for now)
-ALLOCATE( self%velx_bc(oft_blagrange%ne), self%vely_bc(oft_blagrange%ne), &
-          self%velz_bc(oft_blagrange%ne),self%T_bc(oft_blagrange%ne))
-! ! self%n_bc(oft_blagrange%ne),self%psi_bc(oft_blagrange%ne)), self%by_bc(oft_blagrange%ne)
+! ALLOCATE( self%velx_bc(oft_blagrange%ne), self%vely_bc(oft_blagrange%ne), &
+!           self%velz_bc(oft_blagrange%ne))
+! ! self%n_bc(oft_blagrange%ne),self%psi_bc(oft_blagrange%ne)), self%by_bc(oft_blagrange%ne),self%T_bc(oft_blagrange%ne)
 ! self%n_bc=.TRUE.
-self%velx_bc=.TRUE.
-self%vely_bc=.TRUE.
-self%velz_bc=.TRUE.
-self%T_bc=.TRUE.
+! self%velx_bc=.TRUE.
+! self%vely_bc=.TRUE.
+! self%velz_bc=.TRUE.
+! self%T_bc=.TRUE.
 ! self%psi_bc=.TRUE.
 ! self%by_bc=.TRUE.
 
 self%n_bc=>oft_blagrange%be
-! self%velx_bc=>oft_blagrange%be
-! self%vely_bc=>oft_blagrange%be
-! self%velz_bc=>oft_blagrange%be
-! self%T_bc=>oft_blagrange%be
+self%velx_bc=>oft_blagrange%be
+self%vely_bc=>oft_blagrange%be
+self%velz_bc=>oft_blagrange%be
+self%T_bc=>oft_blagrange%be
 self%psi_bc=>oft_blagrange%be
 self%by_bc=>oft_blagrange%be
 
