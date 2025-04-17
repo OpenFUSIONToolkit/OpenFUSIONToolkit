@@ -552,7 +552,6 @@ def read_kfile(path, e_coil_names, f_coil_names, machine_dict):
 		if not float(probe_selected[i]):
 			continue
 		probes_dict[probe_names[i]] = [float(probe_vals[i]), float(probe_errs[i])]
-	# probes_dict['PSF1A'] = float(raw['SIREF'])
 
 	loop_names = machine_dict['LPNAME']
 	loop_vals = raw['COILS'].split()
@@ -563,8 +562,7 @@ def read_kfile(path, e_coil_names, f_coil_names, machine_dict):
 	for i in range(len(loop_names)):
 		if not float(loop_selected[i]):
 			continue
-		loops_dict[loop_names[i]] = [float(loop_vals[i]), float(loop_errs[i])]
-	loops_dict['PSF1A'][0] = float(raw['SIREF']) # / (2*numpy.pi)
+		loops_dict[loop_names[i]] = [float(loop_vals[i]) + float(raw['SIREF']), float(loop_errs[i])]
 		
 	e_coil_vals = raw['ECURRT'].split()
 	e_coil_errs = raw['BITEC'].split()
