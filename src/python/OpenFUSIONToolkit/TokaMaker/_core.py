@@ -36,7 +36,7 @@ def tokamaker_default_settings(oft_env):
     return settings
 
 
-def create_prof_file(self, filename, profile_dict, name):
+def create_prof_file(self, filename, profile_dict, name, include_sol=False):
     '''! Create profile input file to be read by load_profiles()
 
     @param filename Name of input file, see options in set_profiles()
@@ -60,14 +60,16 @@ def create_prof_file(self, filename, profile_dict, name):
             y = numpy.array(y.copy())
         if numpy.min(numpy.diff(x)) < 0.0:
             raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
-        if (x[0] < 0.0) or (x[-1] > 1.0):
-            raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
         if self.psi_convention == 0:
+            if (x[0] < 0.0) or ((x[-1] > 1.0) and not include_sol):
+                raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
             x = 1.0 - x
             sort_inds = x.argsort()
             x = x[sort_inds]
             y = y[sort_inds]
         elif self.psi_convention == 1:
+            if ((x[0] < 0.0) and not include_sol) or (x[-1] > 1.0):
+                raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
             pass
         else:
             raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
@@ -113,6 +115,8 @@ class TokaMaker():
         self.dist_coils = {}
         ## Vacuum F value
         self._F0 = 0.0
+        ## Include F*F' term in SOL?
+        self._F_SOL = False
         ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
         self._Ip_target=c_double(-1.0)
         ## Plasma current target ratio I_p(FF') / I_p(P') (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
@@ -182,6 +186,7 @@ class TokaMaker():
         self.coil_sets = {}
         self._virtual_coils = {}
         self._F0 = 0.0
+        self._F_SOL = False
         self._Ip_target=c_double(-1.0)
         self._Ip_ratio_target=c_double(-1.E99)
         self._pax_target=c_double(-1.0)
@@ -563,7 +568,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise ValueError("Error in initialization: {0}".format(error_string.value.decode()))
 
-    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
+    def load_profiles(self, f_file='none', foffset=None, f_SOL=None, p_file='none', eta_file='none', f_NI_file='none'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -574,16 +579,18 @@ class TokaMaker():
         '''
         if foffset is not None:
             self._F0 = foffset
+        if f_SOL is not None:
+            self._F_SOL = f_SOL
         f_file_c = self._oft_env.path2c(f_file)
         p_file_c = self._oft_env.path2c(p_file)
         eta_file_c = self._oft_env.path2c(eta_file)
         f_NI_file_c = self._oft_env.path2c(f_NI_file)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_load_profiles(self._tMaker_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
+        tokamaker_load_profiles(self._tMaker_ptr,f_file_c,c_double(self._F0),c_bool(self._F_SOL),p_file_c,eta_file_c,f_NI_file_c,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
+    def set_profiles(self, ffp_prof=None, foffset=None, f_SOL=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations 
@@ -596,10 +603,12 @@ class TokaMaker():
         @param keep_files Retain temporary profile files
         '''
         delete_files = []
+        if f_SOL is not None:
+            self._F_SOL = f_SOL
         ffp_file = 'none'
         if ffp_prof is not None:
             ffp_file = self._oft_env.unique_tmpfile('tokamaker_f.prof')
-            create_prof_file(self, ffp_file, ffp_prof, "F*F'")
+            create_prof_file(self, ffp_file, ffp_prof, "F*F'", self._F_SOL)
             delete_files.append(ffp_file)
         pp_file = 'none'
         if pp_prof is not None:
@@ -614,7 +623,7 @@ class TokaMaker():
             delete_files.append(ffp_NI_file)
         if foffset is not None:
             self._F0 = foffset
-        self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
+        self.load_profiles(ffp_file,foffset,f_SOL,pp_file,eta_file,ffp_NI_file)
         if not keep_files:
             for file in delete_files:
                 try:
