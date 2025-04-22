@@ -1074,12 +1074,13 @@ class LIBAEC(package):
         
         
 class HDF5(package):
-    def __init__(self, parallel=False, cmake_build=False, build_hl=False, shared_libs=True):
+    def __init__(self, parallel=False, cmake_build=False, build_hl=False, shared_libs=True,build_deps=True):
         self.name = "HDF5"
         self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.6/hdf5-1.14.6.tar.gz"
         self.parallel = parallel
         self.cmake_build = cmake_build
         self.build_hl = build_hl
+        self.build_deps = build_deps
         self.shared_libs = shared_libs
 
         #ugly but this works for the build deps
