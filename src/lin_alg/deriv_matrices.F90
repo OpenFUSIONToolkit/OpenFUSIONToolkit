@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_deriv_matrices.F90
 !
 !> Abstract operator interfaces and native matrix implementations
@@ -17,18 +19,16 @@
 !! @authors Chris Hansen
 !! @date Feburary 2012
 !! @ingroup la
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE oft_deriv_matrices
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_cmatrix
 IMPLICIT NONE
 #include "local.h"
 private
-!------------------------------------------------------------------------------
-! CLASS oft_noop_matrix
-!------------------------------------------------------------------------------
-!
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 type, public, extends(oft_matrix) :: oft_noop_matrix
 contains
   procedure :: apply_real => noop_apply_real
@@ -43,9 +43,9 @@ contains
   procedure :: zero_rows => noop_zero_rows
   procedure :: delete => noop_delete
 end type oft_noop_matrix
-!------------------------------------------------------------------------------
-!
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 type, public, extends(oft_cmatrix) :: oft_noop_cmatrix
 contains
   procedure :: apply_real => cnoop_apply_real
@@ -60,11 +60,9 @@ contains
   procedure :: zero_rows => cnoop_zero_rows
   procedure :: delete => cnoop_delete
 end type oft_noop_cmatrix
-!------------------------------------------------------------------------------
-! CLASS oft_diagmatrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Diagonal matrix class
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_noop_matrix) :: oft_diagmatrix
 contains
   procedure :: apply_real => diagmat_apply_real
@@ -75,11 +73,9 @@ contains
   procedure :: zero => diagmat_zero
   procedure :: delete => diagmat_delete
 end type oft_diagmatrix
-!------------------------------------------------------------------------------
-! CLASS oft_sum_matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Sum matrix class M = beta*J + alam*K
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_noop_matrix) :: oft_sum_matrix
   real(r8) :: alam = 1.d0 !< Lambda factor
   real(r8) :: beta = 1.d0 !< Beta factor
@@ -93,9 +89,9 @@ contains
   !> Complete matrix assembly
   procedure :: assemble => sum_mat_assemble
 end type oft_sum_matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Sum matrix class M = beta*J + alam*K
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_noop_cmatrix) :: oft_sum_cmatrix
   complex(c8) :: alam = (1.d0,0.d0) !< Lambda factor
   complex(c8) :: beta = (1.d0,0.d0) !< Beta factor
@@ -111,14 +107,12 @@ contains
   !> Complete matrix assembly
   procedure :: assemble => sum_cmat_assemble
 end type oft_sum_cmatrix
-!------------------------------------------------------------------------------
-! CLASS oft_mf_matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Wrapper matrix for matrix-free Jacobians
 !!
 !! Computes a Finite Difference approximation to the Jacobian of a function
 !! \f$ F'(v) = [F(u0 + h * v) - F(u0)]/h \f$
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_noop_matrix) :: oft_mf_matrix
   real(r8) :: b0 = 1.d-6 !< Approximate relative error in function eval
   class(oft_matrix), pointer :: f => NULL() !< Non-linear function
@@ -137,342 +131,253 @@ contains
 end type oft_mf_matrix
 public create_diagmatrix
 contains
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_apply
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine noop_apply_real(self,a,b)
 class(oft_noop_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 call oft_abort('No matrix type specified','noop_apply_real',__FILE__)
 end subroutine noop_apply_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_apply
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
 !! b = self * a
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine noop_apply_comp(self,a,b)
 class(oft_noop_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 call oft_abort('No matrix type specified','noop_apply_comp',__FILE__)
 end subroutine noop_apply_comp
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_applyt
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply the matrix to a field.
 !!
-!! b = selfT * a
+!! b = self^T * a
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine noop_applyt(self,a,b)
 class(oft_noop_matrix), intent(inout) :: self
-class(oft_vector), intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_vector), intent(inout) :: a !< Source field
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 call oft_abort('No matrix type specified','noop_applyt',__FILE__)
 end subroutine noop_applyt
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_set_values
-!------------------------------------------------------------------------------
-!> Set values of a matrix.
+!---------------------------------------------------------------------------------
+!> Set values of a matrix
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to set [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine noop_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_noop_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 call oft_abort('Invalid operation for matrix type','noop_set_values',__FILE__)
 end subroutine noop_set_values
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_add_values
-!------------------------------------------------------------------------------
-!> Add values to a matrix.
+!---------------------------------------------------------------------------------
+!> Add values to a matrix
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine noop_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_noop_matrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 call oft_abort('Invalid operation for matrix type','noop_add_values',__FILE__)
 end subroutine noop_add_values
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_assemble
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine noop_assemble(self,diag)
 class(oft_noop_matrix), intent(inout) :: self
-class(oft_vector), optional, target, intent(inout) :: diag
+class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 call oft_abort('No matrix type specified','noop_assemble',__FILE__)
 end subroutine noop_assemble
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_zero
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in matrix
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine noop_zero(self)
 class(oft_noop_matrix), intent(inout) :: self
 call oft_abort('No matrix type specified','noop_zero',__FILE__)
 end subroutine noop_zero
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_zero_rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine noop_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_noop_matrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 call oft_abort('No matrix type specified','noop_zero_rows',__FILE__)
 end subroutine noop_zero_rows
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete matrix
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
 !! of the member function and catch errors in uninitialized matrices.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine noop_delete(self)
 class(oft_noop_matrix), intent(inout) :: self
 call oft_warn('Finalizing general matrix, this may indicate an error.')
 end subroutine noop_delete
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Apply the matrix to a field
 !!
 !! b = self * a
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine cnoop_apply_real(self,a,b)
 class(oft_noop_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 call oft_abort('No matrix type specified','cnoop_apply_real',__FILE__)
 end subroutine cnoop_apply_real
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Apply the matrix to a field
 !!
 !! b = self * a
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine cnoop_apply_comp(self,a,b)
 class(oft_noop_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 call oft_abort('No matrix type specified','cnoop_apply_comp',__FILE__)
 end subroutine cnoop_apply_comp
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Apply the matrix to a field
 !!
 !! b = selfT * a
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine cnoop_applyt(self,a,b)
 class(oft_noop_cmatrix), intent(inout) :: self
-class(oft_vector), intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_vector), intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< Result of matrix product
 call oft_abort('No matrix type specified','cnoop_applyt',__FILE__)
 end subroutine cnoop_applyt
-!------------------------------------------------------------------------------
-!> Set values of a matrix.
+!---------------------------------------------------------------------------------
+!> Set values of a matrix
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to set [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine cnoop_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_noop_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-complex(c8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 call oft_abort('Invalid operation for matrix type','cnoop_set_values',__FILE__)
 end subroutine cnoop_set_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix.
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine cnoop_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_noop_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-complex(c8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 call oft_abort('Invalid operation for matrix type','cnoop_add_values',__FILE__)
 end subroutine cnoop_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine cnoop_assemble(self,diag)
 class(oft_noop_cmatrix), intent(inout) :: self
-class(oft_cvector), optional, target, intent(inout) :: diag
+class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 call oft_abort('No matrix type specified','cnoop_assemble',__FILE__)
 end subroutine cnoop_assemble
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in matrix
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
 !! of the member function and catch errors in uninitialized matrices.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cnoop_zero(self)
 class(oft_noop_cmatrix), intent(inout) :: self
 call oft_abort('No matrix type specified','cnoop_zero',__FILE__)
 end subroutine cnoop_zero
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine cnoop_zero_rows(self,nrows,irows,iblock,keep_diag)
 class(oft_noop_cmatrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 call oft_abort('No matrix type specified','cnoop_zero_rows',__FILE__)
 end subroutine cnoop_zero_rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete matrix
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
 !! of the member function and catch errors in uninitialized matrices.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine cnoop_delete(self)
 class(oft_noop_cmatrix), intent(inout) :: self
 call oft_warn('Finalizing general matrix, this may indicate an error.')
 end subroutine cnoop_delete
-!------------------------------------------------------------------------------
-! SUBROUTINE: create_diagmatrix
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
-!!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 subroutine create_diagmatrix(self,a)
 class(oft_matrix), pointer, intent(inout) :: self
 class(oft_vector), intent(inout) :: a
@@ -484,44 +389,35 @@ self%nr=a%n; self%nrg=a%ng
 self%nc=a%n; self%ncg=a%ng
 DEBUG_STACK_POP
 end subroutine create_diagmatrix
-!------------------------------------------------------------------------------
-! FUNCTION: diagmatrix_cast
-!------------------------------------------------------------------------------
-!> Cast a matrix object to a oft_diagmatrix.
+!---------------------------------------------------------------------------------
+!> Cast a matrix object to a oft_diagmatrix
 !!
-!! The source matrix must be oft_diagmatrix or a child class, otherwise an error will be thrown.
-!!
-!! @param[out] self Pointer to cast crsmatrix
-!! @param[in] source Source matrix to cast
-!------------------------------------------------------------------------------
-FUNCTION diagmatrix_cast(self,source) result(ierr)
-class(oft_diagmatrix), pointer, intent(out) :: self
-class(oft_matrix), target, intent(in) :: source
-integer(i4) :: ierr
+!! The source matrix must be @ref oft_diagmatrix or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
+!---------------------------------------------------------------------------------
+FUNCTION diagmatrix_cast(self,source) result(success)
+class(oft_diagmatrix), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_matrix), target, intent(in) :: source !< Source matrix to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_diagmatrix)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION diagmatrix_cast
-!------------------------------------------------------------------------------
-! SUBROUTINE: diagmat_apply_real
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Apply the matrix to a field
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine diagmat_apply_real(self,a,b)
 class(oft_diagmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_vector), intent(inout) :: b !< Result of matrix product
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','diagmat_apply_real',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','diagmat_apply_real',__FILE__)
@@ -529,20 +425,15 @@ call b%add(0.d0,1.d0,a)
 call b%mult(self%D)
 DEBUG_STACK_POP
 end subroutine diagmat_apply_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: diagmat_apply_comp
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Apply the matrix to a field
 !!
 !! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine diagmat_apply_comp(self,a,b)
 class(oft_diagmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_cvector), target, intent(inout) :: a !< Source field
+class(oft_cvector), intent(inout) :: b !< 
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','diagmat_apply_comp',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','diagmat_apply_comp',__FILE__)
@@ -550,71 +441,47 @@ call b%add((0.d0,0.d0),(1.d0,0.d0),a)
 call b%mult(self%D)
 DEBUG_STACK_POP
 end subroutine diagmat_apply_comp
-!------------------------------------------------------------------------------
-! SUBROUTINE: noop_set_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Set values of a matrix.
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to set [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine diagmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_diagmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 call oft_abort('Invalid operation for matrix type','diagmat_set_values',__FILE__)
 end subroutine diagmat_set_values
-!------------------------------------------------------------------------------
-! SUBROUTINE: diagmat_add_values
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add values to a matrix.
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] i_inds Row indices of entries to set [n]
-!! @param[in] j_inds Column indices of entries to set [m]
-!! @param[in] b Values to add [n,m]
-!! @param[in] n Number of rows in local matrix
-!! @param[in] m Number of columns in local matrix
-!! @param[in] iblock Row block (optional)
-!! @param[in] jblock Column block (optional)
-!------------------------------------------------------------------------------
+!! of the member function and catch errors in uninitialized matrices
+!---------------------------------------------------------------------------------
 subroutine diagmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
-class(oft_diagmatrix), intent(inout) :: self
-integer(i4), intent(in) :: i_inds(n)
-integer(i4), intent(in) :: j_inds(m)
-real(r8), intent(in) :: b(n,m)
-integer(i4), intent(in) :: n
-integer(i4), intent(in) :: m
-integer(i4), optional, intent(in) :: iblock
-integer(i4), optional, intent(in) :: jblock
-integer(i4), optional, intent(inout) :: loc_cache(n,m)
+class(oft_diagmatrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
+integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
+real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+integer(i4), optional, intent(in) :: jblock !< Column block (optional)
+integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 call oft_abort('Invalid operation for matrix type','diagmat_add_values',__FILE__)
 end subroutine diagmat_add_values
-!------------------------------------------------------------------------------
-! SUBROUTINE: diagmat_assemble
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE diagmat_assemble(self,diag)
-CLASS(oft_diagmatrix), INTENT(inout) :: self
-CLASS(oft_vector), OPTIONAL, TARGET, INTENT(inout) :: diag
+CLASS(oft_diagmatrix), INTENT(inout) :: self !< Matrix object
+CLASS(oft_vector), OPTIONAL, TARGET, INTENT(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
 !---Setup diagonal scaling
 IF(present(diag))THEN
@@ -627,44 +494,27 @@ END IF
 DEBUG_STACK_POP
 !---Common assembly tasks
 END SUBROUTINE diagmat_assemble
-!------------------------------------------------------------------------------
-! SUBROUTINE: diagmat_zero
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in matrix
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine diagmat_zero(self)
 class(oft_diagmatrix), intent(inout) :: self
 CALL self%D%set(0.d0)
 end subroutine diagmat_zero
-!------------------------------------------------------------------------------
-! SUBROUTINE: diagmat_zero_rows
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Zero all entries in the specified rows
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized matrices.
-!!
-!! @param[in] nrows Number of rows to zero
-!! @param[in] irows Indices of rows to zero [nrows]
-!! @param[in] iblock Row block (optional)
-!! @param[in] keep_diag Keep diagonal entries
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine diagmat_zero_rows(self,nrows,irows,iblock,keep_diag)
-class(oft_diagmatrix), intent(inout) :: self
-integer(i4), intent(in) :: nrows
-integer(i4), intent(in) :: irows(nrows)
-integer(i4), optional, intent(in) :: iblock
-logical, optional, intent(in) :: keep_diag
+class(oft_diagmatrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: nrows !< Number of rows to zero
+integer(i4), intent(in) :: irows(nrows) !< Indices of rows to zero [nrows]
+integer(i4), optional, intent(in) :: iblock !< Row block (optional)
+logical, optional, intent(in) :: keep_diag !< Keep diagonal entries
 call oft_abort('Invalid operation for matrix type','diagmat_zero_rows',__FILE__)
 end subroutine diagmat_zero_rows
-!------------------------------------------------------------------------------
-! SUBROUTINE: diagmat_delete
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Delete matrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine diagmat_delete(self)
 class(oft_diagmatrix), intent(inout) :: self
 IF(ASSOCIATED(self%D))THEN
@@ -674,44 +524,35 @@ END IF
 self%nr=0; self%nrg=0
 self%nc=0; self%ncg=0
 end subroutine diagmat_delete
-!------------------------------------------------------------------------------
-! FUNCTION: sum_matrix_cast
-!------------------------------------------------------------------------------
-!> Cast a matrix object to a oft_sum_matrix
+!---------------------------------------------------------------------------------
+!> Cast a matrix object to a sum_matrix_cast
 !!
-!! The source matrix must be oft_sum_matrix or a child class, otherwise an error will be thrown.
-!!
-!! @param[out] self Pointer to cast sum_matrix
-!! @param[in] source Source matrix to cast
-!------------------------------------------------------------------------------
-FUNCTION sum_matrix_cast(self,source) result(ierr)
-class(oft_sum_matrix), pointer, intent(out) :: self
-class(oft_matrix), target, intent(in) :: source
-integer(i4) :: ierr
+!! The source matrix must be @ref sum_matrix_cast or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
+!---------------------------------------------------------------------------------
+FUNCTION sum_matrix_cast(self,source) result(success)
+class(oft_sum_matrix), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_matrix), target, intent(in) :: source !< Source matrix to cast
+LOGICAL :: success !< Cast success flag
 DEBUG_STACK_PUSH
 select type(source)
   class is(oft_sum_matrix)
     self=>source
-    ierr=0
+    success=.TRUE.
   class default
-    ierr=-1
+    success=.FALSE.
 end select
 DEBUG_STACK_POP
 end FUNCTION sum_matrix_cast
-!------------------------------------------------------------------------------
-! SUBROUTINE: sum_mat_apply_real
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Compute matrix vector product
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! b = (self%beta*self%J + self%alam*self%K) * a
+!---------------------------------------------------------------------------------
 subroutine sum_mat_apply_real(self,a,b)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_vector), intent(inout) :: b !< Result vector
 class(oft_vector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_apply_real',__FILE__)
@@ -725,20 +566,15 @@ CALL vtmp%delete()
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_mat_apply_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: sum_mat_apply_comp
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Compute matrix vector product (complex)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! b = (self%beta*self%J + self%alam*self%K) * a
+!---------------------------------------------------------------------------------
 subroutine sum_mat_apply_comp(self,a,b)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_apply_comp',__FILE__)
@@ -752,20 +588,15 @@ CALL vtmp%delete()
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_mat_apply_comp
-!------------------------------------------------------------------------------
-! SUBROUTINE: sum_mat_applyt_real
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Compute matrix vector product for matrix transpose
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! b = self%beta*self%J^T + self%alam*self%K^T * a
+!---------------------------------------------------------------------------------
 subroutine sum_mat_applyt_real(self,a,b)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_vector), intent(inout) :: b !< Result vector
 class(oft_vector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_applyt_real',__FILE__)
@@ -779,20 +610,15 @@ CALL vtmp%delete()
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_mat_applyt_real
-!------------------------------------------------------------------------------
-! SUBROUTINE: sum_mat_applyt_comp
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Compute matrix vector product for matrix transpose (complex)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! b = self%beta*self%J^T + self%alam*self%K^T * a
+!---------------------------------------------------------------------------------
 subroutine sum_mat_applyt_comp(self,a,b)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_applyt_comp',__FILE__)
@@ -806,14 +632,12 @@ CALL vtmp%delete()
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_mat_applyt_comp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine sum_mat_assemble(self,diag)
-class(oft_sum_matrix), intent(inout) :: self
-class(oft_vector), optional, target, intent(inout) :: diag
+class(oft_sum_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 DEBUG_STACK_PUSH
 !---
 if(present(diag))then
@@ -838,18 +662,15 @@ self%nr=self%J%nr; self%nrg=self%J%nrg
 self%nc=self%J%nc; self%ncg=self%J%ncg
 DEBUG_STACK_POP
 end subroutine sum_mat_assemble
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Compute matrix vector product (real)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! b = (self%beta*self%J + self%alam*self%K) * a
+!---------------------------------------------------------------------------------
 subroutine sum_cmat_apply_real(self,a,b)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_vector), pointer :: rtmp
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
@@ -880,18 +701,15 @@ CALL vtmp%delete()
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_cmat_apply_real
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Compute matrix vector product
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! b = (self%beta*self%J + self%alam*self%K) * a
+!---------------------------------------------------------------------------------
 subroutine sum_cmat_apply_comp(self,a,b)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_apply_comp',__FILE__)
@@ -913,18 +731,15 @@ CALL vtmp%delete()
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_cmat_apply_comp
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Compute matrix vector product for matrix transpose (real)
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! b = self%beta*self%J^T + self%alam*self%K^T * a
+!---------------------------------------------------------------------------------
 subroutine sum_cmat_applyt_real(self,a,b)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_vector), pointer :: rtmp
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
@@ -955,18 +770,15 @@ CALL vtmp%delete()
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_cmat_applyt_real
-!------------------------------------------------------------------------------
-!> Apply the matrix to a field.
+!---------------------------------------------------------------------------------
+!> Compute matrix vector product for matrix transpose
 !!
-!! b = self * a
-!!
-!! @param[in] a Source field
-!! @param[out] b Result of matrix product
-!------------------------------------------------------------------------------
+!! b = self%beta*self%J^T + self%alam*self%K^T * a
+!---------------------------------------------------------------------------------
 subroutine sum_cmat_applyt_comp(self,a,b)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_cvector), target, intent(inout) :: a
-class(oft_cvector), intent(inout) :: b
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), target, intent(inout) :: a !< Vector object
+class(oft_cvector), intent(inout) :: b !< Result vector
 class(oft_cvector), pointer :: vtmp
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','sum_mat_applyt_comp',__FILE__)
@@ -988,14 +800,12 @@ CALL vtmp%delete()
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine sum_cmat_applyt_comp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Finish assembly of matrix and optionally extract diagonals
-!!
-!! @param[in,out] diag Diagonal entries of matrix [nr] (optional)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine sum_cmat_assemble(self,diag)
-class(oft_sum_cmatrix), intent(inout) :: self
-class(oft_cvector), optional, target, intent(inout) :: diag
+class(oft_sum_cmatrix), intent(inout) :: self !< Matrix object
+class(oft_cvector), optional, target, intent(inout) :: diag !< Diagonal entries of matrix [nr] (optional)
 class(oft_vector), pointer :: rdiag
 DEBUG_STACK_PUSH
 !---
@@ -1048,18 +858,15 @@ ELSE IF(ASSOCIATED(self%cJ))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine sum_cmat_assemble
-!---------------------------------------------------------------------------
-! SUBROUTINE: mf_mat_apply_real
-!---------------------------------------------------------------------------
-!> Compute Jacobian approximation
+!------------------------------------------------------------------------------
+!> Compute matrix vector product
 !!
-!! @param[in] a Source field
-!! @param[in,out] b F(a)
-!---------------------------------------------------------------------------
+!! b = (self%f(a) - self%f0)/eps
+!------------------------------------------------------------------------------
 subroutine mf_mat_apply_real(self,a,b)
-class(oft_mf_matrix), intent(inout) :: self
-class(oft_vector), target, intent(inout) :: a
-class(oft_vector), intent(inout) :: b
+class(oft_mf_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), target, intent(inout) :: a !< Vector object
+class(oft_vector), intent(inout) :: b !< Result vector
 real(r8) :: eps,bb,aa,a1
 aa=a%dot(a)
 IF(aa==0.d0)THEN
@@ -1082,19 +889,14 @@ CALL self%tmp%add(0.d0,1.d0,self%u0,eps,a)
 CALL self%f%apply(self%tmp,b)
 CALL b%add(1.d0/eps,-1.d0/eps,self%f0)
 end subroutine mf_mat_apply_real
-!---------------------------------------------------------------------------
-! SUBROUTINE: mf_mat_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup matrix-free Jacobian operator
-!!
-!! @param[in] a Field defining domain and range spaces
-!! @param[in] f Non-linear function defining the Jacobian
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine mf_mat_setup(self,a,f,utyp)
-class(oft_mf_matrix), intent(inout) :: self
-class(oft_vector), intent(inout) :: a
-class(oft_matrix), target, intent(in) :: f
-class(oft_vector), optional, intent(inout) :: utyp
+class(oft_mf_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), intent(inout) :: a !< Vector defining domain and range spaces
+class(oft_matrix), target, intent(in) :: f !< Non-linear function defining the Jacobian
+class(oft_vector), optional, intent(inout) :: utyp !< Vector of "typical sizes" (optional)
 self%f=>f
 CALL a%new(self%u0)
 CALL a%new(self%f0)
@@ -1106,29 +908,23 @@ ELSE
   CALL self%utyp%set(1.d0)
 END IF
 end subroutine mf_mat_setup
-!---------------------------------------------------------------------------
-! SUBROUTINE mf_mat_update
-!---------------------------------------------------------------------------
-!> Update linearization point
-!!
-!! @param[in] a New linearization point
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+!> Update linearization point for matrix-free Jacobian
+!------------------------------------------------------------------------------
 subroutine mf_mat_update(self,a)
-class(oft_mf_matrix), intent(inout) :: self
-class(oft_vector), intent(inout) :: a
+class(oft_mf_matrix), intent(inout) :: self !< Matrix object
+class(oft_vector), intent(inout) :: a !< New linearization point
 integer(i4) :: i,nslice,ierr
 real(r8) :: umin
 real(r8), pointer :: vals(:)
 CALL self%u0%add(0.d0,1.d0,a)
 CALL self%f%apply(self%u0,self%f0)
 END SUBROUTINE mf_mat_update
-!---------------------------------------------------------------------------
-! SUBROUTINE: mf_mat_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Cleanup internal storage and reset defaults
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine mf_mat_delete(self)
-class(oft_mf_matrix), intent(inout) :: self
+class(oft_mf_matrix), intent(inout) :: self !< Matrix object
 IF(ASSOCIATED(self%u0))THEN
   CALL self%u0%delete
   CALL self%f0%delete

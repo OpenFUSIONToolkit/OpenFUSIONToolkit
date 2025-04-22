@@ -1,10 +1,15 @@
-'''! Python interface for ThinCurr thin-wall eddy current functionality
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Fortran interface definitions for ThinCurr
 
 @authors Chris Hansen
 @date March 2024
 @ingroup doxy_oft_python
 '''
-from ..util import *
+from .._interface import *
 
 
 ## @cond
@@ -68,6 +73,14 @@ thincurr_get_sensor_name = ctypes_subroutine(oftpy_lib.thincurr_get_sensor_name,
 # Compute model resistivity matrix thincurr_curr_Rmat(tw_ptr,copy_out,Rmat,error_str)
 thincurr_curr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
     [c_void_p, c_bool, ctypes_numpy_array(float64,2), c_char_p])
+
+# thincurr_get_eta(tw_ptr,eta_ptr,error_string)
+thincurr_get_eta = ctypes_subroutine(oftpy_lib.thincurr_get_eta,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
+
+# thincurr_set_eta(tw_ptr,eta_ptr,error_string)
+thincurr_set_eta = ctypes_subroutine(oftpy_lib.thincurr_set_eta,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
 
 # Compute current regularization matrix thincurr_curr_regmat(tw_ptr,Rmat,error_str)
 thincurr_curr_regmat = ctypes_subroutine(oftpy_lib.thincurr_curr_regmat,

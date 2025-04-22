@@ -5,6 +5,7 @@ import time
 import multiprocessing
 import pytest
 import numpy as np
+import h5py
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
@@ -110,11 +111,20 @@ def mp_run(target,args,timeout=180):
     return test_result
 
 
-def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,mp_q):
+def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,mp_q):
+    result = True
     try:
+        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr(nthreads=-1)
-        tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
+        myOFT = OFT_env(nthreads=-1)
+        tw_model = ThinCurr(myOFT)
+        if meshfile is None:
+            from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+            r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25)
+            tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
+            tw_model.set_eta_values(np.r_[1.E4*mu0])
+        else:
+            tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
         if floops is not None:
             from OpenFUSIONToolkit.ThinCurr.sensor import circular_flux_loop, save_sensors
@@ -123,6 +133,8 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
                 sensors.append(circular_flux_loop(floop[0],floop[1],'FLOOP_{0}'.format(k),npts=180))
             save_sensors(sensors)
             _, _, sensor_obj = tw_model.compute_Msensor('floops.loc')
+        else:
+            sensor_obj = None
         if curr_waveform is not None:
             curr_waveform = np.array(curr_waveform)
             curr_waveform[:,1:] /= mu0
@@ -132,7 +144,16 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
         tw_model.compute_Rmat()
         tw_model.run_td(2.E-5,200,direct=(direct_flag == 'T'),lin_tol=lin_tol,coil_currs=curr_waveform,coil_volts=volt_waveform,sensor_obj=sensor_obj)
-        result = True
+        tw_model.plot_td(200,sensor_obj=sensor_obj)
+        if run_reduced:
+            eig_vals, eig_vecs = tw_model.get_eigs(30,direct=(direct_flag == 'T'))
+            tw_reduced = tw_model.build_reduced_model(eig_vecs, compute_B=True, sensor_obj=sensor_obj, filename='tCurr_reduced.h5')
+            eig_vals_r, _ = tw_reduced.get_eigs()
+            if np.linalg.norm(eig_vals_r[:10]-eig_vals[:10])/np.linalg.norm(eig_vals[:10]) > 1.E-2:
+                print("Reduced model eigenvalue error too high ",np.linalg.norm(eig_vals_r[:10]-eig_vals[:10])/np.linalg.norm(eig_vals[:10]))
+                result = False
+            sensors, currents = tw_reduced.run_td(2.E-5,200,coil_currs=curr_waveform)
+            Jreduced = tw_model.reconstruct_current(tw_reduced.reconstruct_potential(currents['curr'][10]),centering='vertex')
     except BaseException as e:
         print(e)
         result = False
@@ -142,9 +163,17 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
 
 def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
     try:
+        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr(nthreads=-1)
-        tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
+        myOFT = OFT_env(nthreads=-1)
+        tw_model = ThinCurr(myOFT)
+        if meshfile is None:
+            from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+            r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
+            tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
+            tw_model.set_eta_values(np.r_[1.E4*mu0])
+        else:
+            tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
         tw_model.compute_Mcoil()
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
@@ -163,9 +192,17 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
 
 def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
     try:
+        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr(nthreads=-1)
-        tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
+        myOFT = OFT_env(nthreads=-1)
+        tw_model = ThinCurr(myOFT)
+        if meshfile is None:
+            from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+            r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
+            tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
+            tw_model.set_eta_values(np.r_[1.E4*mu0])
+        else:
+            tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
         if floops is not None:
             from OpenFUSIONToolkit.ThinCurr.sensor import circular_flux_loop, save_sensors
@@ -192,11 +229,59 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
         result = False
     oftpy_dump_cov()
     mp_q.put(result)
+
+
+def run_mode(meshfile,freq,mp_q):
+    result = True
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        from OpenFUSIONToolkit.ThinCurr.meshing import build_torus_bnorm_grid, ThinCurr_periodic_toroid
+        myOFT = OFT_env(nthreads=-1)
+        ntheta = 20
+        nphi = 20
+        r_grid, bnorm, nfp = build_torus_bnorm_grid('tCurr_test_mode.dat',ntheta,nphi,resample_type='theta',use_spline=False)
+        plasma_mode = ThinCurr_periodic_toroid(r_grid,nfp,ntheta,nphi)
+        plasma_mode.write_to_file('thincurr_mode.h5')
+        #
+        tw_mode = ThinCurr(myOFT)
+        tw_mode.setup_model(mesh_file='thincurr_mode.h5')
+        tw_mode.setup_io(basepath='plasma/')
+        tw_mode.compute_Lmat()
+        Lmat_new = plasma_mode.condense_matrix(tw_mode.Lmat)
+        Linv = np.linalg.inv(Lmat_new)
+        #
+        bnorm_flat = bnorm.reshape((2,bnorm.shape[1]*bnorm.shape[2]))
+        flux_flat = bnorm_flat.copy()
+        flux_flat[0,plasma_mode.r_map] = tw_mode.scale_va(bnorm_flat[0,plasma_mode.r_map])
+        flux_flat[1,plasma_mode.r_map] = tw_mode.scale_va(bnorm_flat[1,plasma_mode.r_map])
+        mode_drive = np.zeros((2,tw_mode.nelems))
+        for j in range(2):
+            output_unique = np.dot(Linv,plasma_mode.nodes_to_unique(flux_flat[j,:]))
+            mode_drive[j,:] = plasma_mode.expand_vector(output_unique)
+        with h5py.File('thincurr_mode.h5', 'r+') as h5_file:
+            h5_file.create_dataset('thincurr/driver', data=mode_drive, dtype='f8')
+        #
+        tw_torus = ThinCurr(myOFT)
+        tw_torus.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml')
+        tw_torus.setup_io(basepath='wall/')
+        tw_torus.compute_Lmat()
+        tw_torus.compute_Rmat()
+        mode_driver = tw_mode.cross_eval(tw_torus,mode_drive)
+        fr_result = tw_torus.compute_freq_response(fdriver=mode_driver,freq=freq)
+        with open('thincurr_mode.dat','w+') as fid:
+            fid.write('{0} {1}\n'.format(*np.linalg.norm(mode_drive,axis=1)))
+            fid.write('{0} {1}\n'.format(*np.linalg.norm(fr_result,axis=1)))
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
     
 
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
-                    python=False,lin_tol=1.E-9,jumper_start=-1):
+                    python=False,lin_tol=1.E-9,jumper_start=0,run_reduced=False):
     """
     Common setup and run operations for thin-wall physics module test cases
     """
@@ -224,9 +309,12 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
     else:
         L_svd_tol = -1.0
         B_svd_tol = -1.0
+    oft_in_meshfile = meshfile
+    if meshfile is None:
+        oft_in_meshfile = "tw_test-passive.h5"
     with open('oft.in','w+') as fid:
         fid.write(oft_in_template.format(
-            meshfile,direct_flag,freq,fr_limit,coil_file_line,volt_file_line,
+            oft_in_meshfile,direct_flag,freq,fr_limit,coil_file_line,volt_file_line,
             neigs,L_svd_tol,B_svd_tol,reduce_model_flag,lin_tol,jumper_start
         ))
     # Create XML input file for coils
@@ -240,17 +328,19 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
                 phi = i*phi_fac
                 coil_string += '{0:.12E} {1:.12E} {2:.12E}\n'.format(R*np.cos(phi), R*np.sin(phi), Z)
             coil_string += "</coil>\n"
-        coil_string += "</coil_set></icoils>"
+        coil_string += "</coil_set></icoils>\n"
     if vcoils is not None:
         coil_string += '<vcoils>\n'
-        for pcoil in vcoils:
-            coil_string += '<coil_set type="2" res_per_len="1.256637E-5" radius="1.E-2"><coil npts="{0}">\n'.format(nPhi)
-            R = pcoil[0]; Z = pcoil[1]
-            for i in range(nPhi):
-                phi = i*phi_fac
-                coil_string += '{0:.12E} {1:.12E} {2:.12E}\n'.format(R*np.cos(phi), R*np.sin(phi), Z)
-            coil_string += "</coil></coil_set>\n"
-        coil_string += "</vcoils>"
+        with h5py.File('test_vcoils.h5','w') as h5_file:
+            for j, pcoil in enumerate(vcoils):
+                coil_string += '<coil_set type="2" res_per_len="1.256637E-5" radius="1.E-2"><coil path="test_vcoils.h5:vcoil_{0:04d}"/></coil_set>\n'.format(j+1)
+                R = pcoil[0]; Z = pcoil[1]
+                vcoil_pts = []
+                for i in range(nPhi):
+                    phi = i*phi_fac
+                    vcoil_pts.append([R*np.cos(phi), R*np.sin(phi), Z])
+                h5_file.create_dataset('vcoil_{0:04d}'.format(j+1), data=np.array(vcoil_pts), dtype='f8')
+        coil_string += "</vcoils>\n"
     with open('oft_in.xml','w+') as fid:
         fid.write(oft_in_xml_template_template.format(coil_string, eta*mu0))
     # Create flux loop definition file for sensors
@@ -282,7 +372,7 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
     # Run thin-wall model
     if run_type == 1:
         if python:
-            return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start))
+            return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced))
         else:
             return run_OFT("../../bin/thincurr_td oft.in oft_in.xml", 1, 180)
     elif run_type == 2:
@@ -295,6 +385,8 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
             return mp_run(run_fr,(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start))
         else:
             return run_OFT("../../bin/thincurr_fr oft.in oft_in.xml", 1, 180)
+    elif run_type == 5:
+        return mp_run(run_mode,(meshfile,freq))
 
 def validate_eigs(eigs, tols=(1.E-5, 1.E-9)):
     """
@@ -430,6 +522,29 @@ def validate_model_red(eigs, tols=(1.E-5, 1.E-9)):
             retval = False
     return retval
 
+
+def validate_mode(drive_exp,result_exp):
+    try:
+        with open('thincurr_mode.dat','r') as fid:
+            drive_amps = [float(val) for val in fid.readline().split()]
+            result_amps = [float(val) for val in fid.readline().split()]
+    except BaseException as e:
+        print(e)
+        return False
+    result_val = True
+    for i in range(2):
+        if abs((drive_exp[i]-drive_amps[i])/drive_exp[i]) > 1.E-4:
+            print("FAILED: driver {0} incorrect!".format(i+1))
+            print("  Expected = {0}".format(drive_exp[i]))
+            print("  Actual =   {0}".format(drive_amps[i]))
+            result_val = False
+        if abs((result_exp[i]-result_amps[i])/result_exp[i]) > 1.E-4:
+            print("FAILED: result {0} incorrect!".format(i+1))
+            print("  Expected = {0}".format(result_exp[i]))
+            print("  Actual =   {0}".format(result_amps[i]))
+            result_val = False
+    return result_val
+
 #============================================================================
 # Test runners for plate
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
@@ -558,6 +673,13 @@ def test_fr_torus(direct_flag,python):
     assert validate_fr(fr_real, fr_imag, python=python)
 
 @pytest.mark.coverage
+def test_mode_torus():
+    drive_exp = (73.91361257364348, 48.430633246949554)
+    result_exp = (58.713811707231145, 41.5238351334917)
+    assert ThinCurr_setup("tw_test-torus.h5",5,False,freq=1.E3)
+    assert validate_mode(drive_exp,result_exp)
+
+@pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (False, True))
 def test_td_torus_volt(direct_flag,python):
@@ -577,7 +699,7 @@ def test_td_torus_volt(direct_flag,python):
 @pytest.mark.parametrize("python", (False, True))
 def test_eig_passive(direct_flag,python):
     eigs = (1.504155E-1, 6.423383E-2, 3.190175E-2, 2.942398E-2)
-    assert ThinCurr_setup("tw_test-passive.h5",2 if python else 4,direct_flag,eta=1.E4,
+    assert ThinCurr_setup(None,2 if python else 4,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)),python=python)
     assert validate_eigs(eigs)
@@ -589,7 +711,7 @@ def test_eig_passive(direct_flag,python):
 @pytest.mark.parametrize("python", (False, True))
 def test_td_passive(direct_flag,python):
    sigs_final = (4.E-3, 8.349309E-4, 8.364054E-4)
-   assert ThinCurr_setup("tw_test-passive.h5",1,direct_flag,eta=1.E4,
+   assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           icoils=((0.5, 0.1),),
                           vcoils=((0.5, 0.0),),
                           floops=((0.5, -0.05), (0.5, -0.1)),
@@ -603,7 +725,7 @@ def test_td_passive(direct_flag,python):
 def test_fr_passive(direct_flag,python):
     fr_real = (1.947713E-1, 1.990873E-1)
     fr_imag = (-2.174952E-4, -1.560016E-4)
-    assert ThinCurr_setup("tw_test-passive.h5",3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
+    assert ThinCurr_setup(None,3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
                            icoils=((0.5, 0.1),),
                            vcoils=((0.5, 0.0),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
@@ -615,7 +737,7 @@ def test_fr_passive(direct_flag,python):
 @pytest.mark.parametrize("python", (False, True))
 def test_td_passive_volt(direct_flag,python):
    sigs_final = (4.E-3, 4.379235E-4, 4.389248E-4)
-   assert ThinCurr_setup("tw_test-passive.h5",1,direct_flag,eta=1.E4,
+   assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
                           volt_waveform=((0.0, 0.0, 1.0), (1.0, 0.0, 1.0)),
@@ -636,13 +758,16 @@ def test_eig_aca(python):
 @pytest.mark.coverage
 @pytest.mark.parametrize("python", (False, True))
 def test_td_aca(python):
+    eigs = (2.659575E-2, 1.254552E-2, 1.254536E-2, 1.208636E-2)
     sigs_final = (4.E-3, 7.280671E-4, 6.211245E-4)
     jumpers_final = (4.E-3, 5.447048E3)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            curr_waveform=((0.0, 0.0), (1.0, 1.0)),
-                           python=python,jumper_start=2)
+                           python=python,jumper_start=2,run_reduced=True)
+    if python:
+        assert validate_model_red(eigs)
     assert validate_td(sigs_final,jumpers_final)
 
 @pytest.mark.coverage

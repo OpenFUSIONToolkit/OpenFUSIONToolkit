@@ -1,9 +1,11 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file xmhd.F90
 !
-!> Module for modeling extended MHD with a mixed Nedelec/lagrange basis set.
+!> Module for modeling extended MHD with a mixed conforming/lagrange basis set.
 !!
 !! The equations currently solved are the equations of extended xMHD with
 !! scalar temperature and pressure.
@@ -67,7 +69,7 @@
 !! @authors Chris Hansen
 !! @date September 2013
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE xmhd
 #define XMHD_ITCACHE 10
 #if !defined(XMHD_RST_LEN)
@@ -75,10 +77,10 @@ MODULE xmhd
 #endif
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
-  hdf5_create_timestep, hdf5_field_exist, oft_bin_file
+  hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, cell_is_curved
-USE multigrid, ONLY: mg_mesh, multigrid_level, multigrid_base_pushcc
+USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
+USE multigrid, ONLY: multigrid_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
   oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat
@@ -90,29 +92,22 @@ USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
   create_cg_solver, create_diag_pre
 !---
-USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
-USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
+USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
+USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
-  oft_lagrange_nlevels, oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
-  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem
-USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
+USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_3D_lagrange_cast, &
+  oft_lag_geval_all, oft_scalar_fem
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag
-USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_ops, oft_hcurl_level, &
-  oft_hcurl_nlevels, oft_hcurl_lev, oft_hcurl_blevel, oft_hcurl_eval_all, &
-  oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem
-USE oft_hcurl_fields, ONLY: oft_hcurl_create
+USE oft_hcurl_basis, ONLY: oft_hcurl_eval_all, oft_3D_hcurl_cast, &
+  oft_hcurl_ceval_all, oft_hcurl_get_cgops, oft_hcurl_fem
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
-USE oft_h0_basis, ONLY: oft_h0_ops, oft_h0_geval_all, oft_h0_fem
-USE oft_h0_fields, ONLY: oft_h0_create
-USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_getmop, h0_zerogrnd, h0_zeroi
-USE oft_h1_basis, ONLY: oft_hgrad, oft_h1_ops, oft_h1_set_level, ML_oft_hgrad
-USE oft_h1_fields, ONLY: oft_h1_create, oft_hgrad_create
-USE oft_h1_operators, ONLY: oft_h1_rinterp, oft_h1_cinterp, oft_h1_dinterp, &
-  oft_h1_divout, h1_jump_error, h1_div
+USE oft_h1_basis, ONLY: oft_h1_fem, oft_h1_geval_all, oft_3D_h1_cast
+USE oft_h1_operators, ONLY: oft_h1_zeroi
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp, oft_hcurl_grad_cinterp, oft_hcurl_grad_dinterp, &
+  oft_hcurl_grad_divout, hcurl_grad_jump_error, hcurl_grad_div
 !---
 USE diagnostic, ONLY: tfluxfun, vec_energy, weighted_vec_energy, scal_energy, &
   scal_int, field_probe
@@ -120,7 +115,7 @@ USE mhd_utils
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Forcing object class for xMHD
 !!
 !! Used to apply arbitrary external fields or dirichlet boundary conditions
@@ -130,7 +125,7 @@ PRIVATE
 !! @note If dirichlet boundary conditions are being used both the source vector
 !! and initial field should be modified consistently. Otherwise these terms will
 !! unnecessarily load the linear solver.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, abstract, public :: oft_xmhd_driver
 contains
   !> Modify vectors to apply forcing
@@ -140,13 +135,13 @@ contains
   !> Save driver info to restart file
   procedure :: rst_save => xmhd_driver_rst_dummy
 end type oft_xmhd_driver
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Probe object class for xMHD
 !!
 !! Used to extract probe signals from restart files during post-processing. If
 !! passed to \ref xmhd::xmhd_plot "xmhd_plot" the object is called to sample and
 !! output the desired probe signals.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, abstract, public :: oft_xmhd_probe
 contains
   !> Sample probe signals from solution
@@ -154,9 +149,9 @@ contains
   !> Flush internal write buffer
   procedure :: flush => xmhd_probe_flush
 end type oft_xmhd_probe
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> NL metric matrix for xMHD
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_noop_matrix) :: oft_xmhd_errmatrix
   real(r8) :: dt = 1.E-3_r8 !< Time step
   real(r8) :: diag_vals(7) = 0.d0 !< Diagnostic values
@@ -165,9 +160,9 @@ contains
   !> Apply the matrix
   procedure :: apply_real => xmhd_errmatrix_apply
 end type oft_xmhd_errmatrix
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Mass metric matrix for Reduced MHD
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 type, public, extends(oft_noop_matrix) :: oft_xmhd_massmatrix
   real(r8) :: diag_vals(7) = 0.d0 !< Diagnostic values
   class(oft_vector), pointer :: u0 => NULL() !< Equilibrium field
@@ -175,9 +170,9 @@ contains
   !> Apply the matrix
   procedure :: apply_real => xmhd_massmatrix_apply
 end type oft_xmhd_massmatrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> xMHD operator container
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: xmhd_ops
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: b1_bc => NULL() !< B-field BC flag (Curl)
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: b2_bc => NULL() !< B-field BC flag (Grad)
@@ -189,9 +184,9 @@ type :: xmhd_ops
   CLASS(oft_matrix), POINTER :: interp => NULL() !< Interpolation matrix
   TYPE(oft_xmhd_errmatrix) :: A !< NL metric matrix
 end type xmhd_ops
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a xMHD operator fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: xmhd_interp_cache
   integer(i4) :: cell = -1 !< Cell index for values
   real(r8), contiguous, pointer, dimension(:) :: bcurl => NULL() !< HCurl values (Curl)
@@ -201,9 +196,9 @@ type :: xmhd_interp_cache
   real(r8), contiguous, pointer, dimension(:) :: J2 => NULL() !< Hyper-res aux values (HCurl)
   real(r8), contiguous, pointer, dimension(:,:) :: lf => NULL() !< Lagrange values (N,V,Ti)
 end type xmhd_interp_cache
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a xMHD operator fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(fem_interp) :: xmhd_interp
   real(r8), contiguous, pointer, dimension(:) :: bcurl_loc => NULL() !< Local HCurl values (Curl)
   real(r8), contiguous, pointer, dimension(:) :: bgrad_loc => NULL() !< Local HCurl values (Grad)
@@ -212,9 +207,9 @@ type, extends(fem_interp) :: xmhd_interp
   real(r8), contiguous, pointer, dimension(:) :: J2_loc => NULL() !< Local hyper-res aux values (HCurl)
   real(r8), contiguous, pointer, dimension(:,:) :: lf_loc => NULL() !< Local Lagrange values (V,N,Ti)
   class(oft_vector), pointer :: u => NULL() !< Field to interpolate
-  class(oft_h0_fem), pointer :: hgrad_rep => NULL() !< H1(Grad) FE representation
-  class(oft_hcurl_fem), pointer :: hcurl_rep => NULL() !< H1(Curl) FE representation
-  class(oft_scalar_fem), pointer :: lag_rep => NULL() !< H1(Curl) FE representation
+  class(oft_h1_fem), pointer :: grad_rep => NULL() !< Grad(H^1) FE representation
+  class(oft_hcurl_fem), pointer :: curl_rep => NULL() !< H(Curl) FE representation
+  class(oft_scalar_fem), pointer :: lag_rep => NULL() !< Lagrange FE representation
   type(xmhd_interp_cache), pointer :: cache(:) => NULL() !< Thread local field cache
 contains
   !> Retrieve local values for interpolation
@@ -224,9 +219,9 @@ contains
   !> Destroy temporary internal storage
   procedure :: delete => xmhd_interp_delete
 end type xmhd_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Unpack object for local fields evaluated by @ref xmhd::xmhd_interp "xmhd_interp"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: xmhd_loc_values
   REAL(r8) :: N = 0.d0 !< Density
   REAL(r8) :: Ti = 0.d0 !< Ion temperature (T in single fluid)
@@ -243,24 +238,24 @@ type :: xmhd_loc_values
   REAL(r8) :: J2c(3) = 0.d0 !< Hyper-res aux field curl
   REAL(r8) :: dV(3,3) = 0.d0 !< Velocity shear tensor
 end type xmhd_loc_values
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Object for sub-fields used by @ref xmhd::oft_xmhd_push "oft_xmhd_push"
 !! and @ref xmhd::oft_xmhd_pop "oft_xmhd_pop"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, public :: xmhd_sub_fields
-  CLASS(oft_vector), POINTER :: B => NULL() !< Magnetic field "H1"
+  CLASS(oft_vector), POINTER :: B => NULL() !< Magnetic field "H(Curl) + Grad(H^1)"
   CLASS(oft_vector), POINTER :: V => NULL() !< Velocity "Vector Lagrange"
   CLASS(oft_vector), POINTER :: Ne => NULL() !< Electron density "Lagrange"
   CLASS(oft_vector), POINTER :: Ti => NULL() !< Ion temperature "Lagrange"
   CLASS(oft_vector), POINTER :: Te => NULL() !< Electron temperature "Lagrange"
   CLASS(oft_vector), POINTER :: N2 => NULL() !< Hyper-diff aux field "Lagrange"
-  CLASS(oft_vector), POINTER :: J2 => NULL() !< Hyper-res aux field "HCurl"
+  CLASS(oft_vector), POINTER :: J2 => NULL() !< Hyper-res aux field "H(Curl)"
 end type xmhd_sub_fields
 !---Interface definitions
 abstract interface
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Modify solution vectors to apply forcing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   subroutine xmhd_driver_apply(self,up,u,v,t,dt)
     import oft_xmhd_driver, oft_vector, r8
     class(oft_xmhd_driver), intent(inout) :: self !< Forcing object
@@ -270,9 +265,9 @@ abstract interface
     real(r8), intent(in) :: t !< Current solution time
     real(r8), intent(in) :: dt !< Current solution timestep
   end subroutine xmhd_driver_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Sample probe signals from solution
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   subroutine xmhd_probe_apply(self,sub_fields,t)
     import oft_xmhd_probe, xmhd_sub_fields, r8
     class(oft_xmhd_probe), intent(inout) :: self !< Probe object
@@ -280,12 +275,22 @@ abstract interface
     real(r8), intent(in) :: t !< Current time
   end subroutine xmhd_probe_apply
 end interface
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+type, PUBLIC, extends(oft_ml_fe_comp_vecspace) :: ml_xmhd_vecspace
+contains
+  !> Needs docs
+  PROCEDURE :: interp => oft_xmhd_interp
+  !> Needs docs
+  PROCEDURE :: inject => oft_xmhd_inject
+end type ml_xmhd_vecspace
+!------------------------------------------------------------------------------
 ! Global variables
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
-TYPE(fox_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
-TYPE(fox_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
+TYPE(xml_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
+TYPE(xml_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
 !---Equation control
 LOGICAL :: xmhd_jcb = .TRUE. !< Include JxB force on fluid
 LOGICAL :: xmhd_advec = .TRUE. !< Include fluid advection
@@ -359,7 +364,8 @@ INTEGER(i4) :: xmhd_minlev = -1 !< Lowest MG level
 INTEGER(i4), DIMENSION(fem_max_levels) :: nu_xmhd = 1 !< Number of smoother iterations
 !---Operators and preconditioning
 TYPE(oft_fem_comp_type), POINTER :: xmhd_rep => NULL() !< Active field representation
-TYPE(oft_ml_fem_comp_type) :: ML_xmhd_rep !< ML container for field representation
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_xmhd_rep !< ML container for field representation
+TYPE(ml_xmhd_vecspace), TARGET :: xmhd_ml_vecspace
 TYPE(oft_mf_matrix), TARGET :: mfmat !< Matrix free operator
 TYPE(xmhd_ops), POINTER :: oft_xmhd_ops => NULL() !< Operator container
 TYPE(xmhd_ops), POINTER, DIMENSION(:) :: oft_xmhd_ops_ML => NULL() !< MG operator container
@@ -368,7 +374,7 @@ TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_J => NULL() !< MG Jacobian ope
 CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
 INTEGER(i4) :: xmhd_prefreq = 30 !< Desired update frequency for preconditioner
 INTEGER(i4) :: xmhd_opcount = 1 !< Number of time steps since preconditioner update
-INTEGER(i4) :: xmhd_nparts = 1 !< Number of local partitions for preconditioning
+INTEGER(i4), DIMENSION(fem_max_levels) :: xmhd_nparts = 1 !< Number of local partitions for preconditioning
 REAL(r8) :: xmhd_opdt = 1.d0 !< Time step for current preconditioner object
 LOGICAL :: xmhd_mfnk = .FALSE. !< Use Jacobian free non-linear advance
 !---Interpolator cache variables
@@ -379,16 +385,29 @@ REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_rop => NULL()
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: xmhd_hcurl_cop => NULL()
 !$omp threadprivate(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: neg_source,neg_flag
-!---------------------------------------------------------------------------
+CLASS(multigrid_mesh), POINTER :: mg_mesh
+CLASS(oft_mesh), POINTER :: mesh
+!
+TYPE(oft_ml_fem_type), POINTER, PUBLIC :: xmhd_ML_lagrange => NULL()
+TYPE(oft_ml_fem_type), POINTER, PUBLIC :: xmhd_ML_H1 => NULL()
+TYPE(oft_ml_fem_type), POINTER, PUBLIC :: xmhd_ML_H1grad => NULL()
+TYPE(oft_ml_fem_type), POINTER, PUBLIC :: xmhd_ML_hcurl => NULL()
+TYPE(oft_ml_fem_comp_type), POINTER, PUBLIC :: xmhd_ML_hcurl_grad => NULL()
+TYPE(oft_ml_fem_comp_type), POINTER, PUBLIC :: xmhd_ML_vlagrange => NULL()
+!
+CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
+CLASS(oft_hcurl_fem), POINTER :: oft_hcurl => NULL()
+CLASS(oft_h1_fem), POINTER :: oft_hgrad => NULL()
+!------------------------------------------------------------------------------
 ! Exported interfaces
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PUBLIC xmhd_run, oft_xmhd_push, oft_xmhd_pop, xmhd_driver_apply, xmhd_minlev
 PUBLIC xmhd_taxis, xmhd_plot, xmhd_probe_apply, xmhd_lin_run, xmhd_bnorm_force
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Read settings for extended MHD model from input files
 !!
-!! Runtime options are set in the main input file using the \c xmhd_options group.
+!! Runtime options are set in the main input file using the `xmhd_options` group.
 !!
 !! @warning Most default physical values in the namelist below will not be appropriate
 !! for new simulations. They are merely placeholders to indicate the type of the input.
@@ -439,7 +458,7 @@ CONTAINS
 !! | `xmhd_monitor_div=F` | Monitor divergence error | bool |
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
 real(r8), intent(out) :: dt !< Maximum timestep
 real(r8), intent(out) :: lin_tol !< Linear solver tolerance
@@ -451,11 +470,6 @@ integer(i4), intent(out) :: nclean !< Frequency to clean divergence
 integer(i4), intent(out) :: maxextrap !< Extrapolation order for initial guess
 integer(i4), intent(out) :: ittarget !< Maximum number of linear iterations
 integer(i4), intent(out) :: nl_update !< Maximum number of linear iterations
-!---XML solver fields
-#ifdef HAVE_XML
-integer(i4) :: nnodes
-TYPE(fox_nodelist), POINTER :: current_nodes
-#endif
 integer(i4) :: io_unit,ierr
 !---
 namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,xmhd_ohmic, &
@@ -464,9 +478,9 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set defaults
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 lin_tol=1.E-9_r8
 nl_tol=1.E-5_r8
 rst_ind=0
@@ -476,9 +490,9 @@ nclean=500
 maxextrap=2
 ittarget=60
 nl_update=2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Read-in Parameters
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 open(NEWUNIT=io_unit,FILE=oft_env%ifile)
 read(io_unit,xmhd_options,IOSTAT=ierr)
 close(io_unit)
@@ -487,20 +501,16 @@ if(ierr>0)call oft_abort('Error parsing MHD options in input file.','xmhd_read_s
 !---Look for xMHD node
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  current_nodes=>fox_getElementsByTagName(oft_env%xml,"xmhd")
-  nnodes=fox_getLength(current_nodes)
-  IF(nnodes>0)THEN
-    xmhd_root_node=>fox_item(current_nodes,0)
+  CALL xml_get_element(oft_env%xml,"xmhd",xmhd_root_node,ierr)
+  IF(ierr==0)THEN
     !---Look for pre node
-    current_nodes=>fox_getElementsByTagName(xmhd_root_node,"pre")
-    nnodes=fox_getLength(current_nodes)
-    IF(nnodes>0)xmhd_pre_node=>fox_item(current_nodes,0)
+    CALL xml_get_element(xmhd_root_node,"pre",xmhd_pre_node,ierr)
   END IF
 END IF
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Check settings and setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 m_ion=mu_ion*proton_mass ! Scale by proton mass
 IF(m_ion<0.d0)CALL oft_abort('Invalid Ion mass','xmhd_read_settings',__FILE__)
 !---Set velocity BC flag
@@ -534,19 +544,19 @@ IF(.NOT.xmhd_two_temp)xmhd_therm_equil=.FALSE.
 CALL xmhd_setup_regions
 DEBUG_STACK_POP
 END SUBROUTINE xmhd_read_settings
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Main driver subroutine for extended MHD time advance
 !!
 !! Runtime options are set in the main input file using the group
-!! \c xmhd_options group, see \ref xmhd_read_settings.
-!---------------------------------------------------------------------------
+!! `xmhd_options` group, see \ref xmhd_read_settings.
+!------------------------------------------------------------------------------
 subroutine xmhd_run(initial_fields,driver,probes,profile_only)
 TYPE(xmhd_sub_fields), INTENT(inout) :: initial_fields !< Initial conditions
 CLASS(oft_xmhd_driver), OPTIONAL, INTENT(inout) :: driver !< Forcing object
 CLASS(oft_xmhd_probe), OPTIONAL, INTENT(inout) :: probes !< Probe object
 LOGICAL, OPTIONAL, INTENT(in) :: profile_only !< Profile operator timing and stop?
-!---H1 divout solver
-TYPE(oft_h1_divout) :: divout
+!---H(Curl) + Grad(H^1) divout solver
+TYPE(oft_hcurl_grad_divout) :: divout
 !---Jacobian solver
 type(oft_nksolver) :: nksolver
 type(oft_native_gmres_solver), target :: solver
@@ -555,8 +565,8 @@ integer(i4), allocatable, dimension(:) :: levels
 !---Local variables
 class(oft_vector), pointer :: u,v,up
 type(xmhd_sub_fields) :: sub_fields
-type(oft_h1_rinterp), target :: Bfield
-type(oft_h1_dinterp) :: divfield
+type(oft_hcurl_grad_rinterp), target :: Bfield
+type(oft_hcurl_grad_dinterp) :: divfield
 type(oft_timer) :: mytimer
 real(r8), pointer :: vals(:)
 integer(i4) :: i,j,k,ierr,io_unit,io_stat,rst_version,rst_tmp,baseit,nredo,nl_update
@@ -567,6 +577,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,tmpint(2)
 character(LEN=XMHD_RST_LEN) :: rst_char
 LOGICAL :: force_refactor,exists,rst
+TYPE(oft_h1_zeroi), TARGET :: h1_zeroi
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -579,27 +590,32 @@ real(4) :: hist_r4(11)
 real(r8) :: lin_tol,nl_tol,scale_tmp(4)
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+mg_mesh=>xmhd_ML_hcurl%ml_mesh
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,xmhd_ML_H1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
+mesh=>oft_hcurl%mesh
+!------------------------------------------------------------------------------
 ! Read-in Parameters
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(ASSOCIATED(initial_fields%Te))xmhd_two_temp=.TRUE.
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
 IF(den_scale<0.d0)den_scale=SQRT(initial_fields%Ne%dot(initial_fields%Ne)/REAL(initial_fields%Ne%ng,8))
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup ML environment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL xmhd_setup_rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create solver fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 call oft_xmhd_create(u)
 call oft_xmhd_create(up)
 call oft_xmhd_create(v)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create extrapolation fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(maxextrap>0)THEN
   ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
   DO i=1,maxextrap
@@ -608,16 +624,16 @@ IF(maxextrap>0)THEN
   END DO
   nextrap=0
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create divergence cleaner
-!---------------------------------------------------------------------------
-call oft_h1_create(sub_fields%B)
-CALL divout%setup("grnd")
+!------------------------------------------------------------------------------
+call xmhd_ML_hcurl_grad%vec_create(sub_fields%B)
+CALL divout%setup(xmhd_ML_hcurl_grad,"grnd")
 divout%pm=.TRUE.
 IF(TRIM(bbc)=="ic")divout%keep_boundary=.TRUE.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup history file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
   CALL hist_file%setup('xmhd.hist', desc="History file for non-linear xMHD run")
   CALL hist_file%add_field('ts',   'i4', desc="Time step index")
@@ -635,9 +651,9 @@ IF(oft_env%head_proc)THEN
   CALL hist_file%add_field('te',   'r4', desc="Average electron temperature [eV]")
   CALL hist_file%add_field('stime','r4', desc="Walltime [s]")
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Import initial fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 dtin=dt
 104 FORMAT (I XMHD_RST_LEN.XMHD_RST_LEN)
 WRITE(rst_char,104)rst_ind
@@ -676,9 +692,9 @@ IF(oft_env%head_proc)CALL hist_file%open ! Open history file
 itcount=ittarget
 dthist=dt
 xmhd_opdt=dt
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 call xmhd_alloc_ops
 jac_dt=dt/2.d0
 ALLOCATE(neg_flag(3,mesh%nc),neg_source(3,mesh%nc))
@@ -697,9 +713,9 @@ IF(xmhd_rw)THEN
   END DO
   DEALLOCATE(vals)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute energies
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 mesh_vol=SUM(mesh%cv)
 mesh_vol=oft_mpi_sum(mesh_vol)
 !
@@ -721,12 +737,12 @@ END IF
 IF(xmhd_monitor_div)THEN
   CALL oft_xmhd_pop(u,sub_fields)
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup
+  CALL Bfield%setup(oft_hcurl,oft_hgrad)
   !---Compute jump error
-  jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
+  jump_error=hcurl_grad_jump_error(xmhd_ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
   divfield%u=>sub_fields%B
-  CALL divfield%setup
-  derror=scal_energy(divfield,oft_hcurl%quad%order)
+  CALL divfield%setup(oft_hcurl,oft_hgrad)
+  derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
 ELSE
   jump_error=-1.d0
   derror=-1.d0
@@ -734,13 +750,14 @@ END IF
 !---Setup B-norm
 IF(.NOT.xmhd_bnorm_force)THEN
   IF(.NOT.xmhd_monitor_div)CALL oft_xmhd_pop(u,sub_fields)
-  CALL oft_h0_create(divout%bnorm)
-  CALL h1_div(sub_fields%B,divout%bnorm)
-  CALL h0_zeroi(divout%bnorm)
+  CALL xmhd_ML_H1grad%vec_create(divout%bnorm)
+  CALL hcurl_grad_div(xmhd_ML_hcurl_grad%current_level,sub_fields%B,divout%bnorm)
+  h1_zeroi%ML_H1_rep=>xmhd_ML_H1grad
+  CALL h1_zeroi%apply(divout%bnorm)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Print run information
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
 100 FORMAT(2X,A,L)
 101 FORMAT(2X,2A)
@@ -795,9 +812,9 @@ END IF
 IF(PRESENT(profile_only))THEN
   IF(profile_only)CALL xmhd_profile(u)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup linear solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(xmhd_mfnk)THEN
   CALL up%set(1.d0)
   CALL up%set(mesh%hrms, iblock=1)
@@ -813,9 +830,9 @@ solver%atol=lin_tol
 solver%itplot=1
 solver%nrits=20
 solver%pm=oft_env%pm
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Preconditioner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
 IF(nlevels==1)THEN
@@ -827,16 +844,17 @@ IF(nlevels==1)THEN
 ELSE
   ALLOCATE(levels(nlevels))
   levels=(/(i,i=xmhd_minlev,xmhd_nlevels)/)
+  xmhd_ml_vecspace%ML_FE_rep=>ML_xmhd_rep
   CALL create_mlpre(solver%pre,ml_J,levels,nlevels=nlevels, &
-    create_vec=oft_xmhd_create,interp=oft_xmhd_interp,inject=oft_xmhd_inject, &
+    ml_vecspace=xmhd_ml_vecspace, &
     stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels),xml_root=xmhd_pre_node)
   DEALLOCATE(levels)
 END IF
 xmhd_pre=>solver%pre
 xmhd_pre%A=>oft_xmhd_ops%J
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Newton solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nksolver%A=>oft_xmhd_ops%A
 nksolver%J_inv=>solver
 nksolver%its=30
@@ -849,9 +867,9 @@ ELSE
   nksolver%J_update=>xmhd_set_ops
   nksolver%up_freq=4
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Begin time stepping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 baseit=-1
 nredo=0
 DO i=1,nsteps
@@ -894,9 +912,9 @@ DO i=1,nsteps
       IF(k>0)WRITE(*,*)oft_env%rank,'Te-FLOOR cells ',k
     END IF
     neg_flag=0.d0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Perform NL Advance
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(i==2)xmhd_opcount=0
     IF(MOD(xmhd_opcount,xmhd_prefreq)==0.OR.ABS(xmhd_opdt-dt)/dt>.15d0)xmhd_opcount=0
     !---Update preconditioning matrices if necessary
@@ -979,23 +997,23 @@ DO i=1,nsteps
       END IF
       IF(j==4)CALL oft_abort('NL Solver failed to converge.','xmhd_run',__FILE__)
     END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute energies and fluxes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     !---Compute divergence error
     IF(xmhd_monitor_div)THEN
       CALL oft_xmhd_pop(u,sub_fields)
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup
+      CALL Bfield%setup(oft_hcurl,oft_hgrad)
       !---Compute jump error
-      jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
+      jump_error=hcurl_grad_jump_error(xmhd_ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
       divfield%u=>sub_fields%B
-      CALL divfield%setup
-      derror=scal_energy(divfield,oft_hcurl%quad%order)
+      CALL divfield%setup(oft_hcurl,oft_hgrad)
+      derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Write out initial solution progress
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       hist_i4=(/rst_ind+i-1,nksolver%lits,nksolver%nlits/)
@@ -1012,9 +1030,9 @@ DO i=1,nsteps
       CALL initial_fields%Ne%scale(den_scale)
       CALL probes%apply(initial_fields,t)
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Update time step and current time
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(baseit<0)baseit=nksolver%lits
     itcount(MOD(i,XMHD_ITCACHE)+1)=nksolver%lits
     dthist(MOD(i,XMHD_ITCACHE)+1)=dt
@@ -1022,9 +1040,9 @@ DO i=1,nsteps
     dt=ittarget*SUM(dthist)/SUM(itcount)
     IF(dt>dtin)dt=dtin
     IF(dt<1.d-10)CALL oft_abort('Time step dropped too low!','xmhd_run',__FILE__)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Write dump file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(MOD(i,rst_freq)==0)THEN
       IF(oft_env%head_proc)CALL mytimer%tick
       !---Create restart file
@@ -1070,21 +1088,21 @@ IF(maxextrap>0)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_run
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Main driver subroutine for extended MHD time advance
 !!
-!! Runtime options are set in the main input file using the group \c xmhd_options group,
+!! Runtime options are set in the main input file using the group `xmhd_options` group,
 !! see \ref xmhd_run.
 !!
 !! @note This method assumes that [B0, V0, Ne0, Ti0, Te0] constitute an
 !! equilibrium.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_lin_run(equil_fields,pert_fields,escale)
 TYPE(xmhd_sub_fields), INTENT(inout) :: equil_fields !< Equilibrium fields
 TYPE(xmhd_sub_fields), INTENT(inout) :: pert_fields !< Perurbed fields
 REAL(r8), OPTIONAL, INTENT(in) :: escale !< Desired total energy to be used for rescaling (optional)
-!---H1 divout solver
-TYPE(oft_h1_divout) :: divout
+!---H(Curl) + Grad(H^1) divout solver
+TYPE(oft_hcurl_grad_divout) :: divout
 !---Jacobian solver
 type(oft_native_gmres_solver), target :: solver
 integer(i4) :: nlevels
@@ -1092,8 +1110,8 @@ integer(i4), allocatable, dimension(:) :: levels
 !---Local variables
 class(oft_vector), pointer :: du,u0,v,un1,un2
 type(xmhd_sub_fields) :: sub_fields
-type(oft_h1_rinterp) :: Bfield
-type(oft_h1_dinterp) :: divfield
+type(oft_hcurl_grad_rinterp) :: Bfield
+type(oft_hcurl_grad_dinterp) :: divfield
 type(oft_xmhd_massmatrix) :: mop
 type(oft_timer) :: mytimer
 integer(i4) :: i,j,ierr,io_unit,io_stat,rst_tmp,nl_update
@@ -1104,7 +1122,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror,de_scale
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol
 real(r8), pointer, dimension(:) :: vals => NULL()
 character(LEN=XMHD_RST_LEN) :: rst_char
-character(LEN=OFT_HIST_SLEN) :: comm_line
+character(LEN=OFT_SLEN) :: comm_line
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -1118,9 +1136,14 @@ logical :: rst
 real(r8) :: lin_tol,nl_tol
 integer(i4) :: rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_lin_run",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_lin_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,xmhd_ML_H1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_lin_run",__FILE__)
+mg_mesh=>xmhd_ML_hcurl%ml_mesh
+mesh=>oft_hcurl%mesh
+!------------------------------------------------------------------------------
 ! Read-in Parameters
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(ASSOCIATED(equil_fields%Te).AND.ASSOCIATED(pert_fields%Te))xmhd_two_temp=.TRUE.
 IF(XOR(ASSOCIATED(equil_fields%Te),ASSOCIATED(pert_fields%Te)))CALL oft_abort( &
   "Te0 and dTe ICs are required for two temp.", "xmhd_lin_run", __FILE__)
@@ -1134,21 +1157,21 @@ xmhd_visc_heat=.FALSE.
 xmhd_brag=.FALSE.
 xmhd_linear=.TRUE.
 xmhd_diss_centered=.TRUE.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup ML environment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL xmhd_setup_rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create solver fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 call oft_xmhd_create(du)
 call oft_xmhd_create(u0)
 call oft_xmhd_create(v)
 CALL oft_xmhd_create(un1)
 CALL oft_xmhd_create(un2)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create extrapolation fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(maxextrap>0)THEN
   ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
   DO i=1,maxextrap
@@ -1157,16 +1180,16 @@ IF(maxextrap>0)THEN
   END DO
   nextrap=0
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create divergence cleaner
-!---------------------------------------------------------------------------
-call oft_h1_create(sub_fields%B)
-CALL divout%setup("grnd")
+!------------------------------------------------------------------------------
+call xmhd_ML_hcurl_grad%vec_create(sub_fields%B)
+CALL divout%setup(xmhd_ML_hcurl_grad,"grnd")
 divout%pm=.TRUE.
 IF(TRIM(bbc)=="ic")divout%keep_boundary=.TRUE.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup history file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
   CALL hist_file%setup('xmhd.hist', desc="History file for linear xMHD run")
 104 FORMAT('E0 = ',ES11.3)
@@ -1189,9 +1212,9 @@ IF(oft_env%head_proc)THEN
   CALL hist_file%add_field('te',   'r4', desc="Average electron temperature [eV]")
   CALL hist_file%add_field('stime','r4', desc="Walltime [s]")
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Import initial fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 dtin=dt
 105 FORMAT (I XMHD_RST_LEN.XMHD_RST_LEN)
 WRITE(rst_char,105)rst_ind
@@ -1225,9 +1248,9 @@ ELSE
   IF(oft_env%head_proc)CALL hist_file%write_header
 END IF
 IF(oft_env%head_proc)CALL hist_file%open ! Open history file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 call xmhd_alloc_ops
 jac_dt=dt
 call xmhd_set_ops(u0)
@@ -1244,9 +1267,9 @@ IF(xmhd_rw)THEN
   END DO
   DEALLOCATE(vals)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute energies
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 mesh_vol=SUM(mesh%cv)
 mesh_vol=oft_mpi_sum(mesh_vol)
 CALL mop%apply(du,v)
@@ -1262,19 +1285,19 @@ tempe_avg=mop%diag_vals(7)/mesh_vol
 IF(xmhd_monitor_div)THEN
   CALL oft_xmhd_pop(du,sub_fields)
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup
+  CALL Bfield%setup(oft_hcurl,oft_hgrad)
   !---Compute jump error
-  jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
+  jump_error=hcurl_grad_jump_error(xmhd_ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
   divfield%u=>sub_fields%B
-  CALL divfield%setup
-  derror=scal_energy(divfield,oft_hcurl%quad%order)
+  CALL divfield%setup(oft_hcurl,oft_hgrad)
+  derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
 ELSE
   jump_error=-1.d0
   derror=-1.d0
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Print run information
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
 100 FORMAT(2X,A,L)
 101 FORMAT(2X,2A)
@@ -1317,18 +1340,18 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup linear solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 solver%A=>oft_xmhd_ops%J
 solver%its=400
 solver%atol=lin_tol
 solver%itplot=1
 solver%nrits=40
 solver%pm=oft_env%pm
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Preconditioner
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
 IF(nlevels==1)THEN
@@ -1340,15 +1363,16 @@ IF(nlevels==1)THEN
 ELSE
   ALLOCATE(levels(nlevels))
   levels=(/(i,i=xmhd_minlev,xmhd_nlevels)/)
+  xmhd_ml_vecspace%ML_FE_rep=>ML_xmhd_rep
   CALL create_mlpre(solver%pre,ml_J,levels,nlevels=nlevels, &
-    create_vec=oft_xmhd_create,interp=oft_xmhd_interp,inject=oft_xmhd_inject, &
+    ml_vecspace=xmhd_ml_vecspace, &
     stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels),xml_root=xmhd_pre_node)
   DEALLOCATE(levels)
 END IF
 xmhd_pre=>solver%pre
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Begin time stepping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DO i=1,nsteps
     merp=mer
     verp=ver
@@ -1370,9 +1394,9 @@ DO i=1,nsteps
       CALL extrap_fields(1)%f%add(0.d0,1.d0,du)
       extrapt(1)=t
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Perform Linear Advance
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     !---Compute metric to get RHS
     IF(i==2)THEN
       jac_dt=dt*2.d0/3.d0
@@ -1402,32 +1426,32 @@ DO i=1,nsteps
     temp_avg=mop%diag_vals(6)/mesh_vol
     tempe_avg=mop%diag_vals(7)/mesh_vol
     IF(maxextrap>0)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,t+dt,du)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Scale fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(PRESENT(escale))THEN
       de_scale=SQRT(escale/(ver+mer/mu0))
       CALL v%scale(de_scale)
       CALL un1%scale(de_scale)
     END IF
     CALL solver%apply(du,v)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute energies and fluxes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     !---Compute divergence error
     IF(xmhd_monitor_div)THEN
       CALL oft_xmhd_pop(du,sub_fields)
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup
+      CALL Bfield%setup(oft_hcurl,oft_hgrad)
       !---Compute jump error
-      jump_error=h1_jump_error(sub_fields%B,oft_hcurl%quad%order)
+      jump_error=hcurl_grad_jump_error(xmhd_ML_hcurl_grad%current_level,sub_fields%B,oft_hcurl%quad%order)
       divfield%u=>sub_fields%B
-      CALL divfield%setup
-      derror=scal_energy(divfield,oft_hcurl%quad%order)
+      CALL divfield%setup(oft_hcurl,oft_hgrad)
+      derror=scal_energy(mesh,divfield,oft_hcurl%quad%order)
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Write out initial solution progress
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       hist_i4=(/rst_ind+i-1,solver%cits,0/)
@@ -1439,9 +1463,9 @@ DO i=1,nsteps
     END IF
     !---Update current time
     t=t+dt
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Write dump file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(MOD(i,rst_freq)==0)THEN
       IF(oft_env%head_proc)CALL mytimer%tick
       !---Create restart file
@@ -1487,14 +1511,14 @@ IF(maxextrap>0)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_lin_run
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Evalute upwinding parameter
 !!
 !! Upwinding parameter for inconsistent streamline upwinded Petrov-Galerkin method
 !! (distorted bases applied to advective terms only).
 !!
 !! @result Upwinding weight
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PURE FUNCTION xmhd_upwind_weight(v_mag,he,nu) RESULT(w_up)
 REAL(r8), INTENT(in) :: v_mag !< Advection velocity [m/s]
 REAL(r8), INTENT(in) :: he !< Element size [m]
@@ -1504,9 +1528,9 @@ Pc = MAX(1.d-8,v_mag*he/(2.d0*nu)) ! Peclet number
 beta = 1.d0/TANH(Pc) - 1.d0/Pc ! Beta parameter
 w_up = beta*he/(2.d0*MAX(1.d-10,v_mag)) ! Upwinding weight
 END FUNCTION xmhd_upwind_weight
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update Jacobian matrix with new fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_build_ops(fullin)
 class(fem_interp), intent(inout) :: fullin !< Interpolator to evaluate fields
 type(oft_local_mat), allocatable, dimension(:,:) :: mtmp
@@ -1531,20 +1555,20 @@ DEBUG_STACK_PUSH
 IF(oft_debug_print(2))write(*,'(4X,A,I4)')'Building xMHD Jacobian: ',xmhd_level
 !---
 Jac=>oft_xmhd_ops%J
-quad=>oft_hcurl%quad
+quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
 tgam_fac=temp_gamma - 1.d0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Reset matrices
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL Jac%zero
 !--Setup thread locks
 ALLOCATE(tlocks(xmhd_rep%nfields))
 DO i=1,xmhd_rep%nfields
   call omp_init_lock(tlocks(i))
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Construct matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(det,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop, &
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,jc,bhat,he,v0_mag,dvT,eta_curr,u,uvec,umat, &
 !$omp mtmp,chi_temp,bmag,c1,c2,c3,c4,divv,nu_tmp,ten1,cgop,fulltmp,lag_gopt, &
@@ -1578,9 +1602,9 @@ END IF
 !--- Define viscosity temporary varible (currently static)
 nu_tmp(1) = nu_par
 nu_tmp(2) = nu_perp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Integration loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp do schedule(static)
 DO ip=1,mesh%nparts
 do ii=1,mesh%tloc_c(ip)%n
@@ -1593,14 +1617,14 @@ do ii=1,mesh%tloc_c(ip)%n
   call oft_hcurl%ncdofs(i,j_hcurl)
   !---Zero local matrix
   CALL xmhd_rep%mat_zero_local(mtmp)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Quadrature Loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   IF(xmhd_hall.AND.xmhd_two_temp)mtmp(1,7)%m=>mtmp(1,te_ind)%m ! Point hall-term coupling to electrons
   DO m=1,quad%np
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local reconstructed operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     if(curved.OR.m==1)then
       call mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
       call oft_hcurl_get_cgops(goptmp,cgop)
@@ -1610,15 +1634,15 @@ do ii=1,mesh%tloc_c(ip)%n
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
     CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
     lag_gopt=TRANSPOSE(lag_gop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     hgrad_ropt=TRANSPOSE(hgrad_rop)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     hcurl_ropt=TRANSPOSE(hcurl_rop)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     hcurl_copt=TRANSPOSE(hcurl_cop)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Reconstruct fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     call fullin%interp(i,quad%pts(:,m),goptmp,fulltmp)
     CALL xmhd_interp_unpack(fulltmp,u0)
     v0_mag = magnitude(u0%V)
@@ -1651,9 +1675,9 @@ do ii=1,mesh%tloc_c(ip)%n
       chi_temp(1)=kappa_par*den_scale/u0%N
       chi_temp(2)=kappa_perp*den_scale/u0%N
     END IF
-    !---------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
     ! Handle solid region
-    !---------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
     IF(solid_cell(i))THEN
       eta_curr=eta_reg(mesh%reg(i))
       do jc=1,oft_hcurl%nce
@@ -1693,12 +1717,12 @@ do ii=1,mesh%tloc_c(ip)%n
       end do
       CYCLE
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_c/dt matrix
-!---------------------------------------------------------------------------
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_c/dt(B_c) matrix (1,1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_adv_b)THEN
       c1 = jac_dt*det
       c3 = eta_curr*c1
@@ -1745,9 +1769,9 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_c/dt(B_g) matrix (1,2)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       do jc=1,oft_hgrad%nce
         uvec = -cross_product(umat(:,1),hgrad_rop(:,jc))
         !$omp simd
@@ -1759,9 +1783,9 @@ do ii=1,mesh%tloc_c(ip)%n
             + DOT_PRODUCT(hcurl_copt(jr,:),uvec)
         end do
       end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_c/dt(V) matrix (1,3:5)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       c1 = jac_dt*det*vel_scale
       do jc=1,oft_lagrange%nce
         uvec = u0%B*lag_rop(jc)*c1
@@ -1775,9 +1799,9 @@ do ii=1,mesh%tloc_c(ip)%n
             + (hcurl_copt(jr,1)*uvec(2) - hcurl_copt(jr,2)*uvec(1))
         end do
       end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_c/dt(n) matrix (1,6)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       IF(xmhd_hall.AND.xmhd_adv_den)THEN
         c1 = -jac_dt*det*den_scale/(mu0*elec_charge*u0%N*u0%N)
         c2 = -k_boltz*u0%Te*jac_dt*det*den_scale/(elec_charge*u0%N)
@@ -1793,10 +1817,10 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_c/dt(T) matrix (1,7) or dB_c/dt(Te) matrix (1,8)
 ! If 'xmhd_two_temp=True', mtmp(1,7)%m => mtmp(1,8)%m
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       IF(xmhd_hall.AND.xmhd_adv_temp)THEN
         c1 = k_boltz*jac_dt*det/(elec_charge*u0%N)
         IF(.NOT.xmhd_two_temp)c1=c1*te_factor
@@ -1810,12 +1834,12 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_g/dt matrix
-!---------------------------------------------------------------------------
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_g/dt(B_c) matrix (2,1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       do jc=1,oft_hcurl%nce
         uvec=hcurl_rop(:,jc)*det
         !$omp simd
@@ -1824,9 +1848,9 @@ do ii=1,mesh%tloc_c(ip)%n
             + DOT_PRODUCT(hgrad_ropt(jr,:),uvec)
         end do
       end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dB_g/dt(B_g) matrix (2,2)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       do jc=1,oft_hgrad%nce
         uvec=hgrad_rop(:,jc)*det
         !$omp simd
@@ -1836,12 +1860,12 @@ do ii=1,mesh%tloc_c(ip)%n
         end do
       end do
     END IF ! Advance B test
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dV/dt matrix
-!---------------------------------------------------------------------------
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dV/dt(B_c) matrix (3:5,1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_jcb)THEN
       c1 = -jac_dt*det/(vel_scale*u0%N*m_ion*mu0)
       do jc=1,oft_hcurl%nce
@@ -1853,9 +1877,9 @@ do ii=1,mesh%tloc_c(ip)%n
           mtmp(5,1)%m(jr,jc) = mtmp(5,1)%m(jr,jc) + lag_rop(jr)*uvec(3)
         end do
       end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dV/dt(B_g) matrix (3:5,2)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       c1 = -jac_dt*det/(vel_scale*u0%N*m_ion*mu0)
       do jc=1,oft_hgrad%nce
         uvec = cross_product(u0%J,hgrad_rop(:,jc))*c1
@@ -1867,9 +1891,9 @@ do ii=1,mesh%tloc_c(ip)%n
         end do
       end do
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dV/dt(V) matrix (3:5,3:5)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     !---Upwinding setup
     IF(xmhd_upwind)c1 = jac_dt*det*xmhd_upwind_weight(v0_mag,he,nu_tmp(2)*den_scale/u0%N)
     c2 = den_scale*jac_dt*det/u0%N
@@ -1985,9 +2009,9 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
       END SELECT
     end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dV/dt(n) matrix (3:5,6)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_adv_den)THEN
       c1 = jac_dt*det*den_scale/(u0%N*u0%N*m_ion*mu0*vel_scale)
       c3 = (u0%Ti+u0%Te)*k_boltz*jac_dt*det*den_scale/(u0%N*m_ion*vel_scale)
@@ -2008,9 +2032,9 @@ do ii=1,mesh%tloc_c(ip)%n
         end do
       end do
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dV/dt(T) matrix (3:5,7) and dV/dt(Te) matrix (3:5,8)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_adv_temp)THEN
       c2 = k_boltz*jac_dt*det/(m_ion*vel_scale)
       IF(.NOT.xmhd_two_temp)c2=c2*(1.d0+te_factor)
@@ -2036,17 +2060,17 @@ do ii=1,mesh%tloc_c(ip)%n
         end do
       END IF
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dn/dt matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_adv_den)THEN
       c2 = jac_dt*det
       c1 = c2*vel_scale/den_scale
       !---Upwinding setup
       IF(xmhd_upwind)c3 = jac_dt*det*xmhd_upwind_weight(v0_mag,he,d_dens)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dn/dt(V) matrix (6,3:5)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       do jc=1,oft_lagrange%nce
         uvec = u0%dN*lag_rop(jc)*c1 + u0%N*lag_gop(:,jc)*c1
         !$omp simd
@@ -2056,9 +2080,9 @@ do ii=1,mesh%tloc_c(ip)%n
           mtmp(6,5)%m(jr,jc) = mtmp(6,5)%m(jr,jc) + lag_rop(jr)*uvec(3)
         end do
       end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dn/dt(n) matrix (6,6)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       do jc=1,oft_lagrange%nce
         u = DOT_PRODUCT(u0%V,lag_gop(:,jc))*c2 + divv*lag_rop(jc)*c2 + lag_rop(jc)*det
         uvec = d_dens*c2*lag_gop(:,jc)
@@ -2095,13 +2119,13 @@ do ii=1,mesh%tloc_c(ip)%n
         end do
       END IF
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dT/dt matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_adv_temp)THEN
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dT/dt(B_c) matrix (7,1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       IF(xmhd_ohmic.AND.xmhd_adv_b.AND.(.NOT.xmhd_two_temp))THEN
         c1 = eta_curr*tgam_fac*jac_dt*det*2.d0/((1.d0+te_factor)*mu0*u0%N*k_boltz)
         do jc=1,oft_hcurl%nce
@@ -2112,9 +2136,9 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dT/dt(V) matrix (7,3:5)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       c3 = jac_dt*det*vel_scale ! advection
       c1 = u0%Ti*tgam_fac*c3 ! compression
       c2 = m_ion*tgam_fac*den_scale*c3/(k_boltz*u0%N)
@@ -2158,9 +2182,9 @@ do ii=1,mesh%tloc_c(ip)%n
           mtmp(7,5)%m(jr,jc) = mtmp(7,5)%m(jr,jc) + lag_rop(jr)*uvec(3)
         end do
       end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dT/dt(n) matrix (7,6)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       IF(xmhd_ohmic.AND.xmhd_adv_den.AND.(.NOT.xmhd_two_temp))THEN
         c1 = eta_curr*tgam_fac*DOT_PRODUCT(u0%J,u0%J)*den_scale*jac_dt*det/ &
           ((1.d0+te_factor)*mu0*u0%N*u0%N*k_boltz)
@@ -2172,9 +2196,9 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dT/dt(T) matrix (7,7)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       !---Upwinding setup
       IF(xmhd_upwind)c1 = jac_dt*det*xmhd_upwind_weight(v0_mag,he,chi_temp(2)*tgam_fac)
       c2 = divv*tgam_fac ! compression
@@ -2199,9 +2223,9 @@ do ii=1,mesh%tloc_c(ip)%n
             + DOT_PRODUCT(lag_gopt(jr,:),uvec)
         end do
       end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dTe/dt(B_c) matrix (8,1)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_two_temp)THEN
       IF(xmhd_adv_b)THEN
         c1 = 0.d0
@@ -2215,9 +2239,9 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dTe/dt(V) matrix (8,3:5)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       c1 = jac_dt*det*vel_scale ! advection
       c2 = u0%Te*tgam_fac*c1 ! compression
       do jc=1,oft_lagrange%nce
@@ -2229,9 +2253,9 @@ do ii=1,mesh%tloc_c(ip)%n
           mtmp(te_ind,5)%m(jr,jc) = mtmp(te_ind,5)%m(jr,jc) + lag_rop(jr)*uvec(3)
         end do
       end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dTe/dt(n) matrix (8,6)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       IF(xmhd_adv_den)THEN
         c1 = 0.d0
         IF(xmhd_ohmic)c1 = eta_curr*tgam_fac*DOT_PRODUCT(u0%J,u0%J)/(mu0*u0%N*u0%N*k_boltz)
@@ -2245,9 +2269,9 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dT/dt(Te) matrix (7,8) and dTe/dt(T) matrix (8,7)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       IF(xmhd_therm_equil)THEN
         c1 = (1.d0 - 3.d0*u0%Ti/u0%Te)*jac_dt*det/(2.d0*elec_ion_therm_rate(u0%Te,u0%N,mu_ion))
         c2 = -jac_dt*det/elec_ion_therm_rate(u0%Te,u0%N,mu_ion)
@@ -2259,9 +2283,9 @@ do ii=1,mesh%tloc_c(ip)%n
           end do
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute dTe/dt(Te) matrix (8,8)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       IF(xmhd_brag)THEN
         chi_temp = brag_elec_transport(u0%N,u0%Te,bmag)/u0%N
         chi_temp(1) = kappa_par*chi_temp(1)
@@ -2295,13 +2319,13 @@ do ii=1,mesh%tloc_c(ip)%n
       end do
     END IF
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! End quadrature loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   end do
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Apply BCs to local matrices
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%b1_bc(j_hcurl),1)
   CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%b2_bc(j_hgrad),2)
   CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%n_bc(j_lag),6)
@@ -2311,7 +2335,7 @@ do ii=1,mesh%tloc_c(ip)%n
   IF(xmhd_vbcdir)THEN
     DO jr=1,oft_lagrange%nce
       IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(j_lag(jr),vbc_type,umat)
+        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),vbc_type,umat)
         DO m=1,xmhd_rep%nfields
           IF(ASSOCIATED(mtmp(3,m)%m))THEN
             DO jc=1,SIZE(mtmp(3,m)%m,2)
@@ -2335,9 +2359,9 @@ do ii=1,mesh%tloc_c(ip)%n
     CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%v_bc(j_lag),4)
     CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%v_bc(j_lag),5)
   END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Add local contribution to full matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   IF(xmhd_hall.AND.xmhd_two_temp)NULLIFY(mtmp(1,7)%m)
   CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc,tlocks)
 end do
@@ -2357,9 +2381,9 @@ DO i=1,xmhd_rep%nfields
   CALL omp_destroy_lock(tlocks(i))
 END DO
 DEALLOCATE(tlocks)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set BC diagnoals
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
 CALL fem_dirichlet_diag(oft_hcurl,Jac,oft_xmhd_ops%b1_bc,1)
 CALL fem_dirichlet_diag(oft_hgrad,Jac,oft_xmhd_ops%b2_bc,2)
@@ -2373,7 +2397,7 @@ IF(xmhd_vbcdir)THEN
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
     jtmp=j
-    CALL lag_vbc_diag(j,vbc_type,umat)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,umat)
     DO jr=1,3
       DO jc=1,3
         CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr+2,jc+2)
@@ -2385,18 +2409,18 @@ ELSE
   CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%v_bc,4)
   CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%v_bc,5)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Final assembly
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 call oft_xmhd_create(tmp)
 call Jac%assemble(tmp)
 call tmp%delete
 DEALLOCATE(tmp)
 DEBUG_STACK_POP
 end subroutine xmhd_build_ops
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup and allocate operators used in xMHD advance
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_alloc_ops
 integer(i4) :: i,j,level,levelin,offset
 INTEGER(i4), ALLOCATABLE :: color_tmp(:)
@@ -2405,18 +2429,18 @@ REAL(r8), POINTER :: node_flag(:)
 CLASS(oft_vector), POINTER :: vectmp
 type(xmhd_ops), pointer :: ops
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup Operators and ML environment
-!---------------------------------------------------------------------------
-allocate(ml_J(oft_hcurl_nlevels-xmhd_minlev+1),ml_int(oft_hcurl_nlevels-xmhd_minlev))
-allocate(oft_xmhd_ops_ML(oft_hcurl_nlevels))
-xmhd_blevel=oft_hcurl_blevel
-xmhd_nlevels=oft_hcurl_nlevels
-xmhd_level=oft_hcurl_level
+!------------------------------------------------------------------------------
+allocate(ml_J(xmhd_ML_hcurl%nlevels-xmhd_minlev+1),ml_int(xmhd_ML_hcurl%nlevels-xmhd_minlev))
+allocate(oft_xmhd_ops_ML(xmhd_ML_hcurl%nlevels))
+xmhd_blevel=xmhd_ML_hcurl%blevel
+xmhd_nlevels=xmhd_ML_hcurl%nlevels
+xmhd_level=xmhd_ML_hcurl%level
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Allocating xMHD structures'
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup matrix mask based on included physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(xmhd_mat_mask(xmhd_rep%nfields,xmhd_rep%nfields))
 xmhd_mat_mask=0
 !---B_c rows
@@ -2487,9 +2511,9 @@ ELSE
   xmhd_mat_mask(7,7)=2
   IF(xmhd_two_temp)xmhd_mat_mask(te_ind,te_ind)=2
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create matrix objects for each level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 levelin=xmhd_level
 do level=levelin,xmhd_minlev,-1
   call xmhd_set_level(level)
@@ -2497,7 +2521,7 @@ do level=levelin,xmhd_minlev,-1
   CALL xmhd_rep%mat_create(ops%J,xmhd_mat_mask)
   ml_J(level-xmhd_minlev+1)%m=>ops%J
   !---Set element coloring
-  IF(xmhd_nparts>1)THEN
+  IF(xmhd_nparts(level)>1)THEN
     SELECT TYPE(this=>ops%J)
       CLASS IS(oft_native_matrix)
         ALLOCATE(this%color(this%nr))
@@ -2507,7 +2531,7 @@ do level=levelin,xmhd_minlev,-1
           ALLOCATE(color_tmp(xmhd_rep%fields(i)%fe%ne))
           SELECT TYPE(this=>xmhd_rep%fields(i)%fe)
           CLASS IS(oft_fem_type)
-            CALL fem_partition(this,color_tmp,xmhd_nparts)
+            CALL fem_partition(this,color_tmp,xmhd_nparts(level))
           CLASS DEFAULT
             CALL oft_abort("Invalid FE representation for partitioning", &
               "xmhd_alloc_ops",__FILE__)
@@ -2538,7 +2562,7 @@ DO level=levelin,xmhd_minlev,-1
   !
   ALLOCATE(oft_xmhd_ops%solid_node(oft_lagrange%ne))
   oft_xmhd_ops%solid_node=.FALSE.
-  CALL oft_lag_create(vectmp)
+  CALL xmhd_ML_vlagrange%vec_create(vectmp)
   CALL vectmp%set(0.d0)
   CALL vectmp%get_local(node_flag)
   !
@@ -2563,16 +2587,16 @@ call xmhd_set_level(levelin)
 ! IF(oft_debug_print(2))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 end subroutine xmhd_alloc_ops
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup material regions from XML input file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_setup_regions()
 !---XML solver fields
 #ifdef HAVE_XML
-integer(i4) :: nnodes,nnodes_inner,nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
+integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
 real(r8) :: eta(1)
-TYPE(fox_node), POINTER :: smd_node,reg_node,inner_node
-TYPE(fox_nodelist), POINTER :: current_nodes,reg_nodes,inner_nodes
+TYPE(xml_node), POINTER :: reg_node,inner_node
+TYPE(xml_nodelist) :: reg_nodes
 #endif
 integer(i4), ALLOCATABLE :: regs(:),reg_types(:)
 DEBUG_STACK_PUSH
@@ -2586,18 +2610,15 @@ solid_cell=.FALSE.
 #ifdef HAVE_XML
 IF(ASSOCIATED(xmhd_root_node))THEN
   !---Look for pre node
-  reg_nodes=>fox_getElementsByTagName(xmhd_root_node,"region")
-  nnodes=fox_getLength(reg_nodes)
-  IF(nnodes>0)THEN
-    DO i=0,nnodes-1
-      reg_node=>fox_item(reg_nodes,i)
+  CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
+  IF(reg_nodes%n>0)THEN
+    DO i=0,reg_nodes%n-1
+      reg_node=>reg_nodes%nodes(i+1)%this
       !---
-      inner_nodes=>fox_getElementsByTagName(reg_node,"id")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)CALL oft_abort("No regions IDs specified for region group", &
+      CALL xml_get_element(reg_node,"id",inner_node,ierr)
+      IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
         "xmhd_setup_regions",__FILE__)
-      inner_node=>fox_item(inner_nodes,0)
-      CALL fox_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
+      CALL xml_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
       IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
         "xmhd_setup_regions",__FILE__)
       IF(ierr>0)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
@@ -2605,12 +2626,8 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(ANY(regs(1:nread_id)>mesh%nreg).OR.ANY(regs(1:nread_id)<=0))CALL oft_abort( &
         "Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
-      inner_nodes=>fox_getElementsByTagName(reg_node,"eta")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)CALL oft_abort("No eta values specified for region group", &
-        "xmhd_setup_regions",__FILE__)
-      inner_node=>fox_item(inner_nodes,0)
-      CALL fox_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
+      CALL xml_get_element(reg_node,"eta",inner_node,ierr)
+      CALL xml_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
       IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
         "xmhd_setup_regions",__FILE__)
       IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
@@ -2618,13 +2635,11 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(eta(1)<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
         __FILE__)
       !---Get region type
-      inner_nodes=>fox_getElementsByTagName(reg_node,"type")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)THEN
+      CALL xml_get_element(reg_node,"type",inner_node,ierr)
+      IF(ierr/=0)THEN
         reg_type(1)=2.d0
       ELSE
-        inner_node=>fox_item(inner_nodes,0)
-        CALL fox_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
+        CALL xml_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
         IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
           "xmhd_setup_regions",__FILE__)
         IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
@@ -2659,15 +2674,15 @@ call MPI_ALLREDUCE(MPI_IN_PLACE,xmhd_rw,1,OFT_MPI_LOGICAL,MPI_LOR,oft_env%COMM,i
 eta_reg=ABS(eta_reg)
 DEBUG_STACK_POP
 end subroutine xmhd_setup_regions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Set BC flags
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_set_bc
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set boundary condition for B
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(oft_xmhd_ops%b1_bc(oft_hcurl%ne))
 ALLOCATE(oft_xmhd_ops%b2_bc(oft_hgrad%ne))
 IF(xmhd_adv_b)THEN
@@ -2696,9 +2711,9 @@ ELSE
   oft_xmhd_ops%b1_bc=.TRUE.
   oft_xmhd_ops%b2_bc=.TRUE.
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Apply boundary condition to V
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(oft_xmhd_ops%v_bc(oft_lagrange%ne))
 oft_xmhd_ops%v_bc=.FALSE.
 IF(vbc(1:4)=='none'.OR.vbc(1:4)=='norm')THEN
@@ -2708,9 +2723,9 @@ ELSE IF(vbc(1:3)=='all')THEN
 ELSE
   CALL oft_abort('Invalid V Boundary Condition.','xmhd_bc',__FILE__)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Apply boundary condition to n
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(oft_xmhd_ops%n_bc(oft_lagrange%ne))
 IF(xmhd_adv_den)THEN
   oft_xmhd_ops%n_bc=.FALSE.
@@ -2724,9 +2739,9 @@ IF(xmhd_adv_den)THEN
 ELSE
   oft_xmhd_ops%n_bc=.TRUE.
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Apply boundary condition to T
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ALLOCATE(oft_xmhd_ops%t_bc(oft_lagrange%ne))
 IF(xmhd_adv_temp)THEN
   oft_xmhd_ops%t_bc=.FALSE.
@@ -2742,11 +2757,11 @@ ELSE
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_set_bc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the NL metric for solution field
 !!
 !! b = F(a)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_errmatrix_apply(self,a,b)
 class(oft_xmhd_errmatrix), intent(inout) :: self !< Error matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -2773,14 +2788,14 @@ DEBUG_STACK_PUSH
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD non-linear function'
 quad=>oft_hcurl%quad
 neg_vols=0.d0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local field values from source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 full_interp%u=>a
-CALL full_interp%setup
-!---------------------------------------------------------------------------
+CALL full_interp%setup(mesh)
+!------------------------------------------------------------------------------
 ! Get local field values from previous step if necessary
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(jpin,npin,vpin)
 back_step=.FALSE.
 IF(ASSOCIATED(self%up))THEN
@@ -2797,9 +2812,9 @@ IF(ASSOCIATED(self%up))THEN
   END IF
   back_step=.TRUE.
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local field values for result
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(bcout,bgout,nout,tout,teout,j2out,n2out)
 CALL b%set(0.d0)
 CALL b%get_local(bcout,1)
@@ -2821,9 +2836,9 @@ diag_vals=0.d0
 ptind=(/1,2/)
 IF(xmhd_taxis==1)ptind(1)=3
 IF(xmhd_taxis==2)ptind(2)=3
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Apply metric function
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(det,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop, &
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,bhat,jp0q,vad,vad_mag,he,c1,cgop,divv, &
 !$omp np0q,eta_curr,u,bc_loc,bg_loc,lag_loc,pt_r,vpin_loc,jpin_loc,chi_temp,te_loc, &
@@ -2858,9 +2873,9 @@ do ii=1,mesh%tloc_c(ip)%n
   call oft_lagrange%ncdofs(i,j_lag)
   call oft_hgrad%ncdofs(i,j_hgrad)
   call oft_hcurl%ncdofs(i,j_hcurl)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Init local entries
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   bc_loc=0.d0; bg_loc=0.d0; lag_loc=0.d0
   IF(xmhd_two_temp)te_loc=0.d0
   IF(j2_ind>0)j2_loc=0.d0
@@ -2871,18 +2886,18 @@ do ii=1,mesh%tloc_c(ip)%n
       vpin_loc(jr,1) = npin(j_lag(jr))
       IF(xmhd_upwind)vpin_loc(jr,2:4) = vpin(j_lag(jr),:)
     end do
-    !---H1(Curl) elements
+    !---H(Curl) elements
     do jr=1,oft_hcurl%nce
       jpin_loc(jr) = jpin(j_hcurl(jr))
     end do
   END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Quadrature Loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO m=1,quad%np
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local reconstructed operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     if(curved.OR.m==1)then
       call mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
       call oft_hcurl_get_cgops(goptmp,cgop)
@@ -2891,7 +2906,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !---Get local reconstruction operators
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
     CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !---Evaluate centering values
@@ -2952,9 +2967,9 @@ do ii=1,mesh%tloc_c(ip)%n
       diag_vals(6) = diag_vals(6) + u0%Ti*det
       diag_vals(7) = diag_vals(7) + u0%Te*det
     END IF
-    !---------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
     ! Compute F (u) for solid region
-    !---------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
     IF(solid_cell(i))THEN
       IF(xmhd_adv_b)THEN
         !---Eta J
@@ -2970,9 +2985,9 @@ do ii=1,mesh%tloc_c(ip)%n
       END IF
       CYCLE
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute F_bc (u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_adv_b)THEN
       IF(eta_temp>0.d0)THEN
         IF(ASSOCIATED(res_profile))THEN
@@ -3015,17 +3030,17 @@ do ii=1,mesh%tloc_c(ip)%n
             + DOT_PRODUCT(hcurl_cop(:,jr),u0%J))*det/j2_scale
         end do
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute F_bg (u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       uvec=u0%B*det
       do jr=1,oft_hgrad%nce
         bg_loc(jr) = bg_loc(jr) + DOT_PRODUCT(hgrad_rop(:,jr),uvec)
       end do
     END IF ! Advance B
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute F_v (u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     uvec = 0.d0; umat = 0.d0
     !---JxB
     IF(xmhd_jcb)uvec = uvec - cross_product(u0%J,u0%B)/(u0%N*m_ion*mu0)
@@ -3084,9 +3099,9 @@ do ii=1,mesh%tloc_c(ip)%n
         + lag_gop(1,jr)*umat(:,1) + lag_gop(2,jr)*umat(:,2) &
         + lag_gop(3,jr)*umat(:,3)
     end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute F_n (u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_adv_den)THEN
       u = 0.d0; uvec = 0.d0
       !---Compression and advection
@@ -3123,9 +3138,9 @@ do ii=1,mesh%tloc_c(ip)%n
         end do
       END IF
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute F_T (u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_adv_temp)THEN
       u = 0.d0; uvec = 0.d0
       !---Viscous heating
@@ -3199,9 +3214,9 @@ do ii=1,mesh%tloc_c(ip)%n
           + DOT_PRODUCT(lag_gop(:,jr),uvec)
       end do
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute F_Te (u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     IF(xmhd_two_temp.AND.xmhd_adv_temp)THEN
       u = 0.d0; uvec = 0.d0
       !---Collisional Heating
@@ -3247,13 +3262,13 @@ do ii=1,mesh%tloc_c(ip)%n
           + DOT_PRODUCT(lag_gop(:,jr),uvec)
       end do
     END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! End quadrature loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Add local contributions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   !$omp critical(xmhderr_red)
   !---B rows
   IF(xmhd_adv_b)THEN
@@ -3291,9 +3306,9 @@ IF(j2_ind>0)DEALLOCATE(j2_loc)
 IF(back_step)deallocate(vpin_loc,jpin_loc)
 NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !$omp end parallel
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Boundary conditions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_hcurl,full_interp%bcurl_loc,bcout,oft_xmhd_ops%b1_bc)
 CALL fem_dirichlet_vec(oft_hgrad,full_interp%bgrad_loc,bgout,oft_xmhd_ops%b2_bc)
@@ -3306,10 +3321,10 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=MATMUL(mloc,vout(j,:))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=vout(j,:)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3317,9 +3332,9 @@ ELSE
   CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,2),vout(:,2),oft_xmhd_ops%v_bc)
   CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),oft_xmhd_ops%v_bc)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set result from local field values, summing contributions across seams
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL b%restore_local(bcout,1,add=.TRUE.,wait=.TRUE.)
 CALL b%restore_local(bgout,2,add=.TRUE.,wait=.TRUE.)
 vtmp=>vout(:,1)
@@ -3338,9 +3353,9 @@ IF(self%dt<0.d0)THEN
   diag_vals(3:4)=diag_vals(3:4)/(2*pi)
   self%diag_vals=oft_mpi_sum(diag_vals,7)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Destroy worker arrays
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(bcout,bgout,vout,nout,tout)
 IF(xmhd_two_temp)DEALLOCATE(teout)
 IF(n2_ind>0)DEALLOCATE(n2out)
@@ -3358,11 +3373,11 @@ IF(xmhd_two_temp)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_errmatrix_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the mass matrix for solution field
 !!
 !! b = M(a)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_massmatrix_apply(self,a,b)
 class(oft_xmhd_massmatrix), intent(inout) :: self !< Mass matrix object
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -3383,11 +3398,11 @@ type(xmhd_loc_values) :: u0
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD mass matrix'
 quad=>oft_hcurl%quad
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local field values from source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 full_interp%u=>a
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 NULLIFY(neqin)
 IF(ASSOCIATED(self%u0))THEN
   neq_present=.TRUE.
@@ -3395,9 +3410,9 @@ IF(ASSOCIATED(self%u0))THEN
 ELSE
   neq_present=.FALSE.
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local field values for result
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(bcout,bgout,nout,tout,teout)
 CALL b%set(0.d0)
 CALL b%get_local(bcout,1)
@@ -3417,9 +3432,9 @@ diag_vals=0.d0
 ptind=(/1,2/)
 IF(xmhd_taxis==1)ptind(1)=3
 IF(xmhd_taxis==2)ptind(2)=3
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Apply metric function
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(det,j_lag,j_hgrad,j_hcurl,lag_rop,hgrad_rop,hcurl_rop, &
 !$omp hcurl_cop,u0,curved,goptmp,vol,j,m,jr,neq,pt,pt_r,cgop,bc_loc,bg_loc,te_loc, &
 !$omp lag_loc,i,ii,fulltmp) reduction(+:diag_vals)
@@ -3449,13 +3464,13 @@ do ii=1,mesh%tloc_c(ip)%n
   !---Init local entries
   bc_loc=0.d0; bg_loc=0.d0; lag_loc=0.d0
   IF(xmhd_two_temp)te_loc=0.d0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Quadrature Loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO m=1,quad%np
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local reconstructed operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     if(curved.OR.m==1)then
       call mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
       call oft_hcurl_get_cgops(goptmp,cgop)
@@ -3464,7 +3479,7 @@ do ii=1,mesh%tloc_c(ip)%n
     det=vol*quad%wts(m)
     !---Lagrange elements
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !
@@ -3491,9 +3506,9 @@ do ii=1,mesh%tloc_c(ip)%n
     diag_vals(5) = diag_vals(5) + u0%N*det
     diag_vals(6) = diag_vals(6) + u0%Ti*det
     diag_vals(7) = diag_vals(7) + u0%Te*det
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Compute mass matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     !---Compute M_bc (u)
     do jr=1,oft_hcurl%nce
       bc_loc(jr) = bc_loc(jr) + DOT_PRODUCT(hcurl_rop(:,jr),u0%B)*det
@@ -3517,14 +3532,14 @@ do ii=1,mesh%tloc_c(ip)%n
       IF(xmhd_adv_temp)lag_loc(jr,5) = lag_loc(jr,5) + lag_rop(jr)*u0%Ti*det
       IF(xmhd_two_temp)te_loc(jr) = te_loc(jr) + lag_rop(jr)*u0%Te*det
     end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! End quadrature loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   end do
   !$omp critical(xmhderr_red)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Add local contributions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   !---B rows
   do jr=1,oft_hcurl%nce
     bcout(j_hcurl(jr)) = bcout(j_hcurl(jr)) + bc_loc(jr)
@@ -3549,28 +3564,28 @@ deallocate(bc_loc,bg_loc,lag_loc)
 IF(xmhd_two_temp)deallocate(te_loc)
 NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !$omp end parallel
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Boundary conditions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_hcurl,full_interp%bcurl_loc,bcout,oft_xmhd_ops%b1_bc)
 CALL fem_dirichlet_vec(oft_hgrad,full_interp%bgrad_loc,bgout,oft_xmhd_ops%b2_bc)
 CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,4),nout,oft_xmhd_ops%n_bc)
 CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,5),tout,oft_xmhd_ops%t_bc)
 IF(xmhd_two_temp)CALL fem_dirichlet_vec(oft_lagrange,full_interp%Te_loc,teout,oft_xmhd_ops%t_bc)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Velocity BC
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(xmhd_vbcdir)THEN
   !---Copy values for boundary terms
   !$omp parallel do private(j,mloc)
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=MATMUL(mloc,vout(j,:))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,vbc_type,mloc)
     vout(j,:)=vout(j,:)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3578,9 +3593,9 @@ ELSE
   CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,2),vout(:,2),oft_xmhd_ops%v_bc)
   CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),oft_xmhd_ops%v_bc)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set result from local field values, summing contributions across seams
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL b%restore_local(bcout,1,add=.TRUE.,wait=.TRUE.)
 CALL b%restore_local(bgout,2,add=.TRUE.,wait=.TRUE.)
 vtmp=>vout(:,1)
@@ -3601,18 +3616,18 @@ diag_vals(2)=diag_vals(2)
 diag_vals(3:4)=diag_vals(3:4)/(2*pi)
 diag_vals(5)=diag_vals(5)
 self%diag_vals=oft_mpi_sum(diag_vals,7)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Destroy worker arrays
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(bcout,bgout,vout,nout,tout)
 IF(ASSOCIATED(neqin))DEALLOCATE(neqin)
 IF(xmhd_two_temp)DEALLOCATE(teout)
 CALL full_interp%delete
 DEBUG_STACK_POP
 end subroutine xmhd_massmatrix_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute diagnostic values from fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_diag(u,diag_vals,ueq)
 class(oft_vector), target, intent(inout) :: u !< Field for diagnostic evaluation
 real(r8), intent(out) :: diag_vals(7) !< Resulting diagnostic values [7]
@@ -3632,11 +3647,11 @@ type(xmhd_loc_values) :: u0
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD mass matrix'
 quad=>oft_hcurl%quad
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local field values from source
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 full_interp%u=>u
-CALL full_interp%setup
+CALL full_interp%setup(mesh)
 NULLIFY(neqin)
 IF(PRESENT(ueq))THEN
   neq_present=.TRUE.
@@ -3649,9 +3664,9 @@ diag_vals=0.d0
 ptind=(/1,2/)
 IF(xmhd_taxis==1)ptind(1)=3
 IF(xmhd_taxis==2)ptind(2)=3
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Apply metric function
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !$omp parallel private(det,j_lag,j_hgrad,j_hcurl,lag_rop,hgrad_rop,hcurl_rop, &
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,neq,pt,pt_r,cgop,u0,i,ii,fulltmp) &
 !$omp reduction(+:diag_vals)
@@ -3675,13 +3690,13 @@ do ii=1,mesh%tloc_c(ip)%n
   call oft_lagrange%ncdofs(i,j_lag)
   call oft_hgrad%ncdofs(i,j_hgrad)
   call oft_hcurl%ncdofs(i,j_hcurl)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Quadrature Loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO m=1,quad%np
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Get local reconstructed operators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
     if(curved.OR.m==1)then
       call mesh%jacobian(i,quad%pts(:,m),goptmp,vol)
       call oft_hcurl_get_cgops(goptmp,cgop)
@@ -3690,7 +3705,7 @@ do ii=1,mesh%tloc_c(ip)%n
     det=vol*quad%wts(m)
     !---Lagrange elements
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
-    CALL oft_h0_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
+    CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
     !
@@ -3730,20 +3745,20 @@ diag_vals(2)=diag_vals(2)
 diag_vals(3:4)=diag_vals(3:4)/(2*pi)
 diag_vals(5)=diag_vals(5)
 diag_vals=oft_mpi_sum(diag_vals,7)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Destroy worker arrays
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(ASSOCIATED(neqin))DEALLOCATE(neqin)
 CALL full_interp%delete
 DEBUG_STACK_POP
 end subroutine xmhd_diag
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup composite FE representation and ML environment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_setup_rep
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating xMHD FE type'
 !---Create FE representation
-ML_xmhd_rep%nlevels=oft_hcurl_nlevels
+ML_xmhd_rep%nlevels=xmhd_ML_hcurl%nlevels
 ML_xmhd_rep%nfields=7
 IF(xmhd_two_temp)THEN
   ML_xmhd_rep%nfields=ML_xmhd_rep%nfields+1
@@ -3759,92 +3774,95 @@ IF(eta_hyper>0.d0)THEN
 END IF
 ALLOCATE(ML_xmhd_rep%ml_fields(ML_xmhd_rep%nfields))
 ALLOCATE(ML_xmhd_rep%field_tags(ML_xmhd_rep%nfields))
-ML_xmhd_rep%ml_fields(1)%ml=>ML_oft_hcurl
+ML_xmhd_rep%ml_fields(1)%ml=>xmhd_ML_hcurl
 ML_xmhd_rep%field_tags(1)='Bc'
-ML_xmhd_rep%ml_fields(2)%ml=>ML_oft_hgrad
+ML_xmhd_rep%ml_fields(2)%ml=>xmhd_ML_H1grad
 ML_xmhd_rep%field_tags(2)='Bg'
-ML_xmhd_rep%ml_fields(3)%ml=>ML_oft_lagrange
+ML_xmhd_rep%ml_fields(3)%ml=>xmhd_ML_lagrange
 ML_xmhd_rep%field_tags(3)='Vx'
-ML_xmhd_rep%ml_fields(4)%ml=>ML_oft_lagrange
+ML_xmhd_rep%ml_fields(4)%ml=>xmhd_ML_lagrange
 ML_xmhd_rep%field_tags(4)='Vy'
-ML_xmhd_rep%ml_fields(5)%ml=>ML_oft_lagrange
+ML_xmhd_rep%ml_fields(5)%ml=>xmhd_ML_lagrange
 ML_xmhd_rep%field_tags(5)='Vz'
-ML_xmhd_rep%ml_fields(6)%ml=>ML_oft_lagrange
+ML_xmhd_rep%ml_fields(6)%ml=>xmhd_ML_lagrange
 ML_xmhd_rep%field_tags(6)='n'
-ML_xmhd_rep%ml_fields(7)%ml=>ML_oft_lagrange
+ML_xmhd_rep%ml_fields(7)%ml=>xmhd_ML_lagrange
 ML_xmhd_rep%field_tags(7)='T'
 IF(xmhd_two_temp)THEN
-  ML_xmhd_rep%ml_fields(te_ind)%ml=>ML_oft_lagrange
+  ML_xmhd_rep%ml_fields(te_ind)%ml=>xmhd_ML_lagrange
   ML_xmhd_rep%field_tags(te_ind)='Te'
 END IF
 IF(n2_ind>0)THEN
-  ML_xmhd_rep%ml_fields(n2_ind)%ml=>ML_oft_lagrange
+  ML_xmhd_rep%ml_fields(n2_ind)%ml=>xmhd_ML_lagrange
   ML_xmhd_rep%field_tags(n2_ind)='n2'
 END IF
 IF(j2_ind>0)THEN
-  ML_xmhd_rep%ml_fields(j2_ind)%ml=>ML_oft_hcurl
+  ML_xmhd_rep%ml_fields(j2_ind)%ml=>xmhd_ML_hcurl
   ML_xmhd_rep%field_tags(j2_ind)='j2'
 END IF
-call ML_xmhd_rep%setup
+call ML_xmhd_rep%setup()
 xmhd_rep=>ML_xmhd_rep%current_level
 !---Declare legacy variables
-xmhd_blevel=oft_hcurl_blevel
-xmhd_nlevels=oft_hcurl_nlevels
-xmhd_level=oft_hcurl_level
+xmhd_blevel=xmhd_ML_hcurl%blevel
+xmhd_nlevels=xmhd_ML_hcurl%nlevels
+xmhd_level=xmhd_ML_hcurl%level
 IF(xmhd_minlev<0)xmhd_minlev=xmhd_nlevels
 end subroutine xmhd_setup_rep
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Set the current level for xMHD model
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_set_level(level)
 integer(i4), intent(in) :: level !< Desired level
-if(level>oft_hcurl_nlevels.OR.level<=0)then
+if(level>xmhd_ML_hcurl%nlevels.OR.level<=0)then
   call oft_abort('Invalid FE level','xmhd_set_level',__FILE__)
 end if
-if(level<mg_mesh%mgdim)then
-  call multigrid_level(level)
-else
-  call multigrid_level(mg_mesh%mgdim)
-end if
+! if(level<mg_mesh%mgdim)then
+!   call multigrid_level(mg_mesh,level)
+! else
+!   call multigrid_level(mg_mesh,mg_mesh%mgdim)
+! end if
 CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
 !---
-CALL oft_lag_set_level(level)
-CALL oft_h1_set_level(level)
+CALL xmhd_ML_lagrange%set_level(level)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid FE object","xmhd_set_level",__FILE__)
+CALL xmhd_ML_hcurl_grad%set_level(level,propogate=.TRUE.)
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,xmhd_ML_H1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
 xmhd_level=level
-xmhd_lev=oft_hcurl_lev
+! xmhd_lev=oft_hcurl_lev
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)
 end subroutine xmhd_set_level
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update Jacobian matrices on all levels with new fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_mfnk_update(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current field
 IF(oft_debug_print(1))write(*,*)'Updating xMHD MF-Jacobian'
 CALL mfmat%update(uin)
 END SUBROUTINE xmhd_mfnk_update
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup interpolator for xMHD solution fields
 !!
 !! - Fetches local vector values for interpolation
-!!
-!! @note Should only be used via class \ref xmhd_interp
-!---------------------------------------------------------------------------
-subroutine xmhd_interp_setup(self)
+!------------------------------------------------------------------------------
+subroutine xmhd_interp_setup(self,mesh)
 CLASS(xmhd_interp), INTENT(inout) :: self !< Interpolation object
+class(oft_mesh), target, intent(inout) :: mesh
 INTEGER(i4) :: i
 REAL(r8), POINTER, DIMENSION(:) :: vtmp
 !---Set FEM links
-self%hgrad_rep=>oft_hgrad
-self%hcurl_rep=>oft_hcurl
+self%grad_rep=>oft_hgrad
+self%curl_rep=>oft_hcurl
 self%lag_rep=>oft_lagrange
+self%mesh=>mesh
 !---Get local slice
 CALL self%u%get_local(self%bcurl_loc,1)
 CALL self%u%get_local(self%bgrad_loc,2)
 IF(.NOT.ASSOCIATED(self%lf_loc))THEN
   ALLOCATE(self%lf_loc(self%lag_rep%ne,5))
   IF(xmhd_two_temp)ALLOCATE(self%Te_loc(self%lag_rep%ne))
-  IF(j2_ind>0)ALLOCATE(self%J2_loc(self%hcurl_rep%ne))
+  IF(j2_ind>0)ALLOCATE(self%J2_loc(self%curl_rep%ne))
   IF(n2_ind>0)ALLOCATE(self%N2_loc(self%lag_rep%ne))
 END IF
 vtmp=>self%lf_loc(:,1)
@@ -3864,11 +3882,11 @@ IF(n2_ind>0)CALL self%u%get_local(self%N2_loc,n2_ind)
 IF(.NOT.ASSOCIATED(self%cache))THEN
   ALLOCATE(self%cache(oft_env%nthreads))
   DO i=1,oft_env%nthreads
-    ALLOCATE(self%cache(i)%bcurl(self%hcurl_rep%nce))
-    ALLOCATE(self%cache(i)%bgrad(self%hgrad_rep%nce))
+    ALLOCATE(self%cache(i)%bcurl(self%curl_rep%nce))
+    ALLOCATE(self%cache(i)%bgrad(self%grad_rep%nce))
     ALLOCATE(self%cache(i)%lf(self%lag_rep%nce,5))
     IF(xmhd_two_temp)ALLOCATE(self%cache(i)%Te(self%lag_rep%nce))
-    IF(j2_ind>0)ALLOCATE(self%cache(i)%J2(self%hcurl_rep%nce))
+    IF(j2_ind>0)ALLOCATE(self%cache(i)%J2(self%curl_rep%nce))
     IF(n2_ind>0)ALLOCATE(self%cache(i)%N2(self%lag_rep%nce))
     self%cache(i)%cell=-1
     self%cache(i)%bcurl=0.d0
@@ -3880,11 +3898,9 @@ IF(.NOT.ASSOCIATED(self%cache))THEN
   END DO
 END IF
 end subroutine xmhd_interp_setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy interpolator for xMHD solution fields
-!!
-!! @note Should only be used via class \ref xmhd_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_interp_delete(self)
 class(xmhd_interp), intent(inout) :: self !< Interpolation object
 INTEGER(i4) :: i
@@ -3906,13 +3922,11 @@ IF(ASSOCIATED(self%cache))THEN
   END DO
   DEALLOCATE(self%cache)
 END IF
-NULLIFY(self%hcurl_rep,self%hgrad_rep,self%lag_rep,self%u)
+NULLIFY(self%curl_rep,self%grad_rep,self%lag_rep,self%u)
 end subroutine xmhd_interp_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reconstruct xMHD solution fields
-!!
-!! @note Should only be used via class \ref xmhd_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_interp_apply(self,cell,f,gop,val)
 class(xmhd_interp), intent(inout) :: self !< Interpolation object
 integer(i4), intent(in) :: cell !< Cell for interpolation
@@ -3932,16 +3946,16 @@ IF(.NOT.ASSOCIATED(self%bgrad_loc))CALL oft_abort('Setup has not been called!', 
 !---Pull cache
 tloc=>self%cache(oft_tid+1)
 IF(tloc%cell/=cell)THEN
-  allocate(j(self%hcurl_rep%nce))
-  call self%hcurl_rep%ncdofs(cell,j)
-  do jc=1,self%hcurl_rep%nce
+  allocate(j(self%curl_rep%nce))
+  call self%curl_rep%ncdofs(cell,j)
+  do jc=1,self%curl_rep%nce
     tloc%bcurl(jc)=self%bcurl_loc(j(jc))
     IF(j2_ind>0)tloc%J2(jc)=self%J2_loc(j(jc))
   end do
   deallocate(j)
-  allocate(j(self%hgrad_rep%nce))
-  call self%hgrad_rep%ncdofs(cell,j)
-  do jc=1,self%hgrad_rep%nce
+  allocate(j(self%grad_rep%nce))
+  call self%grad_rep%ncdofs(cell,j)
+  do jc=1,self%grad_rep%nce
     tloc%bgrad(jc)=self%bgrad_loc(j(jc))
   end do
   deallocate(j)
@@ -3989,18 +4003,18 @@ IF(ASSOCIATED(xmhd_lag_rop))THEN
   END IF
   !---Reconstruct magnetic field
   !$omp simd reduction(+:b0)
-  do jc=1,self%hgrad_rep%nce
+  do jc=1,self%grad_rep%nce
     b0 = b0 + tloc%bgrad(jc)*xmhd_hgrad_rop(:,jc)
   end do
   !---Reconstruct magnetic field and current density
   !$omp simd reduction(+:b0,j0)
-  do jc=1,self%hcurl_rep%nce
+  do jc=1,self%curl_rep%nce
     b0 = b0 + tloc%bcurl(jc)*xmhd_hcurl_rop(:,jc)
     j0 = j0 + tloc%bcurl(jc)*xmhd_hcurl_cop(:,jc)
   end do
   IF(j2_ind>0)THEN
     !$omp simd reduction(+:J2,J2c)
-    do jc=1,self%hcurl_rep%nce
+    do jc=1,self%curl_rep%nce
       J2 = J2 + tloc%J2(jc)*xmhd_hcurl_rop(:,jc)
       J2c = J2c + tloc%J2(jc)*xmhd_hcurl_cop(:,jc)
     end do
@@ -4036,29 +4050,29 @@ ELSE
     END DO
   END IF
   DEALLOCATE(lag_rop,lag_gop)
-  !---H1(Grad) elements
-  ALLOCATE(hgrad_rop(3,self%hgrad_rep%nce))
-  CALL oft_h0_geval_all(self%hgrad_rep,cell,f,hgrad_rop,gop)
+  !---Grad(H^1) elements
+  ALLOCATE(hgrad_rop(3,self%grad_rep%nce))
+  CALL oft_h1_geval_all(self%grad_rep,cell,f,hgrad_rop,gop)
   !---Reconstruct magnetic field
   !$omp simd reduction(+:b0)
-  do jc=1,self%hgrad_rep%nce
+  do jc=1,self%grad_rep%nce
     b0 = b0 + tloc%bgrad(jc)*hgrad_rop(:,jc)
   end do
   DEALLOCATE(hgrad_rop)
-  !---H1(Curl) elements
+  !---H(Curl) elements
   CALL oft_hcurl_get_cgops(gop,cgop)
-  ALLOCATE(hcurl_rop(3,self%hcurl_rep%nce),hcurl_cop(3,self%hcurl_rep%nce))
-  CALL oft_hcurl_eval_all(self%hcurl_rep,cell,f,hcurl_rop,gop)
-  CALL oft_hcurl_ceval_all(self%hcurl_rep,cell,f,hcurl_cop,cgop)
+  ALLOCATE(hcurl_rop(3,self%curl_rep%nce),hcurl_cop(3,self%curl_rep%nce))
+  CALL oft_hcurl_eval_all(self%curl_rep,cell,f,hcurl_rop,gop)
+  CALL oft_hcurl_ceval_all(self%curl_rep,cell,f,hcurl_cop,cgop)
   !---Reconstruct magnetic field and current density
   !$omp simd reduction(+:b0,j0)
-  do jc=1,self%hcurl_rep%nce
+  do jc=1,self%curl_rep%nce
     b0 = b0 + tloc%bcurl(jc)*hcurl_rop(:,jc)
     j0 = j0 + tloc%bcurl(jc)*hcurl_cop(:,jc)
   end do
   IF(j2_ind>0)THEN
     !$omp simd reduction(+:J2,J2c)
-    do jc=1,self%hcurl_rep%nce
+    do jc=1,self%curl_rep%nce
       J2 = J2 + tloc%J2(jc)*hcurl_rop(:,jc)
       J2c = J2c + tloc%J2(jc)*hcurl_cop(:,jc)
     end do
@@ -4086,9 +4100,9 @@ IF(j2_ind>0)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_interp_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Unpack interpolation fields into xMHD field structure
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_interp_unpack(vals,vloc)
 real(r8), intent(in) :: vals(40) !< Packed fields [40]
 type(xmhd_loc_values), intent(out) :: vloc !< Unpacked fields
@@ -4112,9 +4126,9 @@ IF(j2_ind>0)THEN
   vloc%J2c = vals(38:40)*j2_scale
 END IF
 end subroutine xmhd_interp_unpack
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update Jacobian matrices on all levels with new solution
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_set_ops(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current solution
 TYPE(xmhd_interp) :: full_interp
@@ -4127,15 +4141,15 @@ IF(xmhd_skip_update)THEN
   RETURN
 END IF
 IF(oft_debug_print(1))write(*,'(2X,A)')'Update xMHD Jacobians'
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup interpolators
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(fullcc,fullcctmp)
 full_interp%u=>uin
-CALL full_interp%setup
-!---------------------------------------------------------------------------
+CALL full_interp%setup(mesh)
+!------------------------------------------------------------------------------
 ! Construct Jacobian on each sublevel
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 levelin=xmhd_level
 minlev=xmhd_minlev
 qorder=oft_hcurl%order
@@ -4143,27 +4157,27 @@ nfields=26
 IF(xmhd_two_temp)nfields=30
 do i=levelin,minlev,-1
   call xmhd_set_level(i)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Level is on finest mesh, use full field representations
-!---------------------------------------------------------------------------
-  if(oft_lagrange%mesh%nc==oft_lagrange_lin%mesh%nc)then
+!------------------------------------------------------------------------------
+  if(oft_lagrange%mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc)then
     !---Construct Jacobian
     call xmhd_build_ops(full_interp)
     !---Average on lowest level to cell centers
     if(oft_lagrange%order==1.AND.i>xmhd_minlev)then
       allocate(fullcc(nfields,mesh%nc))
-      call fem_avg_bcc(full_interp,fullcc,qorder,n=nfields)
+      call fem_avg_bcc(mesh,full_interp,fullcc,qorder,n=nfields)
     end if
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Level is on coarse mesh, average fields to coarser grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   else
     !---Create cell centered storage
     if(ASSOCIATED(fullcctmp))DEALLOCATE(fullcctmp)
     allocate(fullcctmp(nfields,mesh%nc))
     !---Transfer from distributed to local grid
-    if(oft_lagrange_level==oft_lagrange_blevel)then
-      call multigrid_base_pushcc(fullcc,fullcctmp,nfields)
+    if(xmhd_ML_lagrange%level==xmhd_ML_lagrange%blevel)then
+      call multigrid_base_pushcc(mg_mesh,fullcc,fullcctmp,nfields)
     !---Average values to over child cells
     else
       !$omp parallel do private(k)
@@ -4184,17 +4198,17 @@ do i=levelin,minlev,-1
     call xmhd_build_ops(fullcc_interp)
   end if
 end do
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup temporary storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 if(ASSOCIATED(fullcc))deallocate(fullcc)
 if(ASSOCIATED(fullcctmp))deallocate(fullcctmp)
 call full_interp%delete()
 call xmhd_set_level(levelin)
 end subroutine xmhd_set_ops
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create new xMHD solution vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_xmhd_create(new,level,cache,native)
 class(oft_vector), pointer, intent(out) :: new !< Vector to create
 integer(i4), optional, intent(in) :: level !< FE level (optional)
@@ -4204,9 +4218,9 @@ DEBUG_STACK_PUSH
 CALL ML_xmhd_rep%vec_create(new,level=level,cache=cache,native=native)
 DEBUG_STACK_POP
 end subroutine oft_xmhd_create
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Save xMHD solution state to a restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_xmhd_rst_save(u,t,dt,filename,path)
 class(oft_vector), pointer, intent(inout) :: u !< Solution to save
 real(r8), intent(in) :: t !< Current solution time
@@ -4227,9 +4241,9 @@ IF(oft_env%head_proc)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_xmhd_rst_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_xmhd_rst_load(u,filename,path,t,dt,rst_version_out)
 class(oft_vector), pointer, intent(inout) :: u !< Solution to load
 character(LEN=*), intent(in) :: filename !< Name of restart file
@@ -4289,9 +4303,9 @@ IF(rst_version>2)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_xmhd_rst_load
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Replace subfields in xMHD solution vector with specified fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_xmhd_push(sub_fields,u)
 type(xmhd_sub_fields), intent(inout) :: sub_fields !< Source fields
 class(oft_vector), intent(inout) :: u !< Destination xMHD vector
@@ -4342,9 +4356,9 @@ IF(ASSOCIATED(sub_fields%J2))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_xmhd_push
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Extract subfields from xMHD solution vector
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine oft_xmhd_pop(u,sub_fields)
 class(oft_vector), intent(inout) :: u !< Source xMHD vector
 type(xmhd_sub_fields), intent(inout) :: sub_fields !< Destination fields
@@ -4396,12 +4410,13 @@ IF(ASSOCIATED(sub_fields%J2))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_xmhd_pop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interpolate a coarse level xMHD solution to the next finest level
 !!
 !! @note The global \ref xmhd_level is incremented by one in this subroutine
-!---------------------------------------------------------------------------
-subroutine oft_xmhd_interp(acors,afine)
+!------------------------------------------------------------------------------
+subroutine oft_xmhd_interp(self,acors,afine)
+class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Coarse level vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Interpolated solution on fine level
 INTEGER(i4) :: i
@@ -4413,7 +4428,7 @@ CALL afine%set(0.d0)
 CALL oft_xmhd_ops%interp%apply(acors,afine)
 !---Correct gradient subspace following geometric interpolation
 IF(oft_hcurl%order==1)THEN
-  !---Cast to H1 type and get aliases
+  !---Get local values
   NULLIFY(agrad,acurl)
   CALL afine%get_local(acurl,1)
   CALL afine%get_local(agrad,2)
@@ -4449,12 +4464,13 @@ IF(oft_hcurl%order==1)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine oft_xmhd_interp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Inject a fine level xMHD solution to the next coarsest level
 !!
 !! @note The global \ref xmhd_level is decremented by one in this subroutine
-!---------------------------------------------------------------------------
-subroutine oft_xmhd_inject(afine,acors)
+!------------------------------------------------------------------------------
+subroutine oft_xmhd_inject(self,afine,acors)
+class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine level vector to inject
 class(oft_vector), intent(inout) :: acors !< Injected solution on coarse level
 real(r8), pointer, dimension(:) :: vtmp
@@ -4509,25 +4525,25 @@ END IF
 DEALLOCATE(vtmp)
 DEBUG_STACK_POP
 end subroutine oft_xmhd_inject
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Save or load driver info from restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_driver_rst_dummy(self,rst_file)
 class(oft_xmhd_driver), intent(inout) :: self !< Forcing object
 character(*), intent(in) :: rst_file !< Name of restart file
 IF(oft_env%head_proc)CALL oft_warn('No driver rst specified')
 end subroutine xmhd_driver_rst_dummy
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Flush internal write buffers for probe object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_probe_flush(self)
 class(oft_xmhd_probe), intent(inout) :: self !< Probe object
 end subroutine xmhd_probe_flush
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Plotting subroutine for xMHD post-processing
 !!
-!! Runtime options are set in the main input file using the group \c xmhd_plot_options.
-!! Additionally, options from the \c xmhd_options group are also read to get run parameters,
+!! Runtime options are set in the main input file using the group `xmhd_plot_options`.
+!! Additionally, options from the `xmhd_options` group are also read to get run parameters,
 !! see @ref xmhd::xmhd_run "xmhd_run" for a list of options.
 !!
 !! **Option group:** `xmhd_plot_options`
@@ -4541,7 +4557,7 @@ end subroutine xmhd_probe_flush
 !! | `dt=1E-6`          | Time between sampling points | real |
 !! | `rst_start=0`      | First restart file to read | int |
 !! | `rst_end=2000`     | Last restart file to read | int |
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_plot(probes)
 CLASS(oft_xmhd_probe), OPTIONAL, INTENT(inout) :: probes !< Probe object (optional)
 !---Lagrange mass solver
@@ -4550,8 +4566,8 @@ CLASS(oft_solver), POINTER :: lminv => NULL()
 !---Local variables
 class(oft_vector), pointer :: u,uc,up,ap,bp,x
 TYPE(xmhd_sub_fields) :: sub_fields
-TYPE(oft_h1_cinterp), TARGET :: Jfield
-TYPE(oft_h1_rinterp), TARGET :: Bfield
+TYPE(oft_hcurl_grad_cinterp), TARGET :: Jfield
+TYPE(oft_hcurl_grad_rinterp), TARGET :: Bfield
 TYPE(oft_hcurl_rinterp), TARGET :: J2field
 type(oft_timer) :: mytimer
 real(r8), pointer :: bvout(:,:)
@@ -4561,6 +4577,7 @@ real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr
 real(r8) :: fac,lramp,tflux,tcurr,t,tp,td
 real(r8) :: ndens
 !---
+TYPE(xdmf_plot_file) :: xdmf
 LOGICAL :: rst,first
 character(LEN=XMHD_RST_LEN) :: rst_char
 CHARACTER(LEN=OFT_PATH_SLEN) :: file_tmp,file_prev
@@ -4586,15 +4603,23 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,'(2X,A)')'Starting xMHD post-processing'
 END IF
+mg_mesh=>xmhd_ML_hcurl%ml_mesh
+IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_plot",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_plot",__FILE__)
+IF(.NOT.oft_3D_h1_cast(oft_hgrad,xmhd_ML_h1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_plot",__FILE__)
+mesh=>oft_hcurl%mesh
 file_list="none"
 open(NEWUNIT=io_unit,FILE=oft_env%ifile)
 read(io_unit,xmhd_plot_options,IOSTAT=ierr)
 close(io_unit)
 if(ierr<0)call oft_abort('No MHD plot options found in input file.','xmhd_plot',__FILE__)
 if(ierr>0)call oft_abort('Error parsing MHD plot options in input file.','xmhd_plot',__FILE__)
-!---------------------------------------------------------------------------
+!---
+CALL xdmf%setup("mug")
+CALL mesh%setup_io(xdmf,oft_hcurl%order)
+!------------------------------------------------------------------------------
 ! Check run type and optional fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Check for linearization fields
 rst_cur=0
 100 FORMAT (I XMHD_RST_LEN.XMHD_RST_LEN)
@@ -4632,47 +4657,47 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Read-in run parameters (only `rst_freq` is used)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL xmhd_read_settings(dt_run,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
 rst_ind=rst_start
 nsteps=rst_end
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup ML environment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Build composite representation if necessary
 IF(ML_xmhd_rep%nlevels==0)THEN
   CALL xmhd_setup_rep
-  ALLOCATE(oft_xmhd_ops_ML(oft_hcurl_nlevels))
+  ALLOCATE(oft_xmhd_ops_ML(xmhd_ML_hcurl%nlevels))
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create solver fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 call oft_xmhd_create(u)
 call oft_xmhd_create(uc)
 call oft_xmhd_create(up)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create plotting fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(hcvals)
-call oft_lag_create(x)
-call oft_lag_vcreate(ap)
-call oft_lag_vcreate(bp)
+call xmhd_ML_lagrange%vec_create(x)
+call xmhd_ML_vlagrange%vec_create(ap)
+call xmhd_ML_vlagrange%vec_create(bp)
 allocate(bvout(3,x%n))
 !---Allocate sub-fields
-call oft_h1_create(sub_fields%B)
-call oft_lag_vcreate(sub_fields%V)
-call oft_lag_create(sub_fields%Ne)
-call oft_lag_create(sub_fields%Ti)
-IF(xmhd_two_temp)call oft_lag_create(sub_fields%Te)
-IF(n2_ind>0)call oft_lag_create(sub_fields%N2)
-IF(j2_ind>0)call oft_hcurl_create(sub_fields%J2)
-!---------------------------------------------------------------------------
+call xmhd_ML_hcurl_grad%vec_create(sub_fields%B)
+call xmhd_ML_vlagrange%vec_create(sub_fields%V)
+call xmhd_ML_lagrange%vec_create(sub_fields%Ne)
+call xmhd_ML_lagrange%vec_create(sub_fields%Ti)
+IF(xmhd_two_temp)call xmhd_ML_lagrange%vec_create(sub_fields%Te)
+IF(n2_ind>0)call xmhd_ML_lagrange%vec_create(sub_fields%N2)
+IF(j2_ind>0)call xmhd_ML_hcurl%vec_create(sub_fields%J2)
+!------------------------------------------------------------------------------
 ! Setup Lagrange mass solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(lmop)
-CALL oft_lag_vgetmop(lmop,'none')
+CALL oft_lag_vgetmop(xmhd_ML_vlagrange%current_level,lmop,'none')
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
@@ -4684,45 +4709,45 @@ IF(linear)THEN
   READ(rst_char,100,IOSTAT=io_stat)rst_tmp
   IF((io_stat/=0).OR.(rst_tmp/=rst_cur))CALL oft_abort("Step count exceeds format width", "xmhd_plot", __FILE__)
   CALL oft_xmhd_rst_load(uc, 'xMHD_'//rst_char//'.rst', 'U0')
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Retrieve sub-fields and scale
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   CALL oft_xmhd_pop(uc,sub_fields)
   CALL sub_fields%V%scale(vel_scale)
   CALL sub_fields%Ne%scale(den_scale)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Extract density and plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   vals=>bvout(1,:)
   CALL sub_fields%Ne%get_local(vals)
-  CALL mesh%save_vertex_scalar(vals,'N0')
-!---------------------------------------------------------------------------
+  CALL mesh%save_vertex_scalar(vals,xdmf,'N0')
+!------------------------------------------------------------------------------
 ! Extract temperatures and plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   vals=>bvout(1,:)
   CALL sub_fields%Ti%get_local(vals)
-  CALL mesh%save_vertex_scalar(vals,'T0')
+  CALL mesh%save_vertex_scalar(vals,xdmf,'T0')
   !---Electron temperature
   IF(xmhd_two_temp)THEN
     CALL sub_fields%Te%get_local(vals)
-    CALL mesh%save_vertex_scalar(vals,'Te0')
+    CALL mesh%save_vertex_scalar(vals,xdmf,'Te0')
   END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Extract velocity and plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   vals=>bvout(1,:)
   CALL sub_fields%V%get_local(vals,1)
   vals=>bvout(2,:)
   CALL sub_fields%V%get_local(vals,2)
   vals=>bvout(3,:)
   CALL sub_fields%V%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'V0')
-!---------------------------------------------------------------------------
+  CALL mesh%save_vertex_vector(bvout,xdmf,'V0')
+!------------------------------------------------------------------------------
 ! Project magnetic field and plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   Bfield%u=>sub_fields%B
-  CALL Bfield%setup
-  CALL oft_lag_vproject(Bfield,bp)
+  CALL Bfield%setup(xmhd_ML_hcurl_grad%current_level)
+  CALL oft_lag_vproject(oft_lagrange,Bfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
   vals=>bvout(1,:)
@@ -4731,11 +4756,11 @@ IF(linear)THEN
   CALL ap%get_local(vals,2)
   vals=>bvout(3,:)
   CALL ap%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'B0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
-  CALL Jfield%setup
-  CALL oft_lag_vproject(Jfield,bp)
+  CALL Jfield%setup(xmhd_ML_hcurl_grad%current_level)
+  CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
   CALL ap%set(0.d0)
   CALL lminv%apply(ap,bp)
   vals=>bvout(1,:)
@@ -4744,11 +4769,11 @@ IF(linear)THEN
   CALL ap%get_local(vals,2)
   vals=>bvout(3,:)
   CALL ap%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'J0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'J0')
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Count restart file list
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(file_list(1:4)/="none")THEN
   INQUIRE(FILE=TRIM(file_list),EXIST=rst)
   IF(.NOT.rst)CALL oft_abort('Restart list file does not exist.','xmhd_plot',__FILE__)
@@ -4768,9 +4793,9 @@ IF(file_list(1:4)/="none")THEN
   IF(oft_env%head_proc)WRITE(*,*)'Found ',INT(nsteps,2),' restart files in list'
   REWIND(io_unit)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(file_list(1:4)/="none")THEN
   READ(io_unit,*,IOSTAT=io_flag)file_tmp
   IF(io_flag>0)THEN
@@ -4801,15 +4826,15 @@ ip=0
 u_ip=0
 file_prev=file_tmp
 CALL up%add(0.d0,1.d0,u)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Loop over restart files
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 first=.TRUE.
 DO
   IF(td>t1)EXIT
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   IF(file_list(1:4)/="none")THEN
     READ(io_unit,*,IOSTAT=io_flag)file_tmp
     IF(io_flag>0)THEN
@@ -4836,9 +4861,9 @@ DO
   END IF
   IF(dt<0.d0)td=t
   first=.FALSE.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Check if next sample point is in current time interval
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   IF(td>=tp.AND.td<=t)THEN
     CALL oft_xmhd_rst_load(u, file_tmp, 'U')
     IF(u_ip/=ip)THEN
@@ -4850,18 +4875,18 @@ DO
       ELSE
         CALL uc%add(0.d0,(td-t)/(tp-t),up,(td-tp)/(t-tp),u)
       END IF
-      CALL hdf5_create_timestep(td)
-!---------------------------------------------------------------------------
+      CALL xdmf%add_timestep(td)
+!------------------------------------------------------------------------------
 ! Retrieve sub-fields and setup interpolations
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       CALL oft_xmhd_pop(uc,sub_fields)
       CALL sub_fields%V%scale(vel_scale)
       CALL sub_fields%Ne%scale(den_scale)
       IF(n2_ind>0)CALL sub_fields%N2%scale(n2_scale)
       IF(j2_ind>0)CALL sub_fields%J2%scale(j2_scale)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Save probe signals
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       IF(PRESENT(probes))CALL probes%apply(sub_fields,td)
       IF(probe_only)THEN
         !---Update sampling time
@@ -4869,43 +4894,43 @@ DO
         IF(dt<0.d0)EXIT
         CYCLE
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Extract density and plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       vals=>bvout(1,:)
       CALL sub_fields%Ne%get_local(vals)
-      CALL mesh%save_vertex_scalar(vals,'N')
+      CALL mesh%save_vertex_scalar(vals,xdmf,'N')
       !---Hyper-diff aux field
       IF(n2_ind>0)THEN
         CALL sub_fields%N2%get_local(vals)
-        CALL mesh%save_vertex_scalar(vals,'N2')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'N2')
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Extract temperatures and plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       CALL sub_fields%Ti%get_local(vals)
-      CALL mesh%save_vertex_scalar(vals,'T')
+      CALL mesh%save_vertex_scalar(vals,xdmf,'T')
       !---Electron temperature
       IF(xmhd_two_temp)THEN
         CALL sub_fields%Te%get_local(vals)
-        CALL mesh%save_vertex_scalar(vals,'Te')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'Te')
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Extract velocity and plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       vals=>bvout(1,:)
       CALL sub_fields%V%get_local(vals,1)
       vals=>bvout(2,:)
       CALL sub_fields%V%get_local(vals,2)
       vals=>bvout(3,:)
       CALL sub_fields%V%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'V')
-!---------------------------------------------------------------------------
+      CALL mesh%save_vertex_vector(bvout,xdmf,'V')
+!------------------------------------------------------------------------------
 ! Project magnetic field and plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       Bfield%u=>sub_fields%B
-      CALL Bfield%setup
-      CALL oft_lag_vproject(Bfield,bp)
+      CALL Bfield%setup(xmhd_ML_hcurl_grad%current_level)
+      CALL oft_lag_vproject(oft_lagrange,Bfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
       vals=>bvout(1,:)
@@ -4914,12 +4939,12 @@ DO
       CALL ap%get_local(vals,2)
       vals=>bvout(3,:)
       CALL ap%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'B')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'B')
       !---Hyper-res aux field
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
-        CALL J2field%setup
-        CALL oft_lag_vproject(J2field,bp)
+        CALL J2field%setup(oft_hcurl)
+        CALL oft_lag_vproject(oft_lagrange,J2field,bp)
         CALL ap%set(0.d0)
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
@@ -4928,12 +4953,12 @@ DO
         CALL ap%get_local(vals,2)
         vals=>bvout(3,:)
         CALL ap%get_local(vals,3)
-        CALL mesh%save_vertex_vector(bvout,'J2')
+        CALL mesh%save_vertex_vector(bvout,xdmf,'J2')
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
-      CALL Jfield%setup
-      CALL oft_lag_vproject(Jfield,bp)
+      CALL Jfield%setup(xmhd_ML_hcurl_grad%current_level)
+      CALL oft_lag_vproject(oft_lagrange,Jfield,bp)
       CALL ap%set(0.d0)
       CALL lminv%apply(ap,bp)
       vals=>bvout(1,:)
@@ -4942,10 +4967,10 @@ DO
       CALL ap%get_local(vals,2)
       vals=>bvout(3,:)
       CALL ap%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'J')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'J')
       !---Divergence error
       IF(plot_div)THEN
-        CALL oft_lag_project_div(Bfield,x)
+        CALL oft_lag_project_div(oft_lagrange,Bfield,x)
         vals=>bvout(1,:)
         CALL x%get_local(vals)
         CALL bp%set(0.d0)
@@ -4954,11 +4979,11 @@ DO
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
         CALL ap%get_local(vals,1)
-        CALL mesh%save_vertex_scalar(vals,'divB')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'divB')
       END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Update sampling time
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
       td=td+dt
       IF(dt<0.d0)EXIT
     END DO
@@ -5005,9 +5030,9 @@ CALL Jfield%delete
 DEALLOCATE(bvout)
 DEBUG_STACK_POP
 end subroutine xmhd_plot
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Simple subroutine to compute timing of different solve phases
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine xmhd_profile(u)
 class(oft_vector), intent(inout) :: u
 INTEGER(4) :: i,j,k

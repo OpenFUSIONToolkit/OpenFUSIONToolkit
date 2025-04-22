@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_base.F90
 !
 !> @defgroup doxy_oft_base Open FUSION Toolkit Base
@@ -17,7 +19,7 @@
 !! @authors Chris Hansen
 !! @date June 2010
 !! @ingroup doxy_oft_base
-!-----------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
 MODULE oft_base
 USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit
 USE omp_lib
@@ -61,10 +63,11 @@ INTEGER(i4) :: OFT_MPI_CHAR=MPI_CHARACTER !< MPI_CHAR alias
 INTEGER(i4), PARAMETER :: MPI_COMM_WORLD = -1 ! Dummy comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_COMM_NULL = -2 ! Dummy null comm value for non-MPI runs
 INTEGER(i4), PARAMETER :: MPI_REQUEST_NULL = -3 ! Dummy null request value for non-MPI runs
+INTEGER(i4), PARAMETER :: MPI_COMM_SELF = -4 ! Dummy self-comm value for non-MPI runs
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Perform a SUM/AND reduction over all processors
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE oft_mpi_sum
   MODULE PROCEDURE oft_mpi_sumr
   MODULE PROCEDURE oft_mpi_sumra
@@ -77,9 +80,9 @@ INTERFACE oft_mpi_sum
 END INTERFACE oft_mpi_sum
 PRIVATE oft_mpi_sumr, oft_mpi_sumra, oft_mpi_sumc, oft_mpi_sumca, &
   oft_mpi_sumi4, oft_mpi_sumi4a, oft_mpi_sumi8, oft_mpi_sumi8a
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Perform a MAX reduction over all processors
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE oft_mpi_max
   MODULE PROCEDURE oft_mpi_maxr
   MODULE PROCEDURE oft_mpi_maxra
@@ -88,53 +91,46 @@ INTERFACE oft_mpi_max
   MODULE PROCEDURE oft_mpi_maxi8a
 END INTERFACE oft_mpi_max
 PRIVATE oft_mpi_maxr, oft_mpi_maxra, oft_mpi_maxi, oft_mpi_maxia
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Need docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE oft_random_number
   MODULE PROCEDURE oft_random_number_r8
   MODULE PROCEDURE oft_random_number_c8
 END INTERFACE oft_random_number
 PRIVATE oft_random_number_r8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Dummy shadow type for Fox XML node
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 #if !defined(HAVE_XML)
-TYPE :: fox_node
+TYPE :: xml_node
   INTEGER(i4) :: dummy = 0
 END TYPE
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Open FUSION Toolkit environment class
 !!
 !! Contains runtime enviroment information
 !! - Global MPI COMM alias
 !! - processor context
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: oft_env_type
   INTEGER(i4) :: nbase = -1 !< Number of OpenMP base meshes
   INTEGER(i4) :: nparts = 1 !< Number of OpenMP paritions
 #ifdef OFT_MPI_F08
   TYPE(mpi_comm) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+  TYPE(mpi_comm) :: NODE_COMM = MPI_COMM_SELF !< Open FUSION Toolkit MPI node-local communicator
 #else
   INTEGER(i4) :: COMM = MPI_COMM_WORLD !< Open FUSION Toolkit MPI communicator
+  INTEGER(i4) :: NODE_COMM = MPI_COMM_SELF !< Open FUSION Toolkit MPI node-local communicator
 #endif
   INTEGER(i4) :: nnodes = -1 !< Number of MPI tasks
   INTEGER(i4) :: ppn = 1 !< Number of procs per NUMA node
   INTEGER(i4) :: nprocs = -1 !< Number of MPI tasks
   INTEGER(i4) :: nthreads = -1 !< Number of OpenMP threads
   INTEGER(i4) :: rank = -1 !< MPI rank
-  INTEGER(i4) :: nproc_con = 0 !< Number of processor neighbors
-  INTEGER(i4) :: proc_split = 0 !< Location of self in processor list
+  INTEGER(i4) :: node_rank = -1 !< MPI node-local rank
   INTEGER(i4) :: debug = 0 !< Debug level (1-3)
-  INTEGER(i4), POINTER, DIMENSION(:) :: proc_con => NULL() !< Processor neighbor list
-#ifdef OFT_MPI_F08
-  TYPE(mpi_request), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
-  TYPE(mpi_request), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
-#else
-  INTEGER(i4), POINTER, DIMENSION(:) :: send => NULL() !< Asynchronous MPI Send tags
-  INTEGER(i4), POINTER, DIMENSION(:) :: recv => NULL() !< Asynchronous MPI Recv tags
-#endif
   LOGICAL :: head_proc = .FALSE. !< Lead processor flag
   LOGICAL :: pm = .TRUE. !< Performance monitor (default T=on, F=off)
   LOGICAL :: test_run = .FALSE. !< Test run
@@ -142,7 +138,7 @@ TYPE :: oft_env_type
   CHARACTER(LEN=OFT_PATH_SLEN) :: ifile = 'none' !< Name of input file
   CHARACTER(LEN=OFT_PATH_SLEN) :: xml_file = 'none' !< Name of XML input file
 #ifdef HAVE_XML
-  TYPE(fox_node), POINTER :: xml => NULL()
+  TYPE(xml_node), POINTER :: xml => NULL()
 #endif
 END TYPE oft_env_type
 !---Global variables
@@ -158,7 +154,8 @@ INTEGER(i4), PARAMETER :: oft_test_seed(24) = [430470439, -303393496, -476850581
   142231192, 708877466, -1255634259, 593274827, -561530186, -934579426, 900810854]
 !$omp threadprivate(oft_tid)
 !---Debugging stack information
-LOGICAL :: stack_disabled = .FALSE. !< Disable debug/profiling stack
+LOGICAL :: oft_stack_disabled = .FALSE. !< Disable debug/profiling stack
+LOGICAL, PRIVATE :: oft_prof_enabled = .FALSE. !< Enable profiling?
 #ifdef OFT_STACK
 INTEGER(i4), PRIVATE, PARAMETER :: stacksize = 40
 INTEGER(i4), PRIVATE :: nstack = 0
@@ -173,20 +170,27 @@ INTEGER(i8), PRIVATE :: stack_fun_time(0:stack_nfuns) = 0_i8
 #endif
 #endif
 INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface for setting UNIX signal handlers in "oft_local.c"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE oft_set_signal_handlers()  BIND(C)
   END SUBROUTINE oft_set_signal_handlers
+!------------------------------------------------------------------------------
+!> Prototype for abort callback to override usual abort process
+!------------------------------------------------------------------------------
+  SUBROUTINE oft_abort_callback()  BIND(C)
+  END SUBROUTINE oft_abort_callback
 END INTERFACE
+!> Abort callback for graceful abort in Python interface
+PROCEDURE(oft_abort_callback), POINTER :: oft_abort_cb
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Initializes Open FUSION Toolkit run environment
 !!
 !! Also calls MPI_INIT
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_init(nthreads)
-INTEGER(i4), INTENT(in), OPTIONAL :: nthreads
+INTEGER(i4), INTENT(in), OPTIONAL :: nthreads !< Number for threads to use (negative for default)
 INTEGER(i4) :: ierr,thrdtype,nargs,io_unit
 REAL(r8) :: elapsed_time
 INTEGER(i4) :: ppn=1
@@ -197,10 +201,10 @@ LOGICAL :: test_run=.FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
 #ifdef HAVE_XML
-TYPE(fox_node), POINTER :: doc
+TYPE(xml_node), POINTER :: doc
 #endif
 LOGICAL :: rst
-NAMELIST/runtime_options/ppn,omp_nthreads,debug,stack_disabled,use_petsc,test_run,nparts
+NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts
 !---Initialize MPI
 #ifdef HAVE_MPI
 CALL MPI_INIT_THREAD(MPI_THREAD_FUNNELED,thrdtype,ierr)
@@ -243,13 +247,15 @@ READ(io_unit,runtime_options,IOSTAT=ierr)
 CLOSE(io_unit)
 IF(ierr<0)CALL oft_abort('No runtime options found in input file.','oft_init',__FILE__)
 IF(ierr>0)CALL oft_abort('Error parsing runtime options.','oft_init',__FILE__)
-!---Seed pRNG if test run for repeatability
+!---Seed pRNG if test run for repeatability (does not work on < GCC 9)
+#if !defined(__GNUC__) || (__GNUC__ > 9)
 IF(test_run)THEN
   CALL random_seed(size=nargs)
   IF(nargs>SIZE(oft_test_seed))CALL oft_abort('pRNG seed size exceeds built in values', &
     'oft_init',__FILE__)
   CALL random_seed(put=oft_test_seed)
 END IF
+#endif
 !---Initialize PETSc or exit if requested but not available
 IF(use_petsc)THEN
 #ifdef HAVE_PETSC
@@ -285,8 +291,10 @@ IF(oft_env%xml_file(1:4)/='none')THEN
   !---Test for existence of XML file
   INQUIRE(FILE=TRIM(oft_env%xml_file),exist=rst)
   IF(.NOT.rst)CALL oft_abort('XML file specified but does not exist.','oft_init',__FILE__)
-  doc=>fox_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
-  oft_env%xml=>fox_item(fox_getElementsByTagname(doc,"oft"),0)
+  doc=>xml_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
+  IF(ierr/=0)CALL oft_abort('Error parsing XML input file','oft_init',__FILE__)
+  CALL xml_get_element(doc,"oft",oft_env%xml,ierr)
+  IF(ierr/=0)CALL oft_abort('Error finding "oft" XML root element','oft_init',__FILE__)
 #else
   CALL oft_warn("Open FUSION Toolkit not built wit xml support, ignoring xml input.")
 #endif
@@ -299,6 +307,14 @@ oft_env%debug=debug
 oft_env%test_run=test_run
 oft_env%nparts=nparts
 oft_indent=""
+#ifdef HAVE_MPI
+IF(oft_env%ppn>1)THEN
+  CALL MPI_Comm_split(oft_env%comm,oft_env%rank/oft_env%ppn,oft_env%rank,oft_env%NODE_COMM,ierr)
+  CALL MPI_Comm_rank(oft_env%NODE_COMM,oft_env%node_rank,ierr)
+ELSE
+  oft_env%node_rank=0
+END IF
+#endif
 !---Print runtime information
 IF(oft_env%rank==0)THEN
   WRITE(*,'(A)')    '#----------------------------------------------'
@@ -317,8 +333,8 @@ IF(oft_env%rank==0)THEN
 #else
   WRITE(*,'(A)')    '  Not compiled with OpenMP'
 #endif
-  WRITE(*,'(2A)')   'Fortran input file    = ',oft_env%ifile
-  WRITE(*,'(2A)')   'XML input file        = ',oft_env%xml_file
+  WRITE(*,'(2A)')   'Fortran input file    = ',TRIM(oft_env%ifile)
+  WRITE(*,'(2A)')   'XML input file        = ',TRIM(oft_env%xml_file)
   WRITE(*,'(A,3I4)')'Integer Precisions    = ',i4,i8
   WRITE(*,'(A,3I4)')'Float Precisions      = ',r4,r8,r10
   WRITE(*,'(A,3I4)')'Complex Precisions    = ',c4,c8
@@ -331,11 +347,11 @@ END IF
   WRITE(*,*)
 END IF
 END SUBROUTINE oft_init
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Finalize Open FUSION Toolkit environment
 !!
 !! Also calls PetscFinalize/MPI_FINALIZE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_finalize() BIND(C)
 INTEGER(i4) :: ierr
 INTEGER(i8) :: comm_min(4),comm_max(4),comm_avg(4)
@@ -379,11 +395,11 @@ CALL MPI_FINALIZE(ierr)
 #endif
 STOP
 END SUBROUTINE oft_finalize
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Graceful abort for Open FUSION Toolkit
 !!
 !! Also calls MPI_ABORT/STOP
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_abort(error_str,sname,fname)
 CHARACTER(LEN=*), INTENT(in) :: error_str !< Error string
 CHARACTER(LEN=*), INTENT(in) :: sname !< Source subroutine name
@@ -400,6 +416,7 @@ OPEN(outunit,FILE='abort_'//proc//'.err')
 !---Print error information
 100 FORMAT (A,I5,2A)
 101 FORMAT (2A)
+WRITE(outunit,'(X)')
 WRITE(outunit,'(A)')'#----------------------------------------------'
 IF(oft_env%nprocs>1)THEN
   WRITE(outunit,100)  '[',oft_env%rank,'] ERROR: ',TRIM(error_str)
@@ -410,11 +427,15 @@ ELSE
   WRITE(outunit,101)  'SUBROUTINE: ',TRIM(sname)
   WRITE(outunit,101)  'FILE: ',TRIM(fname)
 END IF
+WRITE(outunit,'(A)')'#----------------------------------------------'
+WRITE(outunit,'(X)')
 #ifdef OFT_ABORT_FILES
 CLOSE(outunit)
 #endif
 !---
 CALL oft_stack_print
+!---
+IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
 !---Abort run
 errcode=99
 #ifdef HAVE_MPI
@@ -423,9 +444,9 @@ CALL MPI_ABORT(oft_env%comm,errcode,ierr)
 ERROR STOP errcode
 #endif
 END SUBROUTINE oft_abort
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Graceful warning printing for Open FUSION Toolkit
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_warn(error_str)
 CHARACTER(LEN=*) :: error_str
 !---Print warning information
@@ -437,28 +458,28 @@ ELSE
   WRITE(error_unit,101)'WARNING: ',TRIM(error_str)
 END IF
 END SUBROUTINE oft_warn
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Output control for performance messages
 !!
 !! @result oft_env\%pm.AND.oft_env\%head_proc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PURE FUNCTION oft_pm_print() RESULT(pflag)
 LOGICAL :: pflag
 pflag=(oft_env%pm.AND.oft_env%head_proc)
 END FUNCTION oft_pm_print
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Output control for debug messages
 !!
 !! @result (oft_env\%debug>=level).AND.oft_env\%head_proc
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PURE FUNCTION oft_debug_print(level) RESULT(pflag)
 INTEGER(i4), INTENT(in) :: level !< Threshold debugging level
 LOGICAL :: pflag
 pflag=((oft_env%debug>=level).AND.oft_env%head_proc)
 END FUNCTION oft_debug_print
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Get thread ownership range for even spacing
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 PURE SUBROUTINE oft_thread_slice(tid,nthreads,length,i1,i2)
 INTEGER(i4), INTENT(in) :: tid !< Thread index (0-indexed)
 INTEGER(i4), INTENT(in) :: nthreads !< Total number of threads
@@ -475,15 +496,15 @@ DO i=1,tid
 END DO
 IF(tid==(nthreads-1))i2=length
 END SUBROUTINE oft_thread_slice
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Increase length of global indent string by 2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_increase_indent
 oft_indent=oft_indent//"  "
 END SUBROUTINE oft_increase_indent
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Decrease length of global indent string by 2
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_decrease_indent
 INTEGER(i4) :: nindent
 nindent = LEN(oft_indent)
@@ -493,9 +514,9 @@ ELSE
   oft_indent=""
 END IF
 END SUBROUTINE oft_decrease_indent
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Wrapper for MPI_BARRIER with MPI_COMM_WORLD to enable communication profiling
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_mpi_barrier(ierr)
 INTEGER(i4), INTENT(out) :: ierr !< Error flag
 INTEGER(i8) :: timein
@@ -508,9 +529,9 @@ comm_times(1)=comm_times(1)+oft_time_diff(timein)
 ierr=0
 #endif
 END SUBROUTINE oft_mpi_barrier
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Wrapper for MPI_WAITANY to enable communication profiling
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_mpi_waitany(n,req,j,ierr)
 INTEGER(i4), INTENT(in) :: n !< Number of requests
 #ifdef OFT_MPI_F08
@@ -531,9 +552,9 @@ ierr=0
 j=-1
 #endif
 END SUBROUTINE oft_mpi_waitany
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Wrapper for MPI_WAITALL to enable communication profiling
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_mpi_waitall(n,req,ierr)
 INTEGER(i4), INTENT(in) :: n !< Number of requests
 #ifdef OFT_MPI_F08
@@ -552,9 +573,9 @@ comm_times(3)=comm_times(3)+oft_time_diff(timein)
 ierr=0
 #endif
 END SUBROUTINE oft_mpi_waitall
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Helper to check all requests from completion
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 FUNCTION oft_mpi_check_reqs(n,req) result(all_null)
 INTEGER(i4), INTENT(in) :: n !< Number of requests
 #ifdef OFT_MPI_F08
@@ -567,15 +588,15 @@ LOGICAL :: all_null
 all_null=.TRUE.
 #ifdef HAVE_MPI
 DO i=1,n
-  all_null=all_null.AND.(oft_env%recv(i)==MPI_REQUEST_NULL)
+  all_null=all_null.AND.(req(i)==MPI_REQUEST_NULL)
 END DO
 #endif
 END FUNCTION oft_mpi_check_reqs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> real(r8) scalar implementation of global SUM reduction
 !!
 !! @result \f$ sum(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumr(a) result(b)
 REAL(r8), INTENT(in) :: a !< Local value for SUM
 REAL(r8) :: b
@@ -593,11 +614,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_sumr
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> real(r8) array implementation of element-wise global SUM reduction
 !!
 !! @result \f$ sum(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumra(a,n) result(b)
 REAL(r8), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
@@ -616,11 +637,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_sumra
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> complex(c8) scalar implementation of global SUM reduction
 !!
 !! @result \f$ sum(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumc(a) result(b)
 COMPLEX(r8), INTENT(in) :: a !< Local value for SUM
 COMPLEX(r8) :: b
@@ -638,11 +659,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_sumc
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> complex(c8) array implementation of element-wise global SUM reduction
 !!
 !! @result \f$ sum(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumca(a,n) result(b)
 COMPLEX(c8), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
@@ -661,11 +682,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_sumca
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> integer(i4) scalar implementation of global SUM reduction
 !!
 !! @result \f$ sum(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumi4(a) result(b)
 INTEGER(i4), INTENT(in) :: a !< Local value for SUM
 INTEGER(i4) :: b,ierr
@@ -682,11 +703,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_sumi4
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> integer(i4) array implementation of element-wise global SUM reduction
 !!
 !! @result \f$ sum(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumi4a(a,n) result(b)
 INTEGER(i4), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
@@ -704,11 +725,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_sumi4a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> integer(i8) scalar implementation of global SUM reduction
 !!
 !! @result \f$ sum(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumi8(a) result(b)
 INTEGER(i8), INTENT(in) :: a !< Local value for SUM
 INTEGER(i8) :: b
@@ -726,11 +747,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_sumi8
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> integer(i8) array implementation of element-wise global SUM reduction
 !!
 !! @result \f$ sum(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumi8a(a,n) result(b)
 INTEGER(i8), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
@@ -749,11 +770,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_sumi8a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> logical scalar implementation of global AND (SUM) reduction
 !!
 !! @result \f$ ALL(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_and(a) result(b)
 LOGICAL, INTENT(in) :: a !< Local value for AND
 LOGICAL :: b
@@ -771,11 +792,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_and
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> real(r8) scalar implementation of global MAX reduction
 !!
 !! @result \f$ max(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_maxr(a) result(b)
 REAL(i8), INTENT(in) :: a !< Local value for MAX
 REAL(i8) :: b
@@ -793,11 +814,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_maxr
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> real(r8) array implementation of element-wise global MAX reduction
 !!
 !! @result \f$ max(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_maxra(a,n) result(b)
 REAL(r8), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
@@ -816,11 +837,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_maxra
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> integer(i4) scalar implementation of global MAX reduction
 !!
 !! @result \f$ max(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_maxi(a) result(b)
 INTEGER(i4), INTENT(in) :: a !< Local value for MAX
 INTEGER(i4) :: b,ierr
@@ -837,11 +858,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_maxi
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> integer(i4) array implementation of element-wise global MAX reduction
 !!
 !! @result \f$ max(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_maxia(a,n) result(b)
 INTEGER(i4), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
@@ -859,11 +880,11 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_maxia
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> integer(i8) array implementation of element-wise global MAX reduction
 !!
 !! @result \f$ max(a) \f$ over all processors
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION oft_mpi_maxi8a(a,n) result(b)
 INTEGER(i8), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
@@ -881,9 +902,9 @@ DEBUG_STACK_POP
 b=a
 #endif
 END FUNCTION oft_mpi_maxi8a
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Real implementation of toolkit random_number function
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_random_number_r8(array,n)
 REAL(r8), INTENT(out) :: array(n) !< Array to set with random values [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array
@@ -896,9 +917,9 @@ ELSE
   CALL RANDOM_NUMBER(array)
 END IF
 END SUBROUTINE oft_random_number_r8
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Complex implementation of toolkit random_number function
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_random_number_c8(array,n)
 COMPLEX(c8), INTENT(out) :: array(n) !< Array to set with random values [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array
@@ -917,20 +938,20 @@ ELSE
   END DO
 END IF
 END SUBROUTINE oft_random_number_c8
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply an orientation transform to a 2 value array
 !!
 !! list([1,2]) = list([1,2]) if oflag>0
 !! list([1,2]) = list([2,1]) if oflag<0
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 PURE SUBROUTINE orient_list2(oflag,list)
 INTEGER(i4), INTENT(in) :: oflag !< Orientation flag
 INTEGER(i4), INTENT(inout) :: list(2) !< Array for orientation [2]
 if(oflag<0)list([2,1])=list([1,2])
 END SUBROUTINE orient_list2
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply an orientation transform to a n-value array
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 PURE SUBROUTINE find_orient_listn(oflag,list,n)
 INTEGER(i4), INTENT(out) :: oflag !< Orientation flag
 INTEGER(i4), INTENT(in) :: list(n) !< Array for orientation [n]
@@ -967,9 +988,9 @@ DO i=1,n
   listtmp=CSHIFT(listtmp,1)
 END DO
 END SUBROUTINE find_orient_listn
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply an orientation transform to a n-value array
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 PURE SUBROUTINE orient_listn(oflag,list,n)
 INTEGER(i4), INTENT(in) :: oflag !< Orientation flag
 INTEGER(i4), INTENT(inout) :: list(n) !< Array for orientation [n]
@@ -978,9 +999,9 @@ INTEGER(i4) :: i
 IF(oflag<0)list=list(n:1:-1) ! Reverse list
 list=CSHIFT(list,ABS(oflag)-1) ! Shift list
 END SUBROUTINE orient_listn
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Apply an orientation transform to a n-value array
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 PURE SUBROUTINE orient_listn_inv(oflag,list,n)
 INTEGER(i4), INTENT(in) :: oflag !< Orientation flag
 INTEGER(i4), INTENT(inout) :: list(n) !< Array for orientation [n]
@@ -993,12 +1014,12 @@ CALL orient_listn(oflag, ltmp, n)
 list(ltmp)=list
 DEALLOCATE(ltmp)
 END SUBROUTINE orient_listn_inv
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute coefficients for linear 1-D interpolation of function F(x)
 !!
 !! @warning This function requires `x` be sorted lowest to highest.
 !! @note This function performs an interval search each time it is called.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE linterp_facs(x,n,xx,inds,facs,extrap)
 REAL(r8), INTENT(in) :: x(n) !< Paramaterizing array \f$ x_i \f$ [n]
 REAL(r8), INTENT(in) :: xx !< Location to perform interpolation
@@ -1042,14 +1063,14 @@ ELSE
   END IF
 END IF
 END SUBROUTINE linterp_facs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Perform linear 1-D interpolation of function F(x)
 !!
 !! @warning This function requires `x` be sorted lowest to highest.
 !! @note This function performs an interval search each time it is called.
 !!
 !! @returns \f$ F(xx) \f$ (-1.E99 if outside domain and `extrap=0` or invalid value for `extrap`)
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 FUNCTION linterp(x,y,n,xx,extrap) result(yy)
 REAL(r8), INTENT(in) :: x(n) !< Paramaterizing array \f$ x_i \f$ [n]
 REAL(r8), INTENT(in) :: y(n) !< Function values \f$ F(x_i) \f$ [n]
@@ -1065,12 +1086,12 @@ ELSE
   yy=-1.d99
 END IF
 END FUNCTION linterp
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Reset the stack
 !!
 !! @warning This should only be done for the main run program, otherwise the
 !! stack may become corrupted.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_stack_reset
 #ifdef OFT_STACK
 !$omp parallel
@@ -1080,19 +1101,21 @@ stack = 0_i4
 #endif
 END SUBROUTINE oft_stack_reset
 #ifdef OFT_STACK
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Add a subroutine call to the current stack
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_stack_push(mod_ind,sub_ind)
 INTEGER(i4), INTENT(in) :: mod_ind !< Index of containing module
 INTEGER(i4), INTENT(in) :: sub_ind !< Index of current subroutine
-IF(stack_disabled)RETURN
+IF(oft_stack_disabled)RETURN
 !---
 #ifdef OFT_PROFILE
-IF(nstack>0)THEN
-  stack_fun_time(stack(2,nstack))=stack_fun_time(stack(2,nstack))+local_timer%int_tock()
-ELSE
-  stack_fun_time(0)=stack_fun_time(0)+local_timer%int_tock()
+IF(oft_prof_enabled)THEN
+  IF(nstack>0)THEN
+    stack_fun_time(stack(2,nstack))=stack_fun_time(stack(2,nstack))+local_timer%int_tock()
+  ELSE
+    stack_fun_time(0)=stack_fun_time(0)+local_timer%int_tock()
+  END IF
 END IF
 #endif
 !---
@@ -1100,20 +1123,22 @@ nstack=nstack+1
 IF(nstack>stacksize)nstack=stacksize
 stack(:,nstack)=[mod_ind,sub_ind]
 #ifdef OFT_PROFILE
-stack_nfun_c(sub_ind)=stack_nfun_c(sub_ind)+1
+IF(oft_prof_enabled)stack_nfun_c(sub_ind)=stack_nfun_c(sub_ind)+1
 #endif
 END SUBROUTINE oft_stack_push
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Pop a subroutine off of the current stack
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_stack_pop
-IF(stack_disabled)RETURN
+IF(oft_stack_disabled)RETURN
 !---
 #ifdef OFT_PROFILE
-IF(nstack>0)THEN
-  stack_fun_time(stack(2,nstack))=stack_fun_time(stack(2,nstack))+local_timer%int_tock()
-ELSE
-  stack_fun_time(0)=stack_fun_time(0)+local_timer%int_tock()
+IF(oft_prof_enabled)THEN
+  IF(nstack>0)THEN
+    stack_fun_time(stack(2,nstack))=stack_fun_time(stack(2,nstack))+local_timer%int_tock()
+  ELSE
+    stack_fun_time(0)=stack_fun_time(0)+local_timer%int_tock()
+  END IF
 END IF
 #endif
 !---
@@ -1121,9 +1146,9 @@ nstack=nstack-1
 IF(nstack<0)nstack=0
 END SUBROUTINE oft_stack_pop
 #endif
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Print the current contents of the stack
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_stack_print() BIND(C)
 #ifdef OFT_STACK
 INTEGER(i4) :: i,outunit
@@ -1156,9 +1181,19 @@ CLOSE(outunit)
 #endif
 #endif
 END SUBROUTINE oft_stack_print
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+!> Activate profiling
+!------------------------------------------------------------------------------
+SUBROUTINE oft_profile_start()
+#ifdef OFT_PROFILE
+oft_prof_enabled=.TRUE.
+#else
+CALL oft_abort("OFT not built with profiling","oft_profile_start",__FILE__)
+#endif
+END SUBROUTINE oft_profile_start
+!------------------------------------------------------------------------------
 !> Reset all profiling counters
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_prof_reset
 #ifdef OFT_PROFILE
 !$omp parallel
@@ -1167,9 +1202,9 @@ stack_fun_time=0_i8
 !$omp end parallel
 #endif
 END SUBROUTINE oft_prof_reset
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Print some basic profiling information
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE oft_prof_print
 #ifdef OFT_PROFILE
 INTEGER(i4) :: i,j,k,ierr
@@ -1179,6 +1214,7 @@ INTEGER(i8), ALLOCATABLE :: lcft(:),cft(:)
 REAL(r8) :: ntmp
 INTEGER(i8) :: countnew,crate,cmax
 CHARACTER(LEN=1) :: suffix
+IF(.NOT.oft_prof_enabled)RETURN
 call system_clock(countnew,crate,cmax)
 !---
 ALLOCATE(lnfc(stack_nfuns),lcft(0:stack_nfuns))

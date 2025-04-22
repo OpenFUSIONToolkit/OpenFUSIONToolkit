@@ -1,3 +1,9 @@
+#!/usr/bin/env python
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 import os
 import sys
 import shutil
@@ -554,11 +560,13 @@ with h5py.File(options.in_file) as fid:
     reg_full = np.asarray(fid['mesh/REG'])
     keep_nodesets = []
     if options.keep_nodeset_start is not None:
-        if options.keep_nodeset_start < 0:
-            parser.exit(-1, '"--keep_nodeset_start" must be a >= 0')
         if 'mesh/NUM_NODESETS' not in fid:
             parser.exit(-1, '"--keep_nodeset_start" specified but no nodesets available')
         num_nodesets = fid['mesh/NUM_NODESETS'][0]
+        if options.keep_nodeset_start < 0:
+            if options.keep_nodeset_start < -num_nodesets:
+                parser.exit(-1, '"--keep_nodeset_start" exceeds the number of available nodesets')
+            options.keep_nodeset_start = num_nodesets + 1 + options.keep_nodeset_start
         if options.keep_nodeset_start > num_nodesets:
             parser.exit(-1, '"--keep_nodeset_start" exceeds the number of available nodesets')
         for j in range(num_nodesets):

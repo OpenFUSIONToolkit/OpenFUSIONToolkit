@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
 !> @file thincurr_td.F90
 !
 !> @defgroup doxy_thincurr ThinCurr
@@ -26,15 +28,15 @@
 !! @authors Chris Hansen
 !! @date Feb 2022
 !! @ingroup doxy_thincurr
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM thincurr_td
 USE oft_base
-USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file
-USE oft_mesh_type, ONLY: smesh
+USE oft_io, ONLY: oft_bin_file
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
 USE oft_mesh_cubit, ONLY: cubit_read_nodesets, cubit_read_sidesets
 #endif
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix
@@ -51,6 +53,7 @@ IMPLICIT NONE
 #include "local.h"
 TYPE(tw_type), TARGET :: tw_sim
 TYPE(tw_sensors) :: sensors
+TYPE(multigrid_mesh) :: mg_mesh
 !
 LOGICAL :: exists
 INTEGER(4) :: i,j,k,n,ierr,io_unit,ncols,ntimes
@@ -69,7 +72,7 @@ REAL(8) :: cg_tol=1.d-6
 INTEGER(4) :: nsteps = 400
 INTEGER(4) :: nstatus = 10
 INTEGER(4) :: nplot = 10
-INTEGER(4) :: jumper_start = -1
+INTEGER(4) :: jumper_start = 0
 LOGICAL :: timestep_cn=.TRUE.
 LOGICAL :: direct = .TRUE.
 LOGICAL :: save_L = .FALSE.
@@ -91,14 +94,14 @@ CLOSE(io_unit)
 if(ierr<0)call oft_abort('No thin-wall options found in input file.','thincurr_td',__FILE__)
 if(ierr>0)call oft_abort('Error parsing thin-wall options in input file.','thincurr_td',__FILE__)
 !---Setup mesh
-CALL multigrid_construct_surf
+CALL multigrid_construct_surf(mg_mesh)
 ! ALLOCATE(mg_mesh)
 ! mg_mesh%mgmax=1
 ! mg_mesh%nbase=1
 ! oft_env%nbase=1
 ! mg_mesh%mgdim=mg_mesh%mgmax
 ! CALL smesh_cubit_load
-SELECT CASE(smesh%cad_type)
+SELECT CASE(mg_mesh%smesh%cad_type)
 CASE(0)
   CALL native_read_nodesets(mesh_nsets)
   CALL native_read_sidesets(mesh_ssets)
@@ -117,7 +120,7 @@ IF(ASSOCIATED(mesh_ssets))THEN
     tw_sim%closures=mesh_ssets(1)%v
   END IF
 END IF
-tw_sim%mesh=>smesh
+tw_sim%mesh=>mg_mesh%smesh
 IF(jumper_start>0)THEN
   n=SIZE(mesh_nsets)
   hole_nsets=>mesh_nsets(1:jumper_start-1)
@@ -134,11 +137,12 @@ CALL tw_sim%setup(hole_nsets)
 IF((TRIM(curr_file)=="none").AND.(tw_sim%n_icoils>0))CALL oft_abort("No waveform filename specified", &
   "thincurr_td",__FILE__)
 !---Setup I/0
-CALL smesh%setup_io(1)
+CALL tw_sim%xdmf%setup("thincurr")
+CALL mg_mesh%smesh%setup_io(tw_sim%xdmf,1)
 IF(oft_debug_print(1))CALL tw_sim%save_debug()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Time-dependent run
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Load drivers and sensors
 CALL tw_load_sensors('floops.loc',tw_sim,sensors)
 !---Compute inductances
@@ -155,9 +159,9 @@ IF(save_Msen)THEN
 ELSE
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Load or build element to element mutual matrix
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 tw_hodlr%tw_obj=>tw_sim
 CALL tw_hodlr%setup(.FALSE.)
 IF(.NOT.plot_run)THEN
@@ -176,9 +180,9 @@ IF(.NOT.plot_run)THEN
     END IF
   END IF
 END IF
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Run main calculation or plots
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(plot_run)THEN
   NULLIFY(sensor_waveform)
   IF(tw_hodlr%L_svd_tol>0.d0)THEN

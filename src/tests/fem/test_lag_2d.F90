@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file test_blag.F90
 !
 !> Regression tests for boundary scalar Lagrange finite elements. Tests are
@@ -12,21 +14,29 @@
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 PROGRAM test_lag_2d
 USE oft_base
-USE oft_mesh_type, ONLY: mesh, smesh
+USE oft_io, ONLY: xdmf_plot_file
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange_nlevels, oft_lag_set_level, oft_blagrange
-USE oft_lag_fields, ONLY: oft_blag_create
-USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, blag_zerob
+USE fem_base, ONLY: oft_ml_fem_type
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_blag_operators, ONLY: oft_blag_getlop, oft_blag_getmop, oft_blag_zerob
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 IMPLICIT NONE
 INTEGER(i4), PARAMETER :: minlev=2
-INTEGER(i4) :: order,ierr,io_unit
+INTEGER(i4) :: ierr,io_unit
+TYPE(xdmf_plot_file) :: plot_file
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
+TYPE(oft_blag_zerob), TARGET :: blag_zerob
+INTEGER(i4) :: order
 NAMELIST/test_blag_options/order
 !---Initialize enviroment
 CALL oft_init
@@ -35,26 +45,26 @@ OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_blag_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---Setup grid
-CALL multigrid_construct_surf
-IF(smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
-!---------------------------------------------------------------------------
+CALL multigrid_construct_surf(mg_mesh)
+IF(mg_mesh%smesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
+!------------------------------------------------------------------------------
 ! Setup I/0
-!---------------------------------------------------------------------------
-CALL smesh%setup_io(order)
+!------------------------------------------------------------------------------
+CALL plot_file%setup("Test")
+CALL mg_mesh%smesh%setup_io(plot_file,order)
 !---
-CALL oft_lag_setup(order,-1)
+CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
+blag_zerob%ML_lag_rep=>ML_oft_blagrange
 !---Run tests
-! oft_env%pm=.FALSE.
+oft_env%pm=.FALSE.
 CALL test_lap
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE: test_lap
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
 !! required iterataions and final field energy.
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE test_lap
 !---Create solver objects
 CLASS(oft_solver), POINTER :: linv => NULL()
@@ -66,13 +76,13 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---Set FE level
-CALL oft_lag_set_level(oft_lagrange_nlevels)
+CALL ML_oft_blagrange%set_level(ML_oft_blagrange%nlevels)
 !---Create solver fields
-CALL oft_blag_create(u)
-CALL oft_blag_create(v)
+CALL ML_oft_blagrange%vec_create(u)
+CALL ML_oft_blagrange%vec_create(v)
 !---Get FE operators
-CALL oft_blag_getlop(lop,'zerob')
-CALL oft_blag_getmop(mop,'none')
+CALL oft_blag_getlop(ML_oft_blagrange%current_level,lop,'zerob')
+CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,'none')
 !---Setup matrix solver
 CALL create_cg_solver(linv)
 linv%A=>lop
@@ -81,11 +91,11 @@ CALL create_diag_pre(linv%pre)
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
-CALL blag_zerob(v)
+CALL blag_zerob%apply(v)
 CALL u%set(0.d0)
 CALL linv%apply(u,v)
 CALL u%get_local(vals)
-CALL smesh%save_vertex_scalar(vals,'T')
+CALL mg_mesh%smesh%save_vertex_scalar(vals,plot_file,'T')
 uu=u%dot(u)
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='lagrange.results')

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_arpack.F90
 !
 !> Interface to parallel ARPACK for eigenvalue problems
@@ -10,18 +12,18 @@
 !! @authors Chris Hansen
 !! @date June 2012
 !! @ingroup doxy_oft_lin_alg
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_arpack
 #ifdef HAVE_ARPACK
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_matrix
-USE oft_solver_base, ONLY: oft_solver, oft_eigsolver, oft_bc_proto, oft_orthog
+USE oft_solver_base, ONLY: oft_solver, oft_eigsolver, oft_solver_bc
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Implicity Restarted Arnoldi Method
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_iram_eigsolver
   INTEGER(i4) :: mode = 1 !< Operational mode
   INTEGER(i4) :: nev = 1 !< Number of eigenvalues to compute
@@ -32,9 +34,8 @@ TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_iram_eigsolver
   REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL() !< Eigenvectors
   CHARACTER(LEN=2) :: which = 'LM' !< Spectrum search flag
   CLASS(oft_solver), POINTER :: Minv => NULL() !< RHS inversion operator
-  !> Boundary condition
-  PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
-  CLASS(oft_orthog), POINTER :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
+  CLASS(oft_solver_bc), POINTER :: orthog => NULL() !< Orthogonalization
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => iram_eig_apply
@@ -43,9 +44,9 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => iram_delete
 END TYPE oft_iram_eigsolver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Implicity Restarted Lanczos Method
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_irlm_eigsolver
   INTEGER(i4) :: mode = 1 !< Operational mode
   INTEGER(i4) :: nev = 1 !< Number of eigenvalues to compute
@@ -56,9 +57,8 @@ TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_irlm_eigsolver
   REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL() !< Eigenvectors
   CHARACTER(LEN=2) :: which = 'LM' !< Spectrum search flag
   CLASS(oft_solver), POINTER :: Minv => NULL() !< RHS inversion operator
-  !> Boundary condition
-  PROCEDURE(oft_bc_proto), POINTER, NOPASS :: bc => NULL()
-  CLASS(oft_orthog), POINTER :: orthog => NULL() !< Orthogonalization
+  class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
+  CLASS(oft_solver_bc), POINTER :: orthog => NULL() !< Orthogonalization
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => irlm_eig_apply
@@ -68,12 +68,12 @@ CONTAINS
   PROCEDURE :: delete => irlm_delete
 END TYPE oft_irlm_eigsolver
 INTERFACE
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to pdnaupd from ARPACK
 !!
 !! Driver subroutine for non-symmetric eigenvalue problems using ARPACK's
 !! Implicitly Restarted Arnoldi Method.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE dnaupd(ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr, &
                     workd,workl,lworkl,info)
   INTEGER :: ido
@@ -93,9 +93,9 @@ INTERFACE
   INTEGER :: lworkl
   INTEGER :: info
   END SUBROUTINE dnaupd
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to pdsaupd from ARPACK
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE dsaupd(ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr, &
                     workd,workl,lworkl,info)
   INTEGER :: ido
@@ -115,9 +115,9 @@ INTERFACE
   INTEGER :: lworkl
   INTEGER :: info
   END SUBROUTINE dsaupd
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to dneupd from ARPACK
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE dneupd(rvec,howmny,select,dr,di,z,ldz,sigmar,sigmai,workev, &
                     bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr,workd,workl, &
                     lworkl,info)
@@ -147,9 +147,9 @@ INTERFACE
   INTEGER :: lworkl
   INTEGER :: info
   END SUBROUTINE dneupd
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to dseupd from ARPACK
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE dseupd(rvec,howmny,select,d,z,ldz,sigma,bmat,n,which,nev,tol, &
                     resid,ncv,v,ldv,iparam,ipntr,workd,workl,lworkl,info)
   LOGICAL :: rvec
@@ -176,12 +176,12 @@ INTERFACE
   INTEGER :: info
   END SUBROUTINE dseupd
 #ifdef HAVE_MPI
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to pdnaupd from ARPACK
 !!
 !! Driver subroutine for non-symmetric eigenvalue problems using ARPACK's
 !! Implicitly Restarted Arnoldi Method.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE pdnaupd(comm,ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam, &
                      ipntr,workd,workl,lworkl,info)
   INTEGER :: comm
@@ -202,9 +202,9 @@ INTERFACE
   INTEGER :: lworkl
   INTEGER :: info
   END SUBROUTINE pdnaupd
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to pdsaupd from ARPACK
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE pdsaupd(comm,ido,bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam, &
                      ipntr,workd,workl,lworkl,info)
   INTEGER :: comm
@@ -225,9 +225,9 @@ INTERFACE
   INTEGER :: lworkl
   INTEGER :: info
   END SUBROUTINE pdsaupd
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to pdneupd from ARPACK
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE pdneupd(comm,rvec,howmny,select,dr,di,z,ldz,sigmar,sigmai,workev, &
                     bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr,workd,workl, &
                     lworkl,info)
@@ -258,9 +258,9 @@ INTERFACE
   INTEGER :: lworkl
   INTEGER :: info
   END SUBROUTINE pdneupd
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Interface to pdseupd from ARPACK
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   SUBROUTINE pdseupd(comm,rvec,howmny,select,d,z,ldz,sigma, &
                     bmat,n,which,nev,tol,resid,ncv,v,ldv,iparam,ipntr,workd,workl, &
                     lworkl,info)
@@ -291,13 +291,13 @@ INTERFACE
 #endif
 END INTERFACE
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the eigenvalue and eigenvector of a matrix system (A*x = Lam*M*x) using
 !! an Implicitly Restarted Arnoldi Iteration.
 !!
 !! Solver employs the ARPACK non-symmetric driver routine. The location of the
 !! eigenvalue is set in the calling class.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE iram_eig_apply(self,u,alam)
 CLASS(oft_iram_eigsolver), intent(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
@@ -316,9 +316,9 @@ CHARACTER(LEN=1) :: bmat,howmny
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: select
 CLASS(oft_vector), POINTER :: tmp1,tmp2
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Starting IRA solver'
 !---Set ARPACK parameters
 IF(self%ncv==0)self%ncv=2*self%nev+1
@@ -344,9 +344,9 @@ END IF
 rvec=.TRUE.                       ! Return eigenvectors
 howmny='A'                        ! Form of the basis (A = Compute Ritz vectors)
 neigs=self%nev
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create local to global mapping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(vslice)
 CALL u%get_slice(vslice)
 nslice=SIZE(vslice)
@@ -357,18 +357,18 @@ IF(ASSOCIATED(self%eig_vec))DEALLOCATE(self%eig_vec)
 ALLOCATE(self%eig_val(2,neigs),self%eig_vec(nslice,neigs))
 self%eig_val=0.d0
 self%eig_vec=0.d0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create temporary work arrays
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---APRACK workspace
 ALLOCATE(resid(nslice),v(ldv,self%ncv),workd(3*nslice),workl(lworkl))
 ALLOCATE(select(self%ncv),dr(self%nev+1),di(self%nev+1),workev(3*self%ncv))
 !---OFT work vectors
 CALL u%new(tmp1)
 CALL u%new(tmp2)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set initial guess
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 resid=vslice
 DEALLOCATE(vslice)
 !---Setup slicing on work vectors
@@ -378,9 +378,9 @@ CALL tmp2%get_slice(vslice)
 DEALLOCATE(vslice)
 CALL u%get_slice(vslice)
 DEALLOCATE(vslice)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Begin Reverse Communication
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 #ifdef OFT_MPI_F08
 comm = oft_env%comm%MPI_VAL
 #else
@@ -407,13 +407,13 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp1)
     !---Compute y' = A*x
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%A%apply(tmp1,tmp2)
     oft_env%pm=pm_save
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp2)
     CALL tmp1%set(0.d0)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
@@ -433,7 +433,7 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp1)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     !---Compute y = M*x
@@ -443,7 +443,7 @@ DO
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
     oft_env%pm=pm_save
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
@@ -502,23 +502,23 @@ DO
     EXIT
   END IF
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup workspace
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(resid,v,workd,workl)
 DEALLOCATE(select,dr,di,workev)
 CALL tmp1%delete
 CALL tmp2%delete
 DEBUG_STACK_POP
 END SUBROUTINE iram_eig_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the largest 2 eigenvalues of a matrix system (A*x = Lam*M*x) using
 !! an Implicitly Restarted Arnoldi Iteration.
 !!
 !! Solver employs the ARPACK non-symmetric driver routine. Currently the guess
 !! field is only used to create work vectors and a random initialization is used
 !! for the solver.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE iram_eig_max(self,u,alam)
 CLASS(oft_iram_eigsolver), INTENT(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
@@ -537,9 +537,9 @@ CHARACTER(LEN=1) :: bmat,howmny
 CHARACTER(LEN=2) :: which
 CLASS(oft_vector), POINTER :: tmp1,tmp2
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Starting IRA solver'
 !---Set ARPACK parameters
 SELECT CASE(self%mode)
@@ -562,16 +562,16 @@ which='LM'                ! Range to search for EVs
 lworkl=3*(ncv**2)+6*ncv   ! Length of workl array
 rvec=.FALSE.              ! Return eigenvectors?
 howmny='A'                ! Form of the basis (A = Compute Ritz vectors)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create local to global mapping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(vslice)
 CALL u%get_slice(vslice)
 nslice=SIZE(vslice)
 ldv=nslice
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create temporary work arrays
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---APRACK workspace
 ALLOCATE(resid(nslice),v(ldv,ncv),workd(3*nslice),workl(lworkl))
 ALLOCATE(select(ncv),dr(nev+1),di(nev+1),workev(3*ncv))
@@ -584,9 +584,9 @@ CALL tmp1%get_slice(vslice)
 DEALLOCATE(vslice)
 CALL tmp2%get_slice(vslice)
 DEALLOCATE(vslice)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Begin Reverse Communication
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 #ifdef OFT_MPI_F08
 comm = oft_env%comm%MPI_VAL
 #else
@@ -610,10 +610,10 @@ DO i=1,4000
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    CALL self%bc(tmp1)
+    CALL self%bc%apply(tmp1)
     !---Compute y' = A*x
     CALL self%A%apply(tmp1,tmp2)
-    CALL self%bc(tmp2)
+    CALL self%bc%apply(tmp2)
     CALL tmp1%set(0.d0)
     IF(bmat=='G')THEN
       !---Compute y = inv(M)*y'
@@ -632,14 +632,14 @@ DO i=1,4000
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    CALL self%bc(tmp1)
+    CALL self%bc%apply(tmp1)
     IF(bmat=='G')THEN
       !---Compute y = M*x
       CALL self%M%apply(tmp1,tmp2)
     ELSE
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
-    CALL self%bc(tmp2)
+    CALL self%bc%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
     CALL tmp2%get_slice(vslice)
@@ -670,18 +670,18 @@ DO i=1,4000
     EXIT
   END IF
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup workspace
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(resid,v,workd,workl)
 DEALLOCATE(select,dr,di,workev)
 CALL tmp1%delete
 CALL tmp2%delete
 DEBUG_STACK_POP
 END SUBROUTINE iram_eig_max
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine iram_delete(self)
 class(oft_iram_eigsolver), intent(inout) :: self
 NULLIFY(self%A,self%M)
@@ -689,13 +689,13 @@ IF(ASSOCIATED(self%eig_val))DEALLOCATE(self%eig_val)
 IF(ASSOCIATED(self%eig_vec))DEALLOCATE(self%eig_vec)
 self%initialized=.FALSE.
 end subroutine iram_delete
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the eigenvalue and eigenvector of a matrix system (A*x = Lam*M*x) using
 !! an Implicitly Restarted Lanczos Iteration.
 !!
 !! Solver employs the ARPACK symmetric driver routine `dsaupd`. The location of the
 !! eigenvalue is set in the calling class.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE irlm_eig_apply(self,u,alam)
 CLASS(oft_irlm_eigsolver), intent(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
@@ -713,9 +713,9 @@ CHARACTER(LEN=1) :: bmat,howmny
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: select
 CLASS(oft_vector), POINTER :: tmp1,tmp2
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Starting IRL solver'
 !---Set ARPACK parameters
 SELECT CASE(self%mode)
@@ -740,9 +740,9 @@ ELSE
 END IF
 rvec=.TRUE.                       ! Return eigenvectors
 howmny='A'                        ! Form of the basis (A = Compute Ritz vectors)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create local to global mapping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(vslice)
 CALL u%get_slice(vslice)
 nslice=SIZE(vslice)
@@ -753,18 +753,18 @@ IF(ASSOCIATED(self%eig_vec))DEALLOCATE(self%eig_vec)
 ALLOCATE(self%eig_val(2,self%nev),self%eig_vec(nslice,self%nev))
 self%eig_val=0.d0
 self%eig_vec=0.d0
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create temporary work arrays
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---APRACK workspace
 ALLOCATE(resid(nslice),v(ldv,self%ncv),workd(3*nslice),workl(lworkl))
 ALLOCATE(select(self%ncv),d(self%nev+1),workev(3*self%ncv))
 !---OFT work vectors
 CALL u%new(tmp1)
 CALL u%new(tmp2)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set initial guess
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 resid=vslice
 DEALLOCATE(vslice)
 !---Setup slicing on work vectors
@@ -774,9 +774,9 @@ CALL tmp2%get_slice(vslice)
 DEALLOCATE(vslice)
 CALL u%get_slice(vslice)
 DEALLOCATE(vslice)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Begin Reverse Communication
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 #ifdef OFT_MPI_F08
 comm = oft_env%comm%MPI_VAL
 #else
@@ -803,12 +803,12 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     !---Compute y' = A*x
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL self%A%apply(tmp1,tmp2)
     oft_env%pm=pm_save
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp2%get_slice(vslice)
@@ -830,7 +830,7 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     !---Compute y = M*x
     IF(bmat=='G')THEN
@@ -839,7 +839,7 @@ DO
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
     oft_env%pm=pm_save
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
     CALL tmp2%get_slice(vslice)
@@ -891,23 +891,23 @@ DO
     EXIT
   END IF
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup workspace
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(resid,v,workd,workl)
 DEALLOCATE(select,d,workev)
 CALL tmp1%delete
 CALL tmp2%delete
 DEBUG_STACK_POP
 END SUBROUTINE irlm_eig_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the largest 2 eigenvalues of a matrix system (A*x = Lam*M*x) using
 !! an Implicitly Restarted Lanczos Iteration.
 !!
 !! Solver employs the ARPACK symmetric driver routine. Currently the guess
 !! field is only used to create work vectors and a random initialization is used
 !! for the solver.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE irlm_eig_max(self,u,alam)
 CLASS(oft_irlm_eigsolver), INTENT(inout) :: self
 CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
@@ -927,9 +927,9 @@ CHARACTER(LEN=1) :: bmat,howmny
 CHARACTER(LEN=2) :: which
 CLASS(oft_vector), POINTER :: tmp1,tmp2
 DEBUG_STACK_PUSH
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Starting IRL solver'
 !---Set ARPACK parameters
 SELECT CASE(self%mode)
@@ -952,16 +952,16 @@ which='LM'                ! Range to search for EVs
 lworkl=(ncv**2)+8*ncv     ! Length of workl array
 rvec=.FALSE.              ! Return eigenvectors
 howmny='A'                ! Form of the basis (A = Compute Ritz vectors)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create local to global mapping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 NULLIFY(vslice)
 CALL u%get_slice(vslice)
 nslice=SIZE(vslice)
 ldv=nslice
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create temporary work arrays
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---APRACK workspace
 ALLOCATE(resid(nslice),v(ldv,ncv),workd(3*nslice),workl(lworkl))
 ALLOCATE(select(ncv),d(nev))
@@ -974,9 +974,9 @@ CALL tmp1%get_slice(vslice)
 DEALLOCATE(vslice)
 CALL tmp2%get_slice(vslice)
 DEALLOCATE(vslice)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Begin Reverse Communication
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 #ifdef OFT_MPI_F08
 comm = oft_env%comm%MPI_VAL
 #else
@@ -1000,10 +1000,10 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     !---Compute y' = A*x
     CALL self%A%apply(tmp1,tmp2)
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
@@ -1028,7 +1028,7 @@ DO
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     !---Compute y = M*x
     CALL self%M%apply(tmp1,tmp2)
     IF(bmat=='G')THEN
@@ -1037,7 +1037,7 @@ DO
     ELSE
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
-    IF(ASSOCIATED(self%bc))CALL self%bc(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     IF(ASSOCIATED(self%orthog))CALL self%orthog%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
@@ -1072,18 +1072,18 @@ DO
     EXIT
   END IF
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Cleanup workspace
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DEALLOCATE(resid,v,workd,workl)
 DEALLOCATE(select,d)
 CALL tmp1%delete
 CALL tmp2%delete
 DEBUG_STACK_POP
 END SUBROUTINE irlm_eig_max
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine irlm_delete(self)
 class(oft_irlm_eigsolver), intent(inout) :: self
 NULLIFY(self%A,self%M)

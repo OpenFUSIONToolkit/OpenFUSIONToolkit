@@ -1,4 +1,4 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> @file thincurr_f.F90
 !
 !> Fortran part of Python wrapper for ThinCurr thin-wall eddy current functionality
@@ -6,14 +6,15 @@
 !! @authors Chris Hansen
 !! @date March 2024
 !! @ingroup doxy_oft_python
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE thincurr_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_associated
 !---Base
 USE oft_base
 USE spline_mod
-USE oft_io, ONLY: hdf5_create_file, hdf5_field_get_sizes, hdf5_read, hdf5_field_exist
+USE oft_io, ONLY: hdf5_create_file, hdf5_field_get_sizes, hdf5_read, hdf5_field_exist, &
+  xdmf_plot_file
 !--Grid
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem, native_read_nodesets, native_read_sidesets
@@ -37,90 +38,137 @@ integer(i4), POINTER :: lc_plot(:,:) !< Needs docs
 integer(i4), POINTER :: reg_plot(:) !< Needs docs
 real(r8), POINTER :: r_plot(:,:) !< Needs docs
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
-SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
-CHARACTER(KIND=c_char), INTENT(in) :: mesh_file(80) !< Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_setup(mesh_file,np,r_loc,nc,lc_loc,reg_loc,pmap_loc,jumper_start_in,tw_ptr,sizes,error_str,xml_ptr) BIND(C,NAME="thincurr_setup")
+CHARACTER(KIND=c_char), INTENT(in) :: mesh_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: pmap_loc !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: np !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nc !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: jumper_start !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: jumper_start_in !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sizes !< Needs docs
 TYPE(c_ptr), INTENT(out) :: tw_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: xml_ptr !< Needs docs
 !
 LOGICAL :: success,is_2d
-INTEGER(4) :: i,ndims,ierr
+INTEGER(4) :: i,ndims,ierr,jumper_start
 integer(i4), allocatable, dimension(:) :: dim_sizes
-INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: rtmp
+INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp,reg_tmp
+INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none'
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 #ifdef HAVE_XML
-TYPE(fox_node), POINTER :: xml_node
+TYPE(xml_node), POINTER :: thincurr_node
 #endif
 CALL copy_string('',error_str)
 CALL copy_string_rev(mesh_file,filename)
-CALL c_f_pointer(sizes, sizes_tmp, [8])
-NULLIFY(mesh_nsets,mesh_ssets)
-IF(TRIM(filename)=='none')THEN
-  CALL copy_string('Array-based loading not yet supported',error_str)
-  RETURN
-  ! CALL c_f_pointer(pmap_loc, pmap_tmp, [1])
-  ! IF(pmap_tmp(1)/=-1)THEN
-  !   CALL c_f_pointer(pmap_loc, pmap_tmp, [tw_obj%mesh%np])
-  !   ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
-  !   tw_obj%pmap=pmap_tmp
-  ! END IF
+NULLIFY(mesh_nsets,hole_nsets,mesh_ssets)
+IF(np>0)THEN
+  ALLOCATE(tw_obj)
+  ALLOCATE(oft_trimesh::tw_obj%mesh)
+  CALL tw_obj%mesh%setup(-1,.FALSE.)
+  !
+  tw_obj%mesh%np=np
+  ALLOCATE(tw_obj%mesh%r(3,tw_obj%mesh%np))
+  CALL c_f_pointer(r_loc, r_tmp, [3,tw_obj%mesh%np])
+  tw_obj%mesh%r=r_tmp
+  !
+  tw_obj%mesh%nc=nc
+  ALLOCATE(tw_obj%mesh%lc(3,tw_obj%mesh%nc))
+  CALL c_f_pointer(lc_loc, lc_tmp, [3,tw_obj%mesh%nc])
+  tw_obj%mesh%lc=lc_tmp
+  !
+  ALLOCATE(tw_obj%mesh%reg(tw_obj%mesh%nc))
+  IF(c_associated(reg_loc))THEN
+    CALL c_f_pointer(reg_loc, reg_tmp, [tw_obj%mesh%nc])
+    tw_obj%mesh%reg=reg_tmp
+  ELSE
+    tw_obj%mesh%reg=1
+  END IF
 ELSE
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Load model from file
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ALLOCATE(tw_obj)
   ALLOCATE(oft_trimesh::tw_obj%mesh)
   CALL tw_obj%mesh%setup(-1,.FALSE.)
   CALL hdf5_field_get_sizes(TRIM(filename),"mesh/R",ndims,dim_sizes)
+  IF(ndims<0)THEN
+    CALL copy_string('Point list ("mesh/R") not present in mesh file',error_str)
+    RETURN
+  END IF
   tw_obj%mesh%np=dim_sizes(2)
   is_2d=(dim_sizes(1)==2)
   DEALLOCATE(dim_sizes)
   CALL hdf5_field_get_sizes(TRIM(filename),"mesh/LC",ndims,dim_sizes)
+  IF(ndims<0)THEN
+    CALL copy_string('Cell list ("mesh/LC") not present in mesh file',error_str)
+    RETURN
+  END IF
   tw_obj%mesh%nc=dim_sizes(2)
   DEALLOCATE(dim_sizes)
   ALLOCATE(tw_obj%mesh%r(3,tw_obj%mesh%np))
   IF(is_2d)THEN
     tw_obj%mesh%r=0.d0
-    ALLOCATE(rtmp(2,tw_obj%mesh%np))
-    CALL hdf5_read(rtmp,TRIM(filename),"mesh/R",success)
-    tw_obj%mesh%r(1:2,:)=rtmp
-    DEALLOCATE(rtmp)
+    ALLOCATE(r_tmp(2,tw_obj%mesh%np))
+    CALL hdf5_read(r_tmp,TRIM(filename),"mesh/R",success)
+    IF(.NOT.success)THEN
+      CALL copy_string('Error reading point list from mesh file',error_str)
+      RETURN
+    END IF
+    tw_obj%mesh%r(1:2,:)=r_tmp
+    DEALLOCATE(r_tmp)
   ELSE
     CALL hdf5_read(tw_obj%mesh%r,TRIM(filename),"mesh/R",success)
+    IF(.NOT.success)THEN
+      CALL copy_string('Error reading point list from mesh file',error_str)
+      RETURN
+    END IF
   END IF
   ALLOCATE(tw_obj%mesh%lc(3,tw_obj%mesh%nc))
   CALL hdf5_read(tw_obj%mesh%lc,TRIM(filename),"mesh/LC",success)
+  IF(.NOT.success)THEN
+    CALL copy_string('Error reading cell list from mesh file',error_str)
+    RETURN
+  END IF
   ALLOCATE(tw_obj%mesh%reg(tw_obj%mesh%nc))
   IF(hdf5_field_exist(TRIM(filename),'mesh/REG'))THEN
     CALL hdf5_read(tw_obj%mesh%reg,TRIM(filename),"mesh/REG",success)
+    IF(.NOT.success)THEN
+      CALL copy_string('Error reading region ID from mesh file',error_str)
+      RETURN
+    END IF
   ELSE
-    tw_obj%mesh%reg=1.d0
+    tw_obj%mesh%reg=1
   END IF
   !
   IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
     ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
     CALL hdf5_read(tw_obj%pmap,TRIM(filename),'thincurr/periodicity/pmap',success)
+    IF(.NOT.success)THEN
+      CALL copy_string('Error reading periodicity information from mesh file',error_str)
+      RETURN
+    END IF
   END IF
   !---Read nodesets and define holes and jumpers
   CALL native_read_nodesets(mesh_nsets,native_filename=TRIM(filename))
-  IF(jumper_start>0)THEN
+  jumper_start=jumper_start_in
+  IF(jumper_start/=0)THEN
     ndims=SIZE(mesh_nsets)
+    IF(ABS(jumper_start)>ndims)THEN
+      CALL copy_string('"jumper_start" exceeds number of nodesets in file',error_str)
+      RETURN
+    END IF
+    IF(jumper_start<0)jumper_start=ndims+1+jumper_start
     hole_nsets=>mesh_nsets(1:jumper_start-1)
     ALLOCATE(tw_obj%jumper_nsets(ndims-jumper_start+1))
     DO i=jumper_start,ndims
@@ -148,8 +196,8 @@ ELSE
 END IF
 IF(c_associated(xml_ptr))THEN
 #ifdef HAVE_XML
-  CALL c_f_pointer(xml_ptr, xml_node)
-  CALL xml_get_element(xml_node,"thincurr",tw_obj%xml,ierr)
+  CALL c_f_pointer(xml_ptr, thincurr_node)
+  CALL xml_get_element(thincurr_node,"thincurr",tw_obj%xml,ierr)
   IF(ierr/=0)THEN
     CALL copy_string('Error getting ThinCurr XML node',error_str)
     RETURN
@@ -170,18 +218,22 @@ IF(ASSOCIATED(mesh_nsets))THEN
 END IF
 !
 tw_ptr=C_LOC(tw_obj)
-sizes_tmp=[tw_obj%mesh%np,tw_obj%mesh%ne,tw_obj%mesh%nc,tw_obj%np_active, &
+CALL c_f_pointer(sizes, sizes_tmp, [9])
+sizes_tmp=[tw_obj%mesh%np,tw_obj%mesh%ne,tw_obj%mesh%nc,tw_obj%mesh%nreg,tw_obj%np_active, &
   tw_obj%nholes,tw_obj%n_vcoils,tw_obj%nelems,tw_obj%n_icoils]
 END SUBROUTINE thincurr_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_setup_io(tw_ptr,basepath,save_debug,error_str) BIND(C,NAME="thincurr_setup_io")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: basepath(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_debug !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
+INTEGER(4) :: i,j,k,npts,nedges
+INTEGER(4), ALLOCATABLE :: lctmp(:,:)
+REAL(r8), ALLOCATABLE :: rtmp(:,:)
 CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix = ''
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
@@ -189,21 +241,77 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  CALL tw_obj%mesh%setup_io(1,basepath=pathprefix)
+  CALL tw_obj%xdmf%setup('thincurr',pathprefix)
+  CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 ELSE
-  CALL tw_obj%mesh%setup_io(1)
+  CALL tw_obj%xdmf%setup('thincurr')
+  CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
+END IF
+IF(tw_obj%n_vcoils>0)THEN
+  npts=0
+  nedges=0
+  DO i=1,tw_obj%n_vcoils
+    DO j=1,tw_obj%vcoils(i)%ncoils
+      npts=npts+tw_obj%vcoils(i)%coils(j)%npts
+      nedges=nedges+tw_obj%vcoils(i)%coils(j)%npts-1
+    END DO
+  END DO
+  ALLOCATE(rtmp(3,npts),lctmp(2,nedges))
+  npts=0
+  nedges=0
+  DO i=1,tw_obj%n_vcoils
+    DO j=1,tw_obj%vcoils(i)%ncoils
+      DO k=1,tw_obj%vcoils(i)%coils(j)%npts
+        npts=npts+1
+        rtmp(:,npts)=tw_obj%vcoils(i)%coils(j)%pts(:,k)
+        IF(k>1)THEN
+          nedges=nedges+1
+          lctmp(:,nedges)=[npts-1,npts]-1
+        END IF
+      END DO
+    END DO
+  END DO
+  CALL tw_obj%xdmf%add_mesh(10,rtmp,lctmp,'vcoils')
+  DEALLOCATE(rtmp,lctmp)
+END IF
+IF(tw_obj%n_icoils>0)THEN
+  npts=0
+  nedges=0
+  DO i=1,tw_obj%n_icoils
+    DO j=1,tw_obj%icoils(i)%ncoils
+      npts=npts+tw_obj%icoils(i)%coils(j)%npts
+      nedges=nedges+tw_obj%icoils(i)%coils(j)%npts-1
+    END DO
+  END DO
+  ALLOCATE(rtmp(3,npts),lctmp(2,nedges))
+  npts=0
+  nedges=0
+  DO i=1,tw_obj%n_icoils
+    DO j=1,tw_obj%icoils(i)%ncoils
+      DO k=1,tw_obj%icoils(i)%coils(j)%npts
+        npts=npts+1
+        rtmp(:,npts)=tw_obj%icoils(i)%coils(j)%pts(:,k)
+        IF(k>1)THEN
+          nedges=nedges+1
+          lctmp(:,nedges)=[npts-1,npts]-1
+        END IF
+      END DO
+    END DO
+  END DO
+  CALL tw_obj%xdmf%add_mesh(10,rtmp,lctmp,'icoils')
+  DEALLOCATE(rtmp,lctmp)
 END IF
 IF(save_debug)CALL tw_obj%save_debug()
 END SUBROUTINE thincurr_setup_io
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_save_field(tw_ptr,vals,fieldname) BIND(C,NAME="thincurr_save_field")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: fieldname(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: fieldname(OFT_SLEN) !< Needs docs
 !
-CHARACTER(LEN=80) :: name_tmp = ''
+CHARACTER(LEN=OFT_SLEN) :: name_tmp = ''
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 TYPE(tw_type), POINTER :: tw_obj
 CALL c_f_pointer(tw_ptr, tw_obj)
@@ -212,9 +320,9 @@ CALL c_f_pointer(vals, vals_tmp, [tw_obj%nelems])
 !---Save plot fields
 CALL tw_save_pfield(tw_obj,vals_tmp,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_field
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_recon_curr(tw_ptr,vals,curr,format) BIND(C,NAME="thincurr_recon_curr")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
@@ -248,9 +356,9 @@ IF(format==2)THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE thincurr_recon_curr
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_recon_field(tw_ptr,pot,coils,field,hodlr_ptr) BIND(C,NAME="thincurr_recon_field")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: pot !< Needs docs
@@ -318,26 +426,26 @@ IF(tw_obj%n_icoils>0)THEN
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE thincurr_recon_field
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_save_scalar(tw_ptr,vals,fieldname) BIND(C,NAME="thincurr_save_scalar")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: fieldname(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: fieldname(OFT_SLEN) !< Needs docs
 !
-CHARACTER(LEN=80) :: name_tmp = ''
+CHARACTER(LEN=OFT_SLEN) :: name_tmp = ''
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 TYPE(tw_type), POINTER :: tw_obj
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(fieldname,name_tmp)
 CALL c_f_pointer(vals, vals_tmp, [tw_obj%mesh%np])
 !---Save plot fields
-CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,TRIM(name_tmp))
+CALL tw_obj%mesh%save_vertex_scalar(vals_tmp,tw_obj%xdmf,TRIM(name_tmp))
 END SUBROUTINE thincurr_save_scalar
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_scale_va(tw_ptr,vals,div_flag) BIND(C,NAME="thincurr_scale_va")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
@@ -352,15 +460,15 @@ ELSE
   vals_tmp = vals_tmp*tw_obj%mesh%va
 END IF
 END SUBROUTINE thincurr_scale_va
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_cross_coupling(tw_ptr1,tw_ptr2,Mmat,cache_file,error_str) BIND(C,NAME="thincurr_cross_coupling")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr1 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr2 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: Mmat !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: Mmat_tmp
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
@@ -377,16 +485,16 @@ ELSE
   CALL tw_compute_LmatDirect(tw_obj1,Mmat_tmp,col_model=tw_obj2,save_file=filename)
 END IF
 END SUBROUTINE thincurr_cross_coupling
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_cross_eval(tw_ptr1,tw_ptr2,nrhs,vec1,vec2,error_str) BIND(C,NAME="thincurr_cross_eval")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr1 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr2 !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nrhs
 TYPE(c_ptr), VALUE, INTENT(in) :: vec1 !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vec2 !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: vec1_tmp,vec2_tmp
 TYPE(tw_type), POINTER :: tw_obj1,tw_obj2
@@ -398,15 +506,15 @@ CALL c_f_pointer(vec2, vec2_tmp, [tw_obj2%nelems,nrhs])
 !
 CALL tw_compute_Lmat_MF(tw_obj1,tw_obj2,nrhs,vec1_tmp,vec2_tmp)
 END SUBROUTINE thincurr_cross_eval
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Lmat(tw_ptr,use_hodlr,Lmat_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Lmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: use_hodlr
 TYPE(c_ptr), INTENT(out) :: Lmat_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
@@ -439,16 +547,16 @@ ELSE
   Lmat_ptr=C_LOC(tw_obj%Lmat)
 END IF
 END SUBROUTINE thincurr_Lmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Bmat_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Bdr_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
@@ -476,14 +584,14 @@ ELSE
   Bdr_ptr=C_LOC(tw_obj%Bdr)
 END IF
 END SUBROUTINE thincurr_Bmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Mcoil(tw_ptr,Mc_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Mcoil")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Mc_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = ''
 TYPE(tw_type), POINTER :: tw_obj
@@ -498,19 +606,19 @@ ELSE
 END IF
 Mc_ptr=C_LOC(tw_obj%Ael2dr)
 END SUBROUTINE thincurr_Mcoil
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,njumpers,sensor_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Msensor")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: sensor_file(80) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: sensor_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Ms_ptr !< Needs docs
 TYPE(c_ptr), INTENT(out) :: Msc_ptr !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: nsensors
 INTEGER(KIND=c_int), INTENT(out) :: njumpers
 TYPE(c_ptr), INTENT(inout) :: sensor_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: cache_file(80) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 INTEGER(4) :: i
 CHARACTER(LEN=OFT_PATH_SLEN) :: sensor_filename = ''
@@ -548,9 +656,9 @@ sensor_ptr=C_LOC(sensors)
 nsensors=sensors%nfloops
 njumpers=sensors%njumpers
 END SUBROUTINE thincurr_Msensor
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_get_sensor_name(sensor_ptr,sensor_ind,sensor_name,error_str) BIND(C,NAME="thincurr_get_sensor_name")
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: sensor_ind !< Needs docs
@@ -561,14 +669,48 @@ CALL copy_string('',error_str)
 CALL c_f_pointer(sensor_ptr, sensors)
 CALL copy_string(sensors%floops(sensor_ind)%name,sensor_name)
 END SUBROUTINE thincurr_get_sensor_name
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_get_eta(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_get_eta")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+!
+INTEGER(4) :: nreg_mesh
+REAL(8), POINTER :: res_tmp(:)
+TYPE(tw_type), POINTER :: tw_obj
+CALL copy_string('',error_str)
+CALL c_f_pointer(tw_ptr, tw_obj)
+!
+CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
+res_tmp=tw_obj%Eta_reg*mu0
+END SUBROUTINE thincurr_get_eta
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_set_eta(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_set_eta")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+!
+INTEGER(4) :: nreg_mesh
+REAL(8), POINTER :: res_tmp(:)
+TYPE(tw_type), POINTER :: tw_obj
+CALL copy_string('',error_str)
+CALL c_f_pointer(tw_ptr, tw_obj)
+!
+CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
+tw_obj%Eta_reg=res_tmp/mu0
+END SUBROUTINE thincurr_set_eta
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_Rmat(tw_ptr,copy_out,Rmat,error_str) BIND(C,NAME="thincurr_Rmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE,  INTENT(in) :: copy_out !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: Rmat !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 INTEGER(4) :: i,j
 REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: Rmat_tmp
@@ -588,13 +730,13 @@ IF(copy_out)THEN
   END DO
 END IF
 END SUBROUTINE thincurr_Rmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_curr_regmat(tw_ptr,Rmat,error_str) BIND(C,NAME="thincurr_curr_regmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: Rmat !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
@@ -639,9 +781,9 @@ END DO
 END DO
 END DO
 END SUBROUTINE thincurr_curr_regmat
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_eigenvalues(tw_ptr,direct,neigs,eig_vals,eig_vec,hodlr_ptr,error_str) BIND(C,NAME="thincurr_eigenvalues")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
@@ -649,7 +791,7 @@ INTEGER(KIND=c_int), VALUE, INTENT(in) :: neigs !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eig_vals !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eig_vec !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 REAL(8), CONTIGUOUS, POINTER :: vals_tmp(:),vec_tmp(:,:)
 TYPE(tw_type), POINTER :: tw_obj
@@ -682,9 +824,9 @@ ELSE
   END IF
 END IF
 END SUBROUTINE thincurr_eigenvalues
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_freq_response(tw_ptr,direct,fr_limit,freq,fr_driver,hodlr_ptr,error_str) BIND(C,NAME="thincurr_freq_response")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Needs docs
@@ -692,7 +834,7 @@ INTEGER(KIND=c_int), VALUE, INTENT(in) :: fr_limit !< Needs docs
 REAL(KIND=c_double), VALUE, INTENT(in) :: freq !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: fr_driver !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 REAL(8), CONTIGUOUS, POINTER :: driver_tmp(:,:)
 TYPE(tw_type), POINTER :: tw_obj
@@ -724,9 +866,9 @@ ELSE
   CALL frequency_response(tw_obj,LOGICAL(direct),fr_limit,freq,driver_tmp)
 END IF
 END SUBROUTINE thincurr_freq_response
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot, &
   vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
@@ -746,7 +888,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: volt_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: volts_full !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 LOGICAL :: pm_save
 REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),curr_waveform(:,:),volt_waveform(:,:),sensor_waveform(:,:)
@@ -816,9 +958,9 @@ ELSE
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot, &
   sensor_ptr,sensor_vals_ptr,nsensor,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
@@ -830,7 +972,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsensor !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 LOGICAL :: pm_save
 REAL(8), CONTIGUOUS, POINTER :: sensor_waveform(:,:)
@@ -867,9 +1009,9 @@ ELSE
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain_plot
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,compute_B,sensor_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_reduce_model")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
@@ -878,7 +1020,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: eig_vec !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_B !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(200) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 REAL(8), CONTIGUOUS, POINTER :: vals_tmp(:),vec_tmp(:,:)
 CHARACTER(LEN=OFT_PATH_SLEN) :: h5_path = 'none'

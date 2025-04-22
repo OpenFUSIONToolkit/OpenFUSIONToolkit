@@ -1,6 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!------------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_io.F90
 !
 !> HDF5 file manipulation for output and restart data.
@@ -13,15 +15,15 @@
 !! @author Chris Hansen
 !! @date Summer 2010
 !! @ingroup doxy_oft_base
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_io
 USE oft_base
 USE hdf5
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Binary output file object
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 TYPE :: oft_bin_file
   LOGICAL :: header_written = .FALSE. !< Was header written during this run
   INTEGER(i4) :: io_unit = 0 !< Output unit for file
@@ -30,11 +32,11 @@ TYPE :: oft_bin_file
   INTEGER(i4) :: nbytes = 0 !< Number of bytes per line
   INTEGER(i4), POINTER, DIMENSION(:) :: field_size => NULL() !< Dimension of each field
   CHARACTER(LEN=OFT_PATH_SLEN) :: filename = '' !< Output filename
-  CHARACTER(LEN=80) :: filedesc = '' !< Description string
+  CHARACTER(LEN=OFT_SLEN) :: filedesc = '' !< Description string
   CHARACTER(LEN=2), POINTER, DIMENSION(:) :: field_type => NULL() !< Field types
-  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: field_names => NULL() !< Field names
-  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: field_desc => NULL() !< Field descriptions
-  CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: comm_lines => NULL() !< Comment lines
+  CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: field_names => NULL() !< Field names
+  CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: field_desc => NULL() !< Field descriptions
+  CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: comm_lines => NULL() !< Comment lines
 CONTAINS
   !> Create object and allocate storage
   PROCEDURE :: setup => bin_file_setup
@@ -53,7 +55,7 @@ CONTAINS
   !>
   PROCEDURE :: flush => bin_file_flush
 END TYPE oft_bin_file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> HDF5 restart structure
 !!
 !! Contains definition and data for saving/loading to distributed restart
@@ -61,7 +63,7 @@ END TYPE oft_bin_file
 !!
 !! @note Local ownership in HDF5 files is different from linear algebra
 !! ownership.
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type :: hdf5_rst
   logical :: full = .TRUE. !< Distributed data flag
   integer(i4) :: count = 0 !< Number of values owned by local process
@@ -69,9 +71,28 @@ type :: hdf5_rst
   integer(i8) :: dim = 0 !< Length of global array
   real(r8), pointer, dimension(:) :: data => NULL() !< Array holding local data
 end type hdf5_rst
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+!> Information for XDMF plotting groups in HDF5 plot file
+!------------------------------------------------------------------------------
+type :: xdmf_plot_file
+  integer(i4) :: n_ts = 0
+  integer(i4) :: curr_ts = 0
+  integer(i4) :: n_grids = 0
+  character(LEN=OFT_PATH_SLEN) :: file_path = ''
+  character(LEN=OFT_PATH_SLEN) :: group_name = ''
+  character(LEN=OFT_PATH_SLEN) :: grid_names(10) = ''
+CONTAINS
+  PROCEDURE :: setup => xmdf_setup
+  PROCEDURE :: add_mesh => xdmf_add_mesh
+  PROCEDURE :: add_timestep => xdmf_add_timestep
+  PROCEDURE :: clear_timesteps => xdmf_clear_timesteps
+  PROCEDURE :: write_scalar => xdmf_write_scalar
+  PROCEDURE :: write_vector => xdmf_write_vector
+  GENERIC :: write => write_scalar, write_vector
+end type xdmf_plot_file
+!------------------------------------------------------------------------------
 !> Write data to an HDF5 file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE hdf5_write
   MODULE PROCEDURE hdf5_write_scalar_r8
   MODULE PROCEDURE hdf5_write_scalar_i4
@@ -81,9 +102,9 @@ INTERFACE hdf5_write
   MODULE PROCEDURE hdf5_write_2d_i4
   MODULE PROCEDURE hdf5_write_rst
 END INTERFACE hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Read data from an HDF5 file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 INTERFACE hdf5_read
   MODULE PROCEDURE hdf5_read_scalar_r8
   MODULE PROCEDURE hdf5_read_scalar_i4
@@ -99,9 +120,9 @@ integer(i4) :: hdf5_ts=0 !< Number of HDF5 time steps
 integer(i4), parameter :: hdf5_nl=800 !< Maximum number of HDF5 fields
 integer(i4), parameter :: hdf5_flen=40 !< Maximum size of HDF5 filenames
 contains
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Setup Open FUSION Toolkit binary I/O file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE bin_file_setup(self,filename,desc)
 CLASS(oft_bin_file), INTENT(inout) :: self
 CHARACTER(LEN=*), INTENT(in) :: filename
@@ -116,9 +137,9 @@ IF(PRESENT(desc))THEN
   self%filedesc=desc
 END IF
 END SUBROUTINE bin_file_setup
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Open Open FUSION Toolkit binary I/O file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE bin_file_open(self)
 CLASS(oft_bin_file), INTENT(inout) :: self
 IF(self%header_written)THEN
@@ -134,16 +155,16 @@ ELSE
 END IF
 self%header_written=.FALSE.
 END SUBROUTINE bin_file_open
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Close Open FUSION Toolkit binary I/O file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE bin_file_close(self)
 CLASS(oft_bin_file), INTENT(inout) :: self
 CLOSE(self%io_unit)
 END SUBROUTINE bin_file_close
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add field to Open FUSION Toolkit binary I/O file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE bin_file_add(self,fieldname,type_str,desc,fsize)
 CLASS(oft_bin_file), INTENT(inout) :: self !< File object
 CHARACTER(LEN=*), INTENT(in) :: fieldname !< Field name to add
@@ -152,8 +173,8 @@ CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: desc !< Description of field
 INTEGER(i4), OPTIONAL, INTENT(in) :: fsize !< Size of field
 INTEGER(i4) :: fsize_tmp
 INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp
-CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: names_tmp
-CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: desc_tmp
+CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: names_tmp
+CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: desc_tmp
 CHARACTER(LEN=2), POINTER, DIMENSION(:) :: types_tmp
 IF((type_str(1:1)/='i').AND.(type_str(1:1)/='r'))THEN
   CALL oft_abort("Invalid field type", "bin_file_add", __FILE__)
@@ -168,10 +189,10 @@ ELSE IF(type_str(2:2)=='8')THEN
 ELSE
   CALL oft_abort("Invalid field size", "bin_file_add", __FILE__)
 END IF
-IF(LEN(fieldname)>OFT_HIST_SLEN)CALL oft_abort('Name too long', &
+IF(LEN(fieldname)>OFT_SLEN)CALL oft_abort('Name too long', &
   "bin_file_add",__FILE__)
 IF(PRESENT(desc))THEN
-  IF(LEN(desc)>OFT_HIST_SLEN)CALL oft_abort('Description too long', &
+  IF(LEN(desc)>OFT_SLEN)CALL oft_abort('Description too long', &
     "bin_file_add",__FILE__)
 END IF
 !
@@ -205,14 +226,14 @@ ELSE
   self%field_desc(self%nfields)="No description"
 END IF
 END SUBROUTINE bin_file_add
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Add comment to Open FUSION Toolkit binary I/O file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE bin_file_add_comm(self,comment)
 CLASS(oft_bin_file), INTENT(inout) :: self !< File object
 CHARACTER(LEN=*), INTENT(in) :: comment !< Comment to add
-CHARACTER(LEN=OFT_HIST_SLEN), POINTER, DIMENSION(:) :: comm_tmp
-IF(LEN(comment)>OFT_HIST_SLEN)CALL oft_abort('Comment too long', &
+CHARACTER(LEN=OFT_SLEN), POINTER, DIMENSION(:) :: comm_tmp
+IF(LEN(comment)>OFT_SLEN)CALL oft_abort('Comment too long', &
   "bin_file_add_comm",__FILE__)
 IF(self%ncomm>0)THEN
   comm_tmp=>self%comm_lines
@@ -225,9 +246,9 @@ END IF
 self%ncomm=self%ncomm+1
 self%comm_lines(self%ncomm)=comment
 END SUBROUTINE bin_file_add_comm
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Write header for Open FUSION Toolkit binary I/O file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE bin_file_header(self)
 CLASS(oft_bin_file), INTENT(inout) :: self
 INTEGER(i4) :: i
@@ -277,9 +298,9 @@ WRITE(self%io_unit,*)
 CLOSE(self%io_unit)
 self%header_written=.TRUE.
 END SUBROUTINE bin_file_header
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Write single set of data to Open FUSION Toolkit binary I/O file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE bin_file_write(self,data_i4,data_i8,data_r4,data_r8)
 CLASS(oft_bin_file), INTENT(inout) :: self !< File object
 INTEGER(i4), OPTIONAL, INTENT(in) :: data_i4(:) !< integer(i4) data
@@ -293,107 +314,267 @@ IF(PRESENT(data_r4))WRITE(self%io_unit)data_r4
 IF(PRESENT(data_r8))WRITE(self%io_unit)data_r8
 WRITE(self%io_unit)self%nfields
 END SUBROUTINE bin_file_write
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Flush I/O buffer for Open FUSION Toolkit binary I/O file
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE bin_file_flush(self)
 CLASS(oft_bin_file), INTENT(inout) :: self
 FLUSH(self%io_unit)
 END SUBROUTINE bin_file_flush
-!---------------------------------------------------------------------------
-!> Creates HDF5 output files for the current mesh
-!!
-!! The following files are created
-!! - mesh.[PROC_RANK].h5
-!! - scalar_dump.[PROC_RANK].h5
-!! - vector_dump.[PROC_RANK].h5
-!!
-!! @note One output file is created per MPI task
-!---------------------------------------------------------------------------
-subroutine hdf5_create_files(basepath)
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+subroutine xmdf_setup(self,group_name,basepath)
+class(xdmf_plot_file), intent(inout) :: self
+CHARACTER(LEN=*), intent(in) :: group_name !< Path to mesh in HDF5 file
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
-INTEGER(4) :: ierr
-DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Creating HDF5 plot files'
-pathprefix=''
+integer :: error
 IF(PRESENT(basepath))THEN
-  IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
-    "hdf5_create_files", __FILE__)
-  pathprefix=basepath
+  call execute_command_line('mkdir -p '//TRIM(basepath), exitstat=error)
+  IF(error/=0)CALL oft_abort('Failed to create output directory: '//TRIM(basepath), &
+    "xmdf_setup", __FILE__)
+  self%file_path=TRIM(basepath)//"oft_xdmf."//hdf5_proc_str()//".h5"
+ELSE
+  self%file_path="oft_xdmf."//hdf5_proc_str()//".h5"
 END IF
-CALL oft_increase_indent
-CALL hdf5_create_file(TRIM(pathprefix)//"scalar_dump."//hdf5_proc_str()//".h5")
-CALL hdf5_create_file(TRIM(pathprefix)//"vector_dump."//hdf5_proc_str()//".h5")
-CALL hdf5_create_file(TRIM(pathprefix)//"mesh."//hdf5_proc_str()//".h5")
-CALL oft_decrease_indent
+self%group_name=TRIM(group_name)
+CALL string_to_lower(self%group_name)
+CALL hdf5_create_file(TRIM(self%file_path),.TRUE.)
+CALL hdf5_create_group(TRIM(self%file_path),TRIM(self%group_name))
+end subroutine xmdf_setup
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+subroutine xdmf_add_mesh(self,mesh_type,pt_list,cell_list,grid_name)
+class(xdmf_plot_file), intent(inout) :: self
+integer(i4), intent(in) :: mesh_type !< Mesh type flag (Tet/Tri or Hex/Quad)
+real(r8), intent(in) :: pt_list(:,:) !< Point list [3,np]
+integer(i4), intent(in) :: cell_list(:,:) !< Cell list [:,nc]
+CHARACTER(LEN=*), intent(in) :: grid_name !< Path to mesh in HDF5 file
+CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix,filename
+CHARACTER(LEN=200) :: hdf5_path
+integer(i4) :: i,ntrans(4),ierr,io_unit
+#ifdef HAVE_MPI
+#ifdef OFT_MPI_F08
+type(mpi_status) :: mpi_stat
+#else
+integer(i4) :: mpi_stat(MPI_STATUS_SIZE)
+#endif
+#endif
+DEBUG_STACK_PUSH
+self%n_grids=self%n_grids+1
+self%grid_names(self%n_grids)=TRIM(grid_name)
+CALL string_to_lower(self%grid_names(self%n_grids))
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_add_mesh",__FILE__)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(self%n_grids))
+CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path))
+CALL hdf5_write(mesh_type,TRIM(self%file_path),TRIM(hdf5_path)//"/TYPE")
+CALL hdf5_write(pt_list,TRIM(self%file_path),TRIM(hdf5_path)//"/R",single_prec=.TRUE.)
+CALL hdf5_write(cell_list,TRIM(self%file_path),TRIM(hdf5_path)//"/LC")
+#ifdef HAVE_MPI
+CALL hdf5_write(oft_env%nprocs,TRIM(self%file_path),TRIM(hdf5_path)//"/NBLOCKS")
+#endif
+!---Create static storage
+CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path)//"/"//hdf5_ts_str(0))
 DEBUG_STACK_POP
-end subroutine hdf5_create_files
-!---------------------------------------------------------------------------
+end subroutine xdmf_add_mesh
+!------------------------------------------------------------------------------
 !> Adds a timestep to the dump metadata file.
 !!
 !! Subsequent output will be added to this timestep until another call
 !! to this subroutine
-!---------------------------------------------------------------------------
-subroutine hdf5_create_timestep(t,basepath)
+!------------------------------------------------------------------------------
+subroutine xdmf_add_timestep(self,t)
+class(xdmf_plot_file), intent(inout) :: self
 real(r8), intent(in) :: t !< Time value
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
-integer(i4) :: io_unit
+integer(i4) :: i
+CHARACTER(LEN=200) :: hdf5_path
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
-hdf5_ts=hdf5_ts+1
-if(oft_env%rank==0)then
-  pathprefix=''
-  IF(PRESENT(basepath))THEN
-    IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
-      "hdf5_create_timestep", __FILE__)
-    pathprefix=basepath
-  END IF
-  OPEN(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
-  WRITE(io_unit,*)
-  WRITE(io_unit,*)'Time Step',REAL(t,4)
-  WRITE(io_unit,*)'Field Data'
-  CLOSE(io_unit)
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_add_timestep",__FILE__)
+self%n_ts=self%n_ts+1
+DO i=1,self%n_grids
+  hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(i))//"/"//TRIM(hdf5_ts_str(self%n_ts))
+  CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path))
+  CALL hdf5_write(t,TRIM(self%file_path),TRIM(hdf5_path)//"/TIME")
+END DO
+DEBUG_STACK_POP
+end subroutine xdmf_add_timestep
+!------------------------------------------------------------------------------
+!> Clear existing timesteps and reset to static fields
+!------------------------------------------------------------------------------
+subroutine xdmf_clear_timesteps(self,clear_static)
+class(xdmf_plot_file), intent(inout) :: self
+logical, optional, intent(in) :: clear_static !< Clear static fields as well?
+integer(i4) :: j,i,istart
+CHARACTER(LEN=200) :: hdf5_path
+integer(HSSIZE_T) :: file_sizes(2)
+DEBUG_STACK_PUSH
+istart=1
+IF(PRESENT(clear_static))THEN
+  IF(clear_static)istart=0
+END IF
+if(oft_debug_print(1))write(*,'(2A,I6,A)')oft_indent,'Clearing ',self%n_ts+(1-istart),' existing timesteps'
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_clear_timesteps",__FILE__)
+DO i=istart,self%n_ts
+  DO j=1,self%n_grids
+    hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(j))//"/"//TRIM(hdf5_ts_str(i))
+    CALL hdf5_delete_obj(TRIM(self%file_path),TRIM(hdf5_path))
+  END DO
+END DO
+self%n_ts=0
+IF(istart==0)THEN
+  hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(j))
+  CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path)//"/"//hdf5_ts_str(0))
+END IF
+if(oft_debug_print(2))THEN
+  file_sizes = hdf5_file_size(TRIM(self%file_path))
+  write(*,'(2A,ES14.6,A,ES14.6,A)')oft_indent,'Freed ',REAL(file_sizes(2),8)/1.d6,' of ',REAL(file_sizes(1),8)/1.d6,' [MB]'
 end if
 DEBUG_STACK_POP
-end subroutine hdf5_create_timestep
-!---------------------------------------------------------------------------
+end subroutine xdmf_clear_timesteps
+!------------------------------------------------------------------------------
+!> Write scalar field to plot file
+!------------------------------------------------------------------------------
+subroutine xdmf_write_scalar(self,data,grid_name,path,centering,single_prec)
+class(xdmf_plot_file), intent(in) :: self
+real(r8), intent(in) :: data(:) !< Scalar data
+CHARACTER(LEN=*), intent(in) :: grid_name !< Grid name
+character(LEN=*), intent(in) :: path !< Name of the output field
+integer(i4), intent(in) :: centering !< Centering of data (1-> vertex; 2-> cell)
+logical, optional, intent(in) :: single_prec !< Save as single precision?
+CHARACTER(LEN=OFT_PATH_SLEN) :: hdf5_path,grid_lower
+CHARACTER(LEN=80) :: attr_data
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_write_scalar",__FILE__)
+grid_lower = TRIM(grid_name)
+CALL string_to_lower(grid_lower)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_lower)//"/"//TRIM(hdf5_ts_str(self%n_ts))
+IF(.NOT.hdf5_field_exist(TRIM(self%file_path),TRIM(hdf5_path)))CALL oft_abort("Timestep does not exist", &
+  "xdmf_write_scalar",__FILE__)
+hdf5_path=TRIM(hdf5_path)//"/"//TRIM(path)
+CALL hdf5_write(data,TRIM(self%file_path),TRIM(hdf5_path),single_prec)
+attr_data='Scalar'
+CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'TYPE',[attr_data])
+SELECT CASE(centering)
+  CASE(1)
+    attr_data='Node'
+    CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'CENTERING',[attr_data])
+  CASE(2)
+    attr_data='Cell'
+    CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'CENTERING',[attr_data])
+  CASE DEFAULT
+    CALL oft_abort('Unknown field centering','xdmf_write_scalar',__FILE__)
+END SELECT
+end subroutine xdmf_write_scalar
+!------------------------------------------------------------------------------
+!> Write vector field to plot file
+!------------------------------------------------------------------------------
+subroutine xdmf_write_vector(self,data,grid_name,path,centering,single_prec)
+class(xdmf_plot_file), intent(in) :: self
+real(r8), intent(in) :: data(:,:) !< Vector data
+CHARACTER(LEN=*), intent(in) :: grid_name !< Grid name
+character(LEN=*), intent(in) :: path !< Name of the output field
+integer(i4), intent(in) :: centering !< Centering of data (1-> vertex; 2-> cell)
+logical, optional, intent(in) :: single_prec !< Save as single precision?
+CHARACTER(LEN=OFT_PATH_SLEN) :: hdf5_path,grid_lower
+CHARACTER(LEN=80) :: attr_data
+IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
+  "xdmf_write_vector",__FILE__)
+grid_lower = TRIM(grid_name)
+CALL string_to_lower(grid_lower)
+hdf5_path=TRIM(self%group_name)//"/"//TRIM(grid_lower)//"/"//TRIM(hdf5_ts_str(self%n_ts))
+IF(.NOT.hdf5_field_exist(TRIM(self%file_path),TRIM(hdf5_path)))CALL oft_abort("Timestep does not exist", &
+  "xdmf_write_vector",__FILE__)
+hdf5_path=TRIM(hdf5_path)//"/"//TRIM(path)
+CALL hdf5_write(data,TRIM(self%file_path),TRIM(hdf5_path),single_prec)
+attr_data='Vector'
+CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'TYPE',[attr_data])
+SELECT CASE(centering)
+  CASE(1)
+    attr_data='Node'
+    CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'CENTERING',[attr_data])
+  CASE(2)
+    attr_data='Cell'
+    CALL hdf5_add_string_attribute(TRIM(self%file_path),TRIM(hdf5_path),'CENTERING',[attr_data])
+  CASE DEFAULT
+    CALL oft_abort('Unknown field centering','xdmf_write_vector',__FILE__)
+END SELECT
+end subroutine xdmf_write_vector
+!------------------------------------------------------------------------------
 !> Get processor rank as string for HDF5 I/O
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function hdf5_proc_str(proc_ind) result(proc_str)
 integer(i4), optional, intent(in) :: proc_ind
-character(LEN=HDF5_TLEN) :: proc_str
-100 FORMAT (I HDF5_TLEN.HDF5_TLEN)
+character(LEN=OFT_MPI_PLEN) :: proc_str
+100 FORMAT (I OFT_MPI_PLEN.OFT_MPI_PLEN)
 IF(PRESENT(proc_ind))THEN
   write(proc_str,100)proc_ind+1
 ELSE
   write(proc_str,100)oft_env%rank+1
 END IF
 end function hdf5_proc_str
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Get timestep index as string for HDF5 I/O
-!---------------------------------------------------------------------------
-function hdf5_ts_str() result(ts_str)
-character(LEN=HDF5_TLEN) :: ts_str
-100 FORMAT (I HDF5_TLEN.HDF5_TLEN)
-write(ts_str,100)hdf5_ts
+!------------------------------------------------------------------------------
+function hdf5_ts_str(ts_in) result(ts_str)
+integer(i4), optional, intent(in) :: ts_in
+character(LEN=OFT_MPI_PLEN) :: ts_str
+100 FORMAT (I OFT_MPI_PLEN.OFT_MPI_PLEN)
+IF(PRESENT(ts_in))THEN
+  write(ts_str,100)ts_in
+ELSE
+  write(ts_str,100)hdf5_ts
+END IF
 end function hdf5_ts_str
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Test for exitence of a file
 !!
 !! @result Logical flag indicating existence
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 function oft_file_exist(filepath) result(exists)
 character(LEN=*), intent(in) :: filepath !< Path to file
 logical :: exists
 INQUIRE(FILE=TRIM(filepath),EXIST=exists)
 end function oft_file_exist
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Test for exitence of a field in a HDF5 file
 !!
 !! @result Logical flag indicating existence of field and file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+function hdf5_file_size(filepath) result(sizes)
+character(LEN=*), intent(in) :: filepath !< Path to file
+integer :: error
+logical :: exists
+integer(HID_T) :: file_id
+integer(HSSIZE_T) :: sizes(2)
+exists=oft_file_exist(filepath)
+sizes=-1
+IF(.NOT.exists)RETURN
+DEBUG_STACK_PUSH
+!---Try to open file as HDF5 file
+call h5open_f(error)
+call h5fopen_f(TRIM(filepath), H5F_ACC_RDONLY_F, file_id, error)
+IF(error/=0)THEN
+  call h5close_f(error)
+  DEBUG_STACK_POP
+  RETURN
+END IF
+CALL H5Fget_filesize_f(file_id,sizes(1),error)
+CALL H5Fget_freespace_f(file_id,sizes(2),error)
+!---Close file and finalize HDF5
+call h5fclose_f(file_id, error)
+call h5close_f(error)
+DEBUG_STACK_POP
+end function hdf5_file_size
+!------------------------------------------------------------------------------
+!> Test for exitence of a field in a HDF5 file
+!!
+!! @result Logical flag indicating existence of field and file
+!------------------------------------------------------------------------------
 function hdf5_field_exist(filepath,path) result(exists)
 character(LEN=*), intent(in) :: filepath !< Path to file
 character(LEN=*), intent(in) :: path !< Path of field in file
@@ -419,11 +600,11 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end function hdf5_field_exist
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Test for exitence of a field in a HDF5 file
 !!
 !! @result Logical flag indicating existence of field and file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_field_get_sizes(filepath,path,ndims,dim_sizes)
 character(LEN=*), intent(in) :: filepath !< Path to file
 character(LEN=*), intent(in) :: path !< Path of field in file
@@ -432,8 +613,9 @@ integer(4), allocatable, dimension(:), intent(out) :: dim_sizes !< Size of each 
 integer(4) :: access_flag,error
 integer(hsize_t), allocatable, dimension(:) :: tmp_sizes,maxdims
 integer(HID_T) :: file_id,dset_id,dspace_id
-DEBUG_STACK_PUSH
 ndims=-1
+IF(.NOT.hdf5_field_exist(filepath,path))RETURN
+DEBUG_STACK_PUSH
 !---Try to open file as HDF5 file
 access_flag=H5F_ACC_RDONLY_F
 call h5open_f(error)
@@ -458,28 +640,40 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_field_get_sizes
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create an empty HDF5 output file
-!---------------------------------------------------------------------------
-subroutine hdf5_create_file(filename)
+!------------------------------------------------------------------------------
+subroutine hdf5_create_file(filename,persistent_space_tracking)
 character(LEN=*), intent(in) :: filename !< Name of file to be created
-integer(4) :: error
-integer(HID_T) :: file_id
+logical, optional, intent(in) :: persistent_space_tracking
+integer :: error
+integer(HID_T) :: file_id,plist_id
+integer(HSIZE_T) :: zero = 0
+logical :: track_free
 DEBUG_STACK_PUSH
 !---Get processor rank for file creation
 IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Creating HDF5 output file: ',TRIM(filename)
 !---Initialize HDF5 system
 call h5open_f(error)
 !---Create HDF5 file
-call h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
+track_free=.FALSE.
+IF(PRESENT(persistent_space_tracking))track_free=persistent_space_tracking
+IF(track_free)THEN
+  CALL H5Pcreate_f(H5P_FILE_CREATE_F,plist_id,error)
+  CALL H5Pset_file_space_strategy_f(plist_id,H5F_FSPACE_STRATEGY_FSM_AGGR_F,.TRUE.,zero,error)
+  CALL h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error, creation_prp=plist_id)
+  CALL h5pclose_f(plist_id, error)
+ELSE
+  call h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
+END IF
 call h5fclose_f(file_id, error)
 !---Finalize HDF5 system
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_create_file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Create HDF5 group in existing file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_create_group(filename,group_name)
 character(LEN=*), intent(in) :: filename !< Name of HDF5 file
 character(LEN=*), intent(in) :: group_name !< Group path
@@ -497,9 +691,29 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_create_group
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+!> Delete HDF5 object in existing file
+!------------------------------------------------------------------------------
+subroutine hdf5_delete_obj(filename,obj_path)
+character(LEN=*), intent(in) :: filename !< Name of HDF5 file
+character(LEN=*), intent(in) :: obj_path !< Object path
+integer :: error
+integer(HID_T) :: file_id,grp_id
+DEBUG_STACK_PUSH
+!---Initialize HDF5 and open vector dump file
+call h5open_f(error)
+CALL h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
+IF(error/=0)CALL oft_abort('Error opening file','hdf5_delete_obj',__FILE__)
+CALL h5ldelete_f(file_id, "/"//TRIM(obj_path), error)
+IF(error/=0)CALL oft_abort('Error deleting object','hdf5_delete_obj',__FILE__)
+!---Close vector dump file and finalize HDF5
+call h5fclose_f(file_id, error)
+call h5close_f(error)
+DEBUG_STACK_POP
+end subroutine hdf5_delete_obj
+!------------------------------------------------------------------------------
 !> Add string attribute to existing object (group or dataset)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_add_string_attribute(filename,objname,aname,attr_data)
 character(LEN=*), intent(in) :: filename !< Name of HDF5 file
 character(LEN=*), intent(in) :: objname !< Name of object (dataset or group)
@@ -544,9 +758,9 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_add_string_attribute
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> real(r8) scalar implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_write_scalar_r8(val,filename,path,single_prec)
 real(r8), intent(in) :: val !< Value to write to file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -556,9 +770,9 @@ real(r8) :: tmpval(1)
 tmpval(1)=val
 CALL hdf5_write_1d_r8(tmpval,filename,path,single_prec)
 end subroutine hdf5_write_scalar_r8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> integer(i4) scalar implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_write_scalar_i4(val,filename,path)
 integer(i4), intent(in) :: val !< Value to write to file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -569,9 +783,9 @@ tmpval(1)=val
 CALL hdf5_write_1d_i4(tmpval,filename,path)
 DEBUG_STACK_POP
 end subroutine hdf5_write_scalar_i4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> real(r8) 1D array implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_write_1d_r8(array,filename,path,single_prec)
 real(r8), intent(in) :: array(:) !< Values to write to file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -583,6 +797,11 @@ integer(i4), parameter :: one=1
 integer(HID_T) :: file_id,dspace_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(1) :: dims
 DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
 !---Write at lower precision?
 write_single=.FALSE.
 IF(PRESENT(single_prec))write_single=single_prec
@@ -610,9 +829,9 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_write_1d_r8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> integer(i4) 1D array implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_write_1d_i4(array,filename,path)
 integer(i4), intent(in) :: array(:) !< Values to write to file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -623,6 +842,11 @@ integer(i4), parameter :: one=1
 integer(HID_T) :: file_id,dspace_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(1) :: dims
 DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
@@ -641,9 +865,9 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_write_1d_i4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> real(r8) 2D array implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_write_2d_r8(array,filename,path,single_prec)
 real(r8), intent(in) :: array(:,:) !< Values to write to file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -655,6 +879,11 @@ integer(i4), parameter :: two=2
 integer(HID_T) :: file_id,dspace_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(2) :: dims
 DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
 !---Write at lower precision?
 write_single=.FALSE.
 IF(PRESENT(single_prec))write_single=single_prec
@@ -682,9 +911,9 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_write_2d_r8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> integer(i4) 2D array implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_write_2d_i4(array,filename,path)
 integer(i4), intent(in) :: array(:,:) !< Values to write to file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -696,6 +925,11 @@ integer(HID_T) :: file_id
 integer(HID_T) :: dspace_id,dset_id
 INTEGER(HSIZE_T), DIMENSION(2) :: dims
 DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
@@ -714,14 +948,13 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_write_2d_i4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> FE vector implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
-subroutine hdf5_write_rst(rst_info,filename,path,append)
+!------------------------------------------------------------------------------
+subroutine hdf5_write_rst(rst_info,filename,path)
 type(hdf5_rst), intent(in) :: rst_info !< Restart data (structure containing data and mapping)
 character(LEN=*), intent(in) :: filename !< Path to file
 character(LEN=*), intent(in) :: path !< Variable path in file
-logical, optional, intent(in) :: append !< Append to or create file? (optional)
 integer(i4) :: i,error,one=1
 integer(HID_T) :: file_id
 integer(HID_T) :: dset_id
@@ -736,8 +969,15 @@ integer(HID_T) :: plist_id
 integer(i4) :: j
 #endif
 DEBUG_STACK_PUSH
-CALL oft_mpi_barrier(error)
 if(oft_debug_print(2))write(*,'(3A)')oft_indent,'Writing FE vector to file: ',TRIM(filename)
+!---Remove field if it already exists
+IF(oft_env%head_proc)THEN
+  IF(hdf5_field_exist(filename,path))THEN
+    CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+    CALL hdf5_delete_obj(filename,path)
+  END IF
+END IF
+CALL oft_mpi_barrier(error)
 !---Setup local chunk
 dims=rst_info%dim
 count=rst_info%count
@@ -840,9 +1080,9 @@ call h5close_f(error)
 CALL oft_mpi_barrier(error)
 DEBUG_STACK_POP
 end subroutine hdf5_write_rst
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> real(r8) scalar implementation of \ref oft_io::hdf5_read
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_read_scalar_r8(val,filename,path,success)
 real(r8), intent(out) :: val !< Value to read from file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -852,9 +1092,9 @@ real(r8) :: tmpval(1)
 CALL hdf5_read_1d_r8(tmpval,filename,path,success)
 val=tmpval(1)
 end subroutine hdf5_read_scalar_r8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> integer(i4) scalar implementation of \ref oft_io::hdf5_read
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_read_scalar_i4(val,filename,path,success)
 integer(i4), intent(out) :: val !< Value to read from file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -864,9 +1104,9 @@ integer(i4) :: tmpval(1)
 CALL hdf5_read_1d_i4(tmpval,filename,path,success)
 val=tmpval(1)
 end subroutine hdf5_read_scalar_i4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> real(r8) 1D array implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_read_1d_r8(array,filename,path,success)
 real(r8), intent(inout) :: array(:) !< Values to read from file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -906,9 +1146,9 @@ RETURN
 102 CALL h5close_f(error)
 IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_1d_r8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> integer(i8) 1D array implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_read_1d_i4(array,filename,path,success)
 integer(i4), intent(inout) :: array(:) !< Values to read from file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -948,9 +1188,9 @@ RETURN
 102 CALL h5close_f(error)
 IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_1d_i4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> real(r8) 2D array implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_read_2d_r8(array,filename,path,success)
 real(r8), intent(inout) :: array(:,:) !< Values to read from file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -990,9 +1230,9 @@ RETURN
 102 CALL h5close_f(error)
 IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_2d_r8
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> integer(i4) 2D array implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_read_2d_i4(array,filename,path,success)
 integer(i4), intent(inout) :: array(:,:) !< Values to read from file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -1032,14 +1272,16 @@ RETURN
 102 CALL h5close_f(error)
 IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_2d_i4
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> FE vector implementation of \ref oft_io::hdf5_write
-!---------------------------------------------------------------------------
-subroutine hdf5_read_rst(rst_info,filename,path)
+!------------------------------------------------------------------------------
+subroutine hdf5_read_rst(rst_info,filename,path,success)
 type(hdf5_rst), intent(inout) :: rst_info !< Restart data (structure containing mapping and data holder)
 character(*), intent(in) :: filename !< Path to file
 character(*), intent(in) :: path !< Variable path in file
-integer(i4) :: i,error,one=1
+logical, optional, intent(out) :: success !< Successful read?
+integer(i4) :: i,error
+integer(i4), parameter :: two=2,one=1,zero=0
 integer :: access_flag
 integer(HID_T) :: file_id
 integer(HID_T) :: dset_id
@@ -1053,7 +1295,11 @@ logical :: exists
 integer(i4) :: info
 integer(HID_T) :: plist_id
 #endif
-DEBUG_STACK_PUSH
+! DEBUG_STACK_PUSH
+IF(PRESENT(success))THEN
+  success=.FALSE.
+  CALL h5eset_auto_f(zero, error)
+END IF
 !---Set filename and check for file
 CALL oft_mpi_barrier(error)
 !---Set access flag
@@ -1070,7 +1316,10 @@ if(rst_info%full)then
   !---Initialize HDF5 and open vector dump file
   call h5open_f(error)
   call h5fopen_f(TRIM(filename), access_flag, file_id, error)
-  IF(error/=0)CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 103
+    CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+  END IF
   !---
   dims=rst_info%dim
   count=rst_info%count
@@ -1078,15 +1327,26 @@ if(rst_info%full)then
   data=>rst_info%data
   !---
   call h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
-  IF(error/=0)CALL oft_abort('Dataset not found','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 102
+    CALL oft_abort('Error opening dataset','hdf5_read_rst',__FILE__)
+  END IF
   !---Check size
   CALL h5dget_space_f(dset_id, memspace, error)
   CALL h5sget_simple_extent_npoints_f(memspace, space_count, error)
-  IF(error/=0)CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
-  IF(space_count/=rst_info%dim)CALL oft_abort('Dataset size does not match', &
-    'hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 101
+    CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
+  END IF
+  IF(space_count/=rst_info%dim)THEN
+    IF(PRESENT(success))GOTO 101
+    CALL oft_abort('Dataset size does not match','hdf5_read_rst',__FILE__)
+  END IF
   CALL h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, count, error)
-  IF(error/=0)CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 100
+    CALL oft_abort('Error reading dataset','hdf5_read_rst',__FILE__)
+  END IF
   !---Close dataset
   CALL h5sclose_f(memspace, error)
   call h5dclose_f(dset_id, error)
@@ -1104,7 +1364,10 @@ else
   CALL h5pset_fapl_mpio_f(plist_id, int(oft_env%comm,4), info, error)
   !---
   CALL h5fopen_f(TRIM(filename), access_flag, file_id, error, access_prp=plist_id)
-  IF(error/=0)CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 103
+    CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+  END IF
   CALL h5pclose_f(plist_id, error)
   !---
   dims=rst_info%dim
@@ -1113,13 +1376,21 @@ else
   data=>rst_info%data
   !---Write out cell data
   CALL h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
-  IF(error/=0)CALL oft_abort('Dataset not found','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 102
+    CALL oft_abort('Error opening dataset','hdf5_read_rst',__FILE__)
+  END IF
   !---Check size
   CALL h5dget_space_f(dset_id, memspace, error)
   CALL h5sget_simple_extent_npoints_f(memspace, space_count, error)
-  IF(error/=0)CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
-  IF(space_count/=rst_info%dim)CALL oft_abort('Dataset size does not match', &
-    'hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 101
+    CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
+  END IF
+  IF(space_count/=rst_info%dim)THEN
+    IF(PRESENT(success))GOTO 101
+    CALL oft_abort('Dataset size does not match','hdf5_read_rst',__FILE__)
+  END IF
   !---Write out cell data
   CALL h5screate_simple_f(one, count, memspace, error)
   !---Write out cell data
@@ -1130,7 +1401,10 @@ else
   CALL h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, error)
   CALL h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, count, error, &
     file_space_id=filespace, mem_space_id=memspace, xfer_prp=plist_id)
-  IF(error/=0)CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+  IF(error/=0)THEN
+    IF(PRESENT(success))GOTO 100
+    CALL oft_abort('Error reading dataset','hdf5_read_rst',__FILE__)
+  END IF
   !---Write out cell data
   CALL h5sclose_f(filespace, error)
   CALL h5sclose_f(memspace, error)
@@ -1154,16 +1428,27 @@ else
     if(oft_env%rank+1==i)then
       !---
       call h5fopen_f(TRIM(filename), access_flag, file_id, error)
-      IF(error/=0)CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+      IF(error/=0)THEN
+        IF(PRESENT(success))GOTO 103
+        CALL oft_abort('Error opening file','hdf5_read_rst',__FILE__)
+      END IF
       !---
       CALL h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
-      IF(error/=0)CALL oft_abort('Dataset not found','hdf5_read_rst',__FILE__)
+      IF(error/=0)THEN
+        IF(PRESENT(success))GOTO 102
+        CALL oft_abort('Error opening dataset','hdf5_read_rst',__FILE__)
+      END IF
       !---Check size
       CALL h5dget_space_f(dset_id, memspace, error)
       CALL h5sget_simple_extent_npoints_f(memspace, space_count, error)
-      IF(error/=0)CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
-      IF(space_count/=rst_info%dim)CALL oft_abort('Dataset size does not match', &
-        'hdf5_read_rst',__FILE__)
+      IF(error/=0)THEN
+        IF(PRESENT(success))GOTO 101
+        CALL oft_abort('Could not read dataset size','hdf5_read_rst',__FILE__)
+      END IF
+      IF(space_count/=rst_info%dim)THEN
+        IF(PRESENT(success))GOTO 101
+        CALL oft_abort('Dataset size does not match','hdf5_read_rst',__FILE__)
+      END IF
       !---
       CALL h5screate_simple_f(one, count, memspace, error)
       CALL h5dget_space_f(dset_id, filespace, error)
@@ -1171,7 +1456,10 @@ else
       !---
       CALL h5dread_f(dset_id, H5T_NATIVE_DOUBLE, data, count, error, &
         file_space_id=filespace, mem_space_id=memspace)
-      IF(error/=0)CALL oft_abort('Error in HDF5 read','hdf5_read_rst',__FILE__)
+      IF(error/=0)THEN
+        IF(PRESENT(success))GOTO 100
+        CALL oft_abort('Error reading dataset','hdf5_read_rst',__FILE__)
+      END IF
       !---Close dataset
       CALL h5sclose_f(filespace, error)
       CALL h5sclose_f(memspace, error)
@@ -1188,93 +1476,43 @@ else
   call oft_abort("Requested distributed read without MPI","hdf5_read_rst",__FILE__)
 #endif
 end if
-DEBUG_STACK_POP
+IF(PRESENT(success))THEN
+  success=.TRUE.
+  CALL h5eset_auto_f(one, error)
+END IF
+! DEBUG_STACK_POP
+RETURN
+100 CALL h5sclose_f(memspace, error)
+#ifdef HAVE_MPI
+IF(.NOT.rst_info%full)THEN
+#ifdef HAVE_PHDF5
+  CALL h5pclose_f(plist_id, error)
+#endif
+  CALL h5sclose_f(filespace, error)
+END IF
+#endif
+101 CALL h5dclose_f(dset_id, error)
+102 CALL h5fclose_f(file_id, error)
+103 CALL h5close_f(error)
+IF(PRESENT(success))CALL h5eset_auto_f(one, error)
+#ifdef HAVE_MPI
+IF(.NOT.rst_info%full)THEN
+#ifdef HAVE_PHDF5
+  CALL oft_mpi_barrier(error)
+#else
+  do i=oft_env%rank+1,oft_env%nprocs
+    CALL oft_mpi_barrier(error)
+  end do
+#endif
+END IF
+#endif
+! DEBUG_STACK_POP
 end subroutine hdf5_read_rst
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Deallocate internal storage fields created for HDF5 collective I/O
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine hdf5_rst_destroy(self)
 type(hdf5_rst), intent(inout) :: self
 IF(ASSOCIATED(self%data))DEALLOCATE(self%data)
 end subroutine hdf5_rst_destroy
-!---------------------------------------------------------------------------
-!> Writes the metadata file referencing all of the mesh blocks
-!!
-!! - Writes out mesh sizes
-!! - Initiliazes timestep 0
-!---------------------------------------------------------------------------
-subroutine oft_hdf5_write_dump(mesh_type,vol_sizes,surf_sizes,basepath)
-integer(i4), intent(in) :: mesh_type !< Mesh type flag (Tet/Tri or Hex/Quad)
-integer(i4), intent(in) :: vol_sizes(2) !< Volume mesh counts (np,nc)
-integer(i4), intent(in) :: surf_sizes(2) !< Surface mesh counts (np,nc)
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
-integer(i4) :: i,ntrans(4),ierr,io_unit
-#ifdef HAVE_MPI
-#ifdef OFT_MPI_F08
-type(mpi_status) :: mpi_stat
-#else
-integer(i4) :: mpi_stat(MPI_STATUS_SIZE)
-#endif
-#endif
-DEBUG_STACK_PUSH
-pathprefix=''
-IF(PRESENT(basepath))THEN
-  IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
-    "oft_hdf5_write_dump", __FILE__)
-  pathprefix=basepath
-END IF
-!---Get local mesh counts
-ntrans(1:2)=vol_sizes
-ntrans(3:4)=surf_sizes
-!---Send to lead proc
-#ifdef HAVE_MPI
-if(oft_env%rank>0)call MPI_SEND(ntrans,4,OFT_MPI_I4,0,1,MPI_COMM_WORLD,ierr)
-#endif
-!---On lead proc setup metadata file
-if(oft_env%rank==0)then
-  !---Setup file
-  open(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat')
-  write(io_unit,*)'Mesh Data'
-  !---Local mesh size
-  write(io_unit,*)mesh_type
-  write(io_unit,*)hdf5_proc_str(),ntrans
-  !---Mesh sizes of other tasks
-#ifdef HAVE_MPI
-  do i=1,oft_env%nprocs-1
-    call MPI_RECV(ntrans,4,OFT_MPI_I4,i,1,MPI_COMM_WORLD,mpi_stat,ierr)
-    write(io_unit,*)hdf5_proc_str(i),ntrans
-  end do
-#endif
-  !---Initialize timestep 0
-  write(io_unit,*)
-  write(io_unit,*)'Time Step',real(0.d0)
-  write(io_unit,*)'Field Data'
-  close(io_unit)
-end if
-DEBUG_STACK_POP
-end subroutine oft_hdf5_write_dump
-!---------------------------------------------------------------------------
-!> Adds an output field to the dump file for Xdmf construction
-!---------------------------------------------------------------------------
-subroutine oft_hdf5_add_dump(tag,type,basepath)
-character(LEN=*), intent(in) :: tag !< Name of the field to add
-integer(i4), intent(in) :: type !< Type of field being output
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
-CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix
-integer(i4) :: io_unit
-DEBUG_STACK_PUSH
-if(oft_env%rank==0)then
-  pathprefix=''
-  IF(PRESENT(basepath))THEN
-    IF(LEN(basepath)>OFT_PATH_SLEN)CALL oft_abort("Basepath too long", &
-      "oft_hdf5_add_dump", __FILE__)
-    pathprefix=basepath
-  END IF
-  open(NEWUNIT=io_unit,FILE=TRIM(pathprefix)//'dump.dat',POSITION="APPEND",STATUS="OLD")
-  write(io_unit,*)tag,type
-  close(io_unit)
-end if
-DEBUG_STACK_POP
-end subroutine oft_hdf5_add_dump
 end module oft_io

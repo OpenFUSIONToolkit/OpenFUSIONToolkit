@@ -17,6 +17,7 @@ The following examples illustrate usage of MUG to run time-dependent resistive a
 
  - \subpage doc_mug_sph_ex1
  - \subpage doc_mug_sph_ex2
+ - \subpage doc_mug_recon_ex
 
 \section doc_mhd_main_eqns MHD System
 Below is the complete system of equations supported by the \ref xmhd "primary implementation". Most

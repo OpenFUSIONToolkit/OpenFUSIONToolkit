@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file thin_wall_solvers.F90
 !
 !> Module for thin-wall modeling on 3D triangular meshes
@@ -9,11 +11,11 @@
 !! @authors Chris Hansen
 !! @date May 2017
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE thin_wall_solvers
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute, hdf5_create_timestep
+USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
 USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
@@ -31,9 +33,9 @@ USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op, oft_tw_hodlr_bjpre, oft_tw_hodlr_rbj
 IMPLICIT NONE
 #include "local.h"
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute L/R eigenmodes of ThinCurr model using a direct approach via LAPACK
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE lr_eigenmodes_direct(self,neigs,eig_rval,eig_vec,eig_ival)
 TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
 INTEGER(4), INTENT(in) :: neigs !< Number of eigenvalues to compute
@@ -106,9 +108,9 @@ DO i=1,MIN(neigs,5)
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE lr_eigenmodes_direct
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Compute L/R eigenmodes of ThinCurr model using an iterative Lanczos method via ARPACK
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE lr_eigenmodes_arpack(self,neigs,eig_rval,eig_vec,eig_ival,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
 INTEGER(4), INTENT(in) :: neigs !< Number of eigenvalues to compute
@@ -210,9 +212,9 @@ CALL oft_abort("Iterative eigenvalue solve requires ARPACK", "lr_eigenmodes_arpa
 #endif
 DEBUG_STACK_POP
 END SUBROUTINE lr_eigenmodes_arpack
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE frequency_response(self,direct,fr_limit,freq,driver,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
 LOGICAL, INTENT(in) :: direct !< Use direct solver?
@@ -331,12 +333,12 @@ driver(:,1)=REAL(x,8)
 driver(:,2)=AIMAG(x)
 DEALLOCATE(b,x)
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with a second vector
 !!
 !! @param[in] a Second vector for dot product
 !! @result \f$ \sum_i self_i a_i \f$
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 function vec_comp_dot(n,a,b) result(dot)
 integer(i4), intent(in) :: n
 DOUBLE COMPLEX, intent(in) :: a(n),b(n)
@@ -348,12 +350,12 @@ DO i=1,n
   dot=dot+CONJG(a(i))*b(i)
 END DO
 end function vec_comp_dot
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Dot product with a second vector
 !!
 !! @param[in] a Second vector for dot product
 !! @result \f$ \sum_i self_i a_i \f$
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 subroutine mat_comp(n,A,x,b)
 integer(i4), intent(in) :: n
 DOUBLE COMPLEX, intent(in) :: A(n,n),x(n)
@@ -379,9 +381,9 @@ ELSE
   !$omp end parallel
 END IF
 end subroutine mat_comp
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE gmres_comp(nrits,its,ncoils,A,u,g,graph,nlocal,loverlap)
 INTEGER(i4), INTENT(in) :: nrits,its,ncoils,nlocal
 DOUBLE COMPLEX, INTENT(inout) :: A(ncoils,ncoils)
@@ -605,11 +607,9 @@ END IF
 oft_env%pm=pm
 END SUBROUTINE gmres_comp
 END SUBROUTINE frequency_response
-!------------------------------------------------------------------------------
-! SUBROUTINE run_td_sim
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tol,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self
 REAL(8), INTENT(in) :: dt
@@ -982,11 +982,9 @@ ELSE
   DEALLOCATE(linv)
 END IF
 END SUBROUTINE run_td_sim
-!------------------------------------------------------------------------------
-! SUBROUTINE plot_sim
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE plot_td_sim(self,nsteps,nplot,sensors,compute_B,rebuild_sensors,sensor_vals,hodlr_op)
 TYPE(tw_type), INTENT(inout) :: self !< Needs Docs
 INTEGER(4), INTENT(in) :: nsteps !< Needs Docs
@@ -1056,6 +1054,7 @@ IF(compute_B)THEN
   END IF
 END IF
 !
+CALL self%xdmf%clear_timesteps()
 DO i=0,nsteps
   IF(MOD(i,nplot)/=0)CYCLE
   !
@@ -1064,7 +1063,7 @@ DO i=0,nsteps
   CALL hdf5_read(t,'pThinCurr_'//pltnum//'.rst','time')
   IF(self%n_icoils>0)CALL hdf5_read(coil_vec,'pThinCurr_'//pltnum//'.rst','coil_currents')
   !
-  CALL hdf5_create_timestep(t)
+  CALL self%xdmf%add_timestep(t)
   CALL u%get_local(vals)
   CALL tw_save_pfield(self,vals,'J')
   !
@@ -1116,7 +1115,7 @@ DO i=0,nsteps
       END DO
     ! END IF
     END IF
-    CALL self%mesh%save_vertex_vector(cc_vals,'B_v')
+    CALL self%mesh%save_vertex_vector(cc_vals,self%xdmf,'B_v')
   END IF
   IF(rebuild_sensors)THEN
     !
@@ -1183,9 +1182,9 @@ IF(compute_B)THEN
 END IF
 IF(self%n_icoils>0)DEALLOCATE(coil_vec)
 END SUBROUTINE plot_td_sim
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs Docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE tw_reduce_model(self,sensors,neigs,eig_vec,filename,compute_B,hodlr_op)
 TYPE(tw_type), INTENT(inout) :: self !< Needs docs
 TYPE(tw_sensors), INTENT(in) :: sensors !< Sensor information

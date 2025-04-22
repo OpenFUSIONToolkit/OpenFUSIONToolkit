@@ -15,4 +15,4 @@ volume 1  tetmesh growth_factor 1.0
 volume all size .4
 mesh volume all
 #
-refine parallel fileroot 'sphere_test_cut' overwrite no_execute
+refine parallel fileroot 'sphere_cut_test' overwrite no_execute
