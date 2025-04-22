@@ -18,11 +18,11 @@
 
 &xmhd_options
   order=2
-  n0=1,
+  n0=1E19,
   psi0=1,
-  velx0=0,
+  velx0=1,
   vely0=1,
-  velz0=0,
+  velz0=1,
   t0=1,
   by0=1,
   chi=1.E-6
