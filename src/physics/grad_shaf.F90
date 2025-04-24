@@ -3193,10 +3193,10 @@ do j=1,self%fe_rep%mesh%nc
       END DO
       IF(self%mode==0)THEN
         ffp(1:2)=((self%alam**2)*self%I%f(psitmp)+self%alam*self%I%f_offset)*self%I%fp(psitmp)
-        ! itor_alam = itor_alam + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
+        itor_alam = itor_alam + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
         ffp(1:2)=0.5d0*self%alam*self%I%fp(psitmp)
-        ! itor_alam = itor_alam + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*self%fe_rep%quad%wts(m)
+        itor_alam = itor_alam + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*self%fe_rep%quad%wts(m)
       END IF
       ! ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
       ! estore = estore + (self%P%F(psitmp))*v*self%fe_rep%quad%wts(m)*pt(1)
