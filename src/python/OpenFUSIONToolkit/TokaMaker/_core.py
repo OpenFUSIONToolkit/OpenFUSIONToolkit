@@ -14,7 +14,9 @@ from collections import OrderedDict
 import ctypes
 import numpy
 from ._interface import *
-
+import matplotlib
+from matplotlib.patches import Polygon
+from matplotlib.colors import ListedColormap
 
 def tokamaker_default_settings(oft_env):
     '''! Initialize settings object with default values
@@ -1508,7 +1510,7 @@ class TokaMaker():
             prev_pt = pt
             prev_psi = psi
         return strike_pts
-    
+
     def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
         r'''! Plot contours of \f$\hat{\psi}\f$
 
@@ -1699,7 +1701,41 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
+    
+    def plot_current_density(self, fig, ax, psi):
+        currents = self.get_delstar_curr(psi)
+        curr_densities = numpy.zeros(self.nc)
 
+        for i in range(self.nc):
+            if self.reg[i] not in [1, 3]:
+                continue # Ignore all regions except plasma and vacuum
+            idx1, idx2, idx3 = self.lc[i]
+            rz1 = self.r[idx1][:2]
+            rz2 = self.r[idx2][:2]
+            rz3 = self.r[idx3][:2]
+            area = numpy.linalg.norm(numpy.cross(rz2 - rz1, rz3 - rz1))/2.0
+            curr_densities[i] = currents[idx1] / area
+
+        # max_cd = numpy.max(numpy.abs(curr_densities))
+        max_cd = 2.5E10
+
+        for i in range(self.nc):
+            if curr_densities[i] > 0:
+                color = [0.0, 1.0, 0.0, curr_densities[i] / max_cd]
+            else:
+                color = [1.0, 1.0, 0.0, numpy.abs(curr_densities[i]) / max_cd]
+            idx1, idx2, idx3 = self.lc[i]
+            rz1 = self.r[idx1][:2]
+            rz2 = self.r[idx2][:2]
+            rz3 = self.r[idx3][:2]
+            poly = Polygon([rz1, rz2, rz3], facecolor=color)
+            ax.add_patch(poly)
+        
+        cmap = ListedColormap([[1.0, 1.0, 0.0, 1.0], [1.0, 1.0, 0.0, 0.5], [1.0, 1.0, 1.0, 1.0], [0.0, 1.0, 0.0, 0.5], [0.0, 1.0, 0.0, 1.0]])
+        bounds = [-2.5, -1.25, 0.0, 1.25, 2.5]
+        norm = matplotlib.colors.BoundaryNorm(bounds, 10)
+        fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
+             ax=ax, orientation='vertical', label='Current Density [A/m2]')
 
 def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=[1.],max_iterations=6,initialize_eq=True):
     '''! Self-consistently compute bootstrap contribution from H-mode profiles,
