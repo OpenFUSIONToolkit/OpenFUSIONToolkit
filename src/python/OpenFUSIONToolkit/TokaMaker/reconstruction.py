@@ -127,6 +127,8 @@ class Ip_con:
         @param val Value of constraint
         @param err Error in constraint
         '''
+        if val <= 0.0:
+            raise ValueError("Plasma current constraint must be positive")
         self.val = val
         self.err = err
 
@@ -136,8 +138,12 @@ class Ip_con:
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline().split()
-        self.val = float(values[0])
-        self.err = 1./float(values[1])
+        Ip = float(values[0])
+        err = float(values[1])
+        if Ip <= 0.0:
+            raise ValueError("Invalid value in file: Plasma current constraint must be positive")
+        self.val = Ip
+        self.err = 1./err
 
     def write(self, file):
         '''! Write plasma current constraint to file
@@ -220,6 +226,8 @@ class Press_con:
         @param val Value of pressure constraint
         @param err Error in constraint
         '''
+        if val <= 0.0:
+            raise ValueError("Plasma pressure constraints must be positive")
         self.loc = loc
         self.val = val
         self.err = err
@@ -232,7 +240,10 @@ class Press_con:
         values = file.readline().split()
         self.loc = (float(values[0]), float(values[1]))
         values = file.readline().split()
-        self.val = float(values[0])
+        pressure = float(values[0])
+        if pressure <= 0.0:
+            raise ValueError("Invalid value in file: Plasma pressure constraints must be positive")
+        self.val = pressure
         self.err = 1./float(values[1])
 
     def write(self, file):

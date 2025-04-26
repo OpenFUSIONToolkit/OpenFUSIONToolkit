@@ -478,6 +478,7 @@ CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs%psi%n,neigs])
 pm_save=oft_env%pm; oft_env%pm=pm
 CALL eig_gs_td(tMaker_obj%gs,neigs,eigs_tmp,eig_vecs_tmp,omega,LOGICAL(include_bounds),eta_plasma)
 oft_env%pm=pm_save
+IF((eigs_tmp(1,1)<-1.d98).AND.(eigs_tmp(2,1)<-1.d98))CALL copy_string('Error in eigenvalue solve',error_str)
 END SUBROUTINE tokamaker_eig_td
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -501,6 +502,7 @@ pnorm_save=tMaker_obj%gs%pnorm; tMaker_obj%gs%pnorm=0.d0
 pm_save=oft_env%pm; oft_env%pm=pm
 CALL eig_gs_td(tMaker_obj%gs,neigs,eigs_tmp,eig_vecs_tmp,0.d0,.FALSE.,-1.d0)
 oft_env%pm=pm_save
+IF((eigs_tmp(1,1)<-1.d98).AND.(eigs_tmp(2,1)<-1.d98))CALL copy_string('Error in eigenvalue solve',error_str)
 tMaker_obj%gs%alam=alam_save
 tMaker_obj%gs%pnorm=pnorm_save
 END SUBROUTINE tokamaker_eig_wall
