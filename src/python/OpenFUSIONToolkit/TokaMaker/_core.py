@@ -114,17 +114,17 @@ class TokaMaker():
         ## Vacuum F value
         self._F0 = 0.0
         ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._Ip_target=c_double(-1.0)
+        self._Ip_target=c_double(self._oft_env.float_disable_flag)
         ## Plasma current target ratio I_p(FF') / I_p(P') (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._Ip_ratio_target=c_double(-1.E99)
+        self._Ip_ratio_target=c_double(self._oft_env.float_disable_flag)
         ## Axis pressure target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._pax_target=c_double(-1.0)
+        self._pax_target=c_double(self._oft_env.float_disable_flag)
         ## Stored energy target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._estore_target=c_double(-1.0)
+        self._estore_target=c_double(self._oft_env.float_disable_flag)
         ## R0 target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._R0_target=c_double(-1.0)
+        self._R0_target=c_double(self._oft_env.float_disable_flag)
         ## V0 target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._V0_target=c_double(-1.E99)
+        self._V0_target=c_double(self._oft_env.float_disable_flag)
         ## F*F' normalization value [1] (use @ref TokaMaker.TokaMaker.alam "alam" property)
         self._alam = None
         ## Pressure normalization value [1] (use @ref TokaMaker.TokaMaker.pnorm "pnorm" property)
@@ -182,12 +182,12 @@ class TokaMaker():
         self.coil_sets = {}
         self._virtual_coils = {}
         self._F0 = 0.0
-        self._Ip_target=c_double(-1.0)
-        self._Ip_ratio_target=c_double(-1.E99)
-        self._pax_target=c_double(-1.0)
-        self._estore_target=c_double(-1.0)
-        self._R0_target=c_double(-1.0)
-        self._V0_target=c_double(-1.E99)
+        self._Ip_target=c_double(self._oft_env.float_disable_flag)
+        self._Ip_ratio_target=c_double(self._oft_env.float_disable_flag)
+        self._pax_target=c_double(self._oft_env.float_disable_flag)
+        self._estore_target=c_double(self._oft_env.float_disable_flag)
+        self._R0_target=c_double(self._oft_env.float_disable_flag)
+        self._V0_target=c_double(self._oft_env.float_disable_flag)
         self._alam = None
         self._pnorm = None
         self.o_point = None
@@ -878,32 +878,40 @@ class TokaMaker():
 
         @param alam Scale factor for \f$F*F'\f$ term (disabled if `Ip` is set)
         @param pnorm Scale factor for \f$P'\f$ term (disabled if `pax`, `estore`, or `R0` are set)
-        @param Ip Target plasma current [A] (disabled if <0)
-        @param Ip_ratio Amplitude of net plasma current contribution from FF' compared to P' (disabled if <-1.E98)
-        @param pax Target axis pressure [Pa] (disabled if <0 or if `estore` is set)
-        @param estore Target sotred energy [J] (disabled if <0)
-        @param R0 Target major radius for magnetic axis (disabled if <0 or if `pax` or `estore` are set)
-        @param V0 Target vertical position for magnetic axis (disabled if <-1.E98)
+        @param Ip Target plasma current [A] (disabled if `OFT_env.float_disable_flag`)
+        @param Ip_ratio Amplitude of net plasma current contribution from FF' compared to P' (disabled if `OFT_env.float_disable_flag`)
+        @param pax Target axis pressure [Pa] (disabled if `OFT_env.float_disable_flag` or if `estore` is set)
+        @param estore Target sotred energy [J] (disabled if `OFT_env.float_disable_flag`)
+        @param R0 Target major radius for magnetic axis (disabled if `OFT_env.float_disable_flag` or if `pax` or `estore` are set)
+        @param V0 Target vertical position for magnetic axis (disabled if `OFT_env.float_disable_flag`)
         @param retain_previous Keep previously set targets unless explicitly updated? (default: False)
         '''
         # Reset all targets unless specified
         if not retain_previous:
-            self._Ip_target.value = -1.E99
-            self._estore_target.value = -1.0
-            self._pax_target.value = -1.0
-            self._Ip_ratio_target.value = -1.E99
-            self._R0_target.value = -1.0
-            self._V0_target.value = -1.E99
+            self._Ip_target.value = self._oft_env.float_disable_flag
+            self._estore_target.value = self._oft_env.float_disable_flag
+            self._pax_target.value = self._oft_env.float_disable_flag
+            self._Ip_ratio_target.value = self._oft_env.float_disable_flag
+            self._R0_target.value = self._oft_env.float_disable_flag
+            self._V0_target.value = self._oft_env.float_disable_flag
         # Set new targets
         if Ip is not None:
+            if (Ip <= 0.0) and (not self._oft_env.float_is_disabled(Ip)):
+                raise ValueError("`Ip_target` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._Ip_target.value=Ip
         if estore is not None:
+            if (estore <= 0.0) and (not self._oft_env.float_is_disabled(estore)):
+                raise ValueError("`estore` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._estore_target.value=estore
         if pax is not None:
+            if (pax <= 0.0) and (not self._oft_env.float_is_disabled(pax)):
+                raise ValueError("`pax` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._pax_target.value=pax
         if Ip_ratio is not None:
             self._Ip_ratio_target.value=Ip_ratio
         if R0 is not None:
+            if (R0 <= 0.0) and (not self._oft_env.float_is_disabled(R0)):
+                raise ValueError("`R0` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._R0_target.value=R0
         if V0 is not None:
             self._V0_target.value=V0
@@ -919,17 +927,17 @@ class TokaMaker():
         '''
         # Get targets
         target_dict = {}
-        if self._Ip_target.value > 0.0:
+        if (not self._oft_env.float_is_disabled(self._Ip_target.value)):
             target_dict['Ip'] = self._Ip_target.value
-        if self._estore_target.value > 0.0:
+        if (not self._oft_env.float_is_disabled(self._estore_target.value)):
             target_dict['estore'] = self._estore_target.value
-        if self._pax_target.value > 0.0:
+        if (not self._oft_env.float_is_disabled(self._pax_target.value)):
             target_dict['pax'] = self._pax_target.value
-        if self._Ip_ratio_target.value > -1.E98:
+        if (not self._oft_env.float_is_disabled(self._Ip_ratio_target.value)):
             target_dict['Ip_ratio'] = self._Ip_ratio_target.value
-        if self._R0_target.value > 0.0:
+        if (not self._oft_env.float_is_disabled(self._R0_target.value)):
             target_dict['R0'] = self._R0_target.value
-        if self._V0_target.value > -1.E98:
+        if (not self._oft_env.float_is_disabled(self._V0_target.value)):
             target_dict['V0'] = self._V0_target.value
         return target_dict
 
@@ -1609,8 +1617,6 @@ class TokaMaker():
         tokamaker_eig_wall(self._tMaker_ptr,c_int(neigs),eig_vals,eig_vecs,pm,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
-            raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
@@ -1630,8 +1636,6 @@ class TokaMaker():
         tokamaker_eig_td(self._tMaker_ptr,c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
-            raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
     def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
