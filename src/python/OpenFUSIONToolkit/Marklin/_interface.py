@@ -33,9 +33,9 @@ marklin_compute_vac = ctypes_subroutine(oftpy_lib.marklin_compute_vac,
 marklin_compute_pardiff = ctypes_subroutine(oftpy_lib.marklin_compute_pardiff,
     [c_void_p, c_void_p, c_int, c_double, c_char_p])
 
-# marklin_setup_io(marklin_ptr,basepath,error_str)
+# marklin_setup_io(marklin_ptr,basepath,legacy_hdf5,error_str)
 marklin_setup_io = ctypes_subroutine(oftpy_lib.marklin_setup_io,
-    [c_void_p, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_bool, c_char_p])
 
 # marklin_save_visit(marklin_ptr,int_obj,int_type,key,error_str)
 marklin_save_visit = ctypes_subroutine(oftpy_lib.marklin_save_visit,

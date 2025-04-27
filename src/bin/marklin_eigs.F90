@@ -21,7 +21,7 @@
 PROGRAM marklin_eigs
 !---Base
 USE oft_base
-USE oft_io, ONLY: hdf5_create_file, xdmf_plot_file
+USE oft_io, ONLY: xdmf_plot_file
 !--Grid
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
