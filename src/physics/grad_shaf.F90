@@ -3373,6 +3373,13 @@ do i=1,self%fe_rep%mesh%nc
       curr_cent = curr_cent + itor_loc*pt(1:2)*v*self%fe_rep%quad%wts(m)
     END IF
     IF(self%I%include_sol)THEN
+     IF(self%mode==0)THEN
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+      ELSE
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+      END IF
       curr_cent = curr_cent + itor_loc*pt(1:2)*v*self%fe_rep%quad%wts(m)
       itor = itor + pt(1)*self%P%Fp(psitmp(1))*v*self%fe_rep%quad%wts(m)
     END IF
