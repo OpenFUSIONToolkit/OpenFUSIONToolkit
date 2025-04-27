@@ -18,9 +18,9 @@ thincurr_setup = ctypes_subroutine(oftpy_lib.thincurr_setup,
     [c_char_p, c_int, ctypes_numpy_array(float64,2), c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), 
      ctypes_numpy_array(int32,1), c_int, c_void_p, ctypes_numpy_array(int32,1), c_char_p])
 
-# ThinCurr setup plotting (tw_ptr,basepath,save_debug,error_str
+# ThinCurr setup plotting (tw_ptr,basepath,save_debug,legacy_hdf5,error_str
 thincurr_setup_io = ctypes_subroutine(oftpy_lib.thincurr_setup_io,
-    [c_void_p, c_char_p, c_bool, c_char_p])
+    [c_void_p, c_char_p, c_bool, c_bool, c_char_p])
 
 # thincurr_recon_curr(tw_ptr,vals,curr,format)
 thincurr_recon_curr = ctypes_subroutine(oftpy_lib.thincurr_recon_curr,
