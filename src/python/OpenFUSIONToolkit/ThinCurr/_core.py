@@ -759,3 +759,252 @@ class ThinCurr_reduced:
             'coil_curr': numpy.array(coil_hist)
         }
         return sensor_obj, curr_obj
+
+
+class ThinCurr_RWM:
+
+    def __init__(self, wall_model, plasma_model, plasma_h5, floops=None):
+        '''
+        Paramters:
+            wall_model: ThinCurr class model of wall and coils
+            plasma_model: ThinCurr class RWM plasma
+            plasma_h5: plasma model hdf5 file
+            floops: file path for flux loops sensors
+        '''
+
+
+        # walls
+        self.tw_wall = wall_model
+        # plasma
+        self.tw_plasma = plasma_model
+        self.plasma_h5=plasma_h5
+        self.floops = floops
+
+        self.rho = None
+        self.R_inv = None
+        self.tau = None
+        self.mat_li = None
+        self.sL_tot = None
+        self.eig_vals = None
+        self.eig_vecs = None
+        self.sM_s = None
+
+    def build_model_R_L_Mcoil(self):
+        '''
+        Compute the Resistance, Inductance, and coil mutual inductance matrices of the wall and plasma models
+        '''
+
+        # wall calcs
+        self.tw_wall.compute_Mcoil()
+        self.tw_wall.compute_Lmat()
+        self.tw_wall.compute_Rmat(copy_out=True)
+
+
+        # plasma calcs _____ can redo this...
+        with h5py.File(self.plasma_h5, 'r+') as h5_file:
+            self.mode_drive = np.asarray(h5_file['thincurr/driver'])      # specific from DCON generation and conversion? Specific for RWM. What was the DCON to this process?*****
+        self.mode_drive_full = np.zeros((2,self.tw_plasma.nelems))
+
+
+        # print(self.tw_plasma.n_vcoils, self.tw_plasma.nelems, self.mode_drive.shape)
+        # mode drive which is read directly from plasma_h5
+        # 1 13411 (2, 3201)
+
+        if self.tw_plasma.n_vcoils > 0:
+            self.mode_drive_full[:,:-self.tw_plasma.n_vcoils] = self.mode_drive
+        else:
+            self.mode_drive_full = self.mode_drive
+
+        self.tw_plasma.compute_Mcoil()
+        self.tw_plasma.compute_Lmat()
+        self.tw_plasma.compute_Rmat(copy_out=True)  # _____
+
+
+    def compute_rho(self, alpha, s):
+        '''
+        compute plasma reluctance matrix rho. Modifies vacuum mutual inductance matrices
+
+        Parameters:
+            alpha: Boozer torque parameter
+            s: Boozer stability parameter
+        Returns:
+            rho: plasma reluctance matrix
+        '''
+
+        if self.mat_li is None:
+            raise ValueError('L_p not calculated: use get matrices')
+
+        L_w, L_c, L_p, M_wp, M_pw, M_wc, M_cw, M_pc, M_cp, R = self.mat_li
+
+        P = np.zeros(L_p.shape, dtype=np.complex128)
+        for j in range(L_p.shape[0]):
+            if s!=0 or alpha!=0:
+                P[j,j] = -1/complex(s,alpha)
+            else:
+                print('/0,0 :  s,alpha =', s, alpha)
+                P[j,j] = 1E20
+        self.rho = np.linalg.inv(L_p) @ (P-np.identity(L_p.shape[0]))
+
+        return self.rho
+
+
+    def compute_sL(self, alpha=None, s=None):
+        '''
+        Computes and returns plasma+wall total effective inductance matrix.
+        Optionally intakes alpha and s, so rho can be automatically calculated.
+        '''
+        if self.rho is None:
+            if alpha is None or s is None:
+                raise ValueError('Alpha or S not defined')
+            self.rho = self.compute_rho(alpha, s)
+
+        rho=self.rho
+
+        L_w, L_c, L_p, M_wp, M_pw, M_wc, M_cw, M_pc, M_cp, R = self.mat_li
+
+        sL_w  = L_w  + M_wp @ (rho @ M_pw)   # parenthesis around last two terms for speed
+        sL_wc = M_wc + M_wp @ (rho @ M_pc)
+        sL_wd = M_wp + M_wp @ (rho @ L_p)
+        sL_cw = M_cw + M_cp @ (rho @ M_pw)
+        sL_c  = L_c  + M_cp @ (rho @ M_pc)
+        sL_cd = M_cp + M_cp @ (rho @ L_p)
+        sL_dw = M_pw + L_p  @ (rho @ M_pw)
+        sL_dc = M_pc + L_p  @ (rho @ M_pc)
+        rho_by_L_p  =  rho @ L_p
+        sL_d  = L_p @ (np.identity(L_p.shape[0]) + rho_by_L_p)
+
+        row1 = np.hstack((sL_w, sL_wc, sL_wd))
+        row2 = np.hstack((sL_cw, sL_c, sL_cd))
+        row3 = np.hstack((sL_dw, sL_dc, sL_d))
+        self.sL_tot = np.vstack((row1, row2, row3))
+
+        self.tau = None
+
+        return self.sL_tot
+
+
+    def _compute_R(self, R_w,R_c,R_p):
+        '''
+        combine the resistance matrices
+        '''
+
+        R = scipy.linalg.block_diag(R_w, R_c, R_p)
+        self.R_inv = None
+        self.tau = None
+        return R
+
+    # voltage _____
+
+    def get_R_sL_submat(self):
+        '''
+        Compute,store,and return the 9 submatrices that compose the effective inductance matrix L. Also resistance matrix.
+        Stores and returns these matrices in a list.
+        #_____***** To-do: change to dictionary
+        '''
+
+        tw_wall = self.tw_wall
+        tw_plasma = self.tw_plasma
+        mode_drive_full = self.mode_drive_full
+        mode_drive = self.mode_drive
+
+        # wall matrices
+        L_w = tw_wall.Lmat[:-tw_wall.n_vcoils,:-tw_wall.n_vcoils]
+        R_w = tw_wall.Rmat[:-tw_wall.n_vcoils,:-tw_wall.n_vcoils]
+        # Coil matrices
+        L_c = tw_wall.Lmat[-tw_wall.n_vcoils:,-tw_wall.n_vcoils:]
+        R_c = tw_wall.Rmat[-tw_wall.n_vcoils:,-tw_wall.n_vcoils:]
+        # Wall,Coil Matrix
+        M_cw = tw_wall.Lmat[-tw_wall.n_vcoils:,:-tw_wall.n_vcoils]
+        #M_wc2 = tw_wall.Lmat[:-tw_wall.n_vcoils,-tw_wall.n_vcoils:]
+        M_wc = M_cw.T  # check M_cw = tw_wall.Lmat[:-tw_wall.n_vcoils,-tw_wall.n_vcoils:].T
+
+
+        # Plasma matrices
+        if tw_plasma.n_vcoils==0:
+            L_p_full = tw_plasma.Lmat                                # changed
+            R_p_full = tw_plasma.Rmat                                # changed
+            M_cp_full = tw_plasma.Lmat                               # changed
+            qwerty = L_p_full @ mode_drive.T
+            L_p = mode_drive @  qwerty
+            R_p = mode_drive @ (R_p_full @ mode_drive.T)
+            M_cp = M_cp_full @ mode_drive.T
+            M_pc = M_cp.T
+            M_pw_full = tw_plasma.cross_eval(tw_wall,mode_drive_full)
+            M_pw = M_pw_full                                          # changed
+            M_wp = M_pw.T
+        else:
+            L_p_full = tw_plasma.Lmat[:-tw_plasma.n_vcoils,:-tw_plasma.n_vcoils]
+            R_p_full = tw_plasma.Rmat[:-tw_plasma.n_vcoils,:-tw_plasma.n_vcoils]
+            # Plasma,Coil Matrix
+            M_cp_full = tw_plasma.Lmat[-tw_plasma.n_vcoils:,:-tw_plasma.n_vcoils]
+
+            # print(L_p_full.shape, tw_plasma.Lmat.shape, tw_plasma.n_vcoils, mode_drive.shape)
+
+            qwerty = L_p_full @ mode_drive.T
+            L_p = mode_drive @  qwerty
+            R_p = mode_drive @ (R_p_full @ mode_drive.T)
+            M_cp = M_cp_full @ mode_drive.T
+            M_pc = M_cp.T
+            #M_pc_full = tw_plasma.Lmat[:-tw_plasma.n_vcoils,-tw_plasma.n_vcoils:]
+            #M_pc2 = np.dot(mode_drive,M_pc_full)
+            M_pw_full = tw_plasma.cross_eval(tw_wall,mode_drive_full) # M_wp = M_w_p_full * modes^T
+            M_pw = M_pw_full[:,0:-tw_wall.n_vcoils]
+            M_wp = M_pw.T
+
+        R = self._compute_R(R_w,R_c,R_p)
+        self.mat_li = [L_w, L_c, L_p, M_wp, M_pw, M_wc, M_cw, M_pc, M_cp, R]
+        return self.mat_li
+
+
+    def compute_tau(self):
+        '''
+        Calculates and returns tau = -np.dot(self.R_inv, self.sL_tot)
+        I' = tau I
+        '''
+        if self.sL_tot is None:
+            print('calculating sL...')
+            self.sL_tot = self.compute_sL()
+        if self.R_inv is None:
+            print('calculating R_inv...')
+            self.R_inv = np.linalg.inv(self.mat_li[-1])
+
+        self.tau = -np.dot(self.R_inv, self.sL_tot)
+        return self.tau
+
+    def compute_current_eigs(self, k=1, which='LR'):#, which_2='SR'):  #_____
+        '''
+        Computes, returns, and stores eigenvalues and eigenvectors
+        Parameters:
+            k: number of eigs
+            which: scipy.eigs paramater to determine which eigs are calculated
+        '''
+        if self.R_inv is None:
+            self.R_inv = np.linalg.inv(self.mat_li[-1])
+        if self.tau is None:
+            self.tau = -np.dot(self.R_inv, self.sL_tot)
+
+        self.eig_vals, self.eig_vecs = eigs(self.tau, k=k, which=which )
+
+        return self.eig_vals, self.eig_vecs
+
+
+    def save_curr_eigs(self, save_eigs_num):
+        '''
+        saves eigs with build_xdmf
+        '''
+        if self.eig_vecs is None:
+            print('no eig_vecs stored')
+            return
+        eig_vecs = self.eig_vecs
+        if save_eigs_num > eig_vecs.shape[1]:
+            print(f'only {eig_vecs.shape[1]} eigs are stored')
+            return
+
+        eig_vecs2 = eig_vecs.T[:,0:self.tw_wall.nelems] #np vs nelems
+        r_evs = np.real(eig_vecs2)
+        i_evs = np.imag(eig_vecs2)
+
+        for n in range(save_eigs_num):
+            self.tw_wall.save_current(r_evs[n,:], f'Jr_{n}_wall')
+            self.tw_wall.save_current(i_evs[n,:], f'Ji_{n}_wall')
+        build_XDMF(path='.') #_____
