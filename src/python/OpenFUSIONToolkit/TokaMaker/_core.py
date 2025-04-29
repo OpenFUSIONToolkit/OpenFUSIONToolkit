@@ -616,7 +616,7 @@ class TokaMaker():
         pp_file = 'none'
         if pp_prof is not None:
             pp_file = self._oft_env.unique_tmpfile('tokamaker_p.prof')
-            create_prof_file(self, pp_file, pp_prof, "P'")
+            create_prof_file(self, pp_file, pp_prof, "P'", include_sol = f_SOL)
             delete_files.append(pp_file)
         eta_file = 'none'
         ffp_NI_file = 'none'
@@ -1710,7 +1710,7 @@ class TokaMaker():
         currents = self.get_delstar_curr(psi)
         curr_densities = numpy.zeros(self.nc)
 
-        max_cd = 2.5E6 # TODO: remove hardcoded value
+        max_cd = 5.0E6 # TODO: remove hardcoded value
         plasma_area = 0.0
 
         for i in range(self.nc):
@@ -1726,7 +1726,7 @@ class TokaMaker():
                 plasma_area += cell_area
 
         curr_densities = curr_densities / plasma_area
-        
+
         for i in range(self.nc):
             idx1, idx2, idx3 = self.lc[i]
             rz1 = self.r[idx1][:2]
@@ -1742,7 +1742,7 @@ class TokaMaker():
             ax.add_patch(poly)
         
         cmap = ListedColormap([[0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 1.0, 0.5], [1.0, 1.0, 1.0, 1.0], [0.0, 1.0, 0.0, 0.5], [0.0, 1.0, 0.0, 1.0]])
-        bounds = numpy.linspace(-2.5, 2.5, 6)
+        bounds = numpy.linspace(-5.0, 5.0, 6)
         norm = matplotlib.colors.BoundaryNorm(bounds, 5)
         # formatter = mticker.ScalarFormatter()
         fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
