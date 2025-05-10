@@ -562,28 +562,40 @@ def read_kfile(path, e_coil_names, f_coil_names, machine_dict):
 	
 	probe_names = machine_dict['MPNAM2']
 	probe_vals = parse_values(raw['EXPMP2'])
+	probe_errs = parse_values(raw['BITMPI'])
 	probe_selected = parse_selected(raw['FWTMP2'])
 	probes_dict = OrderedDict()
 	for i in range(len(probe_names)):
-		probes_dict[probe_names[i]] = [probe_vals[i], probe_selected[i]]
+		if not probe_selected[i]:
+			continue
+		probes_dict[probe_names[i]] = [probe_vals[i], probe_errs[i]]
 
 	loop_names = machine_dict['LPNAME']
 	loop_vals = parse_values(raw['COILS'])
+	loop_errs = parse_values(raw['PSIBIT'])
 	loop_selected = parse_selected(raw['FWTSI'])
 	loops_dict = OrderedDict()
 	for i in range(len(loop_names)):
-		loops_dict[loop_names[i]] = [loop_vals[i], loop_selected[i]]
+		if not loop_selected[i]:
+			continue
+		loops_dict[loop_names[i]] = [loop_vals[i], loop_errs[i]]
 		
 	e_coil_vals = parse_values(raw['ECURRT'])
+	e_coil_errs = parse_values(raw['BITEC'])
 	e_coil_selected = parse_selected(raw['FWTEC'])
 	e_coil_dict = OrderedDict()
 	for i in range(len(e_coil_names)):
-		e_coil_dict[e_coil_names[i]] = [e_coil_vals[i], e_coil_selected[i]]
+		if not e_coil_selected[i]:
+			continue
+		e_coil_dict[e_coil_names[i]] = [e_coil_vals[i], e_coil_errs[i]]
 	
 	f_coil_vals = parse_values(raw['BRSP'])
+	f_coil_errs = parse_values(raw['BITFC'])
 	f_coil_selected = parse_selected(raw['FWTFC'])
 	f_coil_dict = OrderedDict()
 
 	for i in range(len(f_coil_names)):
-		f_coil_dict[f_coil_names[i]] = [f_coil_vals[i], f_coil_selected[i]]
+		if not f_coil_selected[i]:
+			continue
+		f_coil_dict[f_coil_names[i]] = [f_coil_vals[i], f_coil_errs[i]]
 	return probes_dict, loops_dict, e_coil_dict, f_coil_dict
