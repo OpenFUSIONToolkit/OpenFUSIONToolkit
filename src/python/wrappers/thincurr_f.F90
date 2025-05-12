@@ -13,7 +13,7 @@ USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
 !---Base
 USE oft_base
 USE spline_mod
-USE oft_io, ONLY: hdf5_create_file, hdf5_field_get_sizes, hdf5_read, hdf5_field_exist, &
+USE oft_io, ONLY: hdf5_field_get_sizes, hdf5_read, hdf5_field_exist, &
   xdmf_plot_file
 !--Grid
 USE oft_trimesh_type, ONLY: oft_trimesh
@@ -225,10 +225,11 @@ END SUBROUTINE thincurr_setup
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_setup_io(tw_ptr,basepath,save_debug,error_str) BIND(C,NAME="thincurr_setup_io")
+SUBROUTINE thincurr_setup_io(tw_ptr,basepath,save_debug,legacy_hdf5,error_str) BIND(C,NAME="thincurr_setup_io")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: save_debug !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: legacy_hdf5 !< Use legacy HDF5 format?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
 INTEGER(4) :: i,j,k,npts,nedges
@@ -241,10 +242,10 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  CALL tw_obj%xdmf%setup('thincurr',pathprefix)
+  CALL tw_obj%xdmf%setup('thincurr',pathprefix,.NOT.LOGICAL(legacy_hdf5))
   CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 ELSE
-  CALL tw_obj%xdmf%setup('thincurr')
+  CALL tw_obj%xdmf%setup('thincurr',persistent_space_tracking=.NOT.LOGICAL(legacy_hdf5))
   CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 END IF
 IF(tw_obj%n_vcoils>0)THEN
