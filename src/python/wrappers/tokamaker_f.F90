@@ -664,6 +664,45 @@ END SUBROUTINE tokamaker_area_int
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_flux_int(tMaker_ptr,psi_vals,field_vals,nvals,result,error_str) BIND(C,NAME="tokamaker_flux_int")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: field_vals !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: nvals
+REAL(c_double), INTENT(out) :: result !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(i4) :: i,m
+REAL(r8) :: area,psitmp(1),sgop(3,3)
+REAL(8), POINTER, DIMENSION(:) :: psi_tmp,field_tmp
+TYPE(gs_prof_interp) :: prof_interp_obj
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+DEBUG_STACK_PUSH
+!---Setup
+CALL c_f_pointer(psi_vals, psi_tmp, [nvals])
+CALL c_f_pointer(field_vals, field_tmp, [nvals])
+result=0.d0
+prof_interp_obj%mode=4
+CALL prof_interp_obj%setup(tMaker_obj%gs)
+!$omp parallel do private(m,psitmp,sgop,area) reduction(+:result)
+do i=1,tMaker_obj%gs%mesh%nc
+  IF(tMaker_obj%gs%mesh%reg(i)/=1)CYCLE
+  !---Loop over quadrature points
+  do m=1,tMaker_obj%gs%fe_rep%quad%np
+    call tMaker_obj%gs%mesh%jacobian(i,tMaker_obj%gs%fe_rep%quad%pts(:,m),sgop,area)
+    call prof_interp_obj%interp(i,tMaker_obj%gs%fe_rep%quad%pts(:,m),sgop,psitmp)
+    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
+    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*tMaker_obj%gs%fe_rep%quad%wts(m)
+  end do
+end do
+!---Global reduction and cleanup
+result=oft_mpi_sum(result)
+CALL prof_interp_obj%delete()
+DEBUG_STACK_POP
+END SUBROUTINE tokamaker_flux_int
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_coil_currents(tMaker_ptr,currents,reg_currents,error_str) BIND(C,NAME="tokamaker_get_coil_currents")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
@@ -1042,9 +1081,10 @@ END SUBROUTINE tokamaker_set_targets
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_isoflux(tMaker_ptr,targets,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_isoflux")
+SUBROUTINE tokamaker_set_isoflux(tMaker_ptr,targets,ref_points,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_isoflux")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
+REAL(c_double), INTENT(in) :: ref_points(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
@@ -1054,9 +1094,10 @@ IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(ASSOCIATED(tMaker_obj%gs%isoflux_targets))DEALLOCATE(tMaker_obj%gs%isoflux_targets)
 tMaker_obj%gs%isoflux_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(tMaker_obj%gs%isoflux_targets(3,tMaker_obj%gs%isoflux_ntargets))
+  ALLOCATE(tMaker_obj%gs%isoflux_targets(5,tMaker_obj%gs%isoflux_ntargets))
   tMaker_obj%gs%isoflux_targets(1:2,:)=targets
   tMaker_obj%gs%isoflux_targets(3,:)=weights
+  tMaker_obj%gs%isoflux_targets(4:5,:)=ref_points
   tMaker_obj%gs%isoflux_grad_wt_lim=1.d0/grad_wt_lim
 ELSE
   tMaker_obj%gs%isoflux_grad_wt_lim=-1.d0
