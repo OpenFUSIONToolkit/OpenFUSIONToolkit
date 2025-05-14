@@ -495,6 +495,15 @@ class TokaMaker():
                 raise IndexError('Incorrect shape of "reg_weights", should be [nregularize]')
         else:
             raise ValueError('Either "reg_terms" or "reg_mat" is required')
+        # Ensure VSC is constrained
+        if (self._virtual_coils.get('#VSC',-1) < 0) and ((abs(reg_mat[-1,:])).max() < 1.E-8):
+            new_row = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
+            new_row[-1] = 1.0
+            reg_mat = numpy.hstack((reg_mat,new_row.reshape([self.ncoils+1,1])))
+            reg_targets = numpy.append(reg_targets, 0.0)
+            reg_weights = numpy.append(reg_weights, 1.0)
+            nregularize += 1
+
         reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
         reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
@@ -797,6 +806,7 @@ class TokaMaker():
         @param isoflux List of points defining constraints [:,2]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         @param grad_wt_lim Limit on gradient-based weighting (negative to disable)
+        @param ref_points Reference points for each isoflux point [:,2] (default: `isoflux[0,:]` is used for all points)
         '''
         if isoflux is None:
             error_string = self._oft_env.get_c_errorbuff()
@@ -809,6 +819,8 @@ class TokaMaker():
                 ref_points = numpy.zeros((isoflux.shape[0]-1,2), dtype=numpy.float64)
                 ref_points[:,0] = isoflux[0,0]; ref_points[:,1] = isoflux[0,1]
                 isoflux = isoflux[1:,:]
+                if weights is not None:
+                    weights = weights[1:]
             if ref_points.shape[0] != isoflux.shape[0]:
                 raise ValueError('Shape of "ref_points" does not match first dimension of "isoflux"')
             if weights is None:
