@@ -1958,7 +1958,7 @@ logical :: pm_save
 nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize
 ALLOCATE(err_mat(nCon,self%ncoils+1),err_inv(self%ncoils+1,self%ncoils+1))
 ALLOCATE(rhs(nCon),currs(self%ncoils+1))
-ALLOCATE(cells(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets))
+ALLOCATE(cells(2*self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets))
 err_mat=0.d0
 rhs=0.d0
 cells=-1
@@ -1973,17 +1973,20 @@ IF(self%isoflux_grad_wt_lim>0.d0)THEN
 END IF
 !---Get RHS
 DO j=1,self%isoflux_ntargets
-  CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%isoflux_targets(1:2,j),f)
-  CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
+  CALL bmesh_findcell(self%fe_rep%mesh,cells((j-1)*2+1),self%isoflux_targets(1:2,j),f)
+  CALL psi_eval%interp(cells((j-1)*2+1),f,goptmp,pol_val)
   rhs(j)=pol_val(1)
+  CALL bmesh_findcell(self%fe_rep%mesh,cells((j-1)*2+2),self%isoflux_targets(4:5,j),f)
+  CALL psi_eval%interp(cells((j-1)*2+2),f,goptmp,pol_val)
+  rhs(j)=rhs(j)-pol_val(1)
   IF(self%isoflux_grad_wt_lim>0.d0)THEN
-    CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
-    CALL psi_geval2%interp(cells(j),f,goptmp,gpsi)
+    CALL self%fe_rep%mesh%jacobian(cells((j-1)*2+1),f,goptmp,v)
+    CALL psi_geval2%interp(cells((j-1)*2+1),f,goptmp,gpsi)
     wt_tmp(j)=SQRT(SUM(gpsi(1:2)**2))
   END IF
 END DO
 roffset=self%isoflux_ntargets
-coffset=self%isoflux_ntargets
+coffset=2*self%isoflux_ntargets
 DO j=1,self%flux_ntargets
   CALL bmesh_findcell(self%fe_rep%mesh,cells(coffset+j),self%flux_targets(1:2,j),f)
   CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
@@ -2005,12 +2008,17 @@ DO i=1,self%ncoils
   psi_geval%u=>self%psi_coil(i)%f
   CALL psi_geval%setup(self%fe_rep)
   DO j=1,self%isoflux_ntargets
-    CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%isoflux_targets(1:2,j),f)
-    CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
+    CALL bmesh_findcell(self%fe_rep%mesh,cells((j-1)*2+1),self%isoflux_targets(1:2,j),f)
+    CALL psi_eval%interp(cells((j-1)*2+1),f,goptmp,pol_val)
     err_mat(j,i)=pol_val(1)
   END DO
+  DO j=1,self%isoflux_ntargets
+    CALL bmesh_findcell(self%fe_rep%mesh,cells((j-1)*2+2),self%isoflux_targets(4:5,j),f)
+    CALL psi_eval%interp(cells((j-1)*2+2),f,goptmp,pol_val)
+    err_mat(j,i)=err_mat(j,i)-pol_val(1)
+  END DO
   roffset=self%isoflux_ntargets
-  coffset=self%isoflux_ntargets
+  coffset=2*self%isoflux_ntargets
   DO j=1,self%flux_ntargets
     CALL bmesh_findcell(self%fe_rep%mesh,cells(coffset+j),self%flux_targets(1:2,j),f)
     CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
@@ -2033,9 +2041,9 @@ END DO
 !---Enforce difference of fluxes
 wt_max=MAXVAL(wt_tmp)
 wt_min=self%isoflux_grad_wt_lim*wt_max
-DO j=1,self%isoflux_ntargets-1
-  err_mat(j+1,:)=(err_mat(j+1,:)-err_mat(1,:))*self%isoflux_targets(3,j+1)*wt_max/MAX(wt_min,wt_tmp(j+1))
-  rhs(j+1)=(rhs(j+1)-rhs(1))*self%isoflux_targets(3,j+1)*wt_max/MAX(wt_min,wt_tmp(j+1))
+DO j=1,self%isoflux_ntargets
+  err_mat(j,:)=err_mat(j,:)*self%isoflux_targets(3,j)*wt_max/MAX(wt_min,wt_tmp(j))
+  rhs(j)=rhs(j)*self%isoflux_targets(3,j)*wt_max/MAX(wt_min,wt_tmp(j))
 END DO
 DEALLOCATE(wt_tmp)
 !---Apply weights to flux constraints
@@ -2061,17 +2069,17 @@ INTEGER(4), ALLOCATABLE, DIMENSION(:) :: index
 REAL(8) :: rnorm
 REAL(8), ALLOCATABLE, DIMENSION(:) :: w
 ALLOCATE(w(self%ncoils+1),index(self%ncoils+1))
-  CALL bvls(ncon-1,self%ncoils+1,err_mat(2:nCon,:),rhs(2:nCon), &
+  CALL bvls(ncon,self%ncoils+1,err_mat,rhs, &
     self%coil_bounds,currs,rnorm,nsetp,w,index,ierr)
   ! WRITE(*,*)ierr,currs
 DEALLOCATE(w,index)
 END BLOCK
 ELSE
-  err_inv=MATMUL(TRANSPOSE(err_mat(2:nCon,:)),err_mat(2:nCon,:))
+  err_inv=MATMUL(TRANSPOSE(err_mat),err_mat)
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
   CALL lapack_matinv(self%ncoils+1,err_inv,ierr)
   oft_env%pm=pm_save
-  currs=MATMUL(err_inv,MATMUL(TRANSPOSE(err_mat(2:nCon,:)),rhs(2:nCon)))
+  currs=MATMUL(err_inv,MATMUL(TRANSPOSE(err_mat),rhs))
 END IF
 !---Add coil/conductor fields to IC
 self%vcontrol_val=-currs(self%ncoils+1)
@@ -4395,7 +4403,7 @@ SELECT CASE(self%mode)
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     val(1)=self%gs%psiscale*psitmp(1)
   CASE(2)
-    pt=self%gs%fe_rep%mesh%log2phys(cell,f)
+    ! pt=self%gs%fe_rep%mesh%log2phys(cell,f)
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
       IF(self%gs%mode==0)THEN
@@ -4410,6 +4418,14 @@ SELECT CASE(self%mode)
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
       val(1)=(self%gs%psiscale**2)*self%gs%pnorm*self%gs%P%F(psitmp(1))/mu0
+    ELSE
+      val(1)=0.d0
+    END IF
+  CASE(4)
+    ! pt=self%gs%fe_rep%mesh%log2phys(cell,f)
+    CALL self%psi_eval%interp(cell,f,gop,psitmp)
+    IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
+      val(1)=(psitmp(1)-self%gs%plasma_bounds(1))/(self%gs%plasma_bounds(2)-self%gs%plasma_bounds(1))
     ELSE
       val(1)=0.d0
     END IF

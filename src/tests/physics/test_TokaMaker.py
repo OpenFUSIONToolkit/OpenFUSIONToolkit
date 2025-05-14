@@ -713,12 +713,13 @@ def test_ITER_eq(order):
 @pytest.mark.coverage
 def test_ITER_recon():
     ITER_recon_dict = ITER_eq_dict.copy()
-    ITER_recon_dict['q_95'] = 2.727373194556296
-    ITER_recon_dict['P_ax'] = 653312.4614673054
-    ITER_recon_dict['W_MHD'] = 256930543.79179734
-    ITER_recon_dict['beta_pol'] = 44.08617559839085
-    ITER_recon_dict['beta_tor'] = 1.887092454605829
-    ITER_recon_dict['beta_n'] = 1.2523366970906669
+    ITER_recon_dict['q_95'] = 2.7274510732722375
+    ITER_recon_dict['P_ax'] = 655693.6031014244
+    ITER_recon_dict['W_MHD'] = 257915984.01397622
+    ITER_recon_dict['l_i'] = 0.895954395982195
+    ITER_recon_dict['beta_pol'] = 44.16835089714342
+    ITER_recon_dict['beta_tor'] = 1.8950360948919174
+    ITER_recon_dict['beta_n'] = 1.2576100533550467
     results = mp_run(run_ITER_case,(1.0,(2,),False,False,True))
     assert validate_dict(results,ITER_recon_dict)
 
