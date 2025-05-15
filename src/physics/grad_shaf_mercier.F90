@@ -19,9 +19,10 @@ USE fem_utils, ONLY: bfem_interp
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp
 use oft_gs, only: gs_eq, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
-  oft_increase_indent, oft_decrease_indent, gsinv_interp
+  oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
+  gs_get_qprof
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use oft_gs_profiles, only: spline_flux_func
+use oft_gs_profiles, only: spline_flux_func, linterp_flux_func
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -44,6 +45,15 @@ type, extends(spline_flux_func) :: mercier_flux_func
 contains
     procedure :: update => mercier_update
 end type mercier_flux_func
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+type, extends(linterp_flux_func) :: jphi_flux_func
+  real(8), pointer, dimension(:) :: jphi => NULL() !< Needs docs
+contains
+  !> Needs docs
+  procedure :: update => jphi_update
+end type jphi_flux_func
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -242,4 +252,120 @@ val(8)=(tmp*val(4)+grad(1)/(pt(1)+self%eps))*val(5)
 val(3:8)=val(3:8)*val(2)
 deallocate(j)
 end subroutine minterpinv_apply
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0)
+CLASS(flux_func), POINTER, INTENT(out) :: func
+INTEGER(4), INTENT(in) :: npsi
+REAL(8), INTENT(in) :: psivals(npsi)
+REAL(8), INTENT(in) :: yvals(npsi)
+REAL(8), INTENT(in) :: y0
+INTEGER(4) :: i,ierr
+ALLOCATE(jphi_flux_func::func)
+SELECT TYPE(self=>func)
+  TYPE IS(jphi_flux_func)
+  !---
+  self%npsi=npsi
+  self%ncofs=self%npsi
+  !---
+  ALLOCATE(self%x(self%npsi))
+  ALLOCATE(self%yp(self%npsi))
+  ALLOCATE(self%y(self%npsi))
+  ALLOCATE(self%jphi(self%npsi))
+  !---
+  self%y0=0.d0!y0
+  DO i=1,self%npsi
+    self%x(i) = psivals(i)
+    self%jphi(i) = yvals(i)
+    self%yp(i) = psivals(i) ! Dummy initialization
+  END DO
+  self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
+  IF(self%y0<1.d-8)THEN
+    self%ncofs=self%ncofs-1
+    ierr=self%set_cofs(self%yp(2:self%npsi))
+  ELSE
+    ierr=self%set_cofs(self%yp)
+  END IF
+  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%y0
+END SELECT
+
+END SUBROUTINE create_jphi_ff
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+subroutine jphi_update(self,gseq)
+class(jphi_flux_func), intent(inout) :: self
+class(gs_eq), intent(inout) :: gseq
+INTEGER(i4) :: i
+REAL(r8) :: jphi_norm,pscale
+REAL(r8), ALLOCATABLE :: ravgs(:,:),pprime(:),yvals(:)
+self%plasma_bounds=gseq%plasma_bounds
+IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
+IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
+IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
+!---Update jphi normalization to match Ip target
+CALL gs_flux_int(gseq,self%x,self%jphi,self%npsi,jphi_norm)
+jphi_norm=gseq%Itor_target/jphi_norm
+! WRITE(*,*)'Update:'
+! WRITE(*,*)'  Scale factor = ',jphi_norm
+!---Get updated flux surface geometry for Jphi -> F*F' mapping
+ALLOCATE(ravgs(self%npsi-2,2),pprime(self%npsi-2))
+CALL gs_get_qprof(gseq,self%npsi-2,self%x(1:self%npsi-1),pprime,ravgs=ravgs)
+! WRITE(*,*)'  <R>     = ',ravgs(1,1),ravgs(self%npsi-2,1)
+! WRITE(*,*)'  <1/R>   = ',ravgs(1,2),ravgs(self%npsi-2,2)
+!---Get pressure profile
+CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
+DO i=2,self%npsi-1
+  pprime(i-1)=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
+END DO
+pscale=gseq%P%f(gseq%plasma_bounds(2))
+pprime=pprime*gseq%pax_target/pscale
+! WRITE(*,*)'  dP/dpsi = ',pprime(1),pprime(self%npsi-2)
+!---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
+self%yp(2:self%npsi-1) = 2.d0*(self%jphi(2:self%npsi-1)*jphi_norm - ravgs(:,1)*(pprime))/ravgs(:,2)
+self%yp(1) = 0.d0
+self%yp(self%npsi) = self%yp(self%npsi-1)
+self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
+! WRITE(*,*)'CHK:',self%yp(10),self%yp(self%npsi)
+! DO i=2,self%npsi-1,4
+!   WRITE(*,*)'CHK:',self%x(i),self%yp(i),self%jphi(i)*jphi_norm,ravgs(i-1,1)*pprime(i-1)
+! END DO
+!---Clean up
+DEALLOCATE(ravgs,pprime)
+i=self%set_cofs(self%yp(2:self%npsi))
+end subroutine jphi_update
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
+class(gs_eq), INTENT(inout) :: self !< Pointer to TokaMaker object
+REAL(r8), INTENT(in) :: psi_tmp(:) !< Needs docs
+REAL(r8), INTENT(in) :: field_tmp(:) !< Needs docs
+INTEGER(i4), INTENT(in) :: nvals
+REAL(r8), INTENT(out) :: result !< Needs docs
+INTEGER(i4) :: i,m
+REAL(r8) :: area,psitmp(1),sgop(3,3)
+TYPE(gs_prof_interp) :: prof_interp_obj
+! DEBUG_STACK_PUSH
+!---Setup
+result=0.d0
+prof_interp_obj%mode=4
+CALL prof_interp_obj%setup(self)
+!$omp parallel do private(m,psitmp,sgop,area) reduction(+:result)
+do i=1,self%mesh%nc
+  IF(self%mesh%reg(i)/=1)CYCLE
+  !---Loop over quadrature points
+  do m=1,self%fe_rep%quad%np
+    call self%mesh%jacobian(i,self%fe_rep%quad%pts(:,m),sgop,area)
+    call prof_interp_obj%interp(i,self%fe_rep%quad%pts(:,m),sgop,psitmp)
+    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
+    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%fe_rep%quad%wts(m)
+  end do
+end do
+!---Global reduction and cleanup
+result=oft_mpi_sum(result)
+CALL prof_interp_obj%delete()
+! DEBUG_STACK_POP
+END SUBROUTINE gs_flux_int
 end module oft_gs_mercier
