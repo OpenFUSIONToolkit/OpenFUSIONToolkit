@@ -13,7 +13,7 @@ import struct
 import numpy
 from collections import OrderedDict
 from .._interface import *
-from ..util import namelist_read
+from ..util import read_fortran_namelist
 
 ## @cond
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
@@ -267,99 +267,119 @@ def compute_forces_components(tMaker_obj,psi,cell_centered=False):
         return J_cond, Bv_cond, mask, rcc
     else:
         return J_cond, B_cond, mask, tMaker_obj.r
-	
+    
 def read_mhdin(path, e_coil_names, f_coil_names):
-	raw = namelist_read(path)
-	machine_dict = OrderedDict()
-	
-	# Expand later
-	keys = ['MPNAM2', 'LPNAME']
-	for key in keys:
-		names = raw[key].replace("'", " ")
-		names = names.split()
-		machine_dict[key] = names
-		
-	e_coil_dict = OrderedDict()
-	for name in e_coil_names:
-		e_coil_dict[name] = []
+    r'''Read mhdin.dat file.
 
-	raw['ECID'] = [x for x in raw['ECID'] if len(x.strip()) > 0]
-	e_coil_vars = ['RE', 'ZE', 'WE', 'HE']
-	for var in e_coil_vars:
-		raw[var] = raw[var].split()
+    @param path Path to file
+    @param e_coil_names Names of E coils (hardcoded)
+    @param f_coil_names Names of F coils (hardcoded)
+    @result machine_dict Dictionary containing coil coordinates and turns, loop names, and probe names and angles.
+    @result raw Dictionary containing all other data from mhdin.dat
+    '''
+    raw = read_fortran_namelist(path)
+    machine_dict = OrderedDict()
+    
+    # Expand later
+    keys = ['MPNAM2', 'LPNAME']
+    for key in keys:
+        names = raw[key].replace("'", " ")
+        names = names.split()
+        machine_dict[key] = names
+        
+    e_coil_dict = OrderedDict()
+    for name in e_coil_names:
+        e_coil_dict[name] = []
 
-	for i in range(len(raw['ECID'])):
-		if raw['ECID'][i].strip() == '':
-			continue
-		idx = int(raw['ECID'][i]) - 1
-		e_coil_dict[e_coil_names[idx]].append([float(raw['RE'][i]), float(raw['ZE'][i]), float(raw['WE'][i]), float(raw['HE'][i])])
-	machine_dict['ECOIL'] = e_coil_dict
+    raw['ECID'] = [x for x in raw['ECID'] if len(x.strip()) > 0]
+    e_coil_vars = ['RE', 'ZE', 'WE', 'HE']
+    for var in e_coil_vars:
+        raw[var] = raw[var].split()
+
+    for i in range(len(raw['ECID'])):
+        if raw['ECID'][i].strip() == '':
+            continue
+        idx = int(raw['ECID'][i]) - 1
+        e_coil_dict[e_coil_names[idx]].append([float(raw['RE'][i]), float(raw['ZE'][i]), float(raw['WE'][i]), float(raw['HE'][i])])
+    machine_dict['ECOIL'] = e_coil_dict
 
 
-	f_coil_vars = ['RF', 'ZF', 'WF', 'HF', 'TURNFC']
-	for var in f_coil_vars:
-		raw[var] = raw[var].split()
+    f_coil_vars = ['RF', 'ZF', 'WF', 'HF', 'TURNFC']
+    for var in f_coil_vars:
+        raw[var] = raw[var].split()
 
-	f_coil_dict = OrderedDict()
-	for i in range(len(f_coil_names)):
-		f_coil_dict[f_coil_names[i]] = [float(raw['RF'][i]), float(raw['ZF'][i]), float(raw['WF'][i]), float(raw['HF'][i]), float(raw['TURNFC'][i])]
-	machine_dict['FCOIL'] = f_coil_dict
+    f_coil_dict = OrderedDict()
+    for i in range(len(f_coil_names)):
+        f_coil_dict[f_coil_names[i]] = [float(raw['RF'][i]), float(raw['ZF'][i]), float(raw['WF'][i]), float(raw['HF'][i]), float(raw['TURNFC'][i])]
+    machine_dict['FCOIL'] = f_coil_dict
 
-	probe_angle_dict = OrderedDict()
-	i = 0
-	probe_angles = raw['AMP2'].split()
-	for probe_name in machine_dict['MPNAM2']:
-		probe_angle_dict[probe_name] = float(probe_angles[i])
-		i = i + 1
-	machine_dict['AMP2'] = probe_angle_dict
+    probe_angle_dict = OrderedDict()
+    i = 0
+    probe_angles = raw['AMP2'].split()
+    for probe_name in machine_dict['MPNAM2']:
+        probe_angle_dict[probe_name] = float(probe_angles[i])
+        i = i + 1
+    machine_dict['AMP2'] = probe_angle_dict
 
-	return machine_dict, raw
+    return machine_dict, raw
 
-def read_kfile(path, e_coil_names, f_coil_names, machine_dict):		
-	raw = namelist_read(path)
+def read_kfile(path, e_coil_names, f_coil_names, machine_dict):
+    r'''Read k-file.
 
-	def parse_selected(selected_str):
-		tokens = selected_str.split()
-		weights = []
-		for t in tokens:
-			subtokens = t.split('*')
-			if len(subtokens) == 2:
-				n = int(float(subtokens[0]))
-				for _ in range(n):
-					weights.append(float(subtokens[1]))
-			else:
-				weights.append(float(subtokens[0]))
-		return weights
-	
-	def parse_values(values_str):
-		tokens = values_str.split()
-		values = [float(t) for t in tokens]
-		return values
-	
-	probe_names = machine_dict['MPNAM2']
-	probe_vals = parse_values(raw['EXPMP2'])
-	probe_weights = parse_selected(raw['FWTMP2'])
-	probes_dict = OrderedDict()
-	for i in range(len(probe_names)):
-		probes_dict[probe_names[i]] = [probe_vals[i], probe_weights[i]]
+    @param path Path to file
+    @param e_coil_names Names of E coils (hardcoded)
+    @param f_coil_names Names of F coils (hardcoded)
+    @param machine_dict Result from read_mhdin (contents of mhdin.dat file)
+    @result probes_dict Dictionary containing probe values and weights (0 if not selected).
+    @result loops_dict Dictionary containing loop values and weights (0 if not selected).
+    @result e_coil_dict Dictionary containing E copil values and weights (0 if not selected).
+    @result f_coil_dict Dictionary containing F coil values and weights (0 if not selected).
+    @result raw Dictionary containing all other data from k-file.
+    '''
+    raw = read_fortran_namelist(path)
 
-	loop_names = machine_dict['LPNAME']
-	loop_vals = parse_values(raw['COILS'])
-	loop_weights = parse_selected(raw['FWTSI'])
-	loops_dict = OrderedDict()
-	for i in range(len(loop_names)):
-		loops_dict[loop_names[i]] = [loop_vals[i], loop_weights[i]]
-		
-	e_coil_vals = parse_values(raw['ECURRT'])
-	e_coil_weights = parse_selected(raw['FWTEC'])
-	e_coil_dict = OrderedDict()
-	for i in range(len(e_coil_names)):
-		e_coil_dict[e_coil_names[i]] = [e_coil_vals[i], e_coil_weights[i]]
-	
-	f_coil_vals = parse_values(raw['BRSP'])
-	f_coil_weights = parse_selected(raw['FWTFC'])
-	f_coil_dict = OrderedDict()
+    def parse_selected(selected_str):
+        tokens = selected_str.split()
+        weights = []
+        for t in tokens:
+            subtokens = t.split('*')
+            if len(subtokens) == 2:
+                n = int(float(subtokens[0]))
+                for _ in range(n):
+                    weights.append(float(subtokens[1]))
+            else:
+                weights.append(float(subtokens[0]))
+        return weights
+    
+    def parse_values(values_str):
+        tokens = values_str.split()
+        values = [float(t) for t in tokens]
+        return values
+    
+    probe_names = machine_dict['MPNAM2']
+    probe_vals = parse_values(raw['EXPMP2'])
+    probe_weights = parse_selected(raw['FWTMP2'])
+    probes_dict = OrderedDict()
+    for i in range(len(probe_names)):
+        probes_dict[probe_names[i]] = [probe_vals[i], probe_weights[i]]
 
-	for i in range(len(f_coil_names)):
-		f_coil_dict[f_coil_names[i]] = [f_coil_vals[i], f_coil_weights[i]]
-	return probes_dict, loops_dict, e_coil_dict, f_coil_dict, raw
+    loop_names = machine_dict['LPNAME']
+    loop_vals = parse_values(raw['COILS'])
+    loop_weights = parse_selected(raw['FWTSI'])
+    loops_dict = OrderedDict()
+    for i in range(len(loop_names)):
+        loops_dict[loop_names[i]] = [loop_vals[i], loop_weights[i]]
+        
+    e_coil_vals = parse_values(raw['ECURRT'])
+    e_coil_weights = parse_selected(raw['FWTEC'])
+    e_coil_dict = OrderedDict()
+    for i in range(len(e_coil_names)):
+        e_coil_dict[e_coil_names[i]] = [e_coil_vals[i], e_coil_weights[i]]
+    
+    f_coil_vals = parse_values(raw['BRSP'])
+    f_coil_weights = parse_selected(raw['FWTFC'])
+    f_coil_dict = OrderedDict()
+
+    for i in range(len(f_coil_names)):
+        f_coil_dict[f_coil_names[i]] = [f_coil_vals[i], f_coil_weights[i]]
+    return probes_dict, loops_dict, e_coil_dict, f_coil_dict, raw

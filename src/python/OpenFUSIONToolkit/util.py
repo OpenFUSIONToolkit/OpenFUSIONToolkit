@@ -82,9 +82,14 @@ def write_native_mesh(filename, r, lc, reg, nodesets=[], sidesets=[], ho_info=No
         if periodic_info is not None:
             h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
 
-def namelist_read(file0, silent=True, b_arr=False):
-	#Return a dictionary with the parameters in the namelist file (file0)
-	#b_arr refers to an array at the bottom of the file, if one exists
+def read_fortran_namelist(file0, silent=True, b_arr=False):
+	r'''Return a dictionary with the parameters in the namelist file (file0)
+	
+	@param file0 File to read from
+	@param silent If false, print dictionary entries after reading
+	@param b_arr Refers to an array at the bottom of the file, if one exists
+	@result Dictionary containing data from file0.
+	'''
 
 	f = open(str(file0), 'r')
 	f_lines = f.readlines()
