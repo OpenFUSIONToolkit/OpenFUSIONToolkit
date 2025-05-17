@@ -91,8 +91,9 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 	@result Dictionary containing data from file0.
 	'''
 
-	f = open(str(file0), 'r')
-	f_lines = f.readlines()
+	f_lines = None
+	with open(str(file0), 'r') as f:
+		f_lines = f.readlines()
 
 	datalines = [] #Initialize new dictionary of information
 
@@ -309,6 +310,4 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 		for key in data_dict:
 			print(key, data_dict[key])
 			
-	f.close()
-
 	return data_dict
