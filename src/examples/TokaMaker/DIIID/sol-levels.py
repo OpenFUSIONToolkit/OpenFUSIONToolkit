@@ -12,12 +12,13 @@ from sol import *
 def gen_modified_eqdsk(sol_height, eqdsk, graph=False):
     ffprim = np.array(eqdsk['ffprim'])
     ffprim /= ffprim[0]
+    ffprim -= ffprim[-1]
     psi_eqdsk = np.linspace(0.0,1.0,np.size(ffprim))
     ffprim = np.r_[ffprim, ffprim[-1]]
     ffprim += sol_height
     psi_eqdsk = np.r_[psi_eqdsk, 1.5]
 
-    psi_sample = np.linspace(0.0,1.0,150)
+    psi_sample = np.linspace(0.0,1.5,150)
     psi_prof = np.copy(psi_sample)
     ffp_prof = np.transpose(np.vstack((psi_prof,np.interp(psi_sample,psi_eqdsk,ffprim)))).copy()
 
@@ -46,14 +47,14 @@ loop_coords, flux_locs, flux_vals = load_flux_loop(mygs, myrecon, loops_dict)
 load_coil(mygs, e_coil_dict, f_coil_dict, machine_dict)
 
 print("=== BEGINNING OPTIMIZATION ===")
-parameter_space = np.linspace(0.0, 1.0, 6)[::-1]
+parameter_space = np.linspace(0.0, 1.0, 6)
 
 min_err = float('inf')
 min_params = None
 i = 0
 for param in parameter_space:
     try:
-        ffp_prof = gen_modified_eqdsk(param, eqdsk)
+        ffp_prof = gen_modified_eqdsk(param, eqdsk, graph=False)
         print("RUNNING OPTIIMIZATION [{}/{}]".format(i + 1, len(parameter_space)))
         # Reset Flux Loops
         mygs.set_flux(flux_locs, flux_vals)

@@ -50,7 +50,7 @@ def load_shot(mygs, shot_tag):
     e_coil_names = ['ECOILA','ECOILB','E567UP','E567DN','E89DN','E89UP']
     f_coil_names = ['F1A', 'F2A', 'F3A', 'F4A', 'F5A', 'F6A', 'F7A', 'F8A', 'F9A', 'F1B', 'F2B', 'F3B', 'F4B', 'F5B', 'F6B', 'F7B', 'F8B', 'F9B']
     machine_dict, _ = read_mhdin('DIIID_files/mhdin.dat', e_coil_names, f_coil_names)
-    probes_dict, loops_dict, e_coil_dict, f_coil_dict, _ = read_kfile('DIIID_files/k'+shot_tag, e_coil_names, f_coil_names, machine_dict)
+    probes_dict, loops_dict, e_coil_dict, f_coil_dict, _ = read_kfile('DIIID_files/k'+shot_tag, machine_dict, e_coil_names, f_coil_names)
 
     plasma_dx = 0.04
     coil_dx = 0.03
