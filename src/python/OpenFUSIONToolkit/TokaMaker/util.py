@@ -344,8 +344,6 @@ def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
     '''
     raw = read_fortran_namelist(path)
 
-
-
     def parse_selected(selected_str):
         tokens = selected_str.split()
         weights = []
