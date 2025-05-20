@@ -12,7 +12,7 @@ USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_associated
 !---Base
 USE oft_base
-USE oft_io, ONLY: hdf5_create_file, xdmf_plot_file
+USE oft_io, ONLY: xdmf_plot_file
 !--Grid
 USE oft_mesh_type, ONLY: mesh_findcell
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
@@ -341,9 +341,10 @@ END SUBROUTINE marklin_compute_pardiff
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE marklin_setup_io(marklin_ptr,basepath,error_str) BIND(C,NAME="marklin_setup_io")
+SUBROUTINE marklin_setup_io(marklin_ptr,basepath,legacy_hdf5,error_str) BIND(C,NAME="marklin_setup_io")
 TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: basepath(OFT_PATH_SLEN) !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: legacy_hdf5 !< Use legacy HDF5 format?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 TYPE(marklin_obj), POINTER :: self
 CHARACTER(LEN=OFT_PATH_SLEN) :: pathprefix = ''
@@ -351,10 +352,10 @@ IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  CALL self%xdmf_plot%setup('marklin',pathprefix)
+  CALL self%xdmf_plot%setup('marklin',pathprefix,.NOT.LOGICAL(legacy_hdf5))
   CALL self%ml_mesh%mesh%setup_io(self%xdmf_plot,self%ML_hcurl%current_level%order)
 ELSE
-  CALL self%xdmf_plot%setup('marklin')
+  CALL self%xdmf_plot%setup('marklin',persistent_space_tracking=.NOT.LOGICAL(legacy_hdf5))
   CALL self%ml_mesh%mesh%setup_io(self%xdmf_plot,self%ML_hcurl%current_level%order)
 END IF
 END SUBROUTINE marklin_setup_io

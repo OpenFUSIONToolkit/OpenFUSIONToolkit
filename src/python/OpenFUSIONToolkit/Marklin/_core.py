@@ -144,10 +144,11 @@ class Marklin():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
     
-    def setup_io(self,basepath=None):
+    def setup_io(self,basepath=None,legacy_hdf5=False):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
 
         @param basepath Path to root directory to use for I/O
+        @param legacy_hdf5 Use legacy HDF5 format (required for VisIt)
         '''
         if basepath is None:
             basepath_c = self._oft_env.path2c('')
@@ -158,7 +159,7 @@ class Marklin():
             self._io_basepath = basepath[:-1]
             basepath_c = self._oft_env.path2c(basepath)
         error_string = self._oft_env.get_c_errorbuff()
-        marklin_setup_io(self._marklin_ptr,basepath_c,error_string)
+        marklin_setup_io(self._marklin_ptr,basepath_c,c_bool(legacy_hdf5),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
     

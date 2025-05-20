@@ -324,10 +324,11 @@ END SUBROUTINE bin_file_flush
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-subroutine xmdf_setup(self,group_name,basepath)
+subroutine xmdf_setup(self,group_name,basepath,persistent_space_tracking)
 class(xdmf_plot_file), intent(inout) :: self
 CHARACTER(LEN=*), intent(in) :: group_name !< Path to mesh in HDF5 file
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: basepath
+LOGICAL, OPTIONAL, INTENT(in) :: persistent_space_tracking
 integer :: error
 IF(PRESENT(basepath))THEN
   call execute_command_line('mkdir -p '//TRIM(basepath), exitstat=error)
@@ -339,7 +340,7 @@ ELSE
 END IF
 self%group_name=TRIM(group_name)
 CALL string_to_lower(self%group_name)
-CALL hdf5_create_file(TRIM(self%file_path),.TRUE.)
+CALL hdf5_create_file(TRIM(self%file_path),persistent_space_tracking)
 CALL hdf5_create_group(TRIM(self%file_path),TRIM(self%group_name))
 end subroutine xmdf_setup
 !------------------------------------------------------------------------------
