@@ -604,7 +604,7 @@ def test_eig_cyl(direct_flag,python):
 @pytest.mark.parametrize("python", (False, True))
 def test_td_cyl(direct_flag,python):
     sigs_final = (4.E-3, 7.254196E-4, 6.151460E-4)
-    jumpers_final = (4.E-3, 5.445469E3)
+    jumpers_final = (4.E-3, 5.445469E3, 5445.469)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -627,7 +627,7 @@ def test_fr_cyl(direct_flag,python):
 @pytest.mark.parametrize("python", (False, True))
 def test_td_cyl_volt(direct_flag,python):
     sigs_final = (4.E-3, 1.504279E-4, 1.276624E-4)
-    jumpers_final = (4.E-3, 1.1203960E3)
+    jumpers_final = (4.E-3, 1.1203960E3, 1120.396)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -760,7 +760,7 @@ def test_eig_aca(python):
 def test_td_aca(python):
     eigs = (2.659575E-2, 1.254552E-2, 1.254536E-2, 1.208636E-2)
     sigs_final = (4.E-3, 7.280671E-4, 6.211245E-4)
-    jumpers_final = (4.E-3, 5.447048E3)
+    jumpers_final = (4.E-3, 5.447048E3, 5447.048)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -785,7 +785,7 @@ def test_fr_aca(python):
 @pytest.mark.parametrize("python", (False, True))
 def test_td_volt_aca(python):
     sigs_final = (4.E-3, 1.512679E-4, 1.291681E-4)
-    jumpers_final = (4.E-3, 1.122550E3)
+    jumpers_final = (4.E-3, 1.122550E3, 1122.550)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
