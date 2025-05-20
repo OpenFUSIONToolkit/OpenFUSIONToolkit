@@ -49,6 +49,7 @@ end type mercier_flux_func
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(linterp_flux_func) :: jphi_flux_func
+  integer(4) :: ngeom = 50
   real(8), pointer, dimension(:) :: jphi => NULL() !< Needs docs
 contains
   !> Needs docs
@@ -281,12 +282,12 @@ SELECT TYPE(self=>func)
     self%yp(i) = psivals(i) ! Dummy initialization
   END DO
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
-  IF(self%y0<1.d-8)THEN
-    self%ncofs=self%ncofs-1
-    ierr=self%set_cofs(self%yp(2:self%npsi))
-  ELSE
+  ! IF((self%y0<1.d-8))THEN
+  !   self%ncofs=self%ncofs-1
+  !   ierr=self%set_cofs(self%yp(2:self%npsi))
+  ! ELSE
     ierr=self%set_cofs(self%yp)
-  END IF
+  ! END IF
   IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%y0
 END SELECT
 
@@ -298,8 +299,9 @@ subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 INTEGER(i4) :: i
-REAL(r8) :: jphi_norm,pscale
-REAL(r8), ALLOCATABLE :: ravgs(:,:),pprime(:),yvals(:)
+REAL(r8) :: jphi_norm,pscale,pprime
+REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),yvals(:),psi_q(:)
+type(spline_type) :: R_spline
 self%plasma_bounds=gseq%plasma_bounds
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
 IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
@@ -310,30 +312,36 @@ jphi_norm=gseq%Itor_target/jphi_norm
 ! WRITE(*,*)'Update:'
 ! WRITE(*,*)'  Scale factor = ',jphi_norm
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
-ALLOCATE(ravgs(self%npsi-2,2),pprime(self%npsi-2))
-CALL gs_get_qprof(gseq,self%npsi-2,self%x(1:self%npsi-1),pprime,ravgs=ravgs)
-! WRITE(*,*)'  <R>     = ',ravgs(1,1),ravgs(self%npsi-2,1)
-! WRITE(*,*)'  <1/R>   = ',ravgs(1,2),ravgs(self%npsi-2,2)
+ALLOCATE(ravgs(self%ngeom,2),psi_q(self%ngeom),qtmp(self%ngeom))
+psi_q=[(REAL(i,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
+CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
+! WRITE(*,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
+! WRITE(*,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
+CALL spline_alloc(R_spline,self%ngeom-1,2)
+R_spline%xs=psi_q
+R_spline%fs(0:self%ngeom-2,1)=ravgs(:,1); R_spline%fs(self%ngeom-1,1)=gseq%o_point(1)
+R_spline%fs(0:self%ngeom-2,2)=ravgs(:,2); R_spline%fs(self%ngeom-1,2)=1.d0/gseq%o_point(1)
+CALL spline_fit(R_spline,"extrap")
+DEALLOCATE(ravgs,psi_q,qtmp)
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
-DO i=2,self%npsi-1
-  pprime(i-1)=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
-END DO
+! DO i=2,self%npsi
+!   pprime(i-1)=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
+! END DO
 pscale=gseq%P%f(gseq%plasma_bounds(2))
-pprime=pprime*gseq%pax_target/pscale
+pscale=gseq%pax_target/pscale
+! pprime=pprime*gseq%pax_target/pscale
 ! WRITE(*,*)'  dP/dpsi = ',pprime(1),pprime(self%npsi-2)
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
-self%yp(2:self%npsi-1) = 2.d0*(self%jphi(2:self%npsi-1)*jphi_norm - ravgs(:,1)*(pprime))/ravgs(:,2)
-self%yp(1) = 0.d0
-self%yp(self%npsi) = self%yp(self%npsi-1)
+DO i=1,self%npsi
+  CALL spline_eval(R_spline,self%x(i),0)
+  pprime=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
+  self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+END DO
 self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
-! WRITE(*,*)'CHK:',self%yp(10),self%yp(self%npsi)
-! DO i=2,self%npsi-1,4
-!   WRITE(*,*)'CHK:',self%x(i),self%yp(i),self%jphi(i)*jphi_norm,ravgs(i-1,1)*pprime(i-1)
-! END DO
 !---Clean up
-DEALLOCATE(ravgs,pprime)
-i=self%set_cofs(self%yp(2:self%npsi))
+CALL spline_dealloc(R_spline)
+i=self%set_cofs(self%yp)
 end subroutine jphi_update
 !---------------------------------------------------------------------------------
 !> Needs docs
