@@ -641,6 +641,7 @@ TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists,volt_full
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
+CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name
 WRITE(*,*)
 WRITE(*,*)'Starting simulation'
 !---Setup coil waveform
@@ -789,8 +790,8 @@ IF(sensors%nfloops>0)THEN
     CALL floop_hist%write(data_r8=senout)
   END IF
 END IF
-IF(sensors%njumpers>0)THEN
-  ALLOCATE(jumpout(sensors%njumpers+1))
+IF(sensors%njumpers+self%nholes>0)THEN
+  ALLOCATE(jumpout(sensors%njumpers+self%nholes+1))
   DO j=1,sensors%njumpers
     tmp=0.d0
     val_prev=0.d0
@@ -811,6 +812,9 @@ IF(sensors%njumpers>0)THEN
     END DO
     jumpout(j+1)=tmp/mu0
   END DO
+  DO j=1,self%nholes
+    jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+  END DO
   !---Setup history file
   IF(oft_env%head_proc)THEN
     jumper_hist%filedesc = 'ThinCurr current jumper history file'
@@ -818,6 +822,10 @@ IF(sensors%njumpers>0)THEN
     CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
     DO i=1,sensors%njumpers
       CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
+    END DO
+    DO i=1,self%nholes
+      WRITE(hole_jumper_name,'(A,I4.4)')'HOLE_',i
+      CALL jumper_hist%add_field(hole_jumper_name, 'r8')
     END DO
     CALL jumper_hist%write_header
     CALL jumper_hist%open
@@ -932,7 +940,7 @@ DO i=1,nsteps
     senout(1)=t
     CALL floop_hist%write(data_r8=senout)
   END IF
-  IF(sensors%njumpers>0)THEN
+  IF(sensors%njumpers+self%nholes>0)THEN
     DO j=1,sensors%njumpers
       tmp=0.d0
       val_prev=0.d0
@@ -953,6 +961,9 @@ DO i=1,nsteps
       END DO
       jumpout(j+1)=tmp/mu0
     END DO
+    DO j=1,self%nholes
+      jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+    END DO
     jumpout(1)=t
     CALL jumper_hist%write(data_r8=jumpout)
   END IF
@@ -965,7 +976,7 @@ IF(sensors%nfloops>0)THEN
   CALL floop_hist%close
   DEALLOCATE(senout)
 END IF
-IF(sensors%njumpers>0)THEN
+IF(sensors%njumpers+self%nholes>0)THEN
   CALL jumper_hist%close
   DEALLOCATE(jumpout)
 END IF
@@ -1004,6 +1015,7 @@ CLASS(oft_vector), POINTER :: u,Bx,By,Bz
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
+CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name
 WRITE(*,*)'Post-processing simulation'
 ALLOCATE(coil_vec(MAX(1,self%n_icoils)))
 CALL self%Uloc%new(u)
@@ -1025,8 +1037,8 @@ IF(rebuild_sensors)THEN
       CALL floop_hist%open
     END IF
   END IF
-  IF(sensors%njumpers>0)THEN
-    ALLOCATE(jumpout(sensors%njumpers+1))
+  IF(sensors%njumpers+self%nholes>0)THEN
+    ALLOCATE(jumpout(sensors%njumpers+self%nholes+1))
     jumpout = 0.d0
     !---Setup history file
     IF(oft_env%head_proc)THEN
@@ -1035,6 +1047,10 @@ IF(rebuild_sensors)THEN
       CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
       DO i=1,sensors%njumpers
         CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
+      END DO
+      DO i=1,self%nholes
+        WRITE(hole_jumper_name,'(A,I4.4)')'HOLE_',i
+        CALL jumper_hist%add_field(hole_jumper_name, 'r8')
       END DO
       CALL jumper_hist%write_header
       CALL jumper_hist%open
@@ -1134,7 +1150,7 @@ DO i=0,nsteps
       senout(1)=t
       CALL floop_hist%write(data_r8=senout)
     END IF
-    IF(sensors%njumpers>0)THEN
+    IF(sensors%njumpers+self%nholes>0)THEN
       DO j=1,sensors%njumpers
         tmp=0.d0
         val_prev=0.d0
@@ -1155,6 +1171,9 @@ DO i=0,nsteps
         END DO
         jumpout(j+1)=tmp/mu0
       END DO
+      DO j=1,self%nholes
+        jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+      END DO
       jumpout(1)=t
       CALL jumper_hist%write(data_r8=jumpout)
     END IF
@@ -1166,7 +1185,7 @@ IF(sensors%nfloops>0)THEN
   CALL floop_hist%close()
   DEALLOCATE(senout)
 END IF
-IF(sensors%njumpers>0)THEN
+IF(sensors%njumpers+self%nholes>0)THEN
   CALL jumper_hist%close()
   DEALLOCATE(jumpout)
 END IF
