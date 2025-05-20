@@ -24,6 +24,7 @@
 !---------------------------------------------------------------------------------
 MODULE oft_trimesh_type
 USE oft_base
+USE oft_io, ONLY: hdf5_read, hdf5_field_get_sizes, hdf5_write, hdf5_create_file, hdf5_create_group
 USE oft_lag_poly
 USE oft_tet_quadrature, ONLY: oft_quad_type, set_quad_2d
 USE oft_mesh_type, ONLY: oft_bmesh
@@ -64,50 +65,84 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Load trimesh from transfer file
 !------------------------------------------------------------------------------
-SUBROUTINE trimesh_load(self,filename)
+SUBROUTINE trimesh_load(self,filename,ascii)
 CLASS(oft_trimesh), INTENT(inout) :: self !< Mesh object
 CHARACTER(LEN=*), INTENT(in) :: filename !< File to load mesh from
-INTEGER(i4) :: i,io_unit
+LOGICAL, OPTIONAL, INTENT(in) :: ascii !< Mesh stored in ASCII format?
+INTEGER(i4) :: i,io_unit,ndims
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dim_sizes
+LOGICAL :: read_ascii,success
 DEBUG_STACK_PUSH
-OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
-!---Read in points
-READ(io_unit,'(I8)')self%np
-ALLOCATE(self%r(3,self%np))
-self%r=0.d0
-DO i=1,self%np
-  READ(io_unit,'(3E25.16)')self%r(:,i)
-END DO
-IF(ALL(ABS(self%r(3,:))<1.d-10))self%dim=2
-!---Read in faces
-READ(io_unit,'(I8)')self%nc
-ALLOCATE(self%lc(3,self%nc))
-DO i=1,self%nc
-  READ(io_unit,*)self%lc(:,i)
-END DO
-CLOSE(io_unit)
+read_ascii=.FALSE.
+IF(PRESENT(ascii))read_ascii=ascii
+IF(read_ascii)THEN
+  OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
+  !---Read in points
+  READ(io_unit,'(I8)')self%np
+  ALLOCATE(self%r(3,self%np))
+  self%r=0.d0
+  DO i=1,self%np
+    READ(io_unit,'(3E25.16)')self%r(:,i)
+  END DO
+  IF(ALL(ABS(self%r(3,:))<1.d-10))self%dim=2
+  !---Read in faces
+  READ(io_unit,'(I8)')self%nc
+  ALLOCATE(self%lc(3,self%nc))
+  DO i=1,self%nc
+    READ(io_unit,*)self%lc(:,i)
+  END DO
+  CLOSE(io_unit)
+ELSE
+  CALL hdf5_field_get_sizes(TRIM(filename),"mesh/R",ndims,dim_sizes)
+  IF(ndims==-1)CALL oft_abort('"mesh/R" field does not exist', 'trimesh_load', __FILE__)
+  self%np=dim_sizes(2)
+  CALL hdf5_field_get_sizes(TRIM(filename),"mesh/LC",ndims,dim_sizes)
+  IF(ndims==-1)CALL oft_abort('"mesh/LC" field does not exist', 'trimesh_load', __FILE__)
+  IF(dim_sizes(1)/=3)CALL oft_abort('"mesh/LC" has wrong first dimension (must be 3)', 'trimesh_load', __FILE__)
+  self%nc=dim_sizes(2)
+  ALLOCATE(self%r(3,self%np))
+  CALL hdf5_read(self%r,TRIM(filename),"mesh/R",success)
+  IF(.NOT.success)CALL oft_abort('Error reading points','trimesh_load',__FILE__)
+  ALLOCATE(self%lc(3,self%nc))
+  CALL hdf5_read(self%lc,TRIM(filename),"mesh/LC",success)
+  IF(.NOT.success)CALL oft_abort('Error reading cells','trimesh_load',__FILE__)
+END IF
+ALLOCATE(self%reg(self%nc))
+self%reg=1
 ! self%stand_alone=.TRUE.
 DEBUG_STACK_POP
 END SUBROUTINE trimesh_load
 !------------------------------------------------------------------------------
 !> Save trimesh from transfer file
 !------------------------------------------------------------------------------
-SUBROUTINE trimesh_save(self,filename)
+SUBROUTINE trimesh_save(self,filename,ascii)
 CLASS(oft_trimesh), INTENT(in) :: self !< Mesh object
 CHARACTER(LEN=*), INTENT(in) :: filename !< File to save mesh to
+LOGICAL, OPTIONAL, INTENT(in) :: ascii !< Save file in ASCII format?
 INTEGER(i4) :: i,io_unit
+LOGICAL :: write_ascii
 DEBUG_STACK_PUSH
-OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
-!---Write out points
-WRITE(io_unit,'(I8)')self%np
-DO i=1,self%np
-  WRITE(io_unit,'(3E25.16)')self%r(:,i)
-END DO
-!---Write out points
-WRITE(io_unit,'(I8)')self%nc
-DO i=1,self%nc
-  WRITE(io_unit,'(3I8)')self%lc(:,i)
-END DO
-CLOSE(io_unit)
+write_ascii=.FALSE.
+IF(PRESENT(ascii))write_ascii=ascii
+IF(write_ascii)THEN
+  OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
+  !---Write out points
+  WRITE(io_unit,'(I8)')self%np
+  DO i=1,self%np
+    WRITE(io_unit,'(3E25.16)')self%r(:,i)
+  END DO
+  !---Write out points
+  WRITE(io_unit,'(I8)')self%nc
+  DO i=1,self%nc
+    WRITE(io_unit,'(3I8)')self%lc(:,i)
+  END DO
+  CLOSE(io_unit)
+ELSE
+  CALL hdf5_create_file(TRIM(filename))
+  CALL hdf5_create_group(TRIM(filename),'mesh')
+  CALL hdf5_write(self%r,TRIM(filename),"mesh/R")
+  CALL hdf5_write(self%lc,TRIM(filename),"mesh/LC")
+END IF
 DEBUG_STACK_POP
 END SUBROUTINE trimesh_save
 !------------------------------------------------------------------------------
