@@ -256,12 +256,11 @@ end subroutine minterpinv_apply
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0)
+SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals)
 CLASS(flux_func), POINTER, INTENT(out) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 REAL(8), INTENT(in) :: yvals(npsi)
-REAL(8), INTENT(in) :: y0
 INTEGER(4) :: i,ierr
 ALLOCATE(jphi_flux_func::func)
 SELECT TYPE(self=>func)
@@ -275,19 +274,14 @@ SELECT TYPE(self=>func)
   ALLOCATE(self%y(self%npsi))
   ALLOCATE(self%jphi(self%npsi))
   !---
-  self%y0=0.d0!y0
+  self%y0=0.d0
   DO i=1,self%npsi
     self%x(i) = psivals(i)
     self%jphi(i) = yvals(i)
     self%yp(i) = psivals(i) ! Dummy initialization
   END DO
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
-  ! IF((self%y0<1.d-8))THEN
-  !   self%ncofs=self%ncofs-1
-  !   ierr=self%set_cofs(self%yp(2:self%npsi))
-  ! ELSE
-    ierr=self%set_cofs(self%yp)
-  ! END IF
+  ierr=self%set_cofs(self%yp)
   IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%y0
 END SELECT
 
