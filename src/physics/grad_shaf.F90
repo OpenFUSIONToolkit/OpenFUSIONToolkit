@@ -2317,14 +2317,17 @@ DO i=1,self%maxits
 
   param_mat=0.d0
   param_rhs=0.d0
-  IF(self%Itor_target>0.d0)THEN
-    ! itor_alam=self%itor(psi_alam)
-    ! itor_press=self%itor(psi_press)
-    param_mat(1,:)=[itor_alam,itor_press,0.d0]
-    param_rhs(1)=self%Itor_target
-  ELSE
+  IF(self%dipole_mode)THEN
     param_mat(1,1)=1.d0
-    param_rhs(1)=self%alam
+    param_rhs(1)=1.E-8
+  ELSE
+    IF(self%Itor_target>0.d0)THEN
+      param_mat(1,:)=[itor_alam,itor_press,0.d0]
+      param_rhs(1)=self%Itor_target
+    ELSE
+      param_mat(1,1)=1.d0
+      param_rhs(1)=self%alam
+    END IF
   END IF
 
   !---Get desired O-point location for linear fit
@@ -2336,28 +2339,8 @@ DO i=1,self%maxits
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
 
   !---Add row for radial control (beta)
-  IF(self%R0_target>0.d0)THEN
-    !
-    psi_geval%u=>psi_vac
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    param_rhs(2)=-gpsi0(1)
-    !
-    psi_geval%u=>psi_vcont
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    psi_geval%u=>psi_alam
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-    psi_geval%u=>psi_press
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-    param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
-  ELSE IF(self%estore_target>0.d0)THEN
-    param_rhs(2)=self%estore_target
-    param_mat(2,2)=estored*3.d0/2.d0
-  ELSE IF(self%pax_target>0.d0)THEN
-    IF(self%dipole_mode)THEN
+  IF(self%dipole_mode)THEN
+    IF(self%pax_target>0.d0)THEN
       param_mat(2,2)=-1.d99
       param_rhs(2)=self%plasma_bounds(2)
       DO j=1,101
@@ -2367,16 +2350,42 @@ DO i=1,self%maxits
         END IF
       END DO
       param_mat(2,2)=self%P%f(param_rhs(2))
+      param_rhs(2)=self%pax_target
     ELSE
-      param_mat(2,2)=self%P%f(self%plasma_bounds(2))
+      param_mat(2,2)=1.d0
+      param_rhs(2)=self%pnorm
     END IF
-    param_rhs(2)=self%pax_target
-  ELSE IF(self%Ip_ratio_target>-1.d98)THEN
-    param_rhs(2)=0.d0
-    param_mat(2,:)=[itor_alam,-itor_press*self%Ip_ratio_target,0.d0]
   ELSE
-    param_mat(2,2)=1.d0
-    param_rhs(2)=self%pnorm
+    IF(self%R0_target>0.d0)THEN
+      !
+      psi_geval%u=>psi_vac
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+      param_rhs(2)=-gpsi0(1)
+      !
+      psi_geval%u=>psi_vcont
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+      psi_geval%u=>psi_alam
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi1)
+      psi_geval%u=>psi_press
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi2)
+      param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
+    ELSE IF(self%estore_target>0.d0)THEN
+      param_rhs(2)=self%estore_target
+      param_mat(2,2)=estored*3.d0/2.d0
+    ELSE IF(self%pax_target>0.d0)THEN
+      param_mat(2,2)=self%P%f(self%plasma_bounds(2))
+      param_rhs(2)=self%pax_target
+    ELSE IF(self%Ip_ratio_target>-1.d98)THEN
+      param_rhs(2)=0.d0
+      param_mat(2,:)=[itor_alam,-itor_press*self%Ip_ratio_target,0.d0]
+    ELSE
+      param_mat(2,2)=1.d0
+      param_rhs(2)=self%pnorm
+    END IF
   END IF
 
   !---Add row for vertical control
