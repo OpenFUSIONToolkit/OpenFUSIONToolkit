@@ -1147,6 +1147,7 @@ tMaker_obj%gs%urf=settings%urf
 tMaker_obj%gs%maxits=settings%maxits
 tMaker_obj%gs%nl_tol=settings%nl_tol
 tMaker_obj%gs%dipole_mode=settings%dipole_mode
+IF(tMaker_obj%gs%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution")
 CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(limfile_c,tMaker_obj%gs%limiter_file)
 END SUBROUTINE tokamaker_set_settings
