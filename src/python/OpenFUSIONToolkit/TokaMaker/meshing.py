@@ -410,36 +410,37 @@ class gs_Domain:
             raise ValueError('No plasma region specified')
         else:
             # Make sure a boundary exists if we have regions other than plasma
-            if ((self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0)) and (self.reg_type_counts['boundary'] == 0) and require_boundary:
+            if ((self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0)) and require_boundary:
                 if self.boundary_reg is None:
                     raise ValueError('No boundary region specified')
-                # Check or set extents
-                if self.rextent is None:
-                    self.rextent = self.rpad*self.rmax
-                else:
-                    if self.rmax > self.rextent:
-                        raise ValueError('User specified "rextent" does not enclose all regions')
-                if self.zextents[0] is None:
-                    self.zextents[0] = self.zpad[0]*self.zmin
-                else:
-                    if self.zmin < self.zextents[0]:
-                        raise ValueError('User specified "zextents[0]" does not enclose all regions')
-                if self.zextents[1] is None:
-                    self.zextents[1] = self.zpad[1]*self.zmax
-                    if self.zmax > self.zextents[1]:
-                        raise ValueError('User specified "zextents[1]" does not enclose all regions')
-                # Create boundary region
-                vac_dx = self.region_info[self.boundary_reg]['dx']
-                if vac_dx is None:
-                    raise ValueError('Resolution for region "vacuum" not defined')
-                vac_contour = numpy.asarray([
-                    [0.0,           self.zextents[0]],
-                    [self.rextent, self.zextents[0]],
-                    [self.rextent, self.zextents[1]],
-                    [0.0,           self.zextents[1]]
-                ])
-                self.regions.append(Region(vac_contour,vac_dx,vac_dx,id=self.region_info[self.boundary_reg]['id']))
-                self.region_info[self.boundary_reg]['count'] += 1
+                if self.region_info[self.boundary_reg].get('count',0) == 0:
+                    # Check or set extents
+                    if self.rextent is None:
+                        self.rextent = self.rpad*self.rmax
+                    else:
+                        if self.rmax > self.rextent:
+                            raise ValueError('User specified "rextent" does not enclose all regions')
+                    if self.zextents[0] is None:
+                        self.zextents[0] = self.zpad[0]*self.zmin
+                    else:
+                        if self.zmin < self.zextents[0]:
+                            raise ValueError('User specified "zextents[0]" does not enclose all regions')
+                    if self.zextents[1] is None:
+                        self.zextents[1] = self.zpad[1]*self.zmax
+                        if self.zmax > self.zextents[1]:
+                            raise ValueError('User specified "zextents[1]" does not enclose all regions')
+                    # Create boundary region
+                    vac_dx = self.region_info[self.boundary_reg]['dx']
+                    if vac_dx is None:
+                        raise ValueError('Resolution for region "vacuum" not defined')
+                    vac_contour = numpy.asarray([
+                        [0.0,           self.zextents[0]],
+                        [self.rextent, self.zextents[0]],
+                        [self.rextent, self.zextents[1]],
+                        [0.0,           self.zextents[1]]
+                    ])
+                    self.regions.append(Region(vac_contour,vac_dx,vac_dx,id=self.region_info[self.boundary_reg]['id']))
+                    self.region_info[self.boundary_reg]['count'] += 1
         # Check for undefined regions
         for key in self.region_info:
             if self.region_info[key]['count'] == 0:
