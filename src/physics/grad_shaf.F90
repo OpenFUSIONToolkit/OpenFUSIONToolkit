@@ -3502,8 +3502,6 @@ IF(self%dipole_mode)THEN
   END DO
   self%plasma_bounds(2)=ilim_psi
   pttmp=self%o_point
-ELSE
-  self%plasma_bounds(2)=-1.d99
 END IF
 CALL gs_analyze_saddles(self, self%o_point, self%plasma_bounds(2), x_point, x_psi)
 IF(self%dipole_mode)self%o_point=pttmp ! TODO: Handle this better!
@@ -3734,12 +3732,9 @@ DO i=1,smesh%np
   IF(self%saddle_pmask(i))ncuts(i)=-1
 END DO
 !
-IF(self%plasma_bounds(2)<-1.d98)THEN
-  psi_scale_len = 4.d0*smesh%hrms
-ELSE
-  psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))*5.d0/(SQRT(self%lim_area))
-END IF
+psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))*5.d0/(SQRT(self%lim_area))
 unique_saddles=-1.d99
+IF(.NOT.self%dipole_mode)o_psi=-1.d99
 n_unique=0
 !
 DO i=1,smesh%np
