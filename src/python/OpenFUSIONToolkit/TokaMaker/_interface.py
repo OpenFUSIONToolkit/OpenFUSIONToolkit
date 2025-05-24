@@ -31,6 +31,7 @@ class tokamaker_settings_struct(c_struct):
                 ("free_boundary", c_bool),
                 ("has_plasma", c_bool),
                 ("limited_only", c_bool),
+                ("dipole_mode", c_bool),
                 ("maxits", c_int),
                 ("mode", c_int),
                 ("urf", c_double),
@@ -105,6 +106,10 @@ tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
 tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
+# tokamaker_get_jtor(tMaker_ptr,jtor,error_str)
+tokamaker_get_jtor = ctypes_subroutine(oftpy_lib.tokamaker_get_jtor,
+    [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
+
 # tokamaker_area_int(tMaker_ptr,vec_vals,reg_ind,result,error_str)
 tokamaker_area_int = ctypes_subroutine(oftpy_lib.tokamaker_area_int,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_int, c_double_ptr, c_char_p])
@@ -176,6 +181,10 @@ tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
     [c_void_p, ctypes.POINTER(tokamaker_settings_struct), c_char_p])
 
+# tokamaker_set_dipole_a(tMaker_ptr,dipole_a,error_str)
+tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
+    [c_void_p, c_double, c_char_p])
+
 # tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str)
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_char_p])
@@ -217,6 +226,10 @@ tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk,
 tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
     [c_void_p, c_char_p, c_int, c_int, c_double, c_double, c_bool, c_bool, c_char_p])
 
+# tokamaker_save_mug(tMaker_ptr,filename,error_str)
+tokamaker_save_mug = ctypes_subroutine(oftpy_lib.tokamaker_save_mug,
+    [c_void_p, c_char_p, c_char_p])
+
 # tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,error_str)
 tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p])
@@ -236,8 +249,12 @@ class TokaMaker_field_interpolator():
         '''
         self.cell = c_int(-1)
         self.int_type = int_type
-        self.dim = dim
-        self.val = numpy.zeros((self.dim,), dtype=numpy.float64)
+        self.dim_return = dim
+        if dim == 2:
+            self.dim_eval = 3
+        else:
+            self.dim_eval = dim
+        self.val = numpy.zeros((self.dim_eval,), dtype=numpy.float64)
         self._tMaker_obj = tMaker_obj
         self._int_obj = int_obj
         self.fbary_tol = fbary_tol
@@ -245,16 +262,16 @@ class TokaMaker_field_interpolator():
     def __del__(self):
         '''Destroy underlying interpolation object'''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
-        tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
+        tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim_eval,self.val)
 
     def eval(self,pt):
         '''! Evaluate field at a given location
 
         @param pt Location for evaluation [2]
-        @result Field at evaluation point [self.dim]
+        @result Field at evaluation point [self.dim_return]
         '''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
         pt_eval[:2] = pt
-        tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
-        return self.val
+        tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim_eval,self.val)
+        return self.val[:self.dim_return]
 
