@@ -15,7 +15,7 @@ MODULE oft_gs
 USE oft_base
 USE oft_sort, ONLY: sort_matrix, sort_array
 USE oft_io, ONLY: hdf5_field_exist, hdf5_read, hdf5_write, &
-  xdmf_plot_file
+  xdmf_plot_file, hdf5_create_file, hdf5_create_group
 USE oft_quadrature, ONLY: oft_quad_type
 USE oft_gauss_quadrature, ONLY: set_quad_1d
 USE oft_tet_quadrature, ONLY: set_quad_2d
@@ -91,6 +91,7 @@ END TYPE coil_region
 !------------------------------------------------------------------------------
 TYPE :: cond_region
   LOGICAL :: continuous = .TRUE. !< Is region toroidally continuous?
+  LOGICAL :: inner_limiter = .FALSE. !< Needs docs
   INTEGER(i4) :: nc = 0 !< Number of cells in region
   INTEGER(i4) :: id = 0 !< Region ID number
   INTEGER(i4) :: neigs = 0 !< Number of fixed-shape current modes defined in region
@@ -155,6 +156,7 @@ TYPE :: gs_eq
   INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
   INTEGER(i4) :: nlimiter_pts = 0 !< Number of non-node limiter points
   INTEGER(i4) :: nlimiter_nds = 0 !< Number of grid nodes used as limiter points
+  INTEGER(i4) :: ninner_limiter_nds = 0 !< Needs docs
   INTEGER(i4) :: ncond_regs = 0 !< Number of conducting regions
   INTEGER(i4) :: ncond_eigs = 0 !< Number of total fixed-shape current modes for conducting regions
   INTEGER(i4) :: bc_nrhs = 0 !< Number of terms in free-boundary BC
@@ -170,6 +172,7 @@ TYPE :: gs_eq
   REAL(r8) :: psimax = 1.d0 !< Maximum \f$ \psi \f$ value for homogeneous equilibria
   REAL(r8) :: alam = 1.d0 !< Scale factor for F*F' or F' profile (see mode)
   REAL(r8) :: pnorm = 1.d0 !< Scale factor for P' profile
+  REAL(r8) :: dipole_a = 0.d0 !< Anisotropy exponent for dipole pressure profiles
   REAL(r8) :: dt = -1.d0 !< Timestep size for time-dependent and quasi-static solves
   REAL(r8) :: dt_last = -1.d0 !< Timestep size for current LHS matrix
   REAL(r8) :: Itor_target = -1.d0 !< Toroidal current target
@@ -221,6 +224,7 @@ TYPE :: gs_eq
   LOGICAL :: diverted = .FALSE. !< Equilibrium is diverted?
   LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
   LOGICAL :: full_domain = .FALSE. !< Solve across full domain (for Solov'ev test cases)
+  LOGICAL :: dipole_mode = .FALSE. !< Needs docs
   LOGICAL :: save_visit = .TRUE. !< Save information for plotting?
   CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none' !< File containing coil definitions
   CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none' !< File non-node limiter points
@@ -244,6 +248,7 @@ TYPE :: gs_eq
   CLASS(flux_func), POINTER :: P => NULL() !< Pressure flux function
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
+  CLASS(flux_func), POINTER :: dipole_B0 => NULL() !< Dipole minimum B profile
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
   CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
   TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL() !< Multi-level Lagrange FE representation (only top level used)
@@ -299,10 +304,38 @@ end type gs_prof_interp
 !> Interpolate magnetic field for a G-S solution
 !------------------------------------------------------------------------------
 type, extends(gs_prof_interp) :: gs_b_interp
+  LOGICAL :: normalized = .FALSE.
 contains
   !> Evaluate magnetic field
   procedure :: interp => gs_b_interp_apply
 end type gs_b_interp
+!------------------------------------------------------------------------------
+!> Interpolate magnetic field for a G-S solution
+!------------------------------------------------------------------------------
+type, extends(gs_prof_interp) :: gs_j_interp
+  type(oft_lag_brinterp) :: bcross_kappa_fun
+contains
+  !> Needs docs
+  procedure :: setup => gs_j_interp_setup
+  !> Needs docs
+  procedure :: delete => gs_j_interp_delete
+  !> Evaluate magnetic field
+  procedure :: interp => gs_j_interp_apply
+end type gs_j_interp
+!------------------------------------------------------------------------------
+!> Interpolate magnetic field for a G-S solution
+!------------------------------------------------------------------------------
+type, extends(bfem_interp) :: gs_curvature_interp
+  type(oft_lag_brinterp), pointer :: Br_eval => NULL() !< Needs docs
+  type(oft_lag_bginterp), pointer :: Br_geval => NULL() !< Needs docs
+  type(oft_lag_brinterp), pointer :: Bt_eval => NULL() !< Needs docs
+  type(oft_lag_bginterp), pointer :: Bt_geval => NULL() !< Needs docs
+  type(oft_lag_brinterp), pointer :: Bz_eval => NULL() !< Needs docs
+  type(oft_lag_bginterp), pointer :: Bz_geval => NULL() !< Needs docs
+contains
+  !> Evaluate magnetic field
+  procedure :: interp => gs_curvature_apply
+end type gs_curvature_interp
 !------------------------------------------------------------------------------
 !> Need docs
 !------------------------------------------------------------------------------
@@ -675,8 +708,8 @@ end subroutine gs_load_limiters
 subroutine gs_setup_walls(self,skip_load,make_plot)
 class(gs_eq), intent(inout) :: self !< G-S object
 logical, optional, intent(in) :: skip_load,make_plot
-INTEGER(4) :: i,j,k,l,m,nphi_3d,cell
-INTEGER(4), ALLOCATABLE :: eflag(:),j_lag(:),emark(:,:),pmark(:)
+INTEGER(4) :: i,j,k,l,m,nphi_3d,cell,nlim_tmp
+INTEGER(4), ALLOCATABLE :: eflag(:),j_lag(:),emark(:,:),pmark(:),regmark(:)
 REAL(8) :: f(3),rcenter(2),vol,gop(3,3),pt(3)
 REAL(8), ALLOCATABLE :: eigs(:)
 LOGICAL :: file_exists,do_load,do_plot
@@ -867,6 +900,13 @@ CALL gs_get_cond_weights(self,self%cond_weights,.FALSE.)
 CALL gs_set_cond_weights(self,self%cond_weights,.FALSE.)
 #endif
 !---Setup limiters
+ALLOCATE(regmark(smesh%nreg))
+regmark=1
+IF(self%dipole_mode)THEN
+  DO i=1,self%ncond_regs
+    IF(self%cond_regions(i)%inner_limiter)regmark(self%cond_regions(i)%id)=-1
+  END DO
+END IF
 ALLOCATE(eflag(self%fe_rep%ne),j_lag(self%fe_rep%nce))
 eflag=0
 ! DO j=1,self%ncond_regs
@@ -891,25 +931,30 @@ DO i=1,smesh%nc
   IF(smesh%reg(i)==1)THEN
     emark(1,j_lag)=1
   ELSE
-    emark(2,j_lag)=1
+    emark(2,j_lag)=regmark(smesh%reg(i))
   END IF
 END DO
 DO i=1,self%fe_rep%ne
-  IF(emark(1,i)==1.AND.emark(2,i)==1)eflag(i)=1
+  IF(emark(1,i)==1.AND.ABS(emark(2,i))==1)eflag(i)=emark(2,i)
   IF(emark(1,i)==1.AND.self%fe_rep%be(i))eflag(i)=1
 END DO
 !---
-self%nlimiter_nds=SUM(eflag)
+self%nlimiter_nds=SUM(ABS(eflag))
+nlim_tmp=self%nlimiter_nds
 ALLOCATE(self%limiter_nds(self%nlimiter_nds),self%rlimiter_nds(2,self%nlimiter_nds))
 self%nlimiter_nds=0
+self%ninner_limiter_nds=0
 DO i=1,self%fe_rep%ne
   IF(eflag(i)==1)THEN
     self%nlimiter_nds=self%nlimiter_nds+1
     self%limiter_nds(self%nlimiter_nds)=i
+  ELSE IF(eflag(i)==-1)THEN
+    self%ninner_limiter_nds=self%ninner_limiter_nds+1
+    self%limiter_nds(nlim_tmp+1-self%ninner_limiter_nds)=i
   END IF
 END DO
 !
-DO i=1,self%nlimiter_nds
+DO i=1,self%nlimiter_nds+self%ninner_limiter_nds
   ! Get position
   cell=self%fe_rep%lec(self%fe_rep%kec(self%limiter_nds(i)))
   CALL self%fe_rep%ncdofs(cell,j_lag)
@@ -924,6 +969,7 @@ END DO
 DEALLOCATE(eflag,j_lag)
 IF(oft_debug_print(2))THEN!.AND.((self%ncoil_regs>0).OR.(self%ncond_regs>0)))THEN
   WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%nlimiter_nds,' material limiter nodes'
+  IF(self%dipole_mode)WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%ninner_limiter_nds,' inner limiter nodes'
   WRITE(*,*)
 END IF
 !---Mark non-continuous regions
@@ -2271,14 +2317,17 @@ DO i=1,self%maxits
 
   param_mat=0.d0
   param_rhs=0.d0
-  IF(self%Itor_target>0.d0)THEN
-    ! itor_alam=self%itor(psi_alam)
-    ! itor_press=self%itor(psi_press)
-    param_mat(1,:)=[itor_alam,itor_press,0.d0]
-    param_rhs(1)=self%Itor_target
-  ELSE
+  IF(self%dipole_mode)THEN
     param_mat(1,1)=1.d0
-    param_rhs(1)=self%alam
+    param_rhs(1)=1.E-8
+  ELSE
+    IF(self%Itor_target>0.d0)THEN
+      param_mat(1,:)=[itor_alam,itor_press,0.d0]
+      param_rhs(1)=self%Itor_target
+    ELSE
+      param_mat(1,1)=1.d0
+      param_rhs(1)=self%alam
+    END IF
   END IF
 
   !---Get desired O-point location for linear fit
@@ -2290,35 +2339,53 @@ DO i=1,self%maxits
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
 
   !---Add row for radial control (beta)
-  IF(self%R0_target>0.d0)THEN
-    !
-    psi_geval%u=>psi_vac
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    param_rhs(2)=-gpsi0(1)
-    !
-    psi_geval%u=>psi_vcont
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    psi_geval%u=>psi_alam
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-    psi_geval%u=>psi_press
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-    param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
-  ELSE IF(self%estore_target>0.d0)THEN
-    param_rhs(2)=self%estore_target
-    param_mat(2,2)=estored*3.d0/2.d0
-  ELSE IF(self%pax_target>0.d0)THEN
-    param_rhs(2)=self%pax_target
-    param_mat(2,2)=self%P%f(self%plasma_bounds(2))
-  ELSE IF(self%Ip_ratio_target>-1.d98)THEN
-    param_rhs(2)=0.d0
-    param_mat(2,:)=[itor_alam,-itor_press*self%Ip_ratio_target,0.d0]
+  IF(self%dipole_mode)THEN
+    IF(self%pax_target>0.d0)THEN
+      param_mat(2,2)=-1.d99
+      param_rhs(2)=self%plasma_bounds(2)
+      DO j=1,101
+        IF(param_mat(2,2)<ABS(self%P%f((self%plasma_bounds(1)-self%plasma_bounds(2))*REAL(j-1,8)/1.d2+self%plasma_bounds(2))))THEN
+          param_mat(2,2)=ABS(self%P%f((self%plasma_bounds(1)-self%plasma_bounds(2))*REAL(j-1,8)/1.d2+self%plasma_bounds(2)))
+          param_rhs(2)=(self%plasma_bounds(1)-self%plasma_bounds(2))*REAL(j-1,8)/1.d2+self%plasma_bounds(2)
+        END IF
+      END DO
+      param_mat(2,2)=self%P%f(param_rhs(2))
+      param_rhs(2)=self%pax_target
+    ELSE
+      param_mat(2,2)=1.d0
+      param_rhs(2)=self%pnorm
+    END IF
   ELSE
-    param_mat(2,2)=1.d0
-    param_rhs(2)=self%pnorm
+    IF(self%R0_target>0.d0)THEN
+      !
+      psi_geval%u=>psi_vac
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+      param_rhs(2)=-gpsi0(1)
+      !
+      psi_geval%u=>psi_vcont
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+      psi_geval%u=>psi_alam
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi1)
+      psi_geval%u=>psi_press
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi2)
+      param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
+    ELSE IF(self%estore_target>0.d0)THEN
+      param_rhs(2)=self%estore_target
+      param_mat(2,2)=estored*3.d0/2.d0
+    ELSE IF(self%pax_target>0.d0)THEN
+      param_mat(2,2)=self%P%f(self%plasma_bounds(2))
+      param_rhs(2)=self%pax_target
+    ELSE IF(self%Ip_ratio_target>-1.d98)THEN
+      param_rhs(2)=0.d0
+      param_mat(2,:)=[itor_alam,-itor_press*self%Ip_ratio_target,0.d0]
+    ELSE
+      param_mat(2,2)=1.d0
+      param_rhs(2)=self%pnorm
+    END IF
   END IF
 
   !---Add row for vertical control
@@ -3129,11 +3196,12 @@ CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `a
 CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `pnorm`)
 REAL(8), INTENT(out) :: itor_alam,itor_press,estore
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
+real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),ani_fac,H
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
 integer(4) :: j,m,l
 integer(4), allocatable :: j_lag(:)
 logical :: curved
+type(oft_lag_brinterp) :: bcross_kappa_fun
 t1=omp_get_wtime()
 !---
 NULLIFY(atmp,btmp,b2tmp,b3tmp)
@@ -3145,11 +3213,17 @@ CALL b%get_local(btmp)
 CALL b2%get_local(b2tmp)
 CALL b3%get_local(b3tmp)
 CALL a%get_local(atmp)
+IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
+  CALL self%dipole_B0%update(self)
+  CALL self%psi%new(bcross_kappa_fun%u)
+  CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
+  CALL bcross_kappa_fun%setup(self%fe_rep)
+END IF
 !---
 itor_alam=0.d0
 itor_press=0.d0
 estore=0.d0
-!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,vcache) &
+!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,ani_fac,H) &
 !$omp reduction(+:itor_alam) reduction(+:itor_press) reduction(+:estore)
 allocate(rhs_loc(self%fe_rep%nce,3))
 allocate(rop(self%fe_rep%nce),vcache(self%fe_rep%nce))
@@ -3186,7 +3260,21 @@ do j=1,self%fe_rep%mesh%nc
           ffp(1:2)=0.5d0*self%alam*self%I%fp(psitmp)
           itor_alam = itor_alam + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*self%fe_rep%quad%wts(m)
         END IF
-        ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+        !---
+        IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
+          gpsitmp=0.d0
+          DO l=1,self%fe_rep%nce
+            CALL oft_blag_geval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),gop,goptmp)
+            gpsitmp=gpsitmp+vcache(l)*gop
+          END DO
+          H = (gpsitmp(1)/(pt(1)+gs_epsilon))**2 + (gpsitmp(2)/(pt(1)+gs_epsilon))**2
+          H = (self%dipole_b0%f(psitmp)/SQRT(H))**(2.d0*self%dipole_a)
+          CALL bcross_kappa_fun%interp(j,self%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+          ani_fac = bcross_kappa(1)*(1.d0/(1.d0+2.d0*self%dipole_a) - 1.d0)
+          ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*(self%P%fp(psitmp)*pt(1)**2 - self%P%f(psitmp)*ani_fac)*H
+        ELSE
+          ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+        END IF
         !
         estore = estore + (self%P%F(psitmp))*v*self%fe_rep%quad%wts(m)*pt(1)
         itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*self%fe_rep%quad%wts(m)
@@ -3216,6 +3304,11 @@ CALL b%restore_local(btmp,add=.TRUE.)
 CALL b2%restore_local(b2tmp,add=.TRUE.)
 CALL b3%restore_local(b3tmp,add=.TRUE.)
 DEALLOCATE(atmp,btmp,b2tmp,b3tmp)
+IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
+  CALL bcross_kappa_fun%u%delete
+  DEALLOCATE(bcross_kappa_fun%u)
+  CALL bcross_kappa_fun%delete
+END IF
 estore = estore*2.d0*pi*self%psiscale
 itor_alam = itor_alam*self%psiscale
 itor_press = itor_press*self%psiscale
@@ -3376,7 +3469,7 @@ logical, optional, intent(in) :: track_opoint
 type(oft_lag_brinterp) :: psi_interp
 integer(4) :: i,j,cell,ierr,ind_sort(max_xpoints),trace_err,itmp
 REAL(8) :: old_bounds(2),f(3),goptmp(3,3),v,psitmp(1),alt_max
-REAL(8) :: alt_r,alt_z,zmin,zmax,pttmp(2),vtmp
+REAL(8) :: alt_r,alt_z,zmin,zmax,pttmp(2),vtmp,ilim_tmp,ilim_psi
 REAL(8) :: x_point(2,max_xpoints),t1,t2,x_psi(max_xpoints),x_psi_sort(max_xpoints),x_tmp
 REAL(8) :: x_point_old(2,max_xpoints),x_vec_old(2,max_xpoints)
 REAL(8), POINTER :: psi_vals(:)
@@ -3397,7 +3490,21 @@ IF(PRESENT(track_opoint))THEN
 ELSE
   self%o_point(1)=-1.d0
 END IF
+IF(self%dipole_mode)THEN
+  !---Check limiters
+  ilim_psi=1.d99
+  DO i=self%nlimiter_nds+1,self%nlimiter_nds+self%ninner_limiter_nds
+    j=self%limiter_nds(i)
+    IF(psi_vals(j)<ilim_psi)THEN
+      ilim_psi=psi_vals(j)
+      self%o_point=self%rlimiter_nds(:,i)
+    END IF
+  END DO
+  self%plasma_bounds(2)=ilim_psi
+  pttmp=self%o_point
+END IF
 CALL gs_analyze_saddles(self, self%o_point, self%plasma_bounds(2), x_point, x_psi)
+IF(self%dipole_mode)self%o_point=pttmp ! TODO: Handle this better!
 ! t2=omp_get_wtime()
 ! WRITE(*,*)'Analyze',t2-t1
 ! alt_r=-1.d0
@@ -3448,7 +3555,11 @@ IF(self%nx_points>0)THEN
   CALL sort_array(x_psi_sort,ind_sort,self%nx_points)
   DO i=1,self%nx_points
     self%x_points(:,i)=x_point(:,ind_sort(i))
-    self%x_vecs(:,i)=self%o_point-self%x_points(:,i)
+    IF(self%dipole_mode)THEN
+      self%x_vecs(:,i) = (self%o_point+[self%rmax,0.d0])/2.d0 - self%x_points(:,i)
+    ELSE
+      self%x_vecs(:,i)=self%o_point-self%x_points(:,i)
+    END IF
     IF(oft_debug_print(1))THEN
       WRITE(*,'(2A,5ES11.3)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i)
     END IF
@@ -3575,7 +3686,8 @@ end subroutine gs_update_bounds
 subroutine gs_analyze_saddles(self, o_point, o_psi, x_point, x_psi)
 class(gs_eq), intent(inout) :: self
 real(8), intent(inout) :: o_point(2)
-real(8), intent(out) :: o_psi,x_point(2,max_xpoints),x_psi(max_xpoints)
+real(8), intent(inout) :: o_psi
+real(8), intent(out) :: x_point(2,max_xpoints),x_psi(max_xpoints)
 integer(4), PARAMETER :: npts = 10, max_unique = 20
 integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
 integer(4), allocatable :: ncuts(:)
@@ -3622,12 +3734,12 @@ END DO
 !
 psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))*5.d0/(SQRT(self%lim_area))
 unique_saddles=-1.d99
-o_psi=-1.d99
+IF(.NOT.self%dipole_mode)o_psi=-1.d99
 n_unique=0
 !
 DO i=1,smesh%np
   IF((ncuts(i)==0).OR.(ncuts(i)>3))THEN
-    IF((ncuts(i)==0).AND.(o_point(1)>0.d0))THEN
+    IF((ncuts(i)==0).AND.(o_point(1)>0.d0).AND.(.NOT.self%dipole_mode))THEN
       saddle_loc=o_point
     ELSE
       saddle_loc=smesh%r(1:2,i)
@@ -4050,7 +4162,7 @@ real(8), intent(out) :: prof(nr) !< q value at each sampling location
 real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
-real(8), optional, intent(out) :: ravgs(nr,2) !< Flux surface averages <R> and <1/R>
+real(8), optional, intent(out) :: ravgs(nr,3) !< Flux surface averages <R>, <1/R>, and dV/dPsi
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
@@ -4080,11 +4192,19 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%fe_rep%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( psi_tmp(1) < x1)EXIT
+  IF(gseq%dipole_mode)THEN
+    IF(psi_tmp(1)>x1)EXIT
+  ELSE
+    IF(psi_tmp(1)<x1)EXIT
+  END IF
   rmax=pt(1)
 END DO
 pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
@@ -4189,6 +4309,7 @@ do j=1,nr
   IF(PRESENT(ravgs))THEN
     ravgs(j,1)=active_tracer%v(4)/active_tracer%v(2)
     ravgs(j,2)=active_tracer%v(5)/active_tracer%v(2)
+    ravgs(j,3)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
   END IF
 end do
 CALL active_tracer%delete
@@ -4228,11 +4349,15 @@ rmax=raxis
 cell=0
 pmin=1.d99
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%fe_rep%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( ABS(psi_tmp(1)-psi_surf)<pmin)THEN
+  IF(ABS(psi_tmp(1)-psi_surf)<pmin)THEN
     pmin = ABS(psi_tmp(1)-psi_surf)
     rmax = pt(1)
   END IF
@@ -4466,7 +4591,93 @@ IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
 ELSE
   val(2)=self%gs%psiscale*self%gs%I%f_offset/(pt(1)+gs_epsilon)
 END IF
+IF(self%normalized)val(1:3)=val(1:3)/(magnitude(val(1:3))+1.d-10)
 end subroutine gs_b_interp_apply
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine gs_j_interp_setup(self,gs)
+class(gs_j_interp), intent(inout) :: self
+class(gs_eq), target, intent(inout) :: gs
+CALL gs_prof_interp_setup(self,gs)
+CALL self%gs%dipole_B0%update(self%gs)
+CALL self%gs%psi%new(self%bcross_kappa_fun%u)
+CALL gs_bcrosskappa(self%gs,self%bcross_kappa_fun%u)
+CALL self%bcross_kappa_fun%setup(self%gs%fe_rep)
+end subroutine gs_j_interp_setup
+!------------------------------------------------------------------------------
+!> Destroy temporary internal storage and nullify references
+!------------------------------------------------------------------------------
+subroutine gs_j_interp_delete(self)
+class(gs_j_interp), intent(inout) :: self
+CALL gs_prof_interp_delete(self)
+CALL self%bcross_kappa_fun%u%delete()
+DEALLOCATE(self%bcross_kappa_fun%u)
+CALL self%bcross_kappa_fun%delete
+end subroutine gs_j_interp_delete
+!------------------------------------------------------------------------------
+!> Reconstruct magnetic field from a Grad-Shafranov solution
+!------------------------------------------------------------------------------
+subroutine gs_j_interp_apply(self,cell,f,gop,val)
+class(gs_j_interp), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed field at f [3]
+real(8) :: psitmp(1),gpsitmp(3),pt(3),ani_fac,H,bcross_kappa(1)
+logical :: in_plasma
+pt=self%gs%fe_rep%mesh%log2phys(cell,f)
+in_plasma=.TRUE.
+IF(gs_test_bounds(self%gs,pt).AND.(self%gs%fe_rep%mesh%reg(cell)==1))THEN
+  in_plasma=.TRUE.
+ELSE
+  in_plasma=.FALSE.
+END IF
+! Sample fields
+CALL self%psi_eval%interp(cell,f,gop,psitmp)
+CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
+! Evaluate J_tor
+IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
+  IF(self%gs%mode==0)THEN
+    val(1)=(self%gs%alam**2)*self%gs%I%Fp(psitmp(1))*(self%gs%I%f(psitmp(1))+self%gs%I%f_offset/self%gs%alam)/(pt(1)+gs_epsilon)
+  ELSE
+    val(1)=0.5d0*self%gs%alam*self%gs%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
+  END IF
+  IF(self%gs%dipole_mode)THEN
+    H = (gpsitmp(1)/(pt(1)+gs_epsilon))**2 + (gpsitmp(2)/(pt(1)+gs_epsilon))**2
+    H = (self%gs%dipole_b0%f(psitmp(1))/SQRT(H))**(2.d0*self%gs%dipole_a)
+    CALL self%bcross_kappa_fun%interp(cell,f,gop,bcross_kappa)
+    ani_fac = bcross_kappa(1)*(1.d0/(1.d0+2.d0*self%gs%dipole_a) - 1.d0)
+    val(1) = val(1) + self%gs%pnorm*(self%gs%P%fp(psitmp(1))*pt(1)**2 - self%gs%P%f(psitmp(1))*ani_fac)*H
+  ELSE
+    val(1) = val(1) + self%gs%pnorm*pt(1)*self%gs%P%Fp(psitmp(1))
+  END IF
+ELSE
+  val(1)=0.d0
+END IF
+end subroutine gs_j_interp_apply
+!------------------------------------------------------------------------------
+!> Reconstruct magnetic field from a Grad-Shafranov solution
+!------------------------------------------------------------------------------
+subroutine gs_curvature_apply(self,cell,f,gop,val)
+class(gs_curvature_interp), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed field at f [3]
+real(r8) :: btmp(3),gtmp(3),pt(3)
+pt=self%Br_eval%mesh%log2phys(cell,f)
+CALL self%Br_eval%interp(cell,f,gop,btmp(1:1))
+CALL self%Bt_eval%interp(cell,f,gop,btmp(2:2))
+CALL self%Bz_eval%interp(cell,f,gop,btmp(3:3))
+!
+CALL self%Br_geval%interp(cell,f,gop,gtmp)
+val(1)=(btmp(1)*gtmp(1)+btmp(3)*gtmp(2)-btmp(2)*btmp(2)/pt(1))
+CALL self%Bt_geval%interp(cell,f,gop,gtmp)
+val(2)=(btmp(1)*gtmp(1)+btmp(3)*gtmp(2)+btmp(2)*btmp(1)/pt(1))
+CALL self%Bz_geval%interp(cell,f,gop,gtmp)
+val(3)=(btmp(1)*gtmp(1)+btmp(3)*gtmp(2))
+end subroutine gs_curvature_apply
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -4532,28 +4743,190 @@ end subroutine gsinv_apply
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-subroutine gs_save_fgrid(self,filename)
+subroutine gs_project_b(self,br,bt,bz,solver_in,normalized)
 class(gs_eq), target, intent(inout) :: self
-character(LEN=*), optional, intent(in) :: filename
-class(oft_vector), pointer :: a,br,bt,bz
-real(r8), pointer :: vals_tmp(:)
+class(oft_vector), intent(inout) :: br,bt,bz
+class(oft_solver), optional, target, intent(inout) :: solver_in
+logical, optional, intent(in) :: normalized
+class(oft_vector), pointer :: a
 class(oft_solver), pointer :: solver
 type(gs_b_interp) :: Bfield
+integer(4) :: i,io_unit
+logical :: pm_save
+!---
+CALL self%psi%new(a)
+IF(PRESENT(normalized))Bfield%normalized=normalized
+CALL Bfield%setup(self)
+!---Setup Solver
+IF(PRESENT(solver_in))THEN
+  solver=>solver_in
+ELSE
+  CALL create_cg_solver(solver)
+  solver%A=>self%mop
+  solver%its=-2
+  CALL create_diag_pre(solver%pre)
+END IF
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+!---Project B-field
+CALL oft_blag_vproject(self%fe_rep,Bfield,br,bt,bz)
+CALL a%add(0.d0,1.d0,br)
+CALL br%set(0.d0)
+CALL solver%apply(br,a)
+!
+CALL a%add(0.d0,1.d0,bt)
+CALL bt%set(0.d0)
+CALL solver%apply(bt,a)
+!
+CALL a%add(0.d0,1.d0,bz)
+CALL bz%set(0.d0)
+CALL solver%apply(bz,a)
+!---Clean up
+oft_env%pm=pm_save
+CALL a%delete
+DEALLOCATE(a)
+CALL Bfield%delete()
+IF(.NOT.PRESENT(solver_in))THEN
+  CALL solver%pre%delete
+  DEALLOCATE(solver%pre)
+  CALL solver%delete
+  DEALLOCATE(solver)
+END IF
+end subroutine gs_project_b
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_curvature(self,br,bt,bz,solver_in)
+class(gs_eq), target, intent(inout) :: self
+class(oft_vector), target, intent(inout) :: br,bt,bz
+class(oft_solver), optional, target, intent(inout) :: solver_in
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: vr,vt,vz
+class(oft_solver), pointer :: solver
+TYPE(gs_curvature_interp) :: curve_interp
+logical :: pm_save
+!
+CALL self%psi%new(vr)
+CALL self%psi%new(vt)
+CALL self%psi%new(vz)
+!---Setup Solver
+IF(PRESENT(solver_in))THEN
+  solver=>solver_in
+ELSE
+  CALL create_cg_solver(solver)
+  solver%A=>self%mop
+  solver%its=-2
+  CALL create_diag_pre(solver%pre)
+END IF
+CALL gs_project_b(self,br,bt,bz,solver_in=solver,normalized=.TRUE.)
+!
+curve_interp%mesh=>self%fe_rep%mesh
+ALLOCATE(curve_interp%Br_eval,curve_interp%Br_geval)
+curve_interp%Br_eval%u=>br
+CALL curve_interp%Br_eval%setup(self%fe_rep)
+CALL curve_interp%Br_geval%shared_setup(curve_interp%Br_eval)
+ALLOCATE(curve_interp%Bt_eval,curve_interp%Bt_geval)
+curve_interp%Bt_eval%u=>bt
+CALL curve_interp%Bt_eval%setup(self%fe_rep)
+CALL curve_interp%Bt_geval%shared_setup(curve_interp%Bt_eval)
+ALLOCATE(curve_interp%Bz_eval,curve_interp%Bz_geval)
+curve_interp%Bz_eval%u=>bz
+CALL curve_interp%Bz_eval%setup(self%fe_rep)
+CALL curve_interp%Bz_geval%shared_setup(curve_interp%Bz_eval)
+!
+CALL oft_blag_vproject(self%fe_rep,curve_interp,vr,vt,vz)
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+CALL br%set(0.d0)
+CALL solver%apply(br,vr)
+CALL bt%set(0.d0)
+CALL solver%apply(bt,vt)
+CALL bz%set(0.d0)
+CALL solver%apply(bz,vz)
+oft_env%pm=pm_save
+!
+CALL vr%delete()
+CALL vt%delete()
+CALL vz%delete()
+DEALLOCATE(vr,vt,vz)
+CALL curve_interp%Br_eval%delete()
+CALL curve_interp%Bt_eval%delete()
+CALL curve_interp%Bz_eval%delete()
+DEALLOCATE(curve_interp%Br_eval,curve_interp%Br_geval)
+DEALLOCATE(curve_interp%Bt_eval,curve_interp%Bt_geval)
+DEALLOCATE(curve_interp%Bz_eval,curve_interp%Bz_geval)
+IF(.NOT.PRESENT(solver_in))THEN
+  CALL solver%pre%delete
+  DEALLOCATE(solver%pre)
+  CALL solver%delete
+  DEALLOCATE(solver)
+END IF
+END SUBROUTINE gs_curvature
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_bcrosskappa(self,bcross_kappa)
+class(gs_eq), target, intent(inout) :: self
+class(oft_vector), target, intent(inout) :: bcross_kappa
+INTEGER(4) :: i
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: kappa,Bfull
+CLASS(oft_vector), POINTER :: vr,vt,vz,ur,ut,uz
+!
+CALL self%psi%new(vr)
+CALL self%psi%new(vt)
+CALL self%psi%new(vz)
+CALL self%psi%new(ur)
+CALL self%psi%new(ut)
+CALL self%psi%new(uz)
+CALL gs_curvature(self,vr,vt,vz)
+CALL gs_project_b(self,ur,ut,uz)
+ALLOCATE(kappa(vr%n,2),Bfull(vr%n,2))
+vals_tmp=>kappa(:,1)
+CALL vr%get_local(vals_tmp)
+vals_tmp=>kappa(:,2)
+CALL vz%get_local(vals_tmp)
+vals_tmp=>Bfull(:,1)
+CALL ur%get_local(vals_tmp)
+vals_tmp=>Bfull(:,2)
+CALL uz%get_local(vals_tmp)
+!
+CALL bcross_kappa%set(0.d0)
+CALL bcross_kappa%get_local(vals_tmp)
+DO i=1,self%psi%n
+  vals_tmp(i) = (Bfull(i,1)*kappa(i,2)-Bfull(i,2)*kappa(i,1))/(Bfull(i,1)**2+Bfull(i,2)**2)
+END DO
+CALL bcross_kappa%restore_local(vals_tmp)
+CALL vr%delete()
+CALL vt%delete()
+CALL vz%delete()
+CALL ur%delete()
+CALL ut%delete()
+CALL uz%delete()
+DEALLOCATE(vr,vt,vz,ur,ut,uz,kappa,Bfull)
+END SUBROUTINE gs_bcrosskappa
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine gs_save_mug(self,filename,legacy)
+class(gs_eq), target, intent(inout) :: self
+character(LEN=*), optional, intent(in) :: filename
+logical, optional, intent(in) :: legacy
+class(oft_vector), pointer :: v,br,bt,bz,press
+real(r8), pointer :: vals_tmp(:)
+class(oft_solver), pointer :: solver
 type(gs_prof_interp) :: field
 integer(4) :: i,io_unit
 real(8), allocatable :: Fout(:,:)
-logical :: pm_save
+logical :: pm_save,write_legacy
 !---
 NULLIFY(vals_tmp)
-ALLOCATE(Fout(5,self%fe_rep%ne))
-CALL self%psi%new(a)
+write_legacy=.FALSE.
+IF(PRESENT(legacy).AND.PRESENT(filename))write_legacy=legacy
+IF(write_legacy)ALLOCATE(Fout(5,self%fe_rep%ne))
+CALL self%psi%new(v)
+CALL self%psi%new(press)
 CALL self%psi%new(br)
 CALL self%psi%new(bt)
 CALL self%psi%new(bz)
-! Bfield%gs=>self
-! field%gs=>self
-CALL Bfield%setup(self)
-CALL field%setup(self)
 !---Setup Solver
 CALL create_cg_solver(solver)
 solver%A=>self%mop
@@ -4561,57 +4934,67 @@ solver%its=-2
 CALL create_diag_pre(solver%pre)
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 !---Project B-field
-CALL oft_blag_vproject(self%fe_rep,Bfield,br,bt,bz)
-CALL a%set(0.d0)
-CALL solver%apply(a,br)
-CALL a%get_local(vals_tmp)
-Fout(1,:)=vals_tmp
-CALL a%set(0.d0)
-CALL solver%apply(a,bt)
-CALL a%get_local(vals_tmp)
-Fout(2,:)=vals_tmp
-CALL a%set(0.d0)
-CALL solver%apply(a,bz)
-CALL a%get_local(vals_tmp)
-Fout(3,:)=vals_tmp
+CALL gs_project_b(self,br,bt,bz,solver)
 !---Project pressure
+CALL field%setup(self)
 field%mode=3
-CALL oft_blag_project(self%fe_rep,field,br)
-CALL a%set(0.d0)
-CALL solver%apply(a,br)
-CALL a%get_local(vals_tmp)
-Fout(4,:)=vals_tmp
-!---Get poloidal flux
-CALL self%psi%get_local(vals_tmp)
-Fout(5,:)=vals_tmp
+CALL oft_blag_project(self%fe_rep,field,v)
+CALL press%set(0.d0)
+CALL solver%apply(press,v)
 !---Output
 IF(PRESENT(filename))THEN
-  OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
-  WRITE(io_unit,*)self%fe_rep%order
-  DO i=1,self%fe_rep%ne
-    WRITE(io_unit,'(5E18.10)')Fout(:,i)
-  END DO
-  CLOSE(io_unit)
+  IF(write_legacy)THEN
+    ALLOCATE(Fout(5,self%fe_rep%ne))
+    CALL br%get_local(vals_tmp)
+    Fout(1,:)=vals_tmp
+    CALL bt%get_local(vals_tmp)
+    Fout(2,:)=vals_tmp
+    CALL bz%get_local(vals_tmp)
+    Fout(3,:)=vals_tmp
+    CALL press%get_local(vals_tmp)
+    Fout(4,:)=vals_tmp
+    CALL self%psi%get_local(vals_tmp)
+    Fout(5,:)=vals_tmp
+    OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
+    WRITE(io_unit,*)self%fe_rep%order
+    DO i=1,self%fe_rep%ne
+      WRITE(io_unit,'(5E18.10)')Fout(:,i)
+    END DO
+    CLOSE(io_unit)
+    DEALLOCATE(Fout)
+  ELSE
+    CALL hdf5_create_file(filename)
+    CALL hdf5_create_group(filename,'mesh')
+    CALL hdf5_write(self%fe_rep%mesh%r,filename,'mesh/R')
+    CALL hdf5_write(self%fe_rep%mesh%lc,filename,'mesh/LC')
+    CALL hdf5_create_group(filename,'tokamaker')
+    CALL hdf5_write(self%fe_rep%order,filename,'tokamaker/FE_ORDER')
+    CALL br%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/BR')
+    CALL bt%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/BT')
+    CALL bz%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/BZ')
+    CALL press%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/P')
+    CALL self%psi%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/PSI')
+  END IF
 END IF
-!---Save fields to plot
-CALL self%fe_rep%mesh%save_vertex_scalar(Fout(1,:),self%xdmf,'Br')
-CALL self%fe_rep%mesh%save_vertex_scalar(Fout(2,:),self%xdmf,'Bt')
-CALL self%fe_rep%mesh%save_vertex_scalar(Fout(3,:),self%xdmf,'Bz')
-CALL self%fe_rep%mesh%save_vertex_scalar(Fout(4,:),self%xdmf,'P')
 !---Clean up
 oft_env%pm=pm_save
-CALL a%delete
+CALL v%delete
+CALL press%delete
 CALL br%delete
 CALL bt%delete
 CALL bz%delete
-DEALLOCATE(a,br,bt,bz,Fout,vals_tmp)
-CALL Bfield%delete()
+DEALLOCATE(v,press,br,bt,bz,vals_tmp)
 CALL field%delete()
 CALL solver%pre%delete
 DEALLOCATE(solver%pre)
 CALL solver%delete
 DEALLOCATE(solver)
-end subroutine gs_save_fgrid
+end subroutine gs_save_mug
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
