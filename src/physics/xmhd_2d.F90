@@ -455,18 +455,18 @@ DO i=1,mesh%nc
         +self%dt*D_diff*DOT_PRODUCT(dn,basis_grads(:,jr))*jac_det*quad%wts(m)
       !---Momentum
       res_loc(jr, 2:4) = res_loc(jr, 2:4) &
-        + basis_vals(jr)*vel*jac_det*quad%wts(m) !&
-        ! + self%dt*DOT_PRODUCT(btmp,basis_grads(:,jr))*btmp*jac_det*quad%wts(m)/(mu0*m_i*n) &
-        ! - self%dt*DOT_PRODUCT(btmp,btmp)*basis_grads(:,jr)*jac_det*quad%wts(m)/(2*mu0*m_i*n) &
-        ! - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*jac_det*quad%wts(m)/(mu0*m_i*n**2) &
-        ! + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*jac_det*quad%wts(m)/(2*mu0*m_i*n**2) &
-        ! + self%dt*basis_vals(jr)*2.d0*k_boltz*dT*jac_det*quad%wts(m)/m_i &
-        ! + self%dt*basis_vals(jr)*2.d0*k_boltz*T*dn*jac_det*quad%wts(m)/(m_i*n)
+        + basis_vals(jr)*vel*jac_det*quad%wts(m) &
+        + self%dt*DOT_PRODUCT(btmp,basis_grads(:,jr))*btmp*jac_det*quad%wts(m)/(mu0*m_i*n) &
+        - self%dt*DOT_PRODUCT(btmp,btmp)*basis_grads(:,jr)*jac_det*quad%wts(m)/(2*mu0*m_i*n) &
+        - self%dt*basis_vals(jr)*DOT_PRODUCT(dn,btmp)*btmp*jac_det*quad%wts(m)/(mu0*m_i*n**2) &
+        + self%dt*basis_vals(jr)*DOT_PRODUCT(btmp,btmp)*dn*jac_det*quad%wts(m)/(2*mu0*m_i*n**2) &
+        + self%dt*basis_vals(jr)*2.d0*k_boltz*dT*jac_det*quad%wts(m)/m_i &
+        + self%dt*basis_vals(jr)*2.d0*k_boltz*T*dn*jac_det*quad%wts(m)/(m_i*n)
       DO k=1,3
         res_loc(jr,k+1) = res_loc(jr, k+1) &
-          ! + basis_vals(jr)*self%dt*DOT_PRODUCT(vel,dvel(k,:))*jac_det*quad%wts(m) &
-          + nu*self%dt*DOT_PRODUCT(basis_grads(:,jr),dvel(k,:))*jac_det*quad%wts(m)/(m_i*n) !&
-          ! - nu*basis_vals(jr)*self%dt*DOT_PRODUCT(dn,dvel(k,:))*jac_det*quad%wts(m)/(m_i*n**2)
+          + basis_vals(jr)*self%dt*DOT_PRODUCT(vel,dvel(k,:))*jac_det*quad%wts(m) &
+          + nu*self%dt*DOT_PRODUCT(basis_grads(:,jr),dvel(k,:))*jac_det*quad%wts(m)/(m_i*n) &
+          - nu*basis_vals(jr)*self%dt*DOT_PRODUCT(dn,dvel(k,:))*jac_det*quad%wts(m)/(m_i*n**2)
       END DO
       !---Temperature
       res_loc(jr,5) = res_loc(jr, 5) &
@@ -666,36 +666,36 @@ DO i=1,mesh%nc
         END DO
         !--Momentum rows
         ! !--Momentum,density
-        ! DO l=1,3
-        !   jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
-        !   + self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*jac_det*quad%wts(m)/(m_i*n) &
-        !   + self%dt*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*jac_det*quad%wts(m)/(m_i*n) &
-        !   - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*jac_det*quad%wts(m)/(m_i*n**2.d0) &
-        !   - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*jac_det*quad%wts(m)/(m_i*n**2.d0) &
-        !   - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*jac_det*quad%wts(m)/(mu0*m_i*n**2.d0) &
-        !   - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*jac_det*quad%wts(m)/(mu0*m_i*n**2.d0) &
-        !   + self%dt*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*jac_det*quad%wts(m)/(mu0*m_i*n**3.d0) &
-        !   + self%dt*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*mu0*m_i*n**2.d0) &
-        !   + self%dt*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*mu0*m_i*n**2.d0) &
-        !   - self%dt*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(mu0*m_i*n**3.d0)
-        ! END DO 
-        ! DO k=1,3
-        !   jac_loc(k+1,1)%m(jr,jc) = jac_loc(k+1,1)%m(jr,jc) &
-        !   - self%dt*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(k, :))*jac_det*quad%wts(m)/(m_i*n**2) & !-- not sure if indexing on dvel is right here
-        !   - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(k, :))*jac_det*quad%wts(m)/(m_i*n**2) &
-        !   + self%dt*nu*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, dvel(k, :))*jac_det*quad%wts(m)/(m_i*n**3)
-        ! END DO
+        DO l=1,3
+          jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
+          + self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*jac_det*quad%wts(m)/(m_i*n) &
+          + self%dt*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*jac_det*quad%wts(m)/(m_i*n) &
+          - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*jac_det*quad%wts(m)/(m_i*n**2.d0) &
+          - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*jac_det*quad%wts(m)/(m_i*n**2.d0) &
+          - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*jac_det*quad%wts(m)/(mu0*m_i*n**2.d0) &
+          - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*jac_det*quad%wts(m)/(mu0*m_i*n**2.d0) &
+          + self%dt*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*jac_det*quad%wts(m)/(mu0*m_i*n**3.d0) &
+          + self%dt*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*mu0*m_i*n**2.d0) &
+          + self%dt*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(2.d0*mu0*m_i*n**2.d0) &
+          - self%dt*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*jac_det*quad%wts(m)/(mu0*m_i*n**3.d0)
+        END DO 
+        DO k=1,3
+          jac_loc(k+1,1)%m(jr,jc) = jac_loc(k+1,1)%m(jr,jc) &
+          - self%dt*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(k, :))*jac_det*quad%wts(m)/(m_i*n**2) & !-- not sure if indexing on dvel is right here
+          - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(k, :))*jac_det*quad%wts(m)/(m_i*n**2) &
+          + self%dt*nu*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, dvel(k, :))*jac_det*quad%wts(m)/(m_i*n**3)
+        END DO
         !--Momentum, velocity
         DO k=1,3
           jac_loc(k+1,k+1)%m(jr,jc)= jac_loc(k+1,k+1)%m(jr,jc) &
             + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
-            !   + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*jac_det*quad%wts(m) &
+            + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*jac_det*quad%wts(m) &
             + self%dt*nu*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))/(m_i*n) &
             - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(dn, basis_grads(:,jc))/(m_i*n**2)
-          ! DO l=1,3
-          !   jac_loc(k+1,l+1)%m(jr,jc)= jac_loc(k+1,l+1)%m(jr,jc) &
-          !   + self%dt*basis_vals(jr)*basis_vals(jc)*dvel(k, l)*jac_det*quad%wts(m) &
-          ! END DO
+          DO l=1,3
+            jac_loc(k+1,l+1)%m(jr,jc)= jac_loc(k+1,l+1)%m(jr,jc) &
+            + self%dt*basis_vals(jr)*basis_vals(jc)*dvel(k, l)*jac_det*quad%wts(m) 
+          END DO
         END DO
         ! --Momentum, temperature
         ! DO l=1,3
@@ -726,51 +726,51 @@ DO i=1,mesh%nc
         !   + self%dt*basis_vals(jc)*dn(l)*DOT_PRODUCT(tmp2, btmp)*jac_det*quad%wts(m)/(m_i*n**2*mu0) 
         ! END DO
         ! T, n
-        jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
-        - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*jac_det*quad%wts(m)/n & ! grad(delta_n) !works w/o this line
-        + self%dt*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)*jac_det*quad%wts(m)/(n**2) ! delta_n !works w/o this line
+        ! jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
+        ! - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*jac_det*quad%wts(m)/n & ! grad(delta_n) !works w/o this line
+        ! + self%dt*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)*jac_det*quad%wts(m)/(n**2) ! delta_n !works w/o this line
         ! T, vel
-        DO l=1,3
-          jac_loc(5, l+1)%m(jr,jc) = jac_loc(5, l+1)%m(jr, jc) &  
-          + basis_vals(jr) * self%dt*basis_vals(jc)*dT(l)*jac_det*quad%wts(m)/(gamma-1) & ! delta_u dot Delta_T
-          + basis_vals(jr) * self%dt*k_boltz*T*basis_grads(l, jc)*jac_det*quad%wts(m) ! div(delta u) = SUM(basis_grads)?
-        END DO
+        ! DO l=1,3
+        !   jac_loc(5, l+1)%m(jr,jc) = jac_loc(5, l+1)%m(jr, jc) &  
+        !   + basis_vals(jr) * self%dt*basis_vals(jc)*dT(l)*jac_det*quad%wts(m)/(gamma-1) & ! delta_u dot Delta_T
+        !   + basis_vals(jr) * self%dt*k_boltz*T*basis_grads(l, jc)*jac_det*quad%wts(m) ! div(delta u) = SUM(basis_grads)?
+        ! END DO
         ! T, T
-        jac_loc(5, 5)%m(jr,jc) = jac_loc(5,5)%m(jr, jc) &  
-        + basis_vals(jr) * basis_vals(jc)*jac_det*quad%wts(m)/(gamma-1) &! delta_T
-        + basis_vals(jr) * self%dt*DOT_PRODUCT(vel, basis_grads(:, jc))*jac_det*quad%wts(m)/(gamma-1) & ! nabla(dT)
-        + basis_vals(jr) * self%dt*k_boltz*basis_vals(jc)*div_vel*jac_det*quad%wts(m) & ! dT != nabla(dT)
-        + self%dt * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*jac_det*quad%wts(m) & ! dT_Chi
-        - self%dt*basis_vals(jr)*chi*DOT_PRODUCT(dn, basis_grads(:, jc))*jac_det*quad%wts(m)/n !works w/o this line
+        ! jac_loc(5, 5)%m(jr,jc) = jac_loc(5,5)%m(jr, jc) &  
+        ! + basis_vals(jr) * basis_vals(jc)*jac_det*quad%wts(m)/(gamma-1) &! delta_T
+        ! + basis_vals(jr) * self%dt*DOT_PRODUCT(vel, basis_grads(:, jc))*jac_det*quad%wts(m)/(gamma-1) & ! nabla(dT)
+        ! + basis_vals(jr) * self%dt*k_boltz*basis_vals(jc)*div_vel*jac_det*quad%wts(m) & ! dT != nabla(dT)
+        ! + self%dt * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*jac_det*quad%wts(m) & ! dT_Chi
+        ! - self%dt*basis_vals(jr)*chi*DOT_PRODUCT(dn, basis_grads(:, jc))*jac_det*quad%wts(m)/n !works w/o this line
         ! Induction
         ! Psi rows
-        DO l=1,3
-          jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
-          + basis_vals(jr)*self%dt*basis_vals(jc)*dpsi(l)*jac_det*quad%wts(m)
-        END DO
-        jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
-        + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
-        + self%dt*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*jac_det*quad%wts(m) &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu0
+        ! DO l=1,3
+        !   jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
+        !   + basis_vals(jr)*self%dt*basis_vals(jc)*dpsi(l)*jac_det*quad%wts(m)
+        ! END DO
+        ! jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
+        ! + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
+        ! + self%dt*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*jac_det*quad%wts(m) &
+        ! + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu0
         ! B_y rows
         ! by, vel
-        tmp2 = cross_product(dpsi,basis_grads(:,jc))
-        DO l=1,3
-          jac_loc(7, l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
-          - basis_vals(jr)*self%dt*tmp2(l)*jac_det*quad%wts(m) &
-          + basis_vals(jr)*self%dt*basis_vals(jc)*dby(l)*jac_det*quad%wts(m) &
-          + basis_vals(jr)*self%dt*by*basis_grads(l,jc)*jac_det*quad%wts(m) 
-        END DO
+        ! tmp2 = cross_product(dpsi,basis_grads(:,jc))
+        ! DO l=1,3
+        !   jac_loc(7, l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
+        !   - basis_vals(jr)*self%dt*tmp2(l)*jac_det*quad%wts(m) &
+        !   + basis_vals(jr)*self%dt*basis_vals(jc)*dby(l)*jac_det*quad%wts(m) &
+        !   + basis_vals(jr)*self%dt*by*basis_grads(l,jc)*jac_det*quad%wts(m) 
+        ! END DO
         !- by, psi
-        tmp2 = cross_product(basis_grads(:,jc),dvel(2,:))
-        jac_loc(7, 6)%m(jr,jc) = jac_loc(7, 6)%m(jr,jc) &
-        - basis_vals(jr)*self%dt*tmp2(2)*jac_det*quad%wts(m)
+        ! tmp2 = cross_product(basis_grads(:,jc),dvel(2,:))
+        ! jac_loc(7, 6)%m(jr,jc) = jac_loc(7, 6)%m(jr,jc) &
+        ! - basis_vals(jr)*self%dt*tmp2(2)*jac_det*quad%wts(m)
         !- by, by
-        jac_loc(7, 7)%m(jr,jc) = jac_loc(7, 7)%m(jr,jc) &
-        + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
-        + basis_vals(jr)*self%dt*DOT_PRODUCT(basis_grads(:,jc),vel)*jac_det*quad%wts(m) &
-        + basis_vals(jr)*self%dt*basis_vals(jc)*div_vel*jac_det*quad%wts(m) &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu0
+        ! jac_loc(7, 7)%m(jr,jc) = jac_loc(7, 7)%m(jr,jc) &
+        ! + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
+        ! + basis_vals(jr)*self%dt*DOT_PRODUCT(basis_grads(:,jc),vel)*jac_det*quad%wts(m) &
+        ! + basis_vals(jr)*self%dt*basis_vals(jc)*div_vel*jac_det*quad%wts(m) &
+        ! + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m)/mu0
       END DO
     END DO
   END DO
