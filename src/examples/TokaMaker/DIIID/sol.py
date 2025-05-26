@@ -6,7 +6,6 @@ from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk, read_mhdin, read_kfile
 import numpy as np
 # import matplotlib.pyplot as plt
 import sys
-import traceback
 import os
 import json
 from collections import OrderedDict
@@ -117,7 +116,8 @@ def load_mirnov(myrecon, probes_dict, machine_dict):
     mirnov_names = []
 
     for key, mag in magSensors322.items():
-        if probes_dict[key] == 0:
+        print(probes_dict[key])
+        if probes_dict[key][1] == 0:
             print("No data for probe {}".format(key))
             continue
         position, orientation = convert_Mirnov_coordinates(mag, machine_dict['AMP2'][key])
@@ -141,7 +141,7 @@ def load_flux_loop(mygs, myrecon, loops_dict):
     flux_names = []
 
     for key, fl in fluxLoops_onf.items():
-        if loops_dict[key] == 0:
+        if loops_dict[key][1] == 0:
             print("No data for Loop {}".format(key))
             continue
         flux_names.append(key)
@@ -152,7 +152,7 @@ def load_flux_loop(mygs, myrecon, loops_dict):
         myrecon.add_flux_loop(fl, psi_val, err=0.1*(max(psi_mean_1, abs(psi_val))))
 
     for key, fl in fluxLoops_vv.items():
-        if loops_dict[key] == 0:
+        if loops_dict[key][1] == 0:
             print("No data for Loop {}".format(key))
             continue
         flux_names.append(key)
@@ -207,7 +207,7 @@ def load_coil(mygs, e_coil_dict, f_coil_dict, machine_dict):
     # Pass regularization terms to TokaMaker
     mygs.set_coil_reg(reg_terms=regularization_terms)    
 
-def eq_reconstruct(mygs, myrecon, ffp_prof, probes_dict, loops_dict, e_coil_dict, f_coil_dict, machine_dict, eqdsk, probe_coords, loop_coords):
+def eq_reconstruct(mygs, myrecon, ffp_prof, eqdsk, f_SOL=True):
     Ip_target=abs(eqdsk['ip'])
     P0_target=eqdsk['pres'][0]
     mygs.set_targets(Ip=Ip_target, pax=P0_target)
@@ -219,13 +219,19 @@ def eq_reconstruct(mygs, myrecon, ffp_prof, probes_dict, loops_dict, e_coil_dict
     myrecon.settings.fitCoils = True
     myrecon.settings.pm = False
 
-    pprime = [1.0, 0.0, 0.0]
-    psi_pprime = [0.0, 1.0, 1.5]
-    psi_sample = np.linspace(0.0,1.5,150)
-    psi_prof = psi_sample.copy()
+    if f_SOL:
+        pprime = [1.0, 0.0, 0.0]
+        psi_pprime = [0.0, 1.0, 1.5]
+        psi_sample = np.linspace(0.0,1.5,150)
+        psi_prof = psi_sample.copy()
+    else:
+        pprime = [1.0, 0.0]
+        psi_pprime = [0.0, 1.0]
+        psi_sample = np.linspace(0.0,1.0,100)
+        psi_prof = psi_sample.copy()
     pp_prof = np.transpose(np.vstack((psi_prof,np.interp(psi_sample,psi_pprime,pprime)))).copy()
-    mygs.set_profiles(pp_prof={'type': 'linterp', 'y': pp_prof[:,1], 'x': psi_sample}, f_SOL=True)
-    mygs.set_profiles(ffp_prof={'type': 'linterp', 'y': ffp_prof[:,1], 'x': psi_sample},pp_prof={'type': 'linterp', 'y': pp_prof[:,1], 'x': psi_sample},f_SOL=True)
+    mygs.set_profiles(pp_prof={'type': 'linterp', 'y': pp_prof[:,1], 'x': psi_sample}, f_SOL=f_SOL)
+    mygs.set_profiles(ffp_prof={'type': 'linterp', 'y': ffp_prof[:,1], 'x': psi_sample},pp_prof={'type': 'linterp', 'y': pp_prof[:,1], 'x': psi_sample},f_SOL=f_SOL)
 
     # Initial equilibrium with very rough guess
     R0 = eqdsk['rcentr']
@@ -264,5 +270,6 @@ def eq_reconstruct(mygs, myrecon, ffp_prof, probes_dict, loops_dict, e_coil_dict
         for line in fit:
             chi = float(line.split()[2])
             chi_sq += chi ** 2
+    os.remove('fit.out')
 
     return chi_sq
