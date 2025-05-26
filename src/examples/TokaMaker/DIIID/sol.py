@@ -116,7 +116,6 @@ def load_mirnov(myrecon, probes_dict, machine_dict):
     mirnov_names = []
 
     for key, mag in magSensors322.items():
-        print(probes_dict[key])
         if probes_dict[key][1] == 0:
             print("No data for probe {}".format(key))
             continue
@@ -242,8 +241,7 @@ def eq_reconstruct(mygs, myrecon, ffp_prof, eqdsk, f_SOL=True):
 
     err_flag = mygs.init_psi(R0, Z0, a, kappa, delta)
     if err_flag:
-        print("Initialzie PSI Failed.")
-        sys.exit(1)
+        raise(Exception("Initialize PSI Failed."))
 
     print("Initial Solve...")
     mygs.solve()
