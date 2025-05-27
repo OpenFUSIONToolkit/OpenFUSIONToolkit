@@ -19,20 +19,20 @@
 &xmhd_options
   order=2
   n0=1E19,
-  psi0=1,
+  psi0=1E-10,
   velx0=1,
   vely0=1,
   velz0=1,
   t0=1,
-  by0=1,
+  by0=1E-7,
   chi=1.E-6
   eta=1.E-6
-  nu=1.E-7
+  nu=1.E-9
   gamma=2.0
-  D_diff=1.E-6
-  dt=1.E-3
-  nsteps=50
-  rst_freq=1
+  D_diff=1.E-8
+  dt=1.E-4
+  nsteps=500
+  rst_freq=10
   use_mfnk=F
-  pm=F
+  pm=T
 /
