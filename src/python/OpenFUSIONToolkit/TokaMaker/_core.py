@@ -1710,7 +1710,7 @@ class TokaMaker():
         currents = self.get_delstar_curr(psi)
         curr_densities = numpy.zeros(self.nc)
 
-        max_cd = 5.0E6 # TODO: remove hardcoded value
+        max_cd = 2.5E6 # TODO: remove hardcoded value
         plasma_area = 0.0
 
         for i in range(self.nc):
