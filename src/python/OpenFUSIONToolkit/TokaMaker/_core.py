@@ -1702,9 +1702,6 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
     
-    def plasma_area(self):
-        pass
-
     def plot_current_density(self, fig, ax):
         psi = self.get_psi(normalized=True)
         currents = self.get_delstar_curr(psi)
