@@ -3191,6 +3191,10 @@ do j=1,self%fe_rep%mesh%nc
       DO l=1,self%fe_rep%nce
         psitmp=psitmp+vcache(l)*rop(l)
       END DO
+      IF(psitmp > self%plasma_bounds(1))THEN
+        real(8) :: psidiff = psitmp - self%plasma_bounds(1)
+        psitmp = psitmp - psidiff
+      END IF
       IF(self%mode==0)THEN
         ffp(1:2)=((self%alam**2)*self%I%f(psitmp)+self%alam*self%I%f_offset)*self%I%fp(psitmp)
         itor_alam = itor_alam + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
