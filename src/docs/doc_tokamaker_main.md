@@ -39,6 +39,8 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 
 ### Equilibrium Reconstruction
  - \subpage doc_tMaker_ITER_ex4
+ - \subpage doc_tMaker_DIIID_ex3
+ - \subpage doc_tMaker_DIIID_ex4
 
 ### Other workflows/emaples
  - \subpage doc_tMaker_ITER_ex5
