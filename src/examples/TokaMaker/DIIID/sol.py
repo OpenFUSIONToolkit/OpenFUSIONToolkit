@@ -226,8 +226,8 @@ def eq_reconstruct(mygs, myrecon, ffp_prof, eqdsk, f_SOL=True):
         psi_sample = np.linspace(0.0,1.0,100)
         psi_prof = psi_sample.copy()
     pp_prof = np.transpose(np.vstack((psi_prof,np.interp(psi_sample,psi_pprime,pprime)))).copy()
-    mygs.set_profiles(pp_prof={'type': 'linterp', 'y': pp_prof[:,1], 'x': psi_sample}, f_SOL=False)
-    mygs.set_profiles(ffp_prof={'type': 'linterp', 'y': ffp_prof[:,1], 'x': psi_sample},pp_prof={'type': 'linterp', 'y': pp_prof[:,1], 'x': psi_sample},f_SOL=False)
+    mygs.set_profiles(pp_prof={'type': 'linterp', 'y': pp_prof[:,1], 'x': psi_sample}, f_SOL=f_SOL)
+    mygs.set_profiles(ffp_prof={'type': 'linterp', 'y': ffp_prof[:,1], 'x': psi_sample},pp_prof={'type': 'linterp', 'y': pp_prof[:,1], 'x': psi_sample},f_SOL=f_SOL)
 
     # Initial equilibrium with very rough guess
     R0 = eqdsk['rcentr']
