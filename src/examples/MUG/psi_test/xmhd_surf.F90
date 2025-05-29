@@ -172,42 +172,46 @@ CONTAINS
 SUBROUTINE n_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = n0*(1.d0)
+val = n0*EXP(-((pt(1)-0.5d0)**2+pt(2)**2)/(0.9))
 END SUBROUTINE n_init
 !
 SUBROUTINE velx_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = -velx0*(pt(2)/sqrt((pt(1)-0.5d0)**2+pt(2)**2))
+val = 0.d0
+! val = -velx0*(pt(2)/sqrt((pt(1)-0.5d0)**2+pt(2)**2))
 END SUBROUTINE velx_init
 !
 SUBROUTINE vely_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = vely0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
+! val = vely0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
+val = 0.d0
 END SUBROUTINE vely_init
 !
 SUBROUTINE velz_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = velz0*((pt(1)-0.5d0)/sqrt((pt(1)-0.5d0)**2+pt(2)**2))
+! val = velz0*((pt(1)-0.5d0)/sqrt((pt(1)-0.5d0)**2+pt(2)**2))
+val = 0.d0
 END SUBROUTINE velz_init
 !
 SUBROUTINE t_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = t0*(1.d0)
+val = t0*EXP(-((pt(1)-0.5d0)**2+pt(2)**2)/(0.9))
 END SUBROUTINE t_init  
 !
 SUBROUTINE psi_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = psi0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
+! val = psi0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
+val = 0.d0
 END SUBROUTINE psi_init
 !
 SUBROUTINE by_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = by0*(1.d0)
+val = 0.d0
 END SUBROUTINE by_init
 END PROGRAM xmhd_circle
