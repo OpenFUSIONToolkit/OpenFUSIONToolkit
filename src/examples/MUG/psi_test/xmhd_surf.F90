@@ -39,11 +39,12 @@ REAL(r8) :: eta=1.d0 !< Needs docs
 REAL(r8) :: nu=1.d0 !< Needs docs
 REAL(r8) :: gamma=1.d0
 REAL(r8) :: D_diff=1.d0
+REAL(r8) :: den_scale=1.d19
 REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
 NAMELIST/xmhd_options/order,chi,eta,nu,gamma, D_diff, &
-dt,nsteps,rst_freq,use_mfnk,pm, n0, psi0, velx0,vely0,velz0, t0, by0
+dt,nsteps,rst_freq,use_mfnk,pm, n0, psi0, velx0,vely0,velz0, t0, by0, den_scale
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -72,71 +73,80 @@ CALL ML_oft_blagrange%vec_create(u)
 CALL ML_oft_blagrange%vec_create(v)
 
 !---Project n initial condition onto scalar Lagrange basis
-field_init%func=>n_init
+field_init%func=>cos_init
 field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 ! CALL blag_zerob%apply(u)
+CALL u%scale(n0)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'n0')
+vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
 
 !---Project v_x initial condition onto scalar Lagrange basis
-field_init%func=>velx_init
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
+CALL u%scale(velx0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
 CALL mhd_sim%u%restore_local(vec_vals,2)
 
 !---Project v_y initial condition onto scalar Lagrange basis
-field_init%func=>vely_init
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
+CALL u%scale(vely0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vy0')
 CALL mhd_sim%u%restore_local(vec_vals,3)
 
 !---Project v_z initial condition onto scalar Lagrange basis
-field_init%func=>velz_init
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
+CALL u%scale(velz0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
 CALL mhd_sim%u%restore_local(vec_vals,4)
 
 !---Project T initial condition onto scalar Lagrange basis
-field_init%func=>T_init
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
+CALL u%scale(T0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'T0')
 CALL mhd_sim%u%restore_local(vec_vals,5)
 
 !---Project psi initial condition onto scalar Lagrange basis
-field_init%func=>psi_init
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL blag_zerob%apply(u)
+! CALL blag_zerob%apply(u)
+CALL u%scale(psi0)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'psi0')
 CALL mhd_sim%u%restore_local(vec_vals,6)
+
 !---Project by initial condition onto scalar Lagrange basis
-field_init%func=>by_init
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL blag_zerob%apply(u)
+CALL u%scale(by0)
+! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'by0')
 CALL mhd_sim%u%restore_local(vec_vals,7)
@@ -169,49 +179,15 @@ CALL mhd_sim%run_simulation()
 CALL oft_finalize
 CONTAINS
 !
-SUBROUTINE n_init(pt,val)
+SUBROUTINE cos_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = n0*EXP(-((pt(1)-0.5d0)**2+pt(2)**2)/(0.9))
-END SUBROUTINE n_init
+val = 1.0+COS(pi*pt(1)/2.d0)/1000
+END SUBROUTINE cos_init
 !
-SUBROUTINE velx_init(pt,val)
+SUBROUTINE const_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = 0.d0
-! val = -velx0*(pt(2)/sqrt((pt(1)-0.5d0)**2+pt(2)**2))
-END SUBROUTINE velx_init
-!
-SUBROUTINE vely_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-! val = vely0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
-val = 0.d0
-END SUBROUTINE vely_init
-!
-SUBROUTINE velz_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-! val = velz0*((pt(1)-0.5d0)/sqrt((pt(1)-0.5d0)**2+pt(2)**2))
-val = 0.d0
-END SUBROUTINE velz_init
-!
-SUBROUTINE t_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = t0*EXP(-((pt(1)-0.5d0)**2+pt(2)**2)/(0.9))
-END SUBROUTINE t_init  
-!
-SUBROUTINE psi_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-! val = psi0*COS(pi*sqrt((pt(1)-0.5d0)**2+pt(2)**2)/2.d0)
-val = 0.d0
-END SUBROUTINE psi_init
-!
-SUBROUTINE by_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = 0.d0
-END SUBROUTINE by_init
+val = 1.0
+END SUBROUTINE const_init
 END PROGRAM xmhd_circle
