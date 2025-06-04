@@ -241,6 +241,8 @@ class TokaMaker():
             if reg is None:
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
             else:
+                if reg.min() <= 0:
+                    raise ValueError('Invalid "reg" array, values must be >= 0')
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
             oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         else:
