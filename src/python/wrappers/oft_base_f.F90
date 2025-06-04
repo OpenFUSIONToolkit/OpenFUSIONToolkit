@@ -17,6 +17,8 @@ USE oft_base
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
+USE fem_base, ONLY: oft_fem_type, oft_bfem_type
+USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp
 IMPLICIT NONE
 #include "local.h"
 CONTAINS
@@ -172,4 +174,75 @@ CALL multigrid_construct(mg_mesh)
 nregs=mg_mesh%mesh%nreg
 mesh_ptr=C_LOC(mg_mesh)
 END SUBROUTINE oft_setup_vmesh
+!---------------------------------------------------------------------------------
+!> Create an interpolation object for tokamaker fields
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_get_field_eval(tMaker_ptr,vals,imode,int_obj,error_str) BIND(C,NAME="oft_get_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
+TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+TYPE(oft_lag_brinterp), POINTER :: br_obj
+TYPE(oft_lag_bginterp), POINTER :: bg_obj
+SELECT CASE(imode)
+CASE(21)
+    ALLOCATE(br_obj)
+    br_obj%u
+    CALL c_f_pointer(vals, vals_tmp, [bfe_obj%n])
+    CALL br_obj%setup(fe_rep)
+    int_obj=C_LOC(br_obj)
+CASE(22)
+    ALLOCATE(bg_obj)
+    bg_obj%u
+    CALL bg_obj%setup(fe_rep)
+    int_obj=C_LOC(bg_obj)
+CASE DEFAULT
+END SELECT
+END SUBROUTINE oft_get_field_eval
+!---------------------------------------------------------------------------------
+!> Evaluate a TokaMaker field with an interpolation object created by
+!! \ref tokamaker_f::oft_get_field_eval
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_apply_field_eval(tMaker_ptr,int_obj,int_type,pt,fbary_tol,cell,dim,field) BIND(C,NAME="oft_apply_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to interpolation object
+INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Field type (negative to destroy)
+REAL(c_double), INTENT(in) :: pt(3) !< Location for evaluation [R,Z,0]
+REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Tolerance for physical to logical mapping
+INTEGER(c_int), INTENT(inout) :: cell !< Cell containing `pt` (starting guess on input)
+INTEGER(c_int), VALUE, INTENT(in) :: dim !< Dimension of field
+REAL(c_double), INTENT(out) :: field(dim) !< Field at `pt`
+TYPE(oft_lag_brinterp), POINTER :: br_obj
+TYPE(oft_lag_bginterp), POINTER :: bg_obj
+REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+IF(int_type<0)THEN
+    SELECT CASE(ABS(int_type))
+    CASE(21)
+        CALL c_f_pointer(int_obj, br_obj)
+        CALL br_obj%delete
+    CASE(22)
+        CALL c_f_pointer(int_obj, bg_obj)
+        CALL bg_obj%delete
+    END SELECT
+    RETURN
+END IF
+call bmesh_findcell(tMaker_obj%gs%mesh,cell,pt,f)
+IF(cell==0)RETURN
+fmin=MINVAL(f); fmax=MAXVAL(f)
+IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
+  cell=-ABS(cell)
+  RETURN
+END IF
+CALL tMaker_obj%gs%mesh%jacobian(cell,f,goptmp,vol)
+SELECT CASE(int_type)
+CASE(21)
+    CALL c_f_pointer(int_obj, br_obj)
+    CALL br_obj%interp(cell,f,goptmp,field)
+CASE(22)
+    CALL c_f_pointer(int_obj, bg_obj)
+    CALL bg_obj%interp(cell,f,goptmp,field)
+END SELECT
+END SUBROUTINE oft_apply_field_eval
 END MODULE oft_base_f

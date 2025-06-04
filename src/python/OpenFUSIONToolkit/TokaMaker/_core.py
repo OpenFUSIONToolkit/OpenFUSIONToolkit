@@ -1004,6 +1004,18 @@ class TokaMaker():
             target_dict['V0'] = self._V0_target.value
         return target_dict
 
+    def get_bfield(self):
+        r'''! Get magnetic field on node points
+
+        @result \f$ B \f$
+        '''
+        Bfield = numpy.zeros((3,self.np),dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_bfield(self._tMaker_ptr,Bfield,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        return Bfield
+
     def get_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
  
@@ -1092,21 +1104,26 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
     
-    def get_field_eval(self,field_type):
+    def get_field_eval(self,field_type,field_vals=None):
         r'''! Create field interpolator for vector potential
 
         @param field_type Field to interpolate, must be one of ("B", "psi", "F", "P", "dPSI", "dBr", "dBt", or "dBz")
         @result Field interpolation object
         '''
         #
-        mode_map = {'B': 1, 'PSI': 2, 'F': 3, 'P': 4, 'DPSI': 5, 'DBR': 6, 'DBT': 7, 'DBZ': 8}
-        imode = mode_map.get(field_type.upper())
-        if imode is None:
-            raise ValueError('Invalid field type ("B", "psi", "F", "P", "dPSI", "dBr", "dBt", "dBz")')
+        if field_vals is None:
+            mode_map = {'B': 1, 'PSI': 2, 'F': 3, 'P': 4, 'DPSI': 5, 'DBR': 6, 'DBT': 7, 'DBZ': 8}
+            imode = mode_map.get(field_type.upper())
+            if imode is None:
+                raise ValueError('Invalid field type ("B", "psi", "F", "P", "dPSI", "dBr", "dBt", "dBz")')
+        else:
+            if field_vals.shape[0] != self.np:
+                raise IndexError('Incorrect shape of "field_vals", should be [np]')
+            field_vals = numpy.ascontiguousarray(field_vals, dtype=numpy.float64)
         #
         int_obj = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_field_eval(self._tMaker_ptr,imode,ctypes.byref(int_obj),error_string)
+        tokamaker_get_field_eval(self._tMaker_ptr,imode,field_vals,ctypes.byref(int_obj),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         field_dim = 1

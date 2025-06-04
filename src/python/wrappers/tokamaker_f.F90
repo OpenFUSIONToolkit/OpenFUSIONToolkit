@@ -607,6 +607,36 @@ END SUBROUTINE tokamaker_get_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_bfield(tMaker_ptr,b_vals,error_str) BIND(C,NAME="tokamaker_get_bfield")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: b_vals !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: bmat_tmp
+CLASS(oft_vector), POINTER :: tmp1,tmp2,tmp3
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+!
+CALL tMaker_obj%gs%psi%new(tmp1)
+CALL tMaker_obj%gs%psi%new(tmp2)
+CALL tMaker_obj%gs%psi%new(tmp3)
+CALL gs_project_b(tMaker_obj%gs,tmp1,tmp2,tmp3)
+!
+CALL c_f_pointer(b_vals, bmat_tmp, [tMaker_obj%gs%psi%n,3])
+vals_tmp=>bmat_tmp(:,1)
+CALL tmp1%get_local(vals_tmp)
+CALL tmp1%delete()
+vals_tmp=>bmat_tmp(:,2)
+CALL tmp2%get_local(vals_tmp)
+CALL tmp2%delete()
+vals_tmp=>bmat_tmp(:,3)
+CALL tmp3%get_local(vals_tmp)
+CALL tmp3%delete()
+DEALLOCATE(tmp1,tmp2,tmp3)
+END SUBROUTINE tokamaker_get_bfield
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_dels_curr(tMaker_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_get_dels_curr")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
