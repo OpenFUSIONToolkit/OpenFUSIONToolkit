@@ -638,7 +638,7 @@ END IF
 tmp=((rbounds(1,2)+rbounds(1,1))/2.d0-(zbounds(1,2)+zbounds(1,1))/2.d0)*2.d0/(rbounds(1,2)-rbounds(1,1))
 WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
 WRITE(*,'(2A,F8.3)')oft_indent,'Plasma Volume [m^3]     =',vol*2.d0*pi
-WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
+IF(.NOT.self%dipole_mode)WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
 WRITE(*,'(2A,ES11.3)')oft_indent,'Peak Pressure [Pa]      = ',pmax/mu0
 WRITE(*,'(2A,ES11.3)')oft_indent,'Stored Energy [J]       = ',pvol*2.d0*pi/mu0*3.d0/2.d0
 WRITE(*,'(2A,F8.3)')  oft_indent,'<Beta_pol> [%]          = ',1.d2*beta(1)
@@ -878,11 +878,19 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
-  IF( psi_surf(1) < x1)EXIT
+  IF(gseq%dipole_mode)THEN
+    IF(psi_surf(1)>x1)EXIT
+  ELSE
+    IF(psi_surf(1)<x1)EXIT
+  END IF
   rmax=pt(1)
 END DO
 pt_last=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
@@ -1117,11 +1125,19 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( psi_tmp(1) < x1)EXIT
+  IF(gseq%dipole_mode)THEN
+    IF(psi_tmp(1)>x1)EXIT
+  ELSE
+    IF(psi_tmp(1)<x1)EXIT
+  END IF
   rmax=pt(1)
 END DO
 pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]

@@ -40,7 +40,10 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 ### Equilibrium Reconstruction
  - \subpage doc_tMaker_ITER_ex4
 
-### Other workflows/emaples
+### Dipole Equilibria
+ - \subpage doc_tMaker_dipole_ex2
+
+### Other workflows/examples
  - \subpage doc_tMaker_ITER_ex5
 
 \section doc_gs_main_mesh Building meshes using gs_Domain
@@ -70,3 +73,4 @@ The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.mesh
  - \subpage doc_tMaker_DIIID_ex1
  - \subpage doc_tMaker_CUTE_ex1
  - \subpage doc_tMaker_LTX_ex1
+ - \subpage doc_tMaker_dipole_ex1
