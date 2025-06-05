@@ -1486,8 +1486,15 @@ class TokaMaker():
                 mask = numpy.logical_or(mask,mask_tmp)
         return mask, mesh_currents
     
-    def get_strike_points(self):
-        lim = self.lim_contours[0] # Assume one limiter
+    def get_strike_points(self, lim=None):
+        x_pts, is_div = self.get_xpoints()
+
+        if not is_div:
+            return [self.lim_point]
+
+        if lim is None:
+            lim = self.lim_contours[0] # Assume one limiter
+
         lim = [numpy.array(pt) for pt in lim]
 
         psi_eval = self.get_field_eval('PSI')
@@ -1509,6 +1516,8 @@ class TokaMaker():
                 strike_pts.append(strike_pt)
             prev_pt = pt
             prev_psi = psi
+        
+        strike_pts = [sp for sp in strike_pts if numpy.dot(sp - self.o_point, x_pts[0] - self.o_point) > 0]
         return strike_pts
 
     def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
