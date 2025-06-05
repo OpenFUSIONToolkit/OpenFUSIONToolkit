@@ -3122,7 +3122,7 @@ CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `a
 CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `pnorm`)
 REAL(8), INTENT(out) :: itor_alam,itor_press,estore
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
+real(8) :: psitmp,psidiff,goptmp(3,3),det,pt(3),v,ffp(3),t1
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
 integer(4) :: j,m,l
 integer(4), allocatable :: j_lag(:)
@@ -3192,8 +3192,8 @@ do j=1,self%fe_rep%mesh%nc
         psitmp=psitmp+vcache(l)*rop(l)
       END DO
       IF(psitmp > self%plasma_bounds(1))THEN
-        real(8) :: psidiff = psitmp - self%plasma_bounds(1)
-        psitmp = psitmp - psidiff
+        psidiff = psitmp - self%plasma_bounds(1)
+        psitmp = self%plasma_bounds(1) - psidiff
       END IF
       IF(self%mode==0)THEN
         ffp(1:2)=((self%alam**2)*self%I%f(psitmp)+self%alam*self%I%f_offset)*self%I%fp(psitmp)
