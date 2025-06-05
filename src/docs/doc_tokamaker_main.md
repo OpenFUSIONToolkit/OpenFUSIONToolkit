@@ -31,7 +31,6 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 ### Free Boundary Equilibria
  - \subpage doc_tMaker_ITER_ex2
  - \subpage doc_tMaker_HBT_ex2
- - \subpage doc_tMaker_ITER_ex2
  - \subpage doc_tMaker_DIIID_ex2
  - \subpage doc_tMaker_CUTE_ex2
  - \subpage doc_tMaker_LTX_ex2
