@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''! Python interface for TokaMaker Grad-Shafranov functionality
+'''! Core definitions for TokaMaker Grad-Shafranov functionality
 
 @authors Chris Hansen
 @date May 2023

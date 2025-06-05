@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''! Python interface for ThinCurr thin-wall E-M functionality
+'''! Core definitions for ThinCurr thin-wall E-M functionality
 
 @authors Chris Hansen
 @date March 2024
