@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
 
-class sensor_interface():
+class torus_fourier_sensor():
     '''! Interface that sets up normal magnetic field probes at a desired surface, Fourier analyze the signals, and output them for GPEC'''
 
     def convert_to_polar(self):
