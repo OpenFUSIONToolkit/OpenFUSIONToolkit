@@ -250,8 +250,8 @@ class torus_fourier_sensor():
         B_n_ifft = self.ifft2(B_n_fft)
         print(f'The largest difference between the original and reconstructed sensor signals is {np.linalg.norm(abs(B_n_ifft.real-self.get_B_mesh(t).real),np.inf)}')
         phi_grid, theta_grid = np.meshgrid(np.linspace(0,2*np.pi,self.nphi,endpoint=False),self.theta_list)
-        plt.figure(figsize=(10,6))
-        plt.title(fr"Reconstructing $B_{{norm}}$ from Fourier Transform on DCON surface with $R_0$ = {self.major_radius:.3f} at t = {t}")
+        plt.figure(figsize=(10,6),constrained_layout=True)
+        plt.title(fr"Reconstruction from the Fourier Transform on surface with $R_0$ = {self.major_radius:.3f} at t = {t}")
         plt.xlabel(r"$\phi$ (Toroidal Angle)")
         plt.ylabel(r"$\theta$ (Poloidal Angle)")
         plt.contourf(phi_grid,theta_grid,np.flip(B_n_ifft.real,axis=1),levels=50,vmin=B_n_ifft.real.min(),vmax=B_n_ifft.real.max(),cmap="viridis")
@@ -373,7 +373,7 @@ class torus_fourier_sensor():
         else:
             phi_grid, theta_grid = np.meshgrid(np.linspace(0,2*np.pi,self.nphi,endpoint=False),self.theta_list)
             B_n = self.get_B_mesh(t)
-            plt.figure(figsize=(10,6))
+            plt.figure(figsize=(10,6),constrained_layout=True)
             plt.title(rf"Magnetic Field on surfaces of toroidal planes with $R_0$ = {self.major_radius:.3f} at t = {t}")
             plt.xlabel(r"$\phi$ (radians)")
             plt.ylabel(r"$\theta$ (radians)")
@@ -401,14 +401,14 @@ class torus_fourier_sensor():
             lc.set_array(z[:-1])
             lc.set_linewidth(10)
 
-            _, ax = plt.subplots()
+            _, ax = plt.subplots(constrained_layout=True)
             ax.add_collection(lc)
             ax.autoscale()
             plt.colorbar(lc,ax=ax,label='Radial Magnetic Field (Tesla)')
             plt.plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]),color='black',linewidth=0.8,zorder=2)
             plt.xlabel('R')
             plt.ylabel('Z')
-            plt.title(rf"Magnetic Field on the surface @ $\phi$ = {angle:.4f} with $R_0$ = {self.major_radius:.3f} at t = {t}")
+            plt.title(rf"Magnetic Field @ $\phi$ = {angle:.4f} at t = {t}")
             plt.gca().set_aspect('equal')
             plt.show()
 
@@ -435,7 +435,7 @@ class torus_fourier_sensor():
             if len(n_modes)%2==0:
                 toroidal_harmonics[:][len(n_modes)//2] /= 2.0
 
-            plt.figure(figsize=(8,6))
+            plt.figure(figsize=(8,6),constrained_layout=True)
             for harmonic in harmonics:
                 n_indice = np.where((n_modes == harmonic))[0]
                 toroidal_mode = toroidal_harmonics[:,n_indice]
@@ -455,7 +455,7 @@ class torus_fourier_sensor():
             if len(m_modes)%2==0:
                 toroidal_harmonics[len(m_modes)//2][:] /= 2.0
 
-            plt.figure(figsize=(8,6))
+            plt.figure(figsize=(8,6),constrained_layout=True)
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
             for harmonic in harmonics:
                 m_indice = np.where((m_modes == harmonic))[0]
@@ -493,7 +493,7 @@ class torus_fourier_sensor():
             if len(n_modes)%2==0:
                 toroidal_harmonics[:,len(n_modes)//2] /= 2.0
 
-            plt.figure(figsize=(8,6))
+            plt.figure(figsize=(8,6),constrained_layout=True)
             for harmonic in harmonics:
                 n_indice = np.where((n_modes == harmonic))[0]
                 toroidal_mode = toroidal_harmonics[:,n_indice]
@@ -513,7 +513,7 @@ class torus_fourier_sensor():
             if len(m_modes)%2==0:
                 toroidal_harmonics[len(m_modes)//2,:] /= 2.0
 
-            plt.figure(figsize=(8,6))
+            plt.figure(figsize=(8,6),constrained_layout=True)
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
             for harmonic in harmonics:
                 m_indice = np.where((m_modes == harmonic))[0]
@@ -559,11 +559,12 @@ class torus_fourier_sensor():
                 n_indices = np.where((n_modes_sorted == n))[0]
                 mode_amplitudes[i][t] = B_n_sorted[m_indices,n_indices].real
                 i+=1
-        plt.figure(figsize=(8,6))
+        plt.figure(figsize=(8,6),constrained_layout=True)
         for j in range(mode_amplitudes.shape[0]):
             plt.plot(t_array*dt*1e3,mode_amplitudes[j],label=f'{m_list[j]}/{n_list[j]}')
         plt.ylabel('Mode amplitudes (Tesla)')
         plt.xlabel('Time (ms)')
+        plt.title(r'Amplitude of $m/n$ modes in time')
         plt.legend()
 
     def field_fourier_amplitude_contour(self,m_min,m_max,n_min,n_max,t,d_phi=None):
@@ -592,7 +593,7 @@ class torus_fourier_sensor():
 
         n_grid_fft, m_grid_fft = np.meshgrid(n_modes_sorted[n_indices[0]:n_indices[1]+1],m_modes_sorted[m_indices[0]:m_indices[1]+1])
 
-        plt.figure(figsize=(10,6))
+        plt.figure(figsize=(10,6),constrained_layout=True)
         plt.title(f"Real Fourier Amplitude of the Normal Magnetic Field at the Surface")
         plt.ylabel(r"$n$")
         plt.xlabel(r"$m$")
@@ -628,7 +629,7 @@ class torus_fourier_sensor():
             m_range = np.where((m_modes_sorted == mode_min) | (m_modes_sorted == mode_max))[0]
             mode_idx = [np.where(n_modes_sorted == harmonic)[0][0] for harmonic in harmonics]
 
-            plt.figure(figsize=(20,10),dpi=200)
+            plt.figure(figsize=(20,10),dpi=200,constrained_layout=True)
             cmap = plt.get_cmap('tab10')
             for i, idx in enumerate(mode_idx):
                 color = cmap(i/len(mode_idx))
@@ -645,7 +646,7 @@ class torus_fourier_sensor():
             n_range = np.where((n_modes_sorted == mode_min) | (n_modes_sorted == mode_max))[0]
             mode_idx = [np.where(m_modes_sorted == harmonic)[0][0] for harmonic in harmonics]
 
-            plt.figure(figsize=(20,10),dpi=200)
+            plt.figure(figsize=(20,10),dpi=200,constrained_layout=True)
             cmap = plt.get_cmap('tab10')
             for i, idx in enumerate(mode_idx):
                 color = cmap(i/len(mode_idx))
@@ -679,7 +680,7 @@ class torus_fourier_sensor():
             raise ValueError('The d_phi input should have the same dimension as the radial/axial positions')
         if toroidal_harmonics:
             mode_idx = [np.where(n_modes == harmonic)[0][0] for harmonic in harmonics]
-            plt.figure(figsize=(10,6))
+            plt.figure(figsize=(10,6),constrained_layout=True)
             for i, idx in enumerate(mode_idx):
                 plt.plot(self.theta_list,B_n_fft[:,idx].real,label=f"n={harmonics[i]}, real")
                 plt.plot(self.theta_list,B_n_fft[:,idx].imag,linestyle='--',label=f"n={harmonics[i]}, imag")
@@ -690,7 +691,7 @@ class torus_fourier_sensor():
             plt.show()
         else:
             mode_idx = [np.where(m_modes == harmonic)[0][0] for harmonic in harmonics]
-            plt.figure(figsize=(10,6))
+            plt.figure(figsize=(10,6),constrained_layout=True)
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
             for i, idx in enumerate(mode_idx):
                 if self.helicity == -1:
@@ -714,7 +715,7 @@ class torus_fourier_sensor():
 
         B_n = self.get_B_mesh(t)
         if theta:
-            plt.figure(figsize=(10,6))
+            plt.figure(figsize=(10,6),constrained_layout=True)
             plt.plot(self.theta_list/2/np.pi, B_n[:,0])
             plt.title(rf"Magnetic Field on surface @ $\phi$=0 at t = {t}")
             plt.xlabel(r"$\theta$ (radians)")
@@ -722,7 +723,7 @@ class torus_fourier_sensor():
             plt.legend()
             plt.show()
         else:
-            plt.figure(figsize=(10,6))
+            plt.figure(figsize=(10,6),constrained_layout=True)
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
             plt.plot(phi_list/2/np.pi, np.flip(B_n[0,:],axis=1))
             plt.title(rf"Magnetic Field on surface @ $\theta$=0 at t = {t}")
