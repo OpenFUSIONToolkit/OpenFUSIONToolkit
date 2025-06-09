@@ -11,6 +11,7 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !
 USE oft_blag_operators, ONLY: oft_blag_zerob, oft_blag_getmop, oft_blag_project
 USE oft_scalar_inits, ONLY: poss_scalar_bfield
+USE mhd_utils, ONLY: elec_charge, proton_mass
 USE xmhd_2d
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
@@ -40,7 +41,13 @@ REAL(r8) :: nu=1.d0 !< Needs docs
 REAL(r8) :: gamma=1.d0
 REAL(r8) :: D_diff=1.d0
 REAL(r8) :: den_scale=1.d19
+REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propogation
+REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
+REAL(r8) :: lam = 2.d0 !< Wavelength
+REAL(r8) :: v_sound = 2.d4
+REAL(r8) :: delta = 1.d-4 !< Relative size of perturbation (<<1)
 REAL(r8) :: dt = 1.d-3
+REAL(r8) :: v_delta
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
 NAMELIST/xmhd_options/order,chi,eta,nu,gamma, D_diff, &
@@ -72,8 +79,12 @@ CALL create_diag_pre(minv%pre) ! Setup Preconditioner
 CALL ML_oft_blagrange%vec_create(u)
 CALL ML_oft_blagrange%vec_create(v)
 
+!---Set constant values
+t0=(v_sound**2)*3.d0*proton_mass/(5.d0*elec_charge)
+v_delta=t0*elec_charge/(proton_mass*v_sound)
+
 !---Project n initial condition onto scalar Lagrange basis
-field_init%func=>cos_init
+field_init%func=>dens_sound
 field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -86,43 +97,43 @@ vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
 
 !---Project v_x initial condition onto scalar Lagrange basis
-field_init%func=>cos_init
+field_init%func=>velx_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL u%scale(velx0)
+CALL u%scale(v_delta)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
 CALL mhd_sim%u%restore_local(vec_vals,2)
 
 !---Project v_y initial condition onto scalar Lagrange basis
-field_init%func=>const_init
+field_init%func=>vely_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL u%scale(vely0)
+CALL u%scale(v_delta)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vy0')
 CALL mhd_sim%u%restore_local(vec_vals,3)
 
 !---Project v_z initial condition onto scalar Lagrange basis
-field_init%func=>const_init
+field_init%func=>velz_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL u%scale(velz0)
+CALL u%scale(v_delta)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
 CALL mhd_sim%u%restore_local(vec_vals,4)
 
 !---Project T initial condition onto scalar Lagrange basis
-field_init%func=>const_init
+field_init%func=>temp_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL u%scale(T0)
+CALL u%scale(t0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'T0')
@@ -189,4 +200,34 @@ REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
 val = 1.0
 END SUBROUTINE const_init
+
+SUBROUTINE dens_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(3.d0/5.d0)
+END SUBROUTINE dens_sound
+
+SUBROUTINE velx_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = delta*k_dir(1)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+END SUBROUTINE velx_sound
+
+SUBROUTINE vely_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = delta*k_dir(2)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+END SUBROUTINE vely_sound
+
+SUBROUTINE velz_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = delta*k_dir(3)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+END SUBROUTINE velz_sound
+
+SUBROUTINE temp_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(2.d0/5.d0)
+END SUBROUTINE temp_sound
 END PROGRAM xmhd_circle

@@ -397,7 +397,7 @@ diag_vals=0.d0
 
 !$omp parallel private(m,jr,curved,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
 !$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-!$omp jac_det,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel, btmp) reduction(+:diag_vals)
+!$omp jac_det,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp, tmp1) reduction(+:diag_vals)
 !Edit for new fields
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
@@ -479,7 +479,7 @@ DO i=1,mesh%nc
       res_loc(jr,5) = res_loc(jr, 5) &
         + basis_vals(jr)*T*jac_det*quad%wts(m)/(gamma-1) &
         + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, dT)*jac_det*quad%wts(m)/(gamma-1) &
-        - self%dt*basis_vals(jr)*T*div_vel*jac_det*quad%wts(m) & 
+        + self%dt*basis_vals(jr)*T*div_vel*jac_det*quad%wts(m) & 
         + self%dt*chi*DOT_PRODUCT(dT, basis_grads(:,jr))*jac_det*quad%wts(m) &
         - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(dn, dT)*jac_det*quad%wts(m)/n 
       !---Induction
@@ -597,7 +597,7 @@ DO i=1,self%fe_rep%nfields
 END DO
 !$omp parallel private(m,jr,jc,curved,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
 !$omp n_weights_loc,vel_weights_loc, psi_weights_loc, by_weights_loc, btmp, &
-!$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,dn, dT, dvel, dpsi, dby,iloc)
+!$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,dn, dT, dvel, div_vel, dpsi, dby,iloc, tmp2)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),&
         T_weights_loc(oft_blagrange%nce), psi_weights_loc(oft_blagrange%nce),&
@@ -902,17 +902,17 @@ CALL self%fe_rep%vec_create(self%u)
 ! ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.TRUE.
 ! ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
 ! ALLOCATE(self%velz_bc(oft_blagrange%ne)); self%velz_bc=.TRUE.
-ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.TRUE.
-ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.TRUE.
-ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.TRUE.
+! ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.TRUE.
+! ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.TRUE.
+! ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.TRUE.
 
 self%n_bc=>oft_blagrange%global%gbe
 self%velx_bc=>oft_blagrange%global%gbe
 self%vely_bc=>oft_blagrange%global%gbe
 self%velz_bc=>oft_blagrange%global%gbe
-! self%T_bc=>oft_blagrange%global%gbe
-! self%psi_bc=>oft_blagrange%global%gbe
-! self%by_bc=>oft_blagrange%global%gbe
+self%T_bc=>oft_blagrange%global%gbe
+self%psi_bc=>oft_blagrange%global%gbe
+self%by_bc=>oft_blagrange%global%gbe
 
 !---Create Jacobian matrix
 ALLOCATE(self%jacobian_block_mask(self%fe_rep%nfields,self%fe_rep%nfields))
