@@ -5,7 +5,7 @@
 
 &mesh_options
   meshname='test'
-  cad_type=0
+  cad_type=92
   nlevels=1
   nbase=1
   grid_order=2
@@ -14,6 +14,13 @@
 
 &native_mesh_options
   filename="circle_2d.h5"
+/
+&cube_options
+ mesh_type=1
+ ref_per=T,T,F
+ ni=8,8,0
+ rscale=2.0,2.0,0.0
+ shift=-1.0,-1.0,0.0
 /
 
 &xmhd_options
@@ -27,12 +34,12 @@
   by0=0,
   chi=1.E-6
   eta=1.E-6
-  nu=1.E-9
+  nu=1.E-6
   gamma=2.0
-  D_diff=1.E-8
+  D_diff=1.0
   dt=1.E-6
-  nsteps=500
-  rst_freq=10
+  nsteps=200
+  rst_freq=5
   use_mfnk=F
-  pm=T
+  pm=F
 /
