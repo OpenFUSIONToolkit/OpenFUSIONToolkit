@@ -1490,6 +1490,7 @@ class TokaMaker():
         x_pts, is_div = self.get_xpoints()
 
         if not is_div:
+            print("EXAMPLE IS NOT DIVERTED!")
             return [self.lim_point]
 
         if lim is None:
@@ -1517,7 +1518,20 @@ class TokaMaker():
             prev_pt = pt
             prev_psi = psi
         
-        strike_pts = [sp for sp in strike_pts if numpy.dot(sp - self.o_point, x_pts[0] - self.o_point) > 0]
+        def xpt_valid(x_pt):
+            path = numpy.linspace(self.o_point, x_pt, 100)
+            psi_eval = self.get_field_eval('PSI')
+
+            prev_pt = path[0]
+            for pt in path[1:]:
+                if psi_eval.eval(prev_pt) < psi_LCFS and psi_eval.eval(prev_pt) > psi_LCFS:
+                    return False
+                elif psi_eval.eval(prev_pt) > psi_LCFS and psi_eval.eval(prev_pt) < psi_LCFS:
+                    return False
+            return True
+        
+        x_pts = [xpt for xpt in x_pts if xpt_valid(xpt)]
+        strike_pts = [sp for sp in strike_pts if numpy.dot(sp - self.o_point, x_pts[0] - self.o_point) < 0]
         return strike_pts
 
     def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
