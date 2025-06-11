@@ -489,6 +489,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         if eig_test:
             eig_vals, _ = mygs.eig_wall(10)
             mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+            oftpy_dump_cov()
             return
         #
         mygs.set_coil_vsc({'VS': 1.0})
@@ -560,6 +561,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
                 sim_time, _, nl_its, lin_its, nretry = mygs.step_td(sim_time,dt)
             psi1 = mygs.get_psi(False)
             mp_q.put([{'gamma': eig_vals[:5,0], 'nl_change': np.linalg.norm(psi1-psi0)}])
+            oftpy_dump_cov()
             return
         mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
         eq_info = mygs.get_stats(li_normalization='ITER')
@@ -711,12 +713,13 @@ def test_ITER_eq(order):
 @pytest.mark.coverage
 def test_ITER_recon():
     ITER_recon_dict = ITER_eq_dict.copy()
-    ITER_recon_dict['q_95'] = 2.727373194556296
-    ITER_recon_dict['P_ax'] = 653312.4614673054
-    ITER_recon_dict['W_MHD'] = 256930543.79179734
-    ITER_recon_dict['beta_pol'] = 44.08617559839085
-    ITER_recon_dict['beta_tor'] = 1.887092454605829
-    ITER_recon_dict['beta_n'] = 1.2523366970906669
+    ITER_recon_dict['q_95'] = 2.7274510732722375
+    ITER_recon_dict['P_ax'] = 655693.6031014244
+    ITER_recon_dict['W_MHD'] = 257915984.01397622
+    ITER_recon_dict['l_i'] = 0.895954395982195
+    ITER_recon_dict['beta_pol'] = 44.16835089714342
+    ITER_recon_dict['beta_tor'] = 1.8950360948919174
+    ITER_recon_dict['beta_n'] = 1.2576100533550467
     results = mp_run(run_ITER_case,(1.0,(2,),False,False,True))
     assert validate_dict(results,ITER_recon_dict)
 
@@ -778,6 +781,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     if eig_test:
         eig_vals, _ = mygs.eig_wall(10)
         mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+        oftpy_dump_cov()
         return
     #
     mygs.set_coil_vsc({'INTERNALU': 1.0, 'INTERNALL': -1.0})
@@ -814,6 +818,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     if stability_test:
         eig_vals, _ = mygs.eig_td(-1.E3,10,False)
         mp_q.put([{'gamma': eig_vals[:5,0]}])
+        oftpy_dump_cov()
         return
     #
     psi_last = mygs.get_psi(False)

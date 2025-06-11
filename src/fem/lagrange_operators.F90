@@ -61,7 +61,7 @@ contains
   procedure :: setup => lag_rinterp_setup
   !> Reconstruct field
   procedure :: interp => lag_rinterp
-  !> Delete reconstruction object
+  !> Destroy interpolation object
   procedure :: delete => lag_rinterp_delete
 end type oft_lag_rinterp
 !------------------------------------------------------------------------------
@@ -86,7 +86,7 @@ contains
   procedure :: setup => lag_vrinterp_setup
   !> Reconstruct field
   procedure :: interp => lag_vrinterp
-  !> Delete reconstruction object
+  !> Destroy interpolation object
   procedure :: delete => lag_vrinterp_delete
 end type oft_lag_vrinterp
 !------------------------------------------------------------------------------
@@ -106,42 +106,49 @@ contains
   procedure :: interp => lag_vdinterp
 end type oft_lag_vdinterp
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Zero Lagrange FE vector at all global boundary nodes
 !------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_lag_zerob
   class(oft_ml_fem_type), pointer :: ML_lag_rep => NULL() !< FE representation
 contains
+  !> Zero field on boundary nodes
   procedure :: apply => zerob_apply
+  !> Destroy BC object
   procedure :: delete => zerob_delete
 end type oft_lag_zerob
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Zero Lagrange FE vector at all global grounding node(s)
 !------------------------------------------------------------------------------
 type, extends(oft_lag_zerob) :: oft_lag_zerogrnd
 contains
+  !> Zero field at grounding node(s)
   procedure :: apply => zerogrnd_apply
 end type oft_lag_zerogrnd
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Zero all components of vector Lagrange FE vector at all global boundary nodes
 !------------------------------------------------------------------------------
 type, extends(oft_solver_bc) :: oft_vlag_zerob
   class(oft_ml_fem_comp_type), pointer :: ML_vlag_rep => NULL() !< FE representation
 contains
+  !> Zero all components of vector on boundary nodes
   procedure :: apply => vzerob_apply
+  !> Destroy BC object
   procedure :: delete => vzerob_delete
 end type oft_vlag_zerob
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Zero normal component of vector Lagrange FE vector at all global boundary nodes
 !------------------------------------------------------------------------------
 type, extends(oft_vlag_zerob) :: oft_vlag_zeron
 contains
+  !> Zero normal component of vector on boundary nodes
   procedure :: apply => vzeron_apply
 end type oft_vlag_zeron
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Zero tangential component of vector Lagrange FE vector at all global boundary nodes
 !------------------------------------------------------------------------------
 type, extends(oft_vlag_zerob) :: oft_vlag_zerot
 contains
+  !> Zero tangential component of vector on boundary nodes
   procedure :: apply => vzerot_apply
 end type oft_vlag_zerot
 !---Pre options
@@ -213,7 +220,7 @@ ELSE
 END IF
 end subroutine lag_rinterp_setup
 !------------------------------------------------------------------------------
-!> Destroy temporary internal storage
+!> Destroy temporary internal storage and nullify references
 !------------------------------------------------------------------------------
 subroutine lag_rinterp_delete(self)
 class(oft_lag_rinterp), intent(inout) :: self
@@ -352,9 +359,7 @@ ELSE
 END IF
 end subroutine lag_vrinterp_setup
 !------------------------------------------------------------------------------
-!> Setup interpolator for Lagrange vector fields
-!!
-!! Fetches local representation used for interpolation from vector object
+!> Destroy temporary internal storage and nullify references
 !------------------------------------------------------------------------------
 subroutine lag_vrinterp_delete(self)
 class(oft_lag_vrinterp), intent(inout) :: self
@@ -523,9 +528,7 @@ deallocate(vloc)
 DEBUG_STACK_POP
 end subroutine zerob_apply
 !------------------------------------------------------------------------------
-!> Zero a Lagrange scalar field at all boundary nodes
-!!
-!! @param[in,out] a Field to be zeroed
+!> Destroy temporary internal storage and nullify references
 !------------------------------------------------------------------------------
 subroutine zerob_delete(self)
 class(oft_lag_zerob), intent(inout) :: self
@@ -587,9 +590,7 @@ DEALLOCATE(vloc)
 DEBUG_STACK_POP
 end subroutine vzerob_apply
 !------------------------------------------------------------------------------
-!> Zero a Lagrange scalar field at all boundary nodes
-!!
-!! @param[in,out] a Field to be zeroed
+!> Destroy temporary internal storage and nullify references
 !------------------------------------------------------------------------------
 subroutine vzerob_delete(self)
 class(oft_vlag_zerob), intent(inout) :: self
@@ -1540,7 +1541,6 @@ class(oft_mesh), pointer :: cmesh
 CLASS(oft_vector), POINTER :: lag_vec_fine,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
-DEBUG_STACK_PUSH
 !---
 if(ML_lag_rep%ml_mesh%level<1)call oft_abort('Invalid mesh level','lag_ginterpmatrix',__FILE__)
 cmesh=>ML_lag_rep%ml_mesh%meshes(ML_lag_rep%ml_mesh%level-1)
@@ -1639,7 +1639,6 @@ DO i=1,cmesh%ne
   END DO
 END DO
 deallocate(emap)
-DEBUG_STACK_POP
 END SUBROUTINE lag_ginterpmatrix
 !------------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
@@ -1657,7 +1656,6 @@ CLASS(oft_vector), POINTER :: lag_vec_fine,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
 class(oft_mesh), pointer :: mesh
-DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("Incorrect fine FE type","lag_pinterpmatrix",__FILE__)
 mesh=>lag_fine%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
@@ -1946,7 +1944,6 @@ END DO
 !---
 DEALLOCATE(ed_nodes,fc_nodes,c_nodes)
 DEALLOCATE(ftmp,fetmp,ctmp)
-DEBUG_STACK_POP
 END SUBROUTINE lag_pinterpmatrix
 END SUBROUTINE lag_setup_interp
 !------------------------------------------------------------------------------

@@ -701,6 +701,51 @@ END IF
 WRITE(*,*)'  Finished'
 DEALLOCATE(eig_vec,etatmp,corr_mat)
 END SUBROUTINE nonax_eigs
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE decay_eigenmodes(ncoils,rc,eig_val,eig_vec,eta)
+INTEGER(i4), INTENT(in) :: ncoils
+REAL(r8), INTENT(in) :: rc(2,ncoils)
+REAL(r8), intent(out) :: eig_val(ncoils),eig_vec(ncoils,ncoils)
+REAL(r8), OPTIONAL, INTENT(in) :: eta(ncoils)
+!---
+INTEGER(i4) :: i,j,info,N,LDVL,LDVR,LDA,LWORK
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: WR,WI,WORK
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: Amat,VL,VR
+CHARACTER(LEN=1) :: JOBVL,JOBVR
+!--- Create coupling matrix
+ALLOCATE(Amat(ncoils,ncoils))
+!$omp parallel do private(j)
+DO i=1,ncoils
+  DO j=1,ncoils
+    Amat(i,j)=green(rc(1,i),rc(2,i),rc(1,j),rc(2,j))/rc(1,i)
+  END DO
+END DO
+!---Set eta profile
+IF(PRESENT(eta))THEN
+  DO i=1,ncoils
+    Amat(i,:)=Amat(i,:)/eta(i)
+  END DO
+END IF
+!--- Compute eigenvalues
+JOBVL = 'V'
+JOBVR = 'V'
+N = ncoils
+LDA = ncoils
+LDVL = ncoils
+LDVR = ncoils
+ALLOCATE(WR(N),WI(N),VL(LDVL,N),VR(LDVR,N),WORK(1))
+LWORK=-1
+CALL DGEEV(JOBVL, JOBVR, N, Amat, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
+LWORK=INT(WORK(1),4)
+DEALLOCATE(WORK)
+ALLOCATE(WORK(LWORK))
+CALL DGEEV(JOBVL, JOBVR, N, Amat, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
+eig_val=-1.d0/WR
+eig_vec=REAL(VR,8)
+DEALLOCATE(WI,WR,VL,VR,WORK,Amat)
+END SUBROUTINE decay_eigenmodes
 END MODULE nonax_wall
 !---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
@@ -726,8 +771,7 @@ USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE oft_gs_profiles, ONLY: zero_flux_func
 USE oft_gs, ONLY: gs_eq, gs_setup_walls, gs_cond_source, gs_vacuum_solve
 USE oft_gs_fit, ONLY: fit_load, fit_constraint_ptr, gs_active
-USE axi_green, ONLY: decay_eigenmodes
-USE nonax_wall, ONLY: nonax_rescouple, nonax_indcouple, nonax_eigs
+USE nonax_wall, ONLY: nonax_rescouple, nonax_indcouple, nonax_eigs, decay_eigenmodes
 USE exp_geom, ONLY: exp_setup
 IMPLICIT NONE
 #include "local.h"
@@ -822,7 +866,6 @@ CALL exp_setup(mygs)
 mygs%free=.TRUE.
 mygs%pnorm=0.d0
 mygs%alam=1.d-7
-mygs%boundary_limiter=.FALSE.
 mygs%has_plasma=.FALSE.
 mygs%compute_chi=.FALSE.
 IF(TRIM(coil_file)/='none')THEN

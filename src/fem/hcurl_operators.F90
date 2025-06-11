@@ -1144,7 +1144,6 @@ real(r8) :: f(4),incr,val,d(3),goptmp(3,4),v,mop(1),h_rop(3,6)
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
 CLASS(oft_mesh), POINTER :: mesh
-DEBUG_STACK_PUSH
 !---
 if(ML_hcurl_rep%ml_mesh%level<1)then
   call oft_abort('Invalid mesh level','hcurl_ginterpmatrix',__FILE__)
@@ -1329,7 +1328,6 @@ DO i=1,cmesh%nc ! loop over coarse cells
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
   END DO
 END DO
-DEBUG_STACK_POP
 END SUBROUTINE hcurl_ginterpmatrix
 !------------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
@@ -1347,7 +1345,6 @@ CLASS(oft_vector), POINTER :: hcurl_vec_fine,hcurl_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
 type(oft_graph), POINTER :: interp_graph
 CLASS(oft_mesh), POINTER :: mesh
-DEBUG_STACK_PUSH
 !---
 SELECT TYPE(this=>ML_hcurl_rep%levels(ML_hcurl_rep%level)%fe)
 CLASS IS(oft_hcurl_fem)
@@ -1483,7 +1480,6 @@ DO i=1,mesh%nc
     CALL mat%add_values(i_ind,j_ind,mop,1,1)
   END DO
 END DO
-DEBUG_STACK_POP
 END SUBROUTINE hcurl_pinterpmatrix
 END SUBROUTINE hcurl_setup_interp
 !------------------------------------------------------------------------------

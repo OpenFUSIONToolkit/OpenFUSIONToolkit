@@ -229,7 +229,13 @@ WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
 WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
 WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',self%n_vcoils
 WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',self%nclosures
-IF(oft_debug_print(1))WRITE(*,*)oft_indent,'  Closures: ',self%closures
+IF(oft_debug_print(1))THEN
+  CALL oft_increase_indent
+  DO i=1,self%nclosures
+    WRITE(*,'(A,I8,3Es14.5)')oft_indent,self%closures(i),self%mesh%r(:,self%closures(i))
+  END DO
+  CALL oft_decrease_indent
+END IF
 WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',self%n_icoils
 !---Analyze mesh to construct holes
 WRITE(*,*)
@@ -559,6 +565,16 @@ DO i=1,self%nholes
 END DO
 CALL tw_save_hole_debug(self)
 DEALLOCATE(normals)
+!--Save jumper info
+ALLOCATE(normals(self%mesh%np,1))
+DO i=1,SIZE(self%jumper_nsets)
+  normals=0.d0
+  DO j=1,self%jumper_nsets(i)%n
+    normals(self%jumper_nsets(i)%v(j),1)=1.d0
+  END DO
+  WRITE(plt_tag,'(I4.4)')i
+  CALL self%mesh%save_vertex_scalar(normals(:,1),self%xdmf,'Jumper_'//plt_tag)
+END DO
 END SUBROUTINE tw_save_debug
 !---------------------------------------------------------------------------------
 !> Compute element to driver (Icoils) coupling matrix
@@ -2492,7 +2508,10 @@ IF(ASSOCIATED(self%jumper_nsets))THEN
     hole_facs=0.d0
     DO j=1,sensors%jumpers(i)%np-1
       id=mesh_local_findedge(self%mesh,[sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1)])
-      IF(id==0)CALL oft_abort("No matching edge for jumper points","tw_load_sensors",__FILE__)
+      IF(id==0)THEN
+        WRITE(*,*)"No Edge matching points: ",sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1),' on jumper ',i
+        CALL oft_abort("No matching edge for jumper points","tw_load_sensors",__FILE__)
+      END IF
       cell=self%mesh%lec(self%mesh%kec(ABS(id)))
       DO k=self%kfh(cell),self%kfh(cell+1)-1
         vert=self%mesh%lc(self%lfh(2,k),cell)
@@ -2539,39 +2558,91 @@ SUBROUTINE order_jumper_list(list_in,list_out,n)
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered vertex list
 INTEGER(4), INTENT(in) :: n !< Number of vertices in jumper definition
-!---
-INTEGER(4) :: ii,jj,k,ipt,eprev,ed,ptp
-INTEGER(4), ALLOCATABLE :: lloop_tmp(:)
+INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
+INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
 !---Find loop points and edges
-ALLOCATE(lloop_tmp(n))
+ALLOCATE(lloop_tmp(n),flag_list(n))
+flag_list=0
 lloop_tmp=list_in
 CALL sort_array(lloop_tmp, n)
-!
+!---Find suitable starting point
+i0=1
 DO jj=1,n
-  IF(self%mesh%bp(lloop_tmp(jj)))THEN
-    ipt=lloop_tmp(jj)
+  k=0
+  DO ii=self%mesh%kpe(lloop_tmp(jj)),self%mesh%kpe(lloop_tmp(jj)+1)-1
+    ed = self%mesh%lpe(ii)
+    ptp = SUM(self%mesh%le(:,ed))-lloop_tmp(jj)
+    IF(search_array(ptp, lloop_tmp, n)==0)CYCLE
+    k=k+1
+    IF(k>1)EXIT
+  END DO
+  IF(k==1)THEN
+    i0=jj
     EXIT
   END IF
-  ! ipt=lloop_tmp(1)
 END DO
+!---Create oriented list of points
+flag_list(i0)=1
+ipt=lloop_tmp(i0)
 k=1
 list_out(k)=ipt
 eprev=0
 DO jj=1,n
+  IF(jj==n-2)flag_list(i0)=0 ! Unflag first point for last link (needs to be 2 offset for link count check below)
+  last_item=-1
   DO ii=self%mesh%kpe(ipt),self%mesh%kpe(ipt+1)-1
     ed = self%mesh%lpe(ii)
     IF(ed==eprev)CYCLE
     ptp = SUM(self%mesh%le(:,ed))-ipt
-    IF(search_array(ptp, lloop_tmp, n)==0)CYCLE
+    candidate=search_array(ptp, lloop_tmp, n)
+    IF(candidate==0)THEN
+      CYCLE
+    ELSE
+      IF(flag_list(candidate)==1)CYCLE
+      nlinks=0
+      DO l=self%mesh%kpe(ptp),self%mesh%kpe(ptp+1)-1
+        ed2 = self%mesh%lpe(l)
+        ptp2 = SUM(self%mesh%le(:,ed2))-ptp
+        candidate2=search_array(ptp2, lloop_tmp, n)
+        IF(candidate2==0)CYCLE
+        IF(flag_list(candidate2)==1)CYCLE
+        nlinks=nlinks+1
+      END DO
+      last_item=[ptp,candidate,ed]
+      IF(nlinks>1)CYCLE
+      last_item=-1
+    END IF
+    flag_list(candidate)=1
     ipt=ptp
-    IF(jj==n)EXIT
-    k=k+1
-    list_out(k)=ipt
-    eprev=ed
+    IF(jj<n)THEN
+      k=k+1
+      list_out(k)=ipt
+      eprev=ed
+    END IF
     EXIT
   END DO
+  IF(last_item(1)>0)THEN
+    flag_list(last_item(2))=1
+    ipt=last_item(1)
+    IF(jj<n)THEN
+      k=k+1
+      list_out(k)=ipt
+      eprev=last_item(3)
+    END IF
+  END IF
 END DO
-DEALLOCATE(lloop_tmp)
+flag_list(i0)=1 ! Ok to not be a full loop
+IF(ANY(flag_list==0))THEN
+  WRITE(*,'(2A)')oft_indent,"No matching edges for following points:"
+  CALL oft_increase_indent
+  DO jj=1,n
+    IF(flag_list(jj)==0)WRITE(*,'(A,I8,3Es14.5)')oft_indent,lloop_tmp(jj),self%mesh%r(:,lloop_tmp(jj))
+  END DO
+  CALL oft_decrease_indent
+  CALL oft_abort('Error building jumper mesh, unmatched points exist', &
+    'tw_load_sensors::order_jumper_list', __FILE__)
+END IF
+DEALLOCATE(lloop_tmp,flag_list)
 END SUBROUTINE order_jumper_list
 end subroutine tw_load_sensors
 !------------------------------------------------------------------------------

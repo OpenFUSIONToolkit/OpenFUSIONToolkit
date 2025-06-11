@@ -154,7 +154,8 @@ INTEGER(i4), PARAMETER :: oft_test_seed(24) = [430470439, -303393496, -476850581
   142231192, 708877466, -1255634259, 593274827, -561530186, -934579426, 900810854]
 !$omp threadprivate(oft_tid)
 !---Debugging stack information
-LOGICAL :: stack_disabled = .FALSE. !< Disable debug/profiling stack
+LOGICAL :: oft_stack_disabled = .FALSE. !< Disable debug/profiling stack
+LOGICAL, PRIVATE :: oft_prof_enabled = .FALSE. !< Enable profiling?
 #ifdef OFT_STACK
 INTEGER(i4), PRIVATE, PARAMETER :: stacksize = 40
 INTEGER(i4), PRIVATE :: nstack = 0
@@ -203,7 +204,7 @@ LOGICAL :: called_from_lib
 TYPE(xml_node), POINTER :: doc
 #endif
 LOGICAL :: rst
-NAMELIST/runtime_options/ppn,omp_nthreads,debug,stack_disabled,use_petsc,test_run,nparts
+NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts
 !---Initialize MPI
 #ifdef HAVE_MPI
 CALL MPI_INIT_THREAD(MPI_THREAD_FUNNELED,thrdtype,ierr)
@@ -1106,13 +1107,15 @@ END SUBROUTINE oft_stack_reset
 SUBROUTINE oft_stack_push(mod_ind,sub_ind)
 INTEGER(i4), INTENT(in) :: mod_ind !< Index of containing module
 INTEGER(i4), INTENT(in) :: sub_ind !< Index of current subroutine
-IF(stack_disabled)RETURN
+IF(oft_stack_disabled)RETURN
 !---
 #ifdef OFT_PROFILE
-IF(nstack>0)THEN
-  stack_fun_time(stack(2,nstack))=stack_fun_time(stack(2,nstack))+local_timer%int_tock()
-ELSE
-  stack_fun_time(0)=stack_fun_time(0)+local_timer%int_tock()
+IF(oft_prof_enabled)THEN
+  IF(nstack>0)THEN
+    stack_fun_time(stack(2,nstack))=stack_fun_time(stack(2,nstack))+local_timer%int_tock()
+  ELSE
+    stack_fun_time(0)=stack_fun_time(0)+local_timer%int_tock()
+  END IF
 END IF
 #endif
 !---
@@ -1120,20 +1123,22 @@ nstack=nstack+1
 IF(nstack>stacksize)nstack=stacksize
 stack(:,nstack)=[mod_ind,sub_ind]
 #ifdef OFT_PROFILE
-stack_nfun_c(sub_ind)=stack_nfun_c(sub_ind)+1
+IF(oft_prof_enabled)stack_nfun_c(sub_ind)=stack_nfun_c(sub_ind)+1
 #endif
 END SUBROUTINE oft_stack_push
 !------------------------------------------------------------------------------
 !> Pop a subroutine off of the current stack
 !------------------------------------------------------------------------------
 SUBROUTINE oft_stack_pop
-IF(stack_disabled)RETURN
+IF(oft_stack_disabled)RETURN
 !---
 #ifdef OFT_PROFILE
-IF(nstack>0)THEN
-  stack_fun_time(stack(2,nstack))=stack_fun_time(stack(2,nstack))+local_timer%int_tock()
-ELSE
-  stack_fun_time(0)=stack_fun_time(0)+local_timer%int_tock()
+IF(oft_prof_enabled)THEN
+  IF(nstack>0)THEN
+    stack_fun_time(stack(2,nstack))=stack_fun_time(stack(2,nstack))+local_timer%int_tock()
+  ELSE
+    stack_fun_time(0)=stack_fun_time(0)+local_timer%int_tock()
+  END IF
 END IF
 #endif
 !---
@@ -1177,6 +1182,16 @@ CLOSE(outunit)
 #endif
 END SUBROUTINE oft_stack_print
 !------------------------------------------------------------------------------
+!> Activate profiling
+!------------------------------------------------------------------------------
+SUBROUTINE oft_profile_start()
+#ifdef OFT_PROFILE
+oft_prof_enabled=.TRUE.
+#else
+CALL oft_abort("OFT not built with profiling","oft_profile_start",__FILE__)
+#endif
+END SUBROUTINE oft_profile_start
+!------------------------------------------------------------------------------
 !> Reset all profiling counters
 !------------------------------------------------------------------------------
 SUBROUTINE oft_prof_reset
@@ -1199,6 +1214,7 @@ INTEGER(i8), ALLOCATABLE :: lcft(:),cft(:)
 REAL(r8) :: ntmp
 INTEGER(i8) :: countnew,crate,cmax
 CHARACTER(LEN=1) :: suffix
+IF(.NOT.oft_prof_enabled)RETURN
 call system_clock(countnew,crate,cmax)
 !---
 ALLOCATE(lnfc(stack_nfuns),lcft(0:stack_nfuns))

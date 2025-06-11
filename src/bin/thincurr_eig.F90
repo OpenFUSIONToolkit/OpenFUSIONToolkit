@@ -23,7 +23,7 @@
 PROGRAM thincurr_eig
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: oft_bin_file, hdf5_create_file, hdf5_write, &
+USE oft_io, ONLY: oft_bin_file, hdf5_write, &
   hdf5_create_group, hdf5_add_string_attribute
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF

@@ -24,10 +24,11 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
   oft_blag_vproject
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
-USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
-  gs_set_cond_weights, gs_estored, gs_dflux, gs_tflux, gs_helicity, gs_itor_nl, &
-  gs_psimax, gs_test_bounds, gs_b_interp, oft_indent, gs_get_qprof, gsinv_interp, &
-  gs_psi2r, oft_increase_indent, oft_decrease_indent, oft_indent, gs_psi2pt
+USE oft_gs, ONLY: gs_eq, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
+  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon
+#ifdef OFT_TOKAMAKER_LEGACY
+use oft_gs, only: gs_get_cond_source, gs_get_cond_weights, gs_set_cond_weights
+#endif
 USE oft_gs_profiles
 IMPLICIT NONE
 #include "local.h"
@@ -170,19 +171,14 @@ SELECT TYPE(this=>F)
 END SELECT
 CLOSE(io_unit)
 END SUBROUTINE gs_profile_save
+#ifdef OFT_TOKAMAKER_LEGACY
 !------------------------------------------------------------------------------
-! SUBROUTINE gs_save
-!------------------------------------------------------------------------------
-!> Needs Docs
-!!
-!! @param[in,out] self G-S object
-!! @param[in] filename Filename for restart file
-!! @param[in] mpsi_sample Number of flux (radial) sampling points (optional)
+!> Save data to legacy TokaMaker G-S file
 !------------------------------------------------------------------------------
 SUBROUTINE gs_save(self,filename,mpsi_sample)
-class(gs_eq), target, intent(inout) :: self
-character(LEN=*), intent(in) :: filename
-INTEGER(4), OPTIONAL, intent(in) :: mpsi_sample
+class(gs_eq), target, intent(inout) :: self !< G-S object
+character(LEN=*), intent(in) :: filename !< Filename for restart file
+INTEGER(4), OPTIONAL, intent(in) :: mpsi_sample !< Number of flux (radial) sampling points (optional)
 integer(4) :: i,j,m,np_plot
 real(8) :: x1,x2,r
 real(8), allocatable, dimension(:,:) :: tmpout
@@ -356,16 +352,11 @@ END IF
 DEALLOCATE(tmpout)
 END SUBROUTINE gs_save
 !------------------------------------------------------------------------------
-! SUBROUTINE gs_load
-!------------------------------------------------------------------------------
-!> Needs Docs
-!!
-!! @param[in,out] self G-S object
-!! @param[in] filename Filename for restart file
+!> Load data from legacy TokaMaker G-S file
 !------------------------------------------------------------------------------
 SUBROUTINE gs_load(self,filename)
-class(gs_eq), target, intent(inout) :: self
-character(LEN=*), intent(in) :: filename
+class(gs_eq), target, intent(inout) :: self !< G-S object
+character(LEN=*), intent(in) :: filename !< Filename for restart file
 integer(4) :: i,m
 real(8) :: x1,x2,tmpval,tmp_version
 real(8), allocatable, dimension(:,:) :: tmpin
@@ -441,37 +432,25 @@ CALL fit_ff(self%P,tmpin)
 DEALLOCATE(tmpin)
 END SUBROUTINE gs_load
 !---------------------------------------------------------------------------------
-! SUBROUTINE cond_fit_error
-!---------------------------------------------------------------------------------
 !> Needs docs
-!!
-!! @param[in,out] m Needs docs
-!! @param[in,out] n Needs docs
-!! @param[in,out] cofs Needs docs [n]
-!! @param[in,out] err Needs docs [m]
-!! @param[in,out] iflag Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE cond_fit_error(m,n,cofs,err,iflag)
-integer(4), intent(in) :: m,n
-real(8), intent(in) :: cofs(n)
-real(8), intent(out) :: err(m)
-integer(4), intent(inout) :: iflag
+integer(4), intent(in) :: m !< Needs docs
+integer(4), intent(in) :: n !< Needs docs
+real(8), intent(in) :: cofs(n) !< Needs docs
+real(8), intent(out) :: err(m) !< Needs docs
+integer(4), intent(inout) :: iflag !< Needs docs
 !---
 CALL gs_set_cond_weights(gs_fit,cofs,.FALSE.)
 CALL gs_get_cond_source(gs_fit,err)
 err=err-tmpprof(:,1)
 end subroutine cond_fit_error
 !------------------------------------------------------------------------------
-! SUBROUTINE cond_fit
-!------------------------------------------------------------------------------
 !> Needs docs
-!!
-!! @param[in,out] self Needs docs
-!! @param[in,out] tmpin Needs docs
 !------------------------------------------------------------------------------
 subroutine cond_fit(self,tmpin)
-class(gs_eq), target, intent(inout) :: self
-real(8), target, intent(in) :: tmpin(:,:)
+class(gs_eq), target, intent(inout) :: self !< G-S object
+real(8), target, intent(in) :: tmpin(:,:) !< Needs docs
 real(8), allocatable :: wttmp(:),contmp(:)
 !---MINPACK variables
 real(8) :: ftol,xtol,gtol,epsfcn,factor
@@ -509,21 +488,14 @@ deallocate(wa3,wa4,ipvt)
 DEALLOCATE(contmp,wttmp)
 end subroutine cond_fit
 !---------------------------------------------------------------------------------
-! SUBROUTINE fit_ff_error
-!---------------------------------------------------------------------------------
 !> Needs docs
-!!
-!! @param[in,out] m Needs docs
-!! @param[in,out] n Needs docs
-!! @param[in,out] cofs Needs docs [n]
-!! @param[in,out] err Needs docs [m]
-!! @param[in,out] iflag Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE fit_ff_error(m,n,cofs,err,iflag)
-integer(4), intent(in) :: m,n
-real(8), intent(in) :: cofs(n)
-real(8), intent(out) :: err(m)
-integer(4), intent(inout) :: iflag
+integer(4), intent(in) :: m !< Needs docs
+integer(4), intent(in) :: n !< Needs docs
+real(8), intent(in) :: cofs(n) !< Needs docs
+real(8), intent(out) :: err(m) !< Needs docs
+integer(4), intent(inout) :: iflag !< Needs docs
 integer(4) :: i,mtmp,ierr
 real(8) :: r,x1,x2
 !---
@@ -542,8 +514,6 @@ DO i=1,mtmp
   err(mtmp+i)=tmpprof(2,i)-ff_fit%f(r)
 END DO
 end subroutine fit_ff_error
-!------------------------------------------------------------------------------
-! SUBROUTINE fit_ff
 !------------------------------------------------------------------------------
 !> Needs Docs
 !!
@@ -592,19 +562,119 @@ deallocate(wa3,wa4,ipvt)
 DEALLOCATE(contmp,coftmp)
 end subroutine fit_ff
 !------------------------------------------------------------------------------
-! SUBROUTINE gs_comp_globals
+!> Needs Docs
 !------------------------------------------------------------------------------
-!> Compute toroidal current for Grad-Shafranov equilibrium
-!!
-!! @param[in,out] self G-S object
-!! @param[out] itor Toroidal current
-!! @param[out] centroid Current centroid (optional) [2]
+SUBROUTINE gs_analyze(self)
+class(gs_eq), intent(inout) :: self
+integer(4) :: i,io_unit
+integer(4), parameter :: npsi = 50
+real(8) :: Itor,centroid(2),vol,pvol,dflux,tflux,pmax,curr,bp_vol,li
+real(8) :: psimax,baxis(2),prof(npsi),psi_q(npsi),dl,rbounds(2,2),zbounds(2,2)
+real(8) :: beta(2),q95,tmp,psi0,psi1
+WRITE(*,*)
+WRITE(*,'(2A)')oft_indent,'Equilibrium Statistics:'
+CALL oft_increase_indent
+IF(.NOT.self%has_plasma)THEN
+  WRITE(*,'(2A)')oft_indent,'Vacuum only'
+  RETURN
+END IF
+IF(self%mode==0)THEN
+  WRITE(*,'(2A)')oft_indent,"Flux Spec               =   F * F'"
+ELSE
+  WRITE(*,'(2A)')oft_indent,"Flux Spec               =   (F^2)'"
+END IF
+IF(self%diverted)THEN
+  WRITE(*,'(2A)')oft_indent,'Topology                =   Diverted'
+ELSE
+  WRITE(*,'(2A)')oft_indent,'Topology                =   Limited'
+END IF
+CALL gs_comp_globals(self,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
+!---Get q-profile
+psi0=0.02d0; psi1=0.98d0 !1.d0
+! IF(self%plasma_bounds(1)>-1.d98)THEN
+  ! psi0=self%plasma_bounds(1); psi1=self%plasma_bounds(2)
+  ! psi0 = psi0 + (psi1-psi0)*2.d-2
+  ! psi1 = psi1 + (psi0-psi1)*2.d-2
+! ELSE
+  ! IF(.NOT.self%free)psi0 = psi0 + (psi1-psi0)*2.d-2
+! END IF
+do i=1,npsi
+  psi_q(i)=(psi1-psi0)*((i-1)/REAL(npsi-1,8)) + psi0
+end do
+CALL gs_get_qprof(self,npsi,psi_q,prof,dl,rbounds,zbounds)
+IF(dl<=0.d0)CALL oft_abort('Tracing q-profile failed','gs_analyze',__FILE__)
+q95=linterp(psi_q,prof,npsi,0.05d0)
+!
+baxis=self%o_point
+psimax=1.d0
+IF(self%plasma_bounds(1)>-1.d98)psimax=self%plasma_bounds(2)
+pmax=self%pnorm*self%P%f(psimax)*self%psiscale*self%psiscale
+beta(1) = (2.d0*pvol/vol)/(Itor/dl)**2
+IF(ABS(self%I%f_offset)>0.d0)beta(2) = 2.d0*pvol/vol/(self%I%f_offset/centroid(1))**2
+WRITE(*,'(2A,ES11.3)')oft_indent,'Toroidal Current [A]    = ',Itor/mu0
+WRITE(*,'(2A,2F8.3)') oft_indent,'Current Centroid [m]    =',centroid
+WRITE(*,'(2A,2F8.3)') oft_indent,'Magnetic Axis [m]       =',baxis
+WRITE(*,'(2A,F8.3)')  oft_indent,'Elongation              =',(zbounds(2,2)-zbounds(2,1))/(rbounds(1,2)-rbounds(1,1))
+IF(self%diverted)THEN
+  IF(self%x_points(2,self%nx_points)<zbounds(2,1))THEN
+    zbounds(:,1)=self%x_points(:,self%nx_points)
+  ELSE IF(self%x_points(2,self%nx_points)>zbounds(2,2))THEN
+    zbounds(:,2)=self%x_points(:,self%nx_points)
+  END IF
+END IF
+tmp=((rbounds(1,2)+rbounds(1,1))/2.d0-(zbounds(1,2)+zbounds(1,1))/2.d0)*2.d0/(rbounds(1,2)-rbounds(1,1))
+WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
+WRITE(*,'(2A,F8.3)')oft_indent,'Plasma Volume [m^3]     =',vol*2.d0*pi
+IF(.NOT.self%dipole_mode)WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
+WRITE(*,'(2A,ES11.3)')oft_indent,'Peak Pressure [Pa]      = ',pmax/mu0
+WRITE(*,'(2A,ES11.3)')oft_indent,'Stored Energy [J]       = ',pvol*2.d0*pi/mu0*3.d0/2.d0
+WRITE(*,'(2A,F8.3)')  oft_indent,'<Beta_pol> [%]          = ',1.d2*beta(1)
+IF(ABS(self%I%f_offset)>0.d0)THEN
+  WRITE(*,'(2A,F8.3)')oft_indent,'<Beta_tor> [%]          = ',1.d2*beta(2)
+END IF
+WRITE(*,'(2A,ES11.3)')oft_indent,'Diamagnetic flux [Wb]   = ',dflux
+WRITE(*,'(2A,ES11.3)')oft_indent,'Toroidal flux [Wb]      = ',tflux
+WRITE(*,'(2A,ES11.3)')oft_indent,'li                      = ',(bp_vol/vol)/((Itor/dl)**2)
+! IF(.NOT.self%free)THEN
+!   CALL gs_helicity(self,dflux,Itor)
+!   WRITE(*,'(2A,ES11.3)')oft_indent,'Magnetic Energy [J]     = ',dflux/(2.d0*mu0)
+!   WRITE(*,'(2A,ES11.3)')oft_indent,'Magnetic Helicity [J-m] = ',Itor/(2.d0*mu0)
+! END IF
+! !---
+! WRITE(*,*)
+! WRITE(*,'(2A)')oft_indent,'Coil Currents [A]'
+! DO i=1,self%ncoil_regs
+!   curr = self%coil_regions(i)%curr & 
+!     + self%coil_regions(i)%vcont_gain*self%vcontrol_val
+!   WRITE(*,'(A,ES16.7)')oft_indent,curr*self%coil_regions(i)%area/mu0
+! END DO
+! WRITE(*,*)
+CALL oft_decrease_indent
+!------------------------------------------------------------------------------
+! Create output file for q
+!------------------------------------------------------------------------------
+OPEN(NEWUNIT=io_unit,FILE='safety_factor.dat')
+WRITE(io_unit,'(A)')'# TokaMaker q-profile "Psi, q"'
+DO i=1,npsi
+  WRITE(io_unit,'(2ES11.3)')psi_q(i),prof(i)
+END DO
+CLOSE(io_unit)
+END SUBROUTINE gs_analyze
+#endif
+!------------------------------------------------------------------------------
+!> Compute various global quantities for Grad-Shafranov equilibrium
 !------------------------------------------------------------------------------
 subroutine gs_comp_globals(self,itor,centroid,vol,pvol,dflux,tflux,bp_vol)
-class(gs_eq), intent(inout) :: self
-real(8), intent(out) :: itor,centroid(2),vol,pvol,dflux,tflux,bp_vol
-type(oft_lag_brinterp), target :: psi_eval
-type(oft_lag_bginterp), target :: psi_geval
+class(gs_eq), intent(inout) :: self !< G-S object
+real(8), intent(out) :: itor !< Toroidal current
+real(8), intent(out) :: centroid(2) !< Current centroid [2]
+real(8), intent(out) :: vol !< Plasma volume
+real(8), intent(out) :: pvol !< \f$ \int P dV \f$
+real(8), intent(out) :: dflux !< Diamagnetic flux
+real(8), intent(out) :: tflux !< Contained toroidal flux
+real(8), intent(out) :: bp_vol !< \f$ \int B_p^2 dV \f$
+type(oft_lag_brinterp) :: psi_eval
+type(oft_lag_bginterp) :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
 real(8) :: pt(3),curr_cent(2),Btor,Bpol(2)
 integer(4) :: i,m
@@ -636,10 +706,10 @@ do i=1,smesh%nc
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
       ELSE
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
+        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
       END IF
       itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
       centroid = centroid + itor_loc*pt(1:2)*v*self%fe_rep%quad%wts(m)
@@ -647,14 +717,14 @@ do i=1,smesh%nc
       vol = vol + v*self%fe_rep%quad%wts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
-        Btor = (self%alam*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+self%eps)
+        Btor = (self%alam*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+self%eps)
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+gs_epsilon)
       END IF
       tflux = tflux + Btor*v*self%fe_rep%quad%wts(m)
       !---Compute internal inductance
       call psi_geval%interp(i,self%fe_rep%quad%pts(:,m),goptmp,gpsitmp)
-      Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+self%eps)
+      Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+gs_epsilon)
       bp_vol = bp_vol + SUM(Bpol**2)*v*self%fe_rep%quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
@@ -724,14 +794,14 @@ do i=1,smesh%nc
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
         j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+          + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+self%eps))
+          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
       ELSE
         j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+self%eps))
+          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+self%eps))
+          + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
       END IF
       eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(j_NI_loc**2)*v*self%fe_rep%quad%wts(m)*pt(1)
       itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
@@ -746,121 +816,20 @@ vloop=self%psiscale*(eta_jsq/itor)
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_calc_vloop
-!------------------------------------------------------------------------------
-! SUBROUTINE gs_analyze
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-SUBROUTINE gs_analyze(self)
-class(gs_eq), intent(inout) :: self
-integer(4) :: i,io_unit
-integer(4), parameter :: npsi = 50
-real(8) :: Itor,centroid(2),vol,pvol,dflux,tflux,pmax,curr,bp_vol,li
-real(8) :: psimax,baxis(2),prof(npsi),psi_q(npsi),dl,rbounds(2,2),zbounds(2,2)
-real(8) :: beta(2),q95,tmp,psi0,psi1
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Equilibrium Statistics:'
-CALL oft_increase_indent
-IF(.NOT.self%has_plasma)THEN
-  WRITE(*,'(2A)')oft_indent,'Vacuum only'
-  RETURN
-END IF
-IF(self%mode==0)THEN
-  WRITE(*,'(2A)')oft_indent,"Flux Spec               =   F * F'"
-ELSE
-  WRITE(*,'(2A)')oft_indent,"Flux Spec               =   (F^2)'"
-END IF
-IF(self%diverted)THEN
-  WRITE(*,'(2A)')oft_indent,'Topology                =   Diverted'
-ELSE
-  WRITE(*,'(2A)')oft_indent,'Topology                =   Limited'
-END IF
-CALL gs_comp_globals(self,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
-!---Get q-profile
-psi0=0.02d0; psi1=0.98d0 !1.d0
-! IF(self%plasma_bounds(1)>-1.d98)THEN
-  ! psi0=self%plasma_bounds(1); psi1=self%plasma_bounds(2)
-  ! psi0 = psi0 + (psi1-psi0)*2.d-2
-  ! psi1 = psi1 + (psi0-psi1)*2.d-2
-! ELSE
-  ! IF(.NOT.self%free)psi0 = psi0 + (psi1-psi0)*2.d-2
-! END IF
-do i=1,npsi
-  psi_q(i)=(psi1-psi0)*((i-1)/REAL(npsi-1,8)) + psi0
-end do
-CALL gs_get_qprof(self,npsi,psi_q,prof,dl,rbounds,zbounds)
-IF(dl<=0.d0)CALL oft_abort('Tracing q-profile failed','gs_analyze',__FILE__)
-q95=linterp(psi_q,prof,npsi,0.05d0)
-!
-baxis=self%o_point
-psimax=1.d0
-IF(self%plasma_bounds(1)>-1.d98)psimax=self%plasma_bounds(2)
-pmax=self%pnorm*self%P%f(psimax)*self%psiscale*self%psiscale
-beta(1) = (2.d0*pvol/vol)/(Itor/dl)**2
-IF(ABS(self%I%f_offset)>0.d0)beta(2) = 2.d0*pvol/vol/(self%I%f_offset/centroid(1))**2
-WRITE(*,'(2A,ES11.3)')oft_indent,'Toroidal Current [A]    = ',Itor/mu0
-WRITE(*,'(2A,2F8.3)') oft_indent,'Current Centroid [m]    =',centroid
-WRITE(*,'(2A,2F8.3)') oft_indent,'Magnetic Axis [m]       =',baxis
-WRITE(*,'(2A,F8.3)')  oft_indent,'Elongation              =',(zbounds(2,2)-zbounds(2,1))/(rbounds(1,2)-rbounds(1,1))
-IF(self%diverted)THEN
-  IF(self%x_points(2,self%nx_points)<zbounds(2,1))THEN
-    zbounds(:,1)=self%x_points(:,self%nx_points)
-  ELSE IF(self%x_points(2,self%nx_points)>zbounds(2,2))THEN
-    zbounds(:,2)=self%x_points(:,self%nx_points)
-  END IF
-END IF
-tmp=((rbounds(1,2)+rbounds(1,1))/2.d0-(zbounds(1,2)+zbounds(1,1))/2.d0)*2.d0/(rbounds(1,2)-rbounds(1,1))
-WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
-WRITE(*,'(2A,F8.3)')oft_indent,'Plasma Volume [m^3]     =',vol*2.d0*pi
-WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
-WRITE(*,'(2A,ES11.3)')oft_indent,'Peak Pressure [Pa]      = ',pmax/mu0
-WRITE(*,'(2A,ES11.3)')oft_indent,'Stored Energy [J]       = ',pvol*2.d0*pi/mu0*3.d0/2.d0
-WRITE(*,'(2A,F8.3)')  oft_indent,'<Beta_pol> [%]          = ',1.d2*beta(1)
-IF(ABS(self%I%f_offset)>0.d0)THEN
-  WRITE(*,'(2A,F8.3)')oft_indent,'<Beta_tor> [%]          = ',1.d2*beta(2)
-END IF
-WRITE(*,'(2A,ES11.3)')oft_indent,'Diamagnetic flux [Wb]   = ',dflux
-WRITE(*,'(2A,ES11.3)')oft_indent,'Toroidal flux [Wb]      = ',tflux
-WRITE(*,'(2A,ES11.3)')oft_indent,'li                      = ',(bp_vol/vol)/((Itor/dl)**2)
-! IF(.NOT.self%free)THEN
-!   CALL gs_helicity(self,dflux,Itor)
-!   WRITE(*,'(2A,ES11.3)')oft_indent,'Magnetic Energy [J]     = ',dflux/(2.d0*mu0)
-!   WRITE(*,'(2A,ES11.3)')oft_indent,'Magnetic Helicity [J-m] = ',Itor/(2.d0*mu0)
-! END IF
-! !---
-! WRITE(*,*)
-! WRITE(*,'(2A)')oft_indent,'Coil Currents [A]'
-! DO i=1,self%ncoil_regs
-!   curr = self%coil_regions(i)%curr & 
-!     + self%coil_regions(i)%vcont_gain*self%vcontrol_val
-!   WRITE(*,'(A,ES16.7)')oft_indent,curr*self%coil_regions(i)%area/mu0
-! END DO
-! WRITE(*,*)
-CALL oft_decrease_indent
-!------------------------------------------------------------------------------
-! Create output file for q
-!------------------------------------------------------------------------------
-OPEN(NEWUNIT=io_unit,FILE='safety_factor.dat')
-WRITE(io_unit,'(A)')'# TokaMaker q-profile "Psi, q"'
-DO i=1,npsi
-  WRITE(io_unit,'(2ES11.3)')psi_q(i),prof(i)
-END DO
-CLOSE(io_unit)
-END SUBROUTINE gs_analyze
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
 subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
-class(gs_eq), intent(inout) :: gseq
+class(gs_eq), intent(inout) :: gseq !< G-S object
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
-integer(4), intent(in) :: npsi
-integer(4), intent(in) :: ntheta
+integer(4), intent(in) :: npsi !< Number of points in flux coordinate
+integer(4), intent(in) :: ntheta !< Number of points in poloidal coordinate
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
 LOGICAL, OPTIONAL, INTENT(in) :: pack_lcfs !< Use quadratic packing toward LCFS?
 LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision fields?
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
-type(gsinv_interp), target :: field
+type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
 real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
@@ -896,11 +865,19 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
-  IF( psi_surf(1) < x1)EXIT
+  IF(gseq%dipole_mode)THEN
+    IF(psi_surf(1)>x1)EXIT
+  ELSE
+    IF(psi_surf(1)<x1)EXIT
+  END IF
   rmax=pt(1)
 END DO
 pt_last=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
@@ -919,6 +896,7 @@ ALLOCATE(cout(npsi,4))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
+ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
 active_tracer%neq=3
@@ -997,7 +975,8 @@ do j=2,npsi
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
 end do
 CALL active_tracer%delete
-DEALLOCATE(ptout)
+CALL field%delete
+DEALLOCATE(ptout,field)
 !$omp end parallel
 CALL psi_int%delete()
 IF(PRESENT(error_str))THEN
@@ -1133,11 +1112,19 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( psi_tmp(1) < x1)EXIT
+  IF(gseq%dipole_mode)THEN
+    IF(psi_tmp(1)>x1)EXIT
+  ELSE
+    IF(psi_tmp(1)<x1)EXIT
+  END IF
   rmax=pt(1)
 END DO
 pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
@@ -1352,26 +1339,25 @@ END IF
 2022 format(2i5)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 WRITE (io_unit,2000) eqdsk_case,0,nr,nz
-WRITE (io_unit,2020) rdim,zdim,rcentr,rleft,zmid
-WRITE (io_unit,2020) raxis,zaxis,x2,x1,bcentr
-WRITE (io_unit,2020) itor,x2,xdum,raxis,xdum
-WRITE (io_unit,2020) zaxis,xdum,x1,xdum,xdum
-WRITE (io_unit,2020) (fpol(i),i=1,nr)
-WRITE (io_unit,2020) (pres(i),i=1,nr)
-WRITE (io_unit,2020) (ffprim(i),i=1,nr)
-WRITE (io_unit,2020) (pprime(i),i=1,nr)
-WRITE (io_unit,2020) ((psirz(i,j),i=1,nr),j=1,nz)
-WRITE (io_unit,2020) (qpsi(i),i=1,nr)
+WRITE (io_unit,2020) REAL([rdim,zdim,rcentr,rleft,zmid],4)
+WRITE (io_unit,2020) REAL([raxis,zaxis,x2,x1,bcentr],4)
+WRITE (io_unit,2020) REAL([itor,x2,xdum,raxis,xdum],4)
+WRITE (io_unit,2020) REAL([zaxis,xdum,x1,xdum,xdum],4)
+WRITE (io_unit,2020) (REAL(fpol(i),4),i=1,nr)
+WRITE (io_unit,2020) (REAL(pres(i),4),i=1,nr)
+WRITE (io_unit,2020) (REAL(ffprim(i),4),i=1,nr)
+WRITE (io_unit,2020) (REAL(pprime(i),4),i=1,nr)
+WRITE (io_unit,2020) ((REAL(psirz(i,j),4),i=1,nr),j=1,nz)
+WRITE (io_unit,2020) (REAL(qpsi(i),4),i=1,nr)
 WRITE (io_unit,2022) nr,nlim
-WRITE (io_unit,2020) (rout(i),zout(i),i=1,nr)
-WRITE (io_unit,2020) (rlim(i),zlim(i),i=1,nlim)
+WRITE (io_unit,2020) (REAL([rout(i),zout(i)],4),i=1,nr)
+WRITE (io_unit,2020) (REAL([rlim(i),zlim(i)],4),i=1,nlim)
 CLOSE (io_unit)
 !---
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
   WRITE(*,'(2A,ES11.3)')oft_indent,'Qmin = ',MINVAL(qpsi)
   WRITE(*,'(2A,ES11.3)')oft_indent,'Qmax = ',MAXVAL(qpsi)
-  ! WRITE(*,'(2A)')oft_indent,'Done'
 END IF
 CALL oft_decrease_indent
 !---
@@ -1379,14 +1365,14 @@ DEALLOCATE(rout,zout,rlim,zlim)
 DEALLOCATE(fpol,pres,ffprim,pprime,qpsi,psirz)
 end subroutine gs_save_eqdsk
 !------------------------------------------------------------------------------
-!> Needs Docs
+!> Evaluate terms in augmented tracing ODE for computing Sauter factors (see @ref sauter_fc)
 !------------------------------------------------------------------------------
 subroutine sauter_apply(self,cell,f,gop,val)
-class(sauter_interp), intent(inout) :: self
-integer(4), intent(in) :: cell
-real(8), intent(in) :: f(:)
-real(8), intent(in) :: gop(3,3)
-real(8), intent(out) :: val(:)
+class(sauter_interp), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed field at f [8]
 integer(4), allocatable :: j(:)
 integer(4) :: jc
 real(8) :: rop(3),d2op(6),pt(3),grad(3),tmp
@@ -1427,13 +1413,15 @@ END IF
 deallocate(j)
 end subroutine sauter_apply
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Compute factors required for Sauter bootstrap formula
 !------------------------------------------------------------------------------
 subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs)
-class(gs_eq), intent(inout) :: gseq
-integer(4), intent(in) :: nr
-real(8), intent(in) :: psi_q(nr)
-real(8), intent(out) :: fc(nr),r_avgs(nr,3),modb_avgs(nr,2)
+class(gs_eq), intent(inout) :: gseq !< G-S object
+integer(4), intent(in) :: nr !< Number of flux sample points
+real(8), intent(in) :: psi_q(nr) !< Location of flux sample points
+real(8), intent(out) :: fc(nr) !< Trapped particle fraction \f$ f_c \f$
+real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
+real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp) :: psi_int

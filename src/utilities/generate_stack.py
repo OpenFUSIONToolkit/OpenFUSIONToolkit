@@ -17,6 +17,7 @@ import sys
 import os
 import pathlib
 import re
+import hashlib
 # Regular expressions
 TEST_LINE_REGEX = re.compile(r'[ ]*(PURE|IMPURE|ELEMENTAL|RECURSIVE|PROGRAM|MODULE|SUBROUTINE|FUNCTION)+[ ]+', re.I)
 SUB_MOD_REGEX = re.compile(r'[ ]*(PURE|IMPURE|ELEMENTAL|RECURSIVE)+', re.I)
@@ -86,21 +87,31 @@ def parse_fortran_file(fid,modules,functions,debug=False):
             return name.lower(), 'sub'
         return None, None
     # Main body
+    old_file = ""
     file_buffer = ""
     current_module = ""
     current_function = "default"
     fun_depth = 0
     line_number = 0
     entry_count = 0
+    line = ""
     mod_id = 1
-    for line in fid:
+    for line_next in fid:
+        line_prev = line.strip()
+        line = line_next
         line_number += 1
+        old_file += line
         if (line.count("#define DEBUG_STACK_") > 0) or (line.count("#undef DEBUG_STACK_") > 0):
             continue
         if line.startswith("DEBUG_STACK_PUSH"):
             entry_count += 1
             if entry_count > 1:
                 print('  WARNING: Multiple entry points to subroutine "{0}" at line {1}'.format(current_function, line_number))
+        line_striped = line.strip().upper()
+        if len(line_striped) > 0:
+            if line_striped[0] != "!" and line_striped.endswith("RETURN"):
+                if entry_count > 0 and not line_prev.startswith("DEBUG_STACK_POP"):
+                    print('  WARNING: "RETURN" statement without "*_POP" in subroutine "{0}" at line {1}'.format(current_function, line_number))
         file_buffer += line
         if fun_depth > 0:
             end_match = END_SUB_REGEX.match(line)
@@ -145,11 +156,12 @@ def parse_fortran_file(fid,modules,functions,debug=False):
             file_buffer += "#undef DEBUG_STACK_SUB_IND\n#define DEBUG_STACK_SUB_IND " + str(ind) + "\n"
             entry_count = 0
             fun_depth = 1
-    return modules, functions, file_buffer
+    file_unchanged = (hashlib.md5(old_file.encode()).hexdigest() == hashlib.md5(file_buffer.encode()).hexdigest())
+    return modules, functions, file_buffer, file_unchanged
 #----------------------------------------------------------------
 # Create stack variables in FORTRAN syntax
 #----------------------------------------------------------------
-def create_debug_list(modules,functions):
+def create_debug_list(modules,functions,include_path):
     file_buffer = "! Stack definitions for OFT\n"
     #
     file_buffer = file_buffer + "INTEGER(i4), PARAMETER :: stack_len = " + str(stack_len) + "\n"
@@ -193,18 +205,26 @@ def create_debug_list(modules,functions):
         else:
             file_buffer = file_buffer + str(functions[i].module) + "] \n"
     #
-    with open("include/stack_defs.h","w+") as fid:
+    try:
+        file_unchanged = (hashlib.md5(open(os.path.join(include_path,"stack_defs.h"),'rb').read()).hexdigest() == hashlib.md5(file_buffer.encode()).hexdigest())
+    except:
+        file_unchanged = False
+    if file_unchanged:
+        return
+    with open(os.path.join(include_path,"stack_defs.h"),"w+") as fid:
         fid.write(file_buffer)
 #----------------------------------------------------------------
 # Remove STACK preprocessor definitions from a FORTRAN source file
 #----------------------------------------------------------------
 def clean_fortran_file(fid):
     file_buffer = ""
+    file_unchanged = True
     for line in fid:
         if line.count("#define DEBUG_STACK_") > 0 or line.count("#undef DEBUG_STACK_") > 0:
+            file_unchanged = False
             continue
         file_buffer = file_buffer + line
-    return file_buffer
+    return file_buffer, file_unchanged
 #----------------------------------------------------------------
 # Script driver
 #----------------------------------------------------------------
@@ -218,6 +238,8 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--test_run', help='Run without writing any changes.', action="store_true")
     parser.add_argument('-d', '--debug', help='Display debug information.', action="store_true")
     parser.add_argument('-c', '--clean', help='Clean stack declarations from sources.', action="store_true")
+    parser.add_argument('-l', '--lint', help='Perform linting check to ensure no markers are present.', action="store_true")
+    parser.add_argument('-o', '--out_path', help='Output path for stack include file.', type=str, default="include")
     args=parser.parse_args()
     #
     if args.test_run:
@@ -226,6 +248,9 @@ if __name__ == '__main__':
         debug = True
     if args.clean:
         clean = True
+    if args.lint:
+        clean = True
+        test_run = True
     # Check for correct run path
     correct_path = os.path.isfile("base/oft_local.F90")
     if not(correct_path):
@@ -233,21 +258,24 @@ if __name__ == '__main__':
         print("Must be run from root source directory.")
         sys.exit(1)
     # Set source directories for search
-    obj_dirs = ["base", "grid", "lin_alg", "fem", "physics", "."]
+    obj_dirs = ["base", "grid", "lin_alg", "fem", "physics"]
     stack_len = 40
     # Initialize containers
     skip_files = []
-    modules = [module("dummy",1)]
-    functions = [function("dummy",1,1)]
+    modules = [module("unknown",1)]
+    functions = [function("unknown",1,1)]
     # If clean is set remove all preprocessor defs
     if clean:
-        print("\n%========================================%")
-        print("Cleaning Source Files")
+        if debug:
+            print("Cleaning stack from source files")
+        elif args.lint:
+            print("Checking for stack in source files")
     # Otherwise parse source files and add STACK definitions
     else:
-        print("\n%========================================%")
-        print("Parsing Source Files")
+        if debug:
+            print("Creating stack from source files")
     # Look in each source directory
+    nupdate = 0
     for dir in obj_dirs:
         files = os.listdir(dir)
         # Check each file in this directory
@@ -257,30 +285,45 @@ if __name__ == '__main__':
             # If file is a FORTRAN file parse and remove definitions
             if ".F90" == extension:
                 path = os.path.join(dir,filename)
-                print(path)
+                if debug:
+                    print('  '+path)
                 with open(path,'r') as fid:
                     if clean:
-                        new_file = clean_fortran_file(fid)
+                        new_file, file_unchanged = clean_fortran_file(fid)
                     else:
-                        modules, functions, new_file = parse_fortran_file(fid,modules,functions,debug)
+                        modules, functions, new_file, file_unchanged = parse_fortran_file(fid,modules,functions,debug)
                 # If in test mode do not replace file
-                if test_run:
+                if test_run or file_unchanged:
+                    if args.lint and (not file_unchanged):
+                        print('  Found in: '+path)
+                        nupdate += 1
                     continue
+                nupdate += 1
                 with open(path,"w+") as fid:
                     fid.write(new_file)
+    if args.lint and (nupdate > 0):
+        print()
+        print("Linting error: Found errors in {0} file(s)".format(nupdate))
+        sys.exit(1)
+    if nupdate == 0:
+        print("  No updates")
+    else:
+        print("  Updated {0} files".format(nupdate))
     if not clean:
         # Print module statistics from search
-        print("\n%========================================%")
-        print("Found {0} Modules".format(len(modules)))
+        if debug:
+            print("%========================================%")
+            print("Found {0} Modules".format(len(modules)))
         if debug:
             for mod in modules:
-                print(mod)
+                print('  '+mod)
         # Print subroutine statistics from search
-        print("\n%========================================%")
-        print("Found {0} Functions".format(len(functions)))
+        if debug:
+            print("%========================================%")
+            print("Found {0} Functions".format(len(functions)))
         if debug:
             for func in functions:
-                print(repr(func))
+                print('  '+repr(func))
         # Create header file with STACK variables
         if not test_run:
-            create_debug_list(modules,functions)
+            create_debug_list(modules,functions,include_path=args.out_path)
