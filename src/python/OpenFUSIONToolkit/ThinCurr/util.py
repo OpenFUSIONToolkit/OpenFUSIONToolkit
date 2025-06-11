@@ -441,7 +441,7 @@ class torus_fourier_sensor():
                 toroidal_mode = toroidal_harmonics[:,n_indice]
                 plt.plot(self.theta_list,toroidal_mode.real.flatten(),label=f'n={harmonic}')
             plt.legend()
-            plt.title(f"Real Amplitude of Toroidal Mode at t = {t}")
+            plt.title(f"Real 1D FFT Amplitude of Toroidal Mode at t = {t}")
             plt.xlabel(r"$\theta$ (radians)")
             plt.ylabel(f"Mode real amplitude (Tesla)")
             plt.grid()
@@ -462,7 +462,7 @@ class torus_fourier_sensor():
                 poloidal_mode = np.roll(poloidal_harmonics[m_indice,:].flatten()[::-1],shift=1)
                 plt.plot(phi_list,poloidal_mode.real.flatten(),label=f'm={harmonic}')
             plt.legend()
-            plt.title(f"Real Amplitude of Poloidal Mode at t = {t}")
+            plt.title(f"Real 1D FFT Amplitude of Poloidal Mode at t = {t}")
             plt.xlabel(r"$\phi$ (radians)")
             plt.ylabel(f"Mode real amplitude (Tesla)")
             plt.grid()
@@ -499,7 +499,7 @@ class torus_fourier_sensor():
                 toroidal_mode = toroidal_harmonics[:,n_indice]
                 plt.plot(self.theta_list,toroidal_mode.imag.flatten(),label=f'n={harmonic}')
             plt.legend()
-            plt.title(f"Imaginary Amplitude of Toroidal Mode at t = {t}")
+            plt.title(f"Imaginary 1D FFT Amplitude of Toroidal Mode at t = {t}")
             plt.xlabel(r"$\theta$ (radians)")
             plt.ylabel(f"Mode imaginary amplitude (Tesla)")
             plt.grid()
@@ -520,7 +520,7 @@ class torus_fourier_sensor():
                 poloidal_mode = np.roll(poloidal_harmonics[m_indice,:].flatten()[::-1],shift=1)
                 plt.plot(phi_list,poloidal_mode.imag.flatten(),label=f'm={harmonic}')
             plt.legend()
-            plt.title(f"Imaginary Amplitude of Poloidal Mode at t = {t}")
+            plt.title(f"Imaginary 1D FFT Amplitude of Poloidal Mode at t = {t}")
             plt.xlabel(r"$\phi$ (radians)")
             plt.ylabel(f"Mode imaginary amplitude (Tesla)")
             plt.grid()
@@ -636,7 +636,7 @@ class torus_fourier_sensor():
                 plt.plot(m_modes_sorted[m_range[0]:m_range[1]+1],B_n_sorted[m_range[0]:m_range[1]+1,idx].real,color=color,label=f"n={harmonics[i]}, real")
                 plt.plot(m_modes_sorted[m_range[0]:m_range[1]+1],B_n_sorted[m_range[0]:m_range[1]+1,idx].imag,linestyle='--',color=color,label=f"n={harmonics[i]}, imag")
             plt.legend()
-            plt.title(f"Amplitudes of Toroidal Modes at t = {t}",fontsize=20)
+            plt.title(f"2D FFT Amplitudes of Toroidal Modes at t = {t}",fontsize=20)
             plt.xlabel(f"Poloidal Harmonics ($m$)")
             plt.ylabel(f"Mode Amplitudes (Tesla)")
             plt.xticks(range(mode_min,mode_max+1))
@@ -653,7 +653,7 @@ class torus_fourier_sensor():
                 plt.plot(n_modes_sorted[n_range[0]:n_range[1]+1],B_n_sorted[idx,n_range[0]:n_range[1]+1].real,color=color,label=f"m={harmonics[i]}, real")
                 plt.plot(n_modes_sorted[n_range[0]:n_range[1]+1],B_n_sorted[idx,n_range[0]:n_range[1]+1].imag,linestyle='--',color=color,label=f"m={harmonics[i]}, imag")
             plt.legend()
-            plt.title(f"Amplitudes of Poloidal Modes at t = {t}",fontsize=20)
+            plt.title(f"2D FFT Amplitudes of Poloidal Modes at t = {t}",fontsize=20)
             plt.xlabel(f"Toroidal Harmonics ($n$)")
             plt.ylabel(f"Mode Amplitudes (Tesla)")
             plt.xticks(range(mode_min,mode_max+1))
@@ -685,7 +685,7 @@ class torus_fourier_sensor():
                 plt.plot(self.theta_list,B_n_fft[:,idx].real,label=f"n={harmonics[i]}, real")
                 plt.plot(self.theta_list,B_n_fft[:,idx].imag,linestyle='--',label=f"n={harmonics[i]}, imag")
             plt.legend()
-            plt.title(f"Amplitudes of Toroidal Modes at t = {t}")
+            plt.title(f"2D FFT Amplitudes of Toroidal Modes at t = {t}")
             plt.xlabel(r"$\theta$ (radians)")
             plt.ylabel(f"Mode Amplitudes (Tesla)")
             plt.show()
@@ -701,13 +701,13 @@ class torus_fourier_sensor():
                     plt.plot(phi_list,B_n_fft[idx,:].real,label=f"m={harmonics[i]}, real")
                     plt.plot(phi_list,B_n_fft[idx,:].imag,linestyle='--',label=f"m={harmonics[i]}, imag")
             plt.legend()
-            plt.title(f"Amplitudes of Poloidal Modes at t = {t}")
+            plt.title(f"2D FFT Amplitudes of Poloidal Modes at t = {t}")
             plt.xlabel(r"$\phi$ (radians)")
             plt.ylabel(f"Mode Amplitudes (Tesla)")
             plt.show()
 
     def plot_sensor_signal_against_angle(self,t,theta=True):
-        '''! Plot the 2D Fast Fourier Transformed amplitude of the mesh of magnetic values over angle
+        '''! Plot the value of normal magnetic fields over the angle in theta or phi direction
 
         @param t The time step during the time evolution
         @param theta Plot against theta (True) or phi (False)
@@ -720,7 +720,6 @@ class torus_fourier_sensor():
             plt.title(rf"Magnetic Field on surface @ $\phi$=0 at t = {t}")
             plt.xlabel(r"$\theta$ (radians)")
             plt.ylabel(f"Magnetic Field (Tesla)")
-            plt.legend()
             plt.show()
         else:
             plt.figure(figsize=(10,6),constrained_layout=True)
