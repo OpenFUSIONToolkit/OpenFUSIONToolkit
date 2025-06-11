@@ -1524,14 +1524,15 @@ class TokaMaker():
 
             prev_pt = path[0]
             for pt in path[1:]:
-                if psi_eval.eval(prev_pt) < psi_LCFS and psi_eval.eval(prev_pt) > psi_LCFS:
+                if psi_eval.eval(prev_pt) < psi_LCFS and psi_eval.eval(pt) > psi_LCFS:
                     return False
-                elif psi_eval.eval(prev_pt) > psi_LCFS and psi_eval.eval(prev_pt) < psi_LCFS:
+                elif psi_eval.eval(prev_pt) > psi_LCFS and psi_eval.eval(pt) < psi_LCFS:
                     return False
+                prev_pt = pt
             return True
         
         x_pts = [xpt for xpt in x_pts if xpt_valid(xpt)]
-        strike_pts = [sp for sp in strike_pts if numpy.dot(sp - self.o_point, x_pts[0] - self.o_point) < 0]
+        strike_pts = [sp for sp in strike_pts if numpy.dot(sp - self.o_point, x_pts[0] - self.o_point) > 0]
         return strike_pts
 
     def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
