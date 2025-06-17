@@ -273,7 +273,6 @@ DO i=1,self%nsteps
   CALL extrap_fields(1)%f%add(0.d0,1.d0,u)
   extrapt(1)=self%t
   IF(i>maxextrap)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,self%t+self%dt,u)
-  write(*,*)"CALL NKSOLVER"
   CALL nksolver%apply(u,v)
   IF(nksolver%cits<0)CALL oft_abort("Nonlinear solve failed","run_simulation",__FILE__)
   !---------------------------------------------------------------------------

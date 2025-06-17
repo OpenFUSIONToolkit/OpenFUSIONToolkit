@@ -35,10 +35,10 @@
   chi=1.E-6
   eta=1.E-6
   nu=1.E-6
-  gamma=2.0
+  gamma=1.67
   D_diff=1.0
   dt=1.E-6
-  nsteps=200
+  nsteps=100
   rst_freq=5
   use_mfnk=F
   pm=F

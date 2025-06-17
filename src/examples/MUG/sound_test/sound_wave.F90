@@ -80,7 +80,7 @@ CALL ML_oft_blagrange%vec_create(u)
 CALL ML_oft_blagrange%vec_create(v)
 
 !---Set constant values
-t0=(v_sound**2)*3.d0*proton_mass/(5.d0*elec_charge)
+t0=(2*v_sound**2)*3.d0*proton_mass/(5.d0*elec_charge)
 v_delta=t0*elec_charge/(proton_mass*v_sound)
 
 !---Project n initial condition onto scalar Lagrange basis
