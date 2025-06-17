@@ -33,7 +33,7 @@ USE fem_utils, ONLY: bfem_map_flag
 USE oft_lag_basis, ONLY: oft_blag_geval, oft_blag_eval, oft_blag_npos, &
   oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_lag_brinterp
-USE axi_green, ONLY: green, grad_green
+USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_epsilon, flux_func, gs_eq, gs_update_bounds, &
     gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, build_dels
 USE mhd_utils, ONLY: mu0
@@ -260,7 +260,9 @@ IF(ASSOCIATED(self%rhs))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine delete_gs_td
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 subroutine step_gs_td(self,time,dt,nl_its,lin_its,nretry)
 class(oft_tmaker_td), target, intent(inout) :: self !< NL operator object
 REAL(8), INTENT(inout) :: time,dt
@@ -328,7 +330,9 @@ END IF
 !     self%mfop%ip_target=-1.d0
 ! END IF
 end subroutine step_gs_td
-!
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 subroutine eig_gs_td(eq_in,neigs,eigs,eig_vecs,omega,include_bounds,eta_plasma)
 TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
 INTEGER(4), INTENT(in) :: neigs
@@ -482,125 +486,6 @@ CALL b%restore_local(rhs_vals,add=.TRUE.)
 DEALLOCATE(pol_vals,rhs_vals,reg_source)
 DEBUG_STACK_POP
 end subroutine apply_rhs
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine picard_step(self,a,b,p_scale,f_scale,ip_target)
-! class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
-! class(oft_vector), target, intent(inout) :: a !< Source field
-! class(oft_vector), intent(inout) :: b !< Result of metric function
-! real(8), intent(in) :: p_scale
-! real(8), intent(inout) :: f_scale
-! real(8), optional, intent(in) :: ip_target
-! integer(i4) :: i,m,jr,jc
-! integer(i4), allocatable :: j(:)
-! real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),eta_tmp,psi_tmp,ip_p,ip_f
-! real(r8) :: dpsi_tmp(2),p_source,f_source,psi_lim,psi_max,eta_source,max_tmp,lim_tmp
-! real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),vals_loc(:,:)
-! real(r8), pointer, dimension(:) :: pol_vals,rhs_vals,pvals
-! class(oft_vector), pointer :: ptmp
-! logical :: curved,in_bounds
-! ! type(oft_timer) :: mytimer
-! DEBUG_STACK_PUSH
-! ! WRITE(*,*)'Hi'
-! ! IF(oft_debug_print(1))THEN
-! !   WRITE(*,'(2X,A)')'Constructing Poloidal flux time-advance operator'
-! !   CALL mytimer%tick()
-! ! END IF
-! !------------------------------------------------------------------------------
-! ! Get local vector values
-! !------------------------------------------------------------------------------
-! NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
-! CALL a%get_local(pol_vals)
-! !---
-! self%gs_eq%psi=>a ! HERE
-! CALL gs_update_bounds(self%gs_eq)
-! ! WRITE(*,*)'Full',self%gs_eq%plasma_bounds
-! self%F%plasma_bounds=self%gs_eq%plasma_bounds
-! self%P%plasma_bounds=self%gs_eq%plasma_bounds
-! CALL b%set(0.d0)
-! CALL b%get_local(rhs_vals)
-! CALL b%new(ptmp)
-! CALL ptmp%get_local(pvals)
-! !------------------------------------------------------------------------------
-! ! Operator integration
-! !------------------------------------------------------------------------------
-! ip_p=0.d0
-! ip_f=0.d0
-! !$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt, &
-! !$omp eta_tmp,psi_tmp,dpsi_tmp,p_source,f_source,eta_source,in_bounds) &
-! !$omp reduction(+:ip_p) reduction(+:ip_f)
-! allocate(j(oft_blagrange%nce),vals_loc(oft_blagrange%nce,2)) ! Local DOF and matrix indices
-! allocate(rop(oft_blagrange%nce),gop(3,oft_blagrange%nce)) ! Reconstructed gradient operator
-! !$omp do schedule(static,1)
-! do i=1,oft_blagrange%mesh%nc
-!     IF(oft_blagrange%mesh%reg(i)/=1)CYCLE
-!     !---Get local to global DOF mapping
-!     call oft_blagrange%ncdofs(i,j)
-!     !---Get local reconstructed operators
-!     vals_loc=0.d0
-!     do m=1,oft_blagrange%quad%np ! Loop over quadrature points
-!     call oft_blagrange%mesh%jacobian(i,oft_blagrange%quad%pts(:,m),goptmp,vol)
-!     det=vol*oft_blagrange%quad%wts(m)
-!     pt=oft_blagrange%mesh%log2phys(i,oft_blagrange%quad%pts(:,m))
-!     psi_tmp=0.d0; dpsi_tmp=0.d0; eta_tmp=0.d0; p_source=0.d0; f_source=0.d0; eta_source=0.d0
-!     do jr=1,oft_blagrange%nce ! Loop over degrees of freedom
-!         call oft_blag_eval(oft_blagrange,i,jr,oft_blagrange%quad%pts(:,m),rop(jr))
-!         psi_tmp = psi_tmp + pol_vals(j(jr))*rop(jr)
-!     end do
-!     !---Compute local matrix contributions
-!     ! IF(oft_blagrange%mesh%reg(i)==1.AND.psi_tmp>psi_lim)THEN
-!     ! IF(self%allow_xpoints)THEN
-!         in_bounds=gs_test_bounds(self%gs_eq,pt).AND.(psi_tmp>self%gs_eq%plasma_bounds(1))
-!     ! ELSE
-!     !     in_bounds=psi_tmp>psi_lim
-!     ! END IF
-!     IF(in_bounds)THEN
-!         ! gs_source=self%dt*self%lam_amp*(psi_tmp-psi_lim)/(psi_max-psi_lim)/(pt(1)+gs_epsilon)
-!         ! p_source=p_scale*pt(1)*self%P%Fp((psi_tmp-psi_lim)/(psi_max-psi_lim))
-!         ! f_source=0.5d0*self%F%fp((psi_tmp-psi_lim)/(psi_max-psi_lim))/(pt(1)+gs_epsilon)
-!         p_source=p_scale*pt(1)*self%P%Fp(psi_tmp)
-!         f_source=0.5d0*self%F%fp(psi_tmp)/(pt(1)+gs_epsilon)
-!         ip_p=ip_p+p_source*det
-!         ip_f=ip_f+f_source*det
-!     END IF
-!     do jr=1,oft_blagrange%nce
-!         vals_loc(jr,1) = vals_loc(jr,1) - rop(jr)*self%dt*p_source*det
-!         vals_loc(jr,2) = vals_loc(jr,2) - rop(jr)*self%dt*f_source*det
-!     end do
-!     end do
-!     do jr=1,oft_blagrange%nce
-!     !$omp atomic
-!     pvals(j(jr)) = pvals(j(jr)) + vals_loc(jr,1)
-!     !$omp atomic
-!     rhs_vals(j(jr)) = rhs_vals(j(jr)) + vals_loc(jr,2)
-!     end do
-! end do
-! deallocate(j,vals_loc,rop,gop)
-! !$omp end parallel
-! DO i=1,oft_blagrange%nbe
-!     rhs_vals(oft_blagrange%lbe(i))=0.d0
-!     pvals(oft_blagrange%lbe(i))=0.d0
-! END DO
-! CALL b%restore_local(rhs_vals,add=.TRUE.)
-! CALL ptmp%restore_local(pvals,add=.TRUE.)
-! IF(PRESENT(ip_target))THEN
-!     f_scale=(ip_target-ip_p)/ip_f
-! !  WRITE(*,*)'Ip',ip_target,ip_p,ip_f,(ip_target-ip_p)/ip_f
-! ELSE
-! !  WRITE(*,*)'Ip',(ip_p+f_scale*ip_f)/mu0
-! END IF
-! CALL b%add(f_scale,1.d0,ptmp)
-! DEALLOCATE(pol_vals,rhs_vals,pvals)
-! CALL ptmp%delete
-! DEALLOCATE(ptmp)
-! !---Report time
-! ! IF(oft_debug_print(1))THEN
-! !   elapsed_time=mytimer%tock()
-! !   WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
-! ! END IF
-! DEBUG_STACK_POP
-! end subroutine picard_step
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

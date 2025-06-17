@@ -113,6 +113,16 @@ class OFT_env():
         self.oft_path_slen = slens[2]
         ## Error string size
         self.oft_error_slen = slens[3]
+        ## Value for marking a float quantity as disabled
+        self.float_disable_flag = -1.E99
+    
+    def float_is_disabled(self,val):
+        '''! Check if float is set to a value indicated its usage is "disabled"
+
+        @param val Float value to check
+        @returns Value is within 10% of `self.float_disable_flag`
+        '''
+        return val < self.float_disable_flag*0.1
     
     def set_debug_level(self,debug_level):
         '''! Set debug verbosity level

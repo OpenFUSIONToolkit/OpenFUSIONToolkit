@@ -317,18 +317,20 @@ ABSTRACT INTERFACE
   !------------------------------------------------------------------------------
   !> Save mesh to transfer file
   !------------------------------------------------------------------------------
-  SUBROUTINE bmesh_save(self,filename)
+  SUBROUTINE bmesh_save(self,filename,ascii)
   IMPORT oft_bmesh
   CLASS(oft_bmesh), INTENT(in) :: self !< Mesh object
   CHARACTER(LEN=*), INTENT(in) :: filename !< File to save mesh to
+  LOGICAL, OPTIONAL, INTENT(in) :: ascii !< Save file in ASCII format?
   END SUBROUTINE bmesh_save
   !------------------------------------------------------------------------------
   !> Load mesh from transfer file
   !------------------------------------------------------------------------------
-  SUBROUTINE bmesh_load(self,filename)
+  SUBROUTINE bmesh_load(self,filename,ascii)
   IMPORT oft_bmesh
   CLASS(oft_bmesh), INTENT(inout) :: self !< Mesh object
   CHARACTER(LEN=*), INTENT(in) :: filename !< File to load mesh from
+  LOGICAL, OPTIONAL, INTENT(in) :: ascii !< Mesh stored in ASCII format?
   END SUBROUTINE bmesh_load
   !------------------------------------------------------------------------------
   !> Set maximum order of spatial mapping

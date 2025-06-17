@@ -19,11 +19,13 @@ USE oft_solver_utils, ONLY: create_solver_xml, create_diag_pre
 USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
+USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type
-USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
+USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec, bfem_map_flag
 USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast
+USE oft_blag_operators, ONLY: oft_blag_vproject, oft_blag_getmop, oft_lag_bginterp
 USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
 IMPLICIT NONE
 #include "local.h"
@@ -123,6 +125,11 @@ type(oft_timer) :: mytimer
 TYPE(oft_bin_file) :: hist_file
 integer(i4) :: hist_i4(3)
 real(4) :: hist_r4(9)
+!---
+CLASS(oft_matrix), POINTER :: lmop => NULL()
+CLASS(oft_solver), POINTER :: lminv => NULL()
+class(oft_vector), pointer :: ux,uy,uz,v_lag
+type(oft_lag_bginterp) :: grad_psi
 !---Extrapolation fields
 integer(i4), parameter :: maxextrap=2
 integer(i4) :: nextrap
@@ -130,9 +137,9 @@ real(r8), allocatable, dimension(:) :: extrapt
 type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
 !---
 character(LEN=TDIFF_RST_LEN) :: rst_char
-integer(i4) :: i,j,io_stat,rst_tmp
+integer(i4) :: i,j,io_stat,rst_tmp,npre
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time
-real(r8), pointer :: plot_vals(:)
+real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 current_sim=>self
 !---------------------------------------------------------------------------
 ! Create solver fields
@@ -140,6 +147,18 @@ current_sim=>self
 call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)
+!---
+call oft_blagrange%vec_create(grad_psi%u)
+call oft_blagrange%vec_create(ux)
+call oft_blagrange%vec_create(uy)
+call oft_blagrange%vec_create(uz)
+call oft_blagrange%vec_create(v_lag)
+NULLIFY(lmop)
+call oft_blag_getmop(oft_blagrange,lmop,'none')
+CALL create_cg_solver(lminv)
+lminv%A=>lmop
+lminv%its=-2
+CALL create_diag_pre(lminv%pre)
 
 ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
 DO i=1,maxextrap
@@ -155,22 +174,42 @@ CALL u%add(0.d0,1.d0,self%u)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
 NULLIFY(plot_vals)
+ALLOCATE(plot_vec(3,v_lag%n))
 CALL self%xdmf_plot%add_timestep(self%t)
 CALL self%u%get_local(plot_vals,1)
 plot_vals = plot_vals*self%den_scale
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
 CALL self%u%get_local(plot_vals,2)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'velx')
+plot_vec(1,:)=plot_vals
 CALL self%u%get_local(plot_vals,3)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'vely')
+plot_vec(3,:)=plot_vals
 CALL self%u%get_local(plot_vals,4)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'velz')
+plot_vec(2,:)=plot_vals
+CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
 CALL self%u%get_local(plot_vals,5)
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
 CALL self%u%get_local(plot_vals,6)
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
+CALL grad_psi%u%restore_local(plot_vals)
+!------------------------------------------------------------------------------
+! Project magnetic field and plot
+!------------------------------------------------------------------------------
+CALL grad_psi%setup(oft_blagrange)
+CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
+CALL v_lag%set(0.d0)
+CALL lminv%apply(v_lag,ux)
+CALL ux%add(0.d0,1.d0,v_lag)
+CALL v_lag%set(0.d0)
+CALL lminv%apply(v_lag,uy)
+CALL uy%add(0.d0,1.d0,v_lag)
+!
+CALL uy%get_local(plot_vals)
+plot_vec(1,:)=-plot_vals
 CALL self%u%get_local(plot_vals,7)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'by')
+plot_vec(3,:)=plot_vals
+CALL ux%get_local(plot_vals)
+plot_vec(2,:)=plot_vals
+CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
 
 
 !
@@ -202,7 +241,7 @@ IF(self%mfnk)THEN
 ELSE
   solver%A=>self%jacobian
 END IF
-solver%its=200
+solver%its=400
 solver%atol=self%lin_tol
 solver%itplot=1
 solver%nrits=20
@@ -250,6 +289,7 @@ END IF
 !---------------------------------------------------------------------------
 ! Begin time stepping
 !---------------------------------------------------------------------------
+npre=0
 DO i=1,self%nsteps
   IF(oft_env%head_proc)CALL mytimer%tick()
   self%nlfun%dt=0.d0
@@ -260,7 +300,8 @@ DO i=1,self%nsteps
   psi_avg = self%nlfun%diag_vals(6)
   by_avg = self%nlfun%diag_vals(7)
   self%nlfun%dt=self%dt
-  IF((.NOT.self%mfnk).OR.MOD(i,2)==0)THEN
+  npre = npre + 1
+  IF((.NOT.self%mfnk).OR.MOD(npre,4)==0)THEN
     CALL update_jacobian(u)
     CALL solver%pre%update(.TRUE.)
   END IF
@@ -306,22 +347,46 @@ DO i=1,self%nsteps
     END IF
     !---
     CALL self%xdmf_plot%add_timestep(self%t)
-    WRITE(*,*)'CHK',MAXVAL(plot_vals)
     CALL self%u%get_local(plot_vals,1)
     plot_vals = plot_vals*self%den_scale
     CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
     CALL self%u%get_local(plot_vals,2)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'velx')
+    plot_vec(1,:)=plot_vals
     CALL self%u%get_local(plot_vals,3)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'vely')
+    plot_vec(3,:)=plot_vals
     CALL self%u%get_local(plot_vals,4)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'velz')
+    plot_vec(2,:)=plot_vals
+    CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
     CALL self%u%get_local(plot_vals,5)
     CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
     CALL self%u%get_local(plot_vals,6)
     CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
+    CALL grad_psi%u%restore_local(plot_vals)
+    !------------------------------------------------------------------------------
+    ! Project magnetic field and plot
+    !------------------------------------------------------------------------------
+    CALL grad_psi%setup(oft_blagrange)
+    CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
+    CALL v_lag%set(0.d0)
+    CALL lminv%apply(v_lag,ux)
+    CALL ux%add(0.d0,1.d0,v_lag)
+    CALL v_lag%set(0.d0)
+    CALL lminv%apply(v_lag,uy)
+    CALL uy%add(0.d0,1.d0,v_lag)
+    !
+    CALL uy%get_local(plot_vals)
+    plot_vec(1,:)=-plot_vals
     CALL self%u%get_local(plot_vals,7)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'by')
+    plot_vec(3,:)=plot_vals
+    CALL ux%get_local(plot_vals)
+    plot_vec(2,:)=plot_vals
+    CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
+  END IF
+  IF(nksolver%lits<4)THEN
+    self%dt=self%dt*2.d0
+    npre=-1
+  ELSE IF(nksolver%lits>100)THEN
+    npre=-1
   END IF
 END DO
 CALL hist_file%close()
@@ -844,7 +909,8 @@ subroutine setup(self,mg_mesh_in, order)
 class(oft_xmhd_2d_sim), intent(inout) :: self
 CLASS(multigrid_mesh), TARGET, intent(in) :: mg_mesh_in
 integer(i4), intent(in) :: order
-integer(i4) :: ierr,io_unit
+integer(i4) :: i,ierr,io_unit
+LOGICAL, ALLOCATABLE :: vert_flag(:),edge_flag(:)
 mg_mesh=>mg_mesh_in
 mesh=>mg_mesh%smesh
 IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup",__FILE__)
@@ -895,8 +961,7 @@ self%fe_rep%field_tags(7)='by'
 !---Create solution vector
 CALL self%fe_rep%vec_create(self%u)
 
-!---Set boundary conditions (Dirichlet for now)
-
+!---Blocks to disable field evolutions via BCs
 ! ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.TRUE.
 ! ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.TRUE.
 ! ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
@@ -905,13 +970,54 @@ CALL self%fe_rep%vec_create(self%u)
 ! ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.TRUE.
 ! ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.TRUE.
 
-self%n_bc=>oft_blagrange%global%gbe
-self%velx_bc=>oft_blagrange%global%gbe
-self%vely_bc=>oft_blagrange%global%gbe
-self%velz_bc=>oft_blagrange%global%gbe
-self%T_bc=>oft_blagrange%global%gbe
-self%psi_bc=>oft_blagrange%global%gbe
-self%by_bc=>oft_blagrange%global%gbe
+! !---Set boundary conditions for pipe flow in square mesh
+! ALLOCATE(vert_flag(mesh%np),edge_flag(mesh%ne))
+! !---Temperature is fixed on outlet only
+! ALLOCATE(self%T_bc(oft_blagrange%ne))
+! vert_flag=.FALSE.; edge_flag=.FALSE.
+! DO i=1,mesh%nbe
+!   IF(mesh%bes(i)==2)THEN
+!     edge_flag(mesh%lbe(i))=.TRUE.
+!     vert_flag(mesh%le(1,mesh%lbe(i)))=.TRUE.
+!     vert_flag(mesh%le(2,mesh%lbe(i)))=.TRUE.
+!   END IF
+! END DO
+! CALL bfem_map_flag(oft_blagrange,vert_flag,edge_flag,self%T_bc)
+! !---Temperature is fixed on inlet/outlet
+! ALLOCATE(self%n_bc(oft_blagrange%ne))
+! vert_flag=.FALSE.; edge_flag=.FALSE.
+! DO i=1,mesh%nbe
+!   IF(mesh%bes(i)<3)THEN
+!     edge_flag(mesh%lbe(i))=.TRUE.
+!     vert_flag(mesh%le(1,mesh%lbe(i)))=.TRUE.
+!     vert_flag(mesh%le(2,mesh%lbe(i)))=.TRUE.
+!   END IF
+! END DO
+! CALL bfem_map_flag(oft_blagrange,vert_flag,edge_flag,self%n_bc)
+! ! !---Velocity outlet needs work
+! ! ALLOCATE(self%velx_bc(oft_blagrange%ne))
+! ! vert_flag=.FALSE.; edge_flag=.FALSE.
+! ! DO i=1,mesh%nbe
+! !   IF(mesh%bes(i)/=2)THEN
+! !     edge_flag(mesh%lbe(i))=.TRUE.
+! !     vert_flag(mesh%le(1,mesh%lbe(i)))=.TRUE.
+! !     vert_flag(mesh%le(2,mesh%lbe(i)))=.TRUE.
+! !   END IF
+! ! END DO
+! ! CALL bfem_map_flag(oft_blagrange,vert_flag,edge_flag,self%velx_bc)
+! ! ! self%vely_bc=>self%velx_bc
+! ! ! self%velz_bc=>self%velx_bc
+! !---Clean up flags
+! DEALLOCATE(vert_flag,edge_flag)
+
+!---Set any BCs that are not yet set
+IF(.NOT.ASSOCIATED(self%n_bc))self%n_bc=>oft_blagrange%global%gbe
+IF(.NOT.ASSOCIATED(self%velx_bc))self%velx_bc=>oft_blagrange%global%gbe
+IF(.NOT.ASSOCIATED(self%vely_bc))self%vely_bc=>oft_blagrange%global%gbe
+IF(.NOT.ASSOCIATED(self%velz_bc))self%velz_bc=>oft_blagrange%global%gbe
+IF(.NOT.ASSOCIATED(self%T_bc))self%T_bc=>oft_blagrange%global%gbe
+IF(.NOT.ASSOCIATED(self%psi_bc))self%psi_bc=>oft_blagrange%global%gbe
+IF(.NOT.ASSOCIATED(self%by_bc))self%by_bc=>oft_blagrange%global%gbe
 
 !---Create Jacobian matrix
 ALLOCATE(self%jacobian_block_mask(self%fe_rep%nfields,self%fe_rep%nfields))

@@ -22,7 +22,10 @@ set( THINCURR_EXES
   thincurr_coupling.F90
 )
 
-set( BIN_SRCS ${OFT_EXES} ${MARKLIN_EXES} ${TOKAMAKER_EXES} ${THINCURR_EXES} )
+set( BIN_SRCS ${OFT_EXES} ${MARKLIN_EXES} ${THINCURR_EXES} )
+if( OFT_TOKAMAKER_LEGACY )
+  set( BIN_SRCS ${BIN_SRCS} ${TOKAMAKER_EXES} )
+endif()
 
 foreach( file ${BIN_SRCS} )
   oft_add_exe( ${file} )
