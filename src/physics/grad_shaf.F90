@@ -3693,6 +3693,7 @@ integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
 integer(4), allocatable :: ncuts(:)
 real(8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3),loc_vals(3),psi_scale_len
 real(8) :: region(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99], [2,2])
+character(len=20) :: loc_str
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
 type(oft_lag_bg2interp), target :: psi_g2eval
@@ -3752,7 +3753,13 @@ DO i=1,smesh%np
       IF(ncuts(i)==0)stype=1
       IF(ncuts(i)>3)stype=3
     END IF
-    IF(stype<0)CYCLE
+    IF(stype<0)THEN
+      IF(oft_debug_print(1))THEN
+        WRITE(loc_str,'(2ES10.2)')smesh%r(1:2,i)
+        CALL oft_warn("Failed to refine candidate o-point at "//loc_str)
+      END IF
+      CYCLE
+    END IF
     IF(saddle_psi>-1.d98)THEN
       DO m=1,n_unique
         IF(SQRT(SUM((saddle_loc-unique_saddles(1:2,m))**2))<2.d-2)EXIT
