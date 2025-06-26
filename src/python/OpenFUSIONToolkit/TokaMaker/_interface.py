@@ -169,9 +169,9 @@ tokamaker_get_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_get_field_eval,
 tokamaker_apply_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_apply_field_eval,
     [c_void_p, c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double, c_int_ptr, c_int, ctypes_numpy_array(numpy.float64,1)])
 
-# tokamaker_set_psi(tMaker_ptr,psi_vals,error_str)
+# tokamaker_set_psi(tMaker_ptr,psi_vals,update_bounds,error_str)
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
-    [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
+    [c_void_p, ctypes_numpy_array(numpy.float64,1), c_bool, c_char_p])
 
 # tokamaker_set_psi_dt(tMaker_ptr,psi_vals,dt,error_str)
 tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
