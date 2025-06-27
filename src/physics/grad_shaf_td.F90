@@ -329,13 +329,17 @@ DO j=1,4
     !---Apply BCs
     CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
     IF(self%mfop%gs_eq%ncoils>0)THEN
-        ! Add voltage to RHS
+        ! Set Icoil BCs and add voltage to RHS
         CALL self%rhs%get_local(currs_tmp,2)
         DO i=1,self%mfop%gs_eq%ncoils
-            currs_tmp(i)=currs_tmp(i)+self%mfop%dt*coil_voltages(i)
+            IF(self%mfop%gs_eq%Rcoils(i)<=0.d0)THEN
+                currs_tmp(i)=coil_currents(i)
+            ELSE
+                currs_tmp(i)=currs_tmp(i)+self%mfop%dt*coil_voltages(i)
+            END IF
         END DO
         CALL self%rhs%restore_local(currs_tmp,2)
-        ! Set Icoil BCs
+        ! Set Icoil BCs in guess vector
         CALL self%psi_sol%get_local(currs_tmp,2)
         DO i=1,self%mfop%gs_eq%ncoils
             currs_tmp(i)=coil_currents(i)
