@@ -106,7 +106,7 @@ class TokaMaker():
         ## Coil set definitions, including sub-coils
         self.coil_sets = {}
         ## Virtual coils, if present (currently only `'#VSC'`)
-        self._virtual_coils = {'#VSC': -1}
+        self._virtual_coils = {'#VSC': {'id': -1 ,'facs': {}}}
         ## Coil set names in order of id number
         self.coil_set_names = []
         ## Distribution coils, only (currently) saved for plotting utility
@@ -180,7 +180,7 @@ class TokaMaker():
         self._vac_dict = {}
         self._coil_dict = {}
         self.coil_sets = {}
-        self._virtual_coils = {}
+        self._virtual_coils = {'#VSC': {'id': -1 ,'facs': {}}}
         self._F0 = 0.0
         self._Ip_target=c_double(self._oft_env.float_disable_flag)
         self._Ip_ratio_target=c_double(self._oft_env.float_disable_flag)
@@ -434,24 +434,31 @@ class TokaMaker():
         else:
             return None
     
-    def coil_dict2vec(self,coil_dict,always_virtual=False,default_value=0.0):
+    def coil_dict2vec(self,coil_dict,keep_virtual=False,default_value=0.0):
         '''! Create coil vector from dictionary of values
 
         @param coil_vec Input dictionary
-        @param always_virtual Always include virtual coils even if not present in dictionary
+        @param keep_virtual Keep virtual coils in vector instead of mapping to component coils
         @param default_value Fill value for unspecified entries
         @returns `coil_dict` Ouput vector
         '''
         vector = default_value*numpy.ones((self.ncoils+len(self._virtual_coils),))
-        keep_virtual = always_virtual
+        removal_vector = numpy.zeros((self.ncoils+len(self._virtual_coils),))
         for coil_key, value in coil_dict.items():
             if coil_key in self.coil_sets:
-                vector[self.coil_sets[coil_key]['id']] = value
+                vector[self.coil_sets[coil_key]['id']] += value
+                removal_vector[self.coil_sets[coil_key]['id']] = default_value
             elif coil_key in self._virtual_coils:
-                vector[self._virtual_coils[coil_key]] = value
-                keep_virtual = True
+                if keep_virtual:
+                    vector[self._virtual_coils[coil_key]['id']] += value
+                    removal_vector[self._virtual_coils[coil_key]['id']] = default_value
+                else:
+                    for map_key, map_val in self._virtual_coils[coil_key].get('facs',{}).items():
+                        vector[self.coil_sets[map_key]['id']] += map_val*value
+                        removal_vector[self.coil_sets[map_key]['id']] = default_value
             else:
                 raise KeyError('Unknown coil "{0}"'.format(coil_key))
+        vector -= removal_vector
         if keep_virtual:
             return vector
         else:
@@ -469,7 +476,7 @@ class TokaMaker():
             coil_dict[coil_key] = coil_vec[self.coil_sets[coil_key]['id']]
         if coil_vec.shape[0] > self.ncoils:
             for coil_key in self._virtual_coils:
-                coil_dict[coil_key] = coil_vec[self._virtual_coils[coil_key]]
+                coil_dict[coil_key] = coil_vec[self._virtual_coils[coil_key]['id']]
         elif always_virtual:
             for coil_key in self._virtual_coils:
                 coil_dict[coil_key] = 0.0
@@ -518,7 +525,7 @@ class TokaMaker():
                     if key in self.coil_sets:
                         reg_mat[self.coil_sets[key]['id'],i] = value
                     elif key in self._virtual_coils:
-                        reg_mat[self._virtual_coils[key],i] = value
+                        reg_mat[self._virtual_coils[key]['id'],i] = value
                     else:
                         raise KeyError('Unknown coil "{0}"'.format(key))
         elif reg_mat is not None:
@@ -537,7 +544,7 @@ class TokaMaker():
         else:
             raise ValueError('Either "reg_terms" or "reg_mat" is required')
         # Ensure VSC is constrained
-        if (self._virtual_coils.get('#VSC',-1) < 0) and ((abs(reg_mat[-1,:])).max() < 1.E-8):
+        if (not self._virtual_coils.get('#VSC',{}).get('facs',{})) and ((abs(reg_mat[-1,:])).max() < 1.E-8):
             new_row = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
             new_row[-1] = 1.0
             reg_mat = numpy.hstack((reg_mat,new_row.reshape([self.ncoils+1,1])))
@@ -567,7 +574,7 @@ class TokaMaker():
                 if coil_key in self.coil_sets:
                     bounds_array[self.coil_sets[coil_key]['id'],:] = coil_bound
                 elif coil_key in self._virtual_coils:
-                    bounds_array[self._virtual_coils[coil_key],:] = coil_bound
+                    bounds_array[self._virtual_coils[coil_key]['id'],:] = coil_bound
                 else:
                     raise KeyError('Unknown coil "{0}"'.format(coil_key))
         error_string = self._oft_env.get_c_errorbuff()
@@ -585,13 +592,14 @@ class TokaMaker():
         tokamaker_set_coil_vsc(self._tMaker_ptr,gains_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        self._virtual_coils['#VSC']['facs'] = coil_gains.copy()
     
     def set_vcoils(self,coil_resistivities):
         '''! Set or unset one or more coils as Vcoils
 
         @param coil_resistivities Resistivities for Vcoils [Ohms] (dictionary of form `{coil_name: coil_res}`)
         '''
-        res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,True,default_value=-1.0), dtype=numpy.float64)
+        res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,keep_virtual=True,default_value=-1.0), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_vcoil(self._tMaker_ptr,res_array,error_string)
         if error_string.value != b'':
@@ -1068,9 +1076,9 @@ class TokaMaker():
         psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
         if coil_currents is None:
             coil_currents, _ = self.get_coil_currents()
-        curr_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents,True), dtype=numpy.float64)
+        curr_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents,keep_virtual=True), dtype=numpy.float64)
         if coil_voltages is not None:
-            volt_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages,True), dtype=numpy.float64)
+            volt_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages,keep_virtual=True), dtype=numpy.float64)
         else:
             volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
