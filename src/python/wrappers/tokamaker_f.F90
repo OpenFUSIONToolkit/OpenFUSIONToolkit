@@ -358,14 +358,21 @@ END SUBROUTINE tokamaker_init_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_solve")
+SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,error_str) BIND(C,NAME="tokamaker_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
+LOGICAL :: vac_save
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 tMaker_obj%gs%timing=0.d0
+IF(vacuum)THEN
+  vac_save=tMaker_obj%gs%has_plasma
+  tMaker_obj%gs%has_plasma=.FALSE.
+END IF
 CALL tMaker_obj%gs%solve(ierr)
+IF(vacuum)tMaker_obj%gs%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
@@ -1141,6 +1148,7 @@ CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 oft_env%pm=settings%pm
+tMaker_obj%gs%has_plasma=settings%has_plasma
 tMaker_obj%gs%free=settings%free_boundary
 tMaker_obj%gs%lim_zmax=settings%lim_zmax
 tMaker_obj%gs%rmin=settings%rmin
