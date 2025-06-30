@@ -66,9 +66,9 @@ tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_char_p])
 
-# tokamaker_solve(tMaker_ptr,error_str)
+# tokamaker_solve(tMaker_ptr,vacuum,error_str)
 tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
-    [c_void_p, c_char_p])
+    [c_void_p, c_bool, c_char_p])
 
 # tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str)
 tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
