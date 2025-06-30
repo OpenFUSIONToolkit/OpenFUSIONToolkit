@@ -559,7 +559,7 @@ DO i=1,mesh%nc
       res_loc(jr, 6) = res_loc(jr, 6) &
         + basis_vals(jr)*psi*jac_det*quad%wts(m) &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dpsi)*jac_det*quad%wts(m) &
-        !+ basis_vals(jr)*self%dt*tmp1(2)*jac_det*quad%wts(m) &
+        + basis_vals(jr)*self%dt*tmp1(2)*jac_det*quad%wts(m) &
         + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dpsi)*jac_det*quad%wts(m)/mu0
       tmp1 = cross_product(dpsi,dvel(2, :))
       res_loc(jr, 7) = res_loc(jr, 7) &
@@ -835,8 +835,8 @@ DO i=1,mesh%nc
           + basis_vals(jr)*self%dt*basis_vals(jc)*dpsi(l)*jac_det*quad%wts(m)
           tmp2(l) = 1.d0
           tmp3 = cross_product(B_0, tmp2)
-          !jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
-          !+ basis_vals(jr)*self%dt*basis_vals(jc)*tmp3(2)*jac_det*quad%wts(m)
+          jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
+          + basis_vals(jr)*self%dt*basis_vals(jc)*tmp3(2)*jac_det*quad%wts(m)
         END DO
         jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
         + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
