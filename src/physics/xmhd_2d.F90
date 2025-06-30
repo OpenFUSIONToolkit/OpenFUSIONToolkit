@@ -45,6 +45,7 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: m_i=proton_mass
   REAL(r8) :: den_scale = 1.d19 !< Needs docs
   REAL(r8) :: diag_vals(7) = 0.d0 !< Needs docs
+  REAL (r8) :: B_0(3) = 0.d0
 
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
@@ -78,6 +79,7 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8) :: m_i=proton_mass
   REAL(r8) :: lin_tol = 1.d-8 !< absolute tolerance for linear solver
   REAL(r8) :: nl_tol = 1.d-5 !< Needs docs
+  REAL (r8) :: B_0(3) = 0.d0
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vel BC flag
@@ -206,9 +208,9 @@ CALL uy%add(0.d0,1.d0,v_lag)
 CALL uy%get_local(plot_vals)
 plot_vec(1,:)=-plot_vals
 CALL self%u%get_local(plot_vals,7)
-plot_vec(3,:)=plot_vals
-CALL ux%get_local(plot_vals)
 plot_vec(2,:)=plot_vals
+CALL ux%get_local(plot_vals)
+plot_vec(3,:)=plot_vals
 CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
 
 
@@ -220,6 +222,7 @@ self%nlfun%nu=self%nu
 self%nlfun%den_scale = self%den_scale
 self%nlfun%D_diff=self%D_diff
 self%nlfun%gamma=self%gamma
+self%nlfun%B_0 = self%B_0
 self%nlfun%n_bc=>self%n_bc
 self%nlfun%velx_bc=>self%velx_bc
 self%nlfun%vely_bc=>self%vely_bc
@@ -378,17 +381,20 @@ DO i=1,self%nsteps
     CALL uy%get_local(plot_vals)
     plot_vec(1,:)=-plot_vals
     CALL self%u%get_local(plot_vals,7)
-    plot_vec(3,:)=plot_vals
-    CALL ux%get_local(plot_vals)
     plot_vec(2,:)=plot_vals
+    CALL ux%get_local(plot_vals)
+    plot_vec(3,:)=plot_vals
+    plot_vec(1,:) = plot_vec(1,:)
+    plot_vec(2,:) = plot_vec(2,:)
+    plot_vec(3,:) = plot_vec(3,:)
     CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
   END IF
-  IF(nksolver%lits<4)THEN
-    self%dt=self%dt*2.d0
-    npre=-1
-  ELSE IF(nksolver%lits>100)THEN
-    npre=-1
-  END IF
+  ! IF(nksolver%lits<4)THEN
+  !   self%dt=self%dt*2.d0
+  !   npre=-1
+  ! ELSE IF(nksolver%lits>100)THEN
+  !   npre=-1
+  ! END IF
 END DO
 CALL hist_file%close()
 CALL nksolver%delete()
@@ -413,7 +419,7 @@ INTEGER(i4) :: i,m,jr, k,l
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
 REAL(r8) :: k_boltz = elec_charge
 REAL(r8) :: m_i=proton_mass
-REAL(r8) :: chi, eta, nu, D_diff, gamma, diag_vals(7)
+REAL(r8) :: chi, eta, nu, D_diff, gamma, diag_vals(7), B_0(3)
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
          dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3), tmp1(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
@@ -443,6 +449,7 @@ eta = self%eta !< Needs docs
 nu = self%nu !< Needs docs
 gamma = self%gamma !< Needs docs
 D_diff = self%D_diff !< Needs docs
+B_0 = self%B_0
 ! might need a version of this logic for eta or suchlike
 ! IF(self%tau_eq>0.d0)THEN
 !   tau_eq_inv=1.d0/self%tau_eq
@@ -515,8 +522,8 @@ DO i=1,mesh%nc
     n = n * self%den_scale
     dn = dn * self%den_scale
     div_vel = dvel(1,1) + dvel(3,3)
-    diag_vals = diag_vals + [n, vel(1), vel(2), vel(3), T, psi, by]*jac_det*quad%wts(m) !TODO: update this line for new fields
-    btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0]
+    diag_vals = diag_vals + [n, vel(1), vel(2), vel(3), T, psi, by]*jac_det*quad%wts(m) 
+    btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
     !---Compute local function contributions
     DO jr=1,oft_blagrange%nce
       !---Diffusion
@@ -548,9 +555,11 @@ DO i=1,mesh%nc
         + self%dt*chi*DOT_PRODUCT(dT, basis_grads(:,jr))*jac_det*quad%wts(m) &
         - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(dn, dT)*jac_det*quad%wts(m)/n 
       !---Induction
+      tmp1 = cross_product(B_0,vel)
       res_loc(jr, 6) = res_loc(jr, 6) &
         + basis_vals(jr)*psi*jac_det*quad%wts(m) &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dpsi)*jac_det*quad%wts(m) &
+        !+ basis_vals(jr)*self%dt*tmp1(2)*jac_det*quad%wts(m) &
         + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dpsi)*jac_det*quad%wts(m)/mu0
       tmp1 = cross_product(dpsi,dvel(2, :))
       res_loc(jr, 7) = res_loc(jr, 7) &
@@ -615,9 +624,9 @@ INTEGER(i4) :: i,m,jr,jc, k,l
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
 REAL(r8) :: k_boltz=elec_charge
 REAL(r8) :: m_i = proton_mass
-REAL(r8) :: chi, eta, nu, D_diff, gamma
+REAL(r8) :: chi, eta, nu, D_diff, gamma, B_0(3)
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3), tmp2(3)
+dvel(3,3),div_vel,jac_mat(3,4), jac_det, btmp(3), tmp2(3), tmp3(3)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
                                     psi_weights_loc, by_weights_loc, res_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
@@ -650,6 +659,7 @@ eta = self%eta !< Needs docs
 nu = self%nu !< Needs docs
 gamma = self%gamma !< Needs docs
 D_diff = self%D_diff !< Needs docs
+B_0 = self%B_0
 ! IF(self%tau_eq>0.d0)THEN
 !   tau_eq_inv=1.d0/self%tau_eq
 ! ELSE
@@ -662,7 +672,8 @@ DO i=1,self%fe_rep%nfields
 END DO
 !$omp parallel private(m,jr,jc,curved,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
 !$omp n_weights_loc,vel_weights_loc, psi_weights_loc, by_weights_loc, btmp, &
-!$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,dn, dT, dvel, div_vel, dpsi, dby,iloc, tmp2)
+!$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,dn, dT, dvel, div_vel, dpsi, dby,iloc, &
+!$omp tmp2, tmp3)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),&
         T_weights_loc(oft_blagrange%nce), psi_weights_loc(oft_blagrange%nce),&
@@ -720,7 +731,7 @@ DO i=1,mesh%nc
     n = n * self%den_scale
     dn = dn * self%den_scale
     div_vel = dvel(1,1) + dvel(3,3)
-    btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0]
+    btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
     !---Compute local matrix contributions
     DO jr=1,oft_blagrange%nce
       DO jc=1,oft_blagrange%nce
@@ -819,8 +830,13 @@ DO i=1,mesh%nc
         ! Induction
         ! Psi rows
         DO l=1,3
+          tmp2 = [0.d0, 0.d0,0.d0]
           jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
           + basis_vals(jr)*self%dt*basis_vals(jc)*dpsi(l)*jac_det*quad%wts(m)
+          tmp2(l) = 1.d0
+          tmp3 = cross_product(B_0, tmp2)
+          !jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
+          !+ basis_vals(jr)*self%dt*basis_vals(jc)*tmp3(2)*jac_det*quad%wts(m)
         END DO
         jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
         + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
@@ -995,21 +1011,21 @@ CALL self%fe_rep%vec_create(self%u)
 !   END IF
 ! END DO
 ! CALL bfem_map_flag(oft_blagrange,vert_flag,edge_flag,self%n_bc)
-! ! !---Velocity outlet needs work
-! ! ALLOCATE(self%velx_bc(oft_blagrange%ne))
-! ! vert_flag=.FALSE.; edge_flag=.FALSE.
-! ! DO i=1,mesh%nbe
-! !   IF(mesh%bes(i)/=2)THEN
-! !     edge_flag(mesh%lbe(i))=.TRUE.
-! !     vert_flag(mesh%le(1,mesh%lbe(i)))=.TRUE.
-! !     vert_flag(mesh%le(2,mesh%lbe(i)))=.TRUE.
-! !   END IF
-! ! END DO
-! ! CALL bfem_map_flag(oft_blagrange,vert_flag,edge_flag,self%velx_bc)
-! ! ! self%vely_bc=>self%velx_bc
-! ! ! self%velz_bc=>self%velx_bc
-! !---Clean up flags
-! DEALLOCATE(vert_flag,edge_flag)
+! !---Velocity outlet needs work
+! ALLOCATE(self%velx_bc(oft_blagrange%ne))
+! vert_flag=.FALSE.; edge_flag=.FALSE.
+! DO i=1,mesh%nbe
+!   IF(mesh%bes(i)/=2)THEN
+!     edge_flag(mesh%lbe(i))=.TRUE.
+!     vert_flag(mesh%le(1,mesh%lbe(i)))=.TRUE.
+!     vert_flag(mesh%le(2,mesh%lbe(i)))=.TRUE.
+!   END IF
+! END DO
+! CALL bfem_map_flag(oft_blagrange,vert_flag,edge_flag,self%velx_bc)
+! ! self%vely_bc=>self%velx_bc
+! ! self%velz_bc=>self%velx_bc
+!---Clean up flags
+!DEALLOCATE(vert_flag,edge_flag)
 
 !---Set any BCs that are not yet set
 IF(.NOT.ASSOCIATED(self%n_bc))self%n_bc=>oft_blagrange%global%gbe
