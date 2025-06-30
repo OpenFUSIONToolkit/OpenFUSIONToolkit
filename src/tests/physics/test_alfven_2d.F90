@@ -200,6 +200,7 @@ oft_env%pm=pm
 CALL mhd_sim%run_simulation()
 
 CALL ML_oft_blagrange%vec_create(tmp)
+
 !---Compare vx waveform
 initial%u => vx_ic
 CALL initial%setup(ML_oft_blagrange%current_level)

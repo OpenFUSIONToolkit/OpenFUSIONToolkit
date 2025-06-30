@@ -94,7 +94,7 @@ v_delta=2.d0*t0*elec_charge/(proton_mass*v_sound)
 
 
 !---Project n initial condition onto scalar Lagrange basis
-! first save background constant density field
+! First save background constant density field
 field_init%func=>const_init
 field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
@@ -121,6 +121,7 @@ CALL n_ic%restore_local(vec_vals)
 
 
 !---Project v_x initial condition onto scalar Lagrange basis
+! First save background constant density field (0 in this case)
 field_init%func=>const_init
 field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
@@ -163,7 +164,7 @@ CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
 CALL mhd_sim%u%restore_local(vec_vals,4)
 
 !---Project T initial condition onto scalar Lagrange basis
-! first save background constant temperature field
+! First save background constant temperature field
 field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -305,12 +306,7 @@ CLOSE(io_unit)
 CALL oft_finalize
 CONTAINS
 
-SUBROUTINE cos_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = 1.0+COS(pi*pt(1)/2.d0)/100
-END SUBROUTINE cos_init
-!
+
 SUBROUTINE const_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
