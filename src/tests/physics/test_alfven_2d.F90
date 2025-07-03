@@ -55,7 +55,7 @@ Real(r8) :: v_dir(3) = (/1.d0,0.d0,0.d0/) !<Direction of velocity perturbation
 REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
 REAL(r8) :: lam = 2.d0 !< Wavelength
 REAL(r8) :: v_alf = 1.d4 !< Alfven speed
-REAL(r8) :: v_delta = 1.d-4 !< Relative size of perturbation (<<1)
+REAL(r8) :: v_delta = 1.d0 !< Relative size of perturbation (<<1)
 REAL(r8) :: B !<Background magnetic field magnitude
 REAL(r8) :: B_delta !<Perturbed magnetic field magnitude
 LOGICAL :: pm=.FALSE.
@@ -200,7 +200,6 @@ oft_env%pm=pm
 CALL mhd_sim%run_simulation()
 
 CALL ML_oft_blagrange%vec_create(tmp)
-
 !---Compare vx waveform
 initial%u => vx_ic
 CALL initial%setup(ML_oft_blagrange%current_level)
@@ -209,7 +208,8 @@ err_field%dim=1
 err_field%a=>initial
 err_field%b=>final
 CALL mhd_sim%u%get_local(vec_vals,2)
-CALL tmp%restore_local(vec_vals) !this line is the problem
+CALL tmp%restore_local(vec_vals)
+CALL tmp%scale(-1.d0)
 final%u=>tmp
 CALL final%setup(ML_oft_blagrange%current_level)
 verr=scal_energy_2d(mg_mesh%smesh,err_field,order*2)
@@ -223,6 +223,7 @@ err_field%a=>initial
 err_field%b=>final
 CALL mhd_sim%u%get_local(vec_vals,6)
 CALL tmp%restore_local(vec_vals)
+CALL tmp%scale(-1.d0)
 final%u=>tmp
 CALL final%setup(ML_oft_blagrange%current_level)
 psierr=scal_energy_2d(mg_mesh%smesh,err_field,order*2)

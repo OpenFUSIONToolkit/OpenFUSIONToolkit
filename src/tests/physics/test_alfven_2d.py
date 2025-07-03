@@ -45,7 +45,7 @@ oft_in_template = """
   bz0=0.d0,
   chi=1.E0
   eta=1.E-8
-  nu=1.E-6
+  nu=1.E-8
   gamma=1.67
   D_diff=1.E0
   dt={3}
@@ -71,8 +71,8 @@ def alfven_2d_setup(nbase,nlevels,order,
     mesh_type=1
     if hex_mesh:
         mesh_type=2
-    dt='5.0E-7'
-    its='400'
+    dt='2.0E-7'
+    its='500'
     tol='1.E-8'
     mf_flag='F'
     nproc = 1
@@ -106,8 +106,8 @@ def validate_result(verr_exp,berr_exp,steps_exp=11,linear=False):
 #============================================================================
 # Non-Linear test runners for NP=2
 def test_nl(petsc_flag=False):
-    berr_exp = 3.5416834381186570E-002
-    verr_exp = 3.9857714786056549E-002
+    berr_exp = 1.0124295922938713E-002
+    verr_exp = 1.0126253495120578E-002
     assert alfven_2d_setup(1,1,2)
     assert validate_result(verr_exp, berr_exp)
 
