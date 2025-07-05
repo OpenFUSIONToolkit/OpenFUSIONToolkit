@@ -1856,15 +1856,15 @@ class PETSC(package):
         self.display_name = "PETSc"
         self.version = version
         if self.version == '3.18':
-            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.18.6.tar.gz"
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.18.6/petsc-v3.18.6.tar.gz"
         elif self.version == '3.19':
-            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.19.6.tar.gz"
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.19.6/petsc-v3.19.6.tar.gz"
         elif self.version == '3.20':
-            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.20.6.tar.gz"
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.20.6/petsc-v3.20.6.tar.gz"
         elif self.version == '3.21':
-            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.21.6.tar.gz"
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.21.6/petsc-v3.21.6.tar.gz"
         elif self.version == '3.22':
-            self.url = "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.22.4.tar.gz"
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.22.5/petsc-v3.22.5.tar.gz"
         else:
             error_exit('Invalid PETSc version requested (3.18 <= version <= 3.22)')
         self.debug = debug

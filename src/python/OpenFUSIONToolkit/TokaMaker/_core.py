@@ -679,17 +679,20 @@ class TokaMaker():
         self.load_profiles(ffp_file,None,pp_file,eta_file,ffp_NI_file)
 
     def solve(self, vacuum=False):
-        '''! Solve G-S equation with specified constraints, profiles, etc.'''
-        if vacuum:
-            raise ValueError('"vacuum=True" no longer supported, use "vac_solve()"')
+        '''! Solve G-S equation with specified constraints, profiles, etc.
+        
+        @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
+        '''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_solve(self._tMaker_ptr,error_string)
+        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
         and optional other currents
+
+        @note If isoflux, flux, or saddle constraints are desired use @ref solve instead.
         
         @param psi Boundary values for vacuum solve
         @param rhs_source Current source (optional)
@@ -1048,16 +1051,17 @@ class TokaMaker():
                 psi = 1.0 - psi
         return psi
 
-    def set_psi(self,psi):
+    def set_psi(self,psi,update_bounds=False):
         '''! Set poloidal flux values on node points
 
         @param psi Poloidal flux values (should not be normalized!)
+        @param update_bounds Update plasma bounds by determining new limiting points
         '''
         if psi.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi", should be [np]')
         psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_psi(self._tMaker_ptr,psi,error_string)
+        tokamaker_set_psi(self._tMaker_ptr,psi,c_bool(update_bounds),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
