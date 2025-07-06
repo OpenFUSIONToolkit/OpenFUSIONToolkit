@@ -375,44 +375,52 @@ class torus_fourier_sensor():
             if show_plot:
                 plt.show()
 
-    def plot_sensor_output_on_surface(self,t,fig=None,ax=None):
+    def plot_sensor_output_on_surface(self,t,figs=None,axes=None):
         '''! Plot the normal magnetic field on the surface at time step `t`
 
         @param t The time step during the time evolution
-        @param fig Matplotlib figure for plotting
-        @param ax Matplotlib axis for plotting
+        @param figa Maximumly two Matplotlib figures for plotting
+        @param axes Two Matplotlib axes for plotting
         '''
-
+    
+        if axes is None and figs is None:
+            fig1,ax1 = plt.subplots(constrained_layout=True)
+            fig2,ax2 = plt.subplots(constrained_layout=True)
+            figs = [fig1,fig2]
+            axes = [ax1,ax2]
+            show_plot = True
+        elif axes is not None and figs is not None:
+            axes = np.array(axes).flatten()
+            figs = np.array(figs).flatten()
+            if len(axes)!=2:
+                raise ValueError('For customized plotting, two axes are required for plotting the surface at two cross sections.')
+            if len(figs) == 1:
+                figs = [figs[0],figs[0]]
+            elif len(figs) != 2:
+                raise ValueError('For customized plotting, maximumlly two figures are required.')
+            show_plot = False
+        else:
+            raise ValueError('For customized plotting, please provide both figures and axes as inputs.')
+        
         for i, angle in zip([0,self.nphi//2],np.linspace(2*np.pi,0,self.nphi,endpoint=False)[[0,self.nphi//2]]):
             points = np.array([self.radial_positions,self.axial_positions]).T.reshape(-1,1,2)
             points_closed = np.concatenate([points,points[:1]],axis=0)
             segments = np.concatenate([points_closed[:-1],points_closed[1:]],axis=1)
             z = self.get_B_mesh(t)[:,i]
-            lc = LineCollection(
-                segments,
-                cmap='RdBu_r' if z.max()>=0 else 'RdBu',
-                norm=plt.Normalize(z.min(),z.max())
-            )
-
+            lc = LineCollection(segments,cmap='RdBu_r' if z.max()>=0 else 'RdBu',norm=plt.Normalize(z.min(),z.max()))
             lc.set_array(z[:-1])
             lc.set_linewidth(10)
-            if ax is None and fig is None:
-                fig,ax = plt.subplots(constrained_layout=True)
-                show_plot = True
-            elif ax is not None and fig is not None:
-                show_plot = False
-            else:
-                raise ValueError('For customized plotting, please provide both fig and ax as inputs.')
-            ax.add_collection(lc)
-            ax.autoscale()
-            fig.colorbar(lc,ax=ax,label='Radial Magnetic Field (Tesla)')
-            ax.plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]),color='black',linewidth=0.8,zorder=2)
-            ax.set_xlabel('R')
-            ax.set_ylabel('Z')
-            ax.set_title(rf"Magnetic Field @ $\phi$ = {angle:.4f} at [t] = {t}")
-            ax.set_aspect('equal')
-            if show_plot:
-                plt.show()
+
+            axes[i//(self.nphi//2)].add_collection(lc)
+            axes[i//(self.nphi//2)].autoscale()
+            figs[i//(self.nphi//2)].colorbar(lc,ax=axes[i//(self.nphi//2)],label='Radial Magnetic Field (Tesla)')
+            axes[i//(self.nphi//2)].plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]),color='black',linewidth=0.8,zorder=2)
+            axes[i//(self.nphi//2)].set_xlabel('R')
+            axes[i//(self.nphi//2)].set_ylabel('Z')
+            axes[i//(self.nphi//2)].set_title(rf"Magnetic Field @ $\phi$ = {angle:.4f} at [t] = {t}")
+            axes[i//(self.nphi//2)].set_aspect('equal')     
+        if show_plot:
+            plt.show()
 
     def plot_1D_fourier_amplitude(self,t,harmonics,axis,ax=None,d_phi=None,part='r'):
         '''! Plot real fourier amplitude of 1D Fast Fourier Transform of the magnetic mesh in `axis` at time step `t`
@@ -551,14 +559,14 @@ class torus_fourier_sensor():
         if show_plot:
             plt.show()
 
-    def field_fourier_amplitude_contour(self,m_min,m_max,n_min,n_max,t,fig=None,ax=None,d_phi=None):
+    def field_fourier_amplitude_contour(self,t,m_min,m_max,n_min,n_max,fig=None,ax=None,d_phi=None):
         '''! Plot the fourier amplitude of the magnetic field in the fourier space
 
+        @param t The time step during the time evolution
         @param m_min The lower limit of the poloidal harmonics to be included in the contour
         @param m_max The upper limit of the poloidal harmonics to be included in the contour
         @param n_min The lower limit of the toroidal harmonics to be included in the contour
         @param n_max The upper limit of the toroidal harmonics to be included in the contour
-        @param t The time step during the time evolution
         @param fig Matplotlib figure for plotting
         @param ax Matplotlib axis for plotting
         @param d_phi Hamada phase shifts [ntheta]
