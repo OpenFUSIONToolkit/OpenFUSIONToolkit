@@ -121,8 +121,10 @@ IF(ASSOCIATED(mesh_ssets))THEN
   END IF
 END IF
 tw_sim%mesh=>mg_mesh%smesh
-IF(jumper_start>0)THEN
+IF(jumper_start/=0)THEN
   n=SIZE(mesh_nsets)
+  IF(ABS(jumper_start)>n)CALL oft_abort('"jumper_start" exceeds number of nodesets in file',"thincurr_td",__FILE__)
+  IF(jumper_start<0)jumper_start=n+1+jumper_start
   hole_nsets=>mesh_nsets(1:jumper_start-1)
   ALLOCATE(tw_sim%jumper_nsets(n-jumper_start+1))
   DO i=jumper_start,n
