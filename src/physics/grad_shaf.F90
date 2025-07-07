@@ -222,6 +222,7 @@ TYPE :: gs_eq
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Coil current bounds
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Number of turns for each coil in each region
   REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Coil mutual inductance matrix
+  REAL(r8), POINTER, DIMENSION(:,:) :: dist_coil => NULL() !< Current distribution for each coil (if defined)
   LOGICAL :: free = .FALSE. !< Computing free-boundary equilibrium?
   LOGICAL :: compute_chi = .FALSE. !< Compute toroidal field potential?
   LOGICAL :: plot_step = .TRUE. !< Save solver steps for plotting
@@ -1189,8 +1190,9 @@ ELSE
       self%coil_nturns(self%coil_regions(i)%id,:)/self%coil_regions(i)%area ! Normalize turns by coil area
   END DO
 END IF
-ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils+1,self%ncoils+1))
+ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils+1,self%ncoils+1),self%dist_coil(self%psi%n,self%ncoils))
 ALLOCATE(self%Rcoils(self%ncoils+1),self%coils_dt(self%ncoils+1),self%coils_volt(self%ncoils+1))
+self%dist_coil=1.d0
 self%Rcoils=-1.d0
 self%coils_dt=0.d0
 self%coils_volt=0.d0
@@ -1689,7 +1691,7 @@ integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns
+real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns,jphi
 real(8), allocatable :: rhs_loc(:),rop(:)
 integer(4) :: j,m,l,k
 integer(4), allocatable :: j_lag(:)
@@ -1700,7 +1702,7 @@ smesh=>self%fe_rep%mesh
 NULLIFY(btmp)
 CALL b%set(0.d0)
 CALL b%get_local(btmp)
-!$omp parallel private(j,rhs_loc,j_lag,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
+!$omp parallel private(j,rhs_loc,j_lag,goptmp,v,m,det,pt,psitmp,l,rop,nturns,jphi)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
@@ -1713,12 +1715,14 @@ DO j=1,smesh%nc
   do m=1,self%fe_rep%quad%np
     call smesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
     det=v*self%fe_rep%quad%wts(m)
+    jphi=0.d0
     DO l=1,self%fe_rep%nce
-      CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l)) 
+      CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
+      jphi=jphi+rop(l)*curr_dist(j_lag(l))
     END DO
     !$omp simd
     do l=1,self%fe_rep%nce
-      rhs_loc(l)=rhs_loc(l)+rop(l)*det*curr_dist(j_lag(l))
+      rhs_loc(l)=rhs_loc(l)+rop(l)*det*jphi
     end do
   end do
   !---Get local to global DOF mapping
@@ -5651,7 +5655,7 @@ character(LEN=*), intent(in) :: bc
 real(8), intent(in) :: main_scale
 real(r8), optional, intent(in) :: nonaxi_vals(:,:)
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns,eta_wt,pt(3)
+real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns,eta_wt,pt(3),coil_dist
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),row_tmp(:,:),col_tmp(:,:),eta_reg(:)
 integer(4) :: i,j,m,l,k,j2(1),jvsc(1)
 integer(4), allocatable :: j_lag(:)
@@ -5691,14 +5695,15 @@ DO j=1,smesh%nc
     if(curved.OR.(m==1))call smesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
     det=v*self%fe_rep%quad%wts(m)
     pt=smesh%log2phys(j,self%fe_rep%quad%pts(:,m))
-    psi_tmp=0.d0
+    psi_tmp=0.d0; coil_dist=0.d0
     DO l=1,self%fe_rep%nce
       CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
       psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
+      coil_dist=coil_dist+self%dist_coil(j_lag(l),iCoil)*rop(l)
     END DO
     !
     DO l=1,self%fe_rep%nce
-      col_tmp(1,l)=col_tmp(1,l)+mu0*2.d0*pi*rop(l)*nturns*det
+      col_tmp(1,l)=col_tmp(1,l)+mu0*2.d0*pi*rop(l)*nturns*coil_dist*det
       row_tmp(l,1)=row_tmp(l,1)+eta_wt*rop(l)*psi_tmp*det/(pt(1)+gs_epsilon)
     END DO
   end do

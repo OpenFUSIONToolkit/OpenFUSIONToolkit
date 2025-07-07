@@ -52,7 +52,6 @@ type, extends(oft_noop_matrix) :: oft_tmaker_td_mfop
     real(r8) :: ip_target = -1.d0 !< Target plasma current
     real(r8) :: ip_ratio_target = -1.d0 !< Ip ratio target
     real(8), pointer, dimension(:) :: eta_reg => NULL() !< Resistivity by region
-    real(8), pointer, dimension(:) :: curr_reg => NULL() !< Coil current by region
     CLASS(flux_func), POINTER :: F => NULL() !< Flux function for \f$ F*F' \f$ term
     CLASS(flux_func), POINTER :: P => NULL() !< Flux function for \f$ P' \f$ term
     TYPE(gs_eq), POINTER :: gs_eq => NULL() !< Equilibrium object
@@ -163,11 +162,12 @@ IF(eq_in%ncoils>0)THEN
     !---
     call psi_tmp%add(0.d0,1.d0,eq_in%psi)
     CALL self%psi_sol%get_local(vals_out,2)
-    DO i=1,eq_in%ncoils
-        CALL psi_tmp%add(1.d0,-eq_in%coil_currs(i)-eq_in%vcontrol_val*eq_in%coil_vcont(i),eq_in%psi_coil(i)%f)
-        vals_out(i)=eq_in%coil_currs(i)+eq_in%vcontrol_val*eq_in%coil_vcont(i)
-    END DO
+    eq_in%coil_currs = eq_in%coil_currs + eq_in%coil_vcont*eq_in%vcontrol_val
     eq_in%vcontrol_val=0.d0
+    DO i=1,eq_in%ncoils
+        CALL psi_tmp%add(1.d0,-eq_in%coil_currs(i),eq_in%psi_coil(i)%f)
+        vals_out(i)=eq_in%coil_currs(i)
+    END DO
     CALL self%psi_sol%restore_local(vals_out,2)
     DEALLOCATE(vals_out)
 ELSE
@@ -300,6 +300,9 @@ INTEGER(4), INTENT(out) :: nl_its,lin_its,nretry
 INTEGER(4) :: i,j,k,ierr
 REAL(r8), POINTER :: vals_out(:),currs_tmp(:)
 active_tMaker_td=>self
+! Move VSC current to coils
+self%mfop%gs_eq%coil_currs = self%mfop%gs_eq%coil_currs + self%mfop%gs_eq%coil_vcont*self%mfop%gs_eq%vcontrol_val
+self%mfop%gs_eq%vcontrol_val = 0.d0
 ! Update time-advance operator
 CALL self%mfop%update()
 ! Update operators if the timestep has changed
@@ -558,7 +561,11 @@ do i=1,mesh%nc
             IF(self%gs_eq%Rcoils(jr)<=0.d0)CYCLE
             nturns = self%gs_eq%coil_nturns(mesh%reg(i),jr)
             IF(ABS(nturns)>1.d-8)THEN
-                vals_loc(lag_rep%nce+jr)=vals_loc(lag_rep%nce+jr)+mu0*2.d0*pi*psi_tmp*nturns*det
+                eta_source=0.d0
+                do jc=1,lag_rep%nce ! Loop over degrees of freedom
+                    eta_source = eta_source + self%gs_eq%dist_coil(j(jc),jr)*rop(jc)
+                end do
+                vals_loc(lag_rep%nce+jr)=vals_loc(lag_rep%nce+jr)+mu0*2.d0*pi*psi_tmp*nturns*eta_source*det
             END IF
         END DO
     end do
@@ -604,15 +611,6 @@ DO i=1,self%gs_eq%ncond_regs
     j=self%gs_eq%cond_regions(i)%id
     self%eta_reg(j)=self%gs_eq%cond_regions(i)%eta
 END DO
-ALLOCATE(self%curr_reg(eq_in%mesh%nreg))
-self%curr_reg=0.d0
-DO i=1,self%gs_eq%ncoils
-    DO k=1,self%gs_eq%ncoil_regs
-        j=self%gs_eq%coil_regions(k)%id
-        self%curr_reg(j)=self%curr_reg(j) &
-          + (self%gs_eq%coil_currs(i) + self%gs_eq%vcontrol_val*self%gs_eq%coil_vcont(i))*self%gs_eq%coil_nturns(j,i)
-    END DO
-END DO
 !
 CALL build_vac_op(self,self%vac_op)
 DEBUG_STACK_POP
@@ -624,15 +622,6 @@ subroutine update_mfop(self)
 class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
 INTEGER(4) :: i,j,k
 DEBUG_STACK_PUSH
-! Update coil currents (end of time step)
-self%curr_reg=0.d0
-DO i=1,self%gs_eq%ncoils
-    DO k=1,self%gs_eq%ncoil_regs
-        j=self%gs_eq%coil_regions(k)%id
-        self%curr_reg(j)=self%curr_reg(j) &
-            + (self%gs_eq%coil_currs(i) + self%gs_eq%vcontrol_val*self%gs_eq%coil_vcont(i))*self%gs_eq%coil_nturns(j,i)
-    END DO
-END DO
 ! Point to profiles in case they changed
 self%F=>self%gs_eq%I
 self%P=>self%gs_eq%P
@@ -657,7 +646,6 @@ self%ip_target=-1.d0
 self%ip_ratio_target=-1.d0
 !
 IF(ASSOCIATED(self%eta_reg))DEALLOCATE(self%eta_reg)
-IF(ASSOCIATED(self%curr_reg))DEALLOCATE(self%curr_reg)
 ! TODO: Deallocate in the future, need to check if same as GS_EQ
 NULLIFY(self%F,self%P)
 NULLIFY(self%gs_eq)
