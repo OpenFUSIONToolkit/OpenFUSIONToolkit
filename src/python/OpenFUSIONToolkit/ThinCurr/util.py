@@ -4,9 +4,8 @@
 @date June 2025
 @ingroup doxy_oft_python
 '''
+import re
 import numpy as np
-from scipy.__config__ import show
-from sympy import N
 from .sensor import Mirnov, save_sensors
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
@@ -54,6 +53,7 @@ class torus_fourier_sensor():
         @param nphi The number of poloidal planes to be probed by sensors in the toroidal direction
         @param filename The name of the file storing ThinCurr sensors
         @param ax Matplotlib axis for plotting
+        @result line The line object of the surface with outward normal vectors plotted on `ax` if it is provided
         '''
         
         def calculate_outward_unit_normals(R,Z,R_major):
@@ -95,23 +95,19 @@ class torus_fourier_sensor():
 
         save_sensors(sensors,filename=filename)
         
-        if ax is None:
-            _,ax = plt.subplots(figsize=(10, 6))
-            show_plot = True
-        else:
-            show_plot = False
-
-        ax.plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]))
-        ax.quiver(self.radial_positions,self.axial_positions,outward_normals[:,0],outward_normals[:,1],color='red',scale=20)
-        ax.set_xlabel("Radial Position (R)")
-        ax.set_ylabel("Axial Position (Z)")
-        ax.set_ylim((-1.25*max(self.axial_positions),1.25*max(self.axial_positions)))
-        ax.set_xlim((min(self.radial_positions)-0.1,max(self.radial_positions)+0.1))
-        ax.set_title("Surface with Outward Normal Vectors")
-        ax.grid(True)
-        ax.set_aspect('equal')
-        if show_plot:
-            plt.show()
+        if ax is not None:
+            if len(np.array(ax).flatten())!=1:
+                raise ValueError('For customized plotting, please provide a single axis for plotting the surface with outward normal vectors.')
+            line, = ax.plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]))
+            ax.quiver(self.radial_positions,self.axial_positions,outward_normals[:,0],outward_normals[:,1],color='red',scale=20)
+            ax.set_xlabel("Radial Position (R)")
+            ax.set_ylabel("Axial Position (Z)")
+            ax.set_ylim((-1.25*max(self.axial_positions),1.25*max(self.axial_positions)))
+            ax.set_xlim((min(self.radial_positions)-0.1,max(self.radial_positions)+0.1))
+            ax.set_title("Surface with Outward Normal Vectors")
+            ax.grid(True)
+            ax.set_aspect('equal')
+            return line
 
     def load_histfile(self, hist_file_path='floops.hist'):
         '''! Loading histfile containing magnetic values at the surface collected by sensors
@@ -216,33 +212,28 @@ class torus_fourier_sensor():
         else:
             raise ValueError(f"Input coordinate system '{theta_coord}' is not supported. Supported systems are PEST and Hamada.")
     
-    def plot_inverse_2D_fourier_transform(self,t,fig=None,ax=None):
-        '''! Use ifft2 to reconstruct the sensor signal at time step t
+    def plot_inverse_2D_fourier_transform(self,t,fig,ax):
+        '''! Use ifft2 to reconstruct the sensor signal at time step `t`
 
         @param t The time step of the sensor signals at which fft and ifft is to be performed
         @param fig Matplotlib figure for plotting
         @param ax Matplotlib axis for plotting
+        @result cf The contour plot of the reconstructed sensor signals on the surface at time step `t`
+        @result cbar The colorbar of the contour plot
         '''
 
         B_n_fft, _, _ = self.fft2(self.get_B_mesh(t))
         B_n_ifft = self.ifft2(B_n_fft)
         # print(f'The largest difference between the original and reconstructed sensor signals is {np.linalg.norm(abs(B_n_ifft.real-self.get_B_mesh(t).real),np.inf)}')
         phi_grid, theta_grid = np.meshgrid(np.linspace(0,2*np.pi,self.nphi,endpoint=False),self.theta_list)
-        if ax is None and fig is None:
-            fig,ax = plt.subplots(figsize=(10,6),constrained_layout=True)
-            show_plot = True
-        elif ax is not None and fig is not None:
-            show_plot = False
-        else:
-            raise ValueError('For customized plotting, please provide both fig and ax as inputs.')
-        
+        if len(np.array(ax).flatten())!=1 or len(np.array(fig).flatten())!=1:
+            raise ValueError('For customized plotting, please provide a single figure and a single axis for plotting the a contour.')
         ax.set_title(fr"Reconstruction from the Fourier Transform on surface with $R_0$ = {self.major_radius:.3f} at [t] = {t}")
         ax.set_xlabel(r"$\phi$ (Toroidal Angle)")
         ax.set_ylabel(r"$\theta$ (Poloidal Angle)")
         cf = ax.contourf(phi_grid,theta_grid,np.flip(B_n_ifft.real,axis=1),levels=50,vmin=B_n_ifft.real.min(),vmax=B_n_ifft.real.max(),cmap="viridis")
-        fig.colorbar(cf,label="Minor Radial Magnetic Field")
-        if show_plot:
-            plt.show()
+        cbar = fig.colorbar(cf,label="Minor Radial Magnetic Field")
+        return cf, cbar
     
     def sort_fft_indices_and_mesh(self,B_n_fft,n_modes,m_modes):
         '''! Sort the Fourier Transformed B mesh and the poloidal and toroidal mode numbers generated by the FFT functions in this class while considering helicity
@@ -346,12 +337,14 @@ class torus_fourier_sensor():
                         l = 0
                 f.write("\n")
     
-    def plot_sensor_output(self,t,fig=None,ax=None):
+    def plot_sensor_output(self,t,fig,ax):
         '''! Plot the magnetic field contour of the sensors on the surface at time step `t`
 
         @param t The time step during the time evolution
         @param fig Matplotlib figure for plotting
         @param ax Matplotlib axis for plotting
+        @result cf The contour plot of the sensor values on the surface at time step `t`
+        @result cbar The colorbar of the contour plot
         '''
 
         if hasattr(self,'hist_file') == False:
@@ -360,48 +353,38 @@ class torus_fourier_sensor():
             phi_grid, theta_grid = np.meshgrid(np.linspace(0,2*np.pi,self.nphi,endpoint=False),self.theta_list)
             B_n = self.get_B_mesh(t)
 
-            if ax is None and fig is None:
-                fig,ax = plt.subplots(figsize=(10,6),constrained_layout=True)
-                show_plot = True
-            elif ax is not None and fig is not None:
-                show_plot = False
-            else:
-                raise ValueError('For customized plotting, please provide both fig and ax as inputs.')
+            if len(np.array(ax).flatten())!=1 or len(np.array(fig).flatten())!=1:
+                raise ValueError('For customized plotting, please provide a single figure and a single axis for plotting the a contour.')
             ax.set_title(rf"Magnetic Field on surfaces of toroidal planes with $R_0$ = {self.major_radius:.3f} at [t] = {t}")
             ax.set_xlabel(r"$\phi$ (radians)")
             ax.set_ylabel(r"$\theta$ (radians)")
             cf = ax.contourf(phi_grid,theta_grid,np.flip(B_n,axis=1),vmax=B_n.max(),vmin=B_n.min(),levels=50,cmap="viridis")
-            fig.colorbar(cf,label="Radial Magnetic Field (Tesla)")
-            if show_plot:
-                plt.show()
+            cbar = fig.colorbar(cf,label="Radial Magnetic Field (Tesla)")
+            return cf, cbar
 
-    def plot_sensor_output_on_surface(self,t,figs=None,axes=None):
+    def plot_sensor_output_on_surface(self,t,figs,axes):
         '''! Plot the normal magnetic field on the surface at time step `t`
 
         @param t The time step during the time evolution
         @param figa Maximumly two Matplotlib figures for plotting
         @param axes Two Matplotlib axes for plotting
+        @result lc_list The list of LineCollection objects for the two cross sections
+        @result boundary_list The list of surface boundary lines
+        @result cbar_list The list of colorbars for the LineCollection objects
         '''
-    
-        if axes is None and figs is None:
-            fig1,ax1 = plt.subplots(constrained_layout=True)
-            fig2,ax2 = plt.subplots(constrained_layout=True)
-            figs = [fig1,fig2]
-            axes = [ax1,ax2]
-            show_plot = True
-        elif axes is not None and figs is not None:
-            axes = np.array(axes).flatten()
-            figs = np.array(figs).flatten()
-            if len(axes)!=2:
-                raise ValueError('For customized plotting, two axes are required for plotting the surface at two cross sections.')
-            if len(figs) == 1:
-                figs = [figs[0],figs[0]]
-            elif len(figs) != 2:
-                raise ValueError('For customized plotting, maximumlly two figures are required.')
-            show_plot = False
-        else:
-            raise ValueError('For customized plotting, please provide both figures and axes as inputs.')
+
+        axes = np.array(axes).flatten()
+        figs = np.array(figs).flatten()
+        if len(axes)!=2:
+            raise ValueError('For customized plotting, two axes are required for plotting the surface at two cross sections.')
+        if len(figs) == 1:
+            figs = [figs[0],figs[0]]
+        elif len(figs) != 2:
+            raise ValueError('For customized plotting, maximumlly two figures are required.')
         
+        lc_list = []
+        boundary_list = []
+        cbar_list = []
         for i, angle in zip([0,self.nphi//2],np.linspace(2*np.pi,0,self.nphi,endpoint=False)[[0,self.nphi//2]]):
             points = np.array([self.radial_positions,self.axial_positions]).T.reshape(-1,1,2)
             points_closed = np.concatenate([points,points[:1]],axis=0)
@@ -413,27 +396,30 @@ class torus_fourier_sensor():
 
             axes[i//(self.nphi//2)].add_collection(lc)
             axes[i//(self.nphi//2)].autoscale()
-            figs[i//(self.nphi//2)].colorbar(lc,ax=axes[i//(self.nphi//2)],label='Radial Magnetic Field (Tesla)')
-            axes[i//(self.nphi//2)].plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]),color='black',linewidth=0.8,zorder=2)
+            cbar = figs[i//(self.nphi//2)].colorbar(lc,ax=axes[i//(self.nphi//2)],label='Radial Magnetic Field (Tesla)')
+            boundary = axes[i//(self.nphi//2)].plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]),color='black',linewidth=0.8,zorder=2)
             axes[i//(self.nphi//2)].set_xlabel('R')
             axes[i//(self.nphi//2)].set_ylabel('Z')
             axes[i//(self.nphi//2)].set_title(rf"Magnetic Field @ $\phi$ = {angle:.4f} at [t] = {t}")
-            axes[i//(self.nphi//2)].set_aspect('equal')     
-        if show_plot:
-            plt.show()
+            axes[i//(self.nphi//2)].set_aspect('equal')
+            lc_list.append(lc)
+            boundary_list.append(boundary)
+            cbar_list.append(cbar)
+        return lc_list, boundary_list, cbar_list
 
-    def plot_1D_fourier_amplitude(self,t,harmonics,axis,ax=None,d_phi=None,part='r'):
+    def plot_1D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,d_phi=None,part='r'):
         '''! Plot real fourier amplitude of 1D Fast Fourier Transform of the magnetic mesh in `axis` at time step `t`
 
         @param t The time step during the time evolution
         @param harmonics Array of mode number in the `axis` dimension, whose real amplitudes are to be plotted against the other dimension [:]
-        @param axis The direction in which the harmonics is to be obtained through 1D FFT; 1 is toroidal, and 0 is poloidal.
         @param ax Matplotlib axis for plotting
+        @param toroidal_harmonics Whether the input `harmonics` is toroidal or poloidal harmonics
         @param d_phi Hamada phase shifts [ntheta]
-        @param part Plot real ('r'), imaginary ('i'), or absolute ('a') amplitudes
+        @param part The part of the fourier amplitude to be plotted ('r' for real, 'i' for imaginary, 'a' for absolute)
+        @result line_list The list of line objects for each harmonic in `harmonics`
         '''
 
-        if axis == 1:
+        if toroidal_harmonics:
             B_n = self.get_B_mesh(t) if self.helicity == -1 else np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1)
             n_modes = np.fft.fftfreq(self.nphi)*self.nphi
             toroidal_harmonics=np.fft.fft(B_n,axis=1,norm="forward")
@@ -446,11 +432,7 @@ class torus_fourier_sensor():
             toroidal_harmonics[:,0] /= 2.0
             if len(n_modes)%2==0:
                 toroidal_harmonics[:][len(n_modes)//2] /= 2.0
-            if ax is None:
-                _,ax = plt.subplots(figsize=(8,6),constrained_layout=True)
-                show_plot = True
-            else:
-                show_plot = False
+            line_list = []
             for harmonic in harmonics:
                 n_indice = np.where((n_modes == harmonic))[0]
                 toroidal_mode = toroidal_harmonics[:,n_indice]
@@ -465,15 +447,15 @@ class torus_fourier_sensor():
                     lb = 'Abs'
                 else:
                     raise ValueError("Input of 'part' is invalid.")
-                ax.plot(self.theta_list,amplitude,label=f'n={harmonic}, {lb}')
+                line = ax.plot(self.theta_list,amplitude,label=f'n={harmonic}, {lb}')
+                line_list.append(line)
             ax.legend()
             ax.set_title(f"1D FFT Amplitude of Toroidal Mode at [t] = {t}")
             ax.set_xlabel(r"$\theta$ (radians)")
             ax.set_ylabel(f"Mode amplitude (Tesla)")
             ax.grid()
-            if show_plot:
-                plt.show()
-        elif axis == 0:
+            return line_list
+        else:
             B_n = self.get_B_mesh(t)
             m_modes = np.fft.fftfreq(self.ntheta)*self.ntheta
             poloidal_harmonics=np.fft.fft(B_n,axis=0,norm="forward")
@@ -481,12 +463,8 @@ class torus_fourier_sensor():
             poloidal_harmonics[0,:] /= 2.0
             if len(m_modes)%2==0:
                 toroidal_harmonics[len(m_modes)//2][:] /= 2.0
-            if ax is None:
-                _,ax = plt.subplots(figsize=(8,6),constrained_layout=True)
-                show_plot = True
-            else:
-                show_plot = False
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
+            line_list = []
             for harmonic in harmonics:
                 m_indice = np.where((m_modes == harmonic))[0]
                 poloidal_mode = np.roll(poloidal_harmonics[m_indice,:].flatten()[::-1],shift=1)
@@ -501,31 +479,33 @@ class torus_fourier_sensor():
                     lb = 'Abs'
                 else:
                     raise ValueError("Input of 'part' is invalid.")
-                ax.plot(phi_list,poloidal_mode,label=f'm={harmonic}, {lb}')
+                line = ax.plot(phi_list,poloidal_mode,label=f'm={harmonic}, {lb}')
+                line_list.append(line)
             ax.legend()
             ax.set_title(f"1D FFT Amplitude of Poloidal Mode at [t] = {t}")
             ax.set_xlabel(r"$\phi$ (radians)")
             ax.set_ylabel(f"Mode amplitude (Tesla)")
             ax.grid()
-            if show_plot:
-                plt.show()
-        else:
-            raise ValueError('Unspecified or incorrect axis number, should be either 1 (toroidal harmonics) or 0 (poloidal harmonics)')
-        
-    def plot_m_over_n_amplitude(self,m_list,n_list,t_max,dt,t_min=0,ax=None,d_phi=None):
+            return line_list
+
+    def plot_m_over_n_amplitude(self,m_list,n_list,t_max,dt,ax,t_min=0,d_phi=None):
         '''! Plot the 2D Fast Fourier Transformed amplitude of the magnetic field for `m/n` (poloidal harmonic / toroidal harmonic) mode with respect to time
 
-        @param m_list The list of poloidal modes to be visualize [:]
-        @param n_list The list of toroidal modes to be visualize [:]
+        @param m_list The list of m of the m/n modes to be visualized [:]
+        @param n_list The (list of) n of the m/n modes to be visualized [:]
         @param t_max The ending time step of the plot
         @param dt The duration of each time step in unit of seconds
-        @param t_min The starting time step of the plot
         @param ax Matplotlib axis for plotting
+        @param t_min The starting time step of the plot
         @param d_phi Hamada phase shifts [ntheta]
+        @result line_list The list of line objects for each m/n mode in `m_list` and `n_list`
         '''
 
-        if (len(m_list)!=len(n_list)):
-            raise ValueError('Input lists of poloidal and toroidal modes should have the same length')
+        n_list = np.array(n_list).flatten()
+        if len(n_list)!=1 and (len(m_list)!=len(n_list)):
+            raise ValueError('Input lists of poloidal and toroidal modes should have the same length, or input only one toroidal mode')
+        elif len(n_list) == 1:
+            n_list = np.array([n_list[0]]*len(m_list))
         t_array = np.array(range(t_min,t_max+1))
         mode_amplitudes = np.zeros((len(m_list),len(t_array)))
         for t in t_array:
@@ -544,23 +524,19 @@ class torus_fourier_sensor():
                 n_indices = np.where((n_modes_sorted == n))[0]
                 mode_amplitudes[i][t] = B_n_sorted[m_indices,n_indices].real
                 i+=1
-    
-        if ax is None:
-            _,ax = plt.subplots(figsize=(8,6),constrained_layout=True)
-            show_plot = True
-        else:
-            show_plot = False
+
+        line_list = []
         for j in range(mode_amplitudes.shape[0]):
-            plt.plot(t_array*dt*1e3,mode_amplitudes[j],label=f'{m_list[j]}/{n_list[j]}')
+            line = plt.plot(t_array*dt*1e3,mode_amplitudes[j],label=f'{m_list[j]}/{n_list[j]}')
+            line_list.append(line)
         ax.set_ylabel('Mode amplitudes (Tesla)')
         ax.set_xlabel('Time (ms)')
         ax.set_title(r'Amplitude of $m/n$ modes in time')
         ax.legend()
-        if show_plot:
-            plt.show()
+        return line_list
 
-    def field_fourier_amplitude_contour(self,t,m_min,m_max,n_min,n_max,fig=None,ax=None,d_phi=None):
-        '''! Plot the fourier amplitude of the magnetic field in the fourier space
+    def field_fourier_amplitude_contour(self,t,m_min,m_max,n_min,n_max,fig,ax,d_phi=None,part='r'):
+        '''! Plot the real fourier amplitude of the magnetic field in the fourier space
 
         @param t The time step during the time evolution
         @param m_min The lower limit of the poloidal harmonics to be included in the contour
@@ -570,8 +546,14 @@ class torus_fourier_sensor():
         @param fig Matplotlib figure for plotting
         @param ax Matplotlib axis for plotting
         @param d_phi Hamada phase shifts [ntheta]
+        @param part The part of the fourier amplitude to be plotted ('r' for real, 'i' for imaginary, 'a' for absolute)
+        @result cf The contour plot of the real fourier amplitude of the magnetic field in the fourier space
+        @result cbar The colorbar of the contour plot
         '''
 
+        if len(np.array(ax).flatten())!=1 or len(np.array(fig).flatten())!=1:
+            raise ValueError('For customized plotting, please provide a single figure and a single axis for plotting the a contour.')
+        
         B = self.get_B_mesh(t) if self.helicity == -1 else np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1)
         if d_phi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
@@ -587,32 +569,37 @@ class torus_fourier_sensor():
 
         n_grid_fft, m_grid_fft = np.meshgrid(n_modes_sorted[n_indices[0]:n_indices[1]+1],m_modes_sorted[m_indices[0]:m_indices[1]+1])
         
-        if ax is None and fig is None:
-            fig,ax = plt.subplots(figsize=(10,6),constrained_layout=True)
-            show_plot = True
-        elif ax is not None and fig is not None:
-            show_plot = False
-        else:
-            raise ValueError('For customized plotting, please provide both fig and ax as inputs.')
         ax.set_title(f"Real Fourier Amplitude of the Normal Magnetic Field at the Surface at [t] = {t}")
         ax.set_ylabel(r"$n$")
         ax.set_xlabel(r"$m$")
-        cf = ax.contourf(m_grid_fft,n_grid_fft,B_n_sorted[m_indices[0]:m_indices[1]+1,n_indices[0]:n_indices[1]+1].real,levels=50,cmap="viridis")
-        fig.colorbar(cf,label=f"Mode real amplitude (Tesla)")
-        if show_plot:
-            plt.show()
+        if part == 'r':
+            amplitudes = B_n_sorted[m_indices[0]:m_indices[1]+1,n_indices[0]:n_indices[1]+1].real
+            cf = ax.contourf(m_grid_fft,n_grid_fft,amplitudes,levels=50,cmap="viridis")
+            cbar = fig.colorbar(cf,label=f"Mode real amplitude (Tesla)")
+        elif part == 'i':
+            amplitudes = B_n_sorted[m_indices[0]:m_indices[1]+1,n_indices[0]:n_indices[1]+1].imag
+            cf = ax.contourf(m_grid_fft,n_grid_fft,amplitudes,levels=50,cmap="viridis")
+            cbar = fig.colorbar(cf,label=f"Mode imaginary amplitude (Tesla)")
+        elif part == 'a':
+            amplitudes = abs(B_n_sorted[m_indices[0]:m_indices[1]+1,n_indices[0]:n_indices[1]+1])
+            cf = ax.contourf(m_grid_fft,n_grid_fft,amplitudes,levels=50,cmap="viridis")
+            cbar = fig.colorbar(cf,label=f"Mode absolute amplitude (Tesla)")
 
-    def plot_2D_fourier_amplitude(self,t,harmonics,toroidal_harmonics=True,d_phi=None,ax=None,x_type='modes',x_mode_min=None,x_mode_max=None):
+        return cf, cbar
+
+    def plot_2D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,d_phi=None,x_type='modes',x_mode_min=None,x_mode_max=None):
         '''! Plot the 2D Fast Fourier Transformed amplitude of the mesh of magnetic values against poloidal/toroidal harmonics/angles
 
         @param t The time step during the time evolution
         @param harmonics List of (poloidal/toroidal) modes whose amplitudes are to be visualized in y axis [:]
+        @param ax Matplotlib axis for plotting
         @param toroidal_harmonics Whether the input `harmonics` is toroidal or poloidal harmonics
         @param d_phi Hamada phase shifts [ntheta]
-        @param ax Matplotlib axis for plotting
         @param x_type The variable on x axis ('modes' or 'angles')
         @param x_mode_min The min of the (toroidal/poloidal) mode number to be visualized on x axis
         @param x_mode_max The max of the (toroidal/poloidal) mode number to be visualized on x axis
+        @result real_line_list The list of line objects of real amplitudes for each harmonic in `harmonics`
+        @result imag_line_list The list of line objects of imaginary amplitudes for each harmonic in `harmonics`
         '''
 
         harmonics = np.array([harmonics]).flatten()
@@ -633,104 +620,99 @@ class torus_fourier_sensor():
         
         if x_type == 'modes':
             B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
-            if ax is None:
-                _,ax = plt.subplots(figsize=(20,10),dpi=200,constrained_layout=True)
-                show_plot = True
-            else:
-                show_plot = False
             cmap = plt.get_cmap('tab10')
             if toroidal_harmonics:
                 m_range = np.where((m_modes_sorted == x_mode_min) | (m_modes_sorted == x_mode_max))[0]
                 mode_idx = [np.where(n_modes_sorted == harmonic)[0][0] for harmonic in harmonics]
-                
+                real_line_list = []
+                imag_line_list = []
                 for i, idx in enumerate(mode_idx):
                     color = cmap(i/len(mode_idx))
-                    ax.plot(m_modes_sorted[m_range[0]:m_range[1]+1],B_n_sorted[m_range[0]:m_range[1]+1,idx].real,color=color,label=f"n={harmonics[i]}, real")
-                    ax.plot(m_modes_sorted[m_range[0]:m_range[1]+1],B_n_sorted[m_range[0]:m_range[1]+1,idx].imag,linestyle='--',color=color,label=f"n={harmonics[i]}, imag")
+                    rline = ax.plot(m_modes_sorted[m_range[0]:m_range[1]+1],B_n_sorted[m_range[0]:m_range[1]+1,idx].real,color=color,label=f"n={harmonics[i]}, real")
+                    iline = ax.plot(m_modes_sorted[m_range[0]:m_range[1]+1],B_n_sorted[m_range[0]:m_range[1]+1,idx].imag,linestyle='--',color=color,label=f"n={harmonics[i]}, imag")
+                    real_line_list.append(rline)
+                    imag_line_list.append(iline)
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Toroidal Modes at [t] = {t}",fontsize=20)
                 ax.set_xlabel(f"Poloidal Harmonics ($m$)")
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
                 ax.set_xticks(range(x_mode_min,x_mode_max+1))
                 ax.grid()
-                if show_plot:
-                    plt.show()
+                return real_line_list, imag_line_list
             else:
                 n_range = np.where((n_modes_sorted == x_mode_min) | (n_modes_sorted == x_mode_max))[0]
                 mode_idx = [np.where(m_modes_sorted == harmonic)[0][0] for harmonic in harmonics]
-
+                real_line_list = []
+                imag_line_list = []
                 for i, idx in enumerate(mode_idx):
                     color = cmap(i/len(mode_idx))
-                    ax.plot(n_modes_sorted[n_range[0]:n_range[1]+1],B_n_sorted[idx,n_range[0]:n_range[1]+1].real,color=color,label=f"m={harmonics[i]}, real")
-                    ax.plot(n_modes_sorted[n_range[0]:n_range[1]+1],B_n_sorted[idx,n_range[0]:n_range[1]+1].imag,linestyle='--',color=color,label=f"m={harmonics[i]}, imag")
+                    rline = ax.plot(n_modes_sorted[n_range[0]:n_range[1]+1],B_n_sorted[idx,n_range[0]:n_range[1]+1].real,color=color,label=f"m={harmonics[i]}, real")
+                    iline = ax.plot(n_modes_sorted[n_range[0]:n_range[1]+1],B_n_sorted[idx,n_range[0]:n_range[1]+1].imag,linestyle='--',color=color,label=f"m={harmonics[i]}, imag")
+                    real_line_list.append(rline)
+                    imag_line_list.append(iline)
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Poloidal Modes at [t] = {t}",fontsize=20)
                 ax.set_xlabel(f"Toroidal Harmonics ($n$)")
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
                 ax.set_xticks(range(x_mode_min,x_mode_max+1))
                 ax.grid()
-                if show_plot:
-                    plt.show()
+                return real_line_list, imag_line_list
         else:
-            if ax is None:
-                _,ax = plt.subplots(figsize=(10,6),constrained_layout=True)
-                show_plot = True
-            else:
-                show_plot = False
             if toroidal_harmonics:
                 mode_idx = [np.where(n_modes == harmonic)[0][0] for harmonic in harmonics]
+                real_line_list = []
+                imag_line_list = []
                 for i, idx in enumerate(mode_idx):
-                    ax.plot(self.theta_list,B_n_fft[:,idx].real,label=f"n={harmonics[i]}, real")
-                    ax.plot(self.theta_list,B_n_fft[:,idx].imag,linestyle='--',label=f"n={harmonics[i]}, imag")
+                    rline = ax.plot(self.theta_list,B_n_fft[:,idx].real,label=f"n={harmonics[i]}, real")
+                    iline = ax.plot(self.theta_list,B_n_fft[:,idx].imag,linestyle='--',label=f"n={harmonics[i]}, imag")
+                    real_line_list.append(rline)
+                    imag_line_list.append(iline)
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Toroidal Modes at [t] = {t}")
                 ax.set_xlabel(r"$\theta$ (radians)")
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
-                if show_plot:
-                    plt.show()
+                return real_line_list, imag_line_list
             else:
                 mode_idx = [np.where(m_modes == harmonic)[0][0] for harmonic in harmonics]
                 phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
+                real_line_list = []
+                imag_line_list = []
                 for i, idx in enumerate(mode_idx):
                     if self.helicity == -1:
-                        ax.plot(phi_list,np.roll(B_n_fft[idx,:].real[::-1],shift=1),label=f"m={harmonics[i]}, real")
-                        ax.plot(phi_list,np.roll(B_n_fft[idx,:].imag[::-1],shift=1),linestyle='--',label=f"m={harmonics[i]}, imag")
+                        rline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].real[::-1],shift=1),label=f"m={harmonics[i]}, real")
+                        iline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].imag[::-1],shift=1),linestyle='--',label=f"m={harmonics[i]}, imag")
+                        real_line_list.append(rline)
+                        imag_line_list.append(iline)
                     else:
-                        ax.plot(phi_list,B_n_fft[idx,:].real,label=f"m={harmonics[i]}, real")
-                        ax.plot(phi_list,B_n_fft[idx,:].imag,linestyle='--',label=f"m={harmonics[i]}, imag")
+                        rline = ax.plot(phi_list,B_n_fft[idx,:].real,label=f"m={harmonics[i]}, real")
+                        iline = ax.plot(phi_list,B_n_fft[idx,:].imag,linestyle='--',label=f"m={harmonics[i]}, imag")
+                        real_line_list.append(rline)
+                        imag_line_list.append(iline)
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Poloidal Modes at [t] = {t}")
                 ax.set_xlabel(r"$\phi$ (radians)")
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
-                if show_plot:
-                    plt.show()
+                return real_line_list, imag_line_list
 
-    def plot_sensor_signal_against_angle(self,t,theta=True,ax=None):
+    def plot_sensor_signal_against_angle(self,t,ax,theta=True):
         '''! Plot the value of normal magnetic fields over theta/phi at at phi/theta = 0
 
         @param t The time step during the time evolution
-        @param theta Plot against theta (True) or phi (False)
         @param ax Matplotlib axis for plotting
+        @param theta Plot against theta (True) or phi (False)
+        @return line The line object of the plot
         '''
 
         B_n = self.get_B_mesh(t)
-        if ax is None:
-            _,ax = plt.subplots(figsize=(10,6),constrained_layout=True)
-            show_plot = True
-        else:
-            show_plot = False
         if theta:
-            ax.plot(self.theta_list/2/np.pi, B_n[:,0])
+            line = ax.plot(self.theta_list/2/np.pi, B_n[:,0])
             ax.set_title(rf"Magnetic Field on surface @ $\phi$=0 at [t] = {t}")
             ax.set_xlabel(r"$\theta$ (radians)")
             ax.set_ylabel(f"Magnetic Field (Tesla)")
-            if show_plot:
-                plt.show()
         else:
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
-            ax.plot(phi_list/2/np.pi, np.flip(B_n[0,:],axis=1))
+            line = ax.plot(phi_list/2/np.pi, np.flip(B_n[0,:],axis=1))
             ax.set_title(rf"Magnetic Field on surface @ $\theta$=0 at [t] = {t}")
             ax.set_xlabel(r"$\phi$ (radians)")
             ax.set_ylabel(f"Magnetic Field (Tesla)")
-            if show_plot:
-                plt.show()
+        return line
