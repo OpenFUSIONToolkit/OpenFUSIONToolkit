@@ -140,11 +140,10 @@ class torus_fourier_sensor():
                     sensor_mesh[i][j] = self.hist_file[key][t]
             return sensor_mesh
     
-    def fft2(self,B,theta_coord='PEST',d_phi=None):
+    def fft2(self,B,d_phi=None):
         '''! Performs a 2D Fast Fourier Transform in PEST/Hamada coordinates on the magnetic field matrix probed by sensors with proper Nyquist handling
 
         @param B Input matrix of shape [ntheta,nphi]
-        @param theta_coord The coordinate system used for theta
         @param d_phi Hamada phase shifts [ntheta]
         @result `B_n` The Fast Fourier Transformed matrix [ntheta,nphi], `n_modes` The toroidal mode numbers [nphi], `m_modes` The poloidal mode numbers [ntheta]
         '''
@@ -153,18 +152,15 @@ class torus_fourier_sensor():
         n_modes = np.round(np.fft.fftfreq(n_phi)*n_phi).astype(int)
         m_modes = np.round(np.fft.fftfreq(n_theta)*n_theta).astype(int)
 
-        if theta_coord=='PEST':
+        if d_phi is None:
             B_n = np.fft.fft2(B,norm='forward')
-        elif theta_coord=='Hamada':
-            if d_phi is not None:
-                B_n_toroidal = np.fft.fft(B,axis=1,norm='forward')
-                phase_matrix = np.exp(-1j*np.outer(d_phi,n_modes))
-                B_n_toroidal_shifted = B_n_toroidal * phase_matrix
-                B_n = np.fft.fft(B_n_toroidal_shifted,axis=0,norm='forward')
-            else:
-                raise ValueError('List of phase shifts in theta is required by Hamada coordinate system.')
+        elif d_phi is not None and len(d_phi) == len(self.radial_positions):
+            B_n_toroidal = np.fft.fft(B,axis=1,norm='forward')
+            phase_matrix = np.exp(-1j*np.outer(d_phi,n_modes))
+            B_n_toroidal_shifted = B_n_toroidal * phase_matrix
+            B_n = np.fft.fft(B_n_toroidal_shifted,axis=0,norm='forward')
         else:
-            raise ValueError(f"Input coordinate system '{theta_coord}' is not supported. Supported systems are PEST and Hamada.")
+            raise ValueError('`d_phi` should have the same dimension as the radial/axial positions.')
 
         B_n *= 2.0
         B_n[0,0] /= 2.0
@@ -177,11 +173,10 @@ class torus_fourier_sensor():
 
         return B_n, n_modes, m_modes
 
-    def ifft2(self,B_n,theta_coord='PEST',d_phi=None):
+    def ifft2(self,B_n,d_phi=None):
         '''! Performs an inverse 2D Fast Fourier Transform in PEST/Hamada coordinates on the transformed magnetic field matrix with proper Nyquist handling
 
         @param B_n Input FFT'ed matrix of shape [ntheta,nphi]
-        @param theta_coord The coordinate system used for theta
         @param d_phi Hamada phase shifts [ntheta]
         @result `B_ifft` The reconstructed matrix [ntheta,nphi]
         '''
@@ -197,21 +192,17 @@ class torus_fourier_sensor():
         if n_theta%2 == 0 and n_phi%2 == 0:
             B_n[n_theta//2][n_phi//2] *=2.0
 
-        if theta_coord=='PEST':
+        if d_phi is None:
             return np.fft.ifft2(B_n,norm="forward")
-        elif theta_coord=='Hamada':
-            if d_phi is not None:
-                B_ifft_poloidal_shifted = np.fft.ifft(B_n,axis=0,norm='forward')
-                n_modes = np.round(np.fft.fftfreq(n_phi)*n_phi).astype(int)
-                inverse_phase = np.exp(1j*np.outer(d_phi,n_modes))
-                B_ifft_poloidal = B_ifft_poloidal_shifted*inverse_phase
-
-                return np.fft.ifft(B_ifft_poloidal,axis=1,norm='forward')
-            else:
-                raise ValueError('List of phase shifts in theta is required by Hamada coordinate system.')
+        elif d_phi is not None and len(d_phi) == len(self.radial_positions):
+            B_ifft_poloidal_shifted = np.fft.ifft(B_n,axis=0,norm='forward')
+            n_modes = np.round(np.fft.fftfreq(n_phi)*n_phi).astype(int)
+            inverse_phase = np.exp(1j*np.outer(d_phi,n_modes))
+            B_ifft_poloidal = B_ifft_poloidal_shifted*inverse_phase
+            return np.fft.ifft(B_ifft_poloidal,axis=1,norm='forward')
         else:
-            raise ValueError(f"Input coordinate system '{theta_coord}' is not supported. Supported systems are PEST and Hamada.")
-    
+            raise ValueError('`d_phi` should have the same dimension as the radial/axial positions.')
+
     def plot_inverse_2D_fourier_transform(self,t,fig,ax):
         '''! Use ifft2 to reconstruct the sensor signal at time step `t`
 
@@ -268,10 +259,8 @@ class torus_fourier_sensor():
         B = np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1) if self.helicity == 1 else self.get_B_mesh(t)
         if d_phi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
-        elif len(d_phi) == len(self.radial_positions):
-            B_n_fft, n_modes, m_modes = self.fft2(B,theta_coord='Hamada',d_phi=d_phi)
         else:
-            raise ValueError('The d_phi input should have the same dimension as the radial/axial positions')
+            B_n_fft, n_modes, m_modes = self.fft2(B,d_phi=d_phi)
         
         B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
 
@@ -512,10 +501,9 @@ class torus_fourier_sensor():
             B = self.get_B_mesh(t) if self.helicity == -1 else np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1)
             if d_phi is None:
                 B_n_fft, n_modes, m_modes = self.fft2(B)
-            elif len(d_phi) == len(self.radial_positions):
-                B_n_fft, n_modes, m_modes = self.fft2(B,theta_coord='Hamada',d_phi=d_phi)
             else:
-                raise ValueError('The d_phi input should have the same dimension as the radial/axial positions')
+                B_n_fft, n_modes, m_modes = self.fft2(B,d_phi=d_phi)
+
             B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
 
             i = 0
@@ -557,10 +545,8 @@ class torus_fourier_sensor():
         B = self.get_B_mesh(t) if self.helicity == -1 else np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1)
         if d_phi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
-        elif len(d_phi) == len(self.radial_positions):
-            B_n_fft, n_modes, m_modes = self.fft2(B,theta_coord='Hamada',d_phi=d_phi)
         else:
-            raise ValueError('The d_phi input should have the same dimension as the radial/axial positions')
+            B_n_fft, n_modes, m_modes = self.fft2(B,d_phi=d_phi)
         
         B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
 
@@ -613,10 +599,8 @@ class torus_fourier_sensor():
         B = np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1) if self.helicity == 1 else self.get_B_mesh(t)
         if d_phi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
-        elif len(d_phi) == len(self.radial_positions):
-            B_n_fft, n_modes, m_modes = self.fft2(B,theta_coord='Hamada',d_phi=d_phi)
         else:
-            raise ValueError('The d_phi input should have the same dimension as the radial/axial positions')
+            B_n_fft, n_modes, m_modes = self.fft2(B,d_phi=d_phi)
         
         if x_type == 'modes':
             B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
