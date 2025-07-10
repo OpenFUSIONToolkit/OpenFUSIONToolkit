@@ -44,6 +44,26 @@ type, extends(spline_flux_func) :: mercier_flux_func
 contains
     procedure :: update => mercier_update
 end type mercier_flux_func
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+type, extends(gsinv_interp) :: minbinv_interp
+  real(8) :: minB = 1.d99
+contains
+  ! procedure :: setup => minterpinv_setup
+  !> Reconstruct the gradient of a Lagrange scalar field
+  procedure :: interp => minbinv_apply
+end type minbinv_interp
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+type, extends(spline_flux_func) :: dipole_b0_flux_func
+  integer(4) :: ntheta = 128
+  real(r8) :: psi_pad = 1.d-1
+  TYPE(spline_type) :: funcp
+contains
+    procedure :: update => dipole_b0_update
+end type dipole_b0_flux_func
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -242,4 +262,167 @@ val(8)=(tmp*val(4)+grad(1)/(pt(1)+self%eps))*val(5)
 val(3:8)=val(3:8)*val(2)
 deallocate(j)
 end subroutine minterpinv_apply
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+SUBROUTINE create_dipole_b0_prof(func,npsi)
+CLASS(flux_func), POINTER, INTENT(out) :: func
+INTEGER(4), INTENT(in) :: npsi
+INTEGER(4) :: i
+
+ALLOCATE(dipole_b0_flux_func::func)
+select type(self=>func)
+  type is(dipole_b0_flux_func)
+    !---
+    self%npsi=npsi
+    CALL spline_alloc(self%func,self%npsi,1)
+    CALL spline_alloc(self%funcp,self%npsi,1)
+    DO i=1,omp_get_max_threads()
+      CALL spline_alloc(self%fun_loc(i),self%npsi,1)
+    END DO
+end select
+END SUBROUTINE create_dipole_b0_prof
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_update(self,gseq)
+class(dipole_b0_flux_func), intent(inout) :: self
+class(gs_eq), intent(inout) :: gseq
+type(minbinv_interp), target :: field
+type(oft_lag_brinterp) :: psi_int
+real(8) :: I,Ip,q,qp,vp,vpp,s,a,b,pp,gop(3,3),psi_surf(1),vol,rmax
+real(8) :: raxis,zaxis,f(3),pt(3),x1,x2,xr
+real(8), pointer, dimension(:) :: v
+real(8), parameter :: tol=1.d-10
+integer(4) :: j,k,cell
+!
+IF(oft_debug_print(2))THEN
+  WRITE(*,'(2A)')oft_indent,'Updating Mercier Pressure:'
+  CALL oft_increase_indent
+END IF
+psi_int%u=>gseq%psi
+CALL psi_int%setup(gseq%fe_rep)
+raxis=gseq%o_point(1)
+zaxis=gseq%o_point(2)
+IF(oft_debug_print(2))WRITE(*,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
+!---
+x1=0.d0; x2=1.d0
+IF(gseq%plasma_bounds(1)>-1.d98)THEN
+  x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
+END IF
+xr = (x2-x1)
+IF(.TRUE.)THEN
+  x1 = x1 + xr*self%psi_pad
+  xr = (x2-x1)
+END IF
+!---Find Rmax along Zaxis
+rmax=raxis
+cell=0
+DO j=1,100
+  pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
+  CALL psi_int%interp(cell,f,gop,psi_surf)
+  IF( psi_surf(1) > x1)EXIT
+  rmax=pt(1)
+END DO
+IF(oft_debug_print(2))WRITE(*,'(2A,ES11.3)')oft_indent,'Rmin = ',rmax
+!---Trace
+call set_tracer(1)
+!!$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
+pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
+field%u=>gseq%psi
+CALL field%setup(gseq%fe_rep)
+active_tracer%neq=2
+active_tracer%B=>field
+active_tracer%maxsteps=8e4
+active_tracer%tol=1.d-9
+active_tracer%raxis=raxis
+active_tracer%zaxis=zaxis
+active_tracer%inv=.TRUE.
+!!$omp do schedule(dynamic,1)
+do j=1,self%npsi+1
+  !------------------------------------------------------------------------------
+  ! Trace contour
+  !------------------------------------------------------------------------------
+  !psi_surf(1)=(x2-x1)*(1.d0-j/REAL(self%npsi,4))**2
+  psi_surf(1)=(x2-x1)*(1.d0-j/REAL(self%npsi+1,4))
+  psi_surf(1)=x2 - psi_surf(1)
+  !!$omp critical
+  CALL gs_psi2r(gseq,psi_surf(1),pt)
+  !!$omp end critical
+  field%minB=1.d99
+  call tracinginv_fs(gseq%mesh,pt(1:2))
+  !---Exit if trace fails
+  if(active_tracer%status/=1)THEN
+    WRITE(*,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
+    call oft_abort('Trace did not complete.','mercier_update',__FILE__)
+  end if
+  !---Get surface minB
+  self%func%xs(j-1)=psi_surf(1)
+  self%func%fs(j-1,1)=field%minB
+  ! WRITE(*,*)psi_surf(1),field%minB
+end do
+!!$omp end parallel
+! self%funcp%xs(0)=x1
+! self%funcp%fs(0,1)=0.d0
+!self%funcp%fs(0,1)=self%funcp%fs(1,1)
+! self%funcp%xs(self%npsi)=x2!+.05d0*x2
+! self%funcp%fs(self%npsi,1)=0.d0
+self%yp1=self%func%fs(0,1)
+self%ypn=self%func%fs(self%npsi,1)
+!---Setup Spline
+CALL spline_fit(self%func,"extrap")
+! CALL spline_int(self%funcp)
+!---
+! self%func%xs=self%funcp%xs
+! self%func%fs(:,1)=self%funcp%fsi(:,1)
+! CALL spline_fit(self%func,"extrap")
+DO k=1,omp_get_max_threads()
+  CALL spline_copy(self%func,self%fun_loc(k))
+END DO
+!
+self%xmin=self%func%xs(0)
+self%xmax=self%func%xs(self%npsi)
+IF(oft_debug_print(2))CALL oft_decrease_indent
+end subroutine dipole_b0_update
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine minbinv_apply(self,cell,f,gop,val)
+class(minbinv_interp), intent(inout) :: self
+integer(4), intent(in) :: cell
+real(8), intent(in) :: f(:)
+real(8), intent(in) :: gop(3,3)
+real(8), intent(out) :: val(:)
+integer(4), allocatable :: j(:)
+integer(4) :: jc
+real(8) :: rop(3),d2op(6),pt(3),grad(3),d2(3),d2_tmp(6),tmp
+real(8) :: g2op(6,6),s,c
+real(8) :: K(6,3)
+!---Get dofs
+allocate(j(self%lag_rep%nce))
+call self%lag_rep%ncdofs(cell,j)
+!---Reconstruct gradient
+call self%mesh%hessian(cell,f,g2op,K)
+grad=0.d0
+d2_tmp=0.d0
+do jc=1,self%lag_rep%nce
+  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
+  call oft_blag_d2eval(self%lag_rep,cell,jc,f,d2op,g2op)
+  grad=grad+self%uvals(j(jc))*rop
+  d2_tmp=d2_tmp+self%uvals(j(jc))*(d2op-MATMUL(g2op,MATMUL(K,rop)))
+end do
+d2=d2_tmp([1,2,4]) ! Map from 3D to 2D
+!---Get radial position
+pt=self%mesh%log2phys(cell,f)
+!---
+s=SIN(self%t)
+c=COS(self%t)
+!---
+val(1)=(self%rho*(grad(1)*s-grad(2)*c))/(grad(1)*c+grad(2)*s)
+val(2)=pt(1)*SQRT((self%rho**2+val(1)**2)/SUM(grad**2))
+self%minB=min(self%minB,SQRT((grad(1)/pt(1))**2+(grad(2)/pt(1))**2))
+deallocate(j)
+end subroutine minbinv_apply
 end module oft_gs_mercier

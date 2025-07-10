@@ -13,6 +13,7 @@ import struct
 import numpy
 from collections import OrderedDict
 from .._interface import *
+from ..util import read_fortran_namelist
 
 ## @cond
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,

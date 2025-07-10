@@ -22,13 +22,13 @@ USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
   oft_lag_setup
-USE oft_blag_operators, ONLY: oft_lag_brinterp
+USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
-  gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
+USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, &
+  gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
-  gs_coil_mutual, gs_coil_mutual_distributed
+  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 #ifdef OFT_TOKAMAKER_LEGACY
 USE oft_gs, ONLY: gs_load_regions
 #endif
@@ -36,6 +36,7 @@ USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile
   sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
+USE oft_gs_mercier, ONLY: create_dipole_b0_prof
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -48,6 +49,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
   LOGICAL(KIND=c_bool) :: free_boundary = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: has_plasma = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: limited_only = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: dipole_mode = .FALSE. !< Needs docs
   INTEGER(KIND=c_int) :: maxits = 40 !< Needs docs
   INTEGER(KIND=c_int) :: mode = 1 !< Needs docs
   REAL(KIND=c_double) :: urf = 0.3d0 !< Needs docs
@@ -203,6 +205,7 @@ IF(TRIM(tMaker_obj%gs%coil_file)=='none')THEN
       END IF
       tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%id=i
       tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%continuous=(contig_tmp(i)==1)
+      IF(tMaker_obj%gs%dipole_mode)tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%inner_limiter=(contig_tmp(i)==-1)
     ELSE
       tMaker_obj%gs%ncoil_regs=tMaker_obj%gs%ncoil_regs+1
       tMaker_obj%gs%coil_regions(tMaker_obj%gs%ncoil_regs)%id=i
@@ -298,6 +301,10 @@ tMaker_obj%gs%full_domain=full_domain
 CALL gs_setup_walls(tMaker_obj%gs)
 CALL tMaker_obj%gs%load_limiters
 CALL tMaker_obj%gs%init()
+IF(tMaker_obj%gs%dipole_mode)THEN
+  tMaker_obj%gs%dipole_a=0.d0
+  CALL create_dipole_b0_prof(tMaker_obj%gs%dipole_B0,64)
+END IF
 ncoils=tMaker_obj%gs%ncoils
 END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
@@ -353,14 +360,21 @@ END SUBROUTINE tokamaker_init_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_solve")
+SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,error_str) BIND(C,NAME="tokamaker_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
+LOGICAL :: vac_save
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 tMaker_obj%gs%timing=0.d0
+IF(vacuum)THEN
+  vac_save=tMaker_obj%gs%has_plasma
+  tMaker_obj%gs%has_plasma=.FALSE.
+END IF
 CALL tMaker_obj%gs%solve(ierr)
+IF(vacuum)tMaker_obj%gs%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
@@ -636,6 +650,43 @@ END SUBROUTINE tokamaker_get_dels_curr
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_jtor(tMaker_ptr,jtor,error_str) BIND(C,NAME="tokamaker_get_jtor")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: jtor !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: u,v
+CLASS(oft_solver), POINTER :: minv
+TYPE(gs_j_interp) :: j_interp
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_obj%gs%dels_full))CALL build_dels(tMaker_obj%gs%dels_full,tMaker_obj%gs,"none")
+!
+CALL tMaker_obj%gs%psi%new(u)
+CALL tMaker_obj%gs%psi%new(v)
+!
+NULLIFY(minv)
+CALL create_cg_solver(minv)
+minv%A=>tMaker_obj%gs%mop
+minv%its=-2
+CALL create_diag_pre(minv%pre) ! Setup Preconditioner
+CALL j_interp%setup(tMaker_obj%gs)
+CALL oft_blag_project(tMaker_obj%gs%fe_rep,j_interp,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL c_f_pointer(jtor, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL u%get_local(vals_tmp)
+!
+CALL j_interp%delete()
+CALL u%delete()
+CALL v%delete()
+CALL minv%pre%delete()
+CALL minv%delete()
+DEALLOCATE(u,v,minv)
+END SUBROUTINE tokamaker_get_jtor
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_area_int(tMaker_ptr,vec_vals,reg_ind,result,error_str) BIND(C,NAME="tokamaker_area_int")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: vec_vals !< Needs docs
@@ -817,7 +868,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 REAL(c_double), INTENT(in) :: psi_q(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: qvals(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: ravgs(npsi,2) !< Needs docs
+REAL(c_double), INTENT(out) :: ravgs(npsi,3) !< Needs docs
 REAL(c_double), INTENT(inout) :: dl !< Needs docs
 REAL(c_double), INTENT(out) :: rbounds(2,2) !< Needs docs
 REAL(c_double), INTENT(out) :: zbounds(2,2) !< Needs docs
@@ -941,21 +992,58 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
 TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(oft_lag_bginterp), POINTER :: psi_grad_obj
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+CLASS(oft_vector), POINTER :: tmp1,tmp2,tmp3
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(imode==1)THEN
   ALLOCATE(b_interp_obj)
   b_interp_obj%gs=>tMaker_obj%gs
   CALL b_interp_obj%setup(tMaker_obj%gs)
   int_obj=C_LOC(b_interp_obj)
-ELSE
+ELSEIF(imode>=2.AND.imode<=4)THEN
   ALLOCATE(prof_interp_obj)
   prof_interp_obj%gs=>tMaker_obj%gs
   prof_interp_obj%mode=imode-1
   CALL prof_interp_obj%setup(tMaker_obj%gs)
   int_obj=C_LOC(prof_interp_obj)
+ELSEIF(imode==5)THEN
+  ALLOCATE(psi_grad_obj)
+  psi_grad_obj%u=>tMaker_obj%gs%psi
+  CALL psi_grad_obj%setup(tMaker_obj%gs%fe_rep)
+  int_obj=C_LOC(psi_grad_obj)
+ELSEIF(imode>=6.AND.imode<=8)THEN
+  ALLOCATE(psi_grad_obj)
+  CALL tMaker_obj%gs%psi%new(tmp1)
+  CALL tMaker_obj%gs%psi%new(tmp2)
+  CALL tMaker_obj%gs%psi%new(tmp3)
+  CALL gs_project_b(tMaker_obj%gs,tmp1,tmp2,tmp3)
+  IF(imode==6)THEN
+    psi_grad_obj%u=>tmp1
+    NULLIFY(tmp1)
+  ELSE IF(imode==7)THEN
+    psi_grad_obj%u=>tmp2
+    NULLIFY(tmp2)
+  ELSE IF(imode==8)THEN
+    psi_grad_obj%u=>tmp3
+    NULLIFY(tmp3)
+  END IF
+  IF(ASSOCIATED(tmp1))THEN
+    CALL tmp1%delete()
+    DEALLOCATE(tmp1)
+  END IF
+  IF(ASSOCIATED(tmp2))THEN
+    CALL tmp2%delete()
+    DEALLOCATE(tmp2)
+  END IF
+  IF(ASSOCIATED(tmp3))THEN
+    CALL tmp3%delete()
+    DEALLOCATE(tmp3)
+  END IF
+  CALL psi_grad_obj%setup(tMaker_obj%gs%fe_rep)
+  int_obj=C_LOC(psi_grad_obj)
 END IF
 END SUBROUTINE tokamaker_get_field_eval
 !---------------------------------------------------------------------------------
@@ -971,18 +1059,26 @@ REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Tolerance for physical to logi
 INTEGER(c_int), INTENT(inout) :: cell !< Cell containing `pt` (starting guess on input)
 INTEGER(c_int), VALUE, INTENT(in) :: dim !< Dimension of field
 REAL(c_double), INTENT(out) :: field(dim) !< Field at `pt`
+TYPE(oft_lag_bginterp), POINTER :: psi_grad_obj
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))CALL oft_abort("TokaMaker object not associated","tokamaker_apply_field_eval",__FILE__)
 IF(int_type<0)THEN
-  IF(int_type==-1)THEN
+  IF(ABS(int_type)==1)THEN
     CALL c_f_pointer(int_obj, b_interp_obj)
     CALL b_interp_obj%delete
-  ELSE
-    CALL c_f_pointer(int_obj, prof_interp_obj)
-    CALL prof_interp_obj%delete
+  ELSE IF(ABS(int_type)>=2.AND.ABS(int_type)<=4)THEN
+    CALL c_f_pointer(int_obj, b_interp_obj)
+    CALL b_interp_obj%delete
+  ELSE IF(ABS(int_type)>=5)THEN
+    CALL c_f_pointer(int_obj, psi_grad_obj)
+    IF(ABS(int_type)>=6)THEN
+      CALL psi_grad_obj%u%delete
+      DEALLOCATE(psi_grad_obj%u)
+    END IF
+    CALL psi_grad_obj%delete
   END IF
   RETURN
 END IF
@@ -997,23 +1093,28 @@ CALL tMaker_obj%gs%mesh%jacobian(cell,f,goptmp,vol)
 IF(int_type==1)THEN
   CALL c_f_pointer(int_obj, b_interp_obj)
   CALL b_interp_obj%interp(cell,f,goptmp,field)
-ELSE
+ELSE IF(int_type>=2.AND.int_type<=4)THEN
   CALL c_f_pointer(int_obj, prof_interp_obj)
   CALL prof_interp_obj%interp(cell,f,goptmp,field)
+ELSE IF(int_type>=5)THEN
+  CALL c_f_pointer(int_obj, psi_grad_obj)
+  CALL psi_grad_obj%interp(cell,f,goptmp,field)
 END IF
 END SUBROUTINE tokamaker_apply_field_eval
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi(tMaker_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_set_psi")
+SUBROUTINE tokamaker_set_psi(tMaker_ptr,psi_vals,update_bounds,error_str) BIND(C,NAME="tokamaker_set_psi")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: update_bounds !< Update bounds by determining new limiting points
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
 CALL tMaker_obj%gs%psi%restore_local(vals_tmp)
+IF(update_bounds)CALL gs_update_bounds(tMaker_obj%gs)
 END SUBROUTINE tokamaker_set_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -1049,6 +1150,7 @@ CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 oft_env%pm=settings%pm
+tMaker_obj%gs%has_plasma=settings%has_plasma
 tMaker_obj%gs%free=settings%free_boundary
 tMaker_obj%gs%lim_zmax=settings%lim_zmax
 tMaker_obj%gs%rmin=settings%rmin
@@ -1056,9 +1158,22 @@ tMaker_obj%gs%mode=settings%mode
 tMaker_obj%gs%urf=settings%urf
 tMaker_obj%gs%maxits=settings%maxits
 tMaker_obj%gs%nl_tol=settings%nl_tol
+tMaker_obj%gs%dipole_mode=settings%dipole_mode
+IF(tMaker_obj%gs%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution")
 CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(limfile_c,tMaker_obj%gs%limiter_file)
 END SUBROUTINE tokamaker_set_settings
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_dipole_a(tMaker_ptr,dipole_a,error_str) BIND(C,NAME="tokamaker_set_dipole_a")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+REAL(c_double), VALUE, INTENT(in) :: dipole_a !< New value for dipole_a
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+tMaker_obj%gs%dipole_a=dipole_a
+END SUBROUTINE tokamaker_set_dipole_a
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
@@ -1284,6 +1399,21 @@ CALL gs_save_ifile(tMaker_obj%gs,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=lcf
   pack_lcfs=LOGICAL(pack_lcfs),single_prec=LOGICAL(single_prec),error_str=error_flag)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_ifile
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_save_mug(tMaker_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_mug")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_save_mug(tMaker_obj%gs,filename_tmp)
+CALL copy_string(TRIM(error_flag),error_str)
+END SUBROUTINE tokamaker_save_mug
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------
