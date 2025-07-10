@@ -60,6 +60,7 @@ end type circular_curr
 !> Abstract flux function prototype
 !------------------------------------------------------------------------------
 TYPE, ABSTRACT :: flux_func
+  LOGICAL :: include_sol = .FALSE. !< Allow source evaluation in SOL
   INTEGER(i4) :: ncofs = 0 !< Number of free coefficients
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
@@ -3192,6 +3193,23 @@ do j=1,self%fe_rep%mesh%nc
         itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*self%fe_rep%quad%wts(m)
       END IF
     END IF
+    IF((SUM(ABS(ffp))<1.d-10).AND.self%I%include_sol)THEN
+      psitmp=0.d0
+      !$omp simd reduction(+:psitmp)
+      DO l=1,self%fe_rep%nce
+        psitmp=psitmp+vcache(l)*rop(l)
+      END DO
+      IF(self%mode==0)THEN
+        ffp(1:2)=((self%alam**2)*self%I%f(psitmp)+self%alam*self%I%f_offset)*self%I%fp(psitmp)
+        itor_alam = itor_alam + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
+      ELSE
+        ffp(1:2)=0.5d0*self%alam*self%I%fp(psitmp)
+        itor_alam = itor_alam + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*self%fe_rep%quad%wts(m)
+      END IF
+      ! ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+      ! estore = estore + (self%P%F(psitmp))*v*self%fe_rep%quad%wts(m)*pt(1)
+      itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*self%fe_rep%quad%wts(m)
+    END IF
     pt(1) = MAX(pt(1),gs_epsilon)
     ffp = ffp*det/pt(1)
     !$omp simd
@@ -3361,6 +3379,17 @@ do i=1,self%fe_rep%mesh%nc
       END IF
       itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
       curr_cent = curr_cent + itor_loc*pt(1:2)*v*self%fe_rep%quad%wts(m)
+    END IF
+    IF(self%I%include_sol)THEN
+     IF(self%mode==0)THEN
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+      ELSE
+        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
+        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+      END IF
+      curr_cent = curr_cent + itor_loc*pt(1:2)*v*self%fe_rep%quad%wts(m)
+      itor = itor + pt(1)*self%P%Fp(psitmp(1))*v*self%fe_rep%quad%wts(m)
     END IF
   end do
 end do
