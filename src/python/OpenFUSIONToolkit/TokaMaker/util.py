@@ -13,7 +13,7 @@ import struct
 import numpy
 from collections import OrderedDict
 from .._interface import *
-from ..util import read_fortran_namelist
+import re
 
 ## @cond
 tokamaker_eval_green = ctypes_subroutine(oftpy_lib.tokamaker_eval_green,
@@ -267,314 +267,160 @@ def compute_forces_components(tMaker_obj,psi,cell_centered=False):
         return J_cond, Bv_cond, mask, rcc
     else:
         return J_cond, B_cond, mask, tMaker_obj.r
-def namelist_read(file0, silent=True, b_arr=False):
-	#Return a dictionary with the parameters in the namelist file (file0)
-	#b_arr refers to an array at the bottom of the file, if one exists
+    
+def read_namelist(path):
+    f_lines = None
+    with open(str(path), 'r') as f:
+        f_lines = f.readlines()
+    
+    namelist = {}
+    key = None
+    for ln in f_lines:
+        if ln.count("=") > 1:
+            continue # TODO: implement later
+        elif ln.count("=") == 1:
+            key, val = ln.split("=")
+            key = key.strip()
+            tokens = re.split(r'[, ]', val)
+            namelist[key] = numpy.array(tokens)
+        else:
+            if "***" in ln or "&" in ln or "/" in ln:
+                continue
+            if "comment" in ln:
+                break
+            tokens = re.split(r'[, ]', ln)
+            tokens = [t for t in tokens if len(t)]
+            namelist[key] = numpy.append(namelist[key], tokens)
 
-	f = open(str(file0), 'r')
-	f_lines = f.readlines()
+    # Cleanup values
+    for key in namelist:
+        for i, val in enumerate(namelist[key]):
+            namelist[key][i] = val.strip("'").strip()
+        namelist[key] = [str for str in namelist[key] if len(str)]
+    # Expand compressed values
+    for key in namelist:
+        new_arr = numpy.array([])
+        for i, val in enumerate(namelist[key]):
+            if "*" in val:
+                tokens = val.split("*")
+                new_arr = numpy.append(new_arr, int(tokens[0]) * [tokens[1]])
+            else:
+                new_arr = numpy.append(new_arr, val)
+        namelist[key] = new_arr
+    return namelist
 
-	datalines = [] #Initialize new dictionary of information
+def read_mhdin(path, e_coil_names=None, f_coil_names=None):
+    r'''Read mhdin.dat file.
 
-	if b_arr == True:
-		brk_idx = [] #Find the last break and turn it into the bottom array
-		equal_idx = [] #Find the last equals sign
+    @param path Path to file
+    @param e_coil_names Names of E coils (hardcoded, generates indexed names if None)
+    @param f_coil_names Names of F coils (hardcoded, generates indexed names if None)
+    @result machine_dict Dictionary containing coil coordinates and turns, loop names, and probe names and angles.
+    @result raw Dictionary containing all other data from mhdin.dat
+    '''
+    raw = read_namelist(path)
+    machine_dict = OrderedDict()
+    
+    # Expand later
+    machine_dict['MPNAM2'] = raw['MPNAM2']
+    machine_dict['LPNAME'] = raw['LPNAME']
+        
+    e_coil_dict = OrderedDict()
 
-		for i in range(len(f_lines)):
-			brk_loc = f_lines[i].find('/')  #Find the lines with backslashes (line breaks)
-			if brk_loc >= 0.0:
-				brk_idx.append(i)
+    for i in range(len(raw['ECID'])):
+        idx = int(raw['ECID'][i]) - 1
+        e_coil_name = "ECOIL{:03d}".format(idx + 1)
+        if e_coil_names:
+            e_coil_name = e_coil_names[idx]
+        if e_coil_name not in e_coil_dict:
+            e_coil_dict[e_coil_name] = []
+        e_coil_dict[e_coil_name].append([float(raw['RE'][i]), float(raw['ZE'][i]), float(raw['WE'][i]), float(raw['HE'][i])])
+    machine_dict['ECOIL'] = e_coil_dict
 
-			equal_loc = f_lines[i].find('=')
-			if equal_loc >= 0.0:
-				equal_idx.append(i)
+    f_coil_dict = OrderedDict()
+    for i in range(len(raw['FCID'])):
+        f_coil_name = "FCOIL{:03d}".format(i + 1)
+        if f_coil_names:
+            f_coil_name = f_coil_names[i]
+        f_coil_dict[f_coil_name] = [float(raw['RF'][i]), float(raw['ZF'][i]), float(raw['WF'][i]), float(raw['HF'][i]), float(raw['TURNFC'][i])]
+    machine_dict['FCOIL'] = f_coil_dict
 
-		f_lines[brk_idx[np.argmin(abs(brk_idx-np.max(equal_idx)))]] = 'b_arr = '
+    probe_angle_dict = OrderedDict()
+    i = 0
+    probe_angles = raw['AMP2']
+    for probe_name in machine_dict['MPNAM2']:
+        probe_angle_dict[probe_name] = float(probe_angles[i])
+        i = i + 1
+    machine_dict['AMP2'] = probe_angle_dict
 
-	#Prune everything after the comments and remove line breaks 
-	end_idx = len(f_lines)
+    return machine_dict, raw
 
-	for i in range(len(f_lines)):
-		line = f_lines[i]
+def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
+    r'''Read k-file.
 
-		if line.find('comment:') >= 0: #Find the comment at the end (if it exists and make this the end of the file)
-			end_idx = i
+    @param path Path to file
+    @param e_coil_names Names of E coils (hardcoded, generates indexed names if None)
+    @param f_coil_names Names of F coils (hardcoded, generates indexed names if None)
+    @param machine_dict Result from read_mhdin (contents of mhdin.dat file)
+    @result probes_dict Dictionary containing probe values and weights (0 if not selected).
+    @result loops_dict Dictionary containing loop values and weights (0 if not selected).
+    @result e_coil_dict Dictionary containing E copil values and weights (0 if not selected).
+    @result f_coil_dict Dictionary containing F coil values and weights (0 if not selected).
+    @result raw Dictionary containing all other data from k-file.
+    '''
+    raw = read_namelist(path)
 
-		line_update = line.replace('\n','')  #Remove line breaks
-		line_update = line_update.replace(',',' ')   #Remove commas
-		line_update = line_update.replace('"', '')  #Remove comment/quotation marks
-		comment_loc = line_update.find('!')  #Find the comment
-		brk_loc = line_update.find('/')  #Find the lines with backslashes (line breaks)
-		headr_loc = line_update.find('&') #and list headers (& symbols)
+    def to_floats(arr):
+        return [float(x) for x in arr]
+    
+    probe_names = machine_dict['MPNAM2']
+    probe_vals = to_floats(raw['EXPMP2'])
+    probe_weights = to_floats(raw['FWTMP2'])
+    probes_dict = OrderedDict()
+    for i in range(len(probe_names)):
+        probes_dict[probe_names[i]] = [probe_vals[i], probe_weights[i]]
 
-		if i < end_idx: #Only include lines before the end comment
-			if headr_loc < 0: #Remove hardcoded linebreaks and list headers 
-				if brk_loc < 0:
-					if comment_loc < 0:  #If there are no comments in the line (-1)
-						if line_update.strip() != '':
-							datalines.append(line_update.strip())
-					elif comment_loc >= 0:
-						#ignore everything after the comment and get rid of white space (strip)
-						line_update = line_update[:comment_loc].strip()
-						if line_update != '':
-							datalines.append(line_update)
+    loop_names = machine_dict['LPNAME']
+    loop_vals = to_floats(raw['COILS'])
+    loop_weights = to_floats(raw['FWTSI'])
+    loops_dict = OrderedDict()
+    for i in range(len(loop_names)):
+        loops_dict[loop_names[i]] = [loop_vals[i], loop_weights[i]]
+    
+    if e_coil_names is None:
+        e_coil_names = sorted(machine_dict['ECOIL'].keys())
+    e_coil_vals = to_floats(raw['ECURRT'])
+    e_coil_weights = to_floats(raw['BITEC']) # FWTEC?
+    e_coil_dict = OrderedDict()
+    for i, name in enumerate(e_coil_names):
+        e_coil_dict[name] = [e_coil_vals[i], e_coil_weights[i]]
+    
+    if f_coil_names is None:
+        f_coil_names = sorted(machine_dict['FCOIL'].keys())
+    f_coil_vals = to_floats(raw['BRSP'])
+    f_coil_weights = to_floats(raw['BITFC']) # FWTFC?
+    f_coil_dict = OrderedDict()
 
+    for i, name in enumerate(f_coil_names):
+        f_coil_dict[name] = [f_coil_vals[i], f_coil_weights[i]]
+    return probes_dict, loops_dict, e_coil_dict, f_coil_dict, raw
 
-	data_dict = OrderedDict()
-	block_idx = []
-
-	for i in range(len(datalines)):
-		equal_loc = datalines[i].find('=')  #Find where the equal sign is in the array
-		if equal_loc > 0:
-			block_idx.append(i)
-			key0 = datalines[i][:equal_loc].strip()
-			data_dict[key0] = 0.0
-
-	key_list = list(data_dict.keys())
-
-
-	for i in range(len(key_list)):
-		if key_list[i] != 'b_arr':
-			#Concetenate each of the blocks (arrays that span multiple lines) of data
-			if i < len(key_list)-1:
-				mult_block = ' '.join(datalines[block_idx[i]:block_idx[i+1]])
-				equal_loc = mult_block.find('=')
-				mult_block = mult_block[equal_loc+1:].strip()
-				#data_dict[key_list[i]] = np.array(mult_block.split(' '))#.astype('float')
-				dupl_loc = mult_block.find('*')
-				if dupl_loc >= 0:
-					mult_block = mult_block.split()
-					star_idx = [idx for idx, s in enumerate(mult_block) if '*' in s]
-
-					for j in range(len(star_idx)):
-						dupl_str = mult_block[star_idx[j]].split('*')
-						try:
-							dupl_arr = ' '.join(int(dupl_str[0])*[dupl_str[1]])
-						except:
-							continue
-						mult_block[star_idx[j]] = dupl_arr
-
-					mult_block = ' '.join(mult_block)
-
-					try:
-						data_dict[key_list[i]] = np.array(mult_block.split()).astype('float')
-
-					except:
-						data_dict[key_list[i]] = mult_block
-				else:
-					try:
-						if len(mult_block.split()) > 1:  #If longer than one entry, make it an array
-							data_dict[key_list[i]] = np.array(mult_block.split()).astype('float')
-						else:    #if it is one entry, make it a float or an integer
-							data_dict[key_list[i]] = eval(mult_block.split()[0])
-
-					except:
-						data_dict[key_list[i]] = mult_block
-
-			#Try the same process for the last entry		
-			else:
-				mult_block = ' '.join(datalines[block_idx[i]:len(datalines)])  #On the last block, go to the end of the file
-				equal_loc = mult_block.find('=')
-				mult_block = mult_block[equal_loc+1:].strip()
-				dupl_loc = mult_block.find('*')
-				if dupl_loc >= 0:
-					mult_block = mult_block.split()
-					star_idx = [idx for idx, s in enumerate(mult_block) if '*' in s]
-
-					for j in range(len(star_idx)):
-						dupl_str = mult_block[star_idx[j]].split('*')
-						try:
-							dupl_arr = ' '.join(int(dupl_str[0])*[dupl_str[1]])
-						except:
-							continue
-						mult_block[star_idx[j]] = dupl_arr
-
-					mult_block = ' '.join(mult_block) 
-					try:
-						data_dict[key_list[i]] = np.array(mult_block.split()).astype('float')
-					except:
-						data_dict[key_list[i]] = mult_block
-				else:
-					try:
-						data_dict[key_list[i]] = np.array(mult_block.split()).astype('float')
-					except:
-						data_dict[key_list[i]] = mult_block
-
-		elif key_list[i] == 'b_arr':
-			b_arr_len = len(datalines[block_idx[i]+1:len(datalines)])
-			data_dict['b_arr'] = np.zeros((b_arr_len,6))
-
-			for j in range(b_arr_len):
-				try:
-					b_line = np.array(re.split(r'(\s+)', datalines[block_idx[i]+1+j]))
-					b_line_space_idx = []
-					b_line_rmv_idx = []
-
-					for k in range(len(b_line)):
-						if b_line[k].isspace():
-							b_line_space_idx.append(k)
-					
-					b_line_space_len = (lambda x:[len(l) for l in x])(b_line[b_line_space_idx])
-
-					for l in range(len(b_line_space_idx)):
-						if b_line_space_len[l] < 10: #== min(b_line_space_len):
-							b_line_rmv_idx.append(b_line_space_idx[l])
-						else:
-							b_line[b_line_space_idx[l]] = 0.0
-
-					b_line = np.delete(b_line, b_line_rmv_idx)
-
-					#b_line = np.array(datalines[block_idx[i]+1+j].split()).astype('float')
-					data_dict['b_arr'][j][0:len(b_line)] = b_line 
-
-
-				except:
-					data_dict['b_arr'][j][:] = np.nan
-
-			if 'RF' not in key_list:
-				try:
-					data_dict['RF'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),0]
-					data_dict['ZF'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),1]
-					data_dict['WF'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),2]
-					data_dict['HF'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),3]
-					data_dict['AF'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),4]
-					data_dict['AF2'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),5]
-					Fcoil_in_barr = True
-
-				except:
-					print('Error in determining F-coil data')
-
-			if 'RVS' not in key_list:
-				try:
-					VS_idx_start = len(data_dict['b_arr'])-len(data_dict['RSISVS']) #len(data_dict['TURNFC'])
-					VS_idx_end = len(data_dict['b_arr'])#len(data_dict['RSISVS'])+VS_idx_start
-
-					data_dict['RVS'] = data_dict['b_arr'][VS_idx_start:VS_idx_end,0]
-					data_dict['ZVS'] = data_dict['b_arr'][VS_idx_start:VS_idx_end,1]
-					data_dict['WVS'] = data_dict['b_arr'][VS_idx_start:VS_idx_end,2]
-					data_dict['HVS'] = data_dict['b_arr'][VS_idx_start:VS_idx_end,3]
-					data_dict['AVS'] = data_dict['b_arr'][VS_idx_start:VS_idx_end,4]
-					data_dict['AVS2'] = data_dict['b_arr'][VS_idx_start:VS_idx_end,5]
-
-					RVS_in_barr = True
-
-				except:
-					RVS_in_barr = False
-					print('Error in determining vacuum vessel data')
-
-			if 'RE' not in key_list:
-				if data_dict['IECOIL'] == 1:
-					try:
-						if 'RF' in data_dict.keys():
-							EC_idx_start = len(data_dict['TURNFC'])
-						else:
-							EC_idx_start = 0	
-
-						if RVS_in_barr == True:
-							EC_idx_end = VS_idx_start
-						else:
-							EC_idx_end = len(data_dict['b_arr'])
-
-						data_dict['RE'] = data_dict['b_arr'][EC_idx_start:EC_idx_end,0]
-						data_dict['ZE'] = data_dict['b_arr'][EC_idx_start:EC_idx_end,1]
-						data_dict['WE'] = data_dict['b_arr'][EC_idx_start:EC_idx_end,2]
-						data_dict['HE'] = data_dict['b_arr'][EC_idx_start:EC_idx_end,3]
-						data_dict['ECID'] = data_dict['b_arr'][EC_idx_start:EC_idx_end,4]
-
-					except:
-						print('Error in determining E-coil data')
-
-
-	if silent == False:
-		for key in data_dict:
-			print(key, data_dict[key])
-			
-	f.close()
-
-	return data_dict
-
-def read_mhdin(path, e_coil_names, f_coil_names):
-	raw = namelist_read(path)
-	machine_dict = OrderedDict()
-	
-	# Expand later
-	keys = ['MPNAM2', 'LPNAME']
-	for key in keys:
-		names = raw[key].replace("'", " ")
-		names = names.split()
-		machine_dict[key] = names
-		
-	e_coil_dict = OrderedDict()
-	for name in e_coil_names:
-		e_coil_dict[name] = []
-
-	raw['ECID'] = [x for x in raw['ECID'] if len(x.strip()) > 0]
-	e_coil_vars = ['RE', 'ZE', 'WE', 'HE']
-	for var in e_coil_vars:
-		raw[var] = raw[var].split()
-
-	for i in range(len(raw['ECID'])):
-		if raw['ECID'][i].strip() == '':
-			continue
-		idx = int(raw['ECID'][i]) - 1
-		e_coil_dict[e_coil_names[idx]].append([float(raw['RE'][i]), float(raw['ZE'][i]), float(raw['WE'][i]), float(raw['HE'][i])])
-	machine_dict['ECOIL'] = e_coil_dict
-
-
-	f_coil_vars = ['RF', 'ZF', 'WF', 'HF', 'TURNFC']
-	for var in f_coil_vars:
-		raw[var] = raw[var].split()
-
-	f_coil_dict = OrderedDict()
-	for i in range(len(f_coil_names)):
-		f_coil_dict[f_coil_names[i]] = [float(raw['RF'][i]), float(raw['ZF'][i]), float(raw['WF'][i]), float(raw['HF'][i]), float(raw['TURNFC'][i])]
-	machine_dict['FCOIL'] = f_coil_dict
-
-	probe_angle_dict = OrderedDict()
-	i = 0
-	probe_angles = raw['AMP2'].split()
-	for probe_name in machine_dict['MPNAM2']:
-		probe_angle_dict[probe_name] = float(probe_angles[i])
-		i = i + 1
-	machine_dict['AMP2'] = probe_angle_dict
-
-	return machine_dict
-
-def read_kfile(path, e_coil_names, f_coil_names, machine_dict):	
-	raw = namelist_read(path)
-	
-	probe_names = machine_dict['MPNAM2']
-	probe_vals = raw['EXPMP2'].split()
-	probe_errs = raw['BITMPI'].split()
-	probe_selected = raw['FWTMP2'].split()
-	probes_dict = OrderedDict()
-
-	for i in range(len(probe_names)):
-		if not float(probe_selected[i]):
-			continue
-		probes_dict[probe_names[i]] = [float(probe_vals[i]), float(probe_errs[i])]
-
-	loop_names = machine_dict['LPNAME']
-	loop_vals = raw['COILS'].split()
-	loop_errs = raw['PSIBIT'].split()
-	loop_selected = raw['FWTSI'].split()
-
-	loops_dict = OrderedDict()
-	for i in range(len(loop_names)):
-		if not float(loop_selected[i]):
-			continue
-		loops_dict[loop_names[i]] = [float(loop_vals[i]) + float(raw['SIREF']), float(loop_errs[i])]
-		
-	e_coil_vals = raw['ECURRT'].split()
-	e_coil_errs = raw['BITEC'].split()
-	e_coil_dict = OrderedDict()
-	for i in range(len(e_coil_names)):
-		e_coil_dict[e_coil_names[i]] = [float(e_coil_vals[i]), float(e_coil_errs[i])]
-	
-	f_coil_vals = raw['BRSP'].split()
-	f_coil_errs = raw['BITFC'].split()
-	f_coil_dict = OrderedDict()
-
-	for i in range(len(f_coil_names)):
-		f_coil_dict[f_coil_names[i]] = [float(f_coil_vals[i]), float(f_coil_errs[i])]
-	return probes_dict, loops_dict, e_coil_dict, f_coil_dict
+def read_pfile(fname):
+    pdict = {}
+    key1 = None
+    key2 = None
+    with open(fname, 'r') as f:
+        for line in f:
+            toks = line.split()
+            if toks[0] == '3':
+                break
+            if toks[0] == '201':
+                key1 = toks[2]
+                key2 = toks[3]
+                pdict[key1] = {}
+                pdict[key2] = {}
+            else:
+                psi_norm = float(toks[0])
+                pdict[key1][psi_norm] = float(toks[1])
+                pdict[key2][psi_norm] = float(toks[2])
+    return pdict
