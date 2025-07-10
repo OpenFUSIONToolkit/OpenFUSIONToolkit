@@ -666,10 +666,16 @@ class torus_fourier_sensor():
                 real_line_list = []
                 imag_line_list = []
                 for i, idx in enumerate(mode_idx):
-                    rline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].real[:,::-1],shift=1,axis=1),label=f"m={harmonics[i]}, real")
-                    iline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].imag[:,::-1],shift=1,axis=1),linestyle='--',label=f"m={harmonics[i]}, imag")
-                    real_line_list.append(rline)
-                    imag_line_list.append(iline)
+                    if self.helicity == -1:
+                        rline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].real[::-1],shift=1),label=f"m={harmonics[i]}, real")
+                        iline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].imag[::-1],shift=1),linestyle='--',label=f"m={harmonics[i]}, imag")
+                        real_line_list.append(rline)
+                        imag_line_list.append(iline)
+                    else:
+                        rline = ax.plot(phi_list,B_n_fft[idx,:].real,label=f"m={harmonics[i]}, real")
+                        iline = ax.plot(phi_list,B_n_fft[idx,:].imag,linestyle='--',label=f"m={harmonics[i]}, imag")
+                        real_line_list.append(rline)
+                        imag_line_list.append(iline)
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Poloidal Modes at [t] = {t}")
                 ax.set_xlabel(r"$\phi$ (radians)")
