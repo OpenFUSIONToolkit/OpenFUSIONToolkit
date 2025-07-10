@@ -140,27 +140,29 @@ class torus_fourier_sensor():
                     sensor_mesh[i][j] = self.hist_file[key][t]
             return sensor_mesh
     
-    def fft2(self,B,d_phi=None):
+    def fft2(self,B,hamada_dphi=None):
         '''! Performs a 2D Fast Fourier Transform in PEST/Hamada coordinates on the magnetic field matrix probed by sensors with proper Nyquist handling
 
         @param B Input matrix of shape [ntheta,nphi]
-        @param d_phi Hamada phase shifts [ntheta]
+        @param hamada_dphi Hamada phase shifts [ntheta]
         @result `B_n` The Fast Fourier Transformed matrix [ntheta,nphi], `n_modes` The toroidal mode numbers [nphi], `m_modes` The poloidal mode numbers [ntheta]
         '''
+
+        B = np.roll(B[:,::-1],shift=1,axis=1) if self.helicity == 1 else B
 
         n_theta, n_phi = B.shape
         n_modes = np.round(np.fft.fftfreq(n_phi)*n_phi).astype(int)
         m_modes = np.round(np.fft.fftfreq(n_theta)*n_theta).astype(int)
 
-        if d_phi is None:
+        if hamada_dphi is None:
             B_n = np.fft.fft2(B,norm='forward')
-        elif d_phi is not None and len(d_phi) == len(self.radial_positions):
+        elif hamada_dphi is not None and len(hamada_dphi) == len(self.radial_positions):
             B_n_toroidal = np.fft.fft(B,axis=1,norm='forward')
-            phase_matrix = np.exp(-1j*np.outer(d_phi,n_modes))
+            phase_matrix = np.exp(-1j*np.outer(hamada_dphi,n_modes))
             B_n_toroidal_shifted = B_n_toroidal * phase_matrix
             B_n = np.fft.fft(B_n_toroidal_shifted,axis=0,norm='forward')
         else:
-            raise ValueError('`d_phi` should have the same dimension as the radial/axial positions.')
+            raise ValueError('`hamada_dphi` should have the same dimension as the radial/axial positions.')
 
         B_n *= 2.0
         B_n[0,0] /= 2.0
@@ -173,11 +175,11 @@ class torus_fourier_sensor():
 
         return B_n, n_modes, m_modes
 
-    def ifft2(self,B_n,d_phi=None):
+    def ifft2(self,B_n,hamada_dphi=None):
         '''! Performs an inverse 2D Fast Fourier Transform in PEST/Hamada coordinates on the transformed magnetic field matrix with proper Nyquist handling
 
         @param B_n Input FFT'ed matrix of shape [ntheta,nphi]
-        @param d_phi Hamada phase shifts [ntheta]
+        @param hamada_dphi Hamada phase shifts [ntheta]
         @result `B_ifft` The reconstructed matrix [ntheta,nphi]
         '''
 
@@ -192,16 +194,16 @@ class torus_fourier_sensor():
         if n_theta%2 == 0 and n_phi%2 == 0:
             B_n[n_theta//2][n_phi//2] *=2.0
 
-        if d_phi is None:
+        if hamada_dphi is None:
             return np.fft.ifft2(B_n,norm="forward")
-        elif d_phi is not None and len(d_phi) == len(self.radial_positions):
+        elif hamada_dphi is not None and len(hamada_dphi) == len(self.radial_positions):
             B_ifft_poloidal_shifted = np.fft.ifft(B_n,axis=0,norm='forward')
             n_modes = np.round(np.fft.fftfreq(n_phi)*n_phi).astype(int)
-            inverse_phase = np.exp(1j*np.outer(d_phi,n_modes))
+            inverse_phase = np.exp(1j*np.outer(hamada_dphi,n_modes))
             B_ifft_poloidal = B_ifft_poloidal_shifted*inverse_phase
             return np.fft.ifft(B_ifft_poloidal,axis=1,norm='forward')
         else:
-            raise ValueError('`d_phi` should have the same dimension as the radial/axial positions.')
+            raise ValueError('`hamada_dphi` should have the same dimension as the radial/axial positions.')
 
     def plot_inverse_2D_fourier_transform(self,t,fig,ax):
         '''! Use ifft2 to reconstruct the sensor signal at time step `t`
@@ -243,24 +245,24 @@ class torus_fourier_sensor():
 
         return B_n_sorted, n_modes_sorted, m_modes_sorted
     
-    def save_surfmn(self,t,filename,eliminate_negative_n=True,scale=1e-4,d_phi=None):
+    def save_surfmn(self,t,filename,eliminate_negative_n=True,scale=1e-4,hamada_dphi=None):
         '''! Sort the Fast Fourier Transformed B mesh in PEST or Hamada coordinate at time step `t` and write it to a SURFMN-formatted file
 
         @param t The time step at which the magnetic values are desired
         @param filename Filename of the file
         @param eliminate_negative_n Whether values of negative n modes should be written to the file
         @param scale The scaling of the values in the file
-        @param d_phi Hamada phase shifts [ntheta]
+        @param hamada_dphi Hamada phase shifts [ntheta]
         '''
             
-        if d_phi is not None and d_phi[0] == d_phi[-1]:
-            d_phi = d_phi[0:-1]
+        if hamada_dphi is not None and hamada_dphi[0] == hamada_dphi[-1]:
+            hamada_dphi = hamada_dphi[0:-1]
 
-        B = np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1) if self.helicity == 1 else self.get_B_mesh(t)
-        if d_phi is None:
+        B = self.get_B_mesh(t)
+        if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
-            B_n_fft, n_modes, m_modes = self.fft2(B,d_phi=d_phi)
+            B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
         
         B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
 
@@ -396,16 +398,17 @@ class torus_fourier_sensor():
             cbar_list.append(cbar)
         return lc_list, boundary_list, cbar_list
 
-    def plot_1D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,d_phi=None,part='r'):
+    def plot_1D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,hamada_dphi=None,part='r'):
         '''! Plot real fourier amplitude of 1D Fast Fourier Transform of the magnetic mesh in `axis` at time step `t`
 
         @param t The time step during the time evolution
         @param harmonics Array of mode number in the `axis` dimension, whose real amplitudes are to be plotted against the other dimension [:]
         @param ax Matplotlib axis for plotting
         @param toroidal_harmonics Whether the input `harmonics` is toroidal or poloidal harmonics
-        @param d_phi Hamada phase shifts [ntheta]
+        @param hamada_dphi Hamada phase shifts [ntheta]
         @param part The part of the fourier amplitude to be plotted ('r' for real, 'i' for imaginary, 'a' for absolute)
         @result line_list The list of line objects for each harmonic in `harmonics`
+        @result FFTed_mesh The 1D FFTed mesh in the direction desired [ntheta,nphi]
         '''
 
         if toroidal_harmonics:
@@ -413,10 +416,10 @@ class torus_fourier_sensor():
             n_modes = np.fft.fftfreq(self.nphi)*self.nphi
             toroidal_harmonics=np.fft.fft(B_n,axis=1,norm="forward")
             # Apply phase shift
-            if d_phi is not None and len(d_phi) == len(self.radial_positions):
-                toroidal_harmonics *= np.exp(-1j*np.outer(d_phi,n_modes))
-            elif d_phi is not None:
-                raise ValueError('The d_phi input should have the same dimension as the radial/axial positions')
+            if hamada_dphi is not None and len(hamada_dphi) == len(self.radial_positions):
+                toroidal_harmonics *= np.exp(-1j*np.outer(hamada_dphi,n_modes))
+            elif hamada_dphi is not None:
+                raise ValueError('The hamada_dphi input should have the same dimension as the radial/axial positions')
             toroidal_harmonics *= 2.0
             toroidal_harmonics[:,0] /= 2.0
             if len(n_modes)%2==0:
@@ -443,7 +446,7 @@ class torus_fourier_sensor():
             ax.set_xlabel(r"$\theta$ (radians)")
             ax.set_ylabel(f"Mode amplitude (Tesla)")
             ax.grid()
-            return line_list
+            return line_list, toroidal_harmonics
         else:
             B_n = self.get_B_mesh(t)
             m_modes = np.fft.fftfreq(self.ntheta)*self.ntheta
@@ -451,12 +454,13 @@ class torus_fourier_sensor():
             poloidal_harmonics *= 2.0
             poloidal_harmonics[0,:] /= 2.0
             if len(m_modes)%2==0:
-                toroidal_harmonics[len(m_modes)//2][:] /= 2.0
+                poloidal_harmonics[len(m_modes)//2][:] /= 2.0
+            poloidal_harmonics = np.roll(poloidal_harmonics[:,::-1],shift=1,axis=1)
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
             line_list = []
             for harmonic in harmonics:
                 m_indice = np.where((m_modes == harmonic))[0]
-                poloidal_mode = np.roll(poloidal_harmonics[m_indice,:].flatten()[::-1],shift=1)
+                poloidal_mode = poloidal_harmonics[m_indice,:]
                 if part =='r':
                     amplitude = poloidal_mode.real.flatten()
                     lb = 'Real'
@@ -475,9 +479,9 @@ class torus_fourier_sensor():
             ax.set_xlabel(r"$\phi$ (radians)")
             ax.set_ylabel(f"Mode amplitude (Tesla)")
             ax.grid()
-            return line_list
+            return line_list, poloidal_harmonics
 
-    def plot_m_over_n_amplitude(self,m_list,n_list,t_max,dt,ax,t_min=0,d_phi=None):
+    def plot_m_over_n_amplitude(self,m_list,n_list,t_max,dt,ax,t_min=0,hamada_dphi=None):
         '''! Plot the 2D Fast Fourier Transformed amplitude of the magnetic field for `m/n` (poloidal harmonic / toroidal harmonic) mode with respect to time
 
         @param m_list The list of m of the m/n modes to be visualized [:]
@@ -486,7 +490,7 @@ class torus_fourier_sensor():
         @param dt The duration of each time step in unit of seconds
         @param ax Matplotlib axis for plotting
         @param t_min The starting time step of the plot
-        @param d_phi Hamada phase shifts [ntheta]
+        @param hamada_dphi Hamada phase shifts [ntheta]
         @result line_list The list of line objects for each m/n mode in `m_list` and `n_list`
         '''
 
@@ -498,11 +502,11 @@ class torus_fourier_sensor():
         t_array = np.array(range(t_min,t_max+1))
         mode_amplitudes = np.zeros((len(m_list),len(t_array)))
         for t in t_array:
-            B = self.get_B_mesh(t) if self.helicity == -1 else np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1)
-            if d_phi is None:
+            B = self.get_B_mesh(t) 
+            if hamada_dphi is None:
                 B_n_fft, n_modes, m_modes = self.fft2(B)
             else:
-                B_n_fft, n_modes, m_modes = self.fft2(B,d_phi=d_phi)
+                B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
 
             B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
 
@@ -523,7 +527,7 @@ class torus_fourier_sensor():
         ax.legend()
         return line_list
 
-    def field_fourier_amplitude_contour(self,t,m_min,m_max,n_min,n_max,fig,ax,d_phi=None,part='r'):
+    def field_fourier_amplitude_contour(self,t,m_min,m_max,n_min,n_max,fig,ax,hamada_dphi=None,part='r'):
         '''! Plot the real fourier amplitude of the magnetic field in the fourier space
 
         @param t The time step during the time evolution
@@ -533,7 +537,7 @@ class torus_fourier_sensor():
         @param n_max The upper limit of the toroidal harmonics to be included in the contour
         @param fig Matplotlib figure for plotting
         @param ax Matplotlib axis for plotting
-        @param d_phi Hamada phase shifts [ntheta]
+        @param hamada_dphi Hamada phase shifts [ntheta]
         @param part The part of the fourier amplitude to be plotted ('r' for real, 'i' for imaginary, 'a' for absolute)
         @result cf The contour plot of the real fourier amplitude of the magnetic field in the fourier space
         @result cbar The colorbar of the contour plot
@@ -542,11 +546,11 @@ class torus_fourier_sensor():
         if len(np.array(ax).flatten())!=1 or len(np.array(fig).flatten())!=1:
             raise ValueError('For customized plotting, please provide a single figure and a single axis for plotting the a contour.')
         
-        B = self.get_B_mesh(t) if self.helicity == -1 else np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1)
-        if d_phi is None:
+        B = self.get_B_mesh(t)
+        if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
-            B_n_fft, n_modes, m_modes = self.fft2(B,d_phi=d_phi)
+            B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
         
         B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
 
@@ -573,14 +577,14 @@ class torus_fourier_sensor():
 
         return cf, cbar
 
-    def plot_2D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,d_phi=None,x_type='modes',x_mode_min=None,x_mode_max=None):
+    def plot_2D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,hamada_dphi=None,x_type='modes',x_mode_min=None,x_mode_max=None):
         '''! Plot the 2D Fast Fourier Transformed amplitude of the mesh of magnetic values against poloidal/toroidal harmonics/angles
 
         @param t The time step during the time evolution
         @param harmonics List of (poloidal/toroidal) modes whose amplitudes are to be visualized in y axis [:]
         @param ax Matplotlib axis for plotting
         @param toroidal_harmonics Whether the input `harmonics` is toroidal or poloidal harmonics
-        @param d_phi Hamada phase shifts [ntheta]
+        @param hamada_dphi Hamada phase shifts [ntheta]
         @param x_type The variable on x axis ('modes' or 'angles')
         @param x_mode_min The min of the (toroidal/poloidal) mode number to be visualized on x axis
         @param x_mode_max The max of the (toroidal/poloidal) mode number to be visualized on x axis
@@ -589,18 +593,18 @@ class torus_fourier_sensor():
         '''
 
         harmonics = np.array([harmonics]).flatten()
-        if d_phi is not None and d_phi[0] == d_phi[-1]:
-            d_phi = d_phi[0:-1]
+        if hamada_dphi is not None and hamada_dphi[0] == hamada_dphi[-1]:
+            hamada_dphi = hamada_dphi[0:-1]
         if x_type not in ['modes','angles']:
             raise ValueError("Unsupported x variable is provided. Accepts 'modes' and 'angles' only.")
         elif x_type == 'modes' and (x_mode_min is None or x_mode_max is None):
             raise ValueError('For x_type == "modes", both mode_min and mode_max should be provided.')
             
-        B = np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1) if self.helicity == 1 else self.get_B_mesh(t)
-        if d_phi is None:
+        B = self.get_B_mesh(t)
+        if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
-            B_n_fft, n_modes, m_modes = self.fft2(B,d_phi=d_phi)
+            B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
         
         if x_type == 'modes':
             B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
@@ -662,16 +666,10 @@ class torus_fourier_sensor():
                 real_line_list = []
                 imag_line_list = []
                 for i, idx in enumerate(mode_idx):
-                    if self.helicity == -1:
-                        rline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].real[::-1],shift=1),label=f"m={harmonics[i]}, real")
-                        iline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].imag[::-1],shift=1),linestyle='--',label=f"m={harmonics[i]}, imag")
-                        real_line_list.append(rline)
-                        imag_line_list.append(iline)
-                    else:
-                        rline = ax.plot(phi_list,B_n_fft[idx,:].real,label=f"m={harmonics[i]}, real")
-                        iline = ax.plot(phi_list,B_n_fft[idx,:].imag,linestyle='--',label=f"m={harmonics[i]}, imag")
-                        real_line_list.append(rline)
-                        imag_line_list.append(iline)
+                    rline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].real[:,::-1],shift=1,axis=1),label=f"m={harmonics[i]}, real")
+                    iline = ax.plot(phi_list,np.roll(B_n_fft[idx,:].imag[:,::-1],shift=1,axis=1),linestyle='--',label=f"m={harmonics[i]}, imag")
+                    real_line_list.append(rline)
+                    imag_line_list.append(iline)
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Poloidal Modes at [t] = {t}")
                 ax.set_xlabel(r"$\phi$ (radians)")
