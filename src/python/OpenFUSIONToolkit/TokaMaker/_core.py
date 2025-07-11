@@ -619,6 +619,8 @@ class TokaMaker():
         @param eta_file File containing $\eta$ definition
         @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
         '''
+        print("load profiles")
+        print(eta_file)
         if foffset is not None:
             self._F0 = foffset
         if f_SOL is not None:
@@ -688,7 +690,7 @@ class TokaMaker():
             eta_file = 'tokamaker_eta.prof'
             create_prof_file(self, eta_file, eta_prof, "eta'")
         ffp_NI_file = 'none'
-        self.load_profiles(ffp_file,None,pp_file,eta_file,ffp_NI_file)
+        self.load_profiles(ffp_file,None,None,pp_file,eta_file,ffp_NI_file)
 
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.
@@ -1272,6 +1274,8 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         #
+        print("V loop value")
+        print(V_loop.value)
         if V_loop.value < 0.:
             raise ValueError('eta array not specified')
         else:
