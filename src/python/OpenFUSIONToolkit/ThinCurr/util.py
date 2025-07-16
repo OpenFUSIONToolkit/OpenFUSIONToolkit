@@ -38,6 +38,7 @@ class torus_fourier_sensor():
         self.radial_positions = self.radial_positions[sorted_indices]
         self.axial_positions = self.axial_positions[sorted_indices]
         self.theta_list = theta_values[sorted_indices]
+        self.ntheta = len(self.radial_positions)
         self.hist_file = None
 
     def convert_to_polar(self):
@@ -86,11 +87,9 @@ class torus_fourier_sensor():
         outward_normals = calculate_outward_unit_normals(self.radial_positions,self.axial_positions,self.major_radius)
 
         sensors = []
-        ntheta = len(self.radial_positions)
-        self.ntheta = ntheta
         self.nphi = nphi
         for i, phi in enumerate(np.linspace(2*np.pi,0,nphi,endpoint=False)):
-            for j in range(ntheta):
+            for j in range(self.ntheta):
                 sensors.append(Mirnov(np.r_[self.radial_positions[j]*np.cos(phi),self.radial_positions[j]*np.sin(phi),self.axial_positions[j]],np.r_[outward_normals[j,0]*np.cos(phi),outward_normals[j,0]*np.sin(phi),outward_normals[j,1]],'B_{0}_{1}'.format(i+1,j+1)))
 
         save_sensors(sensors,filename=filename)
@@ -410,7 +409,8 @@ class torus_fourier_sensor():
         @result line_list The list of line objects for each harmonic in `harmonics`
         @result FFTed_mesh The 1D FFTed mesh in the direction desired [ntheta,nphi]
         '''
-
+        
+        harmonics = np.array([harmonics]).flatten()
         if toroidal_harmonics:
             B_n = self.get_B_mesh(t) if self.helicity == -1 else np.roll(self.get_B_mesh(t)[:,::-1],shift=1,axis=1)
             n_modes = np.fft.fftfreq(self.nphi)*self.nphi
@@ -523,7 +523,7 @@ class torus_fourier_sensor():
             line_list.append(line)
         ax.set_ylabel('Mode amplitudes (Tesla)')
         ax.set_xlabel('Time (ms)')
-        ax.set_title(r'Amplitude of $m/n$ modes in time')
+        ax.set_title('Amplitude of m/n modes in time')
         ax.legend()
         return line_list
 
