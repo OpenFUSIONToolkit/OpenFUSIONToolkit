@@ -1621,25 +1621,14 @@ class TokaMaker():
                     mesh_currents[mask_tmp] = numpy.sum(curr[self.lc[mask_tmp,:]],axis=1)/3.0
                 mask = numpy.logical_or(mask,mask_tmp)
                 
-        if len(self._vcoils.keys())>0:
-            coil_currents, _ = self.get_coil_currents()
         # Treat vcoils as conductors when looking at induced currents
         for coil_name, coil_obj in self.coil_sets.items():
             if coil_name in self._vcoils.keys():
                 for sub_coil in coil_obj["sub_coils"]:
                     mask_tmp = self.reg == sub_coil['reg_id']
+                    if cell_centered:
+                        mesh_currents[mask_tmp] = numpy.mean(curr[self.lc[mask_tmp]],axis=1)
                     mask = numpy.logical_or(mask,mask_tmp)
-                    J = coil_currents[coil_name]
-                    if (coil_id:=coil_obj["id"]) in self.dist_coils.keys():
-                        face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
-                        if cell_centered:
-                            mesh_currents[mask_tmp] = face_currents*J
-                        else:
-                            curr[self.lc][mask_tmp] = self.dist_coils[coil_id][self.lc][mask_tmp]*J
-                    else:
-                        if cell_centered:
-                            mesh_currents[mask_tmp] = J
-                        curr[self.lc][mask_tmp] = J
         
         if cell_centered:
             return mask, mesh_currents
