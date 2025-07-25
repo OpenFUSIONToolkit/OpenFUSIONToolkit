@@ -1668,6 +1668,16 @@ class TokaMaker():
                 if cond_reg.get('noncontinuous',False):
                     mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
                 mask = numpy.logical_or(mask,mask_tmp)
+
+        # Treat vcoils as conductors when looking at induced currents
+        for coil_name, coil_obj in self.coil_sets.items():
+            if coil_name in self._vcoils.keys():
+                for sub_coil in coil_obj["sub_coils"]:
+                    mask_tmp = self.reg == sub_coil['reg_id']
+                    field_tmp = -dpsi_dt/self._vcoils[coil_name]
+                    mesh_currents[mask_tmp] = numpy.mean(field_tmp[self.lc[mask_tmp]],axis=1)
+                    mask = numpy.logical_or(mask,mask_tmp)
+
         return mask, mesh_currents
     
     def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
