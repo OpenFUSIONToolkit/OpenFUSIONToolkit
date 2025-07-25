@@ -108,6 +108,8 @@ class TokaMaker():
         self.coil_sets = {}
         ## Virtual coils, if present (currently only `'#VSC'`)
         self._virtual_coils = {'#VSC': {'id': -1 ,'facs': {}}}
+        ## Voltage coils dictionary. Currently only used for plotting on python side.
+        self._vcoils = {}
         ## Coil set names in order of id number
         self.coil_set_names = []
         ## Distribution coils, only (currently) saved for plotting utility
@@ -180,6 +182,7 @@ class TokaMaker():
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
+        self._vcoils = {}
         self.coil_sets = {}
         self._virtual_coils = {'#VSC': {'id': -1 ,'facs': {}}}
         self._F0 = 0.0
@@ -634,6 +637,8 @@ class TokaMaker():
         tokamaker_set_vcoil(self._tMaker_ptr,res_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        #Merge dicts and overwrite with new values where necessary. Only used for plotting.
+        self._vcoils = self._vcoils | coil_resistivities
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
         r'''! Initialize \f$\psi\f$ using uniform current distributions
@@ -1615,6 +1620,27 @@ class TokaMaker():
                 if cell_centered:
                     mesh_currents[mask_tmp] = numpy.sum(curr[self.lc[mask_tmp,:]],axis=1)/3.0
                 mask = numpy.logical_or(mask,mask_tmp)
+                
+        if len(self._vcoils.keys())>0:
+            coil_currents, _ = self.get_coil_currents()
+        # Treat vcoils as conductors when looking at induced currents
+        for coil_name, coil_obj in self.coil_sets.items():
+            if coil_name in self._vcoils.keys():
+                for sub_coil in coil_obj["sub_coils"]:
+                    mask_tmp = self.reg == sub_coil['reg_id']
+                    mask = numpy.logical_or(mask,mask_tmp)
+                    J = coil_currents[coil_name]
+                    if (coil_id:=coil_obj["id"]) in self.dist_coils.keys():
+                        face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
+                        if cell_centered:
+                            mesh_currents[mask_tmp] = face_currents*J
+                        else:
+                            curr[self.lc][mask_tmp] = self.dist_coils[coil_id][self.lc][mask_tmp]*J
+                    else:
+                        if cell_centered:
+                            mesh_currents[mask_tmp] = J
+                        curr[self.lc][mask_tmp] = J
+        
         if cell_centered:
             return mask, mesh_currents
         else:
