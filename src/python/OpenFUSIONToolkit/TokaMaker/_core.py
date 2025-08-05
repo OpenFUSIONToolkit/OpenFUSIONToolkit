@@ -409,34 +409,41 @@ class TokaMaker():
 
     @property
     def alam(self):
+        r'''! F*F' normalization value'''
         if self._alam is not None:
             return self._alam[0]
         else:
             return None
     
+    ## @cond
     @alam.setter
     def alam(self,value):
         if self._alam is not None:
             self._alam[0] = value
         else:
             raise ValueError('Class must be initialized to set "alam"')
+    ## @endcond
     
     @property
     def pnorm(self):
+        r'''! Pressure normalization value'''
         if self._pnorm is not None:
             return self._pnorm[0]
         else:
             return None
     
+    ## @cond
     @pnorm.setter
     def pnorm(self,value):
         if self._pnorm is not None:
             self._pnorm[0] = value
         else:
             raise ValueError('Class must be initialized to set "pnorm"')
+    ## @endcond
     
     @property
     def diverted(self):
+        r'''! Diverted flag (limited if `False`)'''
         if self._diverted is not None:
             return self._diverted[0]
         else:

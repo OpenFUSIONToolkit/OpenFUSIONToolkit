@@ -1772,6 +1772,10 @@ table.memberdecls tr[class^='memitem'] .memTemplParams {
     white-space: normal;
 }
 
+table.memberdecls tr[class^='memdesc'] {
+    box-shadow: none;
+}
+
 table.memberdecls .memItemLeft,
 table.memberdecls .memItemRight,
 table.memberdecls .memTemplItemLeft,
@@ -1830,6 +1834,7 @@ table.memberdecls .mdescLeft, table.memberdecls .mdescRight {
     background: none;
     color: var(--page-foreground-color);
     padding: var(--spacing-small) 0;
+    border: none;
 }
 
 table.memberdecls .memItemLeft,
