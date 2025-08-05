@@ -76,8 +76,7 @@ class histfile:
                     self.field_types.append('d')
                     self.field_sizes.append(8)
                 else:
-                    print('unknown type')
-                    raise IOError
+                    raise IOError('Unknown type "{0}" for history file variable'.format(field))
             #
             self.field_repeats = []
             for field in base_dict['field_sizes'].split():
@@ -107,8 +106,7 @@ class histfile:
                 self.dim = None
             #
             if (self.dim != None) and (self.nfields > 1):
-                print("Arrays not supported with multiple fields")
-                raise ValueError
+                raise ValueError("Arrays with multiple fields not supported")
             #
             self.field_tags = []
             for _ in range(self.nfields):
@@ -142,8 +140,7 @@ class histfile:
                 elif (tmp_type[0] + tmp[0]) == 'r8':
                     self.field_types.append('d')
                 else:
-                    print('unknown type')
-                    raise IOError
+                    raise IOError('Unknown type "{0}" for history file variable'.format(tmp_type[0] + tmp[0]))
             self.offset += 4
             #
             if self.nfields == 1:
@@ -192,12 +189,10 @@ class histfile:
             self.nlines += 1
             if stream_data:
                 if (head_val[0] != self.line_length) or (tail_val[0] != self.nfields):
-                    print('Bad data line ({0})'.format(self.nlines))
-                    raise IOError
+                    raise IOError('Bad data line ({0})'.format(self.nlines))
             else:
                 if (head_val[0] != self.line_length) or (tail_val[0] != self.line_length):
-                    print('Bad data line ({0})'.format(self.nlines))
-                    raise IOError
+                    raise IOError('Bad data line ({0})'.format(self.nlines))
             if self.nfields > 1:
                 k = 0
                 for (j, field) in enumerate(self.field_tags):
@@ -218,28 +213,18 @@ class histfile:
 
     def save_to_matlab(self,filename):
         r'''! Convert data to MATLAB format'''
-        try:
-            import scipy.io as sio
-        except:
-            print("Unable to load SCIPY")
-            raise
-        else:
-            print("Converting file to MATLAB format")
-            sio.savemat(filename, self._data, oned_as='row')
+        import scipy.io as sio
+        print("Converting file to MATLAB format")
+        sio.savemat(filename, self._data, oned_as='row')
 
     def save_to_hdf5(self,filename):
         r'''! Convert data to HDF5 format'''
-        try:
-            import h5py
-        except:
-            print("Unable to load H5PY")
-            raise
-        else:
-            print("Converting file to HDF5 format")
-            with h5py.File(filename, 'w') as fid:
-                for (ind, field) in enumerate(self.field_tags):
-                    fid[field] = self._data[field]
-                    fid[field].attrs['description'] = self.field_descriptions[field]
+        import h5py
+        print("Converting file to HDF5 format")
+        with h5py.File(filename, 'w') as fid:
+            for (ind, field) in enumerate(self.field_tags):
+                fid[field] = self._data[field]
+                fid[field].attrs['description'] = self.field_descriptions[field]
 
     def get(self, keyname, value=None):
         return self._data.get(keyname,value)
@@ -346,11 +331,7 @@ class XDMF_plot_mesh:
 
         @returns `pyvista.UnstructuredGrid` object for grid
         '''
-        try:
-            import pyvista
-        except ImportError:
-            print('Failed to load "pyvista" package')
-            raise
+        import pyvista
         if self.type == 31:
             celltype = pyvista.CellType.TETRA
             ncv = 4

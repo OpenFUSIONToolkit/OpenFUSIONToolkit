@@ -11,6 +11,7 @@
 '''
 import os
 import subprocess
+import re
 import numpy
 import h5py
 from collections import OrderedDict
@@ -21,6 +22,17 @@ from ._interface import oftpy_dump_cov
 mu0 = numpy.pi*4.E-7
 ## Electron charge
 eC = 1.60217663e-19
+
+
+def oft_warning(warning,details=[]):
+    '''! Print warning in common format
+
+    @param warning String describing warning
+    @param details List of additional details
+    '''
+    print("Warning: {0}".format(warning))
+    for detail_line in details:
+        print("         {0}".format(detail_line))
 
 
 def run_shell_command(command, timeout=10, env_vars={}):
@@ -42,7 +54,7 @@ def run_shell_command(command, timeout=10, env_vars={}):
     except subprocess.TimeoutExpired:
         pid.kill()
         outs, _ = pid.communicate()
-        print("WARNING: Command timeout")
+        oft_warning("Timeout for command `{0}`".format(command))
     errcode = pid.poll()
     result = outs.decode("utf-8")
     return result, errcode
@@ -110,7 +122,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 			if equal_loc >= 0.0:
 				equal_idx.append(i)
 
-		f_lines[brk_idx[np.argmin(abs(brk_idx-np.max(equal_idx)))]] = 'b_arr = '
+		f_lines[brk_idx[numpy.argmin(abs(brk_idx-numpy.max(equal_idx)))]] = 'b_arr = '
 
 	#Prune everything after the comments and remove line breaks 
 	end_idx = len(f_lines)
@@ -161,7 +173,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 				mult_block = ' '.join(datalines[block_idx[i]:block_idx[i+1]])
 				equal_loc = mult_block.find('=')
 				mult_block = mult_block[equal_loc+1:].strip()
-				#data_dict[key_list[i]] = np.array(mult_block.split(' '))#.astype('float')
+				#data_dict[key_list[i]] = numpy.array(mult_block.split(' '))#.astype('float')
 				dupl_loc = mult_block.find('*')
 				if dupl_loc >= 0:
 					mult_block = mult_block.split()
@@ -178,14 +190,14 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 					mult_block = ' '.join(mult_block)
 
 					try:
-						data_dict[key_list[i]] = np.array(mult_block.split()).astype('float')
+						data_dict[key_list[i]] = numpy.array(mult_block.split()).astype('float')
 
 					except:
 						data_dict[key_list[i]] = mult_block
 				else:
 					try:
 						if len(mult_block.split()) > 1:  #If longer than one entry, make it an array
-							data_dict[key_list[i]] = np.array(mult_block.split()).astype('float')
+							data_dict[key_list[i]] = numpy.array(mult_block.split()).astype('float')
 						else:    #if it is one entry, make it a float or an integer
 							data_dict[key_list[i]] = eval(mult_block.split()[0])
 
@@ -212,22 +224,22 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 
 					mult_block = ' '.join(mult_block) 
 					try:
-						data_dict[key_list[i]] = np.array(mult_block.split()).astype('float')
+						data_dict[key_list[i]] = numpy.array(mult_block.split()).astype('float')
 					except:
 						data_dict[key_list[i]] = mult_block
 				else:
 					try:
-						data_dict[key_list[i]] = np.array(mult_block.split()).astype('float')
+						data_dict[key_list[i]] = numpy.array(mult_block.split()).astype('float')
 					except:
 						data_dict[key_list[i]] = mult_block
 
 		elif key_list[i] == 'b_arr':
 			b_arr_len = len(datalines[block_idx[i]+1:len(datalines)])
-			data_dict['b_arr'] = np.zeros((b_arr_len,6))
+			data_dict['b_arr'] = numpy.zeros((b_arr_len,6))
 
 			for j in range(b_arr_len):
 				try:
-					b_line = np.array(re.split(r'(\s+)', datalines[block_idx[i]+1+j]))
+					b_line = numpy.array(re.split(r'(\s+)', datalines[block_idx[i]+1+j]))
 					b_line_space_idx = []
 					b_line_rmv_idx = []
 
@@ -243,14 +255,14 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 						else:
 							b_line[b_line_space_idx[l]] = 0.0
 
-					b_line = np.delete(b_line, b_line_rmv_idx)
+					b_line = numpy.delete(b_line, b_line_rmv_idx)
 
-					#b_line = np.array(datalines[block_idx[i]+1+j].split()).astype('float')
+					#b_line = numpy.array(datalines[block_idx[i]+1+j].split()).astype('float')
 					data_dict['b_arr'][j][0:len(b_line)] = b_line 
 
 
 				except:
-					data_dict['b_arr'][j][:] = np.nan
+					data_dict['b_arr'][j][:] = numpy.nan
 
 			if 'RF' not in key_list:
 				try:
