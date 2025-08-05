@@ -24,6 +24,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_cyl_td-jumpers
  - \subpage doc_tCurr_torus_mode
  - \subpage doc_tCurr_torus_fr
+ - \subpage doc_tCurr_torus_td
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
