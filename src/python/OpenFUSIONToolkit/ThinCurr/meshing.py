@@ -11,7 +11,7 @@
 '''
 import numpy
 import h5py
-from ..util import write_native_mesh
+from ..util import write_native_mesh, oft_warning
 
 
 def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], pmap=None, nfp=None):
@@ -94,11 +94,7 @@ def build_regcoil_grid(filename, field_suffix, ntheta, nphi, full_torus=False):
     @param full_torus Construct grid for the full torus (default: one field period)
     @result `rgrid` Structed phi-theta grid of points [nphi,ntheta,3], `nfp` Number of field periods
     '''
-    try:
-        import netCDF4
-    except ImportError:
-        print('"netCDF4" required to load REGCOIL files')
-        raise
+    import netCDF4
     with netCDF4.Dataset(filename) as file:
         rmnc = file['rmnc_{0}'.format(field_suffix)][:]
         zmns = file['zmns_{0}'.format(field_suffix)][:],
@@ -191,15 +187,9 @@ def build_torus_bnorm_grid(filename,nsample,nphi,resample_type='theta',use_splin
         for i in range(nsample):
             resample_grid[i]=i*mode_in[npts,3]/nsample
     else:
-        print("Invalid resampling type")
-        return None
-        #raise ValueError("Invalid resampling type")
+       raise ValueError("Invalid resampling type")
     if use_spline:
-        try:
-            from scipy.interpolate import CubicSpline
-        except ImportError:
-            print("SciPy required for spline interpolation")
-            raise
+        from scipy.interpolate import CubicSpline
         splines = [
             CubicSpline(mode_in[:npts+2,3], mode_in[:npts+2,0], axis=0, bc_type='not-a-knot'),
             CubicSpline(mode_in[:npts+2,3], mode_in[:npts+2,1], axis=0, bc_type='not-a-knot'),
@@ -219,7 +209,7 @@ def build_torus_bnorm_grid(filename,nsample,nphi,resample_type='theta',use_splin
     cos_sum = mode_resample[:,5].sum(); cos_sum_abs = max(1.E-14,abs(mode_resample[:,5]).sum())
     print('  Mode pair sums {0:.4E} {1:.4E}'.format(sin_sum,cos_sum))
     if (abs(sin_sum/sin_sum_abs) > 1.E-4) or (abs(cos_sum/cos_sum_abs) > 1.E-4):
-        print('Warning: Large net flux present in one or more modes! This may indicate an error.')
+        oft_warning('Large net flux present in one or more modes! This may indicate an error.')
     #
     phi_grid = numpy.linspace(0.0,2.0*numpy.pi/nmode,nphi,endpoint=(nmode>1))
     r = numpy.zeros((nphi,nsample,3))
