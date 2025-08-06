@@ -158,6 +158,8 @@ class TokaMaker():
         self.nvac = 0
         ## Limiting contour
         self.lim_contour = None
+        ## Limiting contours (if multiple)
+        self.lim_contours = None
     
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
@@ -204,6 +206,7 @@ class TokaMaker():
         self.reg = None
         self.nvac = 0
         self.lim_contour = None
+        self.lim_contours = None
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
         '''! Setup mesh for static and time-dependent G-S calculations
@@ -359,7 +362,9 @@ class TokaMaker():
         self._alam = numpy.ctypeslib.as_array(alam_loc,shape=(1,))
         self._pnorm = numpy.ctypeslib.as_array(pnorm_loc,shape=(1,))
         # Set default targets
+        ## F*F' normalization value
         self.alam = 0.1
+        ## P' normalization value
         self.pnorm = 0.1
         default_prof={
             'type': 'linterp',
@@ -377,10 +382,10 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         loop_ptr = numpy.ctypeslib.as_array(loop_ptr,shape=(nloops.value+1,))
-        self.lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
         self.lim_contours = []
         for i in range(nloops.value):
-            lim_contour = numpy.vstack((self.lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],self.lim_pts[loop_ptr[i]-1,:]))
+            lim_contour = numpy.vstack((lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],lim_pts[loop_ptr[i]-1,:]))
             self.lim_contours.append(lim_contour)
         self.lim_contour = numpy.zeros((0,2))
         for lim_countour in self.lim_contours:
@@ -407,32 +412,30 @@ class TokaMaker():
         ## Mesh regions [nc] 
         self.reg = numpy.ctypeslib.as_array(reg_loc,shape=(self.nc,))
 
+    ## @cond
     @property
     def alam(self):
-        r'''! F*F' normalization value'''
+        r'''F*F' normalization value'''
         if self._alam is not None:
             return self._alam[0]
         else:
             return None
     
-    ## @cond
     @alam.setter
     def alam(self,value):
         if self._alam is not None:
             self._alam[0] = value
         else:
             raise ValueError('Class must be initialized to set "alam"')
-    ## @endcond
     
     @property
     def pnorm(self):
-        r'''! Pressure normalization value'''
+        r'''Pressure normalization value'''
         if self._pnorm is not None:
             return self._pnorm[0]
         else:
             return None
     
-    ## @cond
     @pnorm.setter
     def pnorm(self,value):
         if self._pnorm is not None:
