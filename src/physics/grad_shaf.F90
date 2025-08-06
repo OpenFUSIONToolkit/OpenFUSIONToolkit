@@ -3681,7 +3681,11 @@ END IF
 self%timing(4)=self%timing(4)+(omp_get_wtime()-t1)
 end subroutine gs_update_bounds
 !------------------------------------------------------------------------------
-!> Needs Docs
+!> Analyze psi and location stationary points where \f$ | \nabla \psi | = 0 \f$
+!!
+!! The location of the plasma axis is found as the O-point with the maximum
+!! value of \f$ \psi \f$. A list of unique X-points is also returned for use
+!! in determining the limiting surface (LCFS).
 !------------------------------------------------------------------------------
 subroutine gs_analyze_saddles(self, o_point, o_psi, x_point, x_psi)
 class(gs_eq), intent(inout) :: self
@@ -3693,7 +3697,7 @@ integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
 integer(4), allocatable :: ncuts(:)
 real(8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3),loc_vals(3),psi_scale_len
 real(8) :: region(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99], [2,2])
-character(len=20) :: loc_str
+character(len=20) :: loc_str,loc_str2
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
 type(oft_lag_bg2interp), target :: psi_g2eval
@@ -3746,23 +3750,34 @@ DO i=1,smesh%np
       saddle_loc=smesh%r(1:2,i)
     END IF
     ! IF(ALL(smesh%reg(smesh%lpc(smesh%kpc(i):smesh%kpc(i+1)-1))/=1))CYCLE
+    IF(ncuts(i)==0)stype=1
+    IF(ncuts(i)>3)stype=3
     IF(self%fe_rep%order>1)THEN
       CALL gs_find_saddle(self,psi_scale_len,saddle_psi,saddle_loc,stype)
     ELSE
       saddle_psi=psi_eval%vals(i)
-      IF(ncuts(i)==0)stype=1
-      IF(ncuts(i)>3)stype=3
     END IF
     IF(stype<0)THEN
       IF(oft_debug_print(1))THEN
         WRITE(loc_str,'(2ES10.2)')smesh%r(1:2,i)
-        CALL oft_warn("Failed to refine candidate o-point at "//loc_str)
+        CALL oft_warn("Failed to refine candidate stationary point at "//loc_str)
       END IF
       CYCLE
     END IF
     IF(saddle_psi>-1.d98)THEN
       DO m=1,n_unique
-        IF(SQRT(SUM((saddle_loc-unique_saddles(1:2,m))**2))<2.d-2)EXIT
+        IF(SQRT(SUM((saddle_loc-unique_saddles(1:2,m))**2))<2.d-2)THEN
+          IF(stype/=stypes(m))THEN
+            IF(stype==1)THEN
+              o_psi = MAX(o_psi,saddle_psi)
+              stypes(m)=1
+            END IF
+            WRITE(loc_str,'(2ES10.2)')saddle_loc
+            WRITE(loc_str2,'(2ES10.2)')unique_saddles(1:2,m)
+            CALL oft_warn("Candidate X-point and O-point converged to the same location "//loc_str//" "//loc_str2)
+          END IF
+          EXIT
+        END IF
       END DO
       IF(m>n_unique.AND.n_unique<max_unique)THEN
         n_unique = n_unique + 1
@@ -3773,7 +3788,7 @@ DO i=1,smesh%np
         cell=0
         CALL bmesh_findcell(smesh,cell,saddle_loc,f)
         IF(smesh%reg(cell)/=1)CYCLE
-        o_psi = MAX(o_psi,saddle_psi)
+        IF(stype==1)o_psi = MAX(o_psi,saddle_psi)
       END IF
     END IF
   END IF
@@ -3795,7 +3810,7 @@ DO m=1,n_unique
   CALL bmesh_findcell(smesh,cell,unique_saddles(1:2,m),f)
   IF(oft_debug_print(2))WRITE(*,*)stypes(m),unique_saddles(:,m),smesh%reg(cell)
   IF(self%saddle_rmask(smesh%reg(cell)))CYCLE
-  IF(ABS(o_psi-unique_saddles(3,m))<1.d-8)THEN
+  IF((stypes(m)==1).AND.(ABS(o_psi-unique_saddles(3,m))<1.d-8))THEN
     IF(smesh%reg(cell)/=1)CYCLE
     o_point=unique_saddles(1:2,m)
     CYCLE
@@ -3816,7 +3831,7 @@ class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_scale_len
 real(8), intent(inout) :: psi_x
 real(8), intent(inout) :: pt(2)
-integer(4), intent(out) :: stype
+integer(4), intent(inout) :: stype
 integer(4) :: i
 real(8) :: ptmp(2),gpsitmp(2),f(3),goptmp(3,3),v,mag_min,psi_circ(36),pt_circ(2)
 !---MINPACK variables
@@ -3828,7 +3843,7 @@ integer(4), allocatable, dimension(:) :: ipvt
 !---Determine initial guess from cell search
 ! psi_eval%u=>self%psi
 ! psi_geval%u=>self%psi
-stype=-1
+stype=stype
 f=1.d0/3.d0
 mag_min=1.d99
 psi_x=-1.d99
@@ -3872,7 +3887,7 @@ IF(SQRT(SUM(gpsitmp**2))>psi_scale_len)RETURN
 call psi_eval_active%interp(cell_active,f,goptmp,gpsitmp(1:1))
 psi_x=gpsitmp(1)
 pt=ptmp
-stype=1
+stype=ABS(stype)
 end subroutine gs_find_saddle
 !------------------------------------------------------------------------------
 !> Test whether a point is inside the LCFS
