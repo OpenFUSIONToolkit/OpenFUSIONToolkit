@@ -1093,17 +1093,7 @@ DO i=0,nsteps
       cc_vals(2,:)=vtmp
       CALL Bz%get_local(vtmp)
       cc_vals(3,:)=vtmp
-      ! IF(self%n_icoils>0)THEN
-      !   !$omp parallel do private(k,tmp) collapse(2)
-      !     DO j=1,self%n_icoils
-      !     DO jj=1,3
-      !         !$omp simd
-      !         DO k=1,self%mesh%np
-      !             cc_vals(jj,k)=cc_vals(jj,k)+coil_vec(j)*hodlr_op%Icoil_Bmat(k,j,jj)
-      !         END DO
-      !     END DO
-      !     END DO
-      ! END IF
+      DEALLOCATE(vtmp)
     ELSE
       !$omp parallel do private(j,jj,tmp)
       DO k=1,self%mesh%np
@@ -1129,7 +1119,6 @@ DO i=0,nsteps
           cc_vals(jj,k)=cc_vals(jj,k)+tmp
         END DO
       END DO
-    ! END IF
     END IF
     CALL self%mesh%save_vertex_vector(cc_vals,self%xdmf,'B_v')
   END IF
@@ -1193,11 +1182,11 @@ END IF
 CALL u%delete
 DEALLOCATE(u)
 DEALLOCATE(vals)
-IF(compute_B)THEN
+IF(compute_B.AND.PRESENT(hodlr_op))THEN
   CALL Bx%delete()
   CALL By%delete()
   CALL Bz%delete()
-  DEALLOCATE(vtmp)
+  DEALLOCATE(Bx,By,Bz)
 END IF
 IF(self%n_icoils>0)DEALLOCATE(coil_vec)
 END SUBROUTINE plot_td_sim

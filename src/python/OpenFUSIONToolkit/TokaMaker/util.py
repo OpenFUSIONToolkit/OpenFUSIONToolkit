@@ -60,11 +60,7 @@ def create_spline_flux_fun(npts,x,y,axis_bc=[1,0.0],edge_bc=[1,0.0],normalize=Tr
     @param edge_bc [SciPy BC specification](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html) on LCFS (\f$ \hat{\psi} = 1 \f$)
     @result Flux function definition dictionary
     '''
-    try:
-        from scipy.interpolate import CubicSpline
-    except ImportError:
-        print("Spline flux function requires SciPy")
-        raise
+    from scipy.interpolate import CubicSpline
     prof = CubicSpline(x,y,bc_type=[axis_bc,edge_bc])
     x_sample = numpy.linspace(0.0,1.0,npts)
     prof = {
