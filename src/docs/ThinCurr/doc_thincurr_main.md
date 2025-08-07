@@ -3,6 +3,8 @@ ThinCurr: 3D thin-wall electromagnetic simulation package     {#doc_tw_main}
 
 [TOC]
 
+\image html thincurr_logo.png width=25%
+
 ThinCurr solves variants of a system of equations corresponding to inductive-resistive dynamics of currents
 flowing in thin conducting structures (2D sheets in 3D geometry)
 
@@ -24,6 +26,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_cyl_td-jumpers
  - \subpage doc_tCurr_torus_mode
  - \subpage doc_tCurr_torus_fr
+ - \subpage doc_tCurr_torus_td
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
