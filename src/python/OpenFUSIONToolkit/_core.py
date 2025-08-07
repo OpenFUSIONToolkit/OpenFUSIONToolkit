@@ -160,6 +160,7 @@ class OFT_env():
         @param path Python path string
         @result `c_char_p` object containing path string value
         '''
+        print(path)
         if len(path) > self.oft_path_slen:
             raise ValueError("Path length exceeds OFT library allowable lenght of {0}".format(self.oft_path_slen))
         return c_char_p(path.encode())

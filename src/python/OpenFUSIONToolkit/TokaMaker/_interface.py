@@ -58,9 +58,9 @@ tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
 tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,
     [c_void_p, c_char_p])
 
-# tokamaker_load_profiles(tMaker_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str)
+# tokamaker_load_profiles(tMaker_ptr,f_file,f_offset,f_sol,p_file,eta_file,f_NI_file,error_str)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
-    [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_double, c_bool, c_char_p, c_char_p, c_char_p, c_char_p])
 
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
@@ -220,7 +220,7 @@ tokamaker_set_coil_vsc = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_vsc,
 # tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str)
 tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk,
     [c_void_p, c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p,
-     c_double, c_double, c_bool, c_char_p, c_double, c_char_p])
+     c_double, c_double, c_bool, c_char_p, c_double, c_int, c_char_p])
 
 # tokamaker_save_ifile(tMaker_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
 tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
