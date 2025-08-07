@@ -268,6 +268,12 @@ class XDMF_plot_mesh:
         self.lc = numpy.asarray(mesh_obj['LC'])
         self.np = self.r.shape[0]
         self.nc = self.lc.shape[0]
+        if 'REG_vol' in mesh_obj:
+            self.reg = numpy.asarray(mesh_obj['REG_vol'])
+        elif 'REG_surf' in mesh_obj:
+            self.reg = numpy.asarray(mesh_obj['REG_surf'])
+        else:
+            self.reg = numpy.ones((self.nc,))
         #
         self.static_fields = {}
         for field_name, field_obj in mesh_obj.get('0000',{}).items():
@@ -276,7 +282,7 @@ class XDMF_plot_mesh:
         self.times = []
         self.time_field_names = []
         self.time_fields = []
-        for i in range(1,9998):
+        for i in range(9999):
             timestep = mesh_obj.get('{0:04d}'.format(i+1),None)
             if timestep is None:
                 break
