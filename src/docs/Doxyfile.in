@@ -4,8 +4,9 @@
 
 PROJECT_NAME           = The Open FUSION Toolkit
 PROJECT_NUMBER         = @CMAKE_PROJECT_VERSION@@OFT_VER_SUFFIX@
-PROJECT_BRIEF          = "Modeling tools for plasma and fusion research and engineering"
-PROJECT_LOGO           =
+PROJECT_BRIEF          = "An open-source framework for fusion and plasma science and engineering"
+PROJECT_LOGO           = @CMAKE_CURRENT_SOURCE_DIR@/../logos/oft_logo-notxt.png
+PROJECT_ICON           = @CMAKE_CURRENT_SOURCE_DIR@/docs/website/img/oft_favico.png
 
 DOXYFILE_ENCODING      = UTF-8
 INPUT_ENCODING         = UTF-8
@@ -28,7 +29,8 @@ INPUT                  = @CMAKE_CURRENT_SOURCE_DIR@/docs \
                          @CMAKE_CURRENT_SOURCE_DIR@/bin \
                          @CMAKE_CURRENT_SOURCE_DIR@/python
 IMAGE_PATH             = @CMAKE_CURRENT_SOURCE_DIR@/docs/images \
-                         @CMAKE_CURRENT_SOURCE_DIR@/docs/generated/images
+                         @CMAKE_CURRENT_SOURCE_DIR@/docs/generated/images \
+                         @CMAKE_CURRENT_SOURCE_DIR@/../logos
 RECURSIVE              = YES
 EXCLUDE                =
 EXCLUDE_PATTERNS       =
@@ -55,7 +57,7 @@ INLINE_INHERITED_MEMB  = YES
 INHERIT_DOCS           = YES
 
 FULL_PATH_NAMES        = YES
-STRIP_FROM_PATH        =
+STRIP_FROM_PATH        = @CMAKE_CURRENT_SOURCE_DIR@
 STRIP_FROM_INC_PATH    =
 
 MARKDOWN_SUPPORT       = YES
