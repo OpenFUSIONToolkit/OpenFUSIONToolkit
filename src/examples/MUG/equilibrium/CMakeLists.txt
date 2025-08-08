@@ -1,0 +1,8 @@
+install(FILES oft_eq.in DESTINATION examples/MUG/equilibrium COMPONENT examples)
+configure_file( oft_eq.in ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES equilibrium.h5 DESTINATION examples/MUG/tDiff COMPONENT examples)
+configure_file( equilibrium.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+install(FILES equilibrium_2.h5 DESTINATION examples/MUG/tDiff COMPONENT examples)
+configure_file( equilibrium_2.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+oft_add_exe(eq_driver.F90 )
+configure_file( oft_in.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)

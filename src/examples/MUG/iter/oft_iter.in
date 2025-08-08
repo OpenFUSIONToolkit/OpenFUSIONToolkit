@@ -1,0 +1,46 @@
+&runtime_options
+  ppn=1
+  debug=0
+/
+
+&mesh_options
+  meshname='test'
+  cad_type=0
+  nlevels=1
+  nbase=1
+  grid_order=2
+  fix_boundary=T
+/
+
+&native_mesh_options
+  filename="iter_mug.h5"
+/
+
+&equilibrium_options
+  filename="iter_mug.h5"
+/
+
+
+&xmhd_options
+  order=2
+  n0=1E20,
+  psi0=0.d0,
+  velx0=0,
+  vely0=0,
+  velz0=0,
+  t0=1E3,
+  by0=0.d0,
+  bx0=0.d0,
+  bz0=0.d0,
+  chi=1.E0
+  eta=1.E-8
+  nu=1.E-7
+  gamma=1.67
+  D_diff=1.E0
+  dt=1.0E-9
+  nsteps=100000
+  rst_freq=10
+  use_mfnk=F
+  pm=F
+  den_scale=1.d20
+/

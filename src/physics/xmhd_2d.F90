@@ -25,7 +25,8 @@ USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec, bfem_map_flag
 USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast
-USE oft_blag_operators, ONLY: oft_blag_vproject, oft_blag_getmop, oft_lag_bginterp
+USE oft_blag_operators, ONLY: oft_blag_vproject,oft_blag_project, oft_blag_getmop, oft_lag_bginterp, oft_lag_bg2interp, oft_lag_bg2compinterp
+USE oft_scalar_inits, ONLY: poss_scalar_bfield
 USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
 USE oft_gs, ONLY: gs_epsilon
 IMPLICIT NONE
@@ -38,7 +39,6 @@ PRIVATE
 TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: dt = -1.d0 !< Time step
   REAL(r8) :: chi !< Needs docs
-  REAL(r8) :: eta !< Needs docs
   REAL(r8) :: nu !< Needs docs
   REAL(r8) :: gamma
   REAL(r8) :: D_diff
@@ -47,6 +47,7 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL(r8) :: den_scale = 1.d19 !< Needs docs
   REAL(r8) :: diag_vals(7) = 0.d0 !< Needs docs
   REAL (r8) :: B_0(3) = 0.d0
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: eta
 
   LOGICAL :: cyl_flag
 
@@ -74,7 +75,6 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8) :: t = 0.d0 !< Needs docs
   ! Edited to reflect new fields
   REAL(r8) :: chi = -1.d0 !< Needs docs
-  REAL(r8) :: eta = -1.d0 !< Needs docs
   REAL(r8) :: nu = -1.d0 !< Needs docs
   REAL(r8) :: gamma = -1.d0 !< Needs docs
   REAL(r8) :: D_diff = -1.d0 !< Needs docs
@@ -84,6 +84,7 @@ TYPE, public :: oft_xmhd_2d_sim
   REAL(r8) :: lin_tol = 1.d-8 !< absolute tolerance for linear solver
   REAL(r8) :: nl_tol = 1.d-5 !< Needs docs
   REAL (r8) :: B_0(3) = 0.d0
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: eta
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vel BC flag
@@ -134,8 +135,11 @@ real(4) :: hist_r4(9)
 !---
 CLASS(oft_matrix), POINTER :: lmop => NULL()
 CLASS(oft_solver), POINTER :: lminv => NULL()
-class(oft_vector), pointer :: ux,uy,uz,v_lag
+class(oft_vector), pointer :: ux,uy,uz,v_lag, j_phi_tmp
 type(oft_lag_bginterp) :: grad_psi
+type(oft_lag_bg2compinterp) :: hess_psi
+type(oft_lag_bg2interp), target :: hess_psi_full
+TYPE(poss_scalar_bfield) :: field_init
 !---Extrapolation fields
 integer(i4), parameter :: maxextrap=2
 integer(i4) :: nextrap
@@ -145,7 +149,7 @@ type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
 character(LEN=TDIFF_RST_LEN) :: rst_char
 integer(i4) :: i,j,io_stat,rst_tmp,npre
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time
-real(r8), pointer :: plot_vals(:),plot_vec(:,:)
+real(r8), pointer :: plot_vals(:),plot_vec(:,:), j_phi(:)
 current_sim=>self
 !---------------------------------------------------------------------------
 ! Create solver fields
@@ -155,10 +159,13 @@ call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)
 !---
 call oft_blagrange%vec_create(grad_psi%u)
+call oft_blagrange%vec_create(hess_psi%u)
+call oft_blagrange%vec_create(hess_psi_full%u)
 call oft_blagrange%vec_create(ux)
 call oft_blagrange%vec_create(uy)
 call oft_blagrange%vec_create(uz)
 call oft_blagrange%vec_create(v_lag)
+call oft_blagrange%vec_create(j_phi_tmp)
 NULLIFY(lmop)
 call oft_blag_getmop(oft_blagrange,lmop,'none')
 CALL create_cg_solver(lminv)
@@ -197,6 +204,8 @@ CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
 CALL self%u%get_local(plot_vals,6)
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
 CALL grad_psi%u%restore_local(plot_vals)
+CALL hess_psi%u%restore_local(plot_vals)
+CALL hess_psi_full%u%restore_local(plot_vals)
 !------------------------------------------------------------------------------
 ! Project magnetic field and plot
 !------------------------------------------------------------------------------
@@ -216,10 +225,41 @@ plot_vec(2,:)=plot_vals
 CALL ux%get_local(plot_vals)
 plot_vec(3,:)=plot_vals
 CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
+!------------------------------------------------------------------------------
+! Compute current and plot 
+!------------------------------------------------------------------------------
+NULLIFY(j_phi)
+! Add d^2 psi/ dr^2
+CALL hess_psi_full%setup(oft_blagrange)
+hess_psi%idx = 1
+hess_psi%hess_ptr => hess_psi_full
+CALL hess_psi%setup(oft_blagrange)
+CALL oft_blag_project(oft_blagrange,hess_psi,j_phi_tmp)
+CALL v_lag%set(0.d0)
+CALL lminv%apply(v_lag,j_phi_tmp)
+CALL v_lag%get_local(j_phi)
+plot_vals = j_phi
+NULLIFY(j_phi)
+! Add d^2 psi/ dz^2
+hess_psi%idx = 4
+CALL oft_blag_project(oft_blagrange,hess_psi,j_phi_tmp)
+CALL v_lag%set(0.d0)
+CALL lminv%apply(v_lag,j_phi_tmp)
+CALL v_lag%get_local(j_phi)
+plot_vals = plot_vals + j_phi
+! Subtract 1/r dpsi/dr
+field_init%func=>r_init
+field_init%mesh=>mesh
+CALL oft_blag_project(oft_blagrange,field_init,j_phi_tmp)
+CALL v_lag%set(0.d0)
+CALL lminv%apply(v_lag,j_phi_tmp)
+CALL v_lag%get_local(j_phi)
+plot_vals = plot_vals - plot_vec(3,:)/(j_phi+gs_epsilon)
+plot_vals = -1.d0*plot_vals/(mu0*(j_phi+gs_epsilon))
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'J_phi')
 
-
-!
 ALLOCATE(self%nlfun)
+ALLOCATE(self%nlfun%eta(mesh%nreg))
 self%nlfun%cyl_flag = self%cyl_flag
 self%nlfun%chi=self%chi
 self%nlfun%eta=self%eta
@@ -393,13 +433,43 @@ DO i=1,self%nsteps
     plot_vec(2,:) = plot_vec(2,:)
     plot_vec(3,:) = plot_vec(3,:)
     CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
+    !------------------------------------------------------------------------------
+    ! Compute current and plot 
+    !------------------------------------------------------------------------------
+    NULLIFY(j_phi)
+    CALL hess_psi_full%setup(oft_blagrange)
+    hess_psi%idx = 1
+    hess_psi%hess_ptr => hess_psi_full
+    CALL hess_psi%setup(oft_blagrange)
+    CALL oft_blag_project(oft_blagrange,hess_psi,j_phi_tmp)
+    CALL v_lag%set(0.d0)
+    CALL lminv%apply(v_lag,j_phi_tmp)
+    CALL v_lag%get_local(j_phi)
+    plot_vals = j_phi
+    NULLIFY(j_phi)
+    hess_psi%idx = 4
+    CALL oft_blag_project(oft_blagrange,hess_psi,j_phi_tmp)
+    CALL v_lag%set(0.d0)
+    CALL lminv%apply(v_lag,j_phi_tmp)
+    CALL v_lag%get_local(j_phi)
+    plot_vals = plot_vals + j_phi
+    ! Subtract 1/r dpsi/dr
+    field_init%func=>r_init
+    field_init%mesh=>mesh
+    CALL oft_blag_project(oft_blagrange,field_init,j_phi_tmp)
+    CALL v_lag%set(0.d0)
+    CALL lminv%apply(v_lag,j_phi_tmp)
+    CALL v_lag%get_local(j_phi)
+    plot_vals = plot_vals - plot_vec(3,:)/(j_phi+gs_epsilon)
+    plot_vals = -1.d0*plot_vals/(mu0*(j_phi+gs_epsilon))
+    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'J_phi')
   END IF
-  ! IF(nksolver%lits<4)THEN
-  !   self%dt=self%dt*2.d0
-  !   npre=-1
-  ! ELSE IF(nksolver%lits>100)THEN
-  !   npre=-1
-  ! END IF
+  IF(nksolver%lits<4)THEN
+    self%dt=self%dt*2.d0
+    npre=-1
+  ELSE IF(nksolver%lits>100)THEN
+    npre=-1
+  END IF
 END DO
 CALL hist_file%close()
 CALL nksolver%delete()
@@ -424,9 +494,10 @@ INTEGER(i4) :: i,m,jr, k,l
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
 REAL(r8) :: k_boltz = elec_charge
 REAL(r8) :: m_i=proton_mass
-REAL(r8) :: chi, eta, nu, D_diff, gamma, diag_vals(7), B_0(3), test
+REAL(r8) :: chi,  nu, D_diff, gamma, diag_vals(7), B_0(3), eta_loc 
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
          dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp1(3), coords(3)
+REAL(r8) :: eta(mesh%nreg)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
                      psi_weights_loc, by_weights_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads,res_loc
@@ -451,6 +522,7 @@ CALL a%get_local(by_weights,7)
 !---
 chi = self%chi !< Needs docs
 eta = self%eta !< Needs docs
+!write(*,*) eta
 nu = self%nu !< Needs docs
 gamma = self%gamma !< Needs docs
 D_diff = self%D_diff !< Needs docs
@@ -475,7 +547,7 @@ diag_vals=0.d0
 
 !$omp parallel private(m,jr,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
 !$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp, tmp1, test) reduction(+:diag_vals)
+!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp, tmp1, eta_loc) reduction(+:diag_vals)
 !Edit for new fields
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
@@ -492,6 +564,8 @@ DO i=1,mesh%nc
   T_weights_loc = T_weights(cell_dofs)
   psi_weights_loc = psi_weights(cell_dofs)
   by_weights_loc = by_weights(cell_dofs)
+
+  eta_loc = eta(mesh%reg(i))
   !---------------------------------------------------------------------------
   ! Quadrature Loop
   !---------------------------------------------------------------------------
@@ -599,27 +673,27 @@ DO i=1,mesh%nc
         + basis_vals(jr)*psi*int_factor &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dpsi)*int_factor &
         + basis_vals(jr)*self%dt*tmp1(2)*int_factor &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dpsi)*int_factor/mu0
+        + self%dt*eta_loc*DOT_PRODUCT(basis_grads(:,jr), dpsi)*int_factor/mu0
       IF (cyl_flag) THEN
         res_loc(jr,6) = res_loc(jr, 6) &
-        + basis_vals(jr)*self%dt*eta*2.d0*dpsi(1)*int_factor/(mu0*(coords(1)+gs_epsilon))
+        + basis_vals(jr)*self%dt*eta_loc*2.d0*dpsi(1)*int_factor/(mu0*(coords(1)+gs_epsilon))
       END IF
       tmp1 = cross_product(dpsi,dvel(2, :))
       IF (cyl_flag) THEN
         res_loc(jr, 7) = res_loc(jr, 7) &
         + (basis_vals(jr)*by*int_factor &
-        - basis_vals(jr)*self%dt*tmp1(2)*int_factor/coords(1) &
+        - basis_vals(jr)*self%dt*tmp1(2)*int_factor/(coords(1)+gs_epsilon) &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dby)*int_factor &
         + basis_vals(jr)*self%dt*by*(dvel(1,1) + dvel(3,3))*int_factor &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor/mu0 &
-        + basis_vals(jr)*self%dt*eta*by*int_factor/(mu0*(coords(1)+gs_epsilon)**2))*coords(1)
+        + self%dt*eta_loc*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor/mu0 &
+        + basis_vals(jr)*self%dt*eta_loc*by*int_factor/(mu0*(coords(1)+gs_epsilon)**2))*coords(1)
       ELSE
         res_loc(jr, 7) = res_loc(jr, 7) &
         + basis_vals(jr)*by*int_factor &
         - basis_vals(jr)*self%dt*tmp1(2)*int_factor &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dby)*int_factor &
         + basis_vals(jr)*self%dt*by*div_vel*int_factor &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor/mu0
+        + self%dt*eta_loc*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor/mu0
       END IF 
     END DO
   END DO
@@ -679,9 +753,10 @@ INTEGER(i4) :: i,m,jr,jc, k,l
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
 REAL(r8) :: k_boltz=elec_charge
 REAL(r8) :: m_i = proton_mass
-REAL(r8) :: chi, eta, nu, D_diff, gamma, B_0(3), diag_vals(7)
+REAL(r8) :: chi, nu, D_diff, gamma, B_0(3), diag_vals(7), eta_loc
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
 dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp2(3), tmp3(3), coords(3)
+REAL (r8) :: eta(mesh%nreg)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
                                     psi_weights_loc, by_weights_loc, res_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
@@ -730,7 +805,7 @@ END DO
 !$omp parallel private(m,jr,jc,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
 !$omp n_weights_loc,vel_weights_loc, psi_weights_loc, by_weights_loc, btmp, &
 !$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,int_factor,dn, dT, dvel, div_vel, dpsi, dby,iloc, &
-!$omp tmp2, tmp3) 
+!$omp tmp2, tmp3, eta_loc) 
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),&
         T_weights_loc(oft_blagrange%nce), psi_weights_loc(oft_blagrange%nce),&
@@ -752,6 +827,8 @@ DO i=1,mesh%nc
   T_weights_loc = T_weights(cell_dofs)
   psi_weights_loc = psi_weights(cell_dofs)
   by_weights_loc = by_weights(cell_dofs)
+
+  eta_loc = eta(mesh%reg(i))
 !---------------------------------------------------------------------------
 ! Quadrature Loop
 !---------------------------------------------------------------------------
@@ -766,6 +843,7 @@ DO i=1,mesh%nc
     coords = mesh%log2phys(i,quad%pts(:,m))
     basis_grads(3, :) = basis_grads(2,:)
     basis_grads(2,:) = 0.d0
+
     IF (cyl_flag) THEN
       int_factor = jac_det*quad%wts(m)*coords(1)
     ELSE
@@ -978,10 +1056,10 @@ DO i=1,mesh%nc
         jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
         + basis_vals(jr)*basis_vals(jc)*int_factor &
         + self%dt*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor &
-        + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0
+        + self%dt*eta_loc*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0
         IF (cyl_flag) THEN
           jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
-          + self%dt*basis_vals(jr)*eta*2.d0*basis_grads(1,jc)*int_factor/(mu0*(coords(1) + gs_epsilon))
+          + self%dt*basis_vals(jr)*eta_loc*2.d0*basis_grads(1,jc)*int_factor/(mu0*(coords(1) + gs_epsilon))
         END IF
         !--by, vel
         tmp2 = cross_product(dpsi,basis_grads(:,jc))
@@ -1016,14 +1094,14 @@ DO i=1,mesh%nc
           + basis_vals(jr)*basis_vals(jc)*int_factor &
           + basis_vals(jr)*self%dt*DOT_PRODUCT(basis_grads(:,jc),vel)*int_factor & 
           + basis_vals(jr)*self%dt*basis_vals(jc)*(dvel(1,1) + dvel(3,3))*int_factor & 
-          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0 &
-          + basis_vals(jr)*self%dt*eta*basis_vals(jc)*int_factor/((coords(1)+gs_epsilon)**2*mu0)
+          + self%dt*eta_loc*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0 &
+          + basis_vals(jr)*self%dt*eta_loc*basis_vals(jc)*int_factor/((coords(1)+gs_epsilon)**2*mu0)
         ELSE
           jac_loc(7, 7)%m(jr,jc) = jac_loc(7, 7)%m(jr,jc) &
           + basis_vals(jr)*basis_vals(jc)*int_factor &
           + basis_vals(jr)*self%dt*DOT_PRODUCT(basis_grads(:,jc),vel)*int_factor & 
           + basis_vals(jr)*self%dt*basis_vals(jc)*div_vel*int_factor & 
-          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0 
+          + self%dt*eta_loc*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0 
         END IF
       END DO
     END DO
@@ -1086,12 +1164,14 @@ END SUBROUTINE update_jacobian
 !---------------------------------------------------------------------------
 !> Setup composite FE representation and ML environment
 !---------------------------------------------------------------------------
-subroutine setup(self,mg_mesh_in, order)
+subroutine setup(self,mg_mesh_in, order, region_bcs)
 class(oft_xmhd_2d_sim), intent(inout) :: self
 CLASS(multigrid_mesh), TARGET, intent(in) :: mg_mesh_in
 integer(i4), intent(in) :: order
-integer(i4) :: i,ierr,io_unit
-LOGICAL, ALLOCATABLE :: vert_flag(:),edge_flag(:)
+integer(i4), intent(in), optional :: region_bcs(:)
+integer(i4) :: i,j, ierr,io_unit, cond_ind, coil_ind, type
+LOGICAL, ALLOCATABLE :: vert_flag(:),edge_flag(:), boundary_flag(:)
+INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
 mg_mesh=>mg_mesh_in
 mesh=>mg_mesh%smesh
 IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup",__FILE__)
@@ -1139,11 +1219,114 @@ self%fe_rep%field_tags(6)='psi'
 self%fe_rep%fields(7)%fe=>oft_blagrange
 self%fe_rep%field_tags(7)='by'
 
+!Initialize the eta array
+ALLOCATE(self%eta(mesh%nreg))
+self%eta = -1.d0
+
 !---Create solution vector
 CALL self%fe_rep%vec_create(self%u)
 
+! Apply BCs per region type
+IF (PRESENT(region_bcs)) THEN
+  ALLOCATE(cell_dofs(oft_blagrange%nce))
+  ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.FALSE.
+  ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.FALSE.
+  ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.FALSE.
+  ALLOCATE(self%velz_bc(oft_blagrange%ne)); self%velz_bc=.FALSE.
+  ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.FALSE.
+  ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.FALSE.
+  ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.FALSE.
+  IF (SIZE(region_bcs) /= mesh%nreg) THEN
+    CALL oft_abort("Number of region flags does not match number of regions.","setup",__FILE__)
+  END IF
+  DO i=1, mesh%nc
+    type = region_bcs(mesh%reg(i))
+    IF (type == 1) THEN
+      CALL apply_mhd_bcs(self, i, cell_dofs)
+    ELSE IF (type == 2) THEN
+      CALL apply_cond_bcs(self, i, cell_dofs)
+    ELSE IF (type == 3) THEN
+      CALL apply_supercond_bcs(self, i, cell_dofs)
+    ELSE
+      CALL oft_abort("Invalid region flag.","setup",__FILE__)
+    END IF
+  END DO
+  !Fix psi and By on the boundaries
+  ALLOCATE(vert_flag(mesh%np),edge_flag(mesh%ne))
+  ALLOCATE(boundary_flag(oft_blagrange%ne))
+  vert_flag=.FALSE.; edge_flag=.FALSE.
+  DO i=1,mesh%nbe
+    edge_flag(mesh%lbe(i))=.TRUE.
+    vert_flag(mesh%le(1,mesh%lbe(i)))=.TRUE.
+    vert_flag(mesh%le(2,mesh%lbe(i)))=.TRUE.
+  END DO
+  CALL bfem_map_flag(oft_blagrange,vert_flag,edge_flag,boundary_flag)
+  WHERE (self%psi_bc .OR. boundary_flag)
+    self%psi_bc = .TRUE.
+  END WHERE
+  WHERE (self%by_bc .OR. boundary_flag)
+    self%by_bc = .TRUE.
+  END WHERE
+END IF
+
+
+
+
+! !--- Blocks to disable field evolutions in certain regions
+! ALLOCATE(cell_dofs(oft_blagrange%nce))
+! ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.TRUE.
+! ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.TRUE.
+! ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
+! ALLOCATE(self%velz_bc(oft_blagrange%ne)); self%velz_bc=.TRUE.
+! ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.TRUE.
+! ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.FALSE.
+! ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.FALSE.
+! cond_ind = 5
+! coil_ind = 7
+! DO i=1,mesh%nc
+!   IF(mesh%reg(i) == 1) THEN ! if we are in a plasma region 
+!     call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+!     DO j=1, SIZE(cell_dofs)
+!       self%n_bc(cell_dofs(j)) = .FALSE. ! allow density evolution in plasma
+!       self%velx_bc(cell_dofs(j)) = .FALSE. ! allow velocity evolution in plasma
+!       self%vely_bc(cell_dofs(j)) = .FALSE. ! allow velocity evolution in plasma
+!       self%velz_bc(cell_dofs(j)) = .FALSE. ! allow velocity evolution in plasma
+!       self%T_bc(cell_dofs(j)) = .FALSE. ! allow temperature evolution in plasma
+!     END DO
+!   ELSE IF(mesh%reg(i) > coil_ind) THEN !if we are in a coil region
+!     call oft_blagrange%ncdofs(i,cell_dofs)
+!     DO j=1, SIZE(cell_dofs)
+!       self%psi_bc(cell_dofs(j)) = .TRUE. !block psi evolution in coils
+!       self%by_bc(cell_dofs(j)) = .TRUE.  ! block F evolution in coils
+!     END DO
+!   END IF
+! END DO
+
+! !Fix psi and By on the boundaries
+! ALLOCATE(vert_flag(mesh%np),edge_flag(mesh%ne))
+! ALLOCATE(boundary_flag(oft_blagrange%ne))
+! vert_flag=.FALSE.; edge_flag=.FALSE.
+! DO i=1,mesh%nbe
+!   edge_flag(mesh%lbe(i))=.TRUE.
+!   vert_flag(mesh%le(1,mesh%lbe(i)))=.TRUE.
+!   vert_flag(mesh%le(2,mesh%lbe(i)))=.TRUE.
+! END DO
+! CALL bfem_map_flag(oft_blagrange,vert_flag,edge_flag,boundary_flag)
+
+! WHERE (self%psi_bc .OR. boundary_flag)
+!   self%psi_bc = .TRUE.
+! END WHERE
+
+! WHERE (self%by_bc .OR. boundary_flag)
+!   self%by_bc = .TRUE.
+! END WHERE
+
 !---Blocks to disable field evolutions via BCs
-!ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.TRUE.
+! write(*,*) 'oft_blagrange%ne:',oft_blagrange%ne
+! write(*,*) 'mesh%np:',mesh%np
+! write(*,*) 'mesh%ne:',mesh%ne
+! write(*,*) 'mesh%reg:',SIZE(mesh%reg)
+! ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.TRUE.
 !ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.TRUE.
 !ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
 !ALLOCATE(self%velz_bc(oft_blagrange%ne)); self%velz_bc=.TRUE.
@@ -1156,6 +1339,7 @@ CALL self%fe_rep%vec_create(self%u)
 ! !---Temperature is fixed on outlet only
 ! ALLOCATE(self%T_bc(oft_blagrange%ne))
 ! vert_flag=.FALSE.; edge_flag=.FALSE.
+! write(*,*) mesh%lbe
 ! DO i=1,mesh%nbe
 !   IF(mesh%bes(i)==2)THEN
 !     edge_flag(mesh%lbe(i))=.TRUE.
@@ -1223,6 +1407,48 @@ IF(oft_env%head_proc)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine rst_save
+
+subroutine apply_mhd_bcs(self,cell_ind, cell_dofs)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+integer(i4) , intent(in) :: cell_ind
+INTEGER(i4), POINTER, DIMENSION(:), intent(inout) :: cell_dofs
+end subroutine apply_mhd_bcs
+
+subroutine apply_cond_bcs(self,cell_ind, cell_dofs)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+INTEGER(i4) , intent(in) :: cell_ind
+INTEGER(i4), POINTER, DIMENSION(:), intent(inout) :: cell_dofs
+INTEGER(i4) :: j
+call oft_blagrange%ncdofs(cell_ind,cell_dofs) ! Get global index of local DOFs
+DO j=1, SIZE(cell_dofs)
+  self%n_bc(cell_dofs(j)) = .TRUE. ! prevent density evolution in solid conductor
+  self%velx_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in solid conductor
+  self%vely_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in solid conductor
+  self%velz_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in solid conductor
+  self%T_bc(cell_dofs(j)) = .TRUE. ! prevent temperature evolution in solid conductor
+  !self%psi_bc(cell_dofs(j)) = .TRUE. ! prevent psi evolution in superconductor
+  !self%by_bc(cell_dofs(j)) = .TRUE. ! prevent by evolution in superconductor
+END DO
+end subroutine apply_cond_bcs
+
+subroutine apply_supercond_bcs(self,cell_ind, cell_dofs)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+INTEGER(i4) , intent(in) :: cell_ind
+INTEGER(i4), POINTER, DIMENSION(:), intent(inout) :: cell_dofs
+INTEGER(i4) :: j
+call oft_blagrange%ncdofs(cell_ind,cell_dofs) ! Get global index of local DOFs
+DO j=1, SIZE(cell_dofs)
+  self%n_bc(cell_dofs(j)) = .TRUE. ! prevent density evolution in superconductor
+  self%velx_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in superconductor
+  self%vely_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in superconductor
+  self%velz_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in superconductor
+  self%T_bc(cell_dofs(j)) = .TRUE. ! prevent temperature evolution in superconductor
+  self%psi_bc(cell_dofs(j)) = .TRUE. ! prevent psi evolution in superconductor
+  self%by_bc(cell_dofs(j)) = .TRUE. ! prevent by evolution in superconductor
+END DO
+end subroutine apply_supercond_bcs
+
+
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
 !---------------------------------------------------------------------------
@@ -1239,4 +1465,10 @@ IF(PRESENT(t))CALL hdf5_read(t,filename,'t')
 IF(PRESENT(dt))CALL hdf5_read(dt,filename,'dt')
 DEBUG_STACK_POP
 end subroutine rst_load
+
+SUBROUTINE r_init(pt,val)
+  REAL(r8), INTENT(in) :: pt(3)
+  REAL(r8), INTENT(out) :: val
+  val = pt(1)
+END SUBROUTINE r_init
 END MODULE xmhd_2d
