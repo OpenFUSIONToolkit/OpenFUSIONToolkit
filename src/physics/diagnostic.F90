@@ -529,6 +529,35 @@ CALL quad%delete
 DEBUG_STACK_POP
 END FUNCTION scal_energy
 !------------------------------------------------------------------------------
+!> Evaluate the field energy of a scalar in 2d
+!------------------------------------------------------------------------------
+FUNCTION scal_energy_2d(mesh,field,quad_order) RESULT(energy)
+  CLASS(oft_bmesh), INTENT(inout) :: mesh
+  CLASS(bfem_interp), INTENT(inout) :: field !< Input field
+  INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
+  REAL(r8) :: energy !< \f$ \int u dS \f$
+  INTEGER(i4) :: i,m,cell
+  REAL(r8) :: area,etmp(1),sgop(3,3)
+  TYPE(oft_quad_type) :: quad
+  DEBUG_STACK_PUSH
+  !---Setup
+  CALL mesh%quad_rule(quad_order,quad)
+  energy=0.d0
+  !$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+  do i=1,mesh%nc
+    !---Loop over quadrature points
+    do m=1,quad%np
+      call mesh%jacobian(i,quad%pts(:,m),sgop,area)
+      call field%interp(i,quad%pts(:,m),sgop,etmp)
+      energy = energy + (etmp(1)**2)*area*quad%wts(m)
+    end do
+  end do
+  !---Global reduction and cleanup
+  energy=oft_mpi_sum(energy)
+  CALL quad%delete
+  DEBUG_STACK_POP
+  END FUNCTION scal_energy_2d
+!------------------------------------------------------------------------------
 !> Evaluate the field energy of a 3-vector
 !------------------------------------------------------------------------------
 FUNCTION vec_energy(mesh,field,quad_order) RESULT(energy)
