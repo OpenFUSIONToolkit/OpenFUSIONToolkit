@@ -41,7 +41,7 @@
  eta=742.6         ! Constant resistivity
 ! eta_hyper=50.0   ! Hyper-resistivity
 ! me_factor=73.446  ! M_e/M_i = 25.0 (as per GEM challenge paper)
- visc_type='iso'   ! Use isotropic viscosity tensor
+ visc_type='kin'   ! Use isotropic viscosity tensor
  nu_par=7425.9     ! Fluid viscosity
  d_dens=10.        ! Density diffusion
  kappa_par=2943.4  ! Parallel thermal conduction (fixed)
