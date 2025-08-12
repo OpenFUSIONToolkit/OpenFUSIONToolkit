@@ -25,7 +25,7 @@ USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec, bfem_map_flag
 USE oft_lag_basis, ONLY: oft_lag_setup,oft_scalar_bfem, oft_blag_eval, oft_blag_geval, oft_2D_lagrange_cast
-USE oft_blag_operators, ONLY: oft_blag_vproject,oft_blag_project, oft_blag_getmop, oft_lag_bginterp, oft_lag_bg2interp, oft_lag_bg2compinterp
+USE oft_blag_operators, ONLY: oft_blag_vproject,oft_blag_project, oft_blag_getmop, oft_lag_bginterp
 USE oft_scalar_inits, ONLY: poss_scalar_bfield
 USE mhd_utils, ONLY: mu0, elec_charge, proton_mass
 USE oft_gs, ONLY: gs_epsilon
@@ -135,10 +135,8 @@ real(4) :: hist_r4(9)
 !---
 CLASS(oft_matrix), POINTER :: lmop => NULL()
 CLASS(oft_solver), POINTER :: lminv => NULL()
-class(oft_vector), pointer :: ux,uy,uz,v_lag, j_phi_tmp
+class(oft_vector), pointer :: ux,uy,uz,v_lag
 type(oft_lag_bginterp) :: grad_psi
-type(oft_lag_bg2compinterp) :: hess_psi
-type(oft_lag_bg2interp), target :: hess_psi_full
 TYPE(poss_scalar_bfield) :: field_init
 !---Extrapolation fields
 integer(i4), parameter :: maxextrap=2
@@ -149,7 +147,7 @@ type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
 character(LEN=TDIFF_RST_LEN) :: rst_char
 integer(i4) :: i,j,io_stat,rst_tmp,npre
 real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time
-real(r8), pointer :: plot_vals(:),plot_vec(:,:), j_phi(:)
+real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 current_sim=>self
 !---------------------------------------------------------------------------
 ! Create solver fields
@@ -159,13 +157,10 @@ call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)
 !---
 call oft_blagrange%vec_create(grad_psi%u)
-call oft_blagrange%vec_create(hess_psi%u)
-call oft_blagrange%vec_create(hess_psi_full%u)
 call oft_blagrange%vec_create(ux)
 call oft_blagrange%vec_create(uy)
 call oft_blagrange%vec_create(uz)
 call oft_blagrange%vec_create(v_lag)
-call oft_blagrange%vec_create(j_phi_tmp)
 NULLIFY(lmop)
 call oft_blag_getmop(oft_blagrange,lmop,'none')
 CALL create_cg_solver(lminv)
@@ -204,8 +199,6 @@ CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
 CALL self%u%get_local(plot_vals,6)
 CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
 CALL grad_psi%u%restore_local(plot_vals)
-CALL hess_psi%u%restore_local(plot_vals)
-CALL hess_psi_full%u%restore_local(plot_vals)
 !------------------------------------------------------------------------------
 ! Project magnetic field and plot
 !------------------------------------------------------------------------------
@@ -225,43 +218,12 @@ plot_vec(2,:)=plot_vals
 CALL ux%get_local(plot_vals)
 plot_vec(3,:)=plot_vals
 CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
-!------------------------------------------------------------------------------
-! Compute current and plot 
-!------------------------------------------------------------------------------
-NULLIFY(j_phi)
-! Add d^2 psi/ dr^2
-CALL hess_psi_full%setup(oft_blagrange)
-hess_psi%idx = 1
-hess_psi%hess_ptr => hess_psi_full
-CALL hess_psi%setup(oft_blagrange)
-CALL oft_blag_project(oft_blagrange,hess_psi,j_phi_tmp)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,j_phi_tmp)
-CALL v_lag%get_local(j_phi)
-plot_vals = j_phi
-NULLIFY(j_phi)
-! Add d^2 psi/ dz^2
-hess_psi%idx = 4
-CALL oft_blag_project(oft_blagrange,hess_psi,j_phi_tmp)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,j_phi_tmp)
-CALL v_lag%get_local(j_phi)
-plot_vals = plot_vals + j_phi
-! Subtract 1/r dpsi/dr
-field_init%func=>r_init
-field_init%mesh=>mesh
-CALL oft_blag_project(oft_blagrange,field_init,j_phi_tmp)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,j_phi_tmp)
-CALL v_lag%get_local(j_phi)
-plot_vals = plot_vals - plot_vec(3,:)/(j_phi+gs_epsilon)
-plot_vals = -1.d0*plot_vals/(mu0*(j_phi+gs_epsilon))
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'J_phi')
 
 ALLOCATE(self%nlfun)
 ALLOCATE(self%nlfun%eta(mesh%nreg))
 self%nlfun%cyl_flag = self%cyl_flag
 self%nlfun%chi=self%chi
+self%nlfun%m_i = self%m_i
 self%nlfun%eta=self%eta
 self%nlfun%nu=self%nu
 self%nlfun%den_scale = self%den_scale
@@ -433,41 +395,12 @@ DO i=1,self%nsteps
     plot_vec(2,:) = plot_vec(2,:)
     plot_vec(3,:) = plot_vec(3,:)
     CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
-    !------------------------------------------------------------------------------
-    ! Compute current and plot 
-    !------------------------------------------------------------------------------
-    NULLIFY(j_phi)
-    CALL hess_psi_full%setup(oft_blagrange)
-    hess_psi%idx = 1
-    hess_psi%hess_ptr => hess_psi_full
-    CALL hess_psi%setup(oft_blagrange)
-    CALL oft_blag_project(oft_blagrange,hess_psi,j_phi_tmp)
-    CALL v_lag%set(0.d0)
-    CALL lminv%apply(v_lag,j_phi_tmp)
-    CALL v_lag%get_local(j_phi)
-    plot_vals = j_phi
-    NULLIFY(j_phi)
-    hess_psi%idx = 4
-    CALL oft_blag_project(oft_blagrange,hess_psi,j_phi_tmp)
-    CALL v_lag%set(0.d0)
-    CALL lminv%apply(v_lag,j_phi_tmp)
-    CALL v_lag%get_local(j_phi)
-    plot_vals = plot_vals + j_phi
-    ! Subtract 1/r dpsi/dr
-    field_init%func=>r_init
-    field_init%mesh=>mesh
-    CALL oft_blag_project(oft_blagrange,field_init,j_phi_tmp)
-    CALL v_lag%set(0.d0)
-    CALL lminv%apply(v_lag,j_phi_tmp)
-    CALL v_lag%get_local(j_phi)
-    plot_vals = plot_vals - plot_vec(3,:)/(j_phi+gs_epsilon)
-    plot_vals = -1.d0*plot_vals/(mu0*(j_phi+gs_epsilon))
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'J_phi')
   END IF
   IF(nksolver%lits<4)THEN
     self%dt=self%dt*2.d0
     npre=-1
   ELSE IF(nksolver%lits>100)THEN
+    self%dt=self%dt/2.d0
     npre=-1
   END IF
 END DO
@@ -521,6 +454,7 @@ CALL a%get_local(psi_weights,6)
 CALL a%get_local(by_weights,7)
 !---
 chi = self%chi !< Needs docs
+m_i = self%m_i
 eta = self%eta !< Needs docs
 !write(*,*) eta
 nu = self%nu !< Needs docs
@@ -785,6 +719,7 @@ CALL a%get_local(psi_weights,6)
 CALL a%get_local(by_weights,7)
 !---
 chi = self%chi !< Needs docs
+m_i = self%m_i
 eta = self%eta !< Needs docs
 nu = self%nu !< Needs docs
 gamma = self%gamma !< Needs docs
