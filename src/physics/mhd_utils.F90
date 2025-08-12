@@ -133,7 +133,7 @@ IF(PRESENT(lam))lambda=lam
 mi=1.d0
 IF(PRESENT(mu))mi=mu
 tau = 2.09d7*(T**1.5d0)*SQRT(mi)/(n*lambda/1.d6)
-nu = 0.96d0*n*elec_charge*T*tauk
+nu = 0.96d0*n*elec_charge*T*tau
 END FUNCTION ion_visc
 !------------------------------------------------------------------------------
 !> Evalute Spitzer resistivity
