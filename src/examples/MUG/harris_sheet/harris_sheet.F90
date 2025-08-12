@@ -1,3 +1,25 @@
+!------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!------------------------------------------------------------------------------
+!!MUG Example: Harris Sheet Reconnection    {#doc_mug2d_harris_ex}
+!!============================
+!!
+!![TOC]
+!!
+!! This example demonstrates the use of the \ref xmhd2d "extended MHD" module in OFT. In
+!! this example reconnection in a periodic-slab current sheet will be simulated following
+!! the setup used to the [GEM Challange](https://doi.org/10.1029/1999JA900449).
+!!
+!!\section doc_mug2d_harris_ex_code_helper Code Walk Through
+!!
+!! The code consists of the main run program and subroutines for field initialization.
+!!
+!!\section doc_mug2d_harris_ex_code_helper Main Code
+!!
+!! As usual, we start with a few module imports for required functionality.
+! START SOURCE
 PROGRAM xmhd_circle
 !---Runtime
 USE oft_base
@@ -24,6 +46,11 @@ TYPE(poss_scalar_bfield) :: field_init
 CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 CLASS(oft_vector), POINTER :: u,v
+!!\subsection doc_mug2d_recon_ex_code_vars Local Variables
+!! Next we define the local variables needed to initialize our case and
+!! run the time-dependent solve and post-processing. Compared to previous
+!! examples, we now have specialized initial condition and post-processing
+!! objects.
 !---Runtime options
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: nsteps = 100
@@ -41,17 +68,20 @@ REAL(r8) :: nu=1.d0 !< Needs docs
 REAL(r8) :: gamma=1.d0
 REAL(r8) :: D_diff=1.d0
 REAL(r8) :: den_scale=1.d19
-REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propogation
-REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
-REAL(r8) :: lam = 2.d0 !< Wavelength
-REAL(r8) :: v_sound = 2.d4
+REAL(r8) :: den_inf = 1.d0
+REAL(r8) :: lam_n = 2.d0 !< Wavelength
+REAL(r8) :: lam_b = 2.d0 !< Wavelength
+REAL(r8) :: L_x = 2.d0 !< Box length in x
+REAL(r8) :: L_z = 2.d0 !< Box length in z
 REAL(r8) :: delta = 1.d-4 !< Relative size of perturbation (<<1)
 REAL(r8) :: dt = 1.d-3
-REAL(r8) :: v_delta
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
-NAMELIST/xmhd_options/order,chi,eta,nu,gamma, D_diff, &
-dt,nsteps,rst_freq,use_mfnk,pm, n0, psi0, velx0,vely0,velz0, t0, by0, den_scale
+NAMELIST/xmhd_options/order, chi, eta, nu, gamma, D_diff, &
+dt, nsteps, rst_freq, use_mfnk, pm, n0, psi0, velx0, vely0, velz0, &
+t0, by0, den_scale, delta, lam_n, lam_b, L_x, L_z
+!!\subsection doc_mug_recon_ex_driver_setup OFT Initialization
+!! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
@@ -80,11 +110,9 @@ CALL ML_oft_blagrange%vec_create(u)
 CALL ML_oft_blagrange%vec_create(v)
 
 !---Set constant values
-t0=(2*v_sound**2)*3.d0*proton_mass/(5.d0*elec_charge)
-v_delta=t0*elec_charge/(proton_mass*v_sound)
 
 !---Project n initial condition onto scalar Lagrange basis
-field_init%func=>dens_sound
+field_init%func=>dens_harris
 field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -97,39 +125,39 @@ vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
 
 !---Project v_x initial condition onto scalar Lagrange basis
-field_init%func=>velx_sound
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL u%scale(v_delta)
+CALL u%scale(velx0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
 CALL mhd_sim%u%restore_local(vec_vals,2)
 
 !---Project v_y initial condition onto scalar Lagrange basis
-field_init%func=>vely_sound
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL u%scale(v_delta)
+CALL u%scale(vely0)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vy0')
 CALL mhd_sim%u%restore_local(vec_vals,3)
 
 !---Project v_z initial condition onto scalar Lagrange basis
-field_init%func=>velz_sound
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL u%scale(v_delta)
+CALL u%scale(velz0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
 CALL mhd_sim%u%restore_local(vec_vals,4)
 
 !---Project T initial condition onto scalar Lagrange basis
-field_init%func=>temp_sound
+field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
@@ -140,7 +168,7 @@ CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'T0')
 CALL mhd_sim%u%restore_local(vec_vals,5)
 
 !---Project psi initial condition onto scalar Lagrange basis
-field_init%func=>const_init
+field_init%func=>psi_harris
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
@@ -180,6 +208,7 @@ mhd_sim%nu=nu
 mhd_sim%gamma=gamma
 mhd_sim%D_diff=D_diff
 mhd_sim%dt=dt
+mhd_sim%den_scale=den_scale
 mhd_sim%nsteps=nsteps
 mhd_sim%rst_freq=rst_freq
 mhd_sim%mfnk=use_mfnk
@@ -188,46 +217,29 @@ CALL mhd_sim%run_simulation()
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
-!
-SUBROUTINE cos_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = 1.0+COS(pi*pt(1)/2.d0)/100
-END SUBROUTINE cos_init
-!
+!! To set the initial conditions we define a set of functions 
+!!
+!! The non-uniform initial conditions for this case is given by
+!! \f[ n_0 = (cosh(z / \lambda))^{-2} + n_{\infty} \f]
+!! \f[ B_0 = tanh(z / \lambda) \hat{x} \f]
+!!
+!! The perturbation is then given by
+!! \f[ \delta B = -\frac{\pi}{L_z} cos(2 \pi x / L_x) sin(\pi z / L_z) \hat{x} + \frac{2 \pi}{L_x} sin(2 \pi x / L_x) cos(\pi z / L_z) \hat{x} \f]
 SUBROUTINE const_init(pt,val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
 val = 1.0
 END SUBROUTINE const_init
 
-SUBROUTINE dens_sound(pt, val)
+SUBROUTINE dens_harris(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(3.d0/5.d0)
-END SUBROUTINE dens_sound
+val=(2*delta+1/((COSH(pt(2)/lam_n))**2))
+END SUBROUTINE dens_harris
 
-SUBROUTINE velx_sound(pt, val)
+SUBROUTINE psi_harris(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = delta*k_dir(1)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
-END SUBROUTINE velx_sound
-
-SUBROUTINE vely_sound(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = delta*k_dir(2)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
-END SUBROUTINE vely_sound
-
-SUBROUTINE velz_sound(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = delta*k_dir(3)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
-END SUBROUTINE velz_sound
-
-SUBROUTINE temp_sound(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(2.d0/5.d0)
-END SUBROUTINE temp_sound
+val = -lam_b*LOG(COSH(pt(2)/lam_b)) - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
+END SUBROUTINE psi_harris
 END PROGRAM xmhd_circle
