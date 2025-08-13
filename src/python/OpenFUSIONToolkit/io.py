@@ -268,16 +268,17 @@ class XDMF_plot_mesh:
         self.lc = numpy.asarray(mesh_obj['LC'])
         self.np = self.r.shape[0]
         self.nc = self.lc.shape[0]
-        if 'REG_vol' in mesh_obj:
-            self.reg = numpy.asarray(mesh_obj['REG_vol'])
-        elif 'REG_surf' in mesh_obj:
-            self.reg = numpy.asarray(mesh_obj['REG_surf'])
-        else:
-            self.reg = numpy.ones((self.nc,))
         #
         self.static_fields = {}
         for field_name, field_obj in mesh_obj.get('0000',{}).items():
             self.static_fields[field_name] = numpy.asarray(field_obj)
+        # Set region flag
+        if 'REG_vol' in self.static_fields:
+            self.reg = numpy.asarray(self.static_fields['REG_vol'])
+        elif 'REG_surf' in self.static_fields:
+            self.reg = numpy.asarray(self.static_fields['REG_surf'])
+        else:
+            self.reg = numpy.ones((self.nc,))
         #
         self.times = []
         self.time_field_names = []
