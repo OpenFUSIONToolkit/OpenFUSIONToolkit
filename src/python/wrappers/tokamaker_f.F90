@@ -28,7 +28,7 @@ USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
-  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug
+  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 #ifdef OFT_TOKAMAKER_LEGACY
 USE oft_gs, ONLY: gs_load_regions
 #endif
@@ -358,14 +358,21 @@ END SUBROUTINE tokamaker_init_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_solve")
+SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,error_str) BIND(C,NAME="tokamaker_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
+LOGICAL :: vac_save
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 tMaker_obj%gs%timing=0.d0
+IF(vacuum)THEN
+  vac_save=tMaker_obj%gs%has_plasma
+  tMaker_obj%gs%has_plasma=.FALSE.
+END IF
 CALL tMaker_obj%gs%solve(ierr)
+IF(vacuum)tMaker_obj%gs%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
@@ -1095,15 +1102,17 @@ END SUBROUTINE tokamaker_apply_field_eval
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi(tMaker_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_set_psi")
+SUBROUTINE tokamaker_set_psi(tMaker_ptr,psi_vals,update_bounds,error_str) BIND(C,NAME="tokamaker_set_psi")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: update_bounds !< Update bounds by determining new limiting points
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
 CALL tMaker_obj%gs%psi%restore_local(vals_tmp)
+IF(update_bounds)CALL gs_update_bounds(tMaker_obj%gs)
 END SUBROUTINE tokamaker_set_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -1139,6 +1148,7 @@ CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 oft_env%pm=settings%pm
+tMaker_obj%gs%has_plasma=settings%has_plasma
 tMaker_obj%gs%free=settings%free_boundary
 tMaker_obj%gs%lim_zmax=settings%lim_zmax
 tMaker_obj%gs%rmin=settings%rmin
