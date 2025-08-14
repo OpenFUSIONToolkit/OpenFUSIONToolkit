@@ -321,8 +321,8 @@ IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_
 ! IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Update jphi normalization to match Ip target
-CALL gs_flux_int(gseq,self%x,self%jphi,self%npsi,jphi_norm)
-jphi_norm=ABS(gseq%Itor_target)/jphi_norm
+! CALL gs_flux_int(gseq,self%x,self%jphi,self%npsi,jphi_norm)
+! jphi_norm=ABS(gseq%Itor_target)/jphi_norm
 ! WRITE(*,*)'Update:'
 ! WRITE(*,*)'  Ip scale factor = ',jphi_norm/mu0
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
@@ -337,6 +337,15 @@ R_spline%fs(0:self%ngeom-2,1)=ravgs(1:self%ngeom-1,1); R_spline%fs(self%ngeom-1,
 R_spline%fs(0:self%ngeom-2,2)=ravgs(1:self%ngeom-1,2); R_spline%fs(self%ngeom-1,2)=1.d0/gseq%o_point(1)
 CALL spline_fit(R_spline,"extrap")
 DEALLOCATE(ravgs,psi_q,qtmp)
+!---Update jphi normalization to match Ip target
+ALLOCATE(qtmp(self%npsi))
+DO i=1,self%npsi
+  CALL spline_eval(R_spline,self%x(i),0)
+  qtmp(i) = R_spline%f(1)*R_spline%f(2)
+END DO
+CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,jphi_norm)
+jphi_norm=ABS(gseq%Itor_target)/jphi_norm
+DEALLOCATE(qtmp)
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 ! DO i=2,self%npsi
