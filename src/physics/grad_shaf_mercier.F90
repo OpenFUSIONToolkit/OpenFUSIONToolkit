@@ -48,7 +48,6 @@ end type mercier_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-<<<<<<< HEAD
 type, extends(linterp_flux_func) :: jphi_flux_func
   integer(4) :: ngeom = 50
   real(8), pointer, dimension(:) :: jphi => NULL() !< Needs docs
@@ -56,7 +55,9 @@ contains
   !> Needs docs
   procedure :: update => jphi_update
 end type jphi_flux_func
-=======
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 type, extends(gsinv_interp) :: minbinv_interp
   real(8) :: minB = 1.d99
 contains
@@ -74,7 +75,6 @@ type, extends(spline_flux_func) :: dipole_b0_flux_func
 contains
     procedure :: update => dipole_b0_update
 end type dipole_b0_flux_func
->>>>>>> main
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -314,27 +314,27 @@ class(jphi_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: jphi_norm,pscale,pprime
-REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),yvals(:),psi_q(:)
+REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),psi_q(:)
 type(spline_type) :: R_spline
 self%plasma_bounds=gseq%plasma_bounds
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
-IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
+! IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Update jphi normalization to match Ip target
 CALL gs_flux_int(gseq,self%x,self%jphi,self%npsi,jphi_norm)
-jphi_norm=gseq%Itor_target/jphi_norm
+jphi_norm=ABS(gseq%Itor_target)/jphi_norm
 ! WRITE(*,*)'Update:'
-! WRITE(*,*)'  Scale factor = ',jphi_norm
+! WRITE(*,*)'  Ip scale factor = ',jphi_norm/mu0
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
-ALLOCATE(ravgs(self%ngeom,2),psi_q(self%ngeom),qtmp(self%ngeom))
-psi_q=[(REAL(i,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
+ALLOCATE(ravgs(self%ngeom,3),psi_q(self%ngeom),qtmp(self%ngeom))
+psi_q=[(REAL(i,8)/REAL(self%ngeom+1,8),i=1,self%ngeom)]
 CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
 ! WRITE(*,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
 ! WRITE(*,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
 CALL spline_alloc(R_spline,self%ngeom-1,2)
-R_spline%xs=psi_q
-R_spline%fs(0:self%ngeom-2,1)=ravgs(:,1); R_spline%fs(self%ngeom-1,1)=gseq%o_point(1)
-R_spline%fs(0:self%ngeom-2,2)=ravgs(:,2); R_spline%fs(self%ngeom-1,2)=1.d0/gseq%o_point(1)
+R_spline%xs(0:self%ngeom-2)=psi_q; R_spline%xs(self%ngeom-1)=1.d0
+R_spline%fs(0:self%ngeom-2,1)=ravgs(1:self%ngeom-1,1); R_spline%fs(self%ngeom-1,1)=gseq%o_point(1)
+R_spline%fs(0:self%ngeom-2,2)=ravgs(1:self%ngeom-1,2); R_spline%fs(self%ngeom-1,2)=1.d0/gseq%o_point(1)
 CALL spline_fit(R_spline,"extrap")
 DEALLOCATE(ravgs,psi_q,qtmp)
 !---Get pressure profile
@@ -352,7 +352,10 @@ DO i=1,self%npsi
   pprime=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
   self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 END DO
-self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
+! Disable Ip matching and fix F*F' scale (matching is done here)
+IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
+gseq%alam=1.d0
+! self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
 !---Clean up
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
@@ -390,6 +393,7 @@ result=oft_mpi_sum(result)
 CALL prof_interp_obj%delete()
 ! DEBUG_STACK_POP
 END SUBROUTINE gs_flux_int
+!---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_dipole_b0_prof(func,npsi)
