@@ -424,6 +424,10 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
     else:
         if "METIS_ROOT" in mydict:
             cmake_lines.append("-DOFT_METIS_ROOT:PATH={0}".format(mydict["METIS_ROOT"]))
+    if "ZLIB_ROOT" in mydict:
+        cmake_lines.append("-DZLIB_ROOT:Path={0}".format(mydict["ZLIB_ROOT"]))
+    if "LIBAEC_ROOT" in mydict:
+        cmake_lines.append("-Dlibaec_ROOT:Path={0}".format(mydict["LIBAEC_ROOT"]))
     if "HDF5_ROOT" in mydict:
         cmake_lines.append("-DHDF5_ROOT:PATH={0}".format(mydict["HDF5_ROOT"]))
     if mydict.get("HDF5_HAS_HL",False):
@@ -974,16 +978,115 @@ class OpenMPI(package):
         os.environ["PATH"] = "{0}:".format(self.config_dict['MPI_BIN']) + os.environ.get("PATH", "")
         return config_dict
 
+class ZLIB(package):
+    def __init__(self, cmake_build=False):
+        self.name = "ZLIB"
+        self.url = "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.2.3.tar.gz"
+        self.build_dir = "zlib-ng-2.2.3"
+        self.cmake_build = cmake_build
 
+    def setup(self,config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        return self.config_dict
+        
+    def build(self):
+        build_lines = [
+            "rm -rf build",
+            "mkdir build",
+            "cd build"
+        ]
+        if self.cmake_build:
+            cmake_options = [
+                "-DZLIB_COMPAT=ON"
+                '-DCMAKE_INSTALL_PREFIX:PATH="{ZLIB_ROOT}"'
+                ]
+        else:
+            configure_options = [
+                "--prefix={ZLIB_ROOT}",
+                "--zlib-compat"
+            ]
+        build_lines += [
+            "export CC={CC}",
+            "export FC={FC}"
+        ]
+        if self.cmake_build:
+            build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
+        else:
+            build_lines.append("../configure " + " ".join(configure_options))
+        build_lines += [
+            "make -j{MAKE_THREADS}",
+            "make install",
+            "mkdir include",
+            "cp zlib.h include/.",
+            "mkdir lib",
+            "cp libz* lib/.",
+        ]
+        self.run_build(build_lines, self.config_dict)
+
+        
+class LIBAEC(package):
+    def __init__(self, cmake_build=True):
+        self.name = "LIBAEC"
+        self.url="https://gitlab.dkrz.de/k202009/libaec/-/archive/v1.1.3/libaec-v1.1.3.tar.gz"
+        self.cmake_build = cmake_build
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        return self.config_dict
+        
+    def build(self):
+        build_lines = [
+            "rm -rf build",
+            "mkdir build",
+            "cd build"
+        ]
+        if self.cmake_build:
+            cmake_options = [
+                '-DCMAKE_INSTALL_PREFIX:PATH="{LIBAEC_ROOT}"'
+            ]
+        else:
+            configure_options = [
+                "--prefix={LIBAEC_ROOT}"
+            ]
+        build_lines += [
+            "export CC={CC}",
+            "export FC={FC}"
+        ]
+        if self.cmake_build:
+            build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
+        else:
+            #
+            build_lines += [
+                "gnulib-tool --import lib-symbol-visibility",
+                "autoreconf -iv"
+            ]
+            build_lines.append("../configure " + " ".join(configure_options))
+        build_lines += [
+            "make -j{MAKE_THREADS}",
+            "make install",
+            "cp ../include/szlib.h include/.",
+            "mkdir lib",
+            "cp src/lib* lib/."
+        ]
+        self.run_build(build_lines, self.config_dict)
+        
+        
 class HDF5(package):
-    def __init__(self, parallel=False, cmake_build=False, build_hl=False, shared_libs=True):
+    def __init__(self, parallel=False, cmake_build=False, build_hl=False, shared_libs=True,build_deps=True):
         self.name = "HDF5"
         self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.6/hdf5-1.14.6.tar.gz"
         self.parallel = parallel
         self.cmake_build = cmake_build
         self.build_hl = build_hl
+        self.build_deps = build_deps
         self.shared_libs = shared_libs
 
+        #ugly but this works for the build deps
+        self.szlib_loc="{LIBAEC_ROOT}"
+        self.zlib_loc="{ZLIB_ROOT}"
+        
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
         if self.build_hl:
@@ -1014,6 +1117,8 @@ class HDF5(package):
             cmake_options = [
                 '-DCMAKE_INSTALL_PREFIX:PATH="{HDF5_ROOT}"',
                 '-DHDF5_BUILD_FORTRAN:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON',
+                '-DBUILD_STATIC_LIBS:BOOL=ON'
                 '-DHDF5_BUILD_CPP_LIB=OFF',
                 '-DBUILD_TESTING=OFF',
                 '-DHDF5_BUILD_EXAMPLES=OFF'
@@ -1035,7 +1140,11 @@ class HDF5(package):
                 "--prefix={HDF5_ROOT}",
                 "--enable-fortran",
                 "--enable-hl=no",
-                "--enable-tests=no"
+                "--enable-shared=yes",
+                "--enable-static=yes",
+                "--enable-tests=no",
+                # "--enable-examples=no",
+                "--with-pic"
             ]
             if self.shared_libs:
                 configure_options += [
@@ -1079,6 +1188,14 @@ class HDF5(package):
                     'export LDFLAGS="-L{MPI_LIB}"',
                     'export LIBS="{MPI_LIBS}"'
                 ]
+
+        if self.build_deps:
+            if self.cmake_build:
+                pass
+            else:
+                configure_options.append("--with-zlib="+"".join(self.zlib_loc))
+                configure_options.append("--with-szlib="+"".join(self.szlib_loc))
+        #print(configure_options)
         if self.cmake_build and ('MACOS_SDK_PATH' in self.config_dict):
             if self.cmake_build:
                 cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
@@ -1094,7 +1211,6 @@ class HDF5(package):
             "make install"
         ]
         self.run_build(build_lines, self.config_dict)
-
 
 class NETCDF(package):
     def __init__(self, comp_wrapper=False, cmake_build=True, shared_libs=True):
@@ -2039,15 +2155,25 @@ group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=
 group.add_argument("--mpich_version", default=4, type=int, choices=(3,4), help="MPICH major version (default: 4)")
 group.add_argument("--build_openmpi", default=0, type=int, choices=(0,1), help="Build OpenMPI libraries?")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
+group.add_argument("--mpi_cxx", default=None, type=str, help="MPI C++ compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
 group.add_argument("--mpi_libs", default=None, type=str, help="MPI libraries")
 group.add_argument("--mpi_include_dir", default=None, type=str, help="MPI include directory")
 group.add_argument("--mpi_use_headers", action="store_true", default=False, help="Use header-based MPI interface instead of Fortran 2008 module")
 #
+group = parser.add_argument_group("LIBAEC", "libaec (SZIP) package options")
+group.add_argument("--libaec_cc", default=None,type=str,help="libaec C compiler wrapper")
+group.add_argument("--libaec_cmake_build", action="store_true", default=True, help="Use CMake build instead of legacy?")
+#
+group = parser.add_argument_group("ZLIB", "zlib-ng package options")
+group.add_argument("--zlib_cc", default=None, type=str, help="zlib-ng C compiler wrapper")
+group.add_argument("--zlib_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
+#
 group = parser.add_argument_group("HDF5", "HDF5 package options")
 group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wrapper")
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
+group.add_argument("--hdf5_build_deps", action="store_true", default=True, help="Build zlib and szip dependencies?")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
 group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
 #
@@ -2124,9 +2250,10 @@ if options.macos_sdk_path is not None:
     config_dict['MACOS_SDK_PATH'] = options.macos_sdk_path
 # Building with MPI?
 use_mpi = False
-if (options.mpi_cc is not None) and (options.mpi_fc is not None):
+if (options.mpi_cc is not None) and (options.mpi_fc is not None) and (options.mpi_cxx is not None):
     config_dict['MPI_CC'] = options.mpi_cc
     config_dict['MPI_FC'] = options.mpi_fc
+    config_dict['MPI_CXX'] = options.mpi_cxx
     use_mpi = True
 else:
     if options.mpi_lib_dir is not None:
@@ -2177,13 +2304,27 @@ else:
     if (options.build_petsc == 1) or options.petsc_wrapper:
         parser.exit(-1, 'PETSc requires MPI\n')
 # HDF5
+# if dependencies not provided by system compiler build from scratch
+# sometimes necessary to get szip to work correctly
+if (options.hdf5_build_deps):
+    #zlib-ng
+    if (options.zlib_cc is not None):
+        config_dict['ZLIB_CC'] = options.zlib_cc
+    packages.append(ZLIB(cmake_build=options.zlib_cmake_build))
+
+    #libaec (szip)
+    if (options.libaec_cc is not None):
+        config_dict['LIBAEC_CC'] = options.libaec_cc
+    packages.append(LIBAEC(cmake_build=options.libaec_cmake_build))
+    
 HDF5_HL_required = ((options.build_netcdf == 1) or options.netcdf_wrapper)
 if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     config_dict['HDF5_CC'] = options.hdf5_cc
     config_dict['HDF5_FC'] = options.hdf5_fc
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required,build_deps=options.hdf5_build_deps))
 else:
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required,build_deps=options.hdf5_build_deps))
+
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())
