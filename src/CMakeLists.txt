@@ -14,11 +14,12 @@ option(OFT_HDF5_HL "Search for and link with HDF5 HL interface?" OFF)
 option(OFT_USE_OpenMP "Build with OpenMP support?" ON)
 option(OFT_DEBUG_STACK "Build with internal debugging stack?" OFF)
 option(OFT_PROFILING "Build with internal profiling enabled?" OFF)
-option(OFT_BUILD_PYTHON "Build experimental Python wrappers?" OFF)
+option(OFT_BUILD_PYTHON "Build Python wrappers?" ON)
 option(OFT_BUILD_DOCS "Build documentation?" OFF)
 option(OFT_DOCS_ONLY "Build documentation only?" OFF)
 option(OFT_PACKAGE_BUILD "Perform a destributable package?" OFF)
 option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in package filename?" ON)
+option(OFT_PACKAGE_PYTHON "Setup Python packaging?" ON)
 option(OFT_COVERAGE "Build with code coverage information?" OFF)
 option(OFT_EXECSTACK "Allow executable stack in shared libraries/executables?" OFF)
 option(OFT_TOKAMAKER_LEGACY "Build legacy TokaMaker executables?" OFF)
@@ -42,7 +43,8 @@ if(OFT_PACKAGE_NIGHTLY)
 endif()
 
 if(OFT_BUILD_DOCS OR OFT_PACKAGE_BUILD OR OFT_DEBUG_STACK)
-  find_package(Python REQUIRED)
+  find_package(Python3 REQUIRED)
+  message( STATUS ${Python3_EXECUTABLE} )
 endif()
 
 ########################
@@ -57,7 +59,7 @@ if(OFT_BUILD_DOCS)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/mainpage.in ${CMAKE_CURRENT_SOURCE_DIR}/docs/generated/mainpage.md @ONLY)
 
   add_custom_target( build_ex_docs
-    COMMAND Python::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/utilities/generate_doc.py
+    COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/utilities/generate_doc.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Building documentation from examples"
     VERBATIM 
@@ -372,7 +374,7 @@ set( OFT_LIBS oftphysics oftfem oftla oftgrid oftbase oftext )
 add_subdirectory( utilities )
 # Build master lib for packaging to reduce size
 if(OFT_PACKAGE_BUILD)
-  if( Python_VERSION_MAJOR VERSION_LESS 3 )
+  if (Python3_VERSION_MAJOR VERSION_LESS 3)
     message( FATAL_ERROR "Python 3 required for packaging" )
   endif()
   if(UNIX AND NOT APPLE)
@@ -501,6 +503,37 @@ if(OFT_PACKAGE_BUILD)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../README.md ${CMAKE_CURRENT_BINARY_DIR}/README.md COPYONLY)
   endif()
   set(CPACK_PACKAGE_FILE_NAME OpenFUSIONToolkit_v${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME}-${CMAKE_Fortran_COMPILER_ID}-${CMAKE_HOST_SYSTEM_PROCESSOR})
+
+  if( OFT_PACKAGE_PYTHON )
+    if(APPLE)
+      set(OFT_PYPACKAGE_PLATFORM macosx_11_0_${CMAKE_HOST_SYSTEM_PROCESSOR})
+    elseif(UNIX AND NOT APPLE)
+      execute_process(
+        COMMAND ldd --version | head -n 1
+        OUTPUT_VARIABLE LDD_OUTPUT
+        RESULT_VARIABLE LDD_RESULT
+      )
+      if(NOT LDD_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to get LIBC version. ldd command exited with code: ${LDD_RESULT}")
+      else()
+        string(REGEX MATCH "([0-9]+\.[0-9]+)[\s]*$" LDD_VERSION "${LDD_OUTPUT}")
+        string(REGEX REPLACE "\." "_" LDD_VERSION_US "${LDD_VERSION}")
+      endif()
+      # set(OFT_PYPACKAGE_PLATFORM manylinux2014_${CMAKE_HOST_SYSTEM_PROCESSOR}) # CentOS 7, Ubuntu 20.04
+      set(OFT_PYPACKAGE_PLATFORM manylinux_${LDD_VERSION_US}_${CMAKE_HOST_SYSTEM_PROCESSOR}) # Generic tag format based on LIBC
+    endif()
+    configure_file( python/pyproject.toml.in ${CMAKE_CURRENT_BINARY_DIR}/python/pyproject.toml @ONLY )
+    install( FILES ${CMAKE_CURRENT_BINARY_DIR}/python/pyproject.toml DESTINATION python COMPONENT app )
+    configure_file( python/make_package.sh.in ${CMAKE_CURRENT_BINARY_DIR}/python/make_package.sh @ONLY )
+    install( FILES ${CMAKE_CURRENT_BINARY_DIR}/python/make_package.sh DESTINATION python COMPONENT app )
+    add_custom_target( python_package
+      DEPENDS ${CMAKE_INSTALL_PREFIX}/python/pyproject.toml
+      COMMAND bash make_package.sh
+      WORKING_DIRECTORY $ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/python
+      COMMENT "Generating python package"
+      VERBATIM
+    )
+  endif()
 
   include(CPack)
   cpack_add_component( app REQUIRED )

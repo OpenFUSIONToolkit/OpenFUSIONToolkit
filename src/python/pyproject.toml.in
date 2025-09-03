@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OpenFUSIONToolkit"
+authors = [
+    {name = "Chris Hansen"},
+    {name = "Another person"}
+]
+maintainers = [
+  {name = "Chris Hansen", email = "christopher.hansen@columbia.edu"}
+]
+description = "My package description"
+readme = "README.md"
+requires-python = ">=3.7"
+keywords = ["one", "two"]
+license = "LGPL-3.0-only"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics"
+]
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "h5py"
+]
+version = "@CMAKE_PROJECT_VERSION@@OFT_VER_SUFFIX@"
+
+[project.urls]
+Homepage = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/"
+Documentation = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/docs/index.html"
+Repository = "https://github.com/openfusiontoolkit/OpenFUSIONToolkit"
+Issues = "https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues"
+
+[project.optional-dependencies]
+viz = ["pyvista"]
+
+[tool.setuptools.package-data]
+OpenFUSIONToolkit = ["lib*"]

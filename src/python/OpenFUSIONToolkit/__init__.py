@@ -12,3 +12,4 @@
 from ._core import OFT_env
 
 __all__ = ["OFT_env"]
+__version__ = '1.0.0-beta6'

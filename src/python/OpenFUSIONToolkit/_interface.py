@@ -70,8 +70,17 @@ elif platform.system() == 'Darwin':
     lib_suffix = '.dylib'
 else:
     raise SystemError('Unsupported platform type')
-oftpy_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboftpy'+lib_suffix))
-oft_triangle_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboft_triangle'+lib_suffix))
+
+# Look for library in local or binary directory
+try:
+    oftpy_lib = ctypes.CDLL(os.path.join(root_path,'liboftpy'+lib_suffix))
+    oft_triangle_lib = ctypes.CDLL(os.path.join(root_path,'liboft_triangle'+lib_suffix))
+except:
+    try:
+        oftpy_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboftpy'+lib_suffix))
+        oft_triangle_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboft_triangle'+lib_suffix))
+    except:
+        raise FileNotFoundError('Unable to load OFT shared library')
 
 # Abort callback
 @ctypes.CFUNCTYPE(None)

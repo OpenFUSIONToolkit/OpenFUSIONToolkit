@@ -1,0 +1,12 @@
+#!/bin/bash
+
+rm -f OpenFUSIONToolkit/lib*
+cp ../bin/lib* OpenFUSIONToolkit/
+cp @CMAKE_CURRENT_SOURCE_DIR@/../LICENSE .
+cp @CMAKE_CURRENT_SOURCE_DIR@/../README.md .
+
+#
+rm -rf build dist OpenFUSIONToolkit.egg-info
+@Python3_EXECUTABLE@ -m build --wheel
+@Python3_EXECUTABLE@ -m wheel tags --platform-tag=@OFT_PYPACKAGE_PLATFORM@ dist/*-any.whl
+rm dist/*-any.whl
