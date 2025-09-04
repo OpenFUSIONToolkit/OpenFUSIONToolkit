@@ -607,7 +607,7 @@ class gs_Domain:
         else:
             self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
             if not setup_only:
-                self._r, self._lc, self._reg = self.mesh.get_mesh(cubit_path)
+                self._r, self._lc, self._reg = self.mesh.get_mesh()
                 if self._reg.min() <= 0:
                     raise ValueError('Meshing error: unclaimed region detected!')
                 return self._r, self._lc, self._reg
