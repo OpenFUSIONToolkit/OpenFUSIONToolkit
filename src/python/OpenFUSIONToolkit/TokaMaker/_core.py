@@ -1671,7 +1671,7 @@ class TokaMaker():
         @param truncate_eq Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
         @param limiter_file File containing limiter contour to use instead of TokaMaker limiter
         @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
-        @param cocos COCOS version. (Only 1 or 2 supported.)
+        @param cocos COCOS version. (Only 2 or 7 supported. COCOS=7 is the default.)
         '''
         cfilename = self._oft_env.path2c(filename)
         lim_filename = self._oft_env.path2c(limiter_file)
@@ -1688,6 +1688,8 @@ class TokaMaker():
             zbounds += numpy.r_[-1.0,1.0]*dr*0.05
         if rcentr is None:
             rcentr = -1.0
+        if cocos not in [2, 7]:
+            raise Exception('Unsupported COCOS version. Only supported versions are 2 or 7.')
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_save_eqdsk(self._tMaker_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,cocos,error_string)
         if error_string.value != b'':

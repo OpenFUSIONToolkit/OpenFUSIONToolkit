@@ -1335,16 +1335,20 @@ ELSE
   CLOSE(io_unit)
 END IF
 ! COCOS transform
-IF(cocos == 2)THEN
-  WRITE(*,*) 'Using COCOS=2...'
-  ffprim = -ffprim
-  pprime = -pprime
-  psirz = -psirz
-  ! fpol = -fpol
-  ! bcentr = -bcentr
-  ! itor = -itor
-  x1 = -x1
-  x2 = -x2
+IF(PRESENT(cocos))THEN
+  IF(cocos == 2)THEN
+    WRITE(*,*) 'Using COCOS=2...'
+    ffprim = -ffprim
+    pprime = -pprime
+    psirz = -psirz
+    ! fpol = -fpol
+    ! bcentr = -bcentr
+    ! itor = -itor
+    x1 = -x1
+    x2 = -x2
+  ELSE IF(cocos /= 7)THEN
+    CALL oft_abort('Invalid COCOS version.','gs_save_eqdsk',__FILE__)
+  END IF
 END IF
 ! Write out gEQDSK file
 2000 format(a48,3i4)

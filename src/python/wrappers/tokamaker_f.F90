@@ -1357,7 +1357,7 @@ REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(OFT_PATH_SLEN) !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: cocos
+INTEGER(c_int), VALUE, INTENT(in) :: cocos !< COCOS version. (Only 2 or 7 supported. COCOS=7 is the default.)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=40) :: run_info_f
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp,lim_file
