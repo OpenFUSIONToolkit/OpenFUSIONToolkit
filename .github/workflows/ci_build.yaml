@@ -67,7 +67,7 @@ jobs:
           }
         exclude:
           - parallel: mpich
-            config: {os: macos-12}
+            config: {os: macos-13}
           - parallel: openmpi
             config: {os: macos-14}
           - parallel: openmpi
