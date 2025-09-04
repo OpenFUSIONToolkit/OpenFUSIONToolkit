@@ -13,6 +13,7 @@ import json
 import math
 import numpy
 from .._interface import *
+from ..util import oft_warning
 
 ## @cond
 class triangle_struct(c_struct):
@@ -835,7 +836,7 @@ class Mesh:
                     ])
                     seg_tmp.append(len(pts_out)-1)
             elif dl[-1] < segment[2]:
-                print("  Warning: small feature (dl={0:.2E}) detected at point {1} ({2}, {3})".format(dl[-1], segment[0][0], *pts_tmp[0,:]))
+                oft_warning("Small feature (dl={0:.2E}) detected at point {1} ({2}, {3})".format(dl[-1], segment[0][0], *pts_tmp[0,:]))
             seg_tmp.append(segment[0][-1])
             self._resampled_segments.append(seg_tmp)
         # Reindex points
@@ -951,7 +952,7 @@ class Region:
                     tang = self._points[i+1,:] - self._points[i,:]
                 tang_norm = numpy.linalg.norm(tang)
                 if tang_norm < self._dx_curve/1.E3:
-                    print("  Warning: repeated points detected at point {0} ({1}, {2})".format(i, *self._points[i,:]))
+                    oft_warning("Repeated points detected at point {0} ({1}, {2})".format(i, *self._points[i,:]))
                     continue
                 tang /= tang_norm
                 if i > 0:
@@ -959,7 +960,7 @@ class Region:
                     if angle < keep_tol:
                         keep_points.append(i)
                         if angle < sliver_tol:
-                            print("  Warning: sliver (angle={0:.1F}) detected at point {1} ({2}, {3})".format(180.-numpy.arccos(angle)*180./numpy.pi, i, *self._points[i,:]))
+                            oft_warning("Sliver (angle={0:.1F}) detected at point {1} ({2}, {3})".format(180.-numpy.arccos(angle)*180./numpy.pi, i, *self._points[i,:]))
                 tangp = tang
             keep_points.append(nv+1)
             # Index segments
@@ -1001,7 +1002,7 @@ class Region:
                             numpy.interp(dl_samp,dl,pts_tmp[:,1])
                         ])
                 elif dl[-1] < self._small_thresh:
-                    print("  Warning: small feature (dl={0:.2E}) detected at point {1} ({2}, {3})".format(dl[-1], segment[0], *pts_tmp[0,:]))
+                    oft_warning("Small feature (dl={0:.2E}) detected at point {1} ({2}, {3})".format(dl[-1], segment[0], *pts_tmp[0,:]))
             self._resampled_points = numpy.asarray(pts_out)
         return self._resampled_points
 

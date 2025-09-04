@@ -360,6 +360,7 @@ a.anchor {
 #main-nav {
     flex-grow: 5;
     padding: var(--spacing-small) var(--spacing-medium);
+    border-bottom: none;
 }
 
 #titlearea {
@@ -1771,6 +1772,10 @@ table.memberdecls tr[class^='memitem'] .memTemplParams {
     white-space: normal;
 }
 
+table.memberdecls tr[class^='memdesc'] {
+    box-shadow: none;
+}
+
 table.memberdecls .memItemLeft,
 table.memberdecls .memItemRight,
 table.memberdecls .memTemplItemLeft,
@@ -1829,6 +1834,7 @@ table.memberdecls .mdescLeft, table.memberdecls .mdescRight {
     background: none;
     color: var(--page-foreground-color);
     padding: var(--spacing-small) 0;
+    border: none;
 }
 
 table.memberdecls .memItemLeft,
@@ -2196,13 +2202,15 @@ li.navelem:first-child:before {
 
 #nav-path li.navelem:after {
     content: '';
-    border: 5px solid var(--page-background-color);
+    /*border: 5px solid var(--page-background-color);*/
     border-bottom-color: transparent;
     border-right-color: transparent;
     border-top-color: transparent;
     transform: translateY(-1px) scaleY(4.2);
     z-index: 10;
     margin-left: 6px;
+    background: none;
+    box-shadow: none;
 }
 
 #nav-path li.navelem:before {
@@ -2211,7 +2219,7 @@ li.navelem:first-child:before {
     border-bottom-color: transparent;
     border-right-color: transparent;
     border-top-color: transparent;
-    transform: translateY(-1px) scaleY(3.2);
+    /*transform: translateY(-1px) scaleY(3.2);*/
     margin-right: var(--spacing-small);
 }
 
