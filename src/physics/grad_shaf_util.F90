@@ -1053,7 +1053,7 @@ end subroutine gs_save_ifile
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,cocos,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1066,6 +1066,7 @@ REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
 REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
+INTEGER, OPTIONAL, INTENT(in) :: cocos
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
@@ -1332,6 +1333,22 @@ ELSE
     READ(io_unit,*)rlim(i),zlim(i)
   END DO
   CLOSE(io_unit)
+END IF
+! COCOS transform
+IF(PRESENT(cocos))THEN
+  IF(cocos == 2)THEN
+    WRITE(*,*) 'Using COCOS=2...'
+    ffprim = -ffprim
+    pprime = -pprime
+    psirz = -psirz
+    ! fpol = -fpol
+    ! bcentr = -bcentr
+    ! itor = -itor
+    x1 = -x1
+    x2 = -x2
+  ELSE IF(cocos /= 7)THEN
+    CALL oft_abort('Invalid COCOS version.','gs_save_eqdsk',__FILE__)
+  END IF
 END IF
 ! Write out gEQDSK file
 2000 format(a48,3i4)
