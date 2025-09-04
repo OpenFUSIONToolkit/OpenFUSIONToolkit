@@ -509,15 +509,17 @@ if(OFT_PACKAGE_BUILD)
       set(OFT_PYPACKAGE_PLATFORM macosx_11_0_${CMAKE_HOST_SYSTEM_PROCESSOR})
     elseif(UNIX AND NOT APPLE)
       execute_process(
-        COMMAND ldd --version | head -n 1
+        COMMAND ldd --version
+        COMMAND head -n 1
         OUTPUT_VARIABLE LDD_OUTPUT
         RESULT_VARIABLE LDD_RESULT
       )
       if(NOT LDD_RESULT EQUAL 0)
         message(FATAL_ERROR "Failed to get LIBC version. ldd command exited with code: ${LDD_RESULT}")
       else()
-        string(REGEX MATCH "([0-9]+\.[0-9]+)[\s]*$" LDD_VERSION "${LDD_OUTPUT}")
-        string(REGEX REPLACE "\." "_" LDD_VERSION_US "${LDD_VERSION}")
+        string(REGEX MATCH "([0-9]+\.[0-9]+)[ \t\r\n]*$" dummy "${LDD_OUTPUT}")
+        string(REGEX REPLACE "[\.]" "_" LDD_VERSION_US "${CMAKE_MATCH_1}")
+        message(STATUS "Detected LIBC version: ${LDD_VERSION_US}")
       endif()
       # set(OFT_PYPACKAGE_PLATFORM manylinux2014_${CMAKE_HOST_SYSTEM_PROCESSOR}) # CentOS 7, Ubuntu 20.04
       set(OFT_PYPACKAGE_PLATFORM manylinux_${LDD_VERSION_US}_${CMAKE_HOST_SYSTEM_PROCESSOR}) # Generic tag format based on LIBC
@@ -526,13 +528,6 @@ if(OFT_PACKAGE_BUILD)
     install( FILES ${CMAKE_CURRENT_BINARY_DIR}/python/pyproject.toml DESTINATION python COMPONENT app )
     configure_file( python/make_package.sh.in ${CMAKE_CURRENT_BINARY_DIR}/python/make_package.sh @ONLY )
     install( FILES ${CMAKE_CURRENT_BINARY_DIR}/python/make_package.sh DESTINATION python COMPONENT app )
-    add_custom_target( python_package
-      DEPENDS ${CMAKE_INSTALL_PREFIX}/python/pyproject.toml
-      COMMAND bash make_package.sh
-      WORKING_DIRECTORY $ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/python
-      COMMENT "Generating python package"
-      VERBATIM
-    )
   endif()
 
   include(CPack)
