@@ -1950,35 +1950,11 @@ REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 REAL(8), PARAMETER :: B_dx = 1.d-6
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,hash_tmp(4),file_counts(4)
-LOGICAL :: is_neighbor,exists
+INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
+LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
-IF(TRIM(save_file)/='none')THEN
-  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
-  IF(exists)THEN
-    hash_tmp(1) = self%nelems
-    hash_tmp(2) = self%mesh%nc
-    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
-    hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
-    WRITE(*,*)'  Loading B-field operator from file: ',TRIM(save_file)
-    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
-    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
-      ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
-      CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
-      IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
-      IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
-      IF(exists)THEN
-        ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
-        CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
-        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
-        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
-      END IF
-    END IF
-  END IF
-  IF(exists)RETURN
-  DEALLOCATE(self%Bel,self%Bdr)
-END IF
+IF(PRESENT(save_file))CALL load_from_file()
 !
 bmesh=>self%mesh
 ALLOCATE(quads(18))
@@ -2146,6 +2122,42 @@ DO i=1,bmesh%np
 END DO
 self%Bdr=self%Bdr*mu0/(4.d0*pi)
 !
+IF(PRESENT(save_file))CALL load_from_file()
+CONTAINS
+SUBROUTINE load_from_file()
+INTEGER(4) :: hash_tmp(4),file_counts(4)
+LOGICAL :: exists
+IF(TRIM(save_file)/='none')THEN
+  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
+  IF(exists)THEN
+    hash_tmp(1) = self%nelems
+    hash_tmp(2) = self%mesh%nc
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+    WRITE(*,*)'  Loading B-field operator from file: ',TRIM(save_file)
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
+    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+      ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
+      CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
+      IF(exists)THEN
+        ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
+        CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
+      END IF
+    END IF
+    IF(exists)RETURN
+    IF(ASSOCIATED(self%Bel))DEALLOCATE(self%Bel)
+    IF(ASSOCIATED(self%Bdr))DEALLOCATE(self%Bdr)
+  END IF
+END IF
+END SUBROUTINE load_from_file
+!
+SUBROUTINE save_to_file()
+INTEGER(4) :: hash_tmp(4),file_counts(4)
+LOGICAL :: exists
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems
   hash_tmp(2) = self%mesh%nc
@@ -2165,6 +2177,7 @@ IF(TRIM(save_file)/='none')THEN
     END IF
   END IF
 END IF
+END SUBROUTINE save_to_file
 END SUBROUTINE tw_compute_Bops
 !---------------------------------------------------------------------------------
 !> Setup hole definition for ordered chain of vertices
@@ -2348,7 +2361,7 @@ DO i=1,ncoils
   !---Get sensor flag
   IF(xml_hasAttribute(coil_set,"sens_mask"))THEN
     CALL xml_extractDataAttribute(coil_set,"sens_mask",coil_tmp%sens_mask,num=nread,iostat=ierr)
-    IF(coil_tmp%sens_mask)WRITE(*,'(2A,I4,A)')oft_indent,'Masking coil ',i,' from sensors'
+    IF(coil_tmp%sens_mask)WRITE(*,'(2A,I6,A)')oft_indent,'Masking coil ',i,' from sensors'
   END IF
   ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
   DO j=1,coil_tmp%ncoils
@@ -2357,21 +2370,21 @@ DO i=1,ncoils
     IF(xml_hasAttribute(coil,"path"))THEN
       CALL xml_extractDataAttribute(coil,"path",coil_path,num=nread,iostat=ierr)
       IF(ierr/=0)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       ipath=INDEX(coil_path,":")
       IF(ipath==0)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Misformatted "path" attribute in coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       CALL hdf5_field_get_sizes(coil_path(1:ipath-1),coil_path(ipath+1:OFT_PATH_SLEN),ndims,dim_sizes)
       IF(ndims<0)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Failed to read HDF5 data sizes for coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       IF(dim_sizes(1)/=3)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Incorrect first dimension of HDF5 dataset for coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       coil_tmp%coils(j)%npts=dim_sizes(2)
@@ -2379,7 +2392,7 @@ DO i=1,ncoils
       ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
       CALL hdf5_read(coil_tmp%coils(j)%pts,coil_path(1:ipath-1),coil_path(ipath+1:OFT_PATH_SLEN),success=success)
       IF(.NOT.success)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Failed to read HDF5 data for coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
     ELSE
@@ -2394,7 +2407,7 @@ DO i=1,ncoils
         CASE(1)
           CALL xml_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
           IF(ierr/=0)THEN
-            WRITE(coil_ind,'(I4,2X,I4)')i,j
+            WRITE(coil_ind,'(I6,2X,I6)')i,j
             CALL oft_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
           END IF
           IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
@@ -2407,7 +2420,7 @@ DO i=1,ncoils
           ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
           CALL xml_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
           IF(ierr/=0)THEN
-            WRITE(coil_ind,'(I4,2X,I4)')i,j
+            WRITE(coil_ind,'(I6,2X,I6)')i,j
             CALL oft_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
           END IF
       END SELECT

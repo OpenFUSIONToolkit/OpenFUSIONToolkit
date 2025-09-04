@@ -66,6 +66,8 @@ jobs:
             xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
         exclude:
+          - parallel: mpich
+            config: {os: macos-12}
           - parallel: openmpi
             config: {os: macos-14}
           - parallel: openmpi

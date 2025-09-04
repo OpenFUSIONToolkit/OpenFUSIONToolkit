@@ -6,6 +6,8 @@ Open Flexible Unstructured Simulation Infrastructure with Open Numerics (FUSION)
 [![codecov](https://codecov.io/gh/openfusiontoolkit/OpenFUSIONToolkit/graph/badge.svg?token=GG282HKNAO)](https://codecov.io/gh/openfusiontoolkit/OpenFUSIONToolkit)
 [![DOI](https://zenodo.org/badge/710415041.svg)](https://zenodo.org/doi/10.5281/zenodo.10306801)
 
+<img src="https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/raw/main/logos/oft_logo.png" width="300px" />
+
 The Open FUSION Toolkit (OFT) is a suite of modeling tools, and their underlying finite element
 framework, for problems in plasma and fusion research and engineering in arbitrary 2D and 3D geometries.
 The underlying framework and its component tools support the use of variable order finite element methods on
