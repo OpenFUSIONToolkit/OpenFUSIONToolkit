@@ -30,6 +30,7 @@ USE oft_gs, ONLY: gs_eq, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_i
 use oft_gs, only: gs_get_cond_source, gs_get_cond_weights, gs_set_cond_weights
 #endif
 USE oft_gs_profiles
+USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -63,7 +64,7 @@ REAL(8) :: alpha,beta,sep
 REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
 INTEGER(4) :: ncofs,npsi,io_unit
 LOGICAL :: zero_grad
-CHARACTER(LEN=10) :: profType
+CHARACTER(LEN=15) :: profType
 !---
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)profType
@@ -90,6 +91,13 @@ SELECT CASE(TRIM(profType))
     READ(io_unit,*)cofs
     READ(io_unit,*)yvals
     CALL create_linterp_ff(F,ncofs,cofs,yvals,alpha)
+    DEALLOCATE(cofs,yvals)
+  CASE("jphi-linterp")
+    READ(io_unit,*)ncofs,alpha
+    ALLOCATE(cofs(ncofs),yvals(ncofs))
+    READ(io_unit,*)cofs
+    READ(io_unit,*)yvals
+    CALL create_jphi_ff(F,ncofs,cofs,yvals)
     DEALLOCATE(cofs,yvals)
   CASE("idcd")
     READ(io_unit,*)ncofs
@@ -151,6 +159,11 @@ SELECT TYPE(this=>F)
     WRITE(io_unit,*)this%npsi,this%y0
     WRITE(io_unit,*)this%x
     WRITE(io_unit,*)this%yp
+  TYPE IS(jphi_flux_func)
+    WRITE(io_unit,*)"jphi-linterp"
+    WRITE(io_unit,*)this%npsi,this%y0
+    WRITE(io_unit,*)this%x
+    WRITE(io_unit,*)this%jphi
   TYPE IS(twolam_flux_func)
     WRITE(io_unit,*)"idcd"
     WRITE(io_unit,*)this%ncofs
