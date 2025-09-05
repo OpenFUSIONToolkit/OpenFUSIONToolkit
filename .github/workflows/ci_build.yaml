@@ -78,8 +78,6 @@ jobs:
           - parallel: mpich
             config: {os: macos-13}
           - parallel: openmpi
-            config: {os: macos-14}
-          - parallel: openmpi
             config: {cc: icx}
         include:
           - parallel: mpich_petsc

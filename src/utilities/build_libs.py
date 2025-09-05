@@ -1650,6 +1650,8 @@ class SUPERLU_DIST(package):
             "-DMPI_CXX_COMPILER={MPI_CXX}",
             "-DCMAKE_INSTALL_LIBDIR=lib",
         ]
+        if self.config_dict['CC_VENDOR'] == 'gnu'and ver_gt(self.config_dict.get("CC_VERSION","0.0"), "12.99"):
+            cmake_options.append('-DCMAKE_C_FLAGS="-std=c11"')
         if self.shared_libs:
             cmake_options += [
                 '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
