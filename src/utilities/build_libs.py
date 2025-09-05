@@ -1617,8 +1617,8 @@ class SUPERLU(package):
 class SUPERLU_DIST(package):
     def __init__(self, build_openmp, comp_wrapper=False, shared_libs=False):
         self.name = "SUPERLU_DIST"
-        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v8.1.0.tar.gz"
-        self.build_dir = "superlu_dist-8.1.0"
+        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v8.2.1.tar.gz"
+        self.build_dir = "superlu_dist-8.2.1"
         self.build_openmp = build_openmp
         self.comp_wrapper = comp_wrapper
         self.shared_libs = shared_libs
