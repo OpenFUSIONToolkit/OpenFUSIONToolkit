@@ -36,7 +36,7 @@ USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile
   sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
-USE oft_gs_mercier, ONLY: create_dipole_b0_prof
+USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE

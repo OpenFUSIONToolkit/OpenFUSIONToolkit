@@ -30,7 +30,7 @@ USE oft_gs, ONLY: gs_eq, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_i
 use oft_gs, only: gs_get_cond_source, gs_get_cond_weights, gs_set_cond_weights
 #endif
 USE oft_gs_profiles
-USE oft_gs_mercier, ONLY: create_jphi_ff, jphi_flux_func
+USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------

@@ -3,15 +3,15 @@
 !
 ! SPDX-License-Identifier: LGPL-3.0-only
 !---------------------------------------------------------------------------------
-!> @file mercier.F90
+!> @file grad_shaf_prof_phys.F90
 !
-!> Mercier criterion and DCON interface
+!> Physics-based flux functions for Grad-Sharfranov equilibrium
 !!
 !! @authors Chris Hansen
 !! @date August 2014
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
-module oft_gs_mercier
+module grad_shaf_prof_phys
 use oft_base
 use oft_mesh_type, only: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
@@ -320,11 +320,6 @@ self%plasma_bounds=gseq%plasma_bounds
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
 ! IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
-!---Update jphi normalization to match Ip target
-! CALL gs_flux_int(gseq,self%x,self%jphi,self%npsi,jphi_norm)
-! jphi_norm=ABS(gseq%Itor_target)/jphi_norm
-! WRITE(*,*)'Update:'
-! WRITE(*,*)'  Ip scale factor = ',jphi_norm/mu0
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
 ALLOCATE(ravgs(self%ngeom,3),psi_q(self%ngeom),qtmp(self%ngeom))
 psi_q=[(REAL(i,8)/REAL(self%ngeom+1,8),i=1,self%ngeom)]
@@ -348,23 +343,17 @@ jphi_norm=ABS(gseq%Itor_target)/jphi_norm
 DEALLOCATE(qtmp)
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
-! DO i=2,self%npsi
-!   pprime(i-1)=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
-! END DO
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
-! pprime=pprime*gseq%pax_target/pscale
-! WRITE(*,*)'  dP/dpsi = ',pprime(1),pprime(self%npsi-2)
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
 DO i=1,self%npsi
   CALL spline_eval(R_spline,self%x(i),0)
   pprime=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
   self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 END DO
-! Disable Ip matching and fix F*F' scale (matching is done here)
+! Disable Ip matching and fix F*F' scale (matching is done here instead)
 IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
 gseq%alam=1.d0
-! self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
 !---Clean up
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
@@ -565,4 +554,4 @@ val(2)=pt(1)*SQRT((self%rho**2+val(1)**2)/SUM(grad**2))
 self%minB=min(self%minB,SQRT((grad(1)/pt(1))**2+(grad(2)/pt(1))**2))
 deallocate(j)
 end subroutine minbinv_apply
-end module oft_gs_mercier
+end module grad_shaf_prof_phys
