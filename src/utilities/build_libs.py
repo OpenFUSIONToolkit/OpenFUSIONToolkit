@@ -913,6 +913,7 @@ class OpenMPI(package):
             "mkdir build",
             "cd build",
             "export CC={CC}",
+            "export CXX={CXX}",
             "export FC={FC}"
         ]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
