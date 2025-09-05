@@ -160,7 +160,7 @@ SELECT TYPE(this=>F)
     WRITE(io_unit,*)this%x
     WRITE(io_unit,*)this%yp
   TYPE IS(jphi_flux_func)
-    WRITE(io_unit,*)"linear"
+    WRITE(io_unit,*)"jphi-linterp"
     WRITE(io_unit,*)this%npsi,this%y0
     WRITE(io_unit,*)this%x
     WRITE(io_unit,*)this%jphi
