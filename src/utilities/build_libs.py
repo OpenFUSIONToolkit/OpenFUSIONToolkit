@@ -880,7 +880,7 @@ class OpenMPI(package):
     def __init__(self, use_headers, shared_libs=True):
         self.name = "MPI"
         self.display_name = "OpenMPI"
-        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.7.tar.gz"
+        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.8.tar.gz"
         self.use_headers = use_headers
         self.build_timeout = 30
         self.shared_libs = shared_libs
@@ -1275,9 +1275,9 @@ class NETCDF_Fortran(package):
 class OpenBLAS(package):
     def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False, shared_libs=False):
         self.name = "OpenBLAS"
-        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.29.tar.gz"
-        self.build_dir = "OpenBLAS-0.3.29"
-        self.install_dir = "OpenBLAS-0_3_29"
+        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.30.tar.gz"
+        self.build_dir = "OpenBLAS-0.3.30"
+        self.install_dir = "OpenBLAS-0_3_30"
         self.threaded = build_threaded
         self.dynamic_arch = dynamic_arch
         self.no_avx = no_avx
