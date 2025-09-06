@@ -880,7 +880,7 @@ class OpenMPI(package):
     def __init__(self, use_headers, shared_libs=True):
         self.name = "MPI"
         self.display_name = "OpenMPI"
-        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.7.tar.gz"
+        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.8.tar.gz"
         self.use_headers = use_headers
         self.build_timeout = 30
         self.shared_libs = shared_libs
@@ -913,6 +913,7 @@ class OpenMPI(package):
             "mkdir build",
             "cd build",
             "export CC={CC}",
+            "export CXX={CXX}",
             "export FC={FC}"
         ]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
@@ -1274,9 +1275,9 @@ class NETCDF_Fortran(package):
 class OpenBLAS(package):
     def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False, shared_libs=False):
         self.name = "OpenBLAS"
-        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.29.tar.gz"
-        self.build_dir = "OpenBLAS-0.3.29"
-        self.install_dir = "OpenBLAS-0_3_29"
+        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.30.tar.gz"
+        self.build_dir = "OpenBLAS-0.3.30"
+        self.install_dir = "OpenBLAS-0_3_30"
         self.threaded = build_threaded
         self.dynamic_arch = dynamic_arch
         self.no_avx = no_avx
@@ -1617,8 +1618,8 @@ class SUPERLU(package):
 class SUPERLU_DIST(package):
     def __init__(self, build_openmp, comp_wrapper=False, shared_libs=False):
         self.name = "SUPERLU_DIST"
-        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v8.1.0.tar.gz"
-        self.build_dir = "superlu_dist-8.1.0"
+        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v8.2.1.tar.gz"
+        self.build_dir = "superlu_dist-8.2.1"
         self.build_openmp = build_openmp
         self.comp_wrapper = comp_wrapper
         self.shared_libs = shared_libs
@@ -1650,6 +1651,8 @@ class SUPERLU_DIST(package):
             "-DMPI_CXX_COMPILER={MPI_CXX}",
             "-DCMAKE_INSTALL_LIBDIR=lib",
         ]
+        if self.config_dict['CC_VENDOR'] == 'gnu'and ver_gt(self.config_dict.get("CC_VERSION","0.0"), "12.99"):
+            cmake_options.append('-DCMAKE_C_FLAGS="-std=c11"')
         if self.shared_libs:
             cmake_options += [
                 '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
