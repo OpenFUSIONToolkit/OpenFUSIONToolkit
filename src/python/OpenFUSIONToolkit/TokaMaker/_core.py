@@ -1538,10 +1538,13 @@ class TokaMaker():
 
         # Plot saddle points
         if xpoint_color is not None:
-            x_points, _ = self.get_xpoints()
+            x_points, diverted = self.get_xpoints()
             if x_points is not None:
-                ax.plot(x_points[-1,0], x_points[-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
-                ax.plot(x_points[:-1,0], x_points[:-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
+                if diverted:
+                    ax.plot(x_points[-1,0], x_points[-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
+                    ax.plot(x_points[:-1,0], x_points[:-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
+                else:
+                    ax.plot(x_points[:,0], x_points[:,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
         if (opoint_color is not None) and (self.o_point[0] > 0.0):
             ax.plot(self.o_point[0], self.o_point[1], color=opoint_color, marker=opoint_marker)
         # Make 1:1 aspect ratio
