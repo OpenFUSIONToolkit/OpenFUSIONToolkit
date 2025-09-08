@@ -6,15 +6,14 @@
 #------------------------------------------------------------------------------
 import argparse
 import numpy as np
-import h5py
 from OpenFUSIONToolkit.io import build_XDMF
 
 def compute_force(J,B,area,use_slow,reg_min,reg_max,rcc_torque=None,torque_cen=None):
     if use_slow:
         F = np.zeros((3,))
         T = np.zeros((3,))
-        for j in range(nc):
-            if (reg[j] >= reg_min) and (reg[j] <= reg_max):
+        for j in range(ThinCurr_mesh.nc):
+            if (ThinCurr_mesh.reg[j] >= reg_min) and (ThinCurr_mesh.reg[j] <= reg_max):
                 Ftmp = np.cross(J[j,:],B[j,:])
                 F += area[j]*Ftmp
                 if rcc_torque is not None:
