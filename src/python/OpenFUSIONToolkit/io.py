@@ -274,9 +274,9 @@ class XDMF_plot_mesh:
             self.static_fields[field_name] = numpy.asarray(field_obj)
         # Set region flag
         if 'REG_vol' in self.static_fields:
-            self.reg = numpy.asarray(self.static_fields['REG_vol'])
+            self.reg = self.static_fields['REG_vol']
         elif 'REG_surf' in self.static_fields:
-            self.reg = numpy.asarray(self.static_fields['REG_surf'])
+            self.reg = self.static_fields['REG_surf']
         else:
             self.reg = numpy.ones((self.nc,))
         #
