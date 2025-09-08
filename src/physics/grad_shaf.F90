@@ -4242,7 +4242,7 @@ active_tracer%maxsteps=8e4
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
-ALLOCATE(ptout(3,active_tracer%maxsteps+1))
+IF(PRESENT(dl))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
   !------------------------------------------------------------------------------
@@ -4262,7 +4262,7 @@ do j=1,nr
   CALL gs_psi2r(gseq,psi_surf,pt,psi_int)
   !!$omp end critical
   pt_last=pt
-  IF(j==1)THEN
+  IF(j==1.AND.PRESENT(dl))THEN
     CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2),ptout)
   ELSE
     CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2))
@@ -4320,7 +4320,7 @@ do j=1,nr
   END IF
 end do
 CALL active_tracer%delete
-DEALLOCATE(ptout)
+IF(PRESENT(dl))DEALLOCATE(ptout)
 CALL field%delete()
 DEALLOCATE(field)
 !$omp end parallel
