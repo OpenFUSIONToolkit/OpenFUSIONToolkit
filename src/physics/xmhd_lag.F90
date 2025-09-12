@@ -710,7 +710,7 @@ END IF
 ! Print run information
 !------------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
-100 FORMAT(2X,A,L)
+100 FORMAT(2X,A,L1)
 101 FORMAT(2X,2A)
 102 FORMAT(2X,A,ES11.3)
   WRITE(*,*)
@@ -1191,7 +1191,7 @@ jump_error=-1.d0
 ! Print run information
 !------------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
-100 FORMAT(2X,A,L)
+100 FORMAT(2X,A,L1)
 101 FORMAT(2X,2A)
 102 FORMAT(2X,A,ES11.3)
   WRITE(*,*)
@@ -4559,10 +4559,10 @@ ELSE
   CALL oft_abort("First restart file cannot be found or is inaccessible",'xmhd_plot',__FILE__)
 END IF
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(4X,A,L)')'Linear   = ',linear
-  WRITE(*,'(4X,A,L)')'Te found = ',xmhd_two_temp
-  WRITE(*,'(4X,A,L)')'N2 found = ',(d2_dens>0.d0)
-  WRITE(*,'(4X,A,L)')'J2 found = ',(eta_hyper>0.d0)
+  WRITE(*,'(4X,A,L1)')'Linear   = ',linear
+  WRITE(*,'(4X,A,L1)')'Te found = ',xmhd_two_temp
+  WRITE(*,'(4X,A,L1)')'N2 found = ',(d2_dens>0.d0)
+  WRITE(*,'(4X,A,L1)')'J2 found = ',(eta_hyper>0.d0)
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
 END IF

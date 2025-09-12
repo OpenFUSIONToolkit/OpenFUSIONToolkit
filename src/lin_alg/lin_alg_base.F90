@@ -301,8 +301,8 @@ ABSTRACT INTERFACE
   function vec_mdot_vec(self,a,n) result(dots)
   import oft_vector, oft_vector_ptr, r8, i4
   class(oft_vector), intent(inout) :: self !< Vector object
-  type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
   integer(i4), intent(in) :: n !< Length of vector array
+  type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
   real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
   end function vec_mdot_vec
   !---------------------------------------------------------------------------------
@@ -311,8 +311,8 @@ ABSTRACT INTERFACE
   function vec_mdot_cvec(self,a,n) result(dots)
   import oft_vector, oft_cvector_ptr, c8, i4
   class(oft_vector), intent(inout) :: self !< Vector object
-  type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
   integer(i4), intent(in) :: n !< Length of vector array
+  type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
   complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
   end function vec_mdot_cvec
   !---------------------------------------------------------------------------------
@@ -490,8 +490,8 @@ ABSTRACT INTERFACE
   function cvec_mdot_vec(self,a,n) result(dots)
   import oft_cvector, oft_vector_ptr, c8, i4
   class(oft_cvector), intent(inout) :: self !< Vector object
-  type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
   integer(i4), intent(in) :: n !< Length of vector array
+  type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
   complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
   end function cvec_mdot_vec
   !---------------------------------------------------------------------------------
@@ -500,8 +500,8 @@ ABSTRACT INTERFACE
   function cvec_mdot_cvec(self,a,n) result(dots)
   import oft_cvector, oft_cvector_ptr, c8, i4
   class(oft_cvector), intent(inout) :: self !< Vector object
-  type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
   integer(i4), intent(in) :: n !< Length of vector array
+  type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
   complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
   end function cvec_mdot_cvec
   !---------------------------------------------------------------------------------
@@ -684,11 +684,11 @@ ABSTRACT INTERFACE
   subroutine mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
   import oft_matrix, i4, r8
   class(oft_matrix), intent(inout) :: self !< Matrix object
+  integer(i4), intent(in) :: n !< Number of rows in local matrix
+  integer(i4), intent(in) :: m !< Number of columns in local matrix
   integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
   integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
   real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-  integer(i4), intent(in) :: n !< Number of rows in local matrix
-  integer(i4), intent(in) :: m !< Number of columns in local matrix
   integer(i4), optional, intent(in) :: iblock !< Row block (optional)
   integer(i4), optional, intent(in) :: jblock !< Column block (optional)
   end subroutine mat_set_values
@@ -698,11 +698,11 @@ ABSTRACT INTERFACE
   subroutine mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
   import oft_matrix, i4, r8
   class(oft_matrix), intent(inout) :: self !< Matrix object
+  integer(i4), intent(in) :: n !< Number of rows in local matrix
+  integer(i4), intent(in) :: m !< Number of columns in local matrix
   integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
   integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
   real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-  integer(i4), intent(in) :: n !< Number of rows in local matrix
-  integer(i4), intent(in) :: m !< Number of columns in local matrix
   integer(i4), optional, intent(in) :: iblock !< Row block (optional)
   integer(i4), optional, intent(in) :: jblock !< Column block (optional)
   integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -764,11 +764,11 @@ ABSTRACT INTERFACE
   subroutine cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
   import oft_cmatrix, i4, c8
   class(oft_cmatrix), intent(inout) :: self
+  integer(i4), intent(in) :: n !< Number of rows in local matrix
+  integer(i4), intent(in) :: m !< Number of columns in local matrix
   integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
   integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
   complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
-  integer(i4), intent(in) :: n !< Number of rows in local matrix
-  integer(i4), intent(in) :: m !< Number of columns in local matrix
   integer(i4), optional, intent(in) :: iblock !< Row block (optional)
   integer(i4), optional, intent(in) :: jblock !< Column block (optional)
   end subroutine cmat_set_values
@@ -778,11 +778,11 @@ ABSTRACT INTERFACE
   subroutine cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
   import oft_cmatrix, i4, c8
   class(oft_cmatrix), intent(inout) :: self
+  integer(i4), intent(in) :: n !< Number of rows in local matrix
+  integer(i4), intent(in) :: m !< Number of columns in local matrix
   integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
   integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
   complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
-  integer(i4), intent(in) :: n !< Number of rows in local matrix
-  integer(i4), intent(in) :: m !< Number of columns in local matrix
   integer(i4), optional, intent(in) :: iblock !< Row block (optional)
   integer(i4), optional, intent(in) :: jblock !< Column block (optional)
   integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations

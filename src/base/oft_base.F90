@@ -416,7 +416,7 @@ OPEN(outunit,FILE='abort_'//proc//'.err')
 !---Print error information
 100 FORMAT (A,I5,2A)
 101 FORMAT (2A)
-WRITE(outunit,'(X)')
+WRITE(outunit,'(1X)')
 WRITE(outunit,'(A)')'#----------------------------------------------'
 IF(oft_env%nprocs>1)THEN
   WRITE(outunit,100)  '[',oft_env%rank,'] ERROR: ',TRIM(error_str)
@@ -428,7 +428,7 @@ ELSE
   WRITE(outunit,101)  'FILE: ',TRIM(fname)
 END IF
 WRITE(outunit,'(A)')'#----------------------------------------------'
-WRITE(outunit,'(X)')
+WRITE(outunit,'(1X)')
 #ifdef OFT_ABORT_FILES
 CLOSE(outunit)
 #endif
@@ -620,8 +620,8 @@ END FUNCTION oft_mpi_sumr
 !! @result \f$ sum(a) \f$ over all processors
 !---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumra(a,n) result(b)
-REAL(r8), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
+REAL(r8), INTENT(in) :: a(n) !< Local values for SUM [n]
 REAL(r8) :: b(n)
 INTEGER(i4) :: ierr
 INTEGER(i8) :: timein
@@ -665,8 +665,8 @@ END FUNCTION oft_mpi_sumc
 !! @result \f$ sum(a) \f$ over all processors
 !---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumca(a,n) result(b)
-COMPLEX(c8), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
+COMPLEX(c8), INTENT(in) :: a(n) !< Local values for SUM [n]
 COMPLEX(c8) :: b(n)
 INTEGER(i4) :: ierr
 INTEGER(i8) :: timein
@@ -709,8 +709,8 @@ END FUNCTION oft_mpi_sumi4
 !! @result \f$ sum(a) \f$ over all processors
 !---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumi4a(a,n) result(b)
-INTEGER(i4), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
+INTEGER(i4), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4) :: b(n),ierr
 INTEGER(i8) :: timein
 #ifdef HAVE_MPI
@@ -753,8 +753,8 @@ END FUNCTION oft_mpi_sumi8
 !! @result \f$ sum(a) \f$ over all processors
 !---------------------------------------------------------------------------------
 FUNCTION oft_mpi_sumi8a(a,n) result(b)
-INTEGER(i8), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
+INTEGER(i8), INTENT(in) :: a(n) !< Local values for SUM [n]
 INTEGER(i8) :: b(n)
 INTEGER(i4) :: ierr
 INTEGER(i8) :: timein
@@ -820,8 +820,8 @@ END FUNCTION oft_mpi_maxr
 !! @result \f$ max(a) \f$ over all processors
 !---------------------------------------------------------------------------------
 FUNCTION oft_mpi_maxra(a,n) result(b)
-REAL(r8), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
+REAL(r8), INTENT(in) :: a(n) !< Local values for MAX [n]
 REAL(r8) :: b(n)
 INTEGER(i4) :: ierr
 INTEGER(i8) :: timein
@@ -864,8 +864,8 @@ END FUNCTION oft_mpi_maxi
 !! @result \f$ max(a) \f$ over all processors
 !---------------------------------------------------------------------------------
 FUNCTION oft_mpi_maxia(a,n) result(b)
-INTEGER(i4), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
+INTEGER(i4), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4) :: b(n),ierr
 INTEGER(i8) :: timein
 #ifdef HAVE_MPI
@@ -886,8 +886,8 @@ END FUNCTION oft_mpi_maxia
 !! @result \f$ max(a) \f$ over all processors
 !---------------------------------------------------------------------------------
 FUNCTION oft_mpi_maxi8a(a,n) result(b)
-INTEGER(i8), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array for reduction
+INTEGER(i8), INTENT(in) :: a(n) !< Local values for MAX [n]
 INTEGER(i4) :: ierr
 INTEGER(i8) :: b(n),timein
 #ifdef HAVE_MPI
@@ -906,8 +906,8 @@ END FUNCTION oft_mpi_maxi8a
 !> Real implementation of toolkit random_number function
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_random_number_r8(array,n)
-REAL(r8), INTENT(out) :: array(n) !< Array to set with random values [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array
+REAL(r8), INTENT(out) :: array(n) !< Array to set with random values [n]
 INTEGER(i4) :: i
 IF(oft_env%test_run)THEN
   DO i=1,n
@@ -921,8 +921,8 @@ END SUBROUTINE oft_random_number_r8
 !> Complex implementation of toolkit random_number function
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_random_number_c8(array,n)
-COMPLEX(c8), INTENT(out) :: array(n) !< Array to set with random values [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array
+COMPLEX(c8), INTENT(out) :: array(n) !< Array to set with random values [n]
 INTEGER(i4) :: i
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: harvest
 IF(oft_env%test_run)THEN
@@ -954,8 +954,8 @@ END SUBROUTINE orient_list2
 !---------------------------------------------------------------------------------
 PURE SUBROUTINE find_orient_listn(oflag,list,n)
 INTEGER(i4), INTENT(out) :: oflag !< Orientation flag
-INTEGER(i4), INTENT(in) :: list(n) !< Array for orientation [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array
+INTEGER(i4), INTENT(in) :: list(n) !< Array for orientation [n]
 INTEGER(i4) :: i,ind,comp(2)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: listtmp
 ! Nomial ordering
@@ -993,8 +993,8 @@ END SUBROUTINE find_orient_listn
 !---------------------------------------------------------------------------------
 PURE SUBROUTINE orient_listn(oflag,list,n)
 INTEGER(i4), INTENT(in) :: oflag !< Orientation flag
-INTEGER(i4), INTENT(inout) :: list(n) !< Array for orientation [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array
+INTEGER(i4), INTENT(inout) :: list(n) !< Array for orientation [n]
 INTEGER(i4) :: i
 IF(oflag<0)list=list(n:1:-1) ! Reverse list
 list=CSHIFT(list,ABS(oflag)-1) ! Shift list
@@ -1004,8 +1004,8 @@ END SUBROUTINE orient_listn
 !---------------------------------------------------------------------------------
 PURE SUBROUTINE orient_listn_inv(oflag,list,n)
 INTEGER(i4), INTENT(in) :: oflag !< Orientation flag
-INTEGER(i4), INTENT(inout) :: list(n) !< Array for orientation [n]
 INTEGER(i4), INTENT(in) :: n !< Length of array
+INTEGER(i4), INTENT(inout) :: list(n) !< Array for orientation [n]
 INTEGER(i4) :: i
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ltmp
 ALLOCATE(ltmp(n))
@@ -1021,9 +1021,9 @@ END SUBROUTINE orient_listn_inv
 !! @note This function performs an interval search each time it is called.
 !---------------------------------------------------------------------------------
 SUBROUTINE linterp_facs(x,n,xx,inds,facs,extrap)
+INTEGER(i4), INTENT(in) :: n !< Length of function parameterization
 REAL(r8), INTENT(in) :: x(n) !< Paramaterizing array \f$ x_i \f$ [n]
 REAL(r8), INTENT(in) :: xx !< Location to perform interpolation
-INTEGER(i4), INTENT(in) :: n !< Length of function parameterization
 INTEGER(i4), INTENT(out) :: inds(2) !< Indices of points bounding subinterval (-1 -> error)
 REAL(r8), INTENT(out) :: facs(2) !< Interpolation factors for point in `inds(2)`
 INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Extrapolation mode (0: none, 1: constant, 2: linear)
@@ -1072,10 +1072,10 @@ END SUBROUTINE linterp_facs
 !! @returns \f$ F(xx) \f$ (-1.E99 if outside domain and `extrap=0` or invalid value for `extrap`)
 !---------------------------------------------------------------------------------
 FUNCTION linterp(x,y,n,xx,extrap) result(yy)
+INTEGER(i4), INTENT(in) :: n !< Length of function parameterization
 REAL(r8), INTENT(in) :: x(n) !< Paramaterizing array \f$ x_i \f$ [n]
 REAL(r8), INTENT(in) :: y(n) !< Function values \f$ F(x_i) \f$ [n]
 REAL(r8), INTENT(in) :: xx !< Location to perform interpolation
-INTEGER(i4), INTENT(in) :: n !< Length of function parameterization
 INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Extrapolation mode (0: none, 1: constant, 2: linear)
 INTEGER(i4) :: inds(2)
 REAL(r8) :: yy,facs(2)

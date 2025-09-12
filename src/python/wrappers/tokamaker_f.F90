@@ -1206,10 +1206,10 @@ END SUBROUTINE tokamaker_set_targets
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_isoflux(tMaker_ptr,targets,ref_points,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_isoflux")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: ref_points(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -1231,10 +1231,10 @@ END SUBROUTINE tokamaker_set_isoflux
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_flux(tMaker_ptr,locations,targets,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_flux")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), INTENT(in) :: locations(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: targets(ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -1256,9 +1256,9 @@ END SUBROUTINE tokamaker_set_flux
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_saddles(tMaker_ptr,targets,weights,ntargets,error_str) BIND(C,NAME="tokamaker_set_saddles")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
