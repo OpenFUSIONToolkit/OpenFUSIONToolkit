@@ -450,7 +450,7 @@ END SUBROUTINE thincurr_save_scalar
 SUBROUTINE thincurr_scale_va(tw_ptr,vals,div_flag) BIND(C,NAME="thincurr_scale_va")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
-LOGICAL, VALUE, INTENT(in) :: div_flag !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: div_flag !< Needs docs
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 TYPE(tw_type), POINTER :: tw_obj
 CALL c_f_pointer(tw_ptr, tw_obj)

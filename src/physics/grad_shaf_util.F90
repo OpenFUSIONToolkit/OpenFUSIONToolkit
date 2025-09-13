@@ -1300,7 +1300,7 @@ CALL psi_int%delete()
 !------------------------------------------------------------------------------
 ! Create output file
 !------------------------------------------------------------------------------
-WRITE(eqdsk_case,'(A,X,A)')'tMaker:',run_info
+WRITE(eqdsk_case,'(A,1X,A)')'tMaker:',run_info
 rleft = rbounds(1)
 zmid = (zbounds(2)+zbounds(1))/2.d0
 IF(PRESENT(rcentr_in))THEN

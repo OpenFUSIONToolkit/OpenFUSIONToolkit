@@ -256,7 +256,7 @@ INTEGER(i8) :: value(8)
 !---Create file with binary format description
 CALL DATE_AND_TIME(VALUES=value)
 OPEN(NEWUNIT=self%io_unit,FILE=TRIM(self%filename))
-100 FORMAT("# Created: ",I2,':',I2.2,':'I2.2,' on ',I2,"-",I2.2,"-",I4)
+100 FORMAT("# Created: ",I2,':',I2.2,':',I2.2,' on ',I2,"-",I2.2,"-",I4)
 WRITE(self%io_unit,'(A)')"# Open FUSION Toolkit binary output"
 WRITE(self%io_unit,'(2A)')"# Description: ",TRIM(self%filedesc)
 WRITE(self%io_unit,100)value(5:7),value(2:3),value(1)
