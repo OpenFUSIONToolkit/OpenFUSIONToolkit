@@ -457,9 +457,9 @@ END SUBROUTINE get_hole_pseq
 !> Reorder hole vertices into a sequential chain
 !---------------------------------------------------------------------------------
 SUBROUTINE order_hole_list(list_in,list_out,n)
+INTEGER(4), INTENT(in) :: n !< Number of points in list
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered list
-INTEGER(4), INTENT(in) :: n !< Number of points in list
 INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
 INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
 !---Find loop points and edges
@@ -2568,9 +2568,9 @@ CONTAINS
 !> Order jumper list into sequential chain
 !---------------------------------------------------------------------------------
 SUBROUTINE order_jumper_list(list_in,list_out,n)
+INTEGER(4), INTENT(in) :: n !< Number of vertices in jumper definition
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered vertex list
-INTEGER(4), INTENT(in) :: n !< Number of vertices in jumper definition
 INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
 INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
 !---Find loop points and edges
@@ -2696,7 +2696,7 @@ IF(ierr==0)THEN
   CALL xml_extractDataContent(sens_node,self%sens_mask,num=nread,iostat=ierr)
   IF(nread/=nreg_mesh)CALL oft_abort('Sensor mask size mismatch','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
-    WRITE(*,'(A,I4,L)')oft_indent,i,self%sens_mask(i)
+    WRITE(*,'(A,I4,L1)')oft_indent,i,self%sens_mask(i)
   END DO
   ! WRITE(*,*)'  Sens mask = ',self%sens_mask
 END IF

@@ -3574,7 +3574,7 @@ IF(self%nx_points>0)THEN
       x_masked(i)=x_masked(i).AND.(DOT_PRODUCT(self%x_points(:,i)-self%x_points(:,j),self%x_vecs(:,j))>0.d0)
     END DO
     IF(oft_debug_print(1))THEN
-      WRITE(*,'(2A,5ES11.3,L)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i),.NOT.x_masked(i)
+      WRITE(*,'(2A,5ES11.3,L1)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i),.NOT.x_masked(i)
     END IF
   END DO
   j=0
@@ -3910,8 +3910,8 @@ end function gs_test_bounds
 !------------------------------------------------------------------------------
 subroutine gs_save_fields(self,pts,npts,filename)
 class(gs_eq), intent(inout) :: self !< G-S object
-real(8), intent(in) :: pts(2,npts) !< Sampling locations [2,npts]
 integer(4), intent(in) :: npts !< Number of points to sample
+real(8), intent(in) :: pts(2,npts) !< Sampling locations [2,npts]
 character(LEN=*), intent(in) :: filename !< Output file for field data
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval

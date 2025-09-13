@@ -244,19 +244,19 @@ b=(1.d0,0.d0)*driver(:,1) + (0.d0,1.d0)*driver(:,2)
 IF(PRESENT(hodlr_op))THEN
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
+    WRITE(*,'(1X,A,ES13.5)')'  Frequency [Hz] = ',freq
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)*freq*2.d0*pi
     aca_Fmat%alam=(1.d0,0.d0)
   CASE(1)
-    WRITE(*,'(X,A)')'  Frequency -> Inf (L limit)'
+    WRITE(*,'(1X,A)')'  Frequency -> Inf (L limit)'
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)
     aca_Fmat%alam=(0.d0,0.d0)
   CASE(2)
-    WRITE(*,'(X,A)')'  Frequency -> 0   (R limit)'
+    WRITE(*,'(1X,A)')'  Frequency -> 0   (R limit)'
     aca_Fmat%rJ=>self%Rmat
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,0.d0)
@@ -268,7 +268,7 @@ ELSE
   ALLOCATE(Mmat(self%nelems,self%nelems))
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
+    WRITE(*,'(1X,A,ES13.5)')'  Frequency [Hz] = ',freq
     Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -276,10 +276,10 @@ ELSE
       END DO
     END DO
   CASE(1)
-    WRITE(*,'(X,A)')'  Frequency -> Inf (L limit)'
+    WRITE(*,'(1X,A)')'  Frequency -> Inf (L limit)'
     Mmat=(0.d0,1.d0)*self%Lmat
   CASE(2)
-    WRITE(*,'(X,A)')'  Frequency -> 0   (R limit)'
+    WRITE(*,'(1X,A)')'  Frequency -> 0   (R limit)'
     Mmat=(0.d0,0.d0)
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1

@@ -209,9 +209,9 @@ CONTAINS
 !------------------------------------------------------------------------------
 SUBROUTINE particle_lorentz(t,y,B,n,ydot)
 REAL(r8), INTENT(in) :: t !< Time (unused)
+INTEGER(i4), INTENT(in) :: n !< Number of spatial dimensions (3)
 REAL(r8), INTENT(in) :: y(n) !< Current position/velocity
 REAL(r8), INTENT(in) :: B(3) !< B-field at current position
-INTEGER(i4), INTENT(in) :: n !< Number of spatial dimensions (3)
 REAL(r8), INTENT(out) :: ydot(n) !< New velocity/acceleration at current point
 ydot(1:3)=y(4:6)*vel_scale
 ydot(4:6)=elec_charge*cross_product(y(4:6),B)/(proton_mass*mu_ion)

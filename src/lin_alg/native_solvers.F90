@@ -1788,7 +1788,7 @@ IF(.NOT.self%initialized)THEN
       self%nlocal=self%nlocal*ncolors
       color_avail=.TRUE.
     ELSE IF((self%nlocal>1).AND.(ncolors>1))THEN
-      IF(oft_env%head_proc.AND.self%nlocal/=ncolors)WRITE(*,'(A,I4,A,X,I4)')'[',oft_env%rank,'] Updating number of local parts to match coloring',ncolors
+      IF(oft_env%head_proc.AND.self%nlocal/=ncolors)WRITE(*,'(A,I4,A,1X,I4)')'[',oft_env%rank,'] Updating number of local parts to match coloring',ncolors
       self%nlocal=ncolors
       color_avail=.TRUE.
     END IF
@@ -2146,8 +2146,8 @@ END IF
 IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'Block Jacobi solver setup:'
   WRITE(*,'(2X,A,I4)')  '- NLocal:    ',self%nlocal
-  WRITE(*,'(2X,A,3X,L)')'- Boverlap:  ',self%boundary_overlap
-  WRITE(*,'(2X,A,3X,L)')'- Loverlap:  ',self%loverlap
+  WRITE(*,'(2X,A,3X,L1)')'- Boverlap:  ',self%boundary_overlap
+  WRITE(*,'(2X,A,3X,L1)')'- Loverlap:  ',self%loverlap
 END IF
 DEBUG_STACK_POP
 #else
