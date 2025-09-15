@@ -1103,7 +1103,7 @@ class TokaMaker():
         tokamaker_get_jtor(self._tMaker_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr/mu0
+        return curr
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
