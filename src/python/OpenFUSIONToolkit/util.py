@@ -15,7 +15,6 @@ import re
 import numpy
 import h5py
 from collections import OrderedDict
-from ._interface import oftpy_dump_cov
 
 # Common parameters
 ## Vacuum magnetic permeability
@@ -109,7 +108,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 
 	datalines = [] #Initialize new dictionary of information
 
-	if b_arr == True:
+	if b_arr:
 		brk_idx = [] #Find the last break and turn it into the bottom array
 		equal_idx = [] #Find the last equals sign
 
@@ -247,13 +246,13 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 						if b_line[k].isspace():
 							b_line_space_idx.append(k)
 					
-					b_line_space_len = (lambda x:[len(l) for l in x])(b_line[b_line_space_idx])
+					b_line_space_len = (lambda x:[len(k) for k in x])(b_line[b_line_space_idx])
 
-					for l in range(len(b_line_space_idx)):
-						if b_line_space_len[l] < 10: #== min(b_line_space_len):
-							b_line_rmv_idx.append(b_line_space_idx[l])
+					for k in range(len(b_line_space_idx)):
+						if b_line_space_len[k] < 10: #== min(b_line_space_len):
+							b_line_rmv_idx.append(b_line_space_idx[k])
 						else:
-							b_line[b_line_space_idx[l]] = 0.0
+							b_line[b_line_space_idx[k]] = 0.0
 
 					b_line = numpy.delete(b_line, b_line_rmv_idx)
 
@@ -272,7 +271,6 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 					data_dict['HF'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),3]
 					data_dict['AF'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),4]
 					data_dict['AF2'] = data_dict['b_arr'][0:len(data_dict['TURNFC']),5]
-					Fcoil_in_barr = True
 
 				except:
 					print('Error in determining F-coil data')
@@ -303,7 +301,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 						else:
 							EC_idx_start = 0	
 
-						if RVS_in_barr == True:
+						if RVS_in_barr:
 							EC_idx_end = VS_idx_start
 						else:
 							EC_idx_end = len(data_dict['b_arr'])
@@ -318,7 +316,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 						print('Error in determining E-coil data')
 
 
-	if silent == False:
+	if not silent:
 		for key in data_dict:
 			print(key, data_dict[key])
 			

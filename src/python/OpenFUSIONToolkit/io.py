@@ -105,7 +105,7 @@ class histfile:
             else:
                 self.dim = None
             #
-            if (self.dim != None) and (self.nfields > 1):
+            if (self.dim is not None) and (self.nfields > 1):
                 raise ValueError("Arrays with multiple fields not supported")
             #
             self.field_tags = []
@@ -246,7 +246,7 @@ class histfile:
         result = "\nOFT History file: {0}\n".format(self._filename)
         result += "  Number of fields = {0}\n".format(self.nfields)
         result += "  Number of entries = {0}\n".format(self.nlines)
-        if self.dim != None:
+        if self.dim is not None:
             result += "  Field dimension = {0}\n".format(self.dim)
         result += "\n  Fields:\n"
         #

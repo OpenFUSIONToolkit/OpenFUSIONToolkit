@@ -10,3 +10,5 @@
 @ingroup doxy_oft_python
 '''
 from ._core import OFT_env
+
+__all__ = ["OFT_env"]

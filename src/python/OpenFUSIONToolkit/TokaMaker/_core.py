@@ -560,7 +560,8 @@ class TokaMaker():
         @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
         '''
         bounds_array = numpy.zeros((self.ncoils+1,2), dtype=numpy.float64)
-        bounds_array[:,0] = -1.E98; bounds_array[:,1] = 1.E98
+        bounds_array[:,0] = -1.E98
+        bounds_array[:,1] = 1.E98
         if coil_bounds is not None:
             for coil_key, coil_bound in coil_bounds.items():
                 if coil_key in self.coil_sets:
@@ -874,7 +875,8 @@ class TokaMaker():
         else:
             if ref_points is None:
                 ref_points = numpy.zeros((isoflux.shape[0]-1,2), dtype=numpy.float64)
-                ref_points[:,0] = isoflux[0,0]; ref_points[:,1] = isoflux[0,1]
+                ref_points[:,0] = isoflux[0,0]
+                ref_points[:,1] = isoflux[0,1]
                 isoflux = isoflux[1:,:]
                 if weights is not None:
                     weights = weights[1:]
@@ -1423,10 +1425,10 @@ class TokaMaker():
             # Adjust current in coils with non-uniform distribution
             if len(self.dist_coils)>0:
                 for _, coil_obj in self.coil_sets.items():
-                    if (coil_id:=coil_obj["id"]) in self.dist_coils.keys():
+                    if coil_obj["id"] in self.dist_coils.keys():
                         for sub_coil in coil_obj["sub_coils"]:
                             mask = (self.reg==sub_coil["reg_id"])
-                            face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
+                            face_currents = numpy.mean(self.dist_coils[coil_obj["id"]][self.lc],axis=1)
                             mesh_currents[mask] *= face_currents[mask]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:

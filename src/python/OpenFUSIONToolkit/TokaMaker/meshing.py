@@ -741,17 +741,17 @@ class gs_Domain:
         if show_legends:
             if format_type == 0:
                 ncols = max(1,math.floor((1+nCond+nCoil+nVac)/col_max))
-                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
             elif format_type == 1:
                 ncols = max(1,math.floor((1+nVac)/col_max))
-                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
                 ncols = max(1,math.floor((nCond+nCoil)/col_max))
-                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
             elif format_type == 2:
                 ncols = max(1,math.floor((nCond)/col_max))
-                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
                 ncols = max(1,math.floor((nCoil)/col_max))
-                coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
 
 
 def save_gs_mesh(pts,tris,regions,coil_dict,cond_dict,filename,use_hdf5=True):
@@ -1089,6 +1089,8 @@ class Region:
             keep_tol = numpy.cos(numpy.pi*angle_tol/180)
             sliver_tol = numpy.cos(numpy.pi*sliver_tol/180)
             keep_points = [0]
+            tangp = self._points[1,:] - self._points[0,:]
+            tangp /= numpy.linalg.norm(tangp)
             for i in range(nv):
                 if (i == nv-1):
                     tang = self._points[0,:] - self._points[i,:]
