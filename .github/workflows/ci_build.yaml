@@ -7,6 +7,10 @@ on:
       - ci_debug
   pull_request:
     types: [opened, reopened, synchronize]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
   
 jobs:
   build:
