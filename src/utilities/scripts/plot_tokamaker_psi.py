@@ -123,7 +123,7 @@ if options.plot_b_perp:
 else:
     ax.set_xlabel('Major Radius [m]')
 #
-if options.title != None:
+if options.title is not None:
     fig.set_title(options.title)
 # Handle saving if necessary
 if options.filename is None:
