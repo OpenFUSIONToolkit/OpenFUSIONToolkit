@@ -178,7 +178,7 @@ class OFT_env():
 
     def get_c_errorbuff(self):
         '''! Get properly-sized error string buffer for calls to OFT compiled API'''
-        return ctypes.buffer(b"",self.oft_error_slen)
+        return ctypes.create_string_buffer(b"",self.oft_error_slen)
 
     def update_oft_in(self):
         '''! Update input file with current settings (see @ref oft_in_groups)'''
