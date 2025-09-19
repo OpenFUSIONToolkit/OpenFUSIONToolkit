@@ -206,6 +206,9 @@ if( HDF5_IS_PARALLEL )
     message( FATAL_ERROR "Parallel HDF5 found, but MPI not available" )
   endif()
 endif()
+if( HDF5_VERSION VERSION_GREATER_EQUAL "1.10.0" )
+  add_definitions( -DOFT_HDF5_FS_TRACK )
+endif()
 # PETSc
 if( OFT_PETSc_ROOT ) # Only search if PETSc root is specified
   find_package( OFT_PETSc )
