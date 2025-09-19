@@ -18,12 +18,17 @@ jobs:
         run: |
           python3 -m venv ${{ github.workspace }}/oft_venv
           echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
+          source ${{ github.workspace }}/setup_env.sh
+          pip install ruff
 
       - name: Check stack entries
         working-directory: src
         run: |
           source ${{ github.workspace }}/setup_env.sh
           python utilities/generate_stack.py -l
-      
 
-
+      - name: Check python with ruff
+        working-directory: src/python
+        run: |
+          source ${{ github.workspace }}/setup_env.sh
+          python -m ruff check

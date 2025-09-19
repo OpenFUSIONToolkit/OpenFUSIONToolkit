@@ -660,10 +660,15 @@ call h5open_f(error)
 track_free=.FALSE.
 IF(PRESENT(persistent_space_tracking))track_free=persistent_space_tracking
 IF(track_free)THEN
+#if defined(OFT_HDF5_FS_TRACK)
   CALL H5Pcreate_f(H5P_FILE_CREATE_F,plist_id,error)
   CALL H5Pset_file_space_strategy_f(plist_id,H5F_FSPACE_STRATEGY_FSM_AGGR_F,.TRUE.,zero,error)
   CALL h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error, creation_prp=plist_id)
   CALL h5pclose_f(plist_id, error)
+#else
+  call oft_warn('HDF5 free space tracking requires HDF5 v1.10+')
+  call h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
+#endif
 ELSE
   call h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
 END IF

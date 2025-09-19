@@ -9,9 +9,11 @@
 @date Feb 2025
 @ingroup doxy_oft_python
 '''
+import os
 import platform
 import shutil
 import tempfile
+import ctypes
 import numpy
 from ._interface import *
 from .util import run_shell_command, oft_warning
@@ -176,7 +178,7 @@ class OFT_env():
 
     def get_c_errorbuff(self):
         '''! Get properly-sized error string buffer for calls to OFT compiled API'''
-        return create_string_buffer(b"",self.oft_error_slen)
+        return ctypes.create_string_buffer(b"",self.oft_error_slen)
 
     def update_oft_in(self):
         '''! Update input file with current settings (see @ref oft_in_groups)'''

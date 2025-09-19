@@ -51,7 +51,7 @@ def validate_result(iteration_count,converged_error):
     #
     fid = open('bjacobi.results','r')
     its_test = int(fid.readline())
-    if iteration_count != None:
+    if iteration_count is not None:
         if its_test>iteration_count*1.05:
             print("FAILED: Iteration count incorrect!")
             print("  Expected = {0}".format(iteration_count))
