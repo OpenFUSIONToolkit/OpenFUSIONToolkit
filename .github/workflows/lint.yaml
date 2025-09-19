@@ -17,9 +17,9 @@ jobs:
       - name: Install prerequisites
         run: |
           python3 -m venv ${{ github.workspace }}/oft_venv
+          echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
           source ${{ github.workspace }}/setup_env.sh
           pip install ruff
-          echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
 
       - name: Check stack entries
         working-directory: src
