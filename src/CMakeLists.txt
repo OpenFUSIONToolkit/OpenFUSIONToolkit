@@ -141,6 +141,8 @@ find_package( OpenMP )
 # set( EXT_LIBS "${OpenMP_Fortran_LIBRARIES}")
 if( OFT_USE_OpenMP )
   set( CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${OpenMP_Fortran_FLAGS}" )
+else()
+  set( EXT_LIBS "${OpenMP_Fortran_LIBRARIES}")
 endif()
 # Use fPIC when building shared library
 if(OFT_BUILD_PYTHON)

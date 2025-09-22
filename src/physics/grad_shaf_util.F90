@@ -614,7 +614,7 @@ psi0=0.02d0; psi1=0.98d0 !1.d0
 do i=1,npsi
   psi_q(i)=(psi1-psi0)*((i-1)/REAL(npsi-1,8)) + psi0
 end do
-CALL gs_get_qprof(self,npsi,psi_q,prof,dl,rbounds,zbounds)
+IF(.NOT.self%mirror_mode)CALL gs_get_qprof(self,npsi,psi_q,prof,dl,rbounds,zbounds)
 IF(dl<=0.d0)CALL oft_abort('Tracing q-profile failed','gs_analyze',__FILE__)
 q95=linterp(psi_q,prof,npsi,0.05d0)
 !
@@ -627,7 +627,7 @@ IF(ABS(self%I%f_offset)>0.d0)beta(2) = 2.d0*pvol/vol/(self%I%f_offset/centroid(1
 WRITE(*,'(2A,ES11.3)')oft_indent,'Toroidal Current [A]    = ',Itor/mu0
 WRITE(*,'(2A,2F8.3)') oft_indent,'Current Centroid [m]    =',centroid
 WRITE(*,'(2A,2F8.3)') oft_indent,'Magnetic Axis [m]       =',baxis
-WRITE(*,'(2A,F8.3)')  oft_indent,'Elongation              =',(zbounds(2,2)-zbounds(2,1))/(rbounds(1,2)-rbounds(1,1))
+IF(.NOT.self%mirror_mode)WRITE(*,'(2A,F8.3)')  oft_indent,'Elongation              =',(zbounds(2,2)-zbounds(2,1))/(rbounds(1,2)-rbounds(1,1))
 IF(self%diverted)THEN
   IF(self%x_points(2,self%nx_points)<zbounds(2,1))THEN
     zbounds(:,1)=self%x_points(:,self%nx_points)
@@ -636,9 +636,9 @@ IF(self%diverted)THEN
   END IF
 END IF
 tmp=((rbounds(1,2)+rbounds(1,1))/2.d0-(zbounds(1,2)+zbounds(1,1))/2.d0)*2.d0/(rbounds(1,2)-rbounds(1,1))
-WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
+IF(.NOT.self%mirror_mode)WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
 WRITE(*,'(2A,F8.3)')oft_indent,'Plasma Volume [m^3]     =',vol*2.d0*pi
-IF(.NOT.self%dipole_mode)WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
+IF(.NOT.(self%dipole_mode.OR.self%mirror_mode))WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
 WRITE(*,'(2A,ES11.3)')oft_indent,'Peak Pressure [Pa]      = ',pmax/mu0
 WRITE(*,'(2A,ES11.3)')oft_indent,'Stored Energy [J]       = ',pvol*2.d0*pi/mu0*3.d0/2.d0
 WRITE(*,'(2A,F8.3)')  oft_indent,'<Beta_pol> [%]          = ',1.d2*beta(1)
@@ -719,7 +719,7 @@ do i=1,smesh%nc
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+        + self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
       ELSE
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
         + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
@@ -807,9 +807,9 @@ do i=1,smesh%nc
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
         j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+          + ((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+          + self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
       ELSE
         j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
           + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
@@ -878,7 +878,7 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  IF(gseq%dipole_mode)THEN
+  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
     pt=[raxis*j/REAL(100,8),0.d0,0.d0]
   ELSE
     pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
@@ -886,7 +886,7 @@ DO j=1,100
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
-  IF(gseq%dipole_mode)THEN
+  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
     IF(psi_surf(1)>x1)EXIT
   ELSE
     IF(psi_surf(1)<x1)EXIT
@@ -1134,7 +1134,7 @@ DO j=1,100
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF(gseq%dipole_mode)THEN
+  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
     IF(psi_tmp(1)>x1)EXIT
   ELSE
     IF(psi_tmp(1)<x1)EXIT
@@ -1242,7 +1242,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     fptmp=gseq%alam*gseq%I%f(psi_trace)+gseq%I%f_offset
     fpol(j)=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
-    ffprim(j)=(gseq%alam**2)*gseq%I%fp(psi_surf)*(gseq%I%f(psi_surf)+gseq%I%f_offset/gseq%alam)
+    ffprim(j)=gseq%I%fp(psi_surf)*((gseq%alam**2)*gseq%I%f(psi_surf)+gseq%alam*gseq%I%f_offset)
   ELSE
     fptmp=SQRT(gseq%alam*gseq%I%f(psi_trace) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))

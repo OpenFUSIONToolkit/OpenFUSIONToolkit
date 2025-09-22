@@ -150,10 +150,10 @@ TYPE, PUBLIC :: oft_ml_fem_type
   INTEGER(i4) :: blevel = 0 !< FE base level
   INTEGER(i4) :: minlev = 1 !< Lowest level
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Structure containing bound ML mesh
-  CLASS(oft_afem_type), POINTER :: current_level => NULL()
-  TYPE(oft_fem_ptr) :: levels(fem_max_levels)
-  TYPE(oft_graph_ptr) :: interp_graphs(fem_max_levels)
-  TYPE(oft_matrix_ptr) :: interp_matrices(fem_max_levels)
+  CLASS(oft_afem_type), POINTER :: current_level => NULL() !< FE object for current level
+  TYPE(oft_fem_ptr) :: levels(fem_max_levels) !< FE objects for each level
+  TYPE(oft_graph_ptr) :: interp_graphs(fem_max_levels) !< Level-to-level interpolation matrix graphs
+  TYPE(oft_matrix_ptr) :: interp_matrices(fem_max_levels) !< Level-to-level interpolation matrices
 CONTAINS
   !> Create vector for FE representation
   PROCEDURE :: vec_create => ml_fem_vec_create

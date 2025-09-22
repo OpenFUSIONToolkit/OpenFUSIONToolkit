@@ -326,13 +326,15 @@ end subroutine petsc_solver_setup_ksp
 !---------------------------------------------------------------------------------
 !> Delete PETSc solver
 !---------------------------------------------------------------------------------
-subroutine petsc_solver_delete(self)
+subroutine petsc_solver_delete(self,propogate)
 class(oft_petsc_solver), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 IF(self%initialized)CALL KSPDestroy(self%solver,ierr)
 NULLIFY(self%A)
 self%initialized=.FALSE.
+CALL solver_delete(self,propogate)
 DEBUG_STACK_POP
 end subroutine petsc_solver_delete
 !------------------------------------------------------------------------------
@@ -1166,13 +1168,15 @@ end subroutine precond_apply
 !---------------------------------------------------------------------------------
 !> Delete PETSc solver
 !---------------------------------------------------------------------------------
-subroutine precond_delete(self)
+subroutine precond_delete(self,propogate)
 class(oft_petsc_precond), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 IF(self%initialized)CALL KSPDestroy(self%solver,ierr)
 NULLIFY(self%A)
 self%initialized=.FALSE.
+CALL solver_delete(self,propogate)
 DEBUG_STACK_POP
 end subroutine precond_delete
 !---------------------------------------------------------------------------------

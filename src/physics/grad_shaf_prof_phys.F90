@@ -17,10 +17,10 @@ use oft_mesh_type, only: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
-USE oft_blag_operators, only: oft_lag_brinterp
+USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_eq, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
-  gs_get_qprof
+  gs_get_qprof, gs_ani_press, gs_epsilon
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func
 use spline_mod
@@ -69,12 +69,58 @@ end type minbinv_interp
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(spline_flux_func) :: dipole_b0_flux_func
-  integer(4) :: ntheta = 128
   real(r8) :: psi_pad = 1.d-1
-  TYPE(spline_type) :: funcp
 contains
     procedure :: update => dipole_b0_update
 end type dipole_b0_flux_func
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+type, extends(gs_ani_press) :: dipole_ani_press
+  REAL(r8) :: a_exp = 0.d0 !< Anisotropy exponent for mirror pressure profiles
+  TYPE(oft_lag_brinterp), POINTER :: psi_eval => NULL() !< Needs docs
+  TYPE(oft_lag_bginterp), POINTER :: psi_geval => NULL() !< Needs docs
+  TYPE(gs_eq), POINTER :: gs => NULL()
+  CLASS(flux_func), POINTER :: B0_prof => NULL() !< Dipole minimum B profile
+contains
+  !> Needs docs
+  procedure :: setup => dipole_ani_setup
+  !> Needs docs
+  procedure :: delete => dipole_ani_delete
+  !> Evaluate field
+  procedure :: interp => dipole_ani_apply
+  !>
+  procedure :: update => dipole_ani_update
+end type dipole_ani_press
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+type, extends(spline_flux_func) :: mirror_b0_flux_func
+  real(r8) :: z_midplane = 0.d0 !< Z location of mirror midplane
+contains
+    procedure :: update => mirror_b0_update
+end type mirror_b0_flux_func
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+type, extends(gs_ani_press) :: mirror_ani_slosh
+  REAL(r8) :: n_exp = 0.d0 !< Anisotropy exponent for mirror pressure profiles
+  REAL(r8) :: bturn = 0.d0 !< Turning point for mirror pressure profiles (relative to B_min)
+  REAL(r8) :: zthroat = 0.d0 !< Mirror peak field location
+  TYPE(oft_lag_brinterp), POINTER :: psi_eval => NULL() !< Needs docs
+  TYPE(oft_lag_bginterp), POINTER :: psi_geval => NULL() !< Needs docs
+  TYPE(gs_eq), POINTER :: gs => NULL()
+  CLASS(flux_func), POINTER :: B0_prof => NULL() !< Mirror minimum B profile
+contains
+  !> Needs docs
+  procedure :: setup => mirror_slosh_setup
+  !> Needs docs
+  procedure :: delete => mirror_slosh_delete
+  !> Evaluate field
+  procedure :: interp => mirror_slosh_apply
+  !>
+  procedure :: update => mirror_slosh_update
+end type mirror_ani_slosh
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -398,14 +444,12 @@ SUBROUTINE create_dipole_b0_prof(func,npsi)
 CLASS(flux_func), POINTER, INTENT(out) :: func
 INTEGER(4), INTENT(in) :: npsi
 INTEGER(4) :: i
-
 ALLOCATE(dipole_b0_flux_func::func)
 select type(self=>func)
   type is(dipole_b0_flux_func)
     !---
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
-    CALL spline_alloc(self%funcp,self%npsi,1)
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
@@ -426,7 +470,7 @@ real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell
 !
 IF(oft_debug_print(2))THEN
-  WRITE(*,'(2A)')oft_indent,'Updating Mercier Pressure:'
+  WRITE(*,'(2A)')oft_indent,'Updating Dipole B0 profile:'
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi
@@ -471,11 +515,7 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 !!$omp do schedule(dynamic,1)
 do j=1,self%npsi+1
-  !------------------------------------------------------------------------------
-  ! Trace contour
-  !------------------------------------------------------------------------------
-  !psi_surf(1)=(x2-x1)*(1.d0-j/REAL(self%npsi,4))**2
-  psi_surf(1)=(x2-x1)*(1.d0-j/REAL(self%npsi+1,4))
+  psi_surf(1)=(x2-x1)*(1.d0-j/REAL(self%npsi+2,4))
   psi_surf(1)=x2 - psi_surf(1)
   !!$omp critical
   CALL gs_psi2r(gseq,psi_surf(1),pt)
@@ -485,7 +525,7 @@ do j=1,self%npsi+1
   !---Exit if trace fails
   if(active_tracer%status/=1)THEN
     WRITE(*,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
-    call oft_abort('Trace did not complete.','mercier_update',__FILE__)
+    call oft_abort('Trace did not complete.','dipole_b0_update',__FILE__)
   end if
   !---Get surface minB
   self%func%xs(j-1)=psi_surf(1)
@@ -493,27 +533,17 @@ do j=1,self%npsi+1
   ! WRITE(*,*)psi_surf(1),field%minB
 end do
 !!$omp end parallel
-! self%funcp%xs(0)=x1
-! self%funcp%fs(0,1)=0.d0
-!self%funcp%fs(0,1)=self%funcp%fs(1,1)
-! self%funcp%xs(self%npsi)=x2!+.05d0*x2
-! self%funcp%fs(self%npsi,1)=0.d0
-self%yp1=self%func%fs(0,1)
-self%ypn=self%func%fs(self%npsi,1)
+self%xmin=self%func%xs(0)+(self%func%xs(0)-self%func%xs(1))*4.d0
+self%xmax=self%func%xs(self%npsi)+(self%func%xs(1)-self%func%xs(0))*4.d0
+self%yp1=0.d0
+self%ypn=0.d0
 !---Setup Spline
 CALL spline_fit(self%func,"extrap")
-! CALL spline_int(self%funcp)
-!---
-! self%func%xs=self%funcp%xs
-! self%func%fs(:,1)=self%funcp%fsi(:,1)
-! CALL spline_fit(self%func,"extrap")
 DO k=1,omp_get_max_threads()
   CALL spline_copy(self%func,self%fun_loc(k))
 END DO
-!
-self%xmin=self%func%xs(0)
-self%xmax=self%func%xs(self%npsi)
 IF(oft_debug_print(2))CALL oft_decrease_indent
+CALL psi_int%delete()
 end subroutine dipole_b0_update
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -554,4 +584,213 @@ val(2)=pt(1)*SQRT((self%rho**2+val(1)**2)/SUM(grad**2))
 self%minB=min(self%minB,SQRT((grad(1)/pt(1))**2+(grad(2)/pt(1))**2))
 deallocate(j)
 end subroutine minbinv_apply
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_ani_setup(self,gs)
+class(dipole_ani_press), intent(inout) :: self
+class(gs_eq), target, intent(inout) :: gs
+self%gs=>gs
+self%mesh=>gs%mesh
+ALLOCATE(self%psi_eval,self%psi_geval)
+self%psi_eval%u=>self%gs%psi
+CALL self%psi_eval%setup(self%gs%fe_rep)
+CALL self%psi_geval%shared_setup(self%psi_eval)
+CALL create_dipole_b0_prof(self%B0_prof,64)
+end subroutine dipole_ani_setup
+!------------------------------------------------------------------------------
+!> Destroy temporary internal storage and nullify references
+!------------------------------------------------------------------------------
+subroutine dipole_ani_delete(self)
+class(dipole_ani_press), intent(inout) :: self
+INTEGER(i4) :: i
+IF(ASSOCIATED(self%psi_eval))THEN
+  CALL self%psi_eval%delete()
+  CALL self%psi_geval%delete()
+  DEALLOCATE(self%psi_eval,self%psi_geval)
+END IF
+IF(ASSOCIATED(self%B0_prof))THEN
+  SELECT TYPE(this=>self%B0_prof)
+  TYPE IS(dipole_b0_flux_func)
+    CALL spline_dealloc(this%func)
+    DO i=1,omp_get_max_threads()
+      CALL spline_dealloc(this%fun_loc(i))
+    END DO
+  END SELECT
+END IF
+NULLIFY(self%gs,self%mesh)
+end subroutine dipole_ani_delete
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_ani_update(self,gseq)
+class(dipole_ani_press), intent(inout) :: self
+class(gs_eq), intent(inout) :: gseq
+CALL self%B0_prof%update(gseq)
+end subroutine dipole_ani_update
+!------------------------------------------------------------------------------
+!> Reconstruct a component of a Grad-Shafranov solution
+!------------------------------------------------------------------------------
+subroutine dipole_ani_apply(self,cell,f,gop,val)
+class(dipole_ani_press), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed [p_par, p_perp] factors [2]
+real(8) :: pt(3),psitmp(1),gpsitmp(3),Bp,H
+pt=self%gs%fe_rep%mesh%log2phys(cell,f)
+CALL self%psi_eval%interp(cell,f,gop,psitmp)
+CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
+Bp = SQRT((gpsitmp(1)/(pt(1)+gs_epsilon))**2 + (gpsitmp(2)/(pt(1)+gs_epsilon))**2)
+H = (self%B0_prof%f(psitmp(1))/Bp)**(2.d0*self%a_exp)
+val=[H/(1.d0+2.d0*self%a_exp), H]
+end subroutine dipole_ani_apply
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+SUBROUTINE create_mirror_b0_prof(func,npsi)
+CLASS(flux_func), POINTER, INTENT(out) :: func
+INTEGER(4), INTENT(in) :: npsi
+INTEGER(4) :: i
+ALLOCATE(mirror_b0_flux_func::func)
+select type(self=>func)
+  type is(mirror_b0_flux_func)
+    !---
+    self%npsi=npsi
+    CALL spline_alloc(self%func,self%npsi,1)
+    DO i=1,omp_get_max_threads()
+      CALL spline_alloc(self%fun_loc(i),self%npsi,1)
+    END DO
+end select
+END SUBROUTINE create_mirror_b0_prof
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_update(self,gseq)
+class(mirror_b0_flux_func), intent(inout) :: self
+class(gs_eq), intent(inout) :: gseq
+type(minbinv_interp), target :: field
+type(oft_lag_brinterp) :: psi_int
+type(oft_lag_bginterp) :: psi_gint
+real(8) :: I,Ip,q,qp,vp,vpp,s,a,b,pp,gop(3,3),psi_surf(1),vol,rmax,gpsi(3)
+real(8) :: raxis,zaxis,f(3),pt(3),x1,x2,xr
+real(8), pointer, dimension(:) :: v
+real(8), parameter :: tol=1.d-10
+integer(4) :: j,k,cell
+!
+IF(oft_debug_print(2))THEN
+  WRITE(*,'(2A)')oft_indent,'Updating Mirror B0 profile:'
+  CALL oft_increase_indent
+END IF
+psi_int%u=>gseq%psi
+CALL psi_int%setup(gseq%fe_rep)
+CALL psi_gint%shared_setup(psi_int)
+x1=0.d0; x2=1.d0
+IF(gseq%plasma_bounds(1)>-1.d98)THEN
+  x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
+END IF
+xr = (x2-x1)
+!---Find Rmax along Zaxis
+rmax=gseq%rmax
+cell=0
+DO j=1,100
+  pt=[rmax*j/REAL(100,8),self%z_midplane,0.d0]
+  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
+  CALL psi_int%interp(cell,f,gop,psi_surf)
+  IF( psi_surf(1) > x1)EXIT
+  rmax=pt(1)
+END DO
+!
+pt=[0.5d0*rmax,self%z_midplane,0.d0]
+do j=1,self%npsi+1
+  psi_surf(1)=(x2-x1)*(1.d0-j/REAL(self%npsi+2,4))
+  psi_surf(1)=x2 - psi_surf(1)
+  CALL gs_psi2r(gseq,psi_surf(1),pt)
+  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  call gseq%mesh%jacobian(cell,f,gop,vol)
+  CALL psi_gint%interp(cell,f,gop,gpsi)
+  !---Get surface minB
+  self%func%xs(j-1)=psi_surf(1)
+  self%func%fs(j-1,1)=SQRT((gpsi(1)/(pt(1)+gs_epsilon))**2 + (gpsi(2)/(pt(1)+gs_epsilon))**2)
+end do
+self%yp1=0.d0
+self%ypn=0.d0
+self%xmin=self%func%xs(0)+(self%func%xs(0)-self%func%xs(1))*4.d0
+self%xmax=self%func%xs(self%npsi)+(self%func%xs(1)-self%func%xs(0))*4.d0
+!---Setup Spline
+CALL spline_fit(self%func,"extrap")
+DO k=1,omp_get_max_threads()
+  CALL spline_copy(self%func,self%fun_loc(k))
+END DO
+IF(oft_debug_print(2))CALL oft_decrease_indent
+CALL psi_int%delete()
+CALL psi_gint%delete()
+end subroutine mirror_b0_update
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_slosh_setup(self,gs)
+class(mirror_ani_slosh), intent(inout) :: self
+class(gs_eq), target, intent(inout) :: gs
+self%gs=>gs
+self%mesh=>gs%mesh
+ALLOCATE(self%psi_eval,self%psi_geval)
+self%psi_eval%u=>self%gs%psi
+CALL self%psi_eval%setup(self%gs%fe_rep)
+CALL self%psi_geval%shared_setup(self%psi_eval)
+CALL create_mirror_b0_prof(self%B0_prof,64)
+end subroutine mirror_slosh_setup
+!------------------------------------------------------------------------------
+!> Destroy temporary internal storage and nullify references
+!------------------------------------------------------------------------------
+subroutine mirror_slosh_delete(self)
+class(mirror_ani_slosh), intent(inout) :: self
+INTEGER(i4) :: i
+IF(ASSOCIATED(self%psi_eval))THEN
+  CALL self%psi_eval%delete()
+  CALL self%psi_geval%delete()
+  DEALLOCATE(self%psi_eval,self%psi_geval)
+END IF
+IF(ASSOCIATED(self%B0_prof))THEN
+  SELECT TYPE(this=>self%B0_prof)
+  TYPE IS(mirror_b0_flux_func)
+    CALL spline_dealloc(this%func)
+    DO i=1,omp_get_max_threads()
+      CALL spline_dealloc(this%fun_loc(i))
+    END DO
+  END SELECT
+END IF
+NULLIFY(self%gs,self%mesh)
+end subroutine mirror_slosh_delete
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_slosh_update(self,gseq)
+class(mirror_ani_slosh), intent(inout) :: self
+class(gs_eq), intent(inout) :: gseq
+CALL self%B0_prof%update(gseq)
+end subroutine mirror_slosh_update
+!------------------------------------------------------------------------------
+!> Reconstruct a component of a Grad-Shafranov solution
+!------------------------------------------------------------------------------
+subroutine mirror_slosh_apply(self,cell,f,gop,val)
+class(mirror_ani_slosh), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed [p_par, p_perp] factors [2]
+real(8) :: pt(3),psitmp(1),gpsitmp(3),b_bar,b_turn
+!---
+pt=self%gs%fe_rep%mesh%log2phys(cell,f)
+CALL self%psi_eval%interp(cell,f,gop,psitmp)
+CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
+b_turn = self%B0_prof%f(psitmp(1))*self%bturn
+b_bar = SQRT((gpsitmp(1)/(pt(1)+gs_epsilon))**2 + (gpsitmp(2)/(pt(1)+gs_epsilon))**2)/b_turn
+IF((b_bar<=1.d0).AND.(ABS(pt(2))<self%zthroat))THEN
+  val=[b_bar/self%n_exp*(1.d0-b_bar)**self%n_exp, b_bar*b_bar*(1.d0-b_bar)**(self%n_exp-1.d0)]
+ELSE
+  val=[0.d0,0.d0]
+END IF
+end subroutine mirror_slosh_apply
 end module grad_shaf_prof_phys

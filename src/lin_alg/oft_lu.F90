@@ -60,9 +60,9 @@ PUBLIC lapack_matinv, lapack_cholesky
 !> Native ILU(0) preconditioner information object
 !------------------------------------------------------------------------------
 TYPE :: native_ilu_struc
-  INTEGER(i4), POINTER, DIMENSION(:) :: ju => NULL() !< Diagonal entry indices
-  INTEGER(i4), POINTER, DIMENSION(:) :: jlu => NULL() !< Column values in iLU factors
-  REAL(r8), POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: ju => NULL() !< Diagonal entry indices
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: jlu => NULL() !< Column values in iLU factors
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
 END TYPE native_ilu_struc
 !------------------------------------------------------------------------------
 !> SuperLU solver information
@@ -487,7 +487,7 @@ SELECT CASE(TRIM(self%package))
       CALL oft_superlu_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
         self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (SuperLU)','lusolver_apply',__FILE__)
 #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
       !$omp end critical (superlu_solve)
 #endif
@@ -501,7 +501,7 @@ SELECT CASE(TRIM(self%package))
     CALL oft_superlu_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
       self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
-    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
+    IF(ierr/=0)CALL oft_abort('Solve failed (SuperLU)','lusolver_apply',__FILE__)
 #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
     !$omp end critical (superlu_solve)
 #endif
@@ -531,7 +531,7 @@ CASE("superd")
         self%superlu_struct%grid_handle,self%superlu_struct%f_factors, &
         self%superlu_struct%col_perm,self%iter_refine,ierr)
       !!$omp end critical (superlu_solve)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (SuperLU-DIST)','lusolver_apply',__FILE__)
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
     END IF
@@ -542,7 +542,7 @@ CASE("superd")
       self%superlu_struct%grid_handle,self%superlu_struct%f_factors, &
       self%superlu_struct%col_perm,self%iter_refine,ierr)
     !!$omp end critical (superlu_solve)
-    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
+    IF(ierr/=0)CALL oft_abort('Solve failed (SuperLU-DIST)','lusolver_apply',__FILE__)
 #else
     CALL oft_abort('OFT not compiled with SuperLU-DIST','lusolver_apply',__FILE__)
 #endif
@@ -551,22 +551,22 @@ CASE("superd")
     IF(self%refactor)THEN
       mode=3
       IF(self%update_graph)mode=1
-      !$omp critical (umfpack_solve)
+      !!$omp critical (umfpack_solve)
       CALL oft_umfpack_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
         self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
-      !$omp end critical (umfpack_solve)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (UMFPACK)','lusolver_apply',__FILE__)
+      !!$omp end critical (umfpack_solve)
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
     END IF
     mode=2
-    !$omp critical (umfpack_solve)
+    !!$omp critical (umfpack_solve)
     CALL oft_umfpack_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
       self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
-    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
-    !$omp end critical (umfpack_solve)
+    IF(ierr/=0)CALL oft_abort('Solve failed (UMFPACK)','lusolver_apply',__FILE__)
+    !!$omp end critical (umfpack_solve)
 #else
     CALL oft_abort('OFT not compiled with UMFPACK','lusolver_apply',__FILE__)
 #endif
@@ -581,7 +581,7 @@ CASE("superd")
       CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
         mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
         nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (MKL-PARDISO)','lusolver_apply',__FILE__)
       self%pardiso_struct%iparm(1)=0
       self%pardiso_struct%iparm(27)=0
       self%refactor=.FALSE.
@@ -596,7 +596,7 @@ CASE("superd")
     CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
       mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
       nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
-    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
+    IF(ierr/=0)CALL oft_abort('Solve failed (MKL-PARDISO)','lusolver_apply',__FILE__)
     DEALLOCATE(b)
 #else
     CALL oft_abort('OFT not compiled with MKL-PARDISO','lusolver_apply',__FILE__)
@@ -635,9 +635,11 @@ CASE("superd")
         END DO
       END DO
       CALL dgetrf(A_native%nr,A_native%nr,self%atmp,A_native%nr,self%ipiv,info)
+      IF(info/=0)CALL oft_abort('Factorization failed (LAPACK)','lusolver_apply',__FILE__)
       self%refactor=.FALSE.
     END IF
     CALL dgetrs('N',A_native%nr,nrhs,self%atmp,A_native%nr,self%ipiv,vals,ldb,info)
+    IF(info/=0)CALL oft_abort('Solve failed (LAPACK)','lusolver_apply',__FILE__)
   CASE DEFAULT
     CALL oft_abort('Unknown factorization package','lusolver_apply',__FILE__)
 END SELECT
@@ -705,8 +707,9 @@ end function lusolver_check_thread
 !------------------------------------------------------------------------------
 !> Destroy direct solver and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine lusolver_delete(self)
+subroutine lusolver_delete(self,propogate)
 class(oft_lusolver), intent(inout) :: self
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ivals
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rvals
@@ -775,7 +778,8 @@ CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
-REAL(r8), POINTER, DIMENSION(:) :: mat_vals,csc_vals,vtmp
+REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: mat_vals
+REAL(r8), POINTER, DIMENSION(:) :: csc_vals,vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
 CLASS(oft_native_matrix), POINTER :: A_native
 TYPE(oft_timer) :: mytimer
@@ -967,8 +971,9 @@ end function ilusolver_check_thread
 !------------------------------------------------------------------------------
 !> Destroy direct solver and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine ilusolver_delete(self)
+subroutine ilusolver_delete(self,propogate)
 class(oft_ilusolver), intent(inout) :: self
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ivals
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rvals
