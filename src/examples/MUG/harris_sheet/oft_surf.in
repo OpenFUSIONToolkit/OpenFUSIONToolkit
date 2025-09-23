@@ -1,6 +1,6 @@
 &runtime_options
   ppn=1
-  debug=0
+  debug=2
 /
 
 &mesh_options
@@ -24,6 +24,7 @@
 /
 
 &xmhd_options
+  linear=T
   order=2
   n0=5.196374E16
   psi0=0.002045692328575E0,
