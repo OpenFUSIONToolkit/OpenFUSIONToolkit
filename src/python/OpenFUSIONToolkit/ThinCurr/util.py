@@ -108,17 +108,23 @@ class torus_fourier_sensor():
             ax.set_aspect('equal')
             return line
 
-    def load_histfile(self, hist_file_path='floops.hist'):
+    def load_histfile(self, hist_file_path='floops.hist', norm=None):
         '''! Loading histfile containing magnetic values at the surface collected by sensors
 
             @param hist_file_path Path to the histfile containing sensor values
+            @param norm Normalization factor to be applied to the sensor values
         '''
         
         hist_file = histfile(hist_file_path)
         if hist_file.nfields-1 != self.ntheta*self.nphi:
             raise ValueError("The hist file provided might not be the output of the sensors defined in the current instance of the sensor_interface class.")
         else:
+            if norm is not None:
+                for name in hist_file._data:
+                    if name != 'time':
+                        hist_file._data[name] /= norm
             self.hist_file = hist_file
+
 
     def get_B_mesh(self,t):
         '''! Extract the mesh of magnetic sensor values at a t time step
@@ -225,6 +231,7 @@ class torus_fourier_sensor():
         ax.set_ylabel(r"$\theta$ (Poloidal Angle)")
         cf = ax.contourf(phi_grid,theta_grid,np.flip(B_n_ifft.real,axis=1),levels=50,vmin=B_n_ifft.real.min(),vmax=B_n_ifft.real.max(),cmap="viridis")
         cbar = fig.colorbar(cf,label="Minor Radial Magnetic Field")
+        cbar.ax.ticklabel_format(style='sci', scilimits=(-3, 3))
         return cf, cbar
     
     def sort_fft_indices_and_mesh(self,B_n_fft,n_modes,m_modes):
@@ -349,7 +356,8 @@ class torus_fourier_sensor():
             ax.set_xlabel(r"$\phi$ (radians)")
             ax.set_ylabel(r"$\theta$ (radians)")
             cf = ax.contourf(phi_grid,theta_grid,np.flip(B_n,axis=1),vmax=B_n.max(),vmin=B_n.min(),levels=50,cmap="viridis")
-            cbar = fig.colorbar(cf,label="Radial Magnetic Field (Tesla)")
+            cbar = fig.colorbar(cf,label="Minor Radial Magnetic Field (Tesla)")
+            cbar.ax.ticklabel_format(style='sci', scilimits=(-3, 3))
             return cf, cbar
 
     def plot_sensor_output_on_surface(self,t,figs,axes):
@@ -386,7 +394,8 @@ class torus_fourier_sensor():
 
             axes[i//(self.nphi//2)].add_collection(lc)
             axes[i//(self.nphi//2)].autoscale()
-            cbar = figs[i//(self.nphi//2)].colorbar(lc,ax=axes[i//(self.nphi//2)],label='Radial Magnetic Field (Tesla)')
+            cbar = figs[i//(self.nphi//2)].colorbar(lc,ax=axes[i//(self.nphi//2)],label='Normal Magnetic Field (Tesla)')
+            cbar.ax.ticklabel_format(style='sci', scilimits=(-3, 3))
             boundary = axes[i//(self.nphi//2)].plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]),color='black',linewidth=0.8,zorder=2)
             axes[i//(self.nphi//2)].set_xlabel('R')
             axes[i//(self.nphi//2)].set_ylabel('Z')
@@ -446,6 +455,7 @@ class torus_fourier_sensor():
             ax.set_xlabel(r"$\theta$ (radians)")
             ax.set_ylabel(f"Mode amplitude (Tesla)")
             ax.grid()
+            ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
             return line_list, toroidal_harmonics
         else:
             B_n = self.get_B_mesh(t)
@@ -479,6 +489,7 @@ class torus_fourier_sensor():
             ax.set_xlabel(r"$\phi$ (radians)")
             ax.set_ylabel(f"Mode amplitude (Tesla)")
             ax.grid()
+            ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
             return line_list, poloidal_harmonics
 
     def plot_m_over_n_amplitude(self,m_list,n_list,t_max,dt,ax,t_min=0,hamada_dphi=None):
@@ -525,6 +536,7 @@ class torus_fourier_sensor():
         ax.set_xlabel('Time (ms)')
         ax.set_title('Amplitude of m/n modes in time')
         ax.legend()
+        ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
         return line_list
 
     def field_fourier_amplitude_contour(self,t,m_min,m_max,n_min,n_max,fig,ax,hamada_dphi=None,part='r'):
@@ -574,7 +586,7 @@ class torus_fourier_sensor():
             amplitudes = abs(B_n_sorted[m_indices[0]:m_indices[1]+1,n_indices[0]:n_indices[1]+1])
             cf = ax.contourf(m_grid_fft,n_grid_fft,amplitudes,levels=50,cmap="viridis")
             cbar = fig.colorbar(cf,label=f"Mode absolute amplitude (Tesla)")
-
+        cbar.ax.ticklabel_format(style='sci', scilimits=(-3, 3))
         return cf, cbar
 
     def plot_2D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,hamada_dphi=None,x_type='modes',x_mode_min=None,x_mode_max=None):
@@ -626,6 +638,8 @@ class torus_fourier_sensor():
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
                 ax.set_xticks(range(x_mode_min,x_mode_max+1))
                 ax.grid()
+                ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
+                plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
                 return real_line_list, imag_line_list
             else:
                 n_range = np.where((n_modes_sorted == x_mode_min) | (n_modes_sorted == x_mode_max))[0]
@@ -644,6 +658,8 @@ class torus_fourier_sensor():
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
                 ax.set_xticks(range(x_mode_min,x_mode_max+1))
                 ax.grid()
+                ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
+                plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
                 return real_line_list, imag_line_list
         else:
             if toroidal_harmonics:
@@ -659,6 +675,8 @@ class torus_fourier_sensor():
                 ax.set_title(f"2D FFT Amplitudes of Toroidal Modes at [t] = {t}")
                 ax.set_xlabel(r"$\theta$ (radians)")
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
+                ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
+                plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
                 return real_line_list, imag_line_list
             else:
                 mode_idx = [np.where(m_modes == harmonic)[0][0] for harmonic in harmonics]
@@ -680,6 +698,8 @@ class torus_fourier_sensor():
                 ax.set_title(f"2D FFT Amplitudes of Poloidal Modes at [t] = {t}")
                 ax.set_xlabel(r"$\phi$ (radians)")
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
+                ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
+                plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
                 return real_line_list, imag_line_list
 
     def plot_sensor_signal_against_angle(self,t,ax,theta=True):
@@ -703,4 +723,5 @@ class torus_fourier_sensor():
             ax.set_title(rf"Magnetic Field on surface @ $\theta$=0 at [t] = {t}")
             ax.set_xlabel(r"$\phi$ (radians)")
             ax.set_ylabel(f"Magnetic Field (Tesla)")
+        ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
         return line
