@@ -9,12 +9,14 @@
 @date Feb 2025
 @ingroup doxy_oft_python
 '''
+import os
 import platform
 import shutil
 import tempfile
+import ctypes
 import numpy
 from ._interface import *
-from .util import run_shell_command
+from .util import run_shell_command, oft_warning
 
 
 class OFT_env():
@@ -54,11 +56,11 @@ class OFT_env():
             except:
                 pass
         if self.ncpus is None:
-            print("WARNING: Could not detect number of physical cores.")
+            oft_warning("Could not detect number of physical cores")
         else:
             if nthreads > self.ncpus:
-                print('Warning: Request of {0} threads exceeds {1} physical cores detected by OFT (excluding "efficiency" cores)'.format(nthreads, self.ncpus))
-                print("         If correct, this will significantly degrade performance.")
+                oft_warning('Request of {0} threads exceeds {1} physical cores detected by OFT (excluding "efficiency" cores)'.format(nthreads, self.ncpus),
+                            details=["If correct, this may significantly degrade performance due to oversubcription"])
         ## ID of Python interpreter process
         self.pid = os.getpid()
         if unique_tempfiles == 'global':
@@ -67,21 +69,21 @@ class OFT_env():
             try:
                 os.mkdir(self.tempdir)
             except:
-                print("Could not make temporary directory")
-                raise
+                raise IOError("Could not create temporary directory."
+                              "This usually means you have tried to instantiate more than one instance of `OFT_env` within a single python kernel.")
         elif unique_tempfiles == 'local_dir':
             self.tempdir = os.path.join(os.getcwd(),'oft_tmp-{0}'.format(self.pid))
             try:
                 os.mkdir(self.tempdir)
             except:
-                print("Could not make temporary directory")
-                raise
+                raise IOError("Could not create temporary directory."
+                              "This usually means you have tried to instantiate more than one instance of `OFT_env` within a single python kernel.")
         elif unique_tempfiles == 'local_file':
             self.tempdir = None
         elif unique_tempfiles == 'none':
             self.tempdir = None
             self.pid = None
-            print("Warning: Using non-unique names/locations for temporary files can lead to conflicts if multiple python instances are used in the same directory")
+            oft_warning("Using non-unique names/locations for temporary files can lead to conflicts if multiple python instances are used in the same directory")
         else:
             raise ValueError('Unknown value "{0}" for "unique_tempfiles"'.format(unique_tempfiles))
         ## Number of threads for execution
@@ -176,7 +178,7 @@ class OFT_env():
 
     def get_c_errorbuff(self):
         '''! Get properly-sized error string buffer for calls to OFT compiled API'''
-        return create_string_buffer(b"",self.oft_error_slen)
+        return ctypes.create_string_buffer(b"",self.oft_error_slen)
 
     def update_oft_in(self):
         '''! Update input file with current settings (see @ref oft_in_groups)'''
@@ -193,9 +195,9 @@ class OFT_env():
             try:
                 shutil.rmtree(self.tempdir)
             except:
-                print('Warning: unable to delete temporary directory "{0}"'.format(self.tempdir))
+                oft_warning('Unable to delete temporary directory "{0}"'.format(self.tempdir))
         else:
             try:
                 os.remove(self.oft_ifile)
             except:
-                print('Warning: unable to delete temporary file "{0}"'.format(self.oft_ifile))
+                oft_warning('Unable to delete temporary file "{0}"'.format(self.oft_ifile))

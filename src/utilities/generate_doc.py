@@ -94,7 +94,7 @@ def parse_fortran_file(fid):
                     break
                   if term.find(r'\subsection') >= 0:
                     term_found = True
-                if sec_title != None:
+                if sec_title is not None:
                   full_code = full_code + sep_template.format(sec_title[:-1])
         # Code block
         else:

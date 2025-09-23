@@ -25,7 +25,7 @@ USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
 USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, &
+USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
@@ -36,7 +36,7 @@ USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile
   sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
-USE oft_gs_mercier, ONLY: create_dipole_b0_prof
+USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -319,10 +319,18 @@ CHARACTER(KIND=c_char), INTENT(in) :: eta_file(OFT_PATH_SLEN) !< Resistivity (et
 CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive F*F' prof.in file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
+CLASS(flux_func), POINTER :: prof_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL copy_string_rev(f_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%I)
+IF(TRIM(tmp_str)/='none')THEN
+  CALL gs_profile_load(tmp_str,prof_tmp)
+  IF(ASSOCIATED(tMaker_obj%gs%I))THEN
+    prof_tmp%f_offset=tMaker_obj%gs%I%f_offset ! Persist F0 with profile changes
+    CALL prof_tmp%update(tMaker_obj%gs)        ! Initialize new profile with current EQ
+  END IF
+  tMaker_obj%gs%I=>prof_tmp
+END IF
 IF(f_offset>-1.d98)tMaker_obj%gs%I%f_offset=f_offset
 CALL copy_string_rev(p_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%P)
@@ -1198,10 +1206,10 @@ END SUBROUTINE tokamaker_set_targets
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_isoflux(tMaker_ptr,targets,ref_points,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_isoflux")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: ref_points(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -1223,10 +1231,10 @@ END SUBROUTINE tokamaker_set_isoflux
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_flux(tMaker_ptr,locations,targets,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_flux")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), INTENT(in) :: locations(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: targets(ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -1248,9 +1256,9 @@ END SUBROUTINE tokamaker_set_flux
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_saddles(tMaker_ptr,targets,weights,ntargets,error_str) BIND(C,NAME="tokamaker_set_saddles")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
 REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
@@ -1344,7 +1352,7 @@ END SUBROUTINE tokamaker_set_coil_vsc
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
+SUBROUTINE tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,cocos,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
@@ -1357,6 +1365,7 @@ REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(OFT_PATH_SLEN) !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: cocos !< COCOS version. (Only 2 or 7 supported. COCOS=7 is the default.)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=40) :: run_info_f
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp,lim_file
@@ -1368,10 +1377,10 @@ CALL copy_string_rev(filename,filename_tmp)
 CALL copy_string_rev(lim_filename,lim_file)
 IF(rcentr>0.d0)THEN
   CALL gs_save_eqdsk(tMaker_obj%gs,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
-    rcentr_in=rcentr,trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,error_str=error_flag)
+    rcentr_in=rcentr,trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,cocos=cocos,error_str=error_flag)
 ELSE
   CALL gs_save_eqdsk(tMaker_obj%gs,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
-    trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,error_str=error_flag)
+    trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,cocos=cocos,error_str=error_flag)
 END IF
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_eqdsk

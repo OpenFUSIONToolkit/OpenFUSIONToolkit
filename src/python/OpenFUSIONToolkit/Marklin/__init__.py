@@ -10,3 +10,5 @@
 @ingroup doxy_oft_python
 '''
 from ._core import Marklin
+
+__all__ = ["Marklin"]

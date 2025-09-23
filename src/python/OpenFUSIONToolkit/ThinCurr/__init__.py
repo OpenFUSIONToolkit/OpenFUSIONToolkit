@@ -10,3 +10,5 @@
 @ingroup doxy_oft_python
 '''
 from ._core import ThinCurr, ThinCurr_reduced
+
+__all__ = ["ThinCurr", "ThinCurr_reduced"]

@@ -76,6 +76,7 @@ The Open FUSION Toolkit Team
 Daniel Burgess (@d-burg)\
 Sophia Guizzo (@sguizzo)\
 Chris Hansen (@hansec)\
+Julia Kirby (@juliagoestoikea)\
 Francois Logak\
 Matthew Pharr (@matt-pharr)
 

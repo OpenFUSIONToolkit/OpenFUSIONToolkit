@@ -1029,8 +1029,8 @@ END SUBROUTINE fit_error_grad
 !
 SUBROUTINE run_err(linear,err,m,ierr)
 LOGICAL, INTENT(in) :: linear
-REAL(8), INTENT(inout) :: err(m)
 INTEGER(4), INTENT(in) :: m
+REAL(8), INTENT(inout) :: err(m)
 INTEGER(4), INTENT(out) :: ierr
 INTEGER(4) :: i
 REAL(8) :: alamin

@@ -30,6 +30,7 @@ USE oft_gs, ONLY: gs_eq, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_i
 use oft_gs, only: gs_get_cond_source, gs_get_cond_weights, gs_set_cond_weights
 #endif
 USE oft_gs_profiles
+USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -63,7 +64,7 @@ REAL(8) :: alpha,beta,sep
 REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
 INTEGER(4) :: ncofs,npsi,io_unit
 LOGICAL :: zero_grad
-CHARACTER(LEN=10) :: profType
+CHARACTER(LEN=15) :: profType
 !---
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)profType
@@ -90,6 +91,13 @@ SELECT CASE(TRIM(profType))
     READ(io_unit,*)cofs
     READ(io_unit,*)yvals
     CALL create_linterp_ff(F,ncofs,cofs,yvals,alpha)
+    DEALLOCATE(cofs,yvals)
+  CASE("jphi-linterp")
+    READ(io_unit,*)ncofs,alpha
+    ALLOCATE(cofs(ncofs),yvals(ncofs))
+    READ(io_unit,*)cofs
+    READ(io_unit,*)yvals
+    CALL create_jphi_ff(F,ncofs,cofs,yvals)
     DEALLOCATE(cofs,yvals)
   CASE("idcd")
     READ(io_unit,*)ncofs
@@ -151,6 +159,11 @@ SELECT TYPE(this=>F)
     WRITE(io_unit,*)this%npsi,this%y0
     WRITE(io_unit,*)this%x
     WRITE(io_unit,*)this%yp
+  TYPE IS(jphi_flux_func)
+    WRITE(io_unit,*)"jphi-linterp"
+    WRITE(io_unit,*)this%npsi,this%y0
+    WRITE(io_unit,*)this%x
+    WRITE(io_unit,*)this%jphi
   TYPE IS(twolam_flux_func)
     WRITE(io_unit,*)"idcd"
     WRITE(io_unit,*)this%ncofs
@@ -1053,7 +1066,7 @@ end subroutine gs_save_ifile
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,cocos,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1066,6 +1079,7 @@ REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
 REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
+INTEGER, OPTIONAL, INTENT(in) :: cocos
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
@@ -1286,7 +1300,7 @@ CALL psi_int%delete()
 !------------------------------------------------------------------------------
 ! Create output file
 !------------------------------------------------------------------------------
-WRITE(eqdsk_case,'(A,X,A)')'tMaker:',run_info
+WRITE(eqdsk_case,'(A,1X,A)')'tMaker:',run_info
 rleft = rbounds(1)
 zmid = (zbounds(2)+zbounds(1))/2.d0
 IF(PRESENT(rcentr_in))THEN
@@ -1332,6 +1346,22 @@ ELSE
     READ(io_unit,*)rlim(i),zlim(i)
   END DO
   CLOSE(io_unit)
+END IF
+! COCOS transform
+IF(PRESENT(cocos))THEN
+  IF(cocos == 2)THEN
+    WRITE(*,*) 'Using COCOS=2...'
+    ffprim = -ffprim
+    pprime = -pprime
+    psirz = -psirz
+    ! fpol = -fpol
+    ! bcentr = -bcentr
+    ! itor = -itor
+    x1 = -x1
+    x2 = -x2
+  ELSE IF(cocos /= 7)THEN
+    CALL oft_abort('Invalid COCOS version.','gs_save_eqdsk',__FILE__)
+  END IF
 END IF
 ! Write out gEQDSK file
 2000 format(a48,3i4)

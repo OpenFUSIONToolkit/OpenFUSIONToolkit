@@ -7,6 +7,10 @@ on:
       - ci_debug
   pull_request:
     types: [opened, reopened, synchronize]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
   
 jobs:
   build:
@@ -65,9 +69,22 @@ jobs:
             mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
+        - {
+            name: "macOS Sequoia GCC 15",
+            os: macos-15,
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
+            python: "python3.13",
+            build_flags: "--build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
+            xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer"
+          }
         exclude:
+          - parallel: mpich
+            config: {os: macos-13}
           - parallel: openmpi
             config: {os: macos-14}
+          - parallel: openmpi
+            config: {os: macos-15}
           - parallel: openmpi
             config: {cc: icx}
         include:
