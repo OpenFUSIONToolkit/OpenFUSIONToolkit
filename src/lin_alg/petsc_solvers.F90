@@ -28,7 +28,7 @@
 MODULE oft_petsc_solvers
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
-USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, solver_delete
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, &
   oft_petsc_matrix, oft_petsc_matrix_cast
