@@ -8,7 +8,7 @@
 !> Portable array sorting and search functions
 !!
 !! @note On Intel compilers binary sort and search are used.
-!! Otherwise C++ templated sort search functions defined in c_sort.cxx are used.
+!! Otherwise C++ templated sort search functions defined in `oft_c_sort.cxx` are used.
 !!
 !! @author Chris Hansen
 !! @date June 2010
@@ -29,6 +29,7 @@ INTERFACE sort_array
   MODULE PROCEDURE sort4
   MODULE PROCEDURE sort8
   ! Sort 1D array and companion array (done in C++)
+  !> @cond
   SUBROUTINE int_sort_array44(list,ind,n) BIND(C)
     IMPORT c_int
     IMPLICIT NONE
@@ -71,6 +72,7 @@ INTERFACE sort_array
     REAL(c_double), DIMENSION(n), INTENT(inout) :: list
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind
   END SUBROUTINE real_sort_array8
+  !> @endcond
   ! Sort 2D array as 1D
   MODULE PROCEDURE sorta4
   MODULE PROCEDURE sorta8
@@ -87,6 +89,7 @@ END INTERFACE search_array
 !------------------------------------------------------------------------------
 INTERFACE
 #if !defined(__INTEL_COMPILER)
+  !> @cond
   SUBROUTINE int_sort44(list,n) BIND(C)
     IMPORT c_int
     IMPLICIT NONE
@@ -143,13 +146,16 @@ INTERFACE
     INTEGER(c_long), INTENT(in) :: item
     INTEGER(c_long), INTENT(in) :: result
   END SUBROUTINE
+  !> @endcond
 #endif
 END INTERFACE
 PUBLIC sort_array, search_array
-!
+!---------------------------------------------------------------------------------
+!> Sort rows of a matrix and associated index vector by the first column in ascending order
+!---------------------------------------------------------------------------------
 INTERFACE sort_matrix
   !---------------------------------------------------------------------------------
-  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !> Integer(4)/Integer(4) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix44(matrix,ind,n) BIND(C)
     IMPORT c_int
@@ -159,7 +165,7 @@ INTERFACE sort_matrix
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
   END SUBROUTINE
   !---------------------------------------------------------------------------------
-  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !> Integer(4)/Integer(8) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix48(matrix,ind,n) BIND(C)
     IMPORT c_int, c_long
@@ -169,7 +175,7 @@ INTERFACE sort_matrix
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
   END SUBROUTINE
   !---------------------------------------------------------------------------------
-  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !> Integer(8)/Integer(4) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix84(matrix,ind,n) BIND(C)
     IMPORT c_int, c_long
@@ -179,7 +185,7 @@ INTERFACE sort_matrix
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
   END SUBROUTINE
   !---------------------------------------------------------------------------------
-  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !> Integer(8)/Integer(8) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
   SUBROUTINE int_sort_matrix88(matrix,ind,n) BIND(C)
     IMPORT c_long
@@ -189,7 +195,7 @@ INTERFACE sort_matrix
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
   END SUBROUTINE
   !---------------------------------------------------------------------------------
-  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !> Real(4)/Integer(4) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
   SUBROUTINE real_sort_matrix4(matrix,ind,n) BIND(C)
     IMPORT c_int, c_double
@@ -199,7 +205,7 @@ INTERFACE sort_matrix
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
   END SUBROUTINE
   !---------------------------------------------------------------------------------
-  !> Sort rows of a matrix and associated index vector by the first column in ascending order
+  !> Real(8)/Integer(8) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
   SUBROUTINE real_sort_matrix8(matrix,ind,n) BIND(C)
     IMPORT c_long, c_double

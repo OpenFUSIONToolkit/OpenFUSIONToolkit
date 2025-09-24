@@ -43,7 +43,7 @@ def run_command(command, timeout=10):
 #----------------------------------------------------------------
 # Parse structured example file and generate documentation
 #----------------------------------------------------------------
-def parse_fortran_file(fid):
+def parse_fortran_file(fid,dirname):
     # Initialize local variables
     file_buffer = ""
     code_buffer = ""
@@ -63,6 +63,15 @@ def parse_fortran_file(fid):
                 tmp = line.split('{')[1]
                 tmp = tmp.split('}')[0]
                 ex_prefix = tmp[1:]
+            continue
+        # Include other file in verbatim block
+        if indoc and line.find("! OFT_DOC_INCLUDE:") == 0:
+            include_file = line.split(":")[1].strip()
+            syntax_type = ''
+            if os.path.splitext(include_file)[1] == '.xml':
+               syntax_type = 'xml'
+            with open(os.path.join(dirname,include_file), 'r') as fid:
+                doc_buffer = doc_buffer + '```{1}\n{0}\n'.format(''.join(fid.readlines()),syntax_type)+'```\n'
             continue
         # Check if full source version should be included
         if line.find("! START SOURCE") == 0:
@@ -142,9 +151,10 @@ if __name__ == '__main__':
     print("Parsing Example Files")
     for filename in files:
         basename = os.path.basename(filename)
+        dirname = os.path.dirname(filename)
         print(filename,basename)
         with open(filename,'r') as fid:
-            new_file = parse_fortran_file(fid)
+            new_file = parse_fortran_file(fid,dirname)
         # Write documentation file to doc folder
         path = "docs/generated/doc_" + basename + ".md"
         with open(path,"w+") as fid:
