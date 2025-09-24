@@ -11,47 +11,6 @@
 template <class T1, class T2>
 void int_sort(T1* ia,T2 n) {
 	std::sort(ia,ia+n);
-// Legacy bubble sort implementation
-//	T1 iia;
-//	T2 i;
-//	T2 ir;
-//	T2 j;
-//	T2 l;
-//
-//	if(n<2)
-//		return;
-//	l=n/2+1;
-//	ir=n-1;
-//	while(ir>=0) {
-//		if(l>0) {
-//			l--;
-//			iia=ia[l];
-//		} else {
-//			iia=ia[ir];
-//			ia[ir]=ia[0];
-//			ir--;
-//			if(ir==0){
-//				ia[0]=iia;
-//				return;
-//			}
-//		}
-//		i=l;
-//		j=l+l;
-//		while(j<ir) {
-//			if(j<ir) {
-//				if(ia[j]<ia[j+1])
-//					j++;
-//			}
-//			if(iia<ia[j]) {
-//				ia[i]=ia[j];
-//				i=j;
-//				j=j+j;
-//			} else {
-//				j=ir+1;
-//			}
-//			ia[i]=iia;
-//		}
-//	}
 }
 
 template <class T1, class T2>
@@ -119,18 +78,6 @@ void sort_array(T1* col, T2* ind, T2 n) {
 		col[i] = col_copy[indices[i]];
 		ind[i] = ind_copy[indices[i]];
 	}
-// Legacy bubble sort implementation
-//	T1 store_col;
-//	T2 k;
-//	for (T2 j=0; j<n; j++) {
-//		for (T2 i=n-1; i>j; i--) {
-//			if(col[i-1]>col[i] ) { //Swap rows and indices
-//				store_col=col[i]; k=ind[i]; // [1]
-//				col[i]=col[i-1]; ind[i]=ind[i-1]; // [2]
-//				col[i-1]=store_col; ind[i-1]=k; // [3]
-//			}
-//		}
-//	}
 }
 
 template <class T1, class T2>

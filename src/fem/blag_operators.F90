@@ -389,10 +389,10 @@ end subroutine zeroe_apply
 !! - `'none'` Full matrix
 !! - `'zerob'` Dirichlet for all boundary DOF
 !------------------------------------------------------------------------------
-subroutine oft_blag_getmop(fe_rep,mat,bc)
+subroutine oft_blag_getmop(fe_rep,mat,bc_flag)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
-character(LEN=*), intent(in) :: bc !< Boundary condition
+logical, optional, intent(in) :: bc_flag(:) !< Dirichlet BC flag
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
@@ -442,6 +442,12 @@ do i=1,lag_rep%mesh%nc
   end do
   !---Get local to global DOF mapping
   call lag_rep%ncdofs(i,j)
+  !---Apply bc to local matrix
+  IF(PRESENT(bc_flag))THEN
+    DO jr=1,lag_rep%nce
+      IF(bc_flag(j(jr)))mop(jr,:)=0.d0
+    END DO
+  END IF
   !---Add local values to global matrix
   ! !$omp critical
   call mat%atomic_add_values(j,j,mop,lag_rep%nce,lag_rep%nce)
@@ -449,6 +455,20 @@ do i=1,lag_rep%mesh%nc
 end do
 deallocate(j,rop,mop)
 !$omp end parallel
+!---Set diagonal entries for dirichlet rows
+ALLOCATE(mop(1,1),j(1))
+mop(1,1)=1.d0
+IF(PRESENT(bc_flag))THEN
+  DO i=1,lag_rep%nbe
+    jr=lag_rep%lbe(i)
+    IF(bc_flag(jr).AND.lag_rep%linkage%leo(i))THEN
+      j=jr
+      call mat%add_values(j,j,mop,1,1)
+    END IF
+  END DO
+END IF
+DEALLOCATE(j,mop)
+!---Complete assembly
 CALL lag_rep%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
@@ -612,7 +632,7 @@ CLASS(oft_vector), INTENT(inout) :: x !< Field projected onto boundary Lagrange 
 INTEGER(i4) :: i,m,k,jc,cell,ptmap(3)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j
 REAL(r8) :: vol,det,etmp(1),sgop(3,3),rop
-REAL(r8), POINTER, DIMENSION(:) :: xloc
+REAL(r8), POINTER, DIMENSION(:) :: xloc,xtmp
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_project",__FILE__)
@@ -622,11 +642,11 @@ call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
 !$omp parallel default(firstprivate) shared(field,xloc) private(det)
-allocate(j(lag_rep%nce))
-!$omp do schedule(guided)
+allocate(j(lag_rep%nce),xtmp(lag_rep%nce))
+!$omp do schedule(static)
 do i=1,lag_rep%mesh%nc
-  call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
   !---Loop over quadrature points
+  xtmp=0.d0
   do m=1,lag_rep%quad%np
     call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),sgop,vol)
     det=vol*lag_rep%quad%wts(m)
@@ -634,12 +654,16 @@ do i=1,lag_rep%mesh%nc
     !---Project on to Lagrange basis
     do jc=1,lag_rep%nce
       call oft_blag_eval(lag_rep,i,jc,lag_rep%quad%pts(:,m),rop)
-      !$omp atomic
-      xloc(j(jc))=xloc(j(jc)) + rop*etmp(1)*det
+      xtmp(jc) = xtmp(jc) + rop*etmp(1)*det
     end do
   end do
+  call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
+  do jc=1,lag_rep%nce
+    !$omp atomic
+    xloc(j(jc))=xloc(j(jc)) + xtmp(jc)
+  end do
 end do
-deallocate(j)
+deallocate(j,xtmp)
 !$omp end parallel
 call x%restore_local(xloc,add=.TRUE.)
 deallocate(xloc)
@@ -661,6 +685,7 @@ INTEGER(i4) :: i,m,k,jc,cell,ptmap(3)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j
 REAL(r8) :: vol,det,etmp(3),sgop(3,3),rop
 REAL(r8), POINTER, DIMENSION(:) :: xloc,yloc,zloc
+REAL(r8), POINTER, DIMENSION(:,:) :: vtmp
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_vproject",__FILE__)
@@ -673,12 +698,12 @@ call y%get_local(yloc)
 call z%set(0.d0)
 call z%get_local(zloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc,yloc,zloc) private(det)
-allocate(j(lag_rep%nce))
-!$omp do schedule(guided)
+!$omp parallel default(firstprivate) shared(field,xloc,yloc,zloc,lag_rep)
+allocate(j(lag_rep%nce),vtmp(lag_rep%nce,3))
+!$omp do schedule(static)
 do i=1,lag_rep%mesh%nc
-  call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
   !---Loop over quadrature points
+  vtmp=0.d0
   do m=1,lag_rep%quad%np
     call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),sgop,vol)
     det=vol*lag_rep%quad%wts(m)
@@ -686,16 +711,20 @@ do i=1,lag_rep%mesh%nc
     !---Project on to Lagrange basis
     do jc=1,lag_rep%nce
       call oft_blag_eval(lag_rep,i,jc,lag_rep%quad%pts(:,m),rop)
-      !$omp atomic
-      xloc(j(jc))=xloc(j(jc))+rop*etmp(1)*det
-      !$omp atomic
-      yloc(j(jc))=yloc(j(jc))+rop*etmp(2)*det
-      !$omp atomic
-      zloc(j(jc))=zloc(j(jc))+rop*etmp(3)*det
+      vtmp(jc,:) = vtmp(jc,:) + rop*etmp*det
     end do
   end do
+  call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
+  do jc=1,lag_rep%nce
+    !$omp atomic
+    xloc(j(jc)) = xloc(j(jc))+vtmp(jc,1)
+    !$omp atomic
+    yloc(j(jc)) = yloc(j(jc))+vtmp(jc,2)
+    !$omp atomic
+    zloc(j(jc)) = zloc(j(jc))+vtmp(jc,3)
+  end do
 end do
-deallocate(j)
+deallocate(j,vtmp)
 !$omp end parallel
 call x%restore_local(xloc,add=.TRUE.)
 call y%restore_local(yloc,add=.TRUE.)

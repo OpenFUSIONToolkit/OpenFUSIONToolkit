@@ -36,7 +36,7 @@ USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile
   sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
-USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof
+USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -50,6 +50,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
   LOGICAL(KIND=c_bool) :: has_plasma = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: limited_only = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: dipole_mode = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: mirror_mode = .FALSE. !< Needs docs
   INTEGER(KIND=c_int) :: maxits = 40 !< Needs docs
   INTEGER(KIND=c_int) :: mode = 1 !< Needs docs
   REAL(KIND=c_double) :: urf = 0.3d0 !< Needs docs
@@ -301,10 +302,10 @@ tMaker_obj%gs%full_domain=full_domain
 CALL gs_setup_walls(tMaker_obj%gs)
 CALL tMaker_obj%gs%load_limiters
 CALL tMaker_obj%gs%init()
-IF(tMaker_obj%gs%dipole_mode)THEN
-  tMaker_obj%gs%dipole_a=0.d0
-  CALL create_dipole_b0_prof(tMaker_obj%gs%dipole_B0,64)
-END IF
+! IF(tMaker_obj%gs%dipole_mode)THEN
+!   tMaker_obj%gs%dipole_a=0.d0
+!   CALL create_dipole_b0_prof(tMaker_obj%gs%dipole_B0,64)
+! END IF
 ncoils=tMaker_obj%gs%ncoils
 END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
@@ -1164,8 +1165,10 @@ tMaker_obj%gs%mode=settings%mode
 tMaker_obj%gs%urf=settings%urf
 tMaker_obj%gs%maxits=settings%maxits
 tMaker_obj%gs%nl_tol=settings%nl_tol
+IF((.NOT.tMaker_obj%gs%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution")
 tMaker_obj%gs%dipole_mode=settings%dipole_mode
-IF(tMaker_obj%gs%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution")
+IF((.NOT.tMaker_obj%gs%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution")
+tMaker_obj%gs%mirror_mode=settings%mirror_mode
 CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(limfile_c,tMaker_obj%gs%limiter_file)
 END SUBROUTINE tokamaker_set_settings
@@ -1178,8 +1181,65 @@ REAL(c_double), VALUE, INTENT(in) :: dipole_a !< New value for dipole_a
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-tMaker_obj%gs%dipole_a=dipole_a
+IF(.NOT.tMaker_obj%gs%dipole_mode)THEN
+  CALL copy_string('Dipole pressure profile requires dipole_mode',error_str)
+  RETURN
+END IF
+IF(dipole_a<=0.d0)THEN
+  IF(ASSOCIATED(tMaker_obj%gs%P_ani))THEN
+    CALL tMaker_obj%gs%P_ani%delete()
+    DEALLOCATE(tMaker_obj%gs%P_ani)
+  END IF
+ELSE
+  IF(.NOT.ASSOCIATED(tMaker_obj%gs%P_ani))ALLOCATE(dipole_ani_press::tMaker_obj%gs%P_ani)
+  SELECT TYPE(this=>tMaker_obj%gs%P_ani)
+    CLASS IS(dipole_ani_press)
+      IF(.NOT.ASSOCIATED(this%psi_eval))CALL this%setup(tMaker_obj%gs)
+      this%a_exp=dipole_a
+    CLASS DEFAULT
+      CALL copy_string('Invalid anisotropic pressure type',error_str)
+      RETURN
+  END SELECT
+  ! tMaker_obj%gs%dipole_a=dipole_a
+END IF
 END SUBROUTINE tokamaker_set_dipole_a
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_mirror_slosh(tMaker_ptr,mirror_n,mirror_bturn,mirror_zthroat,error_str) BIND(C,NAME="tokamaker_set_mirror_slosh")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+REAL(c_double), VALUE, INTENT(in) :: mirror_n !< New value for dipole_a
+REAL(c_double), VALUE, INTENT(in) :: mirror_bturn !< New value for dipole_a
+REAL(c_double), VALUE, INTENT(in) :: mirror_zthroat !< New value for dipole_a
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tMaker_obj%gs%mirror_mode)THEN
+  CALL copy_string('Sloshing ions pressure profile requires mirror_mode',error_str)
+  RETURN
+END IF
+IF(mirror_n<=0.d0)THEN
+  IF(ASSOCIATED(tMaker_obj%gs%P_ani))THEN
+    CALL tMaker_obj%gs%P_ani%delete()
+    DEALLOCATE(tMaker_obj%gs%P_ani)
+  END IF
+ELSE
+  IF(.NOT.ASSOCIATED(tMaker_obj%gs%P_ani))ALLOCATE(mirror_ani_slosh::tMaker_obj%gs%P_ani)
+  SELECT TYPE(this=>tMaker_obj%gs%P_ani)
+    CLASS IS(mirror_ani_slosh)
+      IF(.NOT.ASSOCIATED(this%psi_geval))CALL this%setup(tMaker_obj%gs)
+      this%n_exp=mirror_n
+      this%bturn=mirror_bturn
+      this%zthroat=mirror_zthroat
+    CLASS DEFAULT
+      CALL copy_string('Invalid anisotropic pressure type',error_str)
+      RETURN
+  END SELECT
+  ! tMaker_obj%gs%mirror_n=mirror_n
+  ! tMaker_obj%gs%mirror_bturn=mirror_bturn
+  ! tMaker_obj%gs%mirror_zthroat=mirror_zthroat
+END IF
+END SUBROUTINE tokamaker_set_mirror_slosh
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------

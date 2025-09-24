@@ -120,7 +120,7 @@ CONTAINS
   !> Check thread safety
   PROCEDURE :: check_thread => solver_check_thread
   !> Clean-up internal storage
-  PROCEDURE(solver_delete), DEFERRED :: delete
+  PROCEDURE :: delete => solver_delete
 END TYPE oft_solver
 !------------------------------------------------------------------------------
 !> Solver container
@@ -141,16 +141,6 @@ ABSTRACT INTERFACE
   CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
   CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
   END SUBROUTINE solver_apply
-  !------------------------------------------------------------------------------
-  !> Destroy linear solver and deallocate all internal storage
-  !!
-  !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized solvers
-  !------------------------------------------------------------------------------
-  SUBROUTINE solver_delete(self)
-  IMPORT oft_solver
-  CLASS(oft_solver), INTENT(inout) :: self !< Solver object
-  END SUBROUTINE solver_delete
 END INTERFACE
 !------------------------------------------------------------------------------
 !> Base class for OFT solvers
@@ -179,7 +169,7 @@ CONTAINS
   !> Check thread safety
   PROCEDURE :: check_thread => csolver_check_thread
   !> Clean-up internal storage
-  PROCEDURE(csolver_delete), DEFERRED :: delete
+  PROCEDURE :: delete => csolver_delete
 END TYPE oft_csolver
 !------------------------------------------------------------------------------
 !> Solver container
@@ -200,16 +190,6 @@ ABSTRACT INTERFACE
   CLASS(oft_cvector), INTENT(inout) :: u !< Guess/Solution field
   CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
   END SUBROUTINE csolver_apply
-  !------------------------------------------------------------------------------
-  !> Destroy linear solver and deallocate all internal storage
-  !!
-  !! @note This subroutine is a dummy routine used to specify the interface
-  !! of the member function and catch errors in uninitialized solvers
-  !------------------------------------------------------------------------------
-  SUBROUTINE csolver_delete(self)
-  IMPORT oft_csolver
-  CLASS(oft_csolver), INTENT(inout) :: self !< Solver object
-  END SUBROUTINE csolver_delete
 END INTERFACE
 !------------------------------------------------------------------------------
 !> Base class for OFT eigenvalue solvers
@@ -257,7 +237,7 @@ ABSTRACT INTERFACE
   END SUBROUTINE eigsolver_delete
 END INTERFACE
 !---Make classes and prototypes public
-PUBLIC solver_setup, csolver_setup, eigsolver_setup
+PUBLIC solver_setup, solver_delete, csolver_setup, csolver_delete, eigsolver_setup
 CONTAINS
 !------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
@@ -272,12 +252,28 @@ self%initialized=.TRUE.
 DEBUG_STACK_POP
 END SUBROUTINE solver_setup
 !------------------------------------------------------------------------------
+!> Destroy linear solver and deallocate all internal storage
+!!
+!! @note This subroutine is a dummy routine used to specify the interface
+!! of the member function and catch errors in uninitialized solvers
+!------------------------------------------------------------------------------
+SUBROUTINE solver_delete(self,propogate)
+CLASS(oft_solver), INTENT(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+IF(PRESENT(propogate))THEN
+  IF(propogate.AND.ASSOCIATED(self%pre))THEN
+    CALL self%pre%delete(propogate)
+    DEALLOCATE(self%pre)
+  END IF
+END IF
+END SUBROUTINE solver_delete
+!------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
 !! of the member function and catch errors in uninitialized solvers
 !------------------------------------------------------------------------------
-recursive SUBROUTINE solver_update(self,new_pattern)
+RECURSIVE SUBROUTINE solver_update(self,new_pattern)
 CLASS(oft_solver), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix non-zero pattern? (optional)
 IF(ASSOCIATED(self%pre))CALL self%pre%update(new_pattern)
@@ -324,10 +320,20 @@ self%initialized=.TRUE.
 DEBUG_STACK_POP
 END SUBROUTINE csolver_setup
 !------------------------------------------------------------------------------
+!> Destroy linear solver and deallocate all internal storage
+!------------------------------------------------------------------------------
+SUBROUTINE csolver_delete(self,propogate)
+CLASS(oft_csolver), INTENT(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+IF(PRESENT(propogate))THEN
+  IF(propogate.AND.ASSOCIATED(self%pre))THEN
+    CALL self%pre%delete(propogate)
+    DEALLOCATE(self%pre)
+  END IF
+END IF
+END SUBROUTINE csolver_delete
+!------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
-!!
-!! @note This subroutine is a dummy routine used to specify the interface
-!! of the member function and catch errors in uninitialized solvers
 !------------------------------------------------------------------------------
 recursive SUBROUTINE csolver_update(self,new_pattern)
 CLASS(oft_csolver), intent(inout) :: self !< Solver object
