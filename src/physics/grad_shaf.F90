@@ -262,7 +262,6 @@ TYPE :: gs_eq
   CLASS(gs_ani_press), POINTER :: P_ani => NULL() !< Anisotropic flux interpolator
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
-  CLASS(flux_func), POINTER :: dipole_B0 => NULL() !< Dipole minimum B profile
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
   CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
   TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL() !< Multi-level Lagrange FE representation (only top level used)
@@ -1428,6 +1427,7 @@ self%plasma_bounds=[-1.d99,1.d99]
 CALL gs_update_bounds(self)
 CALL self%I%update(self)
 CALL self%p%update(self)
+IF(ASSOCIATED(self%P_ani))CALL self%P_ani%update(self)
 !
 IF(self%save_visit)THEN
   CALL self%psi%get_local(psi_vals)
@@ -1973,19 +1973,7 @@ NULLIFY(btmp)
 CALL b%get_local(btmp)
 psi_eval%u=>self%psi
 CALL psi_eval%setup(self%fe_rep)
-! IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
-!   CALL psi_geval%shared_setup(psi_eval)
-!   CALL self%dipole_B0%update(self)
-!   CALL self%psi%new(bcross_kappa_fun%u)
-!   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
-!   CALL bcross_kappa_fun%setup(self%fe_rep)
-! ELSE IF(self%mirror_mode.AND.(self%mirror_n>0.d0))THEN
-!   CALL psi_geval%shared_setup(psi_eval)
-!   CALL self%psi%new(bcross_kappa_fun%u)
-!   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
-!   CALL bcross_kappa_fun%setup(self%fe_rep)
 IF(ASSOCIATED(self%P_ani))THEN
-  CALL self%P_ani%update(self)
   CALL psi_geval%shared_setup(psi_eval)
   CALL self%psi%new(bcross_kappa_fun%u)
   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
@@ -2261,6 +2249,7 @@ self%o_point(1)=-1.d0
 CALL gs_update_bounds(self)
 CALL self%I%update(self)
 CALL self%p%update(self)
+IF(ASSOCIATED(self%P_ani))CALL self%P_ani%update(self)
 !---Get J_phi source term
 CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
 IF(self%dt>0.d0)THEN
@@ -2632,6 +2621,7 @@ DO i=1,self%maxits
   CALL gs_update_bounds(self)
   CALL self%I%update(self)
   CALL self%p%update(self)
+  IF(ASSOCIATED(self%P_ani))CALL self%P_ani%update(self)
   !---Output
   IF(self%save_visit.AND.self%plot_step)THEN
     eq_count=eq_count+1
@@ -2771,6 +2761,7 @@ END IF
 CALL gs_update_bounds(self)
 CALL self%I%update(self)
 CALL self%p%update(self)
+IF(ASSOCIATED(self%P_ani))CALL self%P_ani%update(self)
 !---Get J_phi source term
 CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
 IF(ABS(self%alam)>TINY(self%alam)*1.d2)CALL psi_alam%scale(1.d0/self%alam)
@@ -2986,6 +2977,7 @@ IF(oft_env%pm)CALL oft_decrease_indent
 ! CALL gs_update_bounds(self)
 ! CALL self%I%update(self)
 ! CALL self%p%update(self)
+! IF(ASSOCIATED(self%P_ani))CALL self%P_ani%update(self) ! Is this needed?
 !---
 CALL rhs%delete
 CALL psip%delete
@@ -3276,17 +3268,7 @@ CALL b%get_local(btmp)
 CALL b2%get_local(b2tmp)
 CALL b3%get_local(b3tmp)
 CALL a%get_local(atmp)
-! IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
-!   CALL self%dipole_B0%update(self)
-!   CALL self%psi%new(bcross_kappa_fun%u)
-!   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
-!   CALL bcross_kappa_fun%setup(self%fe_rep)
-! ELSE IF(self%mirror_mode.AND.(self%mirror_n>0.d0))THEN
-!   CALL self%psi%new(bcross_kappa_fun%u)
-!   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
-!   CALL bcross_kappa_fun%setup(self%fe_rep)
 IF(ASSOCIATED(self%P_ani))THEN
-  CALL self%P_ani%update(self)
   CALL self%psi%new(bcross_kappa_fun%u)
   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
   CALL bcross_kappa_fun%setup(self%fe_rep)
@@ -3501,19 +3483,7 @@ END IF
 !---
 psi_eval%u=>self%psi
 CALL psi_eval%setup(self%fe_rep)
-! IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
-!   CALL psi_geval%shared_setup(psi_eval)
-!   CALL self%dipole_B0%update(self)
-!   CALL self%psi%new(bcross_kappa_fun%u)
-!   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
-!   CALL bcross_kappa_fun%setup(self%fe_rep)
-! ELSE IF(self%mirror_mode.AND.(self%mirror_n>0.d0))THEN
-!   CALL psi_geval%shared_setup(psi_eval)
-!   CALL self%psi%new(bcross_kappa_fun%u)
-!   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
-!   CALL bcross_kappa_fun%setup(self%fe_rep)
 IF(ASSOCIATED(self%P_ani))THEN
-  CALL self%P_ani%update(self)
   CALL psi_geval%shared_setup(psi_eval)
   CALL self%psi%new(bcross_kappa_fun%u)
   CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
@@ -4626,8 +4596,6 @@ ALLOCATE(self%psi_eval,self%psi_geval)
 self%psi_eval%u=>self%gs%psi
 CALL self%psi_eval%setup(self%gs%fe_rep)
 CALL self%psi_geval%shared_setup(self%psi_eval)
-IF(ASSOCIATED(self%gs%P_ani))CALL self%gs%P_ani%update(self%gs)
-! IF(self%gs%dipole_mode)CALL self%gs%dipole_B0%update(self%gs)
 end subroutine gs_prof_interp_setup
 !------------------------------------------------------------------------------
 !> Destroy temporary internal storage and nullify references
@@ -4742,7 +4710,6 @@ subroutine gs_j_interp_setup(self,gs)
 class(gs_j_interp), intent(inout) :: self
 class(gs_eq), target, intent(inout) :: gs
 CALL gs_prof_interp_setup(self,gs)
-! IF(self%gs%dipole_mode.OR.self%gs%mirror_mode)THEN
 IF(ASSOCIATED(self%gs%P_ani))THEN
   CALL self%gs%psi%new(self%bcross_kappa_fun%u)
   CALL gs_bcrosskappa(self%gs,self%bcross_kappa_fun%u)

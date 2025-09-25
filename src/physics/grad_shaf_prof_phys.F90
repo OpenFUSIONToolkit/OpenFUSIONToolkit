@@ -389,6 +389,7 @@ jphi_norm=ABS(gseq%Itor_target)/jphi_norm
 DEALLOCATE(qtmp)
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
+IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
@@ -461,7 +462,7 @@ END SUBROUTINE create_dipole_b0_prof
 subroutine dipole_b0_update(self,gseq)
 class(dipole_b0_flux_func), intent(inout) :: self
 class(gs_eq), intent(inout) :: gseq
-type(minbinv_interp), target :: field
+type(minbinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: I,Ip,q,qp,vp,vpp,s,a,b,pp,gop(3,3),psi_surf(1),vol,rmax
 real(8) :: raxis,zaxis,f(3),pt(3),x1,x2,xr
@@ -502,8 +503,9 @@ END DO
 IF(oft_debug_print(2))WRITE(*,'(2A,ES11.3)')oft_indent,'Rmin = ',rmax
 !---Trace
 call set_tracer(1)
-!!$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
+!$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
+ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
 active_tracer%neq=2
@@ -513,13 +515,11 @@ active_tracer%tol=1.d-9
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
-!!$omp do schedule(dynamic,1)
+!$omp do schedule(dynamic,1)
 do j=1,self%npsi+1
   psi_surf(1)=(x2-x1)*(1.d0-j/REAL(self%npsi+2,4))
   psi_surf(1)=x2 - psi_surf(1)
-  !!$omp critical
-  CALL gs_psi2r(gseq,psi_surf(1),pt)
-  !!$omp end critical
+  CALL gs_psi2r(gseq,psi_surf(1),pt,psi_int)
   field%minB=1.d99
   call tracinginv_fs(gseq%mesh,pt(1:2))
   !---Exit if trace fails
@@ -532,7 +532,10 @@ do j=1,self%npsi+1
   self%func%fs(j-1,1)=field%minB
   ! WRITE(*,*)psi_surf(1),field%minB
 end do
-!!$omp end parallel
+CALL active_tracer%delete
+CALL field%delete()
+DEALLOCATE(field)
+!$omp end parallel
 self%xmin=self%func%xs(0)+(self%func%xs(0)-self%func%xs(1))*4.d0
 self%xmax=self%func%xs(self%npsi)+(self%func%xs(1)-self%func%xs(0))*4.d0
 self%yp1=0.d0
