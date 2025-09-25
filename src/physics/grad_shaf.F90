@@ -1806,12 +1806,14 @@ class(gs_eq), intent(inout) :: self !< G-S object
 CLASS(oft_vector), intent(inout) :: dpsi_dt !< \f$ \psi \f$ at start of step
 CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 real(r8), pointer, dimension(:) :: btmp,btmp_coils
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,nturns
+real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,nturns,cond_norm
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:),eta_reg(:),reg_source(:)
 real(8), pointer :: psi_vals(:),coil_vals(:)
-integer(4) :: j,m,l,k,kk,iCond
+integer(4) :: j,m,l,k,kk,iCond,jc
 integer(4), allocatable :: j_lag(:)
 logical :: curved
+CLASS(oft_scalar_bfem), POINTER :: lag_rep
+lag_rep=>self%fe_rep
 ! t1=omp_get_wtime()
 !---
 NULLIFY(btmp,btmp_coils,psi_vals,coil_vals)
@@ -1839,7 +1841,7 @@ IF(ASSOCIATED(self%region_info%nonaxi_vals))THEN
   END DO
 END IF
 !---
-!$omp parallel private(rhs_loc,j_lag,curved,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
+!$omp parallel private(rhs_loc,j_lag,curved,goptmp,v,m,det,pt,psitmp,l,rop,nturns,cond_norm,jc)
 allocate(rhs_loc(self%fe_rep%nce+self%ncoils))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
@@ -1863,7 +1865,11 @@ DO j=1,self%fe_rep%mesh%nc
       IF(self%Rcoils(l)<=0.d0)CYCLE
       nturns = self%coil_nturns(self%fe_rep%mesh%reg(j),l)
       IF(ABS(nturns)>1.d-8)THEN
-        rhs_loc(self%fe_rep%nce+l)=rhs_loc(self%fe_rep%nce+l)+mu0*2.d0*pi*psitmp*nturns*det
+        cond_norm=0.d0
+        do jc=1,lag_rep%nce ! Loop over degrees of freedom
+          cond_norm = cond_norm + self%dist_coil(j_lag(jc),l)*rop(jc)
+        end do
+        rhs_loc(self%fe_rep%nce+l)=rhs_loc(self%fe_rep%nce+l)+mu0*2.d0*pi*psitmp*nturns*cond_norm*det
       END IF
     END DO
     IF(eta_reg(self%fe_rep%mesh%reg(j))<0.d0)CYCLE
