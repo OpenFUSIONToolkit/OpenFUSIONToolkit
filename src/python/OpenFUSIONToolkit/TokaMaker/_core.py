@@ -1865,21 +1865,21 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
-def new_solve_with_bootstrap(self,
-                             ne,
-                       Te,
-                       ni,
-                       Ti,
-                       Zeff,
-                       Ip_target,
-                       inductive_jtor=None,
-                       Zis=[1.],
-                       scale_jBS=1.0,
-                       isolate_jBS=False,
-                       psi_pad=1e-3,
-                       max_iterations=6,
-                       iteration_plots=False,
-                       initialize_eq=False # do not use, likely can be removed
+def solve_with_bootstrap(self,
+                         ne,
+                         Te,
+                         ni,
+                         Ti,
+                         Zeff,
+                         Ip_target,
+                         inductive_jtor=None,
+                         Zis=[1.],
+                         scale_jBS=1.0,
+                         isolate_jBS=False,
+                         psi_pad=1e-3,
+                         max_iterations=6,
+                         iteration_plots=False,
+                         initialize_eq=False # do not use, likely can be removed
                             ):
     '''! Self-consistently compute bootstrap contribution from H-mode profiles. 
     If l_i is set, match to a user specified internal inductance by scanning a 
