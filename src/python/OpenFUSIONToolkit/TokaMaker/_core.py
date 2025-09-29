@@ -1865,21 +1865,22 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
-def solve_with_bootstrap(self,
-                         ne,
-                         Te,
-                         ni,
-                         Ti,
-                         Zeff,
-                         psi,
-                         Ip_target,
-                         inductive_jtor=None,
-                         Zis=[1.],
-                         scale_jBS=1.0,
-                         isolate_jBS=False,
-                         psi_pad=1e-3,
-                         max_iterations=6,
-                         initialize_eq=True):
+def new_solve_with_bootstrap(self,
+                             ne,
+                       Te,
+                       ni,
+                       Ti,
+                       Zeff,
+                       Ip_target,
+                       inductive_jtor=None,
+                       Zis=[1.],
+                       scale_jBS=1.0,
+                       isolate_jBS=False,
+                       psi_pad=1e-3,
+                       max_iterations=6,
+                       iteration_plots=False,
+                       initialize_eq=False # do not use, likely can be removed
+                            ):
     '''! Self-consistently compute bootstrap contribution from H-mode profiles. 
     If l_i is set, match to a user specified internal inductance by scanning a 
     parametrized FF' profile, and iterate solution until all functions of Psi converge. 
@@ -1906,6 +1907,7 @@ def solve_with_bootstrap(self,
     @param inductive_jtor Inductive toroidal current, sampled over psi_norm
     @param scale_jBS Factor by which to scale bootstrap current fraction
     @param max_iterations Maximum number of H-mode mygs.solve() iterations
+    @param iteration_plots Plot iteration target and output j_tor profiles
     @param initialize_eq Initialize equilibrium solve with flattened pedestal. 
     '''
     from scipy.signal import find_peaks, peak_widths
@@ -1930,7 +1932,6 @@ def solve_with_bootstrap(self,
         @param one_over_R_avg Flux averaged 1/R, calculated by TokaMaker
         @param pprime dP/dPsi profile
         '''
-        mu0 = np.pi*4.E-7
         jtor = ffprime * (one_over_R_avg / mu0) + R_avg * pprime
 
         return jtor
@@ -2198,7 +2199,7 @@ def solve_with_bootstrap(self,
         return init_pressure,init_ne,init_ni,init_Te,init_Ti
         
     kBoltz = eC
-    pressure = (kBoltz * ne * Te) + (kBoltz * ni * Ti) # 1.602e-19 * [m^-3] * [eV] = [Pa]
+    pressure = (kBoltz * ne * Te) + (kBoltz * ni * Ti) # 1.6022e-19 * [m^-3] * [eV] = [Pa]
 
     ### Reconstruct psi_norm and n_psi from pressure
     psi_norm = np.linspace(0.,1.,len(pressure))
@@ -2294,10 +2295,11 @@ def solve_with_bootstrap(self,
             print('Ip target: '+str(Ip_target/1e+6)+' [MA]')
             print('Ip error: '+str(Ip_error_tmp/1e+6)+' [MA]')
 
-            plt.plot(psi,tmp_jtor)
-            plt.plot(psi,input_jtor,linestyle='--')
-            plt.title('Iteration output j_tor, Ip error: '+str(round(Ip_error_tmp/1e+6,5))+' [MA]')
-            plt.show()
+            if iteration_plots:
+                plt.plot(psi,tmp_jtor)
+                plt.plot(psi,input_jtor,linestyle='--')
+                plt.title('Iteration output j_tor, Ip error: '+str(round(Ip_error_tmp/1e+6,5))+' [MA]')
+                plt.show()
             
             # Need to interface with Chris about how to assess solve success
             
