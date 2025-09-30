@@ -21,6 +21,14 @@ from .util import run_shell_command, oft_warning
 
 class OFT_env():
     '''! OpenFUSIONToolkit runtime environment class'''
+    def __new__(cls, *args, **kwargs):
+        '''! Create OFT runtime object ensuring only single initialization'''
+        if hasattr(cls, 'instance'):
+            raise RuntimeError('Only one instance of `OFT_env` can be created per python kernel')
+        else:
+            cls.instance = super(OFT_env, cls).__new__(cls)
+        return cls.instance
+
     def __init__(self,debug_level=0,nthreads=2,unique_tempfiles='global',abort_callback=True):
         '''! Initialize OFT runtime object
 
