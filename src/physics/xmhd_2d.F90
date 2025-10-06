@@ -49,7 +49,7 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
   REAL (r8) :: B_0(3) = 0.d0
   REAL(r8) :: eta
 
-  LOGICAL :: cyl_flag
+  LOGICAL :: cyl_flag=.FALSE.
 
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
@@ -64,7 +64,7 @@ TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
 END TYPE xmhd_2d_nlfun
 
 TYPE, extends(oft_noop_matrix) :: xmhd_2d_mfun
-  LOGICAL :: cyl_flag
+  LOGICAL :: cyl_flag=.FALSE.
   REAL (r8) :: B_0(3) = 0.d0
   REAL (r8) :: den_scale = 1.d19 !< Needs docs
   REAL (r8) :: diag_vals(7) = 0.d0 !< Needs docs
@@ -141,9 +141,6 @@ CLASS(oft_bmesh), POINTER, PUBLIC :: mesh => NULL()
 TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_blagrange
 CLASS(oft_scalar_bfem), POINTER :: oft_blagrange => NULL()
 CONTAINS
-!---------------------------------------------------------------------------
-!> TODO: COMPLETE EDIT FOR NEW FIELDS
-!---------------------------------------------------------------------------
 subroutine run_simulation(self)
 class(oft_xmhd_2d_sim), target, intent(inout) :: self
 type(oft_nksolver) :: nksolver
@@ -197,7 +194,7 @@ DO i=1,maxextrap
   extrapt(i)=0.d0
 END DO
 nextrap=0
-
+!---Set initial time and load initial solution vector from driver
 self%t=0.d0
 CALL u%add(0.d0,1.d0,self%u)
 !---Create initial conditions restart file
@@ -241,7 +238,9 @@ plot_vec(2,:)=plot_vals
 CALL ux%get_local(plot_vals)
 plot_vec(3,:)=plot_vals
 CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
-
+!---------------------------------------------------------------------------
+! Setup non-linear solver
+!---------------------------------------------------------------------------
 ALLOCATE(self%nlfun)
 self%nlfun%cyl_flag = self%cyl_flag
 self%nlfun%chi=self%chi
@@ -668,11 +667,10 @@ DO i=1, self%nsteps
 END DO
 CALL hist_file%close()
 CALL solver%delete()
-CALL u0%delete()
 CALL u%delete()
 CALL up%delete()
 CALL v%delete()
-DEALLOCATE(u,u0,up,v,plot_vals)
+DEALLOCATE(u,up,v,plot_vals)
 END SUBROUTINE run_lin_simulation
 !---------------------------------------------------------------------------
 !> Compute the mass matrix for RHS
@@ -789,13 +787,6 @@ DO i=1,mesh%nc
     dn = dn * self%den_scale
     div_vel = dvel(1,1) + dvel(3,3)
     btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
-    IF (cyl_flag) THEN
-      by = by/(coords(1)+gs_epsilon)
-      dby(1) = (dby(1)-by)/ (coords(1)+gs_epsilon)
-      dby(3) = dby(3)/(coords(1)+gs_epsilon)
-      div_vel = dvel(1,1) +vel(1)/(coords(1)+gs_epsilon) + dvel(3,3)
-      btmp = cross_product(dpsi/coords(1), [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
-    END IF
     diag_vals = diag_vals + [n, vel(1), vel(2), vel(3), T, psi, by]*int_factor
     !---Compute local function contributions
     DO jr=1,oft_blagrange%nce
@@ -868,7 +859,7 @@ end subroutine mfun_apply
 subroutine nlfun_apply(self,a,b)
 class(xmhd_2d_nlfun), intent(inout) :: self !< NL function object
 class(oft_vector), target, intent(inout) :: a !< Source field
-class(oft_vector), intent(inout) :: b !< ResCC=gcc-13 CXX=g++-13 FC=gfortran-13 python /path/to/oft/src/utilities/build_libs.py --nthread=2ult of metric function
+class(oft_vector), intent(inout) :: b !< Result of metric function
 type(oft_quad_type), pointer :: quad
 LOGICAL :: curved, cyl_flag, linear
 INTEGER(i4) :: i,m,jr, k,l
@@ -1474,6 +1465,7 @@ DO i=1,mesh%nc
     jac_loc(1, jr)%m = jac_loc(1, jr)%m / self%den_scale
     jac_loc(jr, 1)%m = jac_loc(jr, 1)%m * self%den_scale
   END DO
+  !---Apply Boundary Conditions
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%n_bc(cell_dofs),1)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%velx_bc(cell_dofs), 2)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%vely_bc(cell_dofs), 3)
@@ -1481,6 +1473,7 @@ DO i=1,mesh%nc
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%T_bc(cell_dofs),5)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),6)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs), 7)
+  !----Add local contributions to matrix
   CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
 END DO
 !---Cleanup thread-local storage
@@ -1587,11 +1580,11 @@ CALL self%fe_rep%vec_create(self%u)
 CALL self%fe_rep%vec_create(self%u0)
 ! Boundary condition flag-setting
 ! ALLOCATE(cell_dofs(oft_blagrange%nce))
-! ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.TRUE.
+ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.FALSE.
 ! ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.TRUE.
 ! ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
 ! ALLOCATE(self%velz_bc(oft_blagrange%ne)); self%velz_bc=.TRUE.
-! ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.TRUE.
+ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.FALSE.
 ! ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.FALSE.
 ! ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.FALSE.
 

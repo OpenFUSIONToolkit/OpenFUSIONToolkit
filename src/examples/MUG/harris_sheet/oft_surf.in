@@ -1,6 +1,6 @@
 &runtime_options
   ppn=1
-  debug=2
+  debug=0
 /
 
 &mesh_options
@@ -15,6 +15,7 @@
 &native_mesh_options
   filename="circle_2d.h5"
 /
+
 &cube_options
  mesh_type=1
  ref_per=T,F,F
@@ -24,7 +25,6 @@
 /
 
 &xmhd_options
-  linear=T
   order=2
   n0=5.196374E16
   psi0=0.002045692328575E0,
@@ -34,7 +34,7 @@
   t0=1E2,
   by0=0,
   chi=2943.4,
-  eta=742.6
+  eta=6.45435863e-8
   nu=6.45427171e-7
   delta = 1.E-1
   gamma=1.67
@@ -45,8 +45,8 @@
   lam_n = 0.5E0
   L_x = 25.6E0
   L_z = 12.8E0
-  nsteps=10000
-  rst_freq=5
+  nsteps=960
+  rst_freq=10
   use_mfnk=T
   pm=F
 /
