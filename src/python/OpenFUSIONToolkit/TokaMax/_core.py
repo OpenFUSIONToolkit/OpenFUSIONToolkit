@@ -36,6 +36,8 @@ class TokaMax:
         @param g_eqdsk_arr Filenames of each gEQDSK file.
         @param dt Time step (s).
         @param t_res Time points to sample output at.
+        @param prescribed_currents True if coil currents will be set to known values.
+        @param last_surface_factor Multiplication factor of the boundary poloidal flux.
         '''
         self._oftenv = OFT_env(nthreads=2)
         self._gs = TokaMaker(self._oftenv)
@@ -192,7 +194,7 @@ class TokaMax:
         self._targets = None
         self._flux = None
         
-    def initialize_gs(self, mesh, weights=None, vsc=None):
+    def initialize_gs(self, mesh, vsc=None):
         r'''! Initialize GS Solver Object.
         @param mesh Filename of reactor mesh.
         @param vsc Vertical Stability Coil.
@@ -206,7 +208,6 @@ class TokaMax:
 
         if vsc is not None:
             self._gs.set_coil_vsc({vsc: 1.0})
-        # self.set_coil_reg(targets, weights=weights, weight_mult=0.1)
 
     def set_Ip(self, ip):
         r'''! Set plasma current (Amps).
@@ -291,10 +292,16 @@ class TokaMax:
         self._evolve_Te = Te
     
     def set_Bp(self, Bp):
+        r'''! Set Beta Poloidal.
+        @param Bp Beta Poloidal.
+        '''
         for i in range(len(self._times)):
             self._state['beta_pol'][i] = Bp[i]
 
     def set_Vloop(self, vloop):
+        r'''! Set Loop Voltage.
+        @param vloop Loop Voltage.
+        '''
         for i in range(len(self._times)):
             self._state['vloop'][i] = vloop[i]
     
@@ -307,21 +314,36 @@ class TokaMax:
         self._gp_dl = decay_length
     
     def set_flux(self, flux):
+        r'''! Set flux.
+        @param flux Flux.
+        '''
         self._flux = flux
     
     def set_chi(self, chi_min=None, chi_max=None):
+        r'''! Set heat conductivities bounds (m^2/s).
+        @param chi_min Minimum heat conductivity.
+        @param chi_max Maximum heat conductivity.
+        '''
         if chi_min is not None:
             self._chi_min = chi_min
         if chi_max is not None:
             self._chi_max = chi_max
     
     def set_De(self, De_min=None, De_max=None):
+        r'''! Set particle diffusivity bounds (m^2/s).
+        @param De_min Minimum diffusivity.
+        @param De_max Maximum diffusivity.
+        '''
         if De_min is not None:
             self._De_min = De_min
         if De_max is not None:
             self._De_max = De_max
         
     def set_Ve(self, Ve_min=None, Ve_max=None):
+        r'''! Set particle convection bounds (m^2/s).
+        @param Ve_min Minimum convection.
+        @param Ve_max Maximum convection.
+        '''
         if Ve_min is not None:
             self._Ve_min = Ve_min
         if Ve_max is not None:
@@ -398,18 +420,8 @@ class TokaMax:
             lcfs = self._boundary[i]
             isoflux_weights = LCFS_WEIGHT * np.ones(len(lcfs))
             lcfs_psi_target = self._state['psi_lcfs'][i]
-            # t_flux = sorted(self._flux.keys())
-            # flux_list = [self._flux[t][0] for t in t_flux]
-            # lcfs_psi_target = np.interp(t, t_flux, flux_list)
 
             self._gs.set_flux(lcfs, targets=lcfs_psi_target*np.ones_like(lcfs[:,0]), weights=isoflux_weights)
-            # self._gs.set_isoflux(lcfs, weights=1.E3*np.ones_like(lcfs[:,0]))
-
-            # x_points = np.zeros((2,2))
-            # x_points[0,:] = lcfs[np.argmin(lcfs[:,1]),:]
-            # x_points[1,:] = lcfs[np.argmax(lcfs[:,1]),:]
-            # x_weights = 1.E3*np.ones(2)
-            # self._gs.set_saddles(x_points, x_weights)
 
             err_flag = self._gs.init_psi(self._state['R'][i],
                                          self._state['Z'][i],
@@ -436,11 +448,6 @@ class TokaMax:
             self._gs.print_info()
             self._gs_update(i)
 
-            # if i:
-            #     # Compute loop voltage
-            #     dt = self._times[i] - self._times[i-1]
-            #     dpsi_lcfs_dt = (self._state['psi_lcfs'][i] - self._state['psi_lcfs'][i-1]) / dt
-            #     self._results['dpsi_lcfs_dt'][i] = dpsi_lcfs_dt
             self._gs.save_eqdsk('tmp/{:03}.{:03}.eqdsk'.format(step, i),lcfs_pad=0.001,run_info='TokaMaker EQDSK', cocos=2)
 
             if self._prescribed_currents:
@@ -572,12 +579,6 @@ class TokaMax:
         if self._Ti_right_bc:
             myconfig['profile_conditions']['T_i_right_bc'] = self._Ti_right_bc
         
-        # if self._ohmic:
-        #     myconfig['sources']['ohmic'] = {
-        #         'mode': 'PRESCRIBED',
-        #         'prescribed_values': self._ohmic,
-        #     }
-        
         if self._gp_s and self._gp_dl:
             myconfig['sources']['gas_puff'] = {
                 'S_total': self._gp_s,
@@ -702,12 +703,6 @@ class TokaMax:
             'x': np.pow(n_e.coords['rho_norm'].values, 2),
             'y': n_e.to_numpy(),
         }
-
-        # def spitzer_resistivity(n,T):
-        #     def log_lambda(n,T):
-        #         return 24.0-np.log(np.sqrt(n/1.E6)/T)
-        #     return 5.253E-5*log_lambda(n,T)/np.power(T,1.5)
-        # self._state['eta_prof'][i] = spitzer_resistivity(n_e.to_numpy(), t_e.to_numpy())
 
         ptot = data_tree.profiles.pressure_thermal_total.sel(time=t, method='nearest')
         self._state['Ptot'][i] = {
