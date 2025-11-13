@@ -904,9 +904,10 @@ class TokaMax:
         @param graph Whether to display psi and profile graphs at each iteration (for testing).
         @param max_step Maximum number of simulation iterations allowed.
         '''
-        del_tmp = input('Delete temporary storage? [y/n] ')
-        if del_tmp != 'y' and not remove_tmp:
-            quit()
+        if not remove_tmp:
+            del_tmp = input('Delete temporary storage? [y/n] ')
+            if del_tmp != 'y':
+                quit()
         with open('convergence_history.txt', 'w'):
             pass
         shutil.rmtree('./tmp')
