@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.io as sio
-from scipy.interpolate import make_smoothing_spline, interp1d
+from scipy.interpolate import make_smoothing_spline
 import torax
 import copy
 import json
@@ -11,7 +10,7 @@ import shutil
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import load_gs_mesh
-from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk, create_isoflux
+from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
 
 from .baseconfig import BASE_CONFIG
 
@@ -611,7 +610,7 @@ class TokaMax:
 
         if hist.sim_error != torax.SimError.NO_ERROR:
             print(hist.sim_error)
-            raise ValueError(f'TORAX failed to run the simulation.')
+            raise ValueError('TORAX failed to run the simulation.')
         
         v_loops = np.zeros(len(self._times))
         for i, t in enumerate(self._times):
