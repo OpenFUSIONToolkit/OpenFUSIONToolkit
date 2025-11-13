@@ -495,9 +495,10 @@ class TokaMax:
             'evolve_density': self._evolve_density, # solve density equation
         }
 
+        mydir = os.getcwd()
         myconfig['geometry'] = {
             'geometry_type': 'eqdsk',
-            'geometry_directory': '/Users/johnl/Desktop/discharge-model', 
+            'geometry_directory': mydir, 
             'last_surface_factor': 0.95,  # TODO: tweak
             # 'n_surfaces': 10,
             'Ip_from_parameters': True,
@@ -910,8 +911,9 @@ class TokaMax:
                 quit()
         with open('convergence_history.txt', 'w'):
             pass
+        os.makedirs('./tmp', exist_ok=True)
         shutil.rmtree('./tmp')
-        os.mkdir('./tmp')
+        os.makedirs('./tmp')
 
         self._fname_out = out
 
