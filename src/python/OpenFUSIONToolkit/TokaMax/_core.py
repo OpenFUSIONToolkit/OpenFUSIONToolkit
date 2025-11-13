@@ -427,8 +427,8 @@ class TokaMax:
                 ax.plot(self._boundary[i][:, 0], self._boundary[i][:, 1], color='r')
                 # ax.set_title(f'i={i}')
                 ax.set_title(f't={t}')
-                plt.savefig(f'nsf/t={t}.png')
-                # plt.show()
+                # plt.savefig(f'nsf/t={t}.png')
+                plt.show()
 
             self._gs.update_settings()
             err_flag = self._gs.solve()
