@@ -29,7 +29,7 @@ class MyEncoder(json.JSONEncoder):
 class TokaMax:
     '''! Coupled Grad-Shafranov/Transport Solver Object.'''
 
-    def __init__(self, t_init, t_final, times, g_eqdsk_arr, dt=1, t_res=None, prescribed_currents=False):
+    def __init__(self, t_init, t_final, times, g_eqdsk_arr, dt=1, t_res=None, prescribed_currents=False, last_surface_factor=0.95):
         r'''! Initialize the Coupled Grad-Shafranov/Transport Solver Object.
         @param t_init Start time (s).
         @param t_final End time (s).
@@ -50,6 +50,7 @@ class TokaMax:
         self._t_final = t_final
         self._dt = dt
         self._prescribed_currents = prescribed_currents
+        self._last_surface_factor = last_surface_factor
 
         if t_res is None:
             self._t_res = times
@@ -499,7 +500,7 @@ class TokaMax:
         myconfig['geometry'] = {
             'geometry_type': 'eqdsk',
             'geometry_directory': mydir, 
-            'last_surface_factor': 0.95,  # TODO: tweak
+            'last_surface_factor': self._last_surface_factor,  # TODO: tweak
             # 'n_surfaces': 10,
             'Ip_from_parameters': True,
             'geometry_configs': {
