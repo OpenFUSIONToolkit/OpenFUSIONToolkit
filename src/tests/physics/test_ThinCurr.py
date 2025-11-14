@@ -279,6 +279,29 @@ def run_mode(meshfile,freq,mp_q):
     mp_q.put(result)
     
 
+def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
+    result = True
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        tw_model = ThinCurr(myOFT)
+        tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in_remc.xml')
+        tw_model.setup_io()
+        _, _, sensor_obj = tw_model.compute_Msensor('floops.loc')
+        if curr_waveform is not None:
+            curr_waveform = np.array(curr_waveform)
+        tw_model.compute_Mcoil()
+        tw_model.compute_Lmat()
+        tw_model.compute_Rmat()
+        tw_model.run_td(2.E-4,200,direct=(direct_flag == 'T'),lin_tol=lin_tol,coil_currs=curr_waveform,sensor_obj=sensor_obj)
+        tw_model.plot_td(200,sensor_obj=sensor_obj)
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
                     python=False,lin_tol=1.E-9,jumper_start=0,run_reduced=False):
@@ -387,6 +410,8 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
             return run_OFT("../../bin/thincurr_fr oft.in oft_in.xml", 1, 180)
     elif run_type == 5:
         return mp_run(run_mode,(meshfile,freq))
+    elif run_type == 6:
+        return mp_run(run_td_for_Mirnov,(meshfile,direct_flag,curr_waveform,lin_tol))
 
 def validate_eigs(eigs, tols=(1.E-5, 1.E-9)):
     """
@@ -545,6 +570,31 @@ def validate_mode(drive_exp,result_exp):
             result_val = False
     return result_val
 
+
+def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi,tol=1.E-10):
+    try:
+        interface.load_histfile()
+    except BaseException as e:
+        print(e)
+        return False
+    
+    result_val = True
+    import matplotlib.pyplot as plt
+    _,ax=plt.subplots(1,1,figsize=(8,6))
+    if np.linalg.norm(abs(sigs_nmodes_1D_PEST-interface.plot_1D_fourier_amplitude(t,1,ax,toroidal_harmonics=True,hamada_dphi=None,part='r')[1]),np.inf)>tol:
+        print(f"FAILED: 1D PEST toroidal Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
+        result_val = False
+    if np.linalg.norm(abs(sigs_nmodes_1D_Hamada-interface.plot_1D_fourier_amplitude(t,1,ax,toroidal_harmonics=True,hamada_dphi=delta_phi,part='r')[1]),np.inf)>tol:
+        print(f"FAILED: 1D Hamada toroidal Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
+        result_val = False
+    if np.linalg.norm(abs(sigs_mnmodes_2D_PEST-interface.fft2(interface.get_B_mesh(t),hamada_dphi=None)[0]),np.inf)>tol:
+        print(f"FAILED: 2D PEST Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
+        result_val = False
+    if np.linalg.norm(abs(sigs_mnmodes_2D_Hamada-interface.fft2(interface.get_B_mesh(t),hamada_dphi=delta_phi)[0]),np.inf)>tol:
+        print(f"FAILED: 2D Hamada Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
+        result_val = False
+    return result_val
+
 #============================================================================
 # Test runners for plate
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
@@ -691,6 +741,36 @@ def test_td_torus_volt(direct_flag,python):
                            lin_tol=1.E-11,
                            python=python)
     assert validate_td(sigs_final)
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+def test_torus_fourier_sensor(direct_flag):
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+    import xarray as xr
+    R_0 = 1.0
+    ds = xr.open_dataset('torus_gpec_control_output_n1_nc.nc')
+    R_gpec=ds.R.to_dataframe().values[:,0][:-1]
+    Z_gpec=ds.z.to_dataframe().values[:,0][:-1]
+    delta_phi = ds.delta_phi.to_dataframe().values[:,0][:-1]
+    interface_h1 = torus_fourier_sensor(R_gpec,Z_gpec,R_0,1)
+    interface_h1.place_normal_sensors(nphi=15,filename='floops.loc')
+    interface_hminus1 = torus_fourier_sensor(R_gpec,Z_gpec,R_0,-1)
+    interface_hminus1.place_normal_sensors(nphi=15,filename='floops.loc')
+    t = 80
+    assert ThinCurr_setup("tw_test-torus.h5",6,direct_flag,
+                           curr_waveform=((0.0, 1.E6), (4.E-3, 0.0), (1.0, 0.0)),
+                           lin_tol=1.E-10,
+                           python=True)
+    sigs_nmodes_1D_h1_PEST = np.load('sigs_nmodes_1D_h1_PEST.npy')
+    sigs_nmodes_1D_hminus1_PEST = np.load('sigs_nmodes_1D_hminus1_PEST.npy')
+    sigs_nmodes_1D_h1_Hamada = np.load('sigs_nmodes_1D_h1_Hamada.npy')
+    sigs_nmodes_1D_hminus1_Hamada = np.load('sigs_nmodes_1D_hminus1_Hamada.npy')
+    sigs_mnmodes_2D_h1_PEST = np.load('sigs_mnmodes_2D_h1_PEST.npy')
+    sigs_mnmodes_2D_hminus1_PEST = np.load('sigs_mnmodes_2D_hminus1_PEST.npy')
+    sigs_mnmodes_2D_h1_Hamada = np.load('sigs_mnmodes_2D_h1_Hamada.npy')
+    sigs_mnmodes_2D_hminus1_Hamada = np.load('sigs_mnmodes_2D_hminus1_Hamada.npy')
+    assert validate_torus_fourier_sensor(interface_h1,sigs_nmodes_1D_h1_PEST,sigs_nmodes_1D_h1_Hamada,sigs_mnmodes_2D_h1_PEST,sigs_mnmodes_2D_h1_Hamada,t,delta_phi)
+    assert validate_torus_fourier_sensor(interface_hminus1,sigs_nmodes_1D_hminus1_PEST,sigs_nmodes_1D_hminus1_Hamada,sigs_mnmodes_2D_hminus1_PEST,sigs_mnmodes_2D_hminus1_Hamada,t,delta_phi)
 
 #============================================================================
 # Test runners for filament model
