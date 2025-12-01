@@ -62,19 +62,19 @@ REAL(r8) :: velz0 = 1.d0
 REAL(r8) :: t0 = 1.d0
 REAL(r8) :: psi0 = 1.d0
 REAL(r8) :: by0 = 1.d0
-REAL(r8) :: B_0 = 0.d0
+REAL(r8) :: B_0(3) = 0.d0
 REAL(r8) :: chi=1.d0 !< Needs docs
 REAL(r8) :: eta=1.d0 !< Needs docs
 REAL(r8) :: nu=1.d0 !< Needs docs
 REAL(r8) :: gamma=1.d0
 REAL(r8) :: D_diff=1.d0
 REAL(r8) :: den_scale=1.d19
-REAL(r8) :: den_inf = 1.d0
+REAL(r8) :: den_inf = 2.d-1
 REAL(r8) :: lam_n = 2.d0 !< Wavelength
 REAL(r8) :: lam_b = 2.d0 !< Wavelength
 REAL(r8) :: L_x = 2.d0 !< Box length in x
 REAL(r8) :: L_z = 2.d0 !< Box length in z
-REAL(r8) :: delta = 1.d-4 !< Relative size of perturbation (<<1)
+REAL(r8) :: delta = 1.d-1 !< Relative size of perturbation (<<1)
 REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: linear=.FALSE.
@@ -115,9 +115,8 @@ CALL ML_oft_blagrange%vec_create(v)
 
 !---Set constant values
 
-!---Project n initial perturbed condition onto scalar Lagrange basis
-!---Always do this!
-field_init%func=>dens_harris_pert
+!---Project n initial condition onto scalar Lagrange basis
+field_init%func=>dens_harris
 field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -128,20 +127,7 @@ CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'n0')
 vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
-
-!---Project n initial equilibrium condition onto scalar Lagrange basis
-!---Only need eq if running in linear mode
-IF (linear) THEN
-  field_init%func=>const_init
-  CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-  CALL u%set(0.d0)
-  CALL minv%apply(u,v)
-  ! CALL blag_zerob%apply(u)
-  CALL u%scale(2*n0*delta)
-  CALL u%get_local(vec_vals)
-  vec_vals = vec_vals / den_scale
-  CALL mhd_sim%u0%restore_local(vec_vals,1)
-END IF
+CALL mhd_sim%u0%restore_local(vec_vals,1)
 
 !---Project v_x initial condition onto scalar Lagrange basis
 field_init%func=>const_init
@@ -274,11 +260,11 @@ REAL(r8), INTENT(out) :: val
 val = 1.0
 END SUBROUTINE const_init
 
-SUBROUTINE dens_harris_pert(pt, val)
+SUBROUTINE dens_harris(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val=(2*delta+1/((COSH(pt(2)/lam_n))**2))
-END SUBROUTINE dens_harris_pert
+val=(den_inf+1/((COSH(pt(2)/lam_n))**2))
+END SUBROUTINE dens_harris
 
 SUBROUTINE psi_harris_eq(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
