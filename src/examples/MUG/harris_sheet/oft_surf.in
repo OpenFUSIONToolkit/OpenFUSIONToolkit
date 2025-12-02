@@ -34,7 +34,7 @@
   t0=1E2,
   by0=0,
   chi=2943.4,
-  eta=6.45435863e-8
+  eta=9.3317868E-4
   nu=6.45427171e-7
   delta = 1.E-1
   gamma=1.67
@@ -45,7 +45,7 @@
   lam_n = 0.5E0
   L_x = 25.6E0
   L_z = 12.8E0
-  nsteps=960
+  nsteps=1200
   rst_freq=10
   use_mfnk=T
   pm=F
