@@ -108,7 +108,6 @@ for i,  region in enumerate(mesh_geom):
     reg_segments = []
     for j,  segment in enumerate(region['segments']):
         reg_segments.append([pts_offset+1+vertex for vertex in segment])
-    print(reg_segments)
     reg_pts.append(reg_segments)
     pts_offset += pts_tmp
 
@@ -127,7 +126,16 @@ surf_pts = []
 for i,  eds in enumerate(reg_ed):
     cubit.cmd("create surface curve {0} to {1}".format(*eds))
     surf_last = cubit.surface(cubit.get_last_id("surface"))
-    surf_pts.append(np.asarray(surf_last.position_from_u_v(0.0,0.0)))
+    U_range = surf_last.get_param_range_U()
+    V_range = surf_last.get_param_range_V()
+    surf_corners = []
+    for U_ratio in (0.025,0.975):
+        U_tmp = U_range[0]*U_ratio + U_range[1]*(1.0-U_ratio)
+        for V_ratio in (0.025,0.975):
+            V_tmp = V_range[0]*V_ratio + V_range[1]*(1.0-V_ratio)
+            surf_corners.append(surf_last.position_from_u_v(U_tmp,V_tmp))
+    surf_pts.append(np.asarray(surf_corners))
+    # surf_pts.append(np.asarray(surf_last.position_from_u_v(0.0,0.0)))
 
 cubit.cmd('imprint all')
 cubit.cmd('merge all')
@@ -143,16 +151,24 @@ nblocks = 0
 matches = [-1 for _ in cubit.get_entities( "surface" )]
 for sid in cubit.get_entities( "surface" ):
     surf_test = cubit.surface(sid)
-    for i, surf_pt in enumerate(surf_pts):
-        proj_pt = np.asarray(surf_test.closest_point_trimmed(surf_pt))
-        if np.linalg.norm(proj_pt-surf_pt) < 1.E-10:
-            if matches[i] != -1:
-                raise ValueError('Multiple matches')
-            matches[i] = sid
-            cubit.cmd("surface {0} size {1}".format(sid,mesh_geom[i]['dx_vol']*4.0))
-            cubit.cmd("block {0} add surface {1}".format(mesh_geom[i]['id'],sid))
-            break
-    nblocks += 1
+    nmax = 0
+    imax = -1
+    for i, surf_corners in enumerate(surf_pts):
+        ncount = 0
+        for surf_pt in surf_corners:
+            proj_pt = np.asarray(surf_test.closest_point_trimmed(surf_pt))
+            if np.linalg.norm(proj_pt-surf_pt) < 1.E-10:
+                ncount += 1
+        if ncount > nmax:
+            nmax = ncount
+            imax = i
+    if imax < 0:
+        raise ValueError('No matches')
+    if matches[imax] != -1:
+        raise ValueError('Multiple matches')
+    matches[imax] = sid
+    cubit.cmd("surface {0} size {1}".format(sid,mesh_geom[imax]['dx_vol']))
+    cubit.cmd("block {0} add surface {1}".format(mesh_geom[imax]['id'],sid))
 
 cubit.cmd("mesh surface all")
 
@@ -527,7 +543,7 @@ class gs_Domain:
                 vac_id += 1
         return cond_list
     
-    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None):
+    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None,cubit_gradation=1.05):
         '''! Build mesh for specified domains
 
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
@@ -598,7 +614,7 @@ class gs_Domain:
                         pass
                 regions_full.append(json_tmp)
             with open('tMaker_cubit.json', 'w') as json_file:
-                json.dump({'regions': regions_full, 'tri_gradation': 1.05}, json_file)
+                json.dump({'regions': regions_full, 'tri_gradation': cubit_gradation}, json_file)
             if not setup_only:
                 self._r, self._lc, self._reg = run_cubit(cubit_path)
                 if self._reg.min() <= 0:
