@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # To access DIII-D eqdsk files, please contact Columbia University Fusion Research Center
-eqdsk_names = sorted(os.listdir('163303/eqs_safe'))
+eqdsk_names = sorted(os.listdir('163303/eqs'))
 eqdsks = []
 eqtimes = []
 
@@ -24,7 +24,7 @@ for fname in eqdsk_names:
     _, t = tag.split('-')
     t = float(t) / 1e3
     eqtimes.append(t)
-    eqdsks.append(f'163303/eqs_safe/{fname}')
+    eqdsks.append(f'163303/eqs/{fname}')
 
     # Create and set profiles
     g = read_eqdsk(eqdsks[-1])
@@ -75,7 +75,7 @@ ip_f = open('163303/ip.json')
 ip_json = json.load(ip_f)
 ip_t = np.array(ip_json['time']) / 1e3
 ip = ip_json['data']
-bpol_f = open('163303/163303_betap.json')
+bpol_f = open('163303/betap.json')
 bpol_json = json.load(bpol_f)
 bpol_t = np.array(bpol_json['time']) / 1e3
 bpol = bpol_json['data']
@@ -84,7 +84,7 @@ myOFT = OFT_env(nthreads=2)
 mygs = TokaMaker(myOFT)
 mygs.settings.maxits = 200
 
-mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('DIIID_mesh.h5')
+mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('163303/DIIID_mesh.h5')
 mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
 mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
 g1 = read_eqdsk(eqdsks[0])
