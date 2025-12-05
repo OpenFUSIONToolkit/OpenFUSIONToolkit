@@ -25,7 +25,7 @@ else:
     PY3K = True
 
 
-def error_exit(error_str, extra_info=None):
+def error_exit(error_str, extra_info=None, exception=None):
     # Exit build script with error
     print("\n\n============  BUILD FAILED!  ============")
     print("ERROR: {0}".format(error_str))
@@ -33,6 +33,8 @@ def error_exit(error_str, extra_info=None):
         for info in extra_info:
             print("INFO: {0}".format(info))
     print()
+    if exception is not None:
+        raise exception
     sys.exit(-1)
 
 
@@ -88,10 +90,10 @@ def fetch_file(url, file):
                 file_size = int(response.info().getheaders("Content-Length")[0])
             except:
                 file_size = -1
-    except ValueError:
-        error_exit('Invalid download URL: "{0}"'.format(original_url))
-    except:
-        error_exit('Download failed for file: "{0}"'.format(original_url))
+    except ValueError as e:
+        error_exit('Invalid download URL: "{0}"'.format(original_url), exception=e)
+    except Exception as e:
+        error_exit('Download failed for file: "{0}"'.format(original_url), exception=e)
     else:
         line = "  Downloading: {0}".format(original_url)
         print(line)
@@ -124,8 +126,8 @@ def extract_archive(file):
     try:
         with tarfile.open(file, errorlevel=2) as tar:
             tar.extractall()
-    except:
-        error_exit('Extraction failed for file: "{0}"'.format(file))
+    except Exception as e:
+        error_exit('Extraction failed for file: "{0}"'.format(file), exception=e)
 
 
 def run_command(command, timeout=10, env_vars={}):
