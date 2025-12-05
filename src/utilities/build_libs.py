@@ -795,7 +795,7 @@ class MPICH(package):
         if ver_major == 3:
             self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
         elif ver_major == 4:
-            self.url = "https://www.mpich.org/static/downloads/4.2.3/mpich-4.2.3.tar.gz"
+            self.url = "https://github.com/pmodels/mpich/releases/download/v4.2.3/mpich-4.2.3.tar.gz"
         else:
             raise ValueError("Unknown MPICH version")
         self.build_timeout = 30
