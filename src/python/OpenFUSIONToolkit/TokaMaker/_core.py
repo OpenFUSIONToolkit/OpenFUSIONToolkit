@@ -3,17 +3,20 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''! Core definitions for TokaMaker Grad-Shafranov functionality
+'''! Python interface for TokaMaker Grad-Shafranov functionality
 
 @authors Chris Hansen
 @date May 2023
 @ingroup doxy_oft_python
 '''
 import collections
+from collections import OrderedDict
 import ctypes
 import numpy
 from ._interface import *
-
+import matplotlib
+from matplotlib.patches import Polygon
+from matplotlib.colors import ListedColormap
 
 def tokamaker_default_settings(oft_env):
     '''! Initialize settings object with default values
@@ -26,8 +29,6 @@ def tokamaker_default_settings(oft_env):
     settings.free_boundary = True
     settings.has_plasma = True
     settings.limited_only = False
-    settings.dipole_mode = False
-    settings.mirror_mode = False
     settings.maxits = 40
     settings.mode = 1
     settings.urf = 0.2
@@ -38,7 +39,7 @@ def tokamaker_default_settings(oft_env):
     return settings
 
 
-def create_prof_file(self, filename, profile_dict, name):
+def create_prof_file(self, filename, profile_dict, name, include_sol=False):
     '''! Create profile input file to be read by load_profiles()
 
     @param filename Name of input file, see options in set_profiles()
@@ -49,7 +50,7 @@ def create_prof_file(self, filename, profile_dict, name):
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
-    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp'):
+    elif profile_dict['type'] == 'linterp':
         x = profile_dict.get('x',None)
         if x is None:
             raise KeyError('No array "x" for piecewise linear profile.')
@@ -62,14 +63,16 @@ def create_prof_file(self, filename, profile_dict, name):
             y = numpy.array(y.copy())
         if numpy.min(numpy.diff(x)) < 0.0:
             raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
-        if (x[0] < 0.0) or (x[-1] > 1.0):
-            raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
         if self.psi_convention == 0:
+            if (x[0] < 0.0) or ((x[-1] > 1.0) and not include_sol):
+                raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
             x = 1.0 - x
             sort_inds = x.argsort()
             x = x[sort_inds]
             y = y[sort_inds]
         elif self.psi_convention == 1:
+            if ((x[0] < 0.0) and not include_sol) or (x[-1] > 1.0):
+                raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
             pass
         else:
             raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
@@ -79,7 +82,7 @@ def create_prof_file(self, filename, profile_dict, name):
             "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
         ]
     else:
-        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
+        raise KeyError('Invalid profile type ("flat", "linterp")')
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
@@ -118,17 +121,17 @@ class TokaMaker():
         ## Include F*F' term in SOL?
         self._F_SOL = False
         ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._Ip_target=c_double(self._oft_env.float_disable_flag)
+        self._Ip_target=c_double(-1.0)
         ## Plasma current target ratio I_p(FF') / I_p(P') (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._Ip_ratio_target=c_double(self._oft_env.float_disable_flag)
+        self._Ip_ratio_target=c_double(-1.E99)
         ## Axis pressure target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._pax_target=c_double(self._oft_env.float_disable_flag)
+        self._pax_target=c_double(-1.0)
         ## Stored energy target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._estore_target=c_double(self._oft_env.float_disable_flag)
+        self._estore_target=c_double(-1.0)
         ## R0 target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._R0_target=c_double(self._oft_env.float_disable_flag)
+        self._R0_target=c_double(-1.0)
         ## V0 target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-        self._V0_target=c_double(self._oft_env.float_disable_flag)
+        self._V0_target=c_double(-1.E99)
         ## F*F' normalization value [1] (use @ref TokaMaker.TokaMaker.alam "alam" property)
         self._alam = None
         ## Pressure normalization value [1] (use @ref TokaMaker.TokaMaker.pnorm "pnorm" property)
@@ -161,8 +164,6 @@ class TokaMaker():
         self.nvac = 0
         ## Limiting contour
         self.lim_contour = None
-        ## Limiting contours (if multiple)
-        self.lim_contours = None
     
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
@@ -189,12 +190,12 @@ class TokaMaker():
         self._virtual_coils = {}
         self._F0 = 0.0
         self._F_SOL = False
-        self._Ip_target=c_double(self._oft_env.float_disable_flag)
-        self._Ip_ratio_target=c_double(self._oft_env.float_disable_flag)
-        self._pax_target=c_double(self._oft_env.float_disable_flag)
-        self._estore_target=c_double(self._oft_env.float_disable_flag)
-        self._R0_target=c_double(self._oft_env.float_disable_flag)
-        self._V0_target=c_double(self._oft_env.float_disable_flag)
+        self._Ip_target=c_double(-1.0)
+        self._Ip_ratio_target=c_double(-1.E99)
+        self._pax_target=c_double(-1.0)
+        self._estore_target=c_double(-1.0)
+        self._R0_target=c_double(-1.0)
+        self._V0_target=c_double(-1.E99)
         self._alam = None
         self._pnorm = None
         self.o_point = None
@@ -210,7 +211,6 @@ class TokaMaker():
         self.reg = None
         self.nvac = 0
         self.lim_contour = None
-        self.lim_contours = None
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
         '''! Setup mesh for static and time-dependent G-S calculations
@@ -248,8 +248,6 @@ class TokaMaker():
             if reg is None:
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
             else:
-                if reg.min() <= 0:
-                    raise ValueError('Invalid "reg" array, values must be >= 0')
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
             oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         else:
@@ -258,7 +256,6 @@ class TokaMaker():
         tokamaker_alloc(ctypes.byref(self._tMaker_ptr),self._mesh_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        self.update_settings()
         self.nregs = nregs.value
     
     def setup_regions(self,cond_dict={},coil_dict={}):
@@ -281,8 +278,6 @@ class TokaMaker():
                 if cond_dict[key].get('noncontinuous',False):
                     contig_flag[cond_dict[key]['reg_id']-1] = 0
             xpoint_mask[cond_dict[key]['reg_id']-1] = int(cond_dict[key].get('allow_xpoints',False))
-            if cond_dict[key].get('inner_limiter',False):
-                contig_flag[cond_dict[key]['reg_id']-1] = -1
         # Remove vacuum regions
         for key in self._vac_dict:
             del cond_dict[key]
@@ -297,14 +292,10 @@ class TokaMaker():
             if coil_set not in self.coil_sets:
                 self.coil_sets[coil_set] = {
                     'id': nCoils,
-                    'net_turns': 0.0,
                     'sub_coils': []
                 }
                 nCoils += 1
-            coil_dict[key]['name'] = key
             self.coil_sets[coil_set]['sub_coils'].append(coil_dict[key])
-            self.coil_sets[coil_set]['sub_coils'][-1]['name'] = key
-            self.coil_sets[coil_set]['net_turns'] += coil_dict[key].get('nturns',1.0)
         self._coil_dict = coil_dict
         # Mark vacuum regions
         self.nvac = 0
@@ -368,9 +359,7 @@ class TokaMaker():
         self._alam = numpy.ctypeslib.as_array(alam_loc,shape=(1,))
         self._pnorm = numpy.ctypeslib.as_array(pnorm_loc,shape=(1,))
         # Set default targets
-        ## F*F' normalization value
         self.alam = 0.1
-        ## P' normalization value
         self.pnorm = 0.1
         default_prof={
             'type': 'linterp',
@@ -388,10 +377,10 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         loop_ptr = numpy.ctypeslib.as_array(loop_ptr,shape=(nloops.value+1,))
-        lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        self.lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
         self.lim_contours = []
         for i in range(nloops.value):
-            lim_contour = numpy.vstack((lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],lim_pts[loop_ptr[i]-1,:]))
+            lim_contour = numpy.vstack((self.lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],self.lim_pts[loop_ptr[i]-1,:]))
             self.lim_contours.append(lim_contour)
         self.lim_contour = numpy.zeros((0,2))
         for lim_countour in self.lim_contours:
@@ -418,10 +407,8 @@ class TokaMaker():
         ## Mesh regions [nc] 
         self.reg = numpy.ctypeslib.as_array(reg_loc,shape=(self.nc,))
 
-    ## @cond
     @property
     def alam(self):
-        r'''F*F' normalization value'''
         if self._alam is not None:
             return self._alam[0]
         else:
@@ -436,7 +423,6 @@ class TokaMaker():
     
     @property
     def pnorm(self):
-        r'''Pressure normalization value'''
         if self._pnorm is not None:
             return self._pnorm[0]
         else:
@@ -448,37 +434,13 @@ class TokaMaker():
             self._pnorm[0] = value
         else:
             raise ValueError('Class must be initialized to set "pnorm"')
-    ## @endcond
     
     @property
     def diverted(self):
-        r'''! Diverted flag (limited if `False`)'''
         if self._diverted is not None:
             return self._diverted[0]
         else:
             return None
-        
-    def abspsi_to_normalized(self,psi_in):
-        r'''! Convert unnormalized \f$ \psi \f$ values to normalized \f$ \hat{\psi} \f$ values
-        
-        @param psi_in Input \f$ \psi \f$ values
-        @returns Normalized \f$ \hat{\psi} \f$ values
-        '''
-        if self.psi_convention == 0:
-            return (psi_in-self.psi_bounds[1])/(self.psi_bounds[0]-self.psi_bounds[1])
-        else:
-            return (psi_in-self.psi_bounds[0])/(self.psi_bounds[1]-self.psi_bounds[0])
-    
-    def psinorm_to_absolute(self,psi_in):
-        r'''! Convert normalized \f$ \hat{\psi} \f$ values to unnormalized values \f$ \psi \f$
-        
-        @param psi_in Input \f$ \hat{\psi} \f$ values
-        @returns Unnormalized \f$ \psi \f$ values
-        '''
-        if self.psi_convention == 0:
-            return psi_in*(self.psi_bounds[0]-self.psi_bounds[1]) + self.psi_bounds[1]
-        else:
-            return psi_in*(self.psi_bounds[1]-self.psi_bounds[0]) + self.psi_bounds[0]
         
     def coil_reg_term(self,coffs,target=0.0,weight=1.0):
         r'''! Define coil current regularization term for the form \f$ target = \Sigma_i \alpha_i I_i \f$
@@ -541,15 +503,6 @@ class TokaMaker():
                 raise IndexError('Incorrect shape of "reg_weights", should be [nregularize]')
         else:
             raise ValueError('Either "reg_terms" or "reg_mat" is required')
-        # Ensure VSC is constrained
-        if (self._virtual_coils.get('#VSC',-1) < 0) and ((abs(reg_mat[-1,:])).max() < 1.E-8):
-            new_row = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
-            new_row[-1] = 1.0
-            reg_mat = numpy.hstack((reg_mat,new_row.reshape([self.ncoils+1,1])))
-            reg_targets = numpy.append(reg_targets, 0.0)
-            reg_weights = numpy.append(reg_weights, 1.0)
-            nregularize += 1
-
         reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
         reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
@@ -566,8 +519,7 @@ class TokaMaker():
         @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
         '''
         bounds_array = numpy.zeros((self.ncoils+1,2), dtype=numpy.float64)
-        bounds_array[:,0] = -1.E98
-        bounds_array[:,1] = 1.E98
+        bounds_array[:,0] = -1.E98; bounds_array[:,1] = 1.E98
         if coil_bounds is not None:
             for coil_key, coil_bound in coil_bounds.items():
                 if coil_key in self.coil_sets:
@@ -700,20 +652,17 @@ class TokaMaker():
         self.load_profiles(ffp_file,None,pp_file,eta_file,ffp_NI_file)
 
     def solve(self, vacuum=False):
-        '''! Solve G-S equation with specified constraints, profiles, etc.
-        
-        @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
-        '''
+        '''! Solve G-S equation with specified constraints, profiles, etc.'''
+        if vacuum:
+            raise ValueError('"vacuum=True" no longer supported, use "vac_solve()"')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),error_string)
+        tokamaker_solve(self._tMaker_ptr,error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
         and optional other currents
-
-        @note If isoflux, flux, or saddle constraints are desired use @ref solve instead.
         
         @param psi Boundary values for vacuum solve
         @param rhs_source Current source (optional)
@@ -736,7 +685,7 @@ class TokaMaker():
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         return psi
 
-    def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
+    def get_stats(self,lcfs_pad=None,li_normalization='std',geom_type='max'):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
@@ -745,34 +694,15 @@ class TokaMaker():
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
-        @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         @result Dictionary of equilibrium parameters
         '''
-        Ip,centroid,vol,pvol,dflux,tflux,Bp_vol = self.get_globals()
-        if beta_Ip is not None:
-            Ip = beta_Ip
-        p_psi = numpy.linspace(0.0,1.0,100)
-        p_psi[0] = 0.001
-        _,_,_,p,_ = self.get_profiles(p_psi)
-        # Return reduced information for mirrors
-        if self.settings.mirror_mode:
-            return {
-                'Ip': Ip,
-                'Ip_centroid': centroid,
-                'vol': vol,
-                'P_ax': p[0],
-                'P_max': p.max(),
-                'W_MHD': pvol*1.5,
-                'dflux': dflux,
-                'tflux': tflux
-            }
-        # Trace 95% surface and core/edge
         if lcfs_pad is None:
             lcfs_pad = 0.0
             if self.diverted or (not self.settings.free_boundary):
                 lcfs_pad = 0.01
-        _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,axis_pad],compute_geo=True) # Given backward so last point is LCFS (for dl)
-        # Get diverted topology information
+        _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02],compute_geo=True) # Given backward so last point is LCFS (for dl)
+        Ip,centroid,vol,pvol,dflux,tflux,Bp_vol = self.get_globals()
+        _,_,_,p,_ = self.get_profiles(numpy.r_[0.001])
         if self.diverted:
             x_points, _ = self.get_xpoints()
             x_active = x_points[-1,:]
@@ -826,7 +756,6 @@ class TokaMaker():
             'q_0': qvals[2],
             'q_95': qvals[1],
             'P_ax': p[0],
-            'P_max': p.max(),
             'W_MHD': pvol*1.5,
             'beta_pol': 100.0*(2.0*pvol*mu0/vol)/numpy.power(Ip*mu0/dl,2),
             'dflux': dflux,
@@ -838,15 +767,14 @@ class TokaMaker():
             eq_stats['beta_n'] = eq_stats['beta_tor']*eq_stats['a_geo']*(self._F0/R_geo)/(Ip/1.E6)
         return eq_stats
 
-    def print_info(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
-        r'''! Print information (Ip, q, etc.) about current G-S equilbirium
+    def print_info(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):
+        '''! Print information (Ip, q, etc.) about current G-S equilbirium
         
-        @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
+        @param lcfs_pad Padding at LCFS for boundary calculations
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
-        @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         '''
-        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,axis_pad=axis_pad,li_normalization=li_normalization,geom_type=geom_type,beta_Ip=beta_Ip)
+        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,li_normalization=li_normalization,geom_type=geom_type)
         print("Equilibrium Statistics:")
         if self.diverted:
             print("  Topology                =   Diverted")
@@ -854,29 +782,23 @@ class TokaMaker():
             print("  Topology                =   Limited")
         print("  Toroidal Current [A]    =   {0:11.4E}".format(eq_stats['Ip']))
         print("  Current Centroid [m]    =   {0:6.3F} {1:6.3F}".format(*eq_stats['Ip_centroid']))
-        if self.settings.dipole_mode:
-            print("  Inner limiter [m]       =   {0:6.3F} {1:6.3F}".format(*self.o_point))
-        elif not self.settings.mirror_mode:
-            print("  Magnetic Axis [m]       =   {0:6.3F} {1:6.3F}".format(*self.o_point))
-        if not self.settings.mirror_mode:
-            print("  Elongation              =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['kappa'],eq_stats['kappaU'],eq_stats['kappaL']))
-            print("  Triangularity           =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['delta'],eq_stats['deltaU'],eq_stats['deltaL']))
+        print("  Magnetic Axis [m]       =   {0:6.3F} {1:6.3F}".format(*self.o_point))
+        print("  Elongation              =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['kappa'],eq_stats['kappaU'],eq_stats['kappaL']))
+        print("  Triangularity           =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['delta'],eq_stats['deltaU'],eq_stats['deltaL']))
         print("  Plasma Volume [m^3]     =   {0:6.3F}".format(eq_stats['vol']))
-        if not (self.settings.dipole_mode or self.settings.mirror_mode):
-            print("  q_0, q_95               =   {0:6.3F} {1:6.3F}".format(eq_stats['q_0'],eq_stats['q_95']))
-        if self.settings.dipole_mode or self.settings.mirror_mode:
-            print("  Peak Pressure [Pa]      =   {0:11.4E}".format(eq_stats['P_max']))
-        else:
-            print("  Plasma Pressure [Pa]    =   Axis: {0:11.4E}, Peak: {1:11.4E}".format(eq_stats['P_ax'], eq_stats['P_max']))
-        print("  Stored Energy [J]       =   {0:11.4E}".format(eq_stats['W_MHD'])) if 'W_MHD' in eq_stats else None
-        print("  <Beta_pol> [%]          =   {0:7.4F}".format(eq_stats['beta_pol'])) if 'beta_pol' in eq_stats else None
-        print("  <Beta_tor> [%]          =   {0:7.4F}".format(eq_stats['beta_tor'])) if 'beta_tor' in eq_stats else None
-        print("  <Beta_n>   [%]          =   {0:7.4F}".format(eq_stats['beta_n'])) if 'beta_n' in eq_stats else None
-        print("  Diamagnetic flux [Wb]   =   {0:11.4E}".format(eq_stats['dflux'])) if 'dflux' in eq_stats else None
-        print("  Toroidal flux [Wb]      =   {0:11.4E}".format(eq_stats['tflux'])) if 'tflux' in eq_stats else None
-        print("  l_i                     =   {0:7.4F}".format(eq_stats['l_i'])) if 'l_i' in eq_stats else None
+        print("  q_0, q_95               =   {0:6.3F} {1:6.3F}".format(eq_stats['q_0'],eq_stats['q_95']))
+        print("  Peak Pressure [Pa]      =   {0:11.4E}".format(eq_stats['P_ax']))
+        print("  Stored Energy [J]       =   {0:11.4E}".format(eq_stats['W_MHD']))
+        print("  <Beta_pol> [%]          =   {0:7.4F}".format(eq_stats['beta_pol']))
+        if 'beta_tor' in eq_stats:
+            print("  <Beta_tor> [%]          =   {0:7.4F}".format(eq_stats['beta_tor']))
+        if 'beta_n' in eq_stats:
+            print("  <Beta_n>   [%]          =   {0:7.4F}".format(eq_stats['beta_n']))
+        print("  Diamagnetic flux [Wb]   =   {0:11.4E}".format(eq_stats['dflux']))
+        print("  Toroidal flux [Wb]      =   {0:11.4E}".format(eq_stats['tflux']))
+        print("  l_i                     =   {0:7.4F}".format(eq_stats['l_i']))
     
-    def set_isoflux(self,isoflux,weights=None,grad_wt_lim=-1.0,ref_points=None):
+    def set_isoflux(self,isoflux,weights=None,grad_wt_lim=-1.0):
         r'''! Set isoflux constraint points (all points lie on a flux surface)
 
         To constraint points more uniformly in space additional weighting based on
@@ -887,33 +809,22 @@ class TokaMaker():
         @param isoflux List of points defining constraints [:,2]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         @param grad_wt_lim Limit on gradient-based weighting (negative to disable)
-        @param ref_points Reference points for each isoflux point [:,2] (default: `isoflux[0,:]` is used for all points)
         '''
         if isoflux is None:
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_isoflux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,1)),numpy.zeros((1,)),0,grad_wt_lim,error_string)
+            tokamaker_set_isoflux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),0,grad_wt_lim,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._isoflux_targets = None
         else:
-            if ref_points is None:
-                ref_points = numpy.zeros((isoflux.shape[0]-1,2), dtype=numpy.float64)
-                ref_points[:,0] = isoflux[0,0]
-                ref_points[:,1] = isoflux[0,1]
-                isoflux = isoflux[1:,:]
-                if weights is not None:
-                    weights = weights[1:]
-            if ref_points.shape[0] != isoflux.shape[0]:
-                raise ValueError('Shape of "ref_points" does not match first dimension of "isoflux"')
             if weights is None:
                 weights = numpy.ones((isoflux.shape[0],), dtype=numpy.float64)
             if weights.shape[0] != isoflux.shape[0]:
                 raise ValueError('Shape of "weights" does not match first dimension of "isoflux"')
             isoflux = numpy.ascontiguousarray(isoflux, dtype=numpy.float64)
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
-            ref_points = numpy.ascontiguousarray(ref_points, dtype=numpy.float64)
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_isoflux(self._tMaker_ptr,isoflux,ref_points,weights,isoflux.shape[0],grad_wt_lim,error_string)
+            tokamaker_set_isoflux(self._tMaker_ptr,isoflux,weights,isoflux.shape[0],grad_wt_lim,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._isoflux_targets = isoflux.copy()
@@ -979,40 +890,32 @@ class TokaMaker():
 
         @param alam Scale factor for \f$F*F'\f$ term (disabled if `Ip` is set)
         @param pnorm Scale factor for \f$P'\f$ term (disabled if `pax`, `estore`, or `R0` are set)
-        @param Ip Target plasma current [A] (disabled if `OFT_env.float_disable_flag`)
-        @param Ip_ratio Amplitude of net plasma current contribution from FF' compared to P' (disabled if `OFT_env.float_disable_flag`)
-        @param pax Target axis pressure [Pa] (disabled if `OFT_env.float_disable_flag` or if `estore` is set)
-        @param estore Target sotred energy [J] (disabled if `OFT_env.float_disable_flag`)
-        @param R0 Target major radius for magnetic axis (disabled if `OFT_env.float_disable_flag` or if `pax` or `estore` are set)
-        @param V0 Target vertical position for magnetic axis (disabled if `OFT_env.float_disable_flag`)
+        @param Ip Target plasma current [A] (disabled if <0)
+        @param Ip_ratio Amplitude of net plasma current contribution from FF' compared to P' (disabled if <-1.E98)
+        @param pax Target axis pressure [Pa] (disabled if <0 or if `estore` is set)
+        @param estore Target sotred energy [J] (disabled if <0)
+        @param R0 Target major radius for magnetic axis (disabled if <0 or if `pax` or `estore` are set)
+        @param V0 Target vertical position for magnetic axis (disabled if <-1.E98)
         @param retain_previous Keep previously set targets unless explicitly updated? (default: False)
         '''
         # Reset all targets unless specified
         if not retain_previous:
-            self._Ip_target.value = self._oft_env.float_disable_flag
-            self._estore_target.value = self._oft_env.float_disable_flag
-            self._pax_target.value = self._oft_env.float_disable_flag
-            self._Ip_ratio_target.value = self._oft_env.float_disable_flag
-            self._R0_target.value = self._oft_env.float_disable_flag
-            self._V0_target.value = self._oft_env.float_disable_flag
+            self._Ip_target.value = -1.E99
+            self._estore_target.value = -1.0
+            self._pax_target.value = -1.0
+            self._Ip_ratio_target.value = -1.E99
+            self._R0_target.value = -1.0
+            self._V0_target.value = -1.E99
         # Set new targets
         if Ip is not None:
-            if (Ip <= 0.0) and (not self._oft_env.float_is_disabled(Ip)):
-                raise ValueError("`Ip_target` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._Ip_target.value=Ip
         if estore is not None:
-            if (estore <= 0.0) and (not self._oft_env.float_is_disabled(estore)):
-                raise ValueError("`estore` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._estore_target.value=estore
         if pax is not None:
-            if (pax <= 0.0) and (not self._oft_env.float_is_disabled(pax)):
-                raise ValueError("`pax` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._pax_target.value=pax
         if Ip_ratio is not None:
             self._Ip_ratio_target.value=Ip_ratio
         if R0 is not None:
-            if (R0 <= 0.0) and (not self._oft_env.float_is_disabled(R0)):
-                raise ValueError("`R0` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._R0_target.value=R0
         if V0 is not None:
             self._V0_target.value=V0
@@ -1028,17 +931,17 @@ class TokaMaker():
         '''
         # Get targets
         target_dict = {}
-        if (not self._oft_env.float_is_disabled(self._Ip_target.value)):
+        if self._Ip_target.value > 0.0:
             target_dict['Ip'] = self._Ip_target.value
-        if (not self._oft_env.float_is_disabled(self._estore_target.value)):
+        if self._estore_target.value > 0.0:
             target_dict['estore'] = self._estore_target.value
-        if (not self._oft_env.float_is_disabled(self._pax_target.value)):
+        if self._pax_target.value > 0.0:
             target_dict['pax'] = self._pax_target.value
-        if (not self._oft_env.float_is_disabled(self._Ip_ratio_target.value)):
+        if self._Ip_ratio_target.value > -1.E98:
             target_dict['Ip_ratio'] = self._Ip_ratio_target.value
-        if (not self._oft_env.float_is_disabled(self._R0_target.value)):
+        if self._R0_target.value > 0.0:
             target_dict['R0'] = self._R0_target.value
-        if (not self._oft_env.float_is_disabled(self._V0_target.value)):
+        if self._V0_target.value > -1.E98:
             target_dict['V0'] = self._V0_target.value
         return target_dict
 
@@ -1051,18 +954,6 @@ class TokaMaker():
         curr = numpy.copy(psi)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_dels_curr(self._tMaker_ptr,curr,error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
-        return curr/mu0
-    
-    def get_jtor_plasma(self):
-        r'''! Get plasma toroidal current density for current equilibrium
- 
-        @result \f$ J_{\phi} \f$ by evalutating RHS source terms
-        '''
-        curr = numpy.zeros((self.np,), dtype=numpy.float64)
-        error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_jtor(self._tMaker_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr/mu0
@@ -1086,17 +977,16 @@ class TokaMaker():
                 psi = 1.0 - psi
         return psi
 
-    def set_psi(self,psi,update_bounds=False):
+    def set_psi(self,psi):
         '''! Set poloidal flux values on node points
 
         @param psi Poloidal flux values (should not be normalized!)
-        @param update_bounds Update plasma bounds by determining new limiting points
         '''
         if psi.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi", should be [np]')
         psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_psi(self._tMaker_ptr,psi,c_bool(update_bounds),error_string)
+        tokamaker_set_psi(self._tMaker_ptr,psi,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1117,14 +1007,14 @@ class TokaMaker():
     def get_field_eval(self,field_type):
         r'''! Create field interpolator for vector potential
 
-        @param field_type Field to interpolate, must be one of ("B", "psi", "F", "P", "dPSI", "dBr", "dBt", or "dBz")
+        @param field_type Field to interpolate, must be one of ("B", "psi", "F", or "P")
         @result Field interpolation object
         '''
         #
-        mode_map = {'B': 1, 'PSI': 2, 'F': 3, 'P': 4, 'DPSI': 5, 'DBR': 6, 'DBT': 7, 'DBZ': 8}
+        mode_map = {'B': 1, 'PSI': 2, 'F': 3, 'P': 4}
         imode = mode_map.get(field_type.upper())
         if imode is None:
-            raise ValueError('Invalid field type ("B", "psi", "F", "P", "dPSI", "dBr", "dBt", "dBz")')
+            raise ValueError('Invalid field type ("B", "psi", "F", "P")')
         #
         int_obj = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
@@ -1134,8 +1024,6 @@ class TokaMaker():
         field_dim = 1
         if imode == 1:
             field_dim = 3
-        elif imode >= 5:
-            field_dim = 2
         return TokaMaker_field_interpolator(self._tMaker_ptr,int_obj,imode,field_dim)
     
     def get_coil_currents(self):
@@ -1195,7 +1083,7 @@ class TokaMaker():
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
-        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>,dV/dPsi]\f$, length of last surface,
+        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>]\f$, length of last surface,
         [r(R_min),r(R_max)], [r(z_min),r(z_max)]
         '''
         if psi is None:
@@ -1208,7 +1096,7 @@ class TokaMaker():
                 psi_save = numpy.copy(psi)
                 psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
-        ravgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
+        ravgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
         if compute_geo:
             dl = c_double(1.0)
         else:
@@ -1282,6 +1170,10 @@ class TokaMaker():
     def calc_loopvoltage(self):
         r'''! Get plasma loop voltage
 
+        @param eta Dictionary object containing resistivity profile ['y'] and sampled locations 
+        in normalized Psi ['x']
+        @param ffp_NI Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
+        in normalized Psi ['x']
         @result Vloop [Volts]
         '''
         V_loop = c_double()
@@ -1364,38 +1256,6 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
     
-    def set_dipole_a(self,a_exp=None):
-        r'''! Update anisotropy exponent `a` when dipole mode is used, calling with no argument
-        will disable pressure anisotropy.
-        
-        @param a_exp New value for `a` exponent
-        '''
-        error_string = self._oft_env.get_c_errorbuff()
-        if a_exp is None:
-            a_exp = -1.0
-        tokamaker_set_dipole_a(self._tMaker_ptr,a_exp,error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
-        
-    def set_mirror_slosh(self,n_exp=None,b_turn=None,z_throat=None):
-        r'''! Update anisotropy exponent `a` when dipole mode is used, calling with no arguments
-        will disable pressure anisotropy.
-        
-        @param n_exp New value for `n` exponent
-        @param b_turn Relative B-field at ion turning point (b_turn = B/B_0)
-        @param z_throat Location of mirror throat
-        '''
-        error_string = self._oft_env.get_c_errorbuff()
-        if (n_exp or b_turn or z_throat) and (not (n_exp and b_turn and z_throat)):
-            raise ValueError('All (or no) arguments must be passed.')
-        if n_exp is None:
-            n_exp = -1.0
-            b_turn = -1.0
-            z_throat = -1.0
-        tokamaker_set_mirror_slosh(self._tMaker_ptr,n_exp,b_turn,z_throat,error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
-    
     def area_integral(self,field,reg_mask=-1):
         r'''! Compute area integral of field over a specified region
 
@@ -1408,28 +1268,6 @@ class TokaMaker():
         #
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_area_int(self._tMaker_ptr,field,c_int(reg_mask),ctypes.byref(result),error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
-        return result.value
-    
-    def flux_integral(self,psi_vals,field_vals):
-        r'''! Compute area integral of field over a specified region
-
-        @param field Field to integrate [np,]
-        @param reg_mask ID of region for integration (negative for whole mesh)
-        @result \f$ \int f dA \f$
-        '''
-        if psi_vals.shape[0] != field_vals.shape[0]:
-            raise ValueError('"psi_vals" and "field_vals" must be the same length')
-        if self.psi_convention == 0:
-            psi_vals = numpy.flip(1.0-psi_vals)
-            field_vals = numpy.flip(field_vals)
-        result = c_double(0.0)
-        psi_vals = numpy.ascontiguousarray(psi_vals, dtype=numpy.float64)
-        field_vals = numpy.ascontiguousarray(field_vals, dtype=numpy.float64)
-        #
-        error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_flux_int(self._tMaker_ptr,psi_vals,field_vals,c_int(psi_vals.shape[0]),ctypes.byref(result),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return result.value
@@ -1452,17 +1290,11 @@ class TokaMaker():
         @result Colorbar instance for coil colors or None
         '''
         mask_vals = numpy.ones((self.np,))
-        if self.settings.mirror_mode:
-            r_plot = self.r[:,1]
-            z_plot = self.r[:,0]
-        else:
-            r_plot = self.r[:,0]
-            z_plot = self.r[:,1]
         # Shade vacuum region
         if vacuum_color is not None:
             mask = numpy.logical_and(self.reg > 1, self.reg <= self.nvac+1)
             if mask.sum() > 0.0:
-                ax.tricontourf(r_plot, z_plot, self.lc[mask,:], mask_vals, colors=vacuum_color)
+                ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask,:], mask_vals, colors=vacuum_color)
         # Shade coils
         if coil_colormap is not None:
             _, region_currents = self.get_coil_currents()
@@ -1472,19 +1304,19 @@ class TokaMaker():
             # Adjust current in coils with non-uniform distribution
             if len(self.dist_coils)>0:
                 for _, coil_obj in self.coil_sets.items():
-                    if coil_obj["id"] in self.dist_coils.keys():
+                    if (coil_id:=coil_obj["id"]) in self.dist_coils.keys():
                         for sub_coil in coil_obj["sub_coils"]:
                             mask = (self.reg==sub_coil["reg_id"])
-                            face_currents = numpy.mean(self.dist_coils[coil_obj["id"]][self.lc],axis=1)
+                            face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
                             mesh_currents[mask] *= face_currents[mask]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:
                 mesh_currents *= coil_scale
                 if coil_symmap:
                     max_curr = abs(mesh_currents).max()
-                    clf = ax.tripcolor(r_plot, z_plot, self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap, vmin=-max_curr, vmax=max_curr)
+                    clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap, vmin=-max_curr, vmax=max_curr)
                 else:
-                    clf = ax.tripcolor(r_plot, z_plot, self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap)
+                    clf = ax.tripcolor(self.r[:,0], self.r[:,1], self.lc[mask,:], mesh_currents[mask], cmap=coil_colormap)
                 if coil_clabel is not None:
                     cax = None
                     if colorbar is not None:
@@ -1493,18 +1325,15 @@ class TokaMaker():
         else:
             for _, coil_reg in self._coil_dict.items():
                 mask_tmp = (self.reg == coil_reg['reg_id'])
-                ax.tricontourf(r_plot, z_plot, self.lc[mask_tmp,:], mask_vals, colors=coil_color, alpha=1)
+                ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask_tmp,:], mask_vals, colors=coil_color, alpha=1)
         # Shade conductors
         for _, cond_reg in self._cond_dict.items():
             mask_tmp = (self.reg == cond_reg['reg_id'])
-            ax.tricontourf(r_plot, z_plot, self.lc[mask_tmp,:], mask_vals, colors=cond_color, alpha=1)
+            ax.tricontourf(self.r[:,0], self.r[:,1], self.lc[mask_tmp,:], mask_vals, colors=cond_color, alpha=1)
         # Show limiter
         if limiter_color and (self.lim_contour is not None):
             for lim_contour in self.lim_contours:
-                if self.settings.mirror_mode:
-                    ax.plot(lim_contour[:,1],lim_contour[:,0],color=limiter_color)
-                else:
-                    ax.plot(lim_contour[:,0],lim_contour[:,1],color=limiter_color)
+                ax.plot(lim_contour[:,0],lim_contour[:,1],color=limiter_color)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
         return colorbar
@@ -1550,12 +1379,6 @@ class TokaMaker():
         @param opoint_color Color for O-point markers (None to disable)
         @param opoint_marker Marker style for O-points
         '''
-        if self.settings.mirror_mode:
-            r_plot = self.r[:,1]
-            z_plot = self.r[:,0]
-        else:
-            r_plot = self.r[:,0]
-            z_plot = self.r[:,1]
         # Plot poloidal flux
         if psi is None:
             psi = self.get_psi(normalized)
@@ -1590,19 +1413,16 @@ class TokaMaker():
         if (plasma_color is None) and (plasma_colormap is None):
             plasma_colormap='viridis'
         if vacuum_levels is not None:
-            ax.tricontour(r_plot,z_plot,self.lc,psi,levels=vacuum_levels,colors=vacuum_color,cmap=vacuum_colormap,linestyles=vacuum_linestyles)
+            ax.tricontour(self.r[:,0],self.r[:,1],self.lc,psi,levels=vacuum_levels,colors=vacuum_color,cmap=vacuum_colormap,linestyles=vacuum_linestyles)
         if plasma_levels is not None:
-            ax.tricontour(r_plot,z_plot,self.lc,psi,levels=plasma_levels,colors=plasma_color,cmap=plasma_colormap,linestyles=plasma_linestyles)
+            ax.tricontour(self.r[:,0],self.r[:,1],self.lc,psi,levels=plasma_levels,colors=plasma_color,cmap=plasma_colormap,linestyles=plasma_linestyles)
 
         # Plot saddle points
         if xpoint_color is not None:
-            x_points, diverted = self.get_xpoints()
+            x_points, _ = self.get_xpoints()
             if x_points is not None:
-                if diverted:
-                    ax.plot(x_points[-1,0], x_points[-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
-                    ax.plot(x_points[:-1,0], x_points[:-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
-                else:
-                    ax.plot(x_points[:,0], x_points[:,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
+                ax.plot(x_points[-1,0], x_points[-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
+                ax.plot(x_points[:-1,0], x_points[:-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
         if (opoint_color is not None) and (self.o_point[0] > 0.0):
             ax.plot(self.o_point[0], self.o_point[1], color=opoint_color, marker=opoint_marker)
         # Make 1:1 aspect ratio
@@ -1666,6 +1486,41 @@ class TokaMaker():
                 mask = numpy.logical_or(mask,mask_tmp)
         return mask, mesh_currents
     
+    def get_strike_points(self, lim=None):
+        x_pts, is_div = self.get_xpoints()
+
+        if not is_div:
+            print("EXAMPLE IS NOT DIVERTED!")
+            return [self.lim_point]
+
+        if lim is None:
+            lim = self.lim_contours[0] # Assume one limiter
+
+        lim = [numpy.array(pt) for pt in lim]
+
+        psi_eval = self.get_field_eval('PSI')
+        psi_LCFS = self.psi_bounds[0]
+
+        strike_pts = []
+        prev_pt = lim[-1]
+        prev_psi = psi_eval.eval(prev_pt)
+
+        for pt in lim:
+            psi = psi_eval.eval(pt)[0]
+            if prev_psi < psi_LCFS and psi > psi_LCFS:
+                psi_diff = (psi_LCFS - prev_psi) / (psi - prev_psi)
+                strike_pt = (1.0-psi_diff) * prev_pt + psi_diff * pt
+                strike_pts.append(strike_pt)
+            elif prev_psi > psi_LCFS and psi < psi_LCFS:
+                psi_diff = (psi_LCFS - psi) / (prev_psi - psi)
+                strike_pt = (1.0-psi_diff) * pt + psi_diff * prev_pt
+                strike_pts.append(strike_pt)
+            prev_pt = pt
+            prev_psi = psi
+        
+        strike_pts = [sp for sp in strike_pts if numpy.dot(sp - self.o_point, x_pts[-1] - self.o_point) > 0]
+        return strike_pts
+
     def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
         r'''! Plot contours of \f$\hat{\psi}\f$
 
@@ -1678,12 +1533,6 @@ class TokaMaker():
         @param clabel Label for colorbar (None to disable colorbar)
         @result Colorbar object
         '''
-        if self.settings.mirror_mode:
-            r_plot = self.r[:,1]
-            z_plot = self.r[:,0]
-        else:
-            r_plot = self.r[:,0]
-            z_plot = self.r[:,1]
         if psi is not None:
             mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
         elif dpsi_dt is not None:
@@ -1691,15 +1540,15 @@ class TokaMaker():
         if plot_field.shape[0] == self.nc:
             if symmap:
                 max_curr = abs(plot_field).max()
-                clf = ax.tripcolor(r_plot,z_plot,self.lc[mask,:],plot_field[mask],cmap=colormap,vmin=-max_curr,vmax=max_curr)
+                clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask,:],plot_field[mask],cmap=colormap,vmin=-max_curr,vmax=max_curr)
             else:
-                clf = ax.tripcolor(r_plot,z_plot,self.lc[mask],plot_field[mask],cmap=colormap)
+                clf = ax.tripcolor(self.r[:,0],self.r[:,1],self.lc[mask],plot_field[mask],cmap=colormap)
         else:
             if symmap:
                 max_curr = abs(plot_field[self.lc[mask,:]]).max(axis=None)
-                clf = ax.tricontourf(r_plot,z_plot,self.lc[mask],plot_field,nlevels,cmap=colormap,vmin=-max_curr,vmax=max_curr)
+                clf = ax.tricontourf(self.r[:,0],self.r[:,1],self.lc[mask],plot_field,nlevels,cmap=colormap,vmin=-max_curr,vmax=max_curr)
             else:
-                clf = ax.tricontourf(r_plot,z_plot,self.lc[mask],plot_field,nlevels,cmap=colormap)
+                clf = ax.tricontourf(self.r[:,0],self.r[:,1],self.lc[mask],plot_field,nlevels,cmap=colormap)
         if clabel is not None:
             cb = fig.colorbar(clf,ax=ax)
             cb.set_label(clabel)
@@ -1724,7 +1573,7 @@ class TokaMaker():
         return numpy.ctypeslib.as_array(pts_loc,shape=(npts.value, 2)), \
             numpy.ctypeslib.as_array(flux_loc,shape=(npts.value,))
 
-    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None,truncate_eq=True,limiter_file='',lcfs_pressure=0.0, cocos=7):
+    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None,truncate_eq=True,limiter_file='',lcfs_pressure=0.0):
         r'''! Save current equilibrium to gEQDSK format
 
         @param filename Filename to save equilibrium to
@@ -1738,7 +1587,6 @@ class TokaMaker():
         @param truncate_eq Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
         @param limiter_file File containing limiter contour to use instead of TokaMaker limiter
         @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
-        @param cocos COCOS version. (Only 2 or 7 supported. COCOS=7 is the default.)
         '''
         cfilename = self._oft_env.path2c(filename)
         lim_filename = self._oft_env.path2c(limiter_file)
@@ -1755,10 +1603,8 @@ class TokaMaker():
             zbounds += numpy.r_[-1.0,1.0]*dr*0.05
         if rcentr is None:
             rcentr = -1.0
-        if cocos not in [2, 7]:
-            raise Exception('Unsupported COCOS version. Only supported versions are 2 or 7.')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_eqdsk(self._tMaker_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,cocos,error_string)
+        tokamaker_save_eqdsk(self._tMaker_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1776,17 +1622,6 @@ class TokaMaker():
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_save_ifile(self._tMaker_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
-    
-    def save_mug(self,filename):
-        r'''! Save current equilibrium to MUG transfer format
-
-        @param filename Filename to save equilibrium to
-        '''
-        cfilename = self._oft_env.path2c(filename)
-        error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_mug(self._tMaker_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -1821,6 +1656,8 @@ class TokaMaker():
         tokamaker_eig_wall(self._tMaker_ptr,c_int(neigs),eig_vals,eig_vecs,pm,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
+            raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
@@ -1840,6 +1677,8 @@ class TokaMaker():
         tokamaker_eig_td(self._tMaker_ptr,c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        if (eig_vals[0,0] < -1.E98) and (eig_vals[0,1] < -1.E98):
+            raise ValueError("Error in eigenvalue solve")
         return eig_vals, eig_vecs
 
     def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
@@ -1872,7 +1711,49 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
+    
+    def plot_current_density(self, fig, ax):
+        psi = self.get_psi(normalized=True)
+        currents = self.get_delstar_curr(psi)
+        curr_densities = numpy.zeros(self.nc)
 
+        max_cd = 2.5E6 # TODO: remove hardcoded value
+        plasma_area = 0.0
+
+        for i in range(self.nc):
+            if self.reg[i] not in [1, 3]:
+                continue # Ignore all regions except plasma and vacuum
+            idx1, idx2, idx3 = self.lc[i]
+            rz1 = self.r[idx1][:2]
+            rz2 = self.r[idx2][:2]
+            rz3 = self.r[idx3][:2]
+            curr_densities[i] = currents[idx1]
+            cell_area = numpy.linalg.norm(numpy.cross(rz2 - rz1, rz3 - rz1))/2.0
+            if self.reg[i] == 1:
+                plasma_area += cell_area
+
+        curr_densities = curr_densities / plasma_area
+
+        for i in range(self.nc):
+            idx1, idx2, idx3 = self.lc[i]
+            rz1 = self.r[idx1][:2]
+            rz2 = self.r[idx2][:2]
+            rz3 = self.r[idx3][:2]
+            if numpy.abs(curr_densities[i]) > max_cd:
+                color = [1.0, 0.0, 1.0, 1.0]
+            elif curr_densities[i] > 0:
+                color = [0.0, 1.0, 0.0, curr_densities[i] / max_cd]
+            else:
+                color = [0.0, 0.0, 1.0, numpy.abs(curr_densities[i]) / max_cd]
+            poly = Polygon([rz1, rz2, rz3], facecolor=color)
+            ax.add_patch(poly)
+        
+        cmap = ListedColormap([[0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 1.0, 0.5], [1.0, 1.0, 1.0, 1.0], [0.0, 1.0, 0.0, 0.5], [0.0, 1.0, 0.0, 1.0]])
+        bounds = numpy.linspace(-5.0, 5.0, 6)
+        norm = matplotlib.colors.BoundaryNorm(bounds, 5)
+        # formatter = mticker.ScalarFormatter()
+        fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
+             ax=ax, orientation='vertical', label='Current Density [MA/m2]')
 
 def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=[1.],max_iterations=6,initialize_eq=True):
     '''! Self-consistently compute bootstrap contribution from H-mode profiles,
@@ -2087,4 +1968,3 @@ def solve_with_bootstrap(self,ne,Te,ni,Ti,inductive_jtor,Zeff,jBS_scale=1.0,Zis=
             raise TypeError('H-mode equilibrium solve did not converge')
     
     return flag, j_BS
-
