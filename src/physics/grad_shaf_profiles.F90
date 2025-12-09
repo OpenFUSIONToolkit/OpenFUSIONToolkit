@@ -89,7 +89,6 @@ end type poly_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-integer(4), parameter :: max_threads = 24
 type, extends(flux_func) :: spline_flux_func
   INTEGER(4) :: npsi = 0 !< Needs docs
   REAL(8) :: xmin = 0.d0 !< Needs docs
@@ -99,7 +98,7 @@ type, extends(flux_func) :: spline_flux_func
   REAL(8) :: yp1 = 0.d0 !< Needs docs
   REAL(8) :: ypn = 0.d0 !< Needs docs
   TYPE(spline_type) :: func !< Needs docs
-  TYPE(spline_type) :: fun_loc(max_threads) !< Needs docs
+  TYPE(spline_type) :: fun_loc(24) !< Needs docs
 contains
   !> Needs docs
   procedure :: f => spline_f
