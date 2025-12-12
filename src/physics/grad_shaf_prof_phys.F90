@@ -22,7 +22,7 @@ use oft_gs, only: gs_eq, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use oft_gs_profiles, only: spline_flux_func, linterp_flux_func
+use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, get_max_threads
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -137,7 +137,7 @@ select type(self=>func)
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
     CALL spline_alloc(self%funcp,self%npsi,1)
-    DO i=1,omp_get_max_threads()
+    DO i=1,get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
 end select
@@ -252,7 +252,7 @@ CALL spline_int(self%funcp)
 self%func%xs=self%funcp%xs
 self%func%fs(:,1)=self%funcp%fsi(:,1)
 CALL spline_fit(self%func,"extrap")
-DO k=1,omp_get_max_threads()
+DO k=1,get_max_threads()
   CALL spline_copy(self%func,self%fun_loc(k))
 END DO
 !
@@ -451,7 +451,7 @@ select type(self=>func)
     !---
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
-    DO i=1,omp_get_max_threads()
+    DO i=1,get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
 end select
@@ -542,7 +542,7 @@ self%yp1=0.d0
 self%ypn=0.d0
 !---Setup Spline
 CALL spline_fit(self%func,"extrap")
-DO k=1,omp_get_max_threads()
+DO k=1,get_max_threads()
   CALL spline_copy(self%func,self%fun_loc(k))
 END DO
 IF(oft_debug_print(2))CALL oft_decrease_indent
@@ -616,7 +616,7 @@ IF(ASSOCIATED(self%B0_prof))THEN
   SELECT TYPE(this=>self%B0_prof)
   TYPE IS(dipole_b0_flux_func)
     CALL spline_dealloc(this%func)
-    DO i=1,omp_get_max_threads()
+    DO i=1,get_max_threads()
       CALL spline_dealloc(this%fun_loc(i))
     END DO
   END SELECT
@@ -661,7 +661,7 @@ select type(self=>func)
     !---
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
-    DO i=1,omp_get_max_threads()
+    DO i=1,get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
 end select
@@ -723,7 +723,7 @@ self%xmin=self%func%xs(0)+(self%func%xs(0)-self%func%xs(1))*4.d0
 self%xmax=self%func%xs(self%npsi)+(self%func%xs(1)-self%func%xs(0))*4.d0
 !---Setup Spline
 CALL spline_fit(self%func,"extrap")
-DO k=1,omp_get_max_threads()
+DO k=1,get_max_threads()
   CALL spline_copy(self%func,self%fun_loc(k))
 END DO
 IF(oft_debug_print(2))CALL oft_decrease_indent
@@ -759,7 +759,7 @@ IF(ASSOCIATED(self%B0_prof))THEN
   SELECT TYPE(this=>self%B0_prof)
   TYPE IS(mirror_b0_flux_func)
     CALL spline_dealloc(this%func)
-    DO i=1,omp_get_max_threads()
+    DO i=1,get_max_threads()
       CALL spline_dealloc(this%fun_loc(i))
     END DO
   END SELECT
