@@ -60,14 +60,14 @@ def fetch_file(url, file):
     original_url = url
     try:
         if PY3K:
-            req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"})
+            req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"}) 
             response = urllib.request.urlopen(req)
             resolved_url = response.geturl()
             for _ in range(10): # Handle redirects
                 if resolved_url == url:
                     break
                 url = resolved_url
-                redirect_req = urllib.request.Request(resolved_url, headers={'User-Agent' : "Magic Browser"})
+                redirect_req = urllib.request.Request(resolved_url, headers={'User-Agent' : "Magic Browser"}) 
                 response = urllib.request.urlopen(redirect_req)
                 resolved_url = response.geturl()
             try:
@@ -90,8 +90,8 @@ def fetch_file(url, file):
                 file_size = -1
     except ValueError:
         error_exit('Invalid download URL: "{0}"'.format(original_url))
-    except BaseException as e:
-        error_exit('Download failed for file: "{0}" with error {1}'.format(original_url, e))
+    except:
+        error_exit('Download failed for file: "{0}"'.format(original_url))
     else:
         line = "  Downloading: {0}".format(original_url)
         print(line)
@@ -356,7 +356,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
     return config_dict
 
 
-def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False,
+def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False, 
                        build_examples=False,build_docs=False,build_coverage=False,package_build=False,
                        package_release=False,enable_debug_stack=False,enable_profiling=False):
     def bool_to_string(val):
@@ -1454,7 +1454,7 @@ class BLAS_LAPACK(package):
         ]
         if 'MACOS_SDK_PATH' in self.config_dict:
             cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
-        build_lines += [
+        build_lines += [    
             "{CMAKE} " + " ".join(cmake_options) + " .. ",
             "make -j{MAKE_THREADS}",
             "make install"
