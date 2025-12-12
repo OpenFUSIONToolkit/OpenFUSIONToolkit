@@ -52,15 +52,6 @@ jobs:
             mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT"
           }
         - {
-            name: "macOS Ventura GCC 12",
-            os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
-            python: "python3.12",
-            build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
-            xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer"
-          }
-        - {
             name: "macOS Sonoma GCC 13",
             os: macos-14,
             cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
@@ -78,15 +69,24 @@ jobs:
             mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer"
           }
+        - {
+            name: "macOS Sequoia GCC 15 (x86)",
+            os: macos-15-intel,
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
+            python: "python3.13",
+            build_flags: "--build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
+            xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer"
+          }
         exclude:
-          - parallel: mpich
-            config: {os: macos-13}
           - parallel: mpich
             config: {os: macos-14}
           - parallel: openmpi
             config: {os: macos-14}
           - parallel: openmpi
             config: {os: macos-15}
+          - parallel: openmpi
+            config: {os: macos-15-intel}
           - parallel: openmpi
             config: {cc: icx}
         include:
