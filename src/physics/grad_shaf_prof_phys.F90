@@ -619,6 +619,7 @@ IF(ASSOCIATED(self%B0_prof))THEN
     DO i=1,omp_get_max_threads()
       CALL spline_dealloc(this%fun_loc(i))
     END DO
+    DEALLOCATE(this%fun_loc)
   END SELECT
 END IF
 NULLIFY(self%gs,self%mesh)
@@ -762,6 +763,7 @@ IF(ASSOCIATED(self%B0_prof))THEN
     DO i=1,omp_get_max_threads()
       CALL spline_dealloc(this%fun_loc(i))
     END DO
+    DEALLOCATE(this%fun_loc)
   END SELECT
 END IF
 NULLIFY(self%gs,self%mesh)
