@@ -137,6 +137,7 @@ select type(self=>func)
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
     CALL spline_alloc(self%funcp,self%npsi,1)
+    ALLOCATE(self%fun_loc(omp_get_max_threads()))
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
@@ -451,6 +452,7 @@ select type(self=>func)
     !---
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
+    ALLOCATE(self%fun_loc(omp_get_max_threads()))
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
@@ -662,6 +664,7 @@ select type(self=>func)
     !---
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
+    ALLOCATE(self%fun_loc(omp_get_max_threads()))
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
