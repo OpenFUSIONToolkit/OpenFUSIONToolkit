@@ -89,7 +89,6 @@ end type poly_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-integer(4), parameter :: max_threads = 24
 type, extends(flux_func) :: spline_flux_func
   INTEGER(4) :: npsi = 0 !< Needs docs
   REAL(8) :: xmin = 0.d0 !< Needs docs
@@ -99,7 +98,7 @@ type, extends(flux_func) :: spline_flux_func
   REAL(8) :: yp1 = 0.d0 !< Needs docs
   REAL(8) :: ypn = 0.d0 !< Needs docs
   TYPE(spline_type) :: func !< Needs docs
-  TYPE(spline_type) :: fun_loc(max_threads) !< Needs docs
+  TYPE(spline_type) :: fun_loc(24) !< Needs docs
 contains
   !> Needs docs
   procedure :: f => spline_f
@@ -552,7 +551,7 @@ select type(self=>func)
   self%npsi=npsi
   self%ncofs=self%npsi
   CALL spline_alloc(self%func,self%npsi-1,1)
-  DO i=1,get_max_threads()
+  DO i=1,omp_get_max_threads()
     CALL spline_alloc(self%fun_loc(i),self%npsi-1,1)
   END DO
   IF(PRESENT(psivals))THEN
@@ -579,7 +578,7 @@ select type(self=>func)
   WRITE(*,*)'Fitting',self%func%xs
   !CALL spline_fit(self%func,"extrap")
   CALL spline_fit(self%func,"not-a-knot")
-  DO i=1,get_max_threads()
+  DO i=1,omp_get_max_threads()
     CALL spline_copy(self%func,self%fun_loc(i))
   END DO
   ALLOCATE(c(self%ncofs))
@@ -646,7 +645,7 @@ IF(ABS(self%yp1-1.d0)>1.d-4)CALL oft_abort('Error in spline normalization','spli
 CALL spline_eval(self%func,self%xmax,1)
 self%ypn=self%func%f1(1)
 !---
-DO i=1,get_max_threads()
+DO i=1,omp_get_max_threads()
   CALL spline_copy(self%func,self%fun_loc(i))
 END DO
 end subroutine spline_update
@@ -680,7 +679,7 @@ CALL spline_eval(self%func,self%xmax,1)
 self%fn=self%func%f(1)-self%f1
 self%ypn=self%func%f1(1)
 !---
-DO i=1,get_max_threads()
+DO i=1,omp_get_max_threads()
   CALL spline_copy(self%func,self%fun_loc(i))
 END DO
 ierr=0
@@ -696,14 +695,6 @@ DO i=0,self%npsi-1
   c(i+1)=self%func%fs(i,1)
 END DO
 end subroutine spline_cofs_get
-!------------------------------------------------------------------------------
-!> Return the maximum number of threads that can be created, additionally
-!> limited by the allocated size of the fun_loc array.
-!------------------------------------------------------------------------------
-function get_max_threads() result(threads)
-  integer(4) :: threads
-  threads = min(omp_get_max_threads(), max_threads)
-end function get_max_threads
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
