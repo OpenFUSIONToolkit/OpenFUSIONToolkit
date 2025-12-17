@@ -424,6 +424,8 @@ end interface
 real(r8), PARAMETER :: gs_epsilon = 1.d-12 !< Epsilon used for radial coordinate
 !
 integer(i4) :: cell_active = 0
+integer(i4) :: ind_active = 0
+integer(i4) :: ed_active = 0
 real(r8) :: pt_con_active(2) = [0.d0,0.d0]
 real(r8) :: vec_con_active(2) = [0.d0,0.d0]
 real(r8) :: psi_target_active = 0.d0
@@ -431,8 +433,9 @@ real(r8) :: qp_int_tol = 1.d-12
 type(oft_lag_brinterp), pointer :: psi_eval_active => NULL()
 type(oft_lag_bginterp), pointer :: psi_geval_active => NULL()
 type(oft_lag_bg2interp), pointer :: psi_g2eval_active => NULL()
-!$omp threadprivate(cell_active,pt_con_active,vec_con_active,psi_target_active)
-!$omp threadprivate(psi_eval_active,psi_geval_active,psi_g2eval_active)
+TYPE(gs_eq), POINTER :: gs_active => NULL()
+!$omp threadprivate(cell_active,ind_active,ed_active,pt_con_active,vec_con_active,psi_target_active)
+!$omp threadprivate(psi_eval_active,psi_geval_active,psi_g2eval_active,gs_active)
 contains
 !
 function dummy_fpp(self,psi) result(b)
@@ -3180,6 +3183,7 @@ TYPE(oft_lusolver) :: lu_solver
 !---
 IF(self%free)CALL oft_abort("Equilibrium is free-boundary","gs_fixed_vflux",__FILE__)
 WRITE(*,'(2A)')oft_indent,"Computing fixed boundary vacuum flux"
+!i=oft_sleep(4)
 !---
 NULLIFY(dels_free)
 CALL compute_bcmat(self)
@@ -5598,7 +5602,7 @@ end subroutine gs_destroy
 !> Compute boundary condition matrix for free-boundary case
 !------------------------------------------------------------------------------
 subroutine compute_bcmat(self)
-class(gs_eq), intent(inout) :: self
+class(gs_eq), target, intent(inout) :: self
 !---
 integer(4) :: i,j,m,l,jr,jc,k,io_unit,nrhs,ierr,i_inds(1),j_inds(1)
 integer(4), allocatable :: elist(:,:),marker(:),bemap(:),el1(:),el2(:),eflag(:)
@@ -5615,12 +5619,12 @@ type(oft_quad_type) :: quad,quad_hp,sing_quad
 CLASS(oft_bmesh), POINTER :: smesh
 !
 integer(4), parameter :: qp_div_lim = 15
-integer(4) :: neval,last,iwork(qp_div_lim),jc_active,nfail
+integer(4) :: neval,last,iwork(qp_div_lim),nfail
 real(8) :: abserr,work(5*qp_div_lim)
 character(len=6) :: nfail_str
 integer(4), save :: cell2,jc_int,ed2
 real(8), save :: pt1(3)
-!$omp threadprivate(pt1,cell2,jc_int,ed2)
+!!$omp threadprivate(pt1,cell2,jc_int,ed2)
 IF(ASSOCIATED(self%bc_lmat))RETURN
 WRITE(*,*)'Computing flux BC matrix '
 CALL set_quad_1d(quad,self%fe_rep%order+2)
@@ -5640,8 +5644,11 @@ sing_quad%wts=[0.663266631902570511783904989051d-2,0.457997079784753341255767348
   0.261390645672007725646580606859d0,0.231636180290909384318815526104d0, &
   0.118598665644451726132783641957d0]
 !
+!WRITE(*,*)1
 allocate(self%olbp(smesh%nbp+1))
 CALL get_olbp(self%mesh,self%olbp)
+!WRITE(*,*)1,1
+!i=oft_sleep(2)
 !---Compute oriented edge list
 ALLOCATE(elist(2,smesh%nbe))
 DO i=1,smesh%nbe
@@ -5655,6 +5662,8 @@ DO i=1,smesh%nbe
   END DO
   IF(m>3)CALL oft_abort("bad","",__FILE__)
 END DO
+!WRITE(*,*)2
+!i=oft_sleep(2)
 !---Count rhs elements
 allocate(marker(self%fe_rep%ne))
 marker=0
@@ -5690,18 +5699,23 @@ bemap=0
 DO i=1,self%fe_rep%nbe
   bemap(self%fe_rep%lbe(i))=i
 END DO
+!WRITE(*,*)3,ASSOCIATED(self%fe_rep%be),ASSOCIATED(self%bc_rhs_list)
+!i=oft_sleep(2)
 !---Compute boundary current to volume flux projection matrix
 nfail=0
 !$omp parallel private(j,jr,jc,k,kk,rop1,gop1,loc_map1,cell1,el1,f1,ed1,dl1,dn1,dl1_mag,pts1,val, &
-!$omp rop2,gop2,loc_map2,el2,f2,dl2,dn2,dl2_mag,pt2,pts2,work,neval,ierr,iwork,last,ltmp,goptmp1) &
-!$omp reduction(+:nfail)
+!$omp rop2,gop2,loc_map2,el2,f2,dl2,dn2,dl2_mag,pt2,pts2,work,neval,ierr,iwork,last,ltmp,goptmp1, &
+!$omp pt1,cell2,jc_int,ed2) &
+!$omp reduction(+:nfail) if(.FALSE.)
 ALLOCATE(el1(self%fe_rep%nce),loc_map1(self%fe_rep%nce))
 ALLOCATE(rop1(self%fe_rep%nce),gop1(3,self%fe_rep%nce))
 ALLOCATE(el2(self%fe_rep%nce),loc_map2(self%fe_rep%nce))
 ALLOCATE(rop2(self%fe_rep%nce),gop2(3,self%fe_rep%nce))
+gs_active=>self
 !$omp do schedule(static,10)
 DO i=1,self%bc_nrhs
   IF(self%fe_rep%be(self%bc_rhs_list(i)))CYCLE
+  !WRITE(*,*)3,i
   cell1 = self%fe_rep%lec(self%fe_rep%kec(self%bc_rhs_list(i)))
   CALL self%fe_rep%ncdofs(cell1,el1)
   DO k=1,self%fe_rep%nce
@@ -5724,9 +5738,15 @@ DO i=1,self%bc_nrhs
     DO jc=1,self%fe_rep%nce
       IF(loc_map2(jc)==0)CYCLE
       jc_int=jc
+      !WRITE(*,*)3.0,i
+      !ierr=oft_sleep(1)
+      ind_active=jc
+      cell_active=cell2
+      pt_con_active=pt1(1:2)
+      ed_active=ed2
       CALL dqagse(integrand1,0.d0,1.d0,qp_int_tol,1.d2*qp_int_tol,qp_div_lim,val,abserr,neval,ierr, &
         work(1),work(qp_div_lim+1),work(2*qp_div_lim+1),work(3*qp_div_lim+1),iwork,last)
-      ! ierr=-1
+      !ierr=-1
       IF(ierr/=0)THEN
         nfail=nfail+1
         val = 0.d0
@@ -5740,6 +5760,8 @@ DO i=1,self%bc_nrhs
   END DO
 END DO
 !$omp end do nowait
+WRITE(*,*)4,oft_tid
+i=oft_sleep(2)
 !---Compute inductance and mass matrices for boundary
 ALLOCATE(ltmp(self%fe_rep%nbe))
 !$omp do schedule(static,10)
@@ -5846,6 +5868,10 @@ DO i=1,smesh%nbe
         DO jc=1,self%fe_rep%nce
           IF(loc_map2(jc)==0)CYCLE
           jc_int=jc
+          ind_active=jc
+          cell_active=cell2
+          pt_con_active=pt1(1:2)
+          ed_active=ed2
           CALL dqagse(integrand2,0.d0,1.d0,qp_int_tol,1.d2*qp_int_tol,qp_div_lim,val,abserr,neval,ierr, &
             work(1),work(qp_div_lim+1),work(2*qp_div_lim+1),work(3*qp_div_lim+1),iwork,last)
           ! ierr=-1
@@ -5877,6 +5903,8 @@ IF(nfail>0)THEN
   WRITE(nfail_str,'(I6)')nfail
   CALL oft_warn("QUADPACK integration failed "//TRIM(nfail_str)//" times in vacuum BC calculation.")
 END IF
+WRITE(*,*)5
+i=oft_sleep(2)
 !
 ALLOCATE(vert_flag(smesh%np),edge_flag(smesh%ne),self%axis_flag(self%fe_rep%ne))
 vert_flag=smesh%r(1,:)<1.d-8
@@ -5893,6 +5921,7 @@ DO i=1,self%fe_rep%nbe
     massmat(i,:)=0.d0; massmat(:,i)=0.d0; massmat(i,i)=1.d0
   END IF
 END DO
+!WRITE(*,*)6
 !
 CALL lapack_matinv(self%fe_rep%nbe,self%bc_lmat,ierr)
 IF(ierr>0)WRITE(*,*)'ERR1',ierr,smesh%nbp
@@ -5906,7 +5935,7 @@ DO i=1,self%bc_nrhs
 END DO
 !--- Final BC is I(psi_b) = B_t(psi) - B_t(psi_b) [B_t with B_n = 0]
 self%bc_lmat=self%bc_lmat - MATMUL(self%bc_bmat,vflux_mat)
-
+WRITE(*,*)7
 DO i=1,self%fe_rep%nbe
   IF(self%axis_flag(self%fe_rep%lbe(i)))THEN
     self%bc_lmat(i,:)=0.d0
@@ -5916,11 +5945,13 @@ END DO
 CALL quad%delete()
 CALL sing_quad%delete()
 DEALLOCATE(massmat,marker,bemap,vflux_mat)
+WRITE(*,*)8
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Complete'
 contains
-function integrand1(x) result(itegrand)
+function integrand11(x) result(itegrand)
 real(8), intent(in) :: x
-real(8) :: itegrand,pt2(3),rop2(1),val,f2(3)
+real(8) :: itegrand
+real(8) :: pt2(3),rop2(1),val,f2(3)
 f2 = 0.d0
 f2(smesh%cell_ed(1,ed2))=x
 f2(smesh%cell_ed(2,ed2))=1.d0 - x
@@ -5929,9 +5960,9 @@ pt2=smesh%log2phys(cell2,f2)
 ! Lmat \int phi^T \int phi * green * dl2 * dl1
 val=green(pt2(1),pt2(2),pt1(1),pt1(2))
 itegrand=rop2(1)*val
-end function integrand1
+end function integrand11
 !
-function integrand2(x) result(itegrand)
+function integrand21(x) result(itegrand)
 real(8), intent(in) :: x
 real(8) :: itegrand,pt2(3),rop2(1),val,f2(3)
 f2 = 0.d0
@@ -5942,8 +5973,39 @@ pt2=smesh%log2phys(cell2,f2)
 ! Lmat \int phi^T \int phi * green * dl2 * dl1
 val=green(pt1(1),pt1(2),pt2(1),pt2(2))
 itegrand=rop2(1)*val
-end function integrand2
+end function integrand21
 end subroutine compute_bcmat
+!
+function integrand1(x) result(itegrand)
+real(8), intent(in) :: x
+real(8) :: itegrand
+real(8) :: pt2(3),rop2(1),val,f2(3)
+!itegrand=1.d0
+!RETURN
+f2 = 0.d0
+f2(gs_active%mesh%cell_ed(1,ed_active))=x
+f2(gs_active%mesh%cell_ed(2,ed_active))=1.d0 - x
+CALL oft_blag_eval(gs_active%fe_rep,cell_active,ind_active,f2,rop2(1))
+pt2=gs_active%mesh%log2phys(cell_active,f2)
+! Lmat \int phi^T \int phi * green * dl2 * dl1
+val=green(pt2(1),pt2(2),pt_con_active(1),pt_con_active(2))
+itegrand=rop2(1)*val
+end function integrand1
+!
+function integrand2(x) result(itegrand)
+real(8), intent(in) :: x
+real(8) :: itegrand,pt2(3),rop2(1),val,f2(3)
+itegrand=1.d0
+RETURN
+f2 = 0.d0
+f2(gs_active%mesh%cell_ed(1,ed_active))=x
+f2(gs_active%mesh%cell_ed(2,ed_active))=1.d0 - x
+CALL oft_blag_eval(gs_active%fe_rep,cell_active,ind_active,f2,rop2(1))
+pt2=gs_active%mesh%log2phys(cell_active,f2)
+! Lmat \int phi^T \int phi * green * dl2 * dl1
+val=green(pt_con_active(1),pt_con_active(2),pt2(1),pt2(2))
+itegrand=rop2(1)*val
+end function integrand2
 !------------------------------------------------------------------------------
 !> Generate oriented loop from boundary points
 !------------------------------------------------------------------------------
