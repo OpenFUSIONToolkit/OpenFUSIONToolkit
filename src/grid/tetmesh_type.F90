@@ -421,6 +421,7 @@ call lmdif(tm_findcell_error,nerr,neq,uv,error, &
 !IF(info>4)WRITE(*,*)'High-order find failed',i,info,nfev
 f(1:3)=uv; f(4)=1.d0-SUM(uv)
 end function tetmesh_phys2logho
+end subroutine tetmesh_phys2log
 !------------------------------------------------------------------------------
 !> Evalute the error between a logical point and the current active point
 !!
@@ -438,7 +439,6 @@ f(1:3)=uv; f(4)=1.d0-SUM(uv)
 pt=tetmesh_log2phys(active_mesh,active_cell,f)
 err=active_pt-pt
 end subroutine tm_findcell_error
-end subroutine tetmesh_phys2log
 !---------------------------------------------------------------------------------
 !> Compute the spatial jacobian matrix and its determinant for a given cell at a given logical position
 !---------------------------------------------------------------------------------

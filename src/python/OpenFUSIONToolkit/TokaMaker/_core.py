@@ -375,9 +375,6 @@ class TokaMaker():
             'y': numpy.array([2.0,1.0,0.0])
         }
         self.set_profiles(ffp_prof=default_prof, foffset=F0, pp_prof=default_prof)
-        print('Prof done')
-        import time
-        time.sleep(2)
         # Get limiter contour
         npts = c_int()
         r_loc = c_double_ptr()
@@ -385,8 +382,6 @@ class TokaMaker():
         loop_ptr = c_int_ptr()
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_limiter(self._tMaker_ptr,ctypes.byref(npts),ctypes.byref(r_loc),ctypes.byref(nloops),ctypes.byref(loop_ptr),error_string)
-        print('Lim done')
-        time.sleep(2)
         if error_string.value != b'':
             raise Exception(error_string.value)
         loop_ptr = numpy.ctypeslib.as_array(loop_ptr,shape=(nloops.value+1,))
@@ -407,7 +402,6 @@ class TokaMaker():
         reg_loc = c_int_ptr()
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_mesh(self._tMaker_ptr,ctypes.byref(np_loc),ctypes.byref(r_loc),ctypes.byref(nc_loc),ctypes.byref(lc_loc),ctypes.byref(reg_loc),error_string)
-        print('Mesh done')
         if error_string.value != b'':
             raise Exception(error_string.value)
         ## Number of points in mesh

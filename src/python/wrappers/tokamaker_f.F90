@@ -322,7 +322,6 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 CLASS(flux_func), POINTER :: prof_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
-INTEGER(i4) :: i
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL copy_string_rev(f_file,tmp_str)
 IF(TRIM(tmp_str)/='none')THEN
@@ -340,8 +339,6 @@ CALL copy_string_rev(eta_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%eta)
 CALL copy_string_rev(f_NI_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%I_NI)
-WRITE(*,*)'Prof F done'
-i = oft_sleep(1)
 END SUBROUTINE tokamaker_load_profiles
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -596,20 +593,14 @@ INTEGER(4) :: i
 REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-WRITE(*,*)'Lim in',tMaker_obj%gs%nlim_con,ASSOCIATED(tMaker_obj%gs%lim_con)
-WRITE(*,*)tMaker_obj%gs%lim_nloops,ASSOCIATED(tMaker_obj%gs%lim_ptr)
-i=oft_sleep(2)
-WRITE(*,*)'Max',MINVAL(tMaker_obj%gs%lim_con),MAXVAL(tMaker_obj%gs%lim_con),tMaker_obj%gs%mesh%np
 np=tMaker_obj%gs%nlim_con
 ALLOCATE(r_tmp(2,tMaker_obj%gs%nlim_con))
 r_loc=C_LOC(r_tmp)
 DO i=1,tMaker_obj%gs%nlim_con
   r_tmp(:,i)=tMaker_obj%gs%mesh%r(1:2,tMaker_obj%gs%lim_con(i))
 END DO
-WRITE(*,*)'Hi'
 nloops=tMaker_obj%gs%lim_nloops
 loop_ptr=C_LOC(tMaker_obj%gs%lim_ptr)
-WRITE(*,*)'Out'
 END SUBROUTINE tokamaker_get_limiter
 !---------------------------------------------------------------------------------
 !> Needs docs
