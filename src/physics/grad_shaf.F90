@@ -421,23 +421,25 @@ abstract interface
   end function region_eta_set
 #endif
 end interface
+!---Encapsulation for external function call parameters
+TYPE, PRIVATE :: opt_targets
+  integer(i4) :: cell = 0
+  integer(i4) :: ind = 0
+  integer(i4) :: ed = 0
+  real(r8) :: pt(2) = [0.d0,0.d0]
+  real(r8) :: vec(2) = [0.d0,0.d0]
+  real(r8) :: psi = 0.d0
+  real(r8) :: delta = 0.d0
+  real(r8) :: kappa = 0.d0
+  type(oft_lag_brinterp), pointer :: psi_eval => NULL()
+  type(oft_lag_bginterp), pointer :: psi_geval => NULL()
+  type(oft_lag_bg2interp), pointer :: psi_g2eval => NULL()
+  TYPE(gs_eq), POINTER :: gs => NULL()
+END TYPE
+TYPE(opt_targets) :: active_targets !< Active target values/ptrs for external function calls
+!$omp threadprivate(active_targets)
 real(r8), PARAMETER :: gs_epsilon = 1.d-12 !< Epsilon used for radial coordinate
-!
-integer(i4) :: cell_active = 0
-integer(i4) :: ind_active = 0
-integer(i4) :: ed_active = 0
-real(r8) :: pt_con_active(2) = [0.d0,0.d0]
-real(r8) :: vec_con_active(2) = [0.d0,0.d0]
-real(r8) :: psi_target_active = 0.d0
-real(r8) :: delta_active = 0.d0
-real(r8) :: kappa_active = 0.d0
 real(r8) :: qp_int_tol = 1.d-12
-type(oft_lag_brinterp), pointer :: psi_eval_active => NULL()
-type(oft_lag_bginterp), pointer :: psi_geval_active => NULL()
-type(oft_lag_bg2interp), pointer :: psi_g2eval_active => NULL()
-TYPE(gs_eq), POINTER :: gs_active => NULL()
-!$omp threadprivate(cell_active,ind_active,ed_active,pt_con_active,vec_con_active,psi_target_active)
-!$omp threadprivate(psi_eval_active,psi_geval_active,psi_g2eval_active,gs_active,delta_active,kappa_active)
 contains
 !
 function dummy_fpp(self,psi) result(b)
@@ -1508,9 +1510,9 @@ gtol = 1.d-8
 epsfcn = 1.d-4
 nprint = 0
 ldfjac = ncons
-pt_con_active=r
-delta_active=self%delta
-kappa_active=self%kappa
+active_targets%pt=r
+active_targets%delta=self%delta
+active_targets%kappa=self%kappa
 coord_tmp=[SQRT(SUM(r**2)),ATAN2(r(2),r(1))]
 call lmdif(circ_error,ncons,ncofs,coord_tmp,gpsitmp, &
             ftol,xtol,gtol,maxfev,epsfcn,diag,mode,factor,nprint,info, &
@@ -1529,9 +1531,9 @@ real(8), intent(in) :: cofs(n)
 real(8), intent(out) :: err(m)
 integer(4), intent(inout) :: iflag
 real(8) :: pt_eval(2)
-pt_eval = cofs(1)*[COS(cofs(2)+ASIN(delta_active)*SIN(cofs(2))), &
-  kappa_active*SIN(cofs(2))]
-err = pt_eval-pt_con_active
+pt_eval = cofs(1)*[COS(cofs(2)+ASIN(active_targets%delta)*SIN(cofs(2))), &
+  active_targets%kappa*SIN(cofs(2))]
+err = pt_eval-active_targets%pt
 end subroutine circ_error
 !------------------------------------------------------------------------------
 !> Solve for \f$ \psi \f$ in vacuum for a given source \f$ \int \phi^T J_{\phi} dA \f$
@@ -3787,12 +3789,12 @@ type(oft_lag_bg2interp), target :: psi_g2eval
 CLASS(oft_bmesh), POINTER :: smesh
 !
 psi_eval%u=>self%psi
-psi_eval_active=>psi_eval
+active_targets%psi_eval=>psi_eval
 CALL psi_eval%setup(self%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
 CALL psi_g2eval%shared_setup(psi_eval)
-psi_geval_active=>psi_geval
-psi_g2eval_active=>psi_g2eval
+active_targets%psi_geval=>psi_geval
+active_targets%psi_g2eval=>psi_g2eval
 !
 smesh=>self%fe_rep%mesh
 ALLOCATE(ncuts(smesh%np))
@@ -3931,9 +3933,9 @@ f=1.d0/3.d0
 mag_min=1.d99
 psi_x=-1.d99
 goptmp=1.d0
-cell_active=0
-CALL bmesh_findcell(self%fe_rep%mesh,cell_active,pt,f)
-IF((cell_active==0).OR.(minval(f)<-1.d-3).OR.(maxval(f)>1.d0+1.d-3))RETURN
+active_targets%cell=0
+CALL bmesh_findcell(self%fe_rep%mesh,active_targets%cell,pt,f)
+IF((active_targets%cell==0).OR.(minval(f)<-1.d-3).OR.(maxval(f)>1.d0+1.d-3))RETURN
 !---Use MINPACK to find maximum (zero gradient)
 ncons=2
 ncofs=2
@@ -3947,7 +3949,7 @@ maxfev = 100
 ftol = 1.d-9
 xtol = 1.d-8
 gtol = 1.d-8
-epsfcn = SQRT(self%fe_rep%mesh%ca(cell_active)*2.d0)/REAL(self%fe_rep%order,8)*0.04d0 !5.d-4
+epsfcn = SQRT(self%fe_rep%mesh%ca(active_targets%cell)*2.d0)/REAL(self%fe_rep%order,8)*0.04d0 !5.d-4
 nprint = 0
 ldfjac = ncons
 ptmp=pt
@@ -3960,14 +3962,14 @@ call lmdif(psimax_error,ncons,ncofs,ptmp,gpsitmp, &
 deallocate(diag,fjac,qtf,wa1,wa2)
 deallocate(wa3,wa4,ipvt)
 !---Get axis values
-CALL bmesh_findcell(self%fe_rep%mesh,cell_active,ptmp,f)
-IF((cell_active==0).OR.(minval(f)<-1.d-3).OR.(maxval(f)>1.d0+1.d-3))THEN
+CALL bmesh_findcell(self%fe_rep%mesh,active_targets%cell,ptmp,f)
+IF((active_targets%cell==0).OR.(minval(f)<-1.d-3).OR.(maxval(f)>1.d0+1.d-3))THEN
   ! CALL psi_eval%delete()
   RETURN
 END IF
-IF(self%saddle_rmask(self%fe_rep%mesh%reg(cell_active)))RETURN ! Dont allow saddles outside of allowable regions
+IF(self%saddle_rmask(self%fe_rep%mesh%reg(active_targets%cell)))RETURN ! Dont allow saddles outside of allowable regions
 IF(SQRT(SUM(gpsitmp**2))>psi_scale_len)RETURN
-call psi_eval_active%interp(cell_active,f,goptmp,gpsitmp(1:1))
+call active_targets%psi_eval%interp(active_targets%cell,f,goptmp,gpsitmp(1:1))
 psi_x=gpsitmp(1)
 pt=ptmp
 stype=ABS(stype)
@@ -4052,14 +4054,14 @@ integer(4), intent(inout) :: iflag
 real(8) :: f(3),goptmp(3,3),psitmp(1),pt(2)
 real(8), parameter :: tol=1.d-10
 !---
-pt=cofs(1)*vec_con_active + pt_con_active
-call bmesh_findcell(psi_eval_active%mesh,cell_active,pt,f)
-IF(cell_active==0)THEN
-  err(1)=psi_target_active
+pt=cofs(1)*active_targets%vec + active_targets%pt
+call bmesh_findcell(active_targets%psi_eval%mesh,active_targets%cell,pt,f)
+IF(active_targets%cell==0)THEN
+  err(1)=active_targets%psi
   RETURN
 END IF
-call psi_eval_active%interp(cell_active,f,goptmp,psitmp)
-err(1)=psitmp(1)-psi_target_active
+call active_targets%psi_eval%interp(active_targets%cell,f,goptmp,psitmp)
+err(1)=psitmp(1)-active_targets%psi
 end subroutine psi2pt_error
 !------------------------------------------------------------------------------
 !> Find position of psi along a vector search direction
@@ -4080,18 +4082,18 @@ integer(4) :: maxfev,mode,nprint,info,nfev,ldfjac,ncons,ncofs
 integer(4), allocatable, dimension(:) :: ipvt
 !---
 IF(PRESENT(psi_int))THEN
-  psi_eval_active=>psi_int
+  active_targets%psi_eval=>psi_int
 ELSE
   psi_eval%u=>self%psi
   CALL psi_eval%setup(self%fe_rep)
-  psi_eval_active=>psi_eval
+  active_targets%psi_eval=>psi_eval
 END IF
-psi_target_active=psi_target
-cell_active=0
+active_targets%psi=psi_target
+active_targets%cell=0
 ! z_con_active=z
 ! rax_con_active=self%o_point(1)
-pt_con_active=pt_con
-vec_con_active=vec
+active_targets%pt=pt_con
+active_targets%vec=vec
 !---Use MINPACK to find maximum (zero gradient)
 ncons=1
 ncofs=1
@@ -4108,7 +4110,7 @@ gtol = 1.d-8
 epsfcn = 1.d-4
 nprint = 0
 ldfjac = ncons
-cofs(1)=DOT_PRODUCT(pt-pt_con_active,vec_con_active)
+cofs(1)=DOT_PRODUCT(pt-active_targets%pt,active_targets%vec)
 call lmdif(psi2pt_error,ncons,ncofs,cofs,error, &
               ftol,xtol,gtol,maxfev,epsfcn,diag,mode,factor,nprint,info, &
               nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
@@ -4116,7 +4118,7 @@ deallocate(diag,fjac,qtf,wa1,wa2)
 deallocate(wa3,wa4,ipvt)
 IF(.NOT.PRESENT(psi_int))CALL psi_eval%delete()
 !---Save back result
-pt=pt_con_active+cofs(1)*vec_con_active
+pt=active_targets%pt+cofs(1)*active_targets%vec
 end subroutine gs_psi2pt
 !------------------------------------------------------------------------------
 !> Find position of psi along a radial chord
@@ -4229,13 +4231,13 @@ real(8), intent(out) :: err(m)
 integer(4), intent(inout) :: iflag
 real(8) :: f(3),goptmp(3,3),v,err_tmp(3)
 !---
-call bmesh_findcell(psi_geval_active%mesh,cell_active,cofs,f)
-IF(cell_active==0)THEN
+call bmesh_findcell(active_targets%psi_geval%mesh,active_targets%cell,cofs,f)
+IF(active_targets%cell==0)THEN
   err(1:2)=0.d0
   RETURN
 END IF
-call psi_geval_active%mesh%jacobian(cell_active,f,goptmp,v)
-call psi_geval_active%interp(cell_active,f,goptmp,err_tmp)
+call active_targets%psi_geval%mesh%jacobian(active_targets%cell,f,goptmp,v)
+call active_targets%psi_geval%interp(active_targets%cell,f,goptmp,err_tmp)
 err(1:2)=err_tmp(1:2)
 end subroutine psimax_error
 !---------------------------------------------------------------------------------
@@ -4249,12 +4251,12 @@ integer(4), intent(in) :: iflag
 real(8) :: f(3),goptmp(3,3),v,d2_tmp(6),err_tmp(3)
 !---
 IF(iflag==1)THEN
-  call bmesh_findcell(psi_geval_active%mesh,cell_active,cofs,f)
-  call psi_geval_active%mesh%jacobian(cell_active,f,goptmp,v)
-  call psi_geval_active%interp(cell_active,f,goptmp,err_tmp)
+  call bmesh_findcell(active_targets%psi_geval%mesh,active_targets%cell,cofs,f)
+  call active_targets%psi_geval%mesh%jacobian(active_targets%cell,f,goptmp,v)
+  call active_targets%psi_geval%interp(active_targets%cell,f,goptmp,err_tmp)
   err(1:2)=err_tmp(1:2)
 ELSE
-  call psi_g2eval_active%interp(cell_active,f,goptmp,d2_tmp)
+  call active_targets%psi_g2eval%interp(active_targets%cell,f,goptmp,d2_tmp)
   jac_mat(1,1)=d2_tmp(1)
   jac_mat(2,1)=d2_tmp(2)
   jac_mat(1,2)=d2_tmp(2)
@@ -5606,7 +5608,7 @@ end subroutine gs_destroy
 subroutine compute_bcmat(self)
 class(gs_eq), target, intent(inout) :: self
 !---
-integer(4) :: i,j,m,l,jr,jc,k,io_unit,nrhs,ierr,i_inds(1),j_inds(1)
+integer(4) :: i,j,m,l,jr,jc,k,io_unit,nrhs,ierr,i_inds(1),j_inds(1),cell2,jc_int,ed2
 integer(4), allocatable :: elist(:,:),marker(:),bemap(:),el1(:),el2(:),eflag(:)
 integer(4), allocatable :: loc_map1(:),loc_map2(:)
 real(8) :: f(3),pt(3),goptmp(3,3),gop(3),v,dl(2),dn(2),pt_int(3),pt2(3)
@@ -5614,7 +5616,7 @@ real(8), allocatable :: ltmp(:),vflux_mat(:,:)
 real(8), allocatable :: rop1(:),rop2(:),gop1(:,:),gop2(:,:), massmat(:,:)
 logical :: file_exists
 integer(4) :: cell1,ed1,kk
-real(8) :: pts1(2,2),pts2(2,2),dl1(2),dl2(2),dl1_mag,dl2_mag,val,f1(3),f2(3)
+real(8) :: pts1(2,2),pts2(2,2),dl1(2),dl2(2),dl1_mag,dl2_mag,val,f1(3),f2(3),pt1(3)
 real(8) :: goptmp1(3,3),goptmp2(3,3),one_val(1,1),dn1(2),dn2(2),offset,grad_tmp(2)
 logical, allocatable, dimension(:) :: vert_flag,edge_flag
 type(oft_quad_type) :: quad,quad_hp,sing_quad
@@ -5624,9 +5626,6 @@ integer(4), parameter :: qp_div_lim = 15
 integer(4) :: neval,last,iwork(qp_div_lim),nfail
 real(8) :: abserr,work(5*qp_div_lim)
 character(len=6) :: nfail_str
-integer(4), save :: cell2,jc_int,ed2
-real(8), save :: pt1(3)
-!!$omp threadprivate(pt1,cell2,jc_int,ed2)
 IF(ASSOCIATED(self%bc_lmat))RETURN
 WRITE(*,*)'Computing flux BC matrix '
 CALL set_quad_1d(quad,self%fe_rep%order+2)
@@ -5706,7 +5705,7 @@ ALLOCATE(el1(self%fe_rep%nce),loc_map1(self%fe_rep%nce))
 ALLOCATE(rop1(self%fe_rep%nce),gop1(3,self%fe_rep%nce))
 ALLOCATE(el2(self%fe_rep%nce),loc_map2(self%fe_rep%nce))
 ALLOCATE(rop2(self%fe_rep%nce),gop2(3,self%fe_rep%nce))
-gs_active=>self
+active_targets%gs=>self
 !$omp do schedule(static,10)
 DO i=1,self%bc_nrhs
   IF(self%fe_rep%be(self%bc_rhs_list(i)))CYCLE
@@ -5732,10 +5731,10 @@ DO i=1,self%bc_nrhs
     DO jc=1,self%fe_rep%nce
       IF(loc_map2(jc)==0)CYCLE
       jc_int=jc
-      ind_active=jc
-      cell_active=cell2
-      pt_con_active=pt1(1:2)
-      ed_active=ed2
+      active_targets%ind=jc
+      active_targets%cell=cell2
+      active_targets%pt=pt1(1:2)
+      active_targets%ed=ed2
       CALL dqagse(bcmat_integrand1,0.d0,1.d0,qp_int_tol,1.d2*qp_int_tol,qp_div_lim,val,abserr,neval,ierr, &
         work(1),work(qp_div_lim+1),work(2*qp_div_lim+1),work(3*qp_div_lim+1),iwork,last)
       !ierr=-1
@@ -5858,10 +5857,10 @@ DO i=1,smesh%nbe
         DO jc=1,self%fe_rep%nce
           IF(loc_map2(jc)==0)CYCLE
           jc_int=jc
-          ind_active=jc
-          cell_active=cell2
-          pt_con_active=pt1(1:2)
-          ed_active=ed2
+          active_targets%ind=jc
+          active_targets%cell=cell2
+          active_targets%pt=pt1(1:2)
+          active_targets%ed=ed2
           CALL dqagse(bcmat_integrand2,0.d0,1.d0,qp_int_tol,1.d2*qp_int_tol,qp_div_lim,val,abserr,neval,ierr, &
             work(1),work(qp_div_lim+1),work(2*qp_div_lim+1),work(3*qp_div_lim+1),iwork,last)
           ! ierr=-1
@@ -5939,12 +5938,12 @@ real(8), intent(in) :: x
 real(8) :: itegrand
 real(8) :: pt2(3),rop2(1),val,f2(3)
 f2 = 0.d0
-f2(gs_active%mesh%cell_ed(1,ed_active))=x
-f2(gs_active%mesh%cell_ed(2,ed_active))=1.d0 - x
-CALL oft_blag_eval(gs_active%fe_rep,cell_active,ind_active,f2,rop2(1))
-pt2=gs_active%mesh%log2phys(cell_active,f2)
+f2(active_targets%gs%mesh%cell_ed(1,active_targets%ed))=x
+f2(active_targets%gs%mesh%cell_ed(2,active_targets%ed))=1.d0 - x
+CALL oft_blag_eval(active_targets%gs%fe_rep,active_targets%cell,active_targets%ind,f2,rop2(1))
+pt2=active_targets%gs%mesh%log2phys(active_targets%cell,f2)
 ! Lmat \int phi^T \int phi * green * dl2 * dl1
-val=green(pt2(1),pt2(2),pt_con_active(1),pt_con_active(2))
+val=green(pt2(1),pt2(2),active_targets%pt(1),active_targets%pt(2))
 itegrand=rop2(1)*val
 end function bcmat_integrand1
 !
@@ -5952,12 +5951,12 @@ function bcmat_integrand2(x) result(itegrand)
 real(8), intent(in) :: x
 real(8) :: itegrand,pt2(3),rop2(1),val,f2(3)
 f2 = 0.d0
-f2(gs_active%mesh%cell_ed(1,ed_active))=x
-f2(gs_active%mesh%cell_ed(2,ed_active))=1.d0 - x
-CALL oft_blag_eval(gs_active%fe_rep,cell_active,ind_active,f2,rop2(1))
-pt2=gs_active%mesh%log2phys(cell_active,f2)
+f2(active_targets%gs%mesh%cell_ed(1,active_targets%ed))=x
+f2(active_targets%gs%mesh%cell_ed(2,active_targets%ed))=1.d0 - x
+CALL oft_blag_eval(active_targets%gs%fe_rep,active_targets%cell,active_targets%ind,f2,rop2(1))
+pt2=active_targets%gs%mesh%log2phys(active_targets%cell,f2)
 ! Lmat \int phi^T \int phi * green * dl2 * dl1
-val=green(pt_con_active(1),pt_con_active(2),pt2(1),pt2(2))
+val=green(active_targets%pt(1),active_targets%pt(2),pt2(1),pt2(2))
 itegrand=rop2(1)*val
 end function bcmat_integrand2
 !------------------------------------------------------------------------------
