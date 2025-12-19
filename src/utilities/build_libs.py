@@ -569,7 +569,8 @@ class package:
                         raise
                     else:
                         print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
-                        pass
+                        continue
+                break
         else:
             print("  Using existing file: {0}".format(self.file))
         for args in self.extra_fetch + self.patch_files:
@@ -589,7 +590,8 @@ class package:
                             raise
                         else:
                             print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
-                            pass
+                            continue
+                    break
             else:
                 print("  Using existing file: {0}".format(tmp_file))
 
