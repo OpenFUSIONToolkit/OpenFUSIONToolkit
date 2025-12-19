@@ -3780,7 +3780,8 @@ real(8), intent(out) :: x_point(2,max_xpoints),x_psi(max_xpoints)
 integer(4), PARAMETER :: npts = 10, max_unique = 20
 integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
 integer(4), allocatable :: ncuts(:)
-real(8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3),loc_vals(3),psi_scale_len
+real(8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3),loc_vals(3)
+real(8) :: psi_scale_len,psi_min,psi_max
 real(8) :: region(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99], [2,2])
 character(len=20) :: loc_str,loc_str2
 type(oft_lag_brinterp), target :: psi_eval
@@ -3795,15 +3796,18 @@ CALL psi_geval%shared_setup(psi_eval)
 CALL psi_g2eval%shared_setup(psi_eval)
 active_targets%psi_geval=>psi_geval
 active_targets%psi_g2eval=>psi_g2eval
-!
+!---Find initial guess from linear grid
 smesh=>self%fe_rep%mesh
 ALLOCATE(ncuts(smesh%np))
 ncuts=0
-!$omp parallel do simd private(loc_vals)
+psi_min=1.d99; psi_max=-1.d99
+!$omp parallel do simd private(loc_vals) reduction(min:psi_min) reduction(max:psi_max)
 DO i=1,smesh%nc
   ! IF(smesh%reg(i)/=1)CYCLE
   IF(self%saddle_cmask(i))CYCLE
   loc_vals=psi_eval%vals(smesh%lc(:,i))
+  psi_min=MIN(psi_min,MINVAL(loc_vals))
+  psi_max=MAX(psi_max,MAXVAL(loc_vals))
   IF((loc_vals(1)-loc_vals(2))*(loc_vals(3)-loc_vals(1))>0)THEN
     !$omp atomic
     ncuts(smesh%lc(1,i))=ncuts(smesh%lc(1,i))+1
@@ -3822,7 +3826,7 @@ DO i=1,smesh%np
   IF(self%saddle_pmask(i))ncuts(i)=-1
 END DO
 !
-psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))*5.d0/(SQRT(self%lim_area))
+psi_scale_len = ABS(psi_max-psi_min)*5.d0/SQRT(self%lim_area)
 unique_saddles=-1.d99
 IF(.NOT.self%dipole_mode)o_psi=-1.d99
 n_unique=0
