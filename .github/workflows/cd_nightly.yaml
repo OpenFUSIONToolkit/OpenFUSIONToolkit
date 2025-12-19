@@ -41,7 +41,7 @@ jobs:
             os: macos-15-intel,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
-            xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer",
+            xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1",
             cache_key: "openmp"
           }
@@ -50,7 +50,7 @@ jobs:
             os: macos-15-intel,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
-            xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer",
+            xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1 --oblas_no_avx",
             cache_key: "openmp_noavx"
           }

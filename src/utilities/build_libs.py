@@ -14,15 +14,9 @@ import tarfile
 import re
 import argparse
 import math
-try:
-    import urllib.request
-except ImportError:
-    import urllib2 as urllib
-    URLError = urllib.URLError
-    PY3K = False
-else:
-    from urllib.error import URLError
-    PY3K = True
+import http.client
+import urllib.request
+from urllib.error import URLError
 
 
 def error_exit(error_str, extra_info=None, exception=None):
@@ -38,7 +32,7 @@ def error_exit(error_str, extra_info=None, exception=None):
     sys.exit(-1)
 
 
-def fetch_file(url, file):
+def fetch_file(url, file, headers={'User-Agent' : "Magic Browser"}):
     def format_bytes(size):
         if size <= 0:
             return "? MB"
@@ -55,41 +49,24 @@ def fetch_file(url, file):
         else:
             line = "    ({0}/{1})".format(format_bytes(curr_size), format_bytes(total_size))
             print(line, end="\r")
-        if not PY3K:
-            sys.stdout.flush()
         return len(line)
     # Download file from url
     original_url = url
     try:
-        if PY3K:
-            req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"}) 
-            response = urllib.request.urlopen(req)
+        req = urllib.request.Request(url, headers=headers) 
+        response = urllib.request.urlopen(req)
+        resolved_url = response.geturl()
+        for _ in range(10): # Handle redirects
+            if resolved_url == url:
+                break
+            url = resolved_url
+            redirect_req = urllib.request.Request(resolved_url, headers=headers) 
+            response = urllib.request.urlopen(redirect_req)
             resolved_url = response.geturl()
-            for _ in range(10): # Handle redirects
-                if resolved_url == url:
-                    break
-                url = resolved_url
-                redirect_req = urllib.request.Request(resolved_url, headers={'User-Agent' : "Magic Browser"}) 
-                response = urllib.request.urlopen(redirect_req)
-                resolved_url = response.geturl()
-            try:
-                file_size = int(response.headers["content-length"])
-            except:
-                file_size = -1
-        else:
-            req = urllib.Request(url, headers={'User-Agent' : "Magic Browser"})
-            response = urllib.urlopen(req)
-            resolved_url = response.geturl()
-            for _ in range(10): # Handle redirects
-                if resolved_url == url:
-                    break
-                redirect_req = urllib.Request(resolved_url, headers={'User-Agent' : "Magic Browser"})
-                response = urllib.request.urlopen(redirect_req)
-                resolved_url = response.geturl()
-            try:
-                file_size = int(response.info().getheaders("Content-Length")[0])
-            except:
-                file_size = -1
+        try:
+            file_size = int(response.headers["content-length"])
+        except:
+            file_size = -1
     except ValueError as e:
         error_exit('Invalid download URL: "{0}"'.format(original_url), exception=e)
     except Exception as e:
@@ -99,26 +76,26 @@ def fetch_file(url, file):
         print(line)
         if fetch_progress:
             old_len = update_progress(0, file_size, 0)
-        else:
-            update_progress(file_size, file_size, 0, final_update=True)
-        blocksize = max(4096, file_size//100)
-        size = 0
-        full_buf = b""
-        while True:
-            buf1 = response.read(blocksize)
-            if not buf1:
-                break
-            full_buf += buf1
-            size += len(buf1)
-            if fetch_progress:
+            blocksize = max(4096, file_size//100)
+            size = 0
+            full_buf = b""
+            while True:
+                buf1 = response.read(blocksize)
+                if not buf1:
+                    break
+                full_buf += buf1
+                size += len(buf1)
                 old_len = update_progress(size, file_size, old_len)
-        with open(file, "wb") as handle:
-            handle.write(full_buf)
-        if fetch_progress:
             update_progress(size, file_size, old_len, final_update=True)
         else:
+            update_progress(file_size, file_size, 0, final_update=True)
+            full_buf = response.read()
+            size = len(full_buf)
             if file_size < 0:
                 update_progress(size, file_size, 0, final_update=True)
+        # Save to disk
+        with open(file, "wb") as handle:
+            handle.write(full_buf)
 
 
 def extract_archive(file):
@@ -144,10 +121,7 @@ def run_command(command, timeout=10, env_vars={}):
         outs, _ = pid.communicate()
         print("WARNING: Command timeout")
     errcode = pid.poll()
-    if PY3K:
-        result = outs.decode("utf-8")
-    else:
-        result = outs
+    result = outs.decode("utf-8")
     return result, errcode
 
 
@@ -582,12 +556,21 @@ class package:
     def post_install(self, config_dict):
         return config_dict
 
-    def fetch(self, force=False):
+    def fetch(self, force=False, nretry=2):
         # Download library archive
         if self.skip:
             return
         if (not os.path.isfile(self.file)) or force:
-            fetch_file(self.url, self.file)
+            for i in range(nretry+1):
+                try:
+                    fetch_file(self.url, self.file)
+                except http.client.HTTPException:
+                    if i == nretry:
+                        raise
+                    else:
+                        print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
+                        continue
+                break
         else:
             print("  Using existing file: {0}".format(self.file))
         for args in self.extra_fetch + self.patch_files:
@@ -599,7 +582,16 @@ class package:
             else:
                 error_exit('Invalid "extra_fetch" or "patch_file" object!')
             if (not os.path.isfile(tmp_file)) or force:
-                fetch_file(url, tmp_file)
+                for i in range(nretry+1):
+                    try:
+                        fetch_file(url, tmp_file)
+                    except http.client.HTTPException:
+                        if i == nretry:
+                            raise
+                        else:
+                            print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
+                            continue
+                    break
             else:
                 print("  Using existing file: {0}".format(tmp_file))
 
