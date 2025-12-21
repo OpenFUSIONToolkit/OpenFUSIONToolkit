@@ -32,6 +32,7 @@ class tokamaker_settings_struct(c_struct):
                 ("has_plasma", c_bool),
                 ("limited_only", c_bool),
                 ("dipole_mode", c_bool),
+                ("mirror_mode", c_bool),
                 ("maxits", c_int),
                 ("mode", c_int),
                 ("urf", c_double),
@@ -187,6 +188,10 @@ tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
 tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
     [c_void_p, c_double, c_char_p])
 
+# tokamaker_set_mirror_slosh(tMaker_ptr,mirror_n,mirror_bturn,mirror_zthroat,error_str)
+tokamaker_set_mirror_slosh = ctypes_subroutine(oftpy_lib.tokamaker_set_mirror_slosh,
+    [c_void_p, c_double, c_double, c_double, c_char_p])
+
 # tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str)
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_char_p])
@@ -226,7 +231,7 @@ tokamaker_set_vcoil = ctypes_subroutine(oftpy_lib.tokamaker_set_vcoil,
 # tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str)
 tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk,
     [c_void_p, c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p,
-     c_double, c_double, c_bool, c_char_p, c_double, c_char_p])
+     c_double, c_double, c_bool, c_char_p, c_double, c_int, c_char_p])
 
 # tokamaker_save_ifile(tMaker_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
 tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
@@ -279,5 +284,5 @@ class TokaMaker_field_interpolator():
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
         pt_eval[:2] = pt
         tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim_eval,self.val)
-        return self.val[:self.dim_return]
+        return self.val[:self.dim_return].copy()
 

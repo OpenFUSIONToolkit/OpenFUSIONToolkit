@@ -73,7 +73,7 @@ def validate_result(iteration_count,converged_error):
     fid = open('lagrange.results','r')
     its_test = int(fid.readline())
     ret_val = True
-    if iteration_count != None:
+    if iteration_count is not None:
         if abs(iteration_count-its_test) >= max(3,0.05*iteration_count):
             print("FAILED: Iteration count incorrect!")
             print("  Expected = {0}".format(iteration_count))

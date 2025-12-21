@@ -105,7 +105,7 @@ class histfile:
             else:
                 self.dim = None
             #
-            if (self.dim != None) and (self.nfields > 1):
+            if (self.dim is not None) and (self.nfields > 1):
                 raise ValueError("Arrays with multiple fields not supported")
             #
             self.field_tags = []
@@ -246,7 +246,7 @@ class histfile:
         result = "\nOFT History file: {0}\n".format(self._filename)
         result += "  Number of fields = {0}\n".format(self.nfields)
         result += "  Number of entries = {0}\n".format(self.nlines)
-        if self.dim != None:
+        if self.dim is not None:
             result += "  Field dimension = {0}\n".format(self.dim)
         result += "\n  Fields:\n"
         #
@@ -268,16 +268,17 @@ class XDMF_plot_mesh:
         self.lc = numpy.asarray(mesh_obj['LC'])
         self.np = self.r.shape[0]
         self.nc = self.lc.shape[0]
-        if 'REG_vol' in mesh_obj:
-            self.reg = numpy.asarray(mesh_obj['REG_vol'])
-        elif 'REG_surf' in mesh_obj:
-            self.reg = numpy.asarray(mesh_obj['REG_surf'])
-        else:
-            self.reg = numpy.ones((self.nc,))
         #
         self.static_fields = {}
         for field_name, field_obj in mesh_obj.get('0000',{}).items():
             self.static_fields[field_name] = numpy.asarray(field_obj)
+        # Set region flag
+        if 'REG_vol' in self.static_fields:
+            self.reg = self.static_fields['REG_vol']
+        elif 'REG_surf' in self.static_fields:
+            self.reg = self.static_fields['REG_surf']
+        else:
+            self.reg = numpy.ones((self.nc,))
         #
         self.times = []
         self.time_field_names = []

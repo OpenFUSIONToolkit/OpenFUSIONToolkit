@@ -7,7 +7,11 @@ on:
       - cov_debug
   pull_request:
     types: [opened, reopened, synchronize]
-  
+
+concurrency:
+  group: cov-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
+
 jobs:
   build:
     name: Code coverage

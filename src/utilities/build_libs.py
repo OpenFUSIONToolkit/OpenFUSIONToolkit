@@ -14,18 +14,12 @@ import tarfile
 import re
 import argparse
 import math
-try:
-    import urllib.request
-except ImportError:
-    import urllib2 as urllib
-    URLError = urllib.URLError
-    PY3K = False
-else:
-    from urllib.error import URLError
-    PY3K = True
+import http.client
+import urllib.request
+from urllib.error import URLError
 
 
-def error_exit(error_str, extra_info=None):
+def error_exit(error_str, extra_info=None, exception=None):
     # Exit build script with error
     print("\n\n============  BUILD FAILED!  ============")
     print("ERROR: {0}".format(error_str))
@@ -33,10 +27,12 @@ def error_exit(error_str, extra_info=None):
         for info in extra_info:
             print("INFO: {0}".format(info))
     print()
+    if exception is not None:
+        raise exception
     sys.exit(-1)
 
 
-def fetch_file(url, file):
+def fetch_file(url, file, headers={'User-Agent' : "Magic Browser"}):
     def format_bytes(size):
         if size <= 0:
             return "? MB"
@@ -53,70 +49,53 @@ def fetch_file(url, file):
         else:
             line = "    ({0}/{1})".format(format_bytes(curr_size), format_bytes(total_size))
             print(line, end="\r")
-        if not PY3K:
-            sys.stdout.flush()
         return len(line)
     # Download file from url
     original_url = url
     try:
-        if PY3K:
-            req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"}) 
-            response = urllib.request.urlopen(req)
+        req = urllib.request.Request(url, headers=headers) 
+        response = urllib.request.urlopen(req)
+        resolved_url = response.geturl()
+        for _ in range(10): # Handle redirects
+            if resolved_url == url:
+                break
+            url = resolved_url
+            redirect_req = urllib.request.Request(resolved_url, headers=headers) 
+            response = urllib.request.urlopen(redirect_req)
             resolved_url = response.geturl()
-            for _ in range(10): # Handle redirects
-                if resolved_url == url:
-                    break
-                url = resolved_url
-                redirect_req = urllib.request.Request(resolved_url, headers={'User-Agent' : "Magic Browser"}) 
-                response = urllib.request.urlopen(redirect_req)
-                resolved_url = response.geturl()
-            try:
-                file_size = int(response.headers["content-length"])
-            except:
-                file_size = -1
-        else:
-            req = urllib.Request(url, headers={'User-Agent' : "Magic Browser"})
-            response = urllib.urlopen(req)
-            resolved_url = response.geturl()
-            for _ in range(10): # Handle redirects
-                if resolved_url == url:
-                    break
-                redirect_req = urllib.Request(resolved_url, headers={'User-Agent' : "Magic Browser"})
-                response = urllib.request.urlopen(redirect_req)
-                resolved_url = response.geturl()
-            try:
-                file_size = int(response.info().getheaders("Content-Length")[0])
-            except:
-                file_size = -1
-    except ValueError:
-        error_exit('Invalid download URL: "{0}"'.format(original_url))
-    except:
-        error_exit('Download failed for file: "{0}"'.format(original_url))
+        try:
+            file_size = int(response.headers["content-length"])
+        except:
+            file_size = -1
+    except ValueError as e:
+        error_exit('Invalid download URL: "{0}"'.format(original_url), exception=e)
+    except Exception as e:
+        error_exit('Download failed for file: "{0}"'.format(original_url), exception=e)
     else:
         line = "  Downloading: {0}".format(original_url)
         print(line)
         if fetch_progress:
             old_len = update_progress(0, file_size, 0)
-        else:
-            update_progress(file_size, file_size, 0, final_update=True)
-        blocksize = max(4096, file_size//100)
-        size = 0
-        full_buf = b""
-        while True:
-            buf1 = response.read(blocksize)
-            if not buf1:
-                break
-            full_buf += buf1
-            size += len(buf1)
-            if fetch_progress:
+            blocksize = max(4096, file_size//100)
+            size = 0
+            full_buf = b""
+            while True:
+                buf1 = response.read(blocksize)
+                if not buf1:
+                    break
+                full_buf += buf1
+                size += len(buf1)
                 old_len = update_progress(size, file_size, old_len)
-        with open(file, "wb") as handle:
-            handle.write(full_buf)
-        if fetch_progress:
             update_progress(size, file_size, old_len, final_update=True)
         else:
+            update_progress(file_size, file_size, 0, final_update=True)
+            full_buf = response.read()
+            size = len(full_buf)
             if file_size < 0:
                 update_progress(size, file_size, 0, final_update=True)
+        # Save to disk
+        with open(file, "wb") as handle:
+            handle.write(full_buf)
 
 
 def extract_archive(file):
@@ -124,8 +103,8 @@ def extract_archive(file):
     try:
         with tarfile.open(file, errorlevel=2) as tar:
             tar.extractall()
-    except:
-        error_exit('Extraction failed for file: "{0}"'.format(file))
+    except Exception as e:
+        error_exit('Extraction failed for file: "{0}"'.format(file), exception=e)
 
 
 def run_command(command, timeout=10, env_vars={}):
@@ -142,10 +121,7 @@ def run_command(command, timeout=10, env_vars={}):
         outs, _ = pid.communicate()
         print("WARNING: Command timeout")
     errcode = pid.poll()
-    if PY3K:
-        result = outs.decode("utf-8")
-    else:
-        result = outs
+    result = outs.decode("utf-8")
     return result, errcode
 
 
@@ -580,12 +556,21 @@ class package:
     def post_install(self, config_dict):
         return config_dict
 
-    def fetch(self, force=False):
+    def fetch(self, force=False, nretry=2):
         # Download library archive
         if self.skip:
             return
         if (not os.path.isfile(self.file)) or force:
-            fetch_file(self.url, self.file)
+            for i in range(nretry+1):
+                try:
+                    fetch_file(self.url, self.file)
+                except http.client.HTTPException:
+                    if i == nretry:
+                        raise
+                    else:
+                        print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
+                        continue
+                break
         else:
             print("  Using existing file: {0}".format(self.file))
         for args in self.extra_fetch + self.patch_files:
@@ -597,7 +582,16 @@ class package:
             else:
                 error_exit('Invalid "extra_fetch" or "patch_file" object!')
             if (not os.path.isfile(tmp_file)) or force:
-                fetch_file(url, tmp_file)
+                for i in range(nretry+1):
+                    try:
+                        fetch_file(url, tmp_file)
+                    except http.client.HTTPException:
+                        if i == nretry:
+                            raise
+                        else:
+                            print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
+                            continue
+                    break
             else:
                 print("  Using existing file: {0}".format(tmp_file))
 
@@ -793,7 +787,7 @@ class MPICH(package):
         if ver_major == 3:
             self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
         elif ver_major == 4:
-            self.url = "https://www.mpich.org/static/downloads/4.2.3/mpich-4.2.3.tar.gz"
+            self.url = "https://github.com/pmodels/mpich/releases/download/v4.2.3/mpich-4.2.3.tar.gz"
         else:
             raise ValueError("Unknown MPICH version")
         self.build_timeout = 30
@@ -880,7 +874,7 @@ class OpenMPI(package):
     def __init__(self, use_headers, shared_libs=True):
         self.name = "MPI"
         self.display_name = "OpenMPI"
-        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.7.tar.gz"
+        self.url = "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.8.tar.gz"
         self.use_headers = use_headers
         self.build_timeout = 30
         self.shared_libs = shared_libs
@@ -913,6 +907,7 @@ class OpenMPI(package):
             "mkdir build",
             "cd build",
             "export CC={CC}",
+            "export CXX={CXX}",
             "export FC={FC}"
         ]
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
@@ -1274,9 +1269,9 @@ class NETCDF_Fortran(package):
 class OpenBLAS(package):
     def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False, shared_libs=False):
         self.name = "OpenBLAS"
-        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.29.tar.gz"
-        self.build_dir = "OpenBLAS-0.3.29"
-        self.install_dir = "OpenBLAS-0_3_29"
+        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.30.tar.gz"
+        self.build_dir = "OpenBLAS-0.3.30"
+        self.install_dir = "OpenBLAS-0_3_30"
         self.threaded = build_threaded
         self.dynamic_arch = dynamic_arch
         self.no_avx = no_avx
@@ -1617,8 +1612,8 @@ class SUPERLU(package):
 class SUPERLU_DIST(package):
     def __init__(self, build_openmp, comp_wrapper=False, shared_libs=False):
         self.name = "SUPERLU_DIST"
-        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v8.1.0.tar.gz"
-        self.build_dir = "superlu_dist-8.1.0"
+        self.url = "https://github.com/xiaoyeli/superlu_dist/archive/refs/tags/v8.2.1.tar.gz"
+        self.build_dir = "superlu_dist-8.2.1"
         self.build_openmp = build_openmp
         self.comp_wrapper = comp_wrapper
         self.shared_libs = shared_libs
@@ -1650,6 +1645,8 @@ class SUPERLU_DIST(package):
             "-DMPI_CXX_COMPILER={MPI_CXX}",
             "-DCMAKE_INSTALL_LIBDIR=lib",
         ]
+        if self.config_dict['CC_VENDOR'] == 'gnu'and ver_gt(self.config_dict.get("CC_VERSION","0.0"), "12.99"):
+            cmake_options.append('-DCMAKE_C_FLAGS="-std=c11"')
         if self.shared_libs:
             cmake_options += [
                 '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',

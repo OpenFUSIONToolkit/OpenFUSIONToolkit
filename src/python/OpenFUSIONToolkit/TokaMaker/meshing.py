@@ -9,11 +9,12 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
+import sys
 import json
 import math
 import numpy
 from .._interface import *
-from ..util import oft_warning
+from ..util import oft_warning, run_shell_command
 
 ## @cond
 class triangle_struct(c_struct):
@@ -79,6 +80,131 @@ def run_triangle(alpha):
     triangles = numpy.ctypeslib.as_array(out_struct.trianglelist,shape=(out_struct.numberoftriangles,3))
     triangle_attributes = numpy.ctypeslib.as_array(out_struct.triangleattributelist,shape=(out_struct.numberoftriangles,))
     return {'vertices': vertices, 'triangles': triangles, 'triangle_attributes': triangle_attributes}
+
+
+def run_cubit(cubit_path):
+    '''! Run Cubit to generate 2D mesh
+
+    @param region_list List of @ref oftpy.Region objects that define mesh
+    @result `r[np,2]` Mesh vertices, `lc[nc,3]` Cell list, `reg[nc]` Region IDs
+    '''
+    jou_template = """#!python
+cubit.cmd('reset')
+cubit.cmd('undo off')
+import json
+import numpy as np
+
+with open('tMaker_cubit.json','r') as fid:
+    mesh_dict = json.load(fid)
+mesh_geom = mesh_dict['regions']
+
+pts_offset = 0
+reg_pts = []
+for i,  region in enumerate(mesh_geom):
+    pts_tmp = 0
+    for j,  pt in enumerate(region['points']):
+        cubit.cmd("create vertex location {0} {1} 0.0".format(pt[0],pt[1]))
+        pts_tmp += 1
+    reg_segments = []
+    for j,  segment in enumerate(region['segments']):
+        reg_segments.append([pts_offset+1+vertex for vertex in segment])
+    print(reg_segments)
+    reg_pts.append(reg_segments)
+    pts_offset += pts_tmp
+
+ed_offset = 0
+reg_ed = []
+for i,  pts in enumerate(reg_pts):
+    for j, segment in enumerate(pts):
+        if len(segment) > 2:
+            cubit.cmd("create Curve spline vertex {0} delete".format(' '.join([str(vertex) for vertex in segment])))
+        else:
+            cubit.cmd("create Curve polyline vertex {0} {1}".format(*segment))
+    reg_ed.append([ed_offset+1,ed_offset+len(pts)])
+    ed_offset += len(pts)
+
+surf_pts = []
+for i,  eds in enumerate(reg_ed):
+    cubit.cmd("create surface curve {0} to {1}".format(*eds))
+    surf_last = cubit.surface(cubit.get_last_id("surface"))
+    surf_pts.append(np.asarray(surf_last.position_from_u_v(0.0,0.0)))
+
+cubit.cmd('imprint all')
+cubit.cmd('merge all')
+
+cubit.cmd("set trimesher coarse off")
+cubit.cmd("set trimesher geometry sizing off")
+cubit.cmd('set trimesher surface gradation {0}'.format(mesh_dict['tri_gradation']))
+cubit.cmd("surface all scheme trimesh")
+
+
+cubit.cmd("set duplicate block elements off")
+nblocks = 0
+matches = [-1 for _ in cubit.get_entities( "surface" )]
+for sid in cubit.get_entities( "surface" ):
+    surf_test = cubit.surface(sid)
+    for i, surf_pt in enumerate(surf_pts):
+        proj_pt = np.asarray(surf_test.closest_point_trimmed(surf_pt))
+        if np.linalg.norm(proj_pt-surf_pt) < 1.E-10:
+            if matches[i] != -1:
+                raise ValueError('Multiple matches')
+            matches[i] = sid
+            cubit.cmd("surface {0} size {1}".format(sid,mesh_geom[i]['dx_vol']*4.0))
+            cubit.cmd("block {0} add surface {1}".format(mesh_geom[i]['id'],sid))
+            break
+    nblocks += 1
+
+cubit.cmd("mesh surface all")
+
+cubit.cmd("set large exodus file on")
+cubit.cmd('export Genesis "tMaker_cubit.g" overwrite block all')
+"""
+    # Generate mesh using Cubit with standardized script
+    print('Generating mesh with Cubit:')
+    oft_warning("CUBIT python wrapper is experimental, please use with care and report bugs.")
+    with open('tMaker_cubit.jou', 'w+') as jou_file:
+        jou_file.write(jou_template)
+    try:
+        os.remove('tMaker_cubit.g')
+    except FileNotFoundError:
+        pass
+    result, _ = run_shell_command(cubit_path + ' -nographics -nojournal -input tMaker_cubit.jou', timeout=60)
+    result_lines = result.splitlines()
+    if not os.path.isfile('tMaker_cubit.g'):
+        nlines = min(10,len(result_lines))
+        print('\n'.join(result_lines[-nlines:]))
+        raise RuntimeError('Cubit grid generation failed')
+    info = False
+    for line in result_lines:
+        if line.lower().find('executive exodus summary') >= 0:
+            info = True
+        if info:
+            print('    '+line)
+            if line.strip() == '':
+                info = False
+    # Convert to native mesh format
+    print('Converting mesh to native format:')
+    try:
+        os.remove('tMaker_cubit.h5')
+    except FileNotFoundError:
+        pass
+    convert_cubit_path = os.path.join(root_path,'..','convert_cubit.py')
+    result, _ = run_shell_command(' '.join([sys.executable, convert_cubit_path, '--in_file=tMaker_cubit.g']), timeout=10)
+    result_lines = result.splitlines()
+    if not os.path.isfile('tMaker_cubit.h5'):
+        nlines = min(10,len(result_lines))
+        print('\n'.join(result_lines[-nlines:]))
+        raise RuntimeError('Failed to convert Cubit file to native format')
+    for line in result_lines:
+        if line.strip() != '':
+            print('    '+line)
+    # Read mesh from file
+    import h5py
+    with h5py.File('tMaker_cubit.h5','r') as h5_file:
+        r = numpy.asarray(h5_file['mesh']['R'])
+        lc = numpy.asarray(h5_file['mesh']['LC'])-1
+        reg = numpy.asarray(h5_file['mesh']['REG'])
+    return r, lc, reg
 
 
 class gs_Domain:
@@ -401,7 +527,7 @@ class gs_Domain:
                 vac_id += 1
         return cond_list
     
-    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False):
+    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None):
         '''! Build mesh for specified domains
 
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
@@ -461,12 +587,30 @@ class gs_Domain:
         for point_def in self._extra_reg_defs:
             point_def[2] = reg_reorder[point_def[2]-1]
         # Generate mesh
-        self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
-        if not setup_only:
-            self._r, self._lc, self._reg = self.mesh.get_mesh()
-            if self._reg.min() <= 0:
-                raise ValueError('Meshing error: unclaimed region detected!')
-            return self._r, self._lc, self._reg
+        if cubit_path is not None:
+            regions_full = []
+            for region in self.regions:
+                json_tmp = region.get_json()
+                for field in json_tmp:
+                    try: 
+                        json_tmp[field] = json_tmp[field].tolist()
+                    except:
+                        pass
+                regions_full.append(json_tmp)
+            with open('tMaker_cubit.json', 'w') as json_file:
+                json.dump({'regions': regions_full, 'tri_gradation': 1.05}, json_file)
+            if not setup_only:
+                self._r, self._lc, self._reg = run_cubit(cubit_path)
+                if self._reg.min() <= 0:
+                    raise ValueError('Meshing error: unclaimed region detected!')
+                return self._r, self._lc, self._reg
+        else:
+            self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
+            if not setup_only:
+                self._r, self._lc, self._reg = self.mesh.get_mesh()
+                if self._reg.min() <= 0:
+                    raise ValueError('Meshing error: unclaimed region detected!')
+                return self._r, self._lc, self._reg
         return None, None, None
     
     def save_json(self,filename):
@@ -493,7 +637,7 @@ class gs_Domain:
         with open(filename, 'w+') as fid:
             fid.write(json.dumps(output_dict))
     
-    def plot_topology(self,fig,ax,linewidth=None):
+    def plot_topology(self,fig,ax,linewidth=None,rotate=False):
         '''! Plot mesh topology
 
         @param fig Figure to add to (unused)
@@ -501,13 +645,17 @@ class gs_Domain:
         @param linewidth Line width for plots
         '''
         for region in self.regions:
-            region.plot_segments(fig,ax,linewidth=linewidth)
+            region.plot_segments(fig,ax,linewidth=linewidth,rotate=rotate)
         # Format plot
         ax.set_aspect('equal','box')
-        ax.set_xlabel('R (m)')
-        ax.set_ylabel('Z (m)')
+        if rotate:
+            ax.set_xlabel('Z (m)')
+            ax.set_ylabel('R (m)')
+        else:
+            ax.set_xlabel('R (m)')
+            ax.set_ylabel('Z (m)')
     
-    def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False):
+    def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False,rotate=False):
         '''! Plot machine geometry
 
         @param fig Figure to add to (unused)
@@ -555,12 +703,19 @@ class gs_Domain:
             coil_axis = ax[1,1]
             vac_axis = ax[0,0]
             ax_flat = ax.flatten()
+        #
+        if rotate:
+            r_plot = self._r[:,1]
+            z_plot = self._r[:,0]
+        else:
+            r_plot = self._r[:,0]
+            z_plot = self._r[:,1]
         # Get region count
         nregs = self._reg.max()
         reg_mark = numpy.zeros((nregs,))
         reg_mark[0] = 1
         # Plot the plasma region
-        plasma_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==1,:],lw=lw,label='Plasma')
+        plasma_axis.triplot(r_plot,z_plot,self._lc[self._reg==1,:],lw=lw,label='Plasma')
         # Plot conductor regions
         nCond = 0
         for key, cond in self.get_conductors().items():
@@ -568,7 +723,7 @@ class gs_Domain:
                 continue
             nCond += 1
             reg_mark[cond['reg_id']-1] = 1
-            cond_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==cond['reg_id'],:],lw=lw,label=key)
+            cond_axis.triplot(r_plot,z_plot,self._lc[self._reg==cond['reg_id'],:],lw=lw,label=key)
         # Plot coil regions
         coil_colors = {}
         for key, coil in self.get_coils().items():
@@ -578,36 +733,40 @@ class gs_Domain:
             else:
                 leg_key = coil.get('coil_set',key)
             if leg_key not in coil_colors:
-                lines, _ = coil_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==coil['reg_id'],:],lw=lw,label=leg_key)
+                lines, _ = coil_axis.triplot(r_plot,z_plot,self._lc[self._reg==coil['reg_id'],:],lw=lw,label=leg_key)
                 coil_colors[leg_key] = lines.get_color()
             else:
-                coil_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==coil['reg_id'],:],lw=lw,color=coil_colors[leg_key])
+                coil_axis.triplot(r_plot,z_plot,self._lc[self._reg==coil['reg_id'],:],lw=lw,color=coil_colors[leg_key])
         nCoil = len(coil_colors)
         # Plot the vacuum regions
         nVac = 0
         for i in range(nregs):
             if reg_mark[i] == 0:
                 nVac += 1
-                vac_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==i+1,:],lw=lw,label='Vacuum_{0}'.format(nVac))
+                vac_axis.triplot(r_plot,z_plot,self._lc[self._reg==i+1,:],lw=lw,label='Vacuum_{0}'.format(nVac))
         # Format plots
         for ax_tmp in ax_flat:
             ax_tmp.set_aspect('equal','box')
-            ax_tmp.set_xlabel('R (m)')
-            ax_tmp.set_ylabel('Z (m)')
+            if rotate:
+                ax_tmp.set_xlabel('Z (m)')
+                ax_tmp.set_ylabel('R (m)')
+            else:
+                ax_tmp.set_xlabel('R (m)')
+                ax_tmp.set_ylabel('Z (m)')
         if show_legends:
             if format_type == 0:
                 ncols = max(1,math.floor((1+nCond+nCoil+nVac)/col_max))
-                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
             elif format_type == 1:
                 ncols = max(1,math.floor((1+nVac)/col_max))
-                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
                 ncols = max(1,math.floor((nCond+nCoil)/col_max))
-                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
             elif format_type == 2:
                 ncols = max(1,math.floor((nCond)/col_max))
-                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
                 ncols = max(1,math.floor((nCoil)/col_max))
-                coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncols=ncols)
+                coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
 
 
 def save_gs_mesh(pts,tris,regions,coil_dict,cond_dict,filename,use_hdf5=True):
@@ -894,7 +1053,7 @@ class Mesh:
 
         @result pts[np,2], tris[nc,3], regions[nc] 
         '''
-        print('Generating mesh:')
+        print('Generating mesh with Triangle:')
         resampled_flat = []
         for segment in self._resampled_segments:
             resampled_flat += [[segment[i], segment[i+1]] for i in range(len(segment)-1)]
@@ -945,6 +1104,8 @@ class Region:
             keep_tol = numpy.cos(numpy.pi*angle_tol/180)
             sliver_tol = numpy.cos(numpy.pi*sliver_tol/180)
             keep_points = [0]
+            tangp = self._points[1,:] - self._points[0,:]
+            tangp /= numpy.linalg.norm(tangp)
             for i in range(nv):
                 if (i == nv-1):
                     tang = self._points[0,:] - self._points[i,:]
@@ -1063,7 +1224,7 @@ class Region:
             segments.append(self._points[self._segments[i],:])
         return segments
     
-    def plot_segments(self,fig,ax,linewidth=None):
+    def plot_segments(self,fig,ax,linewidth=None,rotate=False):
         '''! Plot boundary curve
         
         @param fig Figure to add curves to
@@ -1071,7 +1232,10 @@ class Region:
         @param linewidth Line width for plots
         '''
         for i in range(len(self._segments)):
-            ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1],linewidth=linewidth)
+            if rotate:
+                ax.plot(self._points[self._segments[i],1],self._points[self._segments[i],0],linewidth=linewidth)
+            else:
+                ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1],linewidth=linewidth)
     
     def get_json(self):
         return {
