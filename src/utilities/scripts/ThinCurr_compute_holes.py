@@ -318,8 +318,11 @@ class trimesh:
                     next_pt = cycle_tmp[i]
                     for k in range(self.kpf[next_pt],self.kpf[next_pt+1]):
                         face = self.lpf[k]
-                        if self.bp[self.lf[face,0]] and self.bp[self.lf[face,1]] and self.bp[self.lf[face,2]]:
-                            break
+                        for l in range(3):
+                            if not (self.bp[self.lf[face,l]] and (self.lf[face,l] in cycle_tmp)):
+                                break
+                        else:
+                            break # Point lies on an interior corner of the cycle (skip)
                     else:
                         break
                 else:

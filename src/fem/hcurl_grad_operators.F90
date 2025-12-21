@@ -176,7 +176,8 @@ integer(i4), private :: nu_mop(fem_max_levels)=0 !< Needs Docs
 real(r8), private :: df_mop(fem_max_levels)=-1.d99 !< Needs Docs
 contains
 !------------------------------------------------------------------------------
-!> Read-in options for the basic H(Curl) + Grad(H^1) space ML preconditioners
+!> Read options for the basic H(Curl) + Grad(H^1) space ML preconditioners from
+!! input file
 !------------------------------------------------------------------------------
 subroutine hcurl_grad_mloptions
 integer(i4) :: ierr,io_unit
@@ -1172,12 +1173,10 @@ deallocate(xcurl,xgrad)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_grad_project
 !---------------------------------------------------------------------------------
-!> Boundary projection of a vector field onto a H(Curl) + Grad(H^1) basis
-!!
-!! @note This subroutine only performs the integration of the field with
-!! boundary test functions for a H(Curl) + Grad(H^1) basis
+!> Compute \f$ \int \phi \cdot (V \times dS) \f$ for an arbitrary vector field \f$ V \f$,
+!! where \f$ \phi \f$ are test functions for a H(Curl) + Grad(H^1) FE basis
 !---------------------------------------------------------------------------------
-SUBROUTINE oft_hcurl_grad_bproject(hcurl_grad_rep,field,x)
+SUBROUTINE oft_hcurl_grad_cross_sint(hcurl_grad_rep,field,x)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep
 CLASS(fem_interp), INTENT(inout) :: field !< Vector field for projection
 CLASS(oft_vector), INTENT(inout) :: x !< Field projected onto H(Curl) + Grad(H^1) basis
@@ -1242,7 +1241,7 @@ call x%restore_local(xcurl,1,add=.TRUE.,wait=.TRUE.)
 call x%restore_local(xgrad,2,add=.TRUE.)
 deallocate(xcurl,xgrad)
 DEBUG_STACK_POP
-END SUBROUTINE oft_hcurl_grad_bproject
+END SUBROUTINE oft_hcurl_grad_cross_sint
 !------------------------------------------------------------------------------
 !> Setup matrix and solver with default
 !------------------------------------------------------------------------------
@@ -1795,7 +1794,7 @@ deallocate(alias,array_c,array_f)
 DEBUG_STACK_POP
 end subroutine base_push
 !------------------------------------------------------------------------------
-!> Compute eigenvalues and smoothing coefficients for the mass matrix
+!> Compute eigenvalues and smoothing coefficients for H(Curl) + Grad(H^1) mass matrix
 !------------------------------------------------------------------------------
 SUBROUTINE hcurl_grad_mop_eigs(ML_hcurl_aug_obj,minlev)
 type(oft_ml_fem_comp_type), target, intent(inout) :: ML_hcurl_aug_obj
@@ -1857,8 +1856,8 @@ CALL oft_abort("Subroutine requires ARPACK", "lag_lop_eigs", __FILE__)
 #endif
 END SUBROUTINE hcurl_grad_mop_eigs
 !------------------------------------------------------------------------------
-!> Compute eigenvalues and smoothing coefficients for the operator 
-!! H(Curl) + Grad(H^1) mass matrix
+!> Compute eigenvalues and smoothing coefficients for the H(Curl) + Grad(H^1) 
+!! mass matrix
 !------------------------------------------------------------------------------
 SUBROUTINE hcurl_grad_getmop_pre(ML_hcurl_aug_obj,pre,mats,level,nlevels)
 type(oft_ml_fem_comp_type), target, intent(inout) :: ML_hcurl_aug_obj
@@ -1949,7 +1948,7 @@ END SUBROUTINE hcurl_grad_getmop_pre
 !> Evaluate the jump error in a field over internal faces
 !!
 !! @note Currently faces on domain boundaries are skipped, this is due to the
-!! fact that evaluting the error would require costly communication.
+!! fact that evaluting the error would require communication that may be costly.
 !!
 !! @return Jump error metric
 !------------------------------------------------------------------------------

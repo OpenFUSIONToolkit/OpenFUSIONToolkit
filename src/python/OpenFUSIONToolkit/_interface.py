@@ -14,7 +14,7 @@ import os
 import time
 import platform
 import ctypes
-from ctypes import c_bool, c_int, c_double, c_char_p, c_void_p, create_string_buffer
+from ctypes import c_bool, c_int, c_double, c_char_p, c_void_p
 import numpy
 from numpy import float64, int32
 

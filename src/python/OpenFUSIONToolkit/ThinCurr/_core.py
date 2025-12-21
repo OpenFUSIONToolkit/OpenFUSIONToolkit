@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''! Python interface for ThinCurr thin-wall E-M functionality
+'''! Core definitions for ThinCurr thin-wall E-M functionality
 
 @authors Chris Hansen
 @date March 2024
@@ -333,8 +333,8 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         sensor_names = []
         for i in range(nsensors.value):
-            sensor_name = create_string_buffer(b"",40)
-            error_string = create_string_buffer(b"",200)
+            sensor_name = ctypes.create_string_buffer(b"",40)
+            error_string = ctypes.create_string_buffer(b"",200)
             thincurr_get_sensor_name(sensor_loc,c_int(i+1),sensor_name,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value.decode())

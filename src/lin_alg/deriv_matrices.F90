@@ -181,11 +181,11 @@ end subroutine noop_applyt
 !---------------------------------------------------------------------------------
 subroutine noop_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_noop_matrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 call oft_abort('Invalid operation for matrix type','noop_set_values',__FILE__)
@@ -198,11 +198,11 @@ end subroutine noop_set_values
 !---------------------------------------------------------------------------------
 subroutine noop_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_noop_matrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -303,11 +303,11 @@ end subroutine cnoop_applyt
 !---------------------------------------------------------------------------------
 subroutine cnoop_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_noop_cmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 call oft_abort('Invalid operation for matrix type','cnoop_set_values',__FILE__)
@@ -320,11 +320,11 @@ end subroutine cnoop_set_values
 !---------------------------------------------------------------------------------
 subroutine cnoop_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_noop_cmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -449,11 +449,11 @@ end subroutine diagmat_apply_comp
 !---------------------------------------------------------------------------------
 subroutine diagmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_diagmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 call oft_abort('Invalid operation for matrix type','diagmat_set_values',__FILE__)
@@ -466,11 +466,11 @@ end subroutine diagmat_set_values
 !---------------------------------------------------------------------------------
 subroutine diagmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_diagmatrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations

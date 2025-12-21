@@ -46,7 +46,7 @@ oft_in_template = """
 # Common setup function and process handling
 def cubit_setup(nbase, nlevels, prefix, inp_prefix=None, grid_order=1,
                 reflect='F', per_ns=-1, zstretch=1., test_2d='F', cad_type=2):
-    if inp_prefix == None:
+    if inp_prefix is None:
         prefix2 = "! inpname='none'"
     else:
         prefix2 = "inpname='{0}.3dm'".format(inp_prefix)

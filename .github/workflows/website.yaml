@@ -64,7 +64,7 @@ jobs:
       
       - name: Package full site
         run: |
-          cp -r src/docs/website _site
+          cp -rL src/docs/website _site
           cp -r build_docs/doc/html _site/docs
 
       - name: Fix permissions

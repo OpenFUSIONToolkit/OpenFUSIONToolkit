@@ -83,7 +83,7 @@ CALL ML_oft_blagrange%vec_create(u)
 CALL ML_oft_blagrange%vec_create(v)
 !---Get FE operators
 CALL oft_blag_getlop(ML_oft_blagrange%current_level,lop,'edges',ML_oft_lagrange%current_level%bc)
-CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,'none')
+CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop)
 !---Setup matrix solver
 CALL create_cg_solver(linv)
 linv%A=>lop

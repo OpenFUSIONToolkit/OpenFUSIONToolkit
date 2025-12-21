@@ -6,15 +6,14 @@
 #------------------------------------------------------------------------------
 import argparse
 import numpy as np
-import h5py
-
+from OpenFUSIONToolkit.io import build_XDMF
 
 def compute_force(J,B,area,use_slow,reg_min,reg_max,rcc_torque=None,torque_cen=None):
     if use_slow:
         F = np.zeros((3,))
         T = np.zeros((3,))
-        for j in range(nc):
-            if (reg[j] >= reg_min) and (reg[j] <= reg_max):
+        for j in range(ThinCurr_mesh.nc):
+            if (ThinCurr_mesh.reg[j] >= reg_min) and (ThinCurr_mesh.reg[j] <= reg_max):
                 Ftmp = np.cross(J[j,:],B[j,:])
                 F += area[j]*Ftmp
                 if rcc_torque is not None:
@@ -27,6 +26,7 @@ def compute_force(J,B,area,use_slow,reg_min,reg_max,rcc_torque=None,torque_cen=N
         if rcc_torque is not None:
             T = np.sum(np.cross(rcc_torque[reg_mask,:],np.cross(J[reg_mask,:],B[reg_mask,:])),axis=0)
     # Print results
+    F_mean = max(F_mean,np.finfo(F_mean).tiny) # Avoid divide by zero
     if rcc_torque is None:
         print("{0:15.6E} {1:15.6E} {2:15.6E} ({3:15.6E})".format(*F,np.sqrt(np.sum(np.power(F,2)))/F_mean))
     else:
@@ -49,48 +49,42 @@ if options.torque_cen is not None:
 else:
     torque_cen = np.r_[0.0,0.0,0.0]
 
-with h5py.File('mesh.0001.h5', 'r') as fid:
-    lc = np.asarray(fid['/LC_surf'])
-    r = np.asarray(fid['/R_surf'])
-nv = r.shape[0]
-nc = lc.shape[0]
-area = np.zeros((lc.shape[0],))
-rcc = np.zeros((nc,3))
-rcc_torque = np.zeros((nc,3))
-for i in range(nc):
-    v1 = r[lc[i,1],:]-r[lc[i,0],:]
-    v2 = r[lc[i,2],:]-r[lc[i,0],:]
+plot_data = build_XDMF()
+ThinCurr_mesh = plot_data['ThinCurr']['smesh']
+area = np.zeros((ThinCurr_mesh.nc,))
+rcc = np.zeros((ThinCurr_mesh.nc,3))
+rcc_torque = np.zeros((ThinCurr_mesh.nc,3))
+for i in range(ThinCurr_mesh.nc):
+    v1 = ThinCurr_mesh.r[ThinCurr_mesh.lc[i,1],:]-ThinCurr_mesh.r[ThinCurr_mesh.lc[i,0],:]
+    v2 = ThinCurr_mesh.r[ThinCurr_mesh.lc[i,2],:]-ThinCurr_mesh.r[ThinCurr_mesh.lc[i,0],:]
     area[i] = np.linalg.norm(np.cross(v1,v2))/2.0
-    rcc[i,:] = (r[lc[i,2],:]+r[lc[i,1],:]+r[lc[i,0],:])/3.0
+    rcc[i,:] = (ThinCurr_mesh.r[ThinCurr_mesh.lc[i,2],:]+ThinCurr_mesh.r[ThinCurr_mesh.lc[i,1],:]+ThinCurr_mesh.r[ThinCurr_mesh.lc[i,0],:])/3.0
     rcc_torque[i,:] = rcc[i,:]-torque_cen
-Btor = np.zeros((nv,3))
-for i in range(nv):
-    that = np.r_[-r[i,1],r[i,0],0.0]; that/=np.linalg.norm(that)
-    Btor[i,:] = options.btr0*that/np.sqrt(np.power(r[i,0],2)+np.power(r[i,1],2))
+Btor = np.zeros((ThinCurr_mesh.np,3))
+for i in range(ThinCurr_mesh.np):
+    that = np.r_[-ThinCurr_mesh.r[i,1],ThinCurr_mesh.r[i,0],0.0]; that/=np.linalg.norm(that)
+    Btor[i,:] = options.btr0*that/np.sqrt(np.power(ThinCurr_mesh.r[i,0],2)+np.power(ThinCurr_mesh.r[i,1],2))
 if not have_torque:
     rcc_torque = None
 
-with h5py.File('scalar_dump.0001.h5', 'r') as fid:
-    reg = np.asarray(fid['/REG_surf0000'])
+if rcc_torque is None:
+    print("   Fx              Fy              Fz              |F|/F_rms")
+else:
+    print("   Fx              Fy              Fz              |F|/F_rms         Tx              Ty              Tz")
 
-reg_mask = np.all((reg >= options.reg_min, reg <= options.reg_max),axis=0)
-with h5py.File('vector_dump.0001.h5', 'r') as fid:
-    if options.nmax > 0:
-        for i in range(options.nmax):
-            if '/J{0:04d}'.format(i+1) not in fid:
-                break
-            J = np.asarray(fid['/J{0:04d}'.format(i+1)])
-            Bv = np.asarray(fid['/B_v{0:04d}'.format(i+1)]) + Btor
-            B = (Bv[lc[:,0],:]+Bv[lc[:,1],:]+Bv[lc[:,2],:])/3.0
-            compute_force(J,B,area,options.use_slow,options.reg_min,options.reg_max,rcc_torque=rcc_torque,torque_cen=torque_cen)
-    else:
-        for i in range(abs(options.nmax)):
-            if '/J_{0:02d}{1:04d}'.format(i+1,0) not in fid:
-                break
-            if '/B_v_{0:02d}{1:04d}'.format(i+1,0) not in fid:
-                break
-            J = np.asarray(fid['/J_{0:02d}{1:04d}'.format(i+1,0)])
-            Bv = np.asarray(fid['/B_v_{0:02d}{1:04d}'.format(i+1,0)]) + Btor
-            B = (Bv[lc[:,0],:]+Bv[lc[:,1],:]+Bv[lc[:,2],:])/3.0
-            compute_force(J,B,area,options.use_slow,options.reg_min,options.reg_max,rcc_torque=rcc_torque,torque_cen=torque_cen)
+reg_mask = np.all((ThinCurr_mesh.reg >= options.reg_min, ThinCurr_mesh.reg <= options.reg_max),axis=0)
+if options.nmax > 0:
+    for i, time in enumerate(ThinCurr_mesh.times):
+        if i >= options.nmax:
+            break
+        J = ThinCurr_mesh.get_field('J',time)
+        Bv = ThinCurr_mesh.get_field('B_v',time) + Btor
+        B = (Bv[ThinCurr_mesh.lc[:,0],:]+Bv[ThinCurr_mesh.lc[:,1],:]+Bv[ThinCurr_mesh.lc[:,2],:])/3.0
+        compute_force(J,B,area,options.use_slow,options.reg_min,options.reg_max,rcc_torque=rcc_torque,torque_cen=torque_cen)
+else:
+    for i in range(abs(options.nmax)):
+        J = ThinCurr_mesh.static_fields['J{0:02d}'.format(i+1)]
+        Bv = ThinCurr_mesh.static_fields['B_v{0:02d}'.format(i+1)]
+        B = (Bv[ThinCurr_mesh.lc[:,0],:]+Bv[ThinCurr_mesh.lc[:,1],:]+Bv[ThinCurr_mesh.lc[:,2],:])/3.0
+        compute_force(J,B,area,options.use_slow,options.reg_min,options.reg_max,rcc_torque=rcc_torque,torque_cen=torque_cen)
                 

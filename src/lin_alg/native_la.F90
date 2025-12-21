@@ -714,8 +714,8 @@ end function vec_dot_cvec
 !---------------------------------------------------------------------------------
 function vec_mdot_vec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
-type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 integer(i4), intent(in) :: n !< Length of vector array
+type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 real(r8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 integer(i4) :: i
 DEBUG_STACK_PUSH
@@ -736,8 +736,8 @@ end function vec_mdot_vec
 !---------------------------------------------------------------------------------
 function vec_mdot_cvec(self,a,n) result(dots)
 class(oft_native_vector), intent(inout) :: self !< Vector object
-type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 integer(i4), intent(in) :: n !< Length of vector array
+type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 integer(i4) :: i
 complex(c8), allocatable, dimension(:) :: vtmp
@@ -1564,8 +1564,8 @@ end function cvec_dot_cvec
 !---------------------------------------------------------------------------------
 function cvec_mdot_vec(self,a,n) result(dots)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
-type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 integer(i4), intent(in) :: n !< Length of vector array
+type(oft_vector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 integer(i4) :: i
 complex(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: atmp
@@ -1590,8 +1590,8 @@ end function cvec_mdot_vec
 !---------------------------------------------------------------------------------
 function cvec_mdot_cvec(self,a,n) result(dots)
 class(oft_native_cvector), intent(inout) :: self !< Vector object
-type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 integer(i4), intent(in) :: n !< Length of vector array
+type(oft_cvector_ptr), intent(inout) :: a(n) !< Array of vectors for dot product [n]
 complex(c8) :: dots(n) !< \f$ \sum_i self_i a(j)_i \f$
 integer(i4) :: i
 DEBUG_STACK_PUSH
@@ -1949,11 +1949,11 @@ end subroutine mat_applyt_cvec
 !---------------------------------------------------------------------------------
 subroutine mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: i,j,jp,jn,jk
@@ -1989,11 +1989,11 @@ end subroutine mat_set_values
 !---------------------------------------------------------------------------------
 subroutine mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -2051,11 +2051,11 @@ end subroutine mat_add_values
 !---------------------------------------------------------------------------------
 subroutine mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_matrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -3158,11 +3158,11 @@ end subroutine cmat_applyt_cvec
 !---------------------------------------------------------------------------------
 subroutine cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_cmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: i,j,jp,jn,jk
@@ -3198,11 +3198,11 @@ end subroutine cmat_set_values
 !---------------------------------------------------------------------------------
 subroutine cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_cmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -3260,11 +3260,11 @@ end subroutine cmat_add_values
 !---------------------------------------------------------------------------------
 subroutine cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_cmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -3631,11 +3631,11 @@ end subroutine dense_mat_applyt_cvec
 !---------------------------------------------------------------------------------
 subroutine dense_mat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_dense_matrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: i,j,ii,jj
@@ -3668,11 +3668,11 @@ end subroutine dense_mat_set_values
 !---------------------------------------------------------------------------------
 subroutine dense_mat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_matrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -3706,11 +3706,11 @@ end subroutine dense_mat_add_values
 !---------------------------------------------------------------------------------
 subroutine dense_mat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_matrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 real(r8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -4006,11 +4006,11 @@ end subroutine dense_cmat_applyt_cvec
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_set_values(self,i_inds,j_inds,b,n,m,iblock,jblock)
 class(oft_native_dense_cmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to set [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to set [m]
 complex(c8), intent(in) :: b(n,m) !< Values to set [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: i,j,ii,jj
@@ -4043,11 +4043,11 @@ end subroutine dense_cmat_set_values
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_cmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
@@ -4081,11 +4081,11 @@ end subroutine dense_cmat_add_values
 !---------------------------------------------------------------------------------
 subroutine dense_cmat_atomic_add_values(self,i_inds,j_inds,b,n,m,iblock,jblock,loc_cache)
 class(oft_native_dense_cmatrix), intent(inout) :: self
+integer(i4), intent(in) :: n !< Number of rows in local matrix
+integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), intent(in) :: i_inds(n) !< Row indices of entries to add [n]
 integer(i4), intent(in) :: j_inds(m) !< Column indices of entries to add [m]
 complex(c8), intent(in) :: b(n,m) !< Values to add [n,m]
-integer(i4), intent(in) :: n !< Number of rows in local matrix
-integer(i4), intent(in) :: m !< Number of columns in local matrix
 integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations

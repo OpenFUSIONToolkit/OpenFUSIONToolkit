@@ -74,3 +74,9 @@ if( OFT_COVERAGE )
       POST_BUILD
   )
 endif()
+# Create test driver
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/run_test.sh.in ${CMAKE_CURRENT_BINARY_DIR}/run_test.sh @ONLY )
+file(
+  CHMOD ${CMAKE_CURRENT_BINARY_DIR}/run_test.sh
+  PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ WORLD_READ
+)

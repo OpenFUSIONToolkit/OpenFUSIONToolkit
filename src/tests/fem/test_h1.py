@@ -54,7 +54,7 @@ def h1_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', petsc=Fal
 def validate_result(iteration_count,converged_error):
     fid = open('h1.results','r')
     its_test = int(fid.readline())
-    if iteration_count != None:
+    if iteration_count is not None:
         if abs(iteration_count-its_test) >= max(3,0.05*iteration_count):
             print("FAILED: Iteration count incorrect!")
             print("  Expected = {0}".format(iteration_count))

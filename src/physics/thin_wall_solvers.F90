@@ -244,19 +244,19 @@ b=(1.d0,0.d0)*driver(:,1) + (0.d0,1.d0)*driver(:,2)
 IF(PRESENT(hodlr_op))THEN
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
+    WRITE(*,'(1X,A,ES13.5)')'  Frequency [Hz] = ',freq
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)*freq*2.d0*pi
     aca_Fmat%alam=(1.d0,0.d0)
   CASE(1)
-    WRITE(*,'(X,A)')'  Frequency -> Inf (L limit)'
+    WRITE(*,'(1X,A)')'  Frequency -> Inf (L limit)'
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)
     aca_Fmat%alam=(0.d0,0.d0)
   CASE(2)
-    WRITE(*,'(X,A)')'  Frequency -> 0   (R limit)'
+    WRITE(*,'(1X,A)')'  Frequency -> 0   (R limit)'
     aca_Fmat%rJ=>self%Rmat
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,0.d0)
@@ -268,7 +268,7 @@ ELSE
   ALLOCATE(Mmat(self%nelems,self%nelems))
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(X,A,ES13.5)')'  Frequency [Hz] = ',freq
+    WRITE(*,'(1X,A,ES13.5)')'  Frequency [Hz] = ',freq
     Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -276,10 +276,10 @@ ELSE
       END DO
     END DO
   CASE(1)
-    WRITE(*,'(X,A)')'  Frequency -> Inf (L limit)'
+    WRITE(*,'(1X,A)')'  Frequency -> Inf (L limit)'
     Mmat=(0.d0,1.d0)*self%Lmat
   CASE(2)
-    WRITE(*,'(X,A)')'  Frequency -> 0   (R limit)'
+    WRITE(*,'(1X,A)')'  Frequency -> 0   (R limit)'
     Mmat=(0.d0,0.d0)
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -1093,17 +1093,7 @@ DO i=0,nsteps
       cc_vals(2,:)=vtmp
       CALL Bz%get_local(vtmp)
       cc_vals(3,:)=vtmp
-      ! IF(self%n_icoils>0)THEN
-      !   !$omp parallel do private(k,tmp) collapse(2)
-      !     DO j=1,self%n_icoils
-      !     DO jj=1,3
-      !         !$omp simd
-      !         DO k=1,self%mesh%np
-      !             cc_vals(jj,k)=cc_vals(jj,k)+coil_vec(j)*hodlr_op%Icoil_Bmat(k,j,jj)
-      !         END DO
-      !     END DO
-      !     END DO
-      ! END IF
+      DEALLOCATE(vtmp)
     ELSE
       !$omp parallel do private(j,jj,tmp)
       DO k=1,self%mesh%np
@@ -1129,7 +1119,6 @@ DO i=0,nsteps
           cc_vals(jj,k)=cc_vals(jj,k)+tmp
         END DO
       END DO
-    ! END IF
     END IF
     CALL self%mesh%save_vertex_vector(cc_vals,self%xdmf,'B_v')
   END IF
@@ -1193,11 +1182,11 @@ END IF
 CALL u%delete
 DEALLOCATE(u)
 DEALLOCATE(vals)
-IF(compute_B)THEN
+IF(compute_B.AND.PRESENT(hodlr_op))THEN
   CALL Bx%delete()
   CALL By%delete()
   CALL Bz%delete()
-  DEALLOCATE(vtmp)
+  DEALLOCATE(Bx,By,Bz)
 END IF
 IF(self%n_icoils>0)DEALLOCATE(coil_vec)
 END SUBROUTINE plot_td_sim

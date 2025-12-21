@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from oft_testing import run_OFT
 from OpenFUSIONToolkit.io import histfile
-from OpenFUSIONToolkit.util import oftpy_dump_cov
+from OpenFUSIONToolkit._interface import oftpy_dump_cov
 
 mu0 = np.pi*4.E-7
 

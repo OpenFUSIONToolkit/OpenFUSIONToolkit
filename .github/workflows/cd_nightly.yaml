@@ -38,19 +38,19 @@ jobs:
           }
         - {
             name: "macOS-x86_64",
-            os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
-            python: "python3.12",
-            xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer",
+            os: macos-15-intel,
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
+            python: "python3.13",
+            xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1",
             cache_key: "openmp"
           }
         - {
             name: "macOS-x86_64-Rosetta",
-            os: macos-13,
-            cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
-            python: "python3.12",
-            xcode_path: "/Applications/Xcode_14.2.app/Contents/Developer",
+            os: macos-15-intel,
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
+            python: "python3.13",
+            xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1 --oblas_no_avx",
             cache_key: "openmp_noavx"
           }
@@ -112,7 +112,7 @@ jobs:
         wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
         echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
         sudo apt-get update -o Dir::Etc::sourcelist="sources.list.d/oneAPI.list" -o APT::Get::List-Cleanup="0"
-        sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp intel-oneapi-compiler-fortran intel-oneapi-mkl-devel
+        sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp-2025.2 intel-oneapi-compiler-fortran-2025.2 intel-oneapi-mkl-devel-2025.2
         echo "source /opt/intel/oneapi/compiler/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
         echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
         echo "ulimit -s unlimited" >> ${{ github.workspace }}/setup_env.sh

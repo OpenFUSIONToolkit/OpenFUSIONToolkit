@@ -9,7 +9,7 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from oft_testing import run_command
-from OpenFUSIONToolkit.util import oftpy_dump_cov
+from OpenFUSIONToolkit._interface import oftpy_dump_cov
 
 
 def mp_run(target,args,timeout=180):

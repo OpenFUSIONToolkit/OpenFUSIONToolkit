@@ -3,6 +3,8 @@ TokaMaker: 2D static and time-dependent Grad-Shafranov Equilibria     {#doc_gs_m
 
 [TOC]
 
+\image html tokamaker_logo.png width=25%
+
 TokaMaker solves variants of a system of equations corresponding to Ideal MHD force balance
 for an axisymmetric plasma in response to actively and passively driven currents in nearby
 conductors (eg. coils and structures).
@@ -31,7 +33,6 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 ### Free Boundary Equilibria
  - \subpage doc_tMaker_ITER_ex2
  - \subpage doc_tMaker_HBT_ex2
- - \subpage doc_tMaker_ITER_ex2
  - \subpage doc_tMaker_DIIID_ex2
  - \subpage doc_tMaker_CUTE_ex2
  - \subpage doc_tMaker_LTX_ex2

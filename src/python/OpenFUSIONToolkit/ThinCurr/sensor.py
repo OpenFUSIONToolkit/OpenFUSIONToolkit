@@ -78,7 +78,8 @@ class Mirnov(flux_loop):
         if numpy.linalg.norm(v1) < 1.E-8:
             v1 = numpy.cross([0.0, 1.0, 0.0], norm)
         v1 = v1/numpy.linalg.norm(v1)
-        v2 = numpy.cross(v1, norm); v2 = v2/numpy.linalg.norm(v2)
+        v2 = numpy.cross(v1, norm)
+        v2 /= numpy.linalg.norm(v2)
         #
         self._pts = numpy.array([
             center+dx*(v1+v2)/2.0,

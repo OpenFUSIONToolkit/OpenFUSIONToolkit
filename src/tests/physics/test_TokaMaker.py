@@ -11,10 +11,10 @@ from scipy.integrate import dblquad
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit import OFT_env
+from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
-from OpenFUSIONToolkit.util import oftpy_dump_cov
 
 
 def mp_run(target,args,timeout=30):

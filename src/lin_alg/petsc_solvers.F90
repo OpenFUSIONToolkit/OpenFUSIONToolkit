@@ -28,7 +28,7 @@
 MODULE oft_petsc_solvers
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr
-USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
+USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, solver_delete
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, &
   oft_petsc_matrix, oft_petsc_matrix_cast
@@ -326,13 +326,15 @@ end subroutine petsc_solver_setup_ksp
 !---------------------------------------------------------------------------------
 !> Delete PETSc solver
 !---------------------------------------------------------------------------------
-subroutine petsc_solver_delete(self)
+subroutine petsc_solver_delete(self,propogate)
 class(oft_petsc_solver), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 IF(self%initialized)CALL KSPDestroy(self%solver,ierr)
 NULLIFY(self%A)
 self%initialized=.FALSE.
+CALL solver_delete(self,propogate)
 DEBUG_STACK_POP
 end subroutine petsc_solver_delete
 !------------------------------------------------------------------------------
@@ -1166,13 +1168,15 @@ end subroutine precond_apply
 !---------------------------------------------------------------------------------
 !> Delete PETSc solver
 !---------------------------------------------------------------------------------
-subroutine precond_delete(self)
+subroutine precond_delete(self,propogate)
 class(oft_petsc_precond), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 IF(self%initialized)CALL KSPDestroy(self%solver,ierr)
 NULLIFY(self%A)
 self%initialized=.FALSE.
+CALL solver_delete(self,propogate)
 DEBUG_STACK_POP
 end subroutine precond_delete
 !---------------------------------------------------------------------------------

@@ -30,6 +30,7 @@ USE oft_gs, ONLY: gs_eq, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_i
 use oft_gs, only: gs_get_cond_source, gs_get_cond_weights, gs_set_cond_weights
 #endif
 USE oft_gs_profiles
+USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -63,7 +64,7 @@ REAL(8) :: alpha,beta,sep
 REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
 INTEGER(4) :: ncofs,npsi,io_unit
 LOGICAL :: zero_grad
-CHARACTER(LEN=10) :: profType
+CHARACTER(LEN=15) :: profType
 !---
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)profType
@@ -90,6 +91,13 @@ SELECT CASE(TRIM(profType))
     READ(io_unit,*)cofs
     READ(io_unit,*)yvals
     CALL create_linterp_ff(F,ncofs,cofs,yvals,alpha)
+    DEALLOCATE(cofs,yvals)
+  CASE("jphi-linterp")
+    READ(io_unit,*)ncofs,alpha
+    ALLOCATE(cofs(ncofs),yvals(ncofs))
+    READ(io_unit,*)cofs
+    READ(io_unit,*)yvals
+    CALL create_jphi_ff(F,ncofs,cofs,yvals)
     DEALLOCATE(cofs,yvals)
   CASE("idcd")
     READ(io_unit,*)ncofs
@@ -151,6 +159,11 @@ SELECT TYPE(this=>F)
     WRITE(io_unit,*)this%npsi,this%y0
     WRITE(io_unit,*)this%x
     WRITE(io_unit,*)this%yp
+  TYPE IS(jphi_flux_func)
+    WRITE(io_unit,*)"jphi-linterp"
+    WRITE(io_unit,*)this%npsi,this%y0
+    WRITE(io_unit,*)this%x
+    WRITE(io_unit,*)this%jphi
   TYPE IS(twolam_flux_func)
     WRITE(io_unit,*)"idcd"
     WRITE(io_unit,*)this%ncofs
@@ -601,7 +614,7 @@ psi0=0.02d0; psi1=0.98d0 !1.d0
 do i=1,npsi
   psi_q(i)=(psi1-psi0)*((i-1)/REAL(npsi-1,8)) + psi0
 end do
-CALL gs_get_qprof(self,npsi,psi_q,prof,dl,rbounds,zbounds)
+IF(.NOT.self%mirror_mode)CALL gs_get_qprof(self,npsi,psi_q,prof,dl,rbounds,zbounds)
 IF(dl<=0.d0)CALL oft_abort('Tracing q-profile failed','gs_analyze',__FILE__)
 q95=linterp(psi_q,prof,npsi,0.05d0)
 !
@@ -614,7 +627,7 @@ IF(ABS(self%I%f_offset)>0.d0)beta(2) = 2.d0*pvol/vol/(self%I%f_offset/centroid(1
 WRITE(*,'(2A,ES11.3)')oft_indent,'Toroidal Current [A]    = ',Itor/mu0
 WRITE(*,'(2A,2F8.3)') oft_indent,'Current Centroid [m]    =',centroid
 WRITE(*,'(2A,2F8.3)') oft_indent,'Magnetic Axis [m]       =',baxis
-WRITE(*,'(2A,F8.3)')  oft_indent,'Elongation              =',(zbounds(2,2)-zbounds(2,1))/(rbounds(1,2)-rbounds(1,1))
+IF(.NOT.self%mirror_mode)WRITE(*,'(2A,F8.3)')  oft_indent,'Elongation              =',(zbounds(2,2)-zbounds(2,1))/(rbounds(1,2)-rbounds(1,1))
 IF(self%diverted)THEN
   IF(self%x_points(2,self%nx_points)<zbounds(2,1))THEN
     zbounds(:,1)=self%x_points(:,self%nx_points)
@@ -623,9 +636,9 @@ IF(self%diverted)THEN
   END IF
 END IF
 tmp=((rbounds(1,2)+rbounds(1,1))/2.d0-(zbounds(1,2)+zbounds(1,1))/2.d0)*2.d0/(rbounds(1,2)-rbounds(1,1))
-WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
+IF(.NOT.self%mirror_mode)WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
 WRITE(*,'(2A,F8.3)')oft_indent,'Plasma Volume [m^3]     =',vol*2.d0*pi
-IF(.NOT.self%dipole_mode)WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
+IF(.NOT.(self%dipole_mode.OR.self%mirror_mode))WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
 WRITE(*,'(2A,ES11.3)')oft_indent,'Peak Pressure [Pa]      = ',pmax/mu0
 WRITE(*,'(2A,ES11.3)')oft_indent,'Stored Energy [J]       = ',pvol*2.d0*pi/mu0*3.d0/2.d0
 WRITE(*,'(2A,F8.3)')  oft_indent,'<Beta_pol> [%]          = ',1.d2*beta(1)
@@ -706,7 +719,7 @@ do i=1,smesh%nc
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+        + self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
       ELSE
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
         + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
@@ -794,9 +807,9 @@ do i=1,smesh%nc
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
         j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (self%alam**2)*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+          + ((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (self%alam**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%alam)/(pt(1)+gs_epsilon))
+          + self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
       ELSE
         j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
           + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
@@ -865,7 +878,7 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  IF(gseq%dipole_mode)THEN
+  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
     pt=[raxis*j/REAL(100,8),0.d0,0.d0]
   ELSE
     pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
@@ -873,7 +886,7 @@ DO j=1,100
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
-  IF(gseq%dipole_mode)THEN
+  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
     IF(psi_surf(1)>x1)EXIT
   ELSE
     IF(psi_surf(1)<x1)EXIT
@@ -1053,7 +1066,7 @@ end subroutine gs_save_ifile
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,cocos,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1066,6 +1079,7 @@ REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
 REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
+INTEGER, OPTIONAL, INTENT(in) :: cocos
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
@@ -1120,7 +1134,7 @@ DO j=1,100
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF(gseq%dipole_mode)THEN
+  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
     IF(psi_tmp(1)>x1)EXIT
   ELSE
     IF(psi_tmp(1)<x1)EXIT
@@ -1228,7 +1242,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     fptmp=gseq%alam*gseq%I%f(psi_trace)+gseq%I%f_offset
     fpol(j)=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
-    ffprim(j)=(gseq%alam**2)*gseq%I%fp(psi_surf)*(gseq%I%f(psi_surf)+gseq%I%f_offset/gseq%alam)
+    ffprim(j)=gseq%I%fp(psi_surf)*((gseq%alam**2)*gseq%I%f(psi_surf)+gseq%alam*gseq%I%f_offset)
   ELSE
     fptmp=SQRT(gseq%alam*gseq%I%f(psi_trace) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
@@ -1286,7 +1300,7 @@ CALL psi_int%delete()
 !------------------------------------------------------------------------------
 ! Create output file
 !------------------------------------------------------------------------------
-WRITE(eqdsk_case,'(A,X,A)')'tMaker:',run_info
+WRITE(eqdsk_case,'(A,1X,A)')'tMaker:',run_info
 rleft = rbounds(1)
 zmid = (zbounds(2)+zbounds(1))/2.d0
 IF(PRESENT(rcentr_in))THEN
@@ -1332,6 +1346,22 @@ ELSE
     READ(io_unit,*)rlim(i),zlim(i)
   END DO
   CLOSE(io_unit)
+END IF
+! COCOS transform
+IF(PRESENT(cocos))THEN
+  IF(cocos == 2)THEN
+    WRITE(*,*) 'Using COCOS=2...'
+    ffprim = -ffprim
+    pprime = -pprime
+    psirz = -psirz
+    ! fpol = -fpol
+    ! bcentr = -bcentr
+    ! itor = -itor
+    x1 = -x1
+    x2 = -x2
+  ELSE IF(cocos /= 7)THEN
+    CALL oft_abort('Invalid COCOS version.','gs_save_eqdsk',__FILE__)
+  END IF
 END IF
 ! Write out gEQDSK file
 2000 format(a48,3i4)

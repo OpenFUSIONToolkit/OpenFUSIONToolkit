@@ -127,11 +127,11 @@ IF(oft_env%head_proc)THEN
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(2A,L)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
+          WRITE(*,'(2A,L1)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(2A,L)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
+          WRITE(*,'(2A,L1)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(2A,L)')oft_indent,'XY-plane, periodic = ',ref_per(3)
+          WRITE(*,'(2A,L1)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
     CALL oft_decrease_indent
@@ -253,11 +253,11 @@ IF(oft_env%head_proc)THEN
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(4X,A,L)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
+          WRITE(*,'(4X,A,L1)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(4X,A,L)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
+          WRITE(*,'(4X,A,L1)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(4X,A,L)')oft_indent,'XY-plane, periodic = ',ref_per(3)
+          WRITE(*,'(4X,A,L1)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
     CALL oft_decrease_indent

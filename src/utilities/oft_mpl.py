@@ -50,10 +50,10 @@ class plot:
             if include_yzero:
                 curr_plot.set_ylim(bottom=0)
         # Add X-Axis label
-        if (xlabel != None) and (len(self.ax) == subplot):
+        if (xlabel is not None) and (len(self.ax) == subplot):
             curr_plot.set_xlabel(xlabel)
         # Add Y-Axis label
-        if ylabel != None:
+        if ylabel is not None:
             curr_plot.set_ylabel(ylabel)
 
     def show_legend(self, subplot=-1):

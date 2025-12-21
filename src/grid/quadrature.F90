@@ -205,9 +205,9 @@ end subroutine set_quad_1d
 !> Change domain of integration from [-1,1] to [0,1]
 !------------------------------------------------------------------------------
 subroutine quad_change_domain(x,w,n)
+integer(i4), INTENT(IN) :: n !< Number of quadrature points
 real(r8), intent(inout) :: x(n) !< Quadrature points
 real(r8), intent(inout) :: w(n) !< Quadrature weights
-integer(i4), INTENT(IN) :: n !< Number of quadrature points
 integer(i4) :: i
 DO i=1,n
     w(i)=w(i)/2.d0
@@ -218,9 +218,9 @@ end subroutine quad_change_domain
 !> Create 1D quadrature object from base Gaussian quadrature rule
 !------------------------------------------------------------------------------
 function create_quad_1d(x,w,n) result(quad)
+integer(i4), INTENT(IN) :: n !< Number of quadrature points
 real(r8), intent(in) :: x(n) !< Quadrature points
 real(r8), intent(in) :: w(n) !< Quadrature weights
-integer(i4), INTENT(IN) :: n !< Number of quadrature points
 type(oft_quad_type) :: quad !< Quadrature rule
 quad%dim=1
 quad%np=n

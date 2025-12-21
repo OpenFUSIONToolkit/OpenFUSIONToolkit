@@ -87,9 +87,9 @@ CONTAINS
 !---------------------------------------------------------------------------------
 function global_dp_r8(self,a,b,n,no_reduce) result(c)
 type(oft_seam), intent(inout) :: self !< Seam structure
+integer(i4), intent(in) :: n !< Length of local arrays
 real(r8), intent(in) :: a(n) !< Local vector 1 for dot_product
 real(r8), intent(in) :: b(n) !< Local vector 2 for dot_product
-integer(i4), intent(in) :: n !< Length of local arrays
 logical, optional, intent(in) :: no_reduce !< Skip global reduction step
 logical :: do_reduce
 integer(i4) :: i
@@ -119,9 +119,9 @@ end function global_dp_r8
 !---------------------------------------------------------------------------------
 function global_dp_c8(self,a,b,n,no_reduce) result(c)
 type(oft_seam), intent(inout) :: self !< Seam structure
+integer(i4), intent(in) :: n !< Length of local arrays
 COMPLEX(c8), intent(in) :: a(n) !< Local vector 1 for dot_product
 COMPLEX(c8), intent(in) :: b(n) !< Local vector 2 for dot_product
-integer(i4), intent(in) :: n !< Length of local arrays
 logical, optional, intent(in) :: no_reduce !< Skip global reduction step
 logical :: do_reduce
 integer(i4) :: i
@@ -151,8 +151,8 @@ end function global_dp_c8
 !---------------------------------------------------------------------------------
 function global_reduction_r8(self,a,n) result(c)
 type(oft_seam), intent(inout) :: self !< Seam structure
-real(r8), intent(in) :: a(n) !< Local data for reduction
 integer(i4), intent(in) :: n !< Length of local array for reduction
+real(r8), intent(in) :: a(n) !< Local data for reduction
 integer(i4) :: i
 real(r8) :: c
 DEBUG_STACK_PUSH
@@ -178,8 +178,8 @@ end function global_reduction_r8
 !---------------------------------------------------------------------------------
 function global_reduction_c8(self,a,n) result(c)
 type(oft_seam), intent(inout) :: self !< Seam structure
-COMPLEX(c8), intent(in) :: a(n) !< Local data for reduction
 integer(i4), intent(in) :: n !< Length of local array for reduction
+COMPLEX(c8), intent(in) :: a(n) !< Local data for reduction
 integer(i4) :: i
 COMPLEX(c8) :: c
 DEBUG_STACK_PUSH

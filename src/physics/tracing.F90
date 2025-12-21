@@ -431,8 +431,8 @@ end subroutine tracing_line
 !------------------------------------------------------------------------------
 subroutine tracing_poincare(tracer,pts,n,filename,offset,pcoord,qfile)
 class(oft_tracer), intent(in) :: tracer !< Base tracer for field line advance
-real(r8), intent(in) :: pts(3,n) !< Launch points for field lines [3,n]
 integer(i4), intent(in) :: n !< Number of launch points
+real(r8), intent(in) :: pts(3,n) !< Launch points for field lines [3,n]
 character(LEN=*), intent(in) :: filename !< Filename for section data
 real(r8), optional, intent(in) :: offset !< X-intercept of section plane (optional, default: 0.0)
 integer(i4), optional, intent(in) :: pcoord !< Coordinate index orthogonal to section plane (optional, default: 1)
@@ -550,7 +550,7 @@ IF(oft_env%head_proc)THEN
     END SELECT
   END DO
   elapsed_time=mytimer%tock()
-  WRITE(*,'(X,A,F6.1)')'Trace Complete: ',elapsed_time
+  WRITE(*,'(1X,A,F6.1)')'Trace Complete: ',elapsed_time
   WRITE(*,*)'  # exited mesh              ',counts(1)
   WRITE(*,*)'  # exceeded transfer limit  ',counts(2)
   WRITE(*,*)'  # exceeded step limit      ',counts(3)
@@ -570,8 +570,8 @@ end subroutine tracing_poincare
 !> Manage tracer communication and status for parallel tracing
 !------------------------------------------------------------------------------
 subroutine tracing_poincare_master(tracers,n)
-type(oft_tracer_ptr), target, intent(inout) :: tracers(n) !< Array of all active tracers [n]
 integer(i4), intent(in) :: n !< Number of active tracers
+type(oft_tracer_ptr), target, intent(inout) :: tracers(n) !< Array of all active tracers [n]
 integer(i4) :: i,j,ierr,cell
 #ifdef OFT_MPI_F08
 type(mpi_request) :: tid(2)
@@ -811,11 +811,11 @@ end subroutine tracing_poincare_master
 !! of the yz-plane into a buffer array
 !------------------------------------------------------------------------------
 subroutine tracing_poincare_worker(tracers,n,ibuff,outbuff,nbuff,nloc,xcross,icoord,qbuff)
-type(oft_tracer_ptr), target, intent(inout) :: tracers(n) !< Array of all active tracers [n]
 integer(i4), intent(in) :: n !< Number of active tracers
+type(oft_tracer_ptr), target, intent(inout) :: tracers(n) !< Array of all active tracers [n]
+integer(i4), intent(in) :: nbuff !< Size of local buffer
 integer(i4), intent(inout) :: ibuff(nbuff) !< Local buffer of tracer indices [nbuff]
 real(r8), intent(inout) :: outbuff(3,nbuff) !< Local buffer of plane crossings [3,nbuff]
-integer(i4), intent(in) :: nbuff !< Size of local buffer
 integer(i4), intent(inout) :: nloc !< Number of crossings on local task
 real(r8), optional, intent(in) :: xcross !< X-intercept of section plane (optional, default: 0.0)
 integer(i4), optional, intent(in) :: icoord !< Coordinate index orthogonal to section plane (optional, default: 1)

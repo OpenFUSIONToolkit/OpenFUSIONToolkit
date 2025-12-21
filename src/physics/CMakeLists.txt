@@ -11,8 +11,8 @@ set( OBJS
   tracing_2d.F90
   axi_green.F90
   grad_shaf.F90
-  grad_shaf_mercier.F90
   grad_shaf_profiles.F90
+  grad_shaf_prof_phys.F90
   grad_shaf_util.F90
   grad_shaf_fit.F90
   grad_shaf_td.F90

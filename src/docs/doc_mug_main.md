@@ -3,6 +3,8 @@ Magnetohydrodynamics on Unstructured Grids (MUG): 3D linear/nonlinear extended M
 
 [TOC]
 
+\image html mug_logo.png width=25%
+
 MUG solves the linearized or full nonlinear MHD equations in three dimensions using finite elements on
 unstructured grids of tetrahedra or hexahedra.
 

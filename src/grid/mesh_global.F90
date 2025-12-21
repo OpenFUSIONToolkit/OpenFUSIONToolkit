@@ -534,8 +534,8 @@ end subroutine mesh_global_decomp
 !---------------------------------------------------------------------------------
 subroutine mesh_global_proccon(self,lptmp,np)
 class(oft_amesh), intent(inout) :: self !< Mesh object
-integer(i4), intent(in) :: lptmp(np) !< List of global point indices from initialization
 integer(i4), intent(in) :: np !< number of points
+integer(i4), intent(in) :: lptmp(np) !< List of global point indices from initialization
 integer(i4), allocatable :: c(:),b(:),a(:)
 integer(i4) :: i,j,k,l,ierr
 #ifdef HAVE_MPI
