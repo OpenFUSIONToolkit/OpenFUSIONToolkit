@@ -482,7 +482,7 @@ class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:)
-real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),eta_tmp,psi_tmp,eta_source,psi_lim,psi_max
+real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),eta_tmp,psi_tmp,eta_source,psi_lim,psi_max,cond_norm
 real(8) :: max_tmp,lim_tmp,vcont_val,nturns
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),vals_loc(:),reg_source(:)
 real(r8), pointer, dimension(:) :: pol_vals,rhs_vals
@@ -528,7 +528,7 @@ END IF
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
-!$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt,eta_tmp,psi_tmp,eta_source,nturns)
+!$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt,eta_tmp,psi_tmp,eta_source,nturns,cond_norm)
 allocate(j(lag_rep%nce),vals_loc(lag_rep%nce+self%gs_eq%ncoils)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
 !$omp do schedule(static,1)
@@ -561,11 +561,11 @@ do i=1,mesh%nc
             IF(self%gs_eq%Rcoils(jr)<=0.d0)CYCLE
             nturns = self%gs_eq%coil_nturns(mesh%reg(i),jr)
             IF(ABS(nturns)>1.d-8)THEN
-                eta_source=0.d0
+                cond_norm=0.d0
                 do jc=1,lag_rep%nce ! Loop over degrees of freedom
-                    eta_source = eta_source + self%gs_eq%dist_coil(j(jc),jr)*rop(jc)
+                    cond_norm = cond_norm + self%gs_eq%dist_coil(j(jc),jr)*rop(jc)
                 end do
-                vals_loc(lag_rep%nce+jr)=vals_loc(lag_rep%nce+jr)+mu0*2.d0*pi*psi_tmp*nturns*eta_source*det
+                vals_loc(lag_rep%nce+jr)=vals_loc(lag_rep%nce+jr)+mu0*2.d0*pi*psi_tmp*nturns*cond_norm*det
             END IF
         END DO
     end do
