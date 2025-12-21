@@ -958,10 +958,10 @@ subroutine cmatrix_apply_vec(self,a,b)
 class(oft_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Vector object
 class(oft_cvector), intent(inout) :: b !< Result vector
-class(oft_vector), pointer :: atmp
+class(oft_cvector), pointer :: atmp
 CALL a%new(atmp)
-CALL atmp%add(0.d0,1.d0,a)
-CALL self%apply(atmp,b)
+CALL atmp%add((0.d0,0.d0),(1.d0,0.d0),a)
+CALL self%apply_complex(atmp,b)
 CALL atmp%delete()
 DEALLOCATE(atmp)
 end subroutine cmatrix_apply_vec
@@ -974,10 +974,10 @@ subroutine cmatrix_applyt_vec(self,a,b)
 class(oft_cmatrix), intent(inout) :: self !< Matrix object
 class(oft_vector), target, intent(inout) :: a !< Vector object
 class(oft_cvector), intent(inout) :: b !< Result vector
-class(oft_vector), pointer :: atmp
+class(oft_cvector), pointer :: atmp
 CALL a%new(atmp)
-CALL atmp%add(0.d0,1.d0,a)
-CALL self%applyt(atmp,b)
+CALL atmp%add((0.d0,0.d0),(1.d0,0.d0),a)
+CALL self%applyt_complex(atmp,b)
 CALL atmp%delete()
 DEALLOCATE(atmp)
 end subroutine cmatrix_applyt_vec
