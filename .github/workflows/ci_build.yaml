@@ -197,11 +197,6 @@ jobs:
       with:
         name: Library_failure_log-${{ matrix.config.os }}_${{ matrix.parallel }}
         path: libs/build/build_error.log
-    
-    - name: Remove external build directory
-      shell: bash
-      working-directory: libs
-      run: rm -rf build
 
     - name: Configure OFT
       shell: bash
@@ -232,6 +227,13 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         make test
         mv tests/OFT.junit.xml OFT.junit.xml
+    
+    - name: Fixup cache
+      shell: bash
+      working-directory: libs
+      run: |
+        rm -rf build
+        rm -rf petsc*
     
     - name: Upload test results to Codecov
       if: ${{ !cancelled() && (matrix.config.os == 'ubuntu-24.04') }}
