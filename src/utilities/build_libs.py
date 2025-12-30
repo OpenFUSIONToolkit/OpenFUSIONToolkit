@@ -2047,6 +2047,7 @@ group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wr
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
 group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
+group.add_argument("--hdf5_static", action="store_true", default=False, help="Build and link HDF5 statically?")
 #
 group = parser.add_argument_group("BLAS/LAPACK", "BLAS/LAPACK package options")
 group.add_argument("--oblas_threads", action="store_true", default=False, help="Build OpenBLAS with thread support (OpenMP)")
@@ -2071,6 +2072,7 @@ group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="B
 group = parser.add_argument_group("NETCDF", "NETCDF package options")
 group.add_argument("--build_netcdf", default=0, type=int, choices=(0,1), help="Build NETCDF library? (default: 0)")
 group.add_argument("--netcdf_wrapper", action="store_true", default=False, help="NETCDF included in compilers")
+group.add_argument("--netcdf_static", action="store_true", default=False, help="Build and link NETCDF statically?")
 #
 group = parser.add_argument_group("ARPACK", "ARPACK package options")
 group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="Build ARPACK library? (default: 0)")
@@ -2180,7 +2182,7 @@ if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     config_dict['HDF5_FC'] = options.hdf5_fc
     packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
 else:
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required,shared_libs=(not options.hdf5_static)))
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())
@@ -2192,7 +2194,7 @@ if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
 # Are we building NETCDF?
 if (options.build_netcdf == 1) or options.netcdf_wrapper:
-    packages.append(NETCDF(options.netcdf_wrapper))
+    packages.append(NETCDF(options.netcdf_wrapper,shared_libs=(not options.netcdf_static)))
 # Are we building PETSc?
 if (options.build_petsc == 1) or options.petsc_wrapper:
     packages.append(PETSC(debug=options.petsc_debug, with_superlu=options.petsc_superlu, with_superlu_dist=options.petsc_superlu_dist,
