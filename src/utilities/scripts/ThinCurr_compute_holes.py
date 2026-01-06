@@ -151,6 +151,22 @@ class trimesh:
                 if self.lef[k,0]<0:
                     self.lef[k,0]=i   # record first cell
                 else:
+                    if self.lef[k,1] >= 0:
+                        cells = [i,self.lef[k,0],self.lef[k,1]]
+                        fig = plt.figure()
+                        ax = fig.add_subplot(1, 1, 1, projection='3d')
+                        for cell_chk in cells:
+                            pts = self.lf[cell_chk,:]
+                            area = np.linalg.norm(np.cross(self.r[pts[1],:]-self.r[pts[0],:],self.r[pts[2],:]-self.r[pts[0],:]))
+                            print(cell_chk,area)
+                            ax.plot_trisurf(self.r[pts,0], self.r[pts,1], self.r[pts,2], triangles=[[0,1,2],])
+                            for pt in pts:
+                                print(self.r[pt,:])
+                        # ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lf, alpha=0.7)
+                        # ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lf[cells,:])
+                        # ax.set_aspect('equal','box')
+                        plt.show()
+                        # raise ValueError("T-junction detected")
                     self.lef[k,1]=i   # record second cell
         for i in range(self.nf):     # loop over cells & locate neighbors
             for j in range(3):       # loop over edges
@@ -232,7 +248,7 @@ class trimesh:
         return np.array(oriented)
     
     def get_face_edge_bop(self):
-        ''' Compute face to edge boundary operator \partial_2
+        r''' Compute face to edge boundary operator \partial_2
         '''
         I = np.zeros((self.nf*3,),dtype=np.int32); I[::3] = np.arange(self.nf); I[1::3] = np.arange(self.nf); I[2::3] = np.arange(self.nf)
         J = self.lfe.reshape((self.nf*3,))
