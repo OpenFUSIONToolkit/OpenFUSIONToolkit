@@ -1190,9 +1190,9 @@ tMaker_obj%gs%mode=settings%mode
 tMaker_obj%gs%urf=settings%urf
 tMaker_obj%gs%maxits=settings%maxits
 tMaker_obj%gs%nl_tol=settings%nl_tol
-IF((.NOT.tMaker_obj%gs%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution")
+IF((.NOT.tMaker_obj%gs%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution and report bugs")
 tMaker_obj%gs%dipole_mode=settings%dipole_mode
-IF((.NOT.tMaker_obj%gs%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution")
+IF((.NOT.tMaker_obj%gs%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution and report bugs")
 tMaker_obj%gs%mirror_mode=settings%mirror_mode
 CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(limfile_c,tMaker_obj%gs%limiter_file)
@@ -1444,6 +1444,7 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 REAL(8), POINTER, DIMENSION(:) :: rtmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(ALL(tMaker_obj%gs%Rcoils<0.d0))CALL oft_warn("TokaMaker's Vcoil functionality is experimental, use with caution and report bugs")
 CALL c_f_pointer(rcoils, rtmp, [tMaker_obj%gs%ncoils])
 tMaker_obj%gs%Rcoils(1:tMaker_obj%gs%ncoils)=rtmp
 END SUBROUTINE tokamaker_set_vcoil
