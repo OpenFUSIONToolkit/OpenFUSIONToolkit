@@ -321,10 +321,18 @@ CHARACTER(KIND=c_char), INTENT(in) :: eta_file(OFT_PATH_SLEN) !< Resistivity (et
 CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive F*F' prof.in file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
+CLASS(flux_func), POINTER :: prof_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 CALL copy_string_rev(f_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%I)
+IF(TRIM(tmp_str)/='none')THEN
+  CALL gs_profile_load(tmp_str,prof_tmp)
+  IF(ASSOCIATED(tMaker_obj%gs%I))THEN
+    prof_tmp%f_offset=tMaker_obj%gs%I%f_offset ! Persist F0 with profile changes
+    CALL prof_tmp%update(tMaker_obj%gs)        ! Initialize new profile with current EQ
+  END IF
+  tMaker_obj%gs%I=>prof_tmp
+END IF
 IF(f_offset>-1.d98)tMaker_obj%gs%I%f_offset=f_offset
 tMaker_obj%gs%I%include_sol=f_sol
 CALL copy_string_rev(p_file,tmp_str)

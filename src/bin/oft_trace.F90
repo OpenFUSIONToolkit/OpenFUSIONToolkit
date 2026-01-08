@@ -115,10 +115,10 @@ tracer%maxtrans=INT(tracer_maxtrans)
 SELECT CASE(adv_type)
   CASE(1)
     ALLOCATE(pt(3))
-  CASE(2)
-    ALLOCATE(pt(6))
-    tracer%neq=6
-    tracer%ydot=>particle_lorentz
+  ! CASE(2)
+  !   ALLOCATE(pt(6))
+  !   tracer%neq=6
+  !   tracer%ydot=>particle_lorentz
   CASE DEFAULT
     CALL oft_abort("Unknown advance type", "oft_trace", __FILE__)
 END SELECT
@@ -201,19 +201,19 @@ END DO
 CLOSE(pt_file_unit)
 !---Finalize enviroment
 CALL oft_finalize
-CONTAINS
-!------------------------------------------------------------------------------
-!> ODE function for Lorentz force particle advance
-!!
-!! F = q * cross(V,B) / m_i
-!------------------------------------------------------------------------------
-SUBROUTINE particle_lorentz(t,y,B,n,ydot)
-REAL(r8), INTENT(in) :: t !< Time (unused)
-INTEGER(i4), INTENT(in) :: n !< Number of spatial dimensions (3)
-REAL(r8), INTENT(in) :: y(n) !< Current position/velocity
-REAL(r8), INTENT(in) :: B(3) !< B-field at current position
-REAL(r8), INTENT(out) :: ydot(n) !< New velocity/acceleration at current point
-ydot(1:3)=y(4:6)*vel_scale
-ydot(4:6)=elec_charge*cross_product(y(4:6),B)/(proton_mass*mu_ion)
-END SUBROUTINE particle_lorentz
+! CONTAINS
+! !------------------------------------------------------------------------------
+! !> ODE function for Lorentz force particle advance
+! !!
+! !! F = q * cross(V,B) / m_i
+! !------------------------------------------------------------------------------
+! SUBROUTINE particle_lorentz(t,y,B,n,ydot)
+! REAL(r8), INTENT(in) :: t !< Time (unused)
+! INTEGER(i4), INTENT(in) :: n !< Number of spatial dimensions (3)
+! REAL(r8), INTENT(in) :: y(n) !< Current position/velocity
+! REAL(r8), INTENT(in) :: B(3) !< B-field at current position
+! REAL(r8), INTENT(out) :: ydot(n) !< New velocity/acceleration at current point
+! ydot(1:3)=y(4:6)*vel_scale
+! ydot(4:6)=elec_charge*cross_product(y(4:6),B)/(proton_mass*mu_ion)
+! END SUBROUTINE particle_lorentz
 END PROGRAM oft_trace

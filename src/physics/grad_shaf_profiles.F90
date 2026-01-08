@@ -98,7 +98,7 @@ type, extends(flux_func) :: spline_flux_func
   REAL(8) :: yp1 = 0.d0 !< Needs docs
   REAL(8) :: ypn = 0.d0 !< Needs docs
   TYPE(spline_type) :: func !< Needs docs
-  TYPE(spline_type) :: fun_loc(24) !< Needs docs
+  TYPE(spline_type), POINTER, DIMENSION(:) :: fun_loc => NULL() !< Needs docs
 contains
   !> Needs docs
   procedure :: f => spline_f
@@ -550,6 +550,7 @@ select type(self=>func)
   !---
   self%npsi=npsi
   self%ncofs=self%npsi
+  ALLOCATE(self%fun_loc(omp_get_max_threads()))
   CALL spline_alloc(self%func,self%npsi-1,1)
   DO i=1,omp_get_max_threads()
     CALL spline_alloc(self%fun_loc(i),self%npsi-1,1)
@@ -745,7 +746,7 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF((psihat<0.d0).AND.(.NOT.self%include_sol))RETURN
+IF(psihat<0.d0)RETURN
 !
 if(psihat<=self%x(1))then
   b = psihat*(.5d0*psihat)/self%x(1)*(self%yp(1)-self%y0) + psihat*self%y0
@@ -777,7 +778,7 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF((psihat<0.d0).AND.(.NOT.self%include_sol))RETURN
+IF(psihat<0.d0)RETURN
 !
 if(psihat<=self%x(1))then
   x = psihat/self%x(1)
@@ -807,7 +808,7 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF((psihat<0.d0).AND.(.NOT.self%include_sol))RETURN
+IF(psihat<0.d0)RETURN
 !
 if(psihat<=self%x(1))then
   x = 1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/self%x(1)

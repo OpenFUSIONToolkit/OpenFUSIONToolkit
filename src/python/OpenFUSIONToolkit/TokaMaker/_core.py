@@ -52,7 +52,7 @@ def create_prof_file(self, filename, profile_dict, name, include_sol=False):
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
-    elif profile_dict['type'] == 'linterp':
+    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp'):
         x = profile_dict.get('x',None)
         if x is None:
             raise KeyError('No array "x" for piecewise linear profile.')
@@ -84,9 +84,10 @@ def create_prof_file(self, filename, profile_dict, name, include_sol=False):
             "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
         ]
     else:
-        raise KeyError('Invalid profile type ("flat", "linterp")')
+        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
+
 
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
