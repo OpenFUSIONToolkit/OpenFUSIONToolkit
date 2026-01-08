@@ -67,11 +67,6 @@ jobs:
       with:
         name: Library failure log
         path: libs/build/build_error.log
-    
-    - name: Remove external build directory
-      shell: bash
-      working-directory: libs
-      run: rm -rf build
 
     - name: Configure OFT
       shell: bash
@@ -92,6 +87,13 @@ jobs:
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate
         make test_cov
+    
+    - name: Fixup cache
+      shell: bash
+      working-directory: libs
+      run: |
+        rm -rf build
+        rm -rf petsc*
     
     - name: Generate coverage report (GCOV)
       shell: bash
