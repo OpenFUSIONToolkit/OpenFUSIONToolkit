@@ -1636,6 +1636,8 @@ class SUPERLU_DIST(package):
     def build(self):
         #
         tmp_dict = self.config_dict.copy()
+        if 'MPI_CXX' not in self.config_dict:
+            error_exit('SuperLU-DIST requires an MPI C++ compiler')
         cmake_options = [
             "-DTPL_ENABLE_PARMETISLIB:BOOL=FALSE",
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT}",
@@ -1732,10 +1734,13 @@ class UMFPACK(package):
             AMD_CMAKE_options.append("-DCMAKE_EXE_LINKER_FLAGS={0}".format(self.config_dict['OMP_FLAGS']))
         if 'MACOS_SDK_PATH' in self.config_dict:
             AMD_CMAKE_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
-        config_CMAKE_options = AMD_CMAKE_options.copy() + [
-            "-DBLAS_ROOT:PATH={BLAS_ROOT}",
-            "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
-        ]
+        if 'BLA_ROOT' in self.config_dict:
+            config_CMAKE_options = AMD_CMAKE_options.copy() + [
+                "-DBLAS_ROOT:PATH={BLAS_ROOT}",
+                "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
+            ]
+        else:
+            config_CMAKE_options = AMD_CMAKE_options.copy()
         UMFPACK_CMAKE_options = config_CMAKE_options.copy() + [
             "-DUMFPACK_USE_CHOLMOD:BOOL=OFF"
         ]
@@ -1993,6 +1998,8 @@ class PETSC(package):
             # elif config_dict['CC_VENDOR'] == 'intel':
             #     options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
         if need_cxx:
+            if 'MPI_CXX' not in self.config_dict:
+                error_exit('PETSc build as configured requires an MPI C++ compiler')
             options += ['--with-cxx={MPI_CXX}']
         else:
             options += ['--with-cxx=0']
@@ -2036,6 +2043,7 @@ group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=
 group.add_argument("--mpich_version", default=4, type=int, choices=(3,4), help="MPICH major version (default: 4)")
 group.add_argument("--build_openmpi", default=0, type=int, choices=(0,1), help="Build OpenMPI libraries?")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
+group.add_argument("--mpi_cxx", default=None, type=str, help="MPI C++ compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
 group.add_argument("--mpi_libs", default=None, type=str, help="MPI libraries")
@@ -2126,6 +2134,8 @@ use_mpi = False
 if (options.mpi_cc is not None) and (options.mpi_fc is not None):
     config_dict['MPI_CC'] = options.mpi_cc
     config_dict['MPI_FC'] = options.mpi_fc
+    if options.mpi_cxx is not None:
+        config_dict['MPI_CXX'] = options.mpi_cxx
     use_mpi = True
 else:
     if options.mpi_lib_dir is not None:
@@ -2168,6 +2178,8 @@ if use_mpi:
         packages.append(OpenMPI(mpi_force_headers))
     elif options.build_mpich:
         packages.append(MPICH(mpi_force_headers,options.mpich_version))
+    elif (options.mpi_cc is not None) and (options.mpi_fc is not None):
+        pass
     else:
         parser.exit(-1, 'Invalid MPI package')
 else:
