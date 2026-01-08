@@ -614,7 +614,8 @@ class TokaMaker():
         @param coil_bounds Minimum and maximum allowable coil currents (dictionary of form `{coil_name: coil_bound[2]}`)
         '''
         bounds_array = numpy.zeros((self.ncoils+len(self._virtual_coils),2), dtype=numpy.float64)
-        bounds_array[:,0] = -1.E98; bounds_array[:,1] = 1.E98
+        bounds_array[:,0] = -1.E98
+        bounds_array[:,1] = 1.E98
         if coil_bounds is not None:
             for coil_key, coil_bound in coil_bounds.items():
                 if coil_key in self.coil_sets:
