@@ -36,6 +36,12 @@ class trimesh:
         self._setup_edges()
         self._setup_neighbors()
         self._setup_boundary()
+        if len(self._non_manifold_edges) > 0:
+            print('ERROR: Non-manifold surface detected')
+            for k, cells in self._non_manifold_edges.items():
+                pt = (self.r[self.le[k,0],:] + self.r[self.le[k,1],:])/2.0
+                print('  {0} cells share edge {1} located at {2} {3} {4}'.format(2+len(cells), k+1, *pt))
+            raise ValueError("ThinCurr requires manifold surfaces")
         self.surf_tag = self._orient_surface()
         self.nsurfs = np.max(self.surf_tag)+1
         if info:
@@ -145,29 +151,19 @@ class trimesh:
                 nr[k]+=1                      # count cell to corner
         self.lef=-np.ones((self.ne,2), dtype=np.int32)
         self.lff=np.zeros((self.nf,3), dtype=np.int32)
+        self._non_manifold_edges = {}
         for i in range(self.nf):      # loop over cells & index to edges
             for j in range(3):        # loop over edges
                 k=abs(self.lfe[i,j])-1  # edge numbers
                 if self.lef[k,0]<0:
                     self.lef[k,0]=i   # record first cell
                 else:
-                    if self.lef[k,1] >= 0:
-                        cells = [i,self.lef[k,0],self.lef[k,1]]
-                        fig = plt.figure()
-                        ax = fig.add_subplot(1, 1, 1, projection='3d')
-                        for cell_chk in cells:
-                            pts = self.lf[cell_chk,:]
-                            area = np.linalg.norm(np.cross(self.r[pts[1],:]-self.r[pts[0],:],self.r[pts[2],:]-self.r[pts[0],:]))
-                            print(cell_chk,area)
-                            ax.plot_trisurf(self.r[pts,0], self.r[pts,1], self.r[pts,2], triangles=[[0,1,2],])
-                            for pt in pts:
-                                print(self.r[pt,:])
-                        # ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lf, alpha=0.7)
-                        # ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lf[cells,:])
-                        # ax.set_aspect('equal','box')
-                        plt.show()
-                        # raise ValueError("T-junction detected")
-                    self.lef[k,1]=i   # record second cell
+                    if self.lef[k,1] >= 0: # Handle more than 2 connections
+                        curr_list = self._non_manifold_edges.get(k,[])
+                        if i not in curr_list:
+                            self._non_manifold_edges[k] = curr_list + [i]
+                    else:
+                        self.lef[k,1]=i   # record second cell
         for i in range(self.nf):     # loop over cells & locate neighbors
             for j in range(3):       # loop over edges
                 k=abs(self.lfe[i,j])-1 # edge numbers
