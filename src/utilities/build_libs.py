@@ -1734,7 +1734,7 @@ class UMFPACK(package):
             AMD_CMAKE_options.append("-DCMAKE_EXE_LINKER_FLAGS={0}".format(self.config_dict['OMP_FLAGS']))
         if 'MACOS_SDK_PATH' in self.config_dict:
             AMD_CMAKE_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
-        if 'BLA_ROOT' in self.config_dict:
+        if 'BLAS_ROOT' in self.config_dict:
             config_CMAKE_options = AMD_CMAKE_options.copy() + [
                 "-DBLAS_ROOT:PATH={BLAS_ROOT}",
                 "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
