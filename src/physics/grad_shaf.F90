@@ -737,7 +737,7 @@ subroutine gs_setup_walls(self,skip_load,make_plot)
 class(gs_eq), intent(inout) :: self !< G-S object
 logical, optional, intent(in) :: skip_load,make_plot
 INTEGER(4) :: i,j,k,l,m,nphi_3d,cell,nlim_tmp
-INTEGER(4), ALLOCATABLE :: eflag(:),j_lag(:),emark(:,:),pmark(:),regmark(:)
+INTEGER(4), ALLOCATABLE :: eflag(:),lag_dofs(:),emark(:,:),pmark(:),regmark(:)
 REAL(8) :: f(3),rcenter(2),vol,gop(3,3),pt(3)
 REAL(8), ALLOCATABLE :: eigs(:)
 LOGICAL :: file_exists,do_load,do_plot
@@ -935,16 +935,16 @@ IF(self%dipole_mode)THEN
     IF(self%cond_regions(i)%inner_limiter)regmark(self%cond_regions(i)%id)=-1
   END DO
 END IF
-ALLOCATE(eflag(self%fe_rep%ne),j_lag(self%fe_rep%nce))
+ALLOCATE(eflag(self%fe_rep%ne),lag_dofs(self%fe_rep%nce))
 eflag=0
 ! DO j=1,self%ncond_regs
 !   IF(self%cond_regions(j)%limiter)THEN
 !     DO k=1,self%cond_regions(j)%nc_quad
 !       DO m=1,4
 !         i=self%cond_regions(j)%lc(m,k)
-!         CALL self%fe_rep%ncdofs(i,j_lag)
+!         CALL self%fe_rep%ncdofs(i,lag_dofs)
 !         DO l=1,self%fe_rep%nce
-!           eflag(j_lag(l))=1
+!           eflag(lag_dofs(l))=1
 !         END DO
 !       END DO
 !     END DO
@@ -955,11 +955,11 @@ ALLOCATE(emark(2,self%fe_rep%ne))
 emark=0
 DO i=1,smesh%nc
   IF(MAXVAL(ABS(smesh%r(2,smesh%lc(:,i))))>self%lim_zmax)CYCLE
-  CALL self%fe_rep%ncdofs(i,j_lag)
+  CALL self%fe_rep%ncdofs(i,lag_dofs)
   IF(smesh%reg(i)==1)THEN
-    emark(1,j_lag)=1
+    emark(1,lag_dofs)=1
   ELSE
-    emark(2,j_lag)=regmark(smesh%reg(i))
+    emark(2,lag_dofs)=regmark(smesh%reg(i))
   END IF
 END DO
 DO i=1,self%fe_rep%ne
@@ -992,16 +992,16 @@ END DO
 DO i=1,self%nlimiter_nds+self%ninner_limiter_nds
   ! Get position
   cell=self%fe_rep%lec(self%fe_rep%kec(self%limiter_nds(i)))
-  CALL self%fe_rep%ncdofs(cell,j_lag)
+  CALL self%fe_rep%ncdofs(cell,lag_dofs)
   DO l=1,self%fe_rep%nce
-    IF(j_lag(l)==self%limiter_nds(i))EXIT
+    IF(lag_dofs(l)==self%limiter_nds(i))EXIT
   END DO
   IF(l>self%fe_rep%nce)CALL oft_abort("BAD", "gs_setup_walls", __FILE__)
   CALL oft_blag_npos(self%fe_rep,cell,l,f)
   pt=smesh%log2phys(cell,f)
   self%rlimiter_nds(:,i)=pt(1:2)
 END DO
-DEALLOCATE(eflag,j_lag)
+DEALLOCATE(eflag,lag_dofs)
 IF(oft_debug_print(2))THEN!.AND.((self%ncoil_regs>0).OR.(self%ncond_regs>0)))THEN
   WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%nlimiter_nds,' material limiter nodes'
   IF(self%dipole_mode)WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%ninner_limiter_nds,' inner limiter nodes'
@@ -1482,8 +1482,6 @@ integer(4), intent(in) :: cell !< Cell for interpolation
 real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
 real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
 real(8), intent(out) :: val(:) !< Reconstructed field at f [1]
-integer(i4), allocatable :: j(:)
-integer(i4) :: jc
 real(r8) :: r(2),lam,coord_tmp(2),pt(3)
 !---MINPACK variables
 real(8) :: ftol,xtol,gtol,epsfcn,factor,cofs(1),error(1),gpsitmp(2)
@@ -1576,27 +1574,27 @@ subroutine gs_gen_source(self,source_fun,b)
 class(gs_eq), intent(inout) :: self !< G-S object
 CLASS(bfem_interp), intent(inout) :: source_fun !< Interpolation object for \f$ J_{\phi} \f$
 CLASS(oft_vector), intent(inout) :: b !< Resulting source field
+integer(i4) :: j
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,source_tmp(1)
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
-integer(4) :: j,m,l,k
-integer(4), allocatable :: j_lag(:)
-logical :: curved
-t1=omp_get_wtime()
 !---
 NULLIFY(btmp)
-! IF(.NOT.ASSOCIATED(self%cflag))CALL gs_setup_cflag(self)
 call b%set(0.d0)
 CALL b%get_local(btmp)
 !---
-!!$omp parallel private(j,rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,source_tmp)
+!$omp parallel
+BLOCK
+logical :: curved
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: goptmp(3,3),det,v,source_tmp(1)
+real(r8), allocatable :: rhs_loc(:),rop(:)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
-!!$omp do schedule(static,1)
+allocate(lag_dofs(self%fe_rep%nce))
+!$omp do schedule(static,1)
 DO j=1,self%fe_rep%mesh%nc
   IF(self%fe_rep%mesh%reg(j)/=1)CYCLE
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   rhs_loc=0.d0
   curved=cell_is_curved(self%fe_rep%mesh,j)
   do m=1,self%fe_rep%quad%np
@@ -1613,17 +1611,16 @@ DO j=1,self%fe_rep%mesh%nc
   end do
   !---Get local to global DOF mapping
   do l=1,self%fe_rep%nce
-    m = j_lag(l)
-    !!$omp atomic
+    m = lag_dofs(l)
+    !$omp atomic
     btmp(m)=btmp(m)+rhs_loc(l)
   end do
 end do
-deallocate(rhs_loc,j_lag,rop)
-!!$omp end parallel
-! DEALLOCATE(cond_fac)
+deallocate(rhs_loc,lag_dofs,rop)
+END BLOCK
+!$omp end parallel
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
-! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_gen_source
 !------------------------------------------------------------------------------
 !> Calculates coil current source for given coil
@@ -1633,27 +1630,27 @@ class(gs_eq), intent(inout) :: self !< G-S Object
 integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,nturns
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
-integer(4) :: j,m,l,k
-integer(4), allocatable :: j_lag(:)
-logical :: curved
-t1=omp_get_wtime()
+integer(i4) :: j
 !---
 NULLIFY(btmp)
-! IF(.NOT.ASSOCIATED(self%cflag))CALL gs_setup_cflag(self)
 call b%set(0.d0)
 CALL b%get_local(btmp)
 !---
-!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
+!$omp parallel
+BLOCK
+logical :: curved
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: goptmp(3,3),det,v,nturns
+real(r8), allocatable :: rhs_loc(:),rop(:)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do schedule(static,1)
 DO j=1,self%fe_rep%mesh%nc
   nturns=self%coil_nturns(self%fe_rep%mesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   rhs_loc=0.d0
   curved=cell_is_curved(self%fe_rep%mesh,j)
   do m=1,self%fe_rep%quad%np
@@ -1669,17 +1666,16 @@ DO j=1,self%fe_rep%mesh%nc
   end do
   !---Get local to global DOF mapping
   do l=1,self%fe_rep%nce
-    m = j_lag(l)
+    m = lag_dofs(l)
     !$omp atomic
     btmp(m)=btmp(m)+rhs_loc(l)*nturns
   end do
 end do
-deallocate(rhs_loc,j_lag,rop)
+deallocate(rhs_loc,lag_dofs,rop)
+END BLOCK
 !$omp end parallel
-! DEALLOCATE(cond_fac)
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
-! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_coil_source
 !------------------------------------------------------------------------------
 !> Calculates coil current source for given coil with non-uniform current distribution
@@ -1689,27 +1685,28 @@ class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
+integer(i4) :: j
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns
-real(8), allocatable :: rhs_loc(:),rop(:)
-integer(4) :: j,m,l,k
-integer(4), allocatable :: j_lag(:)
 class(oft_bmesh), pointer :: smesh
-! t1=omp_get_wtime()
 smesh=>self%fe_rep%mesh
 !---
 NULLIFY(btmp)
 CALL b%set(0.d0)
 CALL b%get_local(btmp)
-!$omp parallel private(j,rhs_loc,j_lag,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
+!$omp parallel
+BLOCK
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: goptmp(3,3),det,v,nturns
+real(r8), allocatable :: rhs_loc(:),rop(:)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do schedule(static,1)
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   rhs_loc=0.d0
   do m=1,self%fe_rep%quad%np
     call smesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
@@ -1719,17 +1716,18 @@ DO j=1,smesh%nc
     END DO
     !$omp simd
     do l=1,self%fe_rep%nce
-      rhs_loc(l)=rhs_loc(l)+rop(l)*det*curr_dist(j_lag(l))
+      rhs_loc(l)=rhs_loc(l)+rop(l)*det*curr_dist(lag_dofs(l))
     end do
   end do
   !---Get local to global DOF mapping
   do l=1,self%fe_rep%nce
-    m = j_lag(l)
+    m = lag_dofs(l)
     !$omp atomic
     btmp(m)=btmp(m)+rhs_loc(l)*nturns
   end do
 END DO
-deallocate(rhs_loc,j_lag,rop)
+deallocate(rhs_loc,lag_dofs,rop)
+END BLOCK
 !$omp end parallel
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
@@ -1743,29 +1741,29 @@ class(gs_eq), intent(inout) :: self
 integer(4), intent(in) :: iCond
 integer(4), intent(in) :: iMode
 CLASS(oft_vector), intent(inout) :: b
+integer(i4) :: k
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
-integer(4) :: j,m,l,k,kk
-integer(4), allocatable :: j_lag(:)
-logical :: curved
-t1=omp_get_wtime()
 !---
 NULLIFY(btmp)
-! IF(.NOT.ASSOCIATED(self%cflag))CALL gs_setup_cflag(self)
 call b%set(0.d0)
 CALL b%get_local(btmp)
 !---
-!$omp parallel private(j,kk,rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,vcache)
+!$omp parallel
+BLOCK
+logical :: curved
+integer(i4) :: j,m,l,kk
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: psitmp,goptmp(3,3),det,v
+real(r8), allocatable :: rhs_loc(:),rop(:)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do schedule(static,1)
 DO k=1,self%cond_regions(iCond)%nc_quad
 DO kk=1,4
   j=self%cond_regions(iCond)%lc(kk,k)
   psitmp=self%cond_regions(iCond)%cond_vals(k,iMode)/self%fe_rep%mesh%ca(j)
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   rhs_loc=0.d0
   curved=cell_is_curved(self%fe_rep%mesh,j)
   do m=1,self%fe_rep%quad%np
@@ -1781,18 +1779,17 @@ DO kk=1,4
   end do
   !---Get local to global DOF mapping
   do l=1,self%fe_rep%nce
-    m = j_lag(l)
+    m = lag_dofs(l)
     !$omp atomic
     btmp(m)=btmp(m)+rhs_loc(l)
   end do
 END DO
 end do
-deallocate(rhs_loc,j_lag,rop)
+deallocate(rhs_loc,lag_dofs,rop)
+END BLOCK
 !$omp end parallel
-! DEALLOCATE(cond_fac)
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
-! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_cond_source
 #endif
 !------------------------------------------------------------------------------
@@ -1802,14 +1799,9 @@ subroutine gs_wall_source(self,dpsi_dt,b)
 class(gs_eq), intent(inout) :: self !< G-S object
 CLASS(oft_vector), intent(inout) :: dpsi_dt !< \f$ \psi \f$ at start of step
 CLASS(oft_vector), intent(inout) :: b !< Resulting source field
-real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:),eta_reg(:),reg_source(:)
-real(8), pointer :: psi_vals(:)
-integer(4) :: j,m,l,k,kk,iCond
-integer(4), allocatable :: j_lag(:)
-logical :: curved
-! t1=omp_get_wtime()
+integer(i4) :: j,k
+real(r8), allocatable, dimension(:) :: eta_reg,reg_source
+real(r8), pointer, dimension(:) :: btmp,psi_vals
 !---
 NULLIFY(btmp,psi_vals)
 call b%set(0.d0)
@@ -1819,24 +1811,30 @@ CALL dpsi_dt%get_local(psi_vals)
 ALLOCATE(eta_reg(self%fe_rep%mesh%nreg),reg_source(self%fe_rep%mesh%nreg))
 reg_source=0.d0
 eta_reg=-1.d0
-DO l=1,self%ncond_regs
-  j=self%cond_regions(l)%id
-  eta_reg(j)=self%cond_regions(l)%eta
+DO k=1,self%ncond_regs
+  j=self%cond_regions(k)%id
+  eta_reg(j)=self%cond_regions(k)%eta
 END DO
 IF(ASSOCIATED(self%region_info%nonaxi_vals))THEN
-  DO l=1,self%fe_rep%mesh%nreg
-    reg_source(l)=DOT_PRODUCT(psi_vals,self%region_info%nonaxi_vals(:,l))
+  DO k=1,self%fe_rep%mesh%nreg
+    reg_source(k)=DOT_PRODUCT(psi_vals,self%region_info%nonaxi_vals(:,k))
   END DO
 END IF
 !---
-!$omp parallel private(rhs_loc,j_lag,curved,goptmp,v,m,det,pt,psitmp,l,rop)
+!$omp parallel
+BLOCK
+logical :: curved
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: psitmp,goptmp(3,3),det,pt(3),v
+real(r8), allocatable :: rhs_loc(:),rop(:)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do schedule(static,1)
 DO j=1,self%fe_rep%mesh%nc
   IF(eta_reg(self%fe_rep%mesh%reg(j))<0.d0)CYCLE
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   rhs_loc=0.d0
   curved=cell_is_curved(self%fe_rep%mesh,j)
   do m=1,self%fe_rep%quad%np
@@ -1846,7 +1844,7 @@ DO j=1,self%fe_rep%mesh%nc
     psitmp=0.d0
     DO l=1,self%fe_rep%nce
       CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
-      psitmp=psitmp+psi_vals(j_lag(l))*rop(l)
+      psitmp=psitmp+psi_vals(lag_dofs(l))*rop(l)
     END DO
     psitmp=psitmp/eta_reg(self%fe_rep%mesh%reg(j))/(pt(1)+gs_epsilon)
     !$omp simd
@@ -1856,16 +1854,16 @@ DO j=1,self%fe_rep%mesh%nc
   end do
   !---Get local to global DOF mapping
   do l=1,self%fe_rep%nce
-    m = j_lag(l)
+    m = lag_dofs(l)
     !$omp atomic
     btmp(m)=btmp(m)+rhs_loc(l)
   end do
 END DO
-deallocate(rhs_loc,j_lag,rop)
+deallocate(rhs_loc,lag_dofs,rop)
+END BLOCK
 !$omp end parallel
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp,psi_vals,eta_reg,reg_source)
-! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_wall_source
 !------------------------------------------------------------------------------
 !> Compute inductance between coil and given poloidal flux
@@ -1875,25 +1873,27 @@ class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
+integer(i4) :: j
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
-integer(4) :: j,m,l,k
-integer(4), allocatable :: j_lag(:)
-logical :: curved
 !---
 NULLIFY(btmp)
 CALL b%get_local(btmp)
 !---
 mutual=0.d0
-!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psi_tmp,l,rop,nturns) reduction(+:mutual)
+!$omp parallel reduction(+:mutual)
+BLOCK
+logical :: curved
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: goptmp(3,3),det,v,psi_tmp,nturns
+real(r8), allocatable :: rop(:)
 allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do schedule(static,1)
 DO j=1,self%fe_rep%mesh%nc
   nturns=self%coil_nturns(self%fe_rep%mesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   curved=cell_is_curved(self%fe_rep%mesh,j)
   do m=1,self%fe_rep%quad%np
     if(curved.OR.(m==1))call self%fe_rep%mesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
@@ -1901,12 +1901,13 @@ DO j=1,self%fe_rep%mesh%nc
     psi_tmp=0.d0
     DO l=1,self%fe_rep%nce
       CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
-      psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
+      psi_tmp=psi_tmp+btmp(lag_dofs(l))*rop(l)
     END DO
     mutual = mutual + psi_tmp*det*nturns
   end do
 end do
-deallocate(j_lag,rop)
+deallocate(lag_dofs,rop)
+END BLOCK
 !$omp end parallel
 mutual=mu0*2.d0*pi*mutual
 DEALLOCATE(btmp)
@@ -1920,12 +1921,8 @@ integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
 REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int I_C \psi dV / I_C \f$
+integer(i4) :: j
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: goptmp(3,3),det,v,t1,psi_tmp,nturns,j_phi
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
-integer(4) :: j,m,l,k
-integer(4), allocatable :: j_lag(:)
-logical :: curved
 class(oft_bmesh), pointer :: smesh
 smesh=>self%fe_rep%mesh
 !---
@@ -1933,14 +1930,19 @@ NULLIFY(btmp)
 CALL b%get_local(btmp)
 !---
 mutual=0.d0
-!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,l,rop,nturns,j_phi,psi_tmp) reduction(+:mutual)
+!$omp parallel reduction(+:mutual)
+BLOCK
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: goptmp(3,3),det,v,psi_tmp,nturns,j_phi
+real(r8), allocatable :: rop(:)
 allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do schedule(static,1)
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   do m=1,self%fe_rep%quad%np
     call smesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
     det=v*self%fe_rep%quad%wts(m)
@@ -1948,13 +1950,14 @@ DO j=1,smesh%nc
     j_phi=0.d0
     DO l=1,self%fe_rep%nce
       CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
-      psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
-      j_phi=j_phi+curr_dist(j_lag(l))*rop(l)
+      psi_tmp=psi_tmp+btmp(lag_dofs(l))*rop(l)
+      j_phi=j_phi+curr_dist(lag_dofs(l))*rop(l)
     END DO
     mutual = mutual + psi_tmp*det*nturns*j_phi
   end do
 end do
-deallocate(j_lag,rop)
+deallocate(lag_dofs,rop)
+END BLOCK
 !$omp end parallel
 mutual=mu0*2.d0*pi*mutual
 DEALLOCATE(btmp)
@@ -1967,15 +1970,10 @@ class(gs_eq), intent(inout) :: self !< G-S solver object
 CLASS(oft_vector), intent(inout) :: b !< \f$ \psi \f$ for mutual calculation
 real(8), intent(out) :: mutual !< Mutual inductance \f$ \int J_p \psi dV / I_p \f$
 real(8), intent(out) :: itor !< Plasma toroidal current
+integer(i4) :: j
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp(1),goptmp(3,3),det,pt(3),v,t1,b_tmp,itor_loc,pani(2),bcross_kappa(1),gpsitmp(3)
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:)
-integer(4) :: j,m,l,k
-integer(4), allocatable :: j_lag(:)
-logical :: curved
 type(oft_lag_brinterp), target :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp), target :: psi_geval
-! t1=omp_get_wtime()
 !---
 NULLIFY(btmp)
 CALL b%get_local(btmp)
@@ -1992,14 +1990,19 @@ END IF
 !---
 mutual=0.d0
 itor=0.d0
-!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,pt,psitmp,b_tmp,l,rop,itor_loc,pani,bcross_kappa,gpsitmp) reduction(+:mutual) &
-!$omp reduction(+:itor)
+!$omp parallel reduction(+:mutual) reduction(+:itor)
+BLOCK
+logical :: curved
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: psitmp(1),goptmp(3,3),det,pt(3),v,b_tmp,itor_loc,pani(2),bcross_kappa(1)
+real(r8), allocatable :: rop(:)
 allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do schedule(static,1)
 DO j=1,self%fe_rep%mesh%nc
   IF(self%fe_rep%mesh%reg(j)/=1)CYCLE
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   curved=cell_is_curved(self%fe_rep%mesh,j)
   do m=1,self%fe_rep%quad%np
     if(curved.OR.(m==1))call self%fe_rep%mesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
@@ -2023,7 +2026,7 @@ DO j=1,self%fe_rep%mesh%nc
       b_tmp=0.d0
       DO l=1,self%fe_rep%nce
         CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
-        b_tmp=b_tmp+btmp(j_lag(l))*rop(l)
+        b_tmp=b_tmp+btmp(lag_dofs(l))*rop(l)
       END DO
       det = v*self%fe_rep%quad%wts(m)
       itor = itor + itor_loc*det
@@ -2031,7 +2034,8 @@ DO j=1,self%fe_rep%mesh%nc
     END IF
   end do
 end do
-deallocate(j_lag,rop)
+deallocate(lag_dofs,rop)
+END BLOCK
 !$omp end parallel
 mutual=mu0*2.d0*pi*mutual/itor
 IF(ASSOCIATED(bcross_kappa_fun%u))THEN
@@ -2042,7 +2046,6 @@ IF(ASSOCIATED(bcross_kappa_fun%u))THEN
 END IF
 CALL psi_eval%delete()
 DEALLOCATE(btmp)
-! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_plasma_mutual
 !------------------------------------------------------------------------------
 !> Compute coil currents to best fit isoflux, flux, and saddle targets at current solution
@@ -3258,12 +3261,9 @@ CLASS(oft_vector), intent(inout) :: b !< Full RHS source
 CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `alam`)
 CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `pnorm`)
 REAL(8), INTENT(out) :: itor_alam,itor_press,estore
+integer(i4) :: j
+real(r8) :: t1
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
-real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
-real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
-integer(4) :: j,m,l
-integer(4), allocatable :: j_lag(:)
-logical :: curved
 type(oft_lag_brinterp) :: bcross_kappa_fun
 t1=omp_get_wtime()
 !---
@@ -3287,19 +3287,24 @@ END IF
 itor_alam=0.d0
 itor_press=0.d0
 estore=0.d0
-!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
-!$omp reduction(+:itor_alam) reduction(+:itor_press) reduction(+:estore)
+!$omp parallel reduction(+:itor_alam) reduction(+:itor_press) reduction(+:estore)
+BLOCK
+logical :: curved
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),bcross_kappa(1),pani(2)
+real(r8), allocatable :: rhs_loc(:,:),rop(:),vcache(:)
 allocate(rhs_loc(self%fe_rep%nce,3))
 allocate(rop(self%fe_rep%nce),vcache(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do schedule(static,1)
 do j=1,self%fe_rep%mesh%nc
   ! IF(self%cflag(j)==3)CYCLE ! Vacuum region (no source)
   IF(self%fe_rep%mesh%reg(j)/=1)CYCLE ! Only compute in plasma region
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   rhs_loc=0.d0
   DO l=1,self%fe_rep%nce
-    vcache(l) = atmp(j_lag(l))
+    vcache(l) = atmp(lag_dofs(l))
   END DO
   curved=cell_is_curved(self%fe_rep%mesh,j)
   do m=1,self%fe_rep%quad%np
@@ -3346,7 +3351,7 @@ do j=1,self%fe_rep%mesh%nc
   end do
   !---Get local to global DOF mapping
   do l=1,self%fe_rep%nce
-    m = j_lag(l)
+    m = lag_dofs(l)
     !$omp atomic
     btmp(m)=btmp(m)+rhs_loc(l,1)
     !$omp atomic
@@ -3355,7 +3360,8 @@ do j=1,self%fe_rep%mesh%nc
     b3tmp(m)=b3tmp(m)+rhs_loc(l,3)
   end do
 end do
-deallocate(rhs_loc,j_lag,rop,vcache)
+deallocate(rhs_loc,lag_dofs,rop,vcache)
+END BLOCK
 !$omp end parallel
 CALL b%restore_local(btmp,add=.TRUE.)
 CALL b2%restore_local(b2tmp,add=.TRUE.)
@@ -3379,13 +3385,9 @@ class(gs_eq), intent(inout) :: self !< G-S object
 class(oft_solver), POINTER :: solver
 type(oft_lag_brinterp) :: psi_interp
 class(oft_vector), pointer :: psihat,rhs
+integer(i4) :: j
 real(r8), pointer :: vals_tmp(:)
 class(oft_matrix), POINTER :: dels_grnd
-real(8) :: psitmp(1),goptmp(3,3),det,pt(3),rop,v,f
-real(8), allocatable :: rhs_loc(:)
-integer(4) :: j,m,l
-integer(4), allocatable :: j_lag(:)
-logical :: curved
 !---
 NULLIFY(dels_grnd,vals_tmp)
 CALL build_dels(dels_grnd,self,"grnd")
@@ -3406,9 +3408,15 @@ CALL rhs%get_local(vals_tmp)
 psi_interp%u=>psihat
 CALL psi_interp%setup(self%fe_rep)
 !---
-!$omp parallel private(rhs_loc,j_lag,f,curved,goptmp,v,m,det,pt,psitmp,l,rop)
+!$omp parallel
+BLOCK
+logical :: curved
+integer(i4) :: m,l
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: psitmp(1),goptmp(3,3),det,pt(3),rop,v,f
+real(r8), allocatable :: rhs_loc(:)
 allocate(rhs_loc(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
+allocate(lag_dofs(self%fe_rep%nce))
 !$omp do
 do j=1,self%fe_rep%mesh%nc
   rhs_loc=0.d0
@@ -3429,15 +3437,16 @@ do j=1,self%fe_rep%mesh%nc
     end do
   end do
   !---Get local to global DOF mapping
-  call self%fe_rep%ncdofs(j,j_lag)
+  call self%fe_rep%ncdofs(j,lag_dofs)
   do l=1,self%fe_rep%nce
-    m=j_lag(l)
+    m=lag_dofs(l)
     !$omp atomic
     vals_tmp(m)=vals_tmp(m)+rhs_loc(l)
   end do
 end do
 !$omp end do
-deallocate(rhs_loc,j_lag)
+deallocate(rhs_loc,lag_dofs)
+END BLOCK
 !$omp end parallel
 CALL rhs%restore_local(vals_tmp,add=.TRUE.)
 call self%zerob_bc%apply(rhs)
@@ -3547,8 +3556,8 @@ class(gs_eq), intent(inout) :: self
 logical, optional, intent(in) :: track_opoint
 type(oft_lag_brinterp) :: psi_interp
 integer(4) :: i,j,cell,ierr,ind_sort(max_xpoints),trace_err,itmp
-REAL(8) :: old_bounds(2),f(3),goptmp(3,3),v,psitmp(1),alt_max
-REAL(8) :: alt_r,alt_z,zmin,zmax,pttmp(2),vtmp,ilim_tmp,ilim_psi
+REAL(8) :: old_bounds(2),goptmp(3,3),v,alt_max
+REAL(8) :: alt_r,alt_z,zmin,zmax,pttmp(2),ilim_tmp,ilim_psi
 REAL(8) :: x_point(2,max_xpoints),t1,t2,x_psi(max_xpoints),x_psi_sort(max_xpoints),x_tmp
 REAL(8) :: x_point_old(2,max_xpoints),x_vec_old(2,max_xpoints)
 REAL(8), POINTER :: psi_vals(:)
@@ -3695,8 +3704,10 @@ CALL psi_interp%setup(self%fe_rep)
 ! self%plasma_bounds(1)=-1.d99
 v=self%plasma_bounds(1)
 ! WRITE(*,*)'CHK',v
-!$omp parallel private(i,j,cell,f,psitmp,vtmp,pttmp)
-! reduction(max:v)
+!$omp parallel
+BLOCK
+INTEGER(i4) :: j,cell
+REAL(r8) :: f(3),psitmp(1),vtmp,pttmp(2)
 vtmp=self%plasma_bounds(1)
 !$omp do
 DO i=1,self%nlimiter_nds
@@ -3731,6 +3742,7 @@ IF(vtmp>v)THEN
   self%lim_point=pttmp
 END IF
 !$omp end critical
+END BLOCK
 !$omp end parallel
 DEALLOCATE(psi_vals)
 ! t2=omp_get_wtime()
@@ -3777,12 +3789,12 @@ class(gs_eq), intent(inout) :: self
 real(8), intent(inout) :: o_point(2)
 real(8), intent(inout) :: o_psi
 real(8), intent(out) :: x_point(2,max_xpoints),x_psi(max_xpoints)
-integer(4), PARAMETER :: npts = 10, max_unique = 20
-integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
-integer(4), allocatable :: ncuts(:)
-real(8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3),loc_vals(3)
-real(8) :: psi_scale_len,psi_min,psi_max
-real(8) :: region(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99], [2,2])
+integer(i4), PARAMETER :: npts = 10, max_unique = 20
+integer(i4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
+integer(i4), allocatable :: ncuts(:)
+real(r8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3)
+real(r8) :: psi_scale_len,psi_min,psi_max
+real(r8) :: region(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99], [2,2])
 character(len=20) :: loc_str,loc_str2
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
@@ -3801,7 +3813,10 @@ smesh=>self%fe_rep%mesh
 ALLOCATE(ncuts(smesh%np))
 ncuts=0
 psi_min=1.d99; psi_max=-1.d99
-!$omp parallel do simd private(loc_vals) reduction(min:psi_min) reduction(max:psi_max)
+!$omp parallel reduction(min:psi_min) reduction(max:psi_max)
+BLOCK
+real(r8) :: loc_vals(3)
+!$omp do simd
 DO i=1,smesh%nc
   ! IF(smesh%reg(i)/=1)CYCLE
   IF(self%saddle_cmask(i))CYCLE
@@ -3825,6 +3840,8 @@ END DO
 DO i=1,smesh%np
   IF(self%saddle_pmask(i))ncuts(i)=-1
 END DO
+END BLOCK
+!$omp end parallel
 !
 psi_scale_len = ABS(psi_max-psi_min)*5.d0/SQRT(self%lim_area)
 unique_saddles=-1.d99
@@ -4143,14 +4160,16 @@ function gs_dflux(self) result(dflux)
 class(gs_eq), intent(inout) :: self !< G-S object
 real(8) :: dflux !< Toroidal flux increment due to plasma
 type(oft_lag_brinterp), target :: psi_eval
-real(8) :: goptmp(3,3),v,psitmp(1),pt(3)
-real(8) :: Btor
-integer(4) :: i,m
+integer(i4) :: i
 !---
 psi_eval%u=>self%psi
 CALL psi_eval%setup(self%fe_rep)
 dflux=0.d0
-!$omp parallel do private(m,pt,goptmp,v,psitmp,Btor) reduction(+:dflux)
+!$omp parallel reduction(+:dflux)
+BLOCK
+integer(i4) :: m
+real(r8) :: goptmp(3,3),v,psitmp(1),pt(3),Btor
+!$omp do
 do i=1,self%fe_rep%mesh%nc
   IF(self%fe_rep%mesh%reg(i)/=1)CYCLE
   do m=1,self%fe_rep%quad%np
@@ -4172,6 +4191,8 @@ do i=1,self%fe_rep%mesh%nc
     END IF
   end do
 end do
+END BLOCK
+!$omp end parallel
 dflux=dflux*self%psiscale
 end function gs_dflux
 !------------------------------------------------------------------------------
@@ -4186,9 +4207,8 @@ real(8), intent(out) :: ener !< Total magnetic energy
 real(8), intent(out) :: helic !< Total magnetic helicity
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: gpsi_eval,gchi_eval
-real(8) :: goptmp(3,3),v,psitmp(1),gchitmp(3),gpsitmp(3),B(3),A(3),pt(3)
-integer(4) :: i,m
 logical :: pm_save
+integer(i4) :: i
 !---
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 CALL self%get_chi
@@ -4203,7 +4223,11 @@ CALL gchi_eval%setup(self%fe_rep)
 !---
 ener=0.d0
 helic=0.d0
-!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,gchitmp,pt,A,B) reduction(+:ener) reduction(+:helic)
+!$omp parallel reduction(+:ener) reduction(+:helic)
+BLOCK
+integer(i4) :: m
+real(r8) :: goptmp(3,3),v,psitmp(1),gchitmp(3),gpsitmp(3),B(3),A(3),pt(3)
+!$omp do
 do i=1,self%fe_rep%mesh%nc
   do m=1,self%fe_rep%quad%np
     call self%fe_rep%mesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
@@ -4224,6 +4248,8 @@ do i=1,self%fe_rep%mesh%nc
     ener = ener + DOT_PRODUCT(B,B)*v*self%fe_rep%quad%wts(m)*pt(1)
   end do
 end do
+END BLOCK
+!$omp end parallel
 end subroutine gs_helicity
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -4279,14 +4305,12 @@ real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should
 real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: ravgs(nr,3) !< Flux surface averages <R>, <1/R>, and dV/dPsi
-real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
-real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
+real(8) :: rmax,x1,x2,raxis,zaxis
+real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
-real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: i,j,cell
+integer(4) :: j,cell
 logical :: lcfs_all,lcfs_any
-type(gsinv_interp), pointer :: field
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
 lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
 lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
@@ -4335,7 +4359,12 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-!$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field) firstprivate(pt_last)
+!$omp parallel firstprivate(pt_last)
+BLOCK
+integer(i4) :: i
+real(r8) :: psi_surf,fpol,qpsi,pt(3),pt_proj(3)
+real(r8), pointer :: ptout(:,:)
+type(gsinv_interp), pointer :: field
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
@@ -4432,6 +4461,7 @@ CALL active_tracer%delete
 IF(PRESENT(dl))DEALLOCATE(ptout)
 CALL field%delete()
 DEALLOCATE(field)
+END BLOCK
 !$omp end parallel
 CALL psi_int%delete()
 end subroutine gs_get_qprof
@@ -4834,18 +4864,18 @@ integer(4), intent(in) :: cell
 real(8), intent(in) :: f(:)
 real(8), intent(in) :: gop(3,3)
 real(8), intent(out) :: val(:)
-integer(4), allocatable :: j(:)
+integer(4), allocatable :: lag_dofs(:)
 integer(4) :: jc
 real(8) :: rop(3),d2op(6),pt(3),grad(3),tmp
 real(8) :: s,c
 !---Get dofs
-allocate(j(self%lag_rep%nce))
-call self%lag_rep%ncdofs(cell,j)
+allocate(lag_dofs(self%lag_rep%nce))
+call self%lag_rep%ncdofs(cell,lag_dofs)
 !---Reconstruct gradient
 grad=0.d0
 do jc=1,self%lag_rep%nce
   call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
-  grad=grad+self%uvals(j(jc))*rop
+  grad=grad+self%uvals(lag_dofs(jc))*rop
 end do
 !---Get radial position
 pt=self%mesh%log2phys(cell,f)
@@ -4862,7 +4892,7 @@ IF(self%compute_geom)THEN
   val(5)=val(2)/pt(1)
 END IF
 ! val(3:8)=val(3:8)
-deallocate(j)
+deallocate(lag_dofs)
 end subroutine gsinv_apply
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -5185,12 +5215,9 @@ subroutine build_mrop(fe_rep,mat,bc)
 type(oft_scalar_bfem), intent(inout) :: fe_rep !< 2D Lagrange FE representation
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
-integer(i4), allocatable :: j(:)
-real(r8) :: vol,det,goptmp(3,4),elapsed_time,pt(3)
-real(r8), allocatable :: rop(:),mop(:,:)
-logical :: curved
 CLASS(oft_vector), POINTER :: oft_lag_vec
+integer(i4) :: i
+real(r8) :: elapsed_time
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
@@ -5209,8 +5236,13 @@ END IF
 !
 !------------------------------------------------------------------------------
 !---Operator integration loop
-!$omp parallel private(j,rop,det,mop,curved,goptmp,m,vol,jc,jr,pt)
-allocate(j(fe_rep%nce)) ! Local DOF and matrix indices
+!$omp parallel
+BLOCK
+integer(i4) :: m,jr,jc
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: vol,det,goptmp(3,4),pt(3)
+real(r8), allocatable :: rop(:),mop(:,:)
+allocate(lag_dofs(fe_rep%nce)) ! Local DOF and matrix indices
 allocate(rop(fe_rep%nce)) ! Reconstructed gradient operator
 allocate(mop(fe_rep%nce,fe_rep%nce)) ! Local laplacian matrix
 !$omp do
@@ -5233,13 +5265,14 @@ do i=1,fe_rep%mesh%nc
     end do
   end do
   !---Get local to global DOF mapping
-  call fe_rep%ncdofs(i,j)
+  call fe_rep%ncdofs(i,lag_dofs)
   !---Add local values to global matrix
   !!$omp ordered
-  call mat%atomic_add_values(j,j,mop,fe_rep%nce,fe_rep%nce)
+  call mat%atomic_add_values(lag_dofs,lag_dofs,mop,fe_rep%nce,fe_rep%nce)
   !!$omp end ordered
 end do
-deallocate(j,rop,mop)
+deallocate(lag_dofs,rop,mop)
+END BLOCK
 !$omp end parallel
 CALL fe_rep%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
@@ -5265,14 +5298,13 @@ class(gs_eq), intent(inout) :: self !< G-S object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 real(8), optional, intent(in) :: dt !< Timestep size for time-dependent version
 real(8), optional, intent(in) :: scale !< Global scale factor
-integer(i4) :: i,m,jr,jc
-integer(i4), allocatable :: j(:)
-real(r8) :: vol,det,goptmp(3,4),elapsed_time,pt(3),dt_in,main_scale
-real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),eta_reg(:)
+integer(i4) :: i,k
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: elapsed_time,dt_in,main_scale
+real(r8), allocatable :: lop(:,:),eta_reg(:)
 logical :: curved
 integer(i4) :: nnonaxi
 integer(i4), allocatable :: dense_flag(:)
-real(r8), pointer, dimension(:) :: nonaxi_tmp
 real(r8), pointer, dimension(:,:) :: nonaxi_vals
 type(oft_1d_int), pointer, dimension(:) :: bc_nodes
 CLASS(oft_vector), POINTER :: oft_lag_vec
@@ -5310,8 +5342,8 @@ IF(.NOT.ASSOCIATED(mat))THEN
     !---Add dense blocks
     ALLOCATE(dense_flag(self%fe_rep%ne))
     dense_flag=0
-    DO m=1,self%region_info%nnonaxi
-      dense_flag(self%region_info%noaxi_nodes(m)%v)=m
+    DO k=1,self%region_info%nnonaxi
+      dense_flag(self%region_info%noaxi_nodes(k)%v)=k
     END DO
     CALL graph_add_dense_blocks(graph1,graph2,dense_flag,self%region_info%noaxi_nodes)
     NULLIFY(graph1%kr,graph1%lc)
@@ -5351,8 +5383,8 @@ ALLOCATE(eta_reg(smesh%nreg))
 eta_reg=-1.d0
 IF(dt_in>0.d0)THEN
   DO i=1,self%ncond_regs
-    jr=self%cond_regions(i)%id
-    eta_reg(jr)=self%cond_regions(i)%eta
+    k=self%cond_regions(i)%id
+    eta_reg(k)=self%cond_regions(i)%eta
   END DO
 END IF
 !------------------------------------------------------------------------------
@@ -5362,8 +5394,13 @@ IF(nnonaxi>0)THEN
   ALLOCATE(nonaxi_vals(self%region_info%block_max+1,self%region_info%nnonaxi))
   nonaxi_vals=0.d0
 END IF
-!$omp parallel private(j,rop,gop,det,lop,curved,goptmp,m,vol,jc,jr,pt,nonaxi_tmp)
-allocate(j(self%fe_rep%nce)) ! Local DOF and matrix indices
+!$omp parallel
+BLOCK
+integer(i4) :: m,jr,jc
+integer(i4), allocatable :: lag_dofs(:)
+real(r8) :: vol,det,goptmp(3,4),pt(3)
+real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),nonaxi_tmp(:)
+allocate(lag_dofs(self%fe_rep%nce)) ! Local DOF and matrix indices
 allocate(rop(self%fe_rep%nce),gop(3,self%fe_rep%nce)) ! Reconstructed gradient operator
 allocate(lop(self%fe_rep%nce,self%fe_rep%nce)) ! Local laplacian matrix
 IF(nnonaxi>0)allocate(nonaxi_tmp(self%fe_rep%nce))
@@ -5403,27 +5440,27 @@ do i=1,self%fe_rep%mesh%nc
     END IF
   end do
   !---Get local to global DOF mapping
-  call self%fe_rep%ncdofs(i,j)
+  call self%fe_rep%ncdofs(i,lag_dofs)
   !---Apply bc to local matrix
   SELECT CASE(TRIM(bc))
     CASE("zerob")
       DO jr=1,self%fe_rep%nce
-        IF(self%fe_rep%be(j(jr)))lop(jr,:)=0.d0
+        IF(self%fe_rep%be(lag_dofs(jr)))lop(jr,:)=0.d0
       END DO
     CASE("free")
       DO jr=1,self%fe_rep%nce
-        IF(self%fe_rep%be(j(jr)))lop(jr,:)=0.d0
+        IF(self%fe_rep%be(lag_dofs(jr)))lop(jr,:)=0.d0
       END DO
   END SELECT
   !---Add local values to global matrix
   lop=lop*main_scale
   !$omp ordered
-  call mat%atomic_add_values(j,j,lop,self%fe_rep%nce,self%fe_rep%nce)
+  call mat%atomic_add_values(lag_dofs,lag_dofs,lop,self%fe_rep%nce,self%fe_rep%nce)
   IF(nnonaxi>0.AND.self%region_info%reg_map(smesh%reg(i))>0)THEN
     DO jr=1,self%fe_rep%nce
       !$omp atomic
-      nonaxi_vals(self%region_info%node_mark(smesh%reg(i),j(jr)),self%region_info%reg_map(smesh%reg(i))) = &
-        nonaxi_vals(self%region_info%node_mark(smesh%reg(i),j(jr)),self%region_info%reg_map(smesh%reg(i))) &
+      nonaxi_vals(self%region_info%node_mark(smesh%reg(i),lag_dofs(jr)),self%region_info%reg_map(smesh%reg(i))) = &
+        nonaxi_vals(self%region_info%node_mark(smesh%reg(i),lag_dofs(jr)),self%region_info%reg_map(smesh%reg(i))) &
         + nonaxi_tmp(jr)
     END DO
   END IF
@@ -5434,7 +5471,7 @@ IF(nnonaxi>0)THEN
   do i=1,self%fe_rep%mesh%nc
     IF(self%region_info%reg_map(smesh%reg(i))==0)CYCLE
     !---Get local to global DOF mapping
-    call self%fe_rep%ncdofs(i,j)
+    call self%fe_rep%ncdofs(i,lag_dofs)
     !---Get local reconstructed operators
     lop(:,1)=0.d0
     do m=1,self%fe_rep%quad%np ! Loop over quadrature points
@@ -5451,24 +5488,25 @@ IF(nnonaxi>0)THEN
     lop(:,1)=lop(:,1)*main_scale
     !$omp ordered
     do jc=1,self%fe_rep%nce
-      call mat%atomic_add_values(j(jc:jc),self%region_info%noaxi_nodes(m)%v, &
+      call mat%atomic_add_values(lag_dofs(jc:jc),self%region_info%noaxi_nodes(m)%v, &
         lop(jc,1)*nonaxi_vals(:,m),1,self%region_info%noaxi_nodes(m)%n)
     end do
     !$omp end ordered
   end do
 END IF
-deallocate(j,rop,gop,lop)
+deallocate(lag_dofs,rop,gop,lop)
 IF(nnonaxi>0)deallocate(nonaxi_tmp)
+END BLOCK
 !$omp end parallel
-ALLOCATE(lop(1,1),j(1))
+ALLOCATE(lop(1,1),lag_dofs(1))
 IF(nnonaxi>0)THEN
   IF(.NOT.ASSOCIATED(self%region_info%nonaxi_vals))ALLOCATE(self%region_info%nonaxi_vals(self%fe_rep%ne,smesh%nreg))
   self%region_info%nonaxi_vals=0.d0
   DO i=1,smesh%nreg
     IF(self%region_info%reg_map(i)==0)CYCLE
-    DO jc=1,self%region_info%noaxi_nodes(self%region_info%reg_map(i))%n
-      self%region_info%nonaxi_vals(self%region_info%noaxi_nodes(self%region_info%reg_map(i))%v(jc),i) = &
-        -nonaxi_vals(jc,self%region_info%reg_map(i))*dt_in/nonaxi_vals(self%region_info%block_max+1,self%region_info%reg_map(i))
+    DO k=1,self%region_info%noaxi_nodes(self%region_info%reg_map(i))%n
+      self%region_info%nonaxi_vals(self%region_info%noaxi_nodes(self%region_info%reg_map(i))%v(k),i) = &
+        -nonaxi_vals(k,self%region_info%reg_map(i))*dt_in/nonaxi_vals(self%region_info%block_max+1,self%region_info%reg_map(i))
     END DO
   END DO
   DEALLOCATE(nonaxi_vals)
@@ -5479,13 +5517,13 @@ SELECT CASE(TRIM(bc))
     lop(1,1)=1.d0
     DO i=1,self%fe_rep%nbe
       IF(.NOT.self%fe_rep%linkage%leo(i))CYCLE
-      j=self%fe_rep%lbe(i)
-      call mat%add_values(j,j,lop,1,1)
+      lag_dofs=self%fe_rep%lbe(i)
+      call mat%add_values(lag_dofs,lag_dofs,lop,1,1)
     END DO
   CASE("free")
     CALL set_bcmat(self,mat)
 END SELECT
-DEALLOCATE(j,lop)
+DEALLOCATE(lag_dofs,lop)
 CALL self%fe_rep%vec_create(oft_lag_vec)
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
@@ -5612,23 +5650,15 @@ end subroutine gs_destroy
 subroutine compute_bcmat(self)
 class(gs_eq), target, intent(inout) :: self
 !---
-integer(4) :: i,j,m,l,jr,jc,k,io_unit,nrhs,ierr,i_inds(1),j_inds(1),cell2,jc_int,ed2
-integer(4), allocatable :: elist(:,:),marker(:),bemap(:),el1(:),el2(:),eflag(:)
-integer(4), allocatable :: loc_map1(:),loc_map2(:)
-real(8) :: f(3),pt(3),goptmp(3,3),gop(3),v,dl(2),dn(2),pt_int(3),pt2(3)
-real(8), allocatable :: ltmp(:),vflux_mat(:,:)
-real(8), allocatable :: rop1(:),rop2(:),gop1(:,:),gop2(:,:), massmat(:,:)
-logical :: file_exists
-integer(4) :: cell1,ed1,kk
-real(8) :: pts1(2,2),pts2(2,2),dl1(2),dl2(2),dl1_mag,dl2_mag,val,f1(3),f2(3),pt1(3)
-real(8) :: goptmp1(3,3),goptmp2(3,3),one_val(1,1),dn1(2),dn2(2),offset,grad_tmp(2)
+integer(4) :: i,l,m,ierr
+integer(4), allocatable :: elist(:,:),marker(:),bemap(:),eflag(:)
+real(8), allocatable :: vflux_mat(:,:),massmat(:,:)
 logical, allocatable, dimension(:) :: vert_flag,edge_flag
 type(oft_quad_type) :: quad,quad_hp,sing_quad
 CLASS(oft_bmesh), POINTER :: smesh
-!
+! QUADPACK variables
+integer(4) :: nfail
 integer(4), parameter :: qp_div_lim = 15
-integer(4) :: neval,last,iwork(qp_div_lim),nfail
-real(8) :: abserr,work(5*qp_div_lim)
 character(len=6) :: nfail_str
 IF(ASSOCIATED(self%bc_lmat))RETURN
 WRITE(*,*)'Computing flux BC matrix '
@@ -5654,10 +5684,10 @@ CALL get_olbp(self%mesh,self%olbp)
 !---Compute oriented edge list
 ALLOCATE(elist(2,smesh%nbe))
 DO i=1,smesh%nbe
-  j=ABS(mesh_local_findedge(smesh,[self%olbp(i),self%olbp(i+1)]))
-  elist(2,i)=smesh%lec(smesh%kec(j))
+  l=ABS(mesh_local_findedge(smesh,[self%olbp(i),self%olbp(i+1)]))
+  elist(2,i)=smesh%lec(smesh%kec(l))
   DO m=1,3
-    IF(j==ABS(smesh%lce(m,elist(2,i))))THEN
+    IF(l==ABS(smesh%lce(m,elist(2,i))))THEN
       elist(1,i)=m
       EXIT
     END IF
@@ -5667,19 +5697,19 @@ END DO
 !---Count rhs elements
 allocate(marker(self%fe_rep%ne))
 marker=0
-ALLOCATE(el1(self%fe_rep%nce))
+ALLOCATE(eflag(self%fe_rep%nce))
 self%bc_nrhs=0
 DO i=1,smesh%nbc
-  j=smesh%lbc(i)
-  call self%fe_rep%ncdofs(j,el1)
+  l=smesh%lbc(i)
+  call self%fe_rep%ncdofs(l,eflag)
   DO m=1,self%fe_rep%nce
-    IF(marker(el1(m))==0)THEN
+    IF(marker(eflag(m))==0)THEN
       self%bc_nrhs=self%bc_nrhs+1
-      marker(el1(m))=self%bc_nrhs
+      marker(eflag(m))=self%bc_nrhs
     END IF
   END DO
 END DO
-DEALLOCATE(el1)
+DEALLOCATE(eflag)
 !---
 allocate(self%bc_rhs_list(self%bc_nrhs))
 allocate(self%bc_lmat(self%fe_rep%nbe,self%fe_rep%nbe))
@@ -5701,10 +5731,16 @@ DO i=1,self%fe_rep%nbe
 END DO
 !---Compute boundary current to volume flux projection matrix
 nfail=0
-!$omp parallel private(j,jr,jc,k,kk,rop1,gop1,loc_map1,cell1,el1,f1,ed1,dl1,dn1,dl1_mag,pts1,val, &
-!$omp rop2,gop2,loc_map2,el2,f2,dl2,dn2,dl2_mag,pt2,pts2,work,neval,ierr,iwork,last,ltmp,goptmp1, &
-!$omp pt1,cell2,jc_int,ed2) &
-!$omp reduction(+:nfail) if(.FALSE.)
+!$omp parallel reduction(+:nfail) if(.FALSE.)
+BLOCK
+integer(i4) :: j,jr,jc,k,kk,ierr,cell1,ed1,cell2,ed2,jc_int,neval
+integer(i4), allocatable :: el1(:),el2(:),loc_map1(:),loc_map2(:)
+real(r8) :: pt1(3),pt2(3),pts1(2,2),pts2(2,2),dl1(2),dl2(2),dl1_mag,dl2_mag,val,v,f1(3),f2(3)
+real(r8) :: goptmp1(3,3),dn1(2),dn2(2)
+real(r8), allocatable :: ltmp(:),rop1(:),rop2(:),gop1(:,:),gop2(:,:)
+! QUADPACK variables
+integer(i4) :: last,iwork(qp_div_lim)
+real(r8) :: abserr,work(5*qp_div_lim)
 ALLOCATE(el1(self%fe_rep%nce),loc_map1(self%fe_rep%nce))
 ALLOCATE(rop1(self%fe_rep%nce),gop1(3,self%fe_rep%nce))
 ALLOCATE(el2(self%fe_rep%nce),loc_map2(self%fe_rep%nce))
@@ -5891,6 +5927,7 @@ DO i=1,smesh%nbe
   END DO
 END DO
 DEALLOCATE(el1,el2,rop1,rop2,gop1,gop2,loc_map1,loc_map2,ltmp)
+END BLOCK
 !$omp end parallel
 IF(nfail>0)THEN
   WRITE(nfail_str,'(I6)')nfail
