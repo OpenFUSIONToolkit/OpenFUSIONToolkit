@@ -18,10 +18,10 @@ Before running any workflow in this folder, ensure the following:
 AdvancedWorkflows/
 │
 ├── Pulse Design/
-│   ├── etc
-│   ├── etc
+│   ├── CUTE_pulse_ex.ipynb
+│   ├── d3d_pulse_ex.py
 │   └── README.md
-
+│
 ├── TokaMax/
 │   ├── etc
 │   ├── etc
