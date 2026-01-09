@@ -637,7 +637,7 @@ class gs_Domain:
         with open(filename, 'w+') as fid:
             fid.write(json.dumps(output_dict))
     
-    def plot_topology(self,fig,ax,linewidth=None):
+    def plot_topology(self,fig,ax,linewidth=None,rotate=False):
         '''! Plot mesh topology
 
         @param fig Figure to add to (unused)
@@ -645,13 +645,17 @@ class gs_Domain:
         @param linewidth Line width for plots
         '''
         for region in self.regions:
-            region.plot_segments(fig,ax,linewidth=linewidth)
+            region.plot_segments(fig,ax,linewidth=linewidth,rotate=rotate)
         # Format plot
         ax.set_aspect('equal','box')
-        ax.set_xlabel('R (m)')
-        ax.set_ylabel('Z (m)')
+        if rotate:
+            ax.set_xlabel('Z (m)')
+            ax.set_ylabel('R (m)')
+        else:
+            ax.set_xlabel('R (m)')
+            ax.set_ylabel('Z (m)')
     
-    def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False):
+    def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False,rotate=False):
         '''! Plot machine geometry
 
         @param fig Figure to add to (unused)
@@ -699,12 +703,19 @@ class gs_Domain:
             coil_axis = ax[1,1]
             vac_axis = ax[0,0]
             ax_flat = ax.flatten()
+        #
+        if rotate:
+            r_plot = self._r[:,1]
+            z_plot = self._r[:,0]
+        else:
+            r_plot = self._r[:,0]
+            z_plot = self._r[:,1]
         # Get region count
         nregs = self._reg.max()
         reg_mark = numpy.zeros((nregs,))
         reg_mark[0] = 1
         # Plot the plasma region
-        plasma_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==1,:],lw=lw,label='Plasma')
+        plasma_axis.triplot(r_plot,z_plot,self._lc[self._reg==1,:],lw=lw,label='Plasma')
         # Plot conductor regions
         nCond = 0
         for key, cond in self.get_conductors().items():
@@ -712,7 +723,7 @@ class gs_Domain:
                 continue
             nCond += 1
             reg_mark[cond['reg_id']-1] = 1
-            cond_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==cond['reg_id'],:],lw=lw,label=key)
+            cond_axis.triplot(r_plot,z_plot,self._lc[self._reg==cond['reg_id'],:],lw=lw,label=key)
         # Plot coil regions
         coil_colors = {}
         for key, coil in self.get_coils().items():
@@ -722,22 +733,26 @@ class gs_Domain:
             else:
                 leg_key = coil.get('coil_set',key)
             if leg_key not in coil_colors:
-                lines, _ = coil_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==coil['reg_id'],:],lw=lw,label=leg_key)
+                lines, _ = coil_axis.triplot(r_plot,z_plot,self._lc[self._reg==coil['reg_id'],:],lw=lw,label=leg_key)
                 coil_colors[leg_key] = lines.get_color()
             else:
-                coil_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==coil['reg_id'],:],lw=lw,color=coil_colors[leg_key])
+                coil_axis.triplot(r_plot,z_plot,self._lc[self._reg==coil['reg_id'],:],lw=lw,color=coil_colors[leg_key])
         nCoil = len(coil_colors)
         # Plot the vacuum regions
         nVac = 0
         for i in range(nregs):
             if reg_mark[i] == 0:
                 nVac += 1
-                vac_axis.triplot(self._r[:,0],self._r[:,1],self._lc[self._reg==i+1,:],lw=lw,label='Vacuum_{0}'.format(nVac))
+                vac_axis.triplot(r_plot,z_plot,self._lc[self._reg==i+1,:],lw=lw,label='Vacuum_{0}'.format(nVac))
         # Format plots
         for ax_tmp in ax_flat:
             ax_tmp.set_aspect('equal','box')
-            ax_tmp.set_xlabel('R (m)')
-            ax_tmp.set_ylabel('Z (m)')
+            if rotate:
+                ax_tmp.set_xlabel('Z (m)')
+                ax_tmp.set_ylabel('R (m)')
+            else:
+                ax_tmp.set_xlabel('R (m)')
+                ax_tmp.set_ylabel('Z (m)')
         if show_legends:
             if format_type == 0:
                 ncols = max(1,math.floor((1+nCond+nCoil+nVac)/col_max))
@@ -1209,7 +1224,7 @@ class Region:
             segments.append(self._points[self._segments[i],:])
         return segments
     
-    def plot_segments(self,fig,ax,linewidth=None):
+    def plot_segments(self,fig,ax,linewidth=None,rotate=False):
         '''! Plot boundary curve
         
         @param fig Figure to add curves to
@@ -1217,7 +1232,10 @@ class Region:
         @param linewidth Line width for plots
         '''
         for i in range(len(self._segments)):
-            ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1],linewidth=linewidth)
+            if rotate:
+                ax.plot(self._points[self._segments[i],1],self._points[self._segments[i],0],linewidth=linewidth)
+            else:
+                ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1],linewidth=linewidth)
     
     def get_json(self):
         return {

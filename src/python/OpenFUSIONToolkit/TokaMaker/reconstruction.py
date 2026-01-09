@@ -10,6 +10,7 @@
 @ingroup doxy_oft_python
 '''
 from .._interface import *
+from ..util import oft_warning
 
 class tokamaker_recon_settings_struct(c_struct):
     r'''! TokaMaker reconstruction settings structure
@@ -519,6 +520,17 @@ class reconstruction():
         @param gtol Stopping condition: termination occurs when the cosine of the angle between fvec and any column of the jacobian is at most `gtol` in absolute value
         @result Error flag
         '''
+        # Check for possibly conflicting constraints
+        if self._tMaker_obj._isoflux_targets is not None:
+            oft_warning('Removing conflicting isoflux targets from equilibrium object via `.set_isoflux(None)`')
+            self._tMaker_obj.set_isoflux(None)
+        if self._tMaker_obj._flux_targets is not None:
+            oft_warning('Removing conflicting flux targets from equilibrium object via `.set_flux(None,None)`')
+            self._tMaker_obj.set_flux(None,None)
+        if self._tMaker_obj._saddle_targets is not None:
+            oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddles(None)`')
+            self._tMaker_obj.set_saddles(None)
+        # Modify input file
         self.write_fit_in()
         self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['linearized_fit'] = 'T' if linearized_fit else 'F'
         self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['maxfev'] = '{0:d}'.format(maxits)
@@ -527,7 +539,7 @@ class reconstruction():
         self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['xtol'] = '{0:.5E}'.format(xtol)
         self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['gtol'] = '{0:.5E}'.format(gtol)
         self._tMaker_obj._oft_env.update_oft_in()
-        #
+        # Run reconstruction
         error_flag = c_int()
         tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings,ctypes.byref(error_flag))
         return error_flag.value

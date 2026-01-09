@@ -40,7 +40,7 @@ USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   partition_graph, native_matrix_setup_full, oft_native_submatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
   oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
-  eigsolver_setup
+  eigsolver_setup, solver_delete, csolver_delete
 IMPLICIT NONE
 #include "local.h"
 private
@@ -473,10 +473,12 @@ end subroutine cg_setup_xml
 !------------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine cg_delete(self)
+subroutine cg_delete(self,propogate)
 class(oft_native_cg_solver), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 NULLIFY(self%A)
 self%initialized=.FALSE.
+CALL solver_delete(self,propogate)
 end subroutine cg_delete
 !------------------------------------------------------------------------------
 !> Cast a solver object to a oft_native_gmres_solver
@@ -726,8 +728,9 @@ end subroutine gmres_setup_xml
 !------------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine gmres_delete(self)
+subroutine gmres_delete(self,propogate)
 class(oft_native_gmres_solver), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 integer(i4) :: i
 NULLIFY(self%A)
 IF(self%initialized)THEN
@@ -742,6 +745,7 @@ IF(self%initialized)THEN
   DEALLOCATE(self%r,self%w)
 END IF
 self%initialized=.FALSE.
+CALL solver_delete(self,propogate)
 end subroutine gmres_delete
 !------------------------------------------------------------------------------
 !> Solve a linear system using the flexible GMRES method (complex)
@@ -972,8 +976,9 @@ end subroutine cgmres_setup_xml
 !------------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine cgmres_delete(self)
+subroutine cgmres_delete(self,propogate)
 class(oft_native_gmres_csolver), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 integer(i4) :: i
 NULLIFY(self%A)
 IF(self%initialized)THEN
@@ -988,6 +993,7 @@ IF(self%initialized)THEN
   DEALLOCATE(self%r,self%w)
 END IF
 self%initialized=.FALSE.
+CALL csolver_delete(self,propogate)
 end subroutine cgmres_delete
 !------------------------------------------------------------------------------
 !> Cast an eigensolver object to a oft_native_cg_eigsolver
@@ -1291,8 +1297,10 @@ end subroutine identity_inv_apply
 !------------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine identity_inv_delete(self)
+subroutine identity_inv_delete(self,propogate)
 class(oft_identity_inv), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+CALL solver_delete(self,propogate)
 end subroutine identity_inv_delete
 !------------------------------------------------------------------------------
 !> Cast a solver object to a oft_diag_scale
@@ -1333,9 +1341,11 @@ end subroutine diag_scale_apply
 !------------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine diag_scale_delete(self)
+subroutine diag_scale_delete(self,propogate)
 class(oft_diag_scale), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 NULLIFY(self%A)
+CALL solver_delete(self,propogate)
 end subroutine diag_scale_delete
 !------------------------------------------------------------------------------
 !> Solve the linear system for a diagonal matrix (complex)
@@ -1356,9 +1366,11 @@ end subroutine cdiag_scale_apply
 !------------------------------------------------------------------------------
 !> Destroy diagonal preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine cdiag_scale_delete(self)
+subroutine cdiag_scale_delete(self,propogate)
 class(oft_diag_cscale), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 NULLIFY(self%A)
+CALL csolver_delete(self,propogate)
 end subroutine cdiag_scale_delete
 !------------------------------------------------------------------------------
 !> Cast a solver object to a jblock_precond_cast
@@ -1516,8 +1528,9 @@ end subroutine jblock_setup_xml
 !------------------------------------------------------------------------------
 !> Destroy symmetric Jacobi preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine jblock_precond_delete(self)
+subroutine jblock_precond_delete(self,propogate)
 class(oft_jblock_precond), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 DEBUG_STACK_PUSH
 IF(self%initialized)THEN
   DEALLOCATE(self%u_save,self%g_save)
@@ -1529,6 +1542,7 @@ NULLIFY(self%A)
 NULLIFY(self%bc)
 self%warn_once=.TRUE.
 self%initialized=.FALSE.
+CALL solver_delete(self,propogate)
 DEBUG_STACK_POP
 end subroutine jblock_precond_delete
 !------------------------------------------------------------------------------
@@ -1645,23 +1659,24 @@ end subroutine ml_precond_update
 !------------------------------------------------------------------------------
 !> Destroy Multi-Level preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-recursive subroutine ml_precond_delete(self)
+recursive subroutine ml_precond_delete(self,propogate)
 class(oft_ml_precond), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 DEBUG_STACK_PUSH
 if(ASSOCIATED(self%smooth_up))then
-  call self%smooth_up%delete
+  call self%smooth_up%delete(propogate)
   DEALLOCATE(self%smooth_up)
 end if
 if(ASSOCIATED(self%smooth_down))then
   IF(self%symmetric)THEN
     NULLIFY(self%smooth_down)
   ELSE
-    call self%smooth_down%delete
+    call self%smooth_down%delete(propogate)
     DEALLOCATE(self%smooth_down)
   END IF
 end if
 if(associated(self%base_solve))then
-  call self%base_solve%delete
+  call self%base_solve%delete(propogate)
   DEALLOCATE(self%base_solve)
 end if
 ! IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
@@ -1730,19 +1745,20 @@ end subroutine ml_trans_apply
 !------------------------------------------------------------------------------
 !> Destroy Multi-Level preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine ml_trans_delete(self)
+subroutine ml_trans_delete(self,propogate)
 class(oft_ml_trans), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 DEBUG_STACK_PUSH
 if(associated(self%smooth_up))then
-  call self%smooth_up%delete
+  call self%smooth_up%delete(propogate)
   nullify(self%smooth_up)
 end if
 if(associated(self%smooth_down))then
-  call self%smooth_down%delete
+  call self%smooth_down%delete(propogate)
   nullify(self%smooth_down)
 end if
 if(associated(self%base_solve))then
-  call self%base_solve%delete
+  call self%base_solve%delete(propogate)
   nullify(self%base_solve)
 end if
 ! IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
@@ -1776,6 +1792,8 @@ IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix requir
   'bjprecond_apply',__FILE__)
 !---Initialize local matrix
 IF(.NOT.self%initialized)THEN
+  IF(.NOT.ASSOCIATED(self%pre))CALL oft_abort('No sub-solver (preconditioner defined)', &
+    'bjprecond_apply',__FILE__)
   color_avail=.FALSE.
   CALL solver_setup(self)
   IF(self%nlocal==-1)THEN
@@ -1784,11 +1802,11 @@ IF(.NOT.self%initialized)THEN
   END IF
   IF(ASSOCIATED(A_native%color))THEN
     ncolors=MAXVAL(A_native%color)
-    IF(self%nlocal<=1.AND.ncolors>1)THEN
+    IF((self%nlocal<1).AND.(ncolors>1))THEN
       self%nlocal=self%nlocal*ncolors
       color_avail=.TRUE.
-    ELSE IF((self%nlocal>1).AND.(ncolors>1))THEN
-      IF(oft_env%head_proc.AND.self%nlocal/=ncolors)WRITE(*,'(A,I4,A,1X,I4)')'[',oft_env%rank,'] Updating number of local parts to match coloring',ncolors
+    ELSE IF((self%nlocal>=1).AND.(ncolors>1))THEN
+      IF(oft_env%head_proc.AND.self%nlocal/=ncolors)WRITE(*,'(A,X,I4)')' Updating number of local parts to match coloring',ncolors
       self%nlocal=ncolors
       color_avail=.TRUE.
     END IF
@@ -1845,12 +1863,6 @@ IF(.NOT.self%initialized)THEN
           END DO
         END IF
       END IF
-      !---Do not include redundant rows
-      IF(ASSOCIATED(A_native%redind))THEN
-        DO i=1,A_native%nred
-          part(A_native%redind(i))=-1
-        END DO
-      END IF
     ELSE
       IF(self%nlocal>0)THEN
         IF(color_avail)THEN
@@ -1904,9 +1916,15 @@ IF(.NOT.self%initialized)THEN
         END IF
       END IF
     END IF
+    !---Do not include redundant rows
+    IF(ASSOCIATED(A_native%redind))THEN
+      DO i=1,A_native%nred
+        part(A_native%redind(i))=-1
+      END DO
+    END IF
     !---Create partition mappings
     ALLOCATE(self%parts(self%nlocal))
-    IF(ANY(part==0))CALL oft_abort("Unclaimed partition","bjprecond_apply",__FILE__)
+    IF(ANY(part==0))CALL oft_abort("Unclaimed row after partitioning","bjprecond_apply",__FILE__)
     DO i=1,A_native%nr
       IF(part(i)<0)CYCLE
       self%parts(part(i))%n=self%parts(part(i))%n+1
@@ -1963,6 +1981,7 @@ IF(.NOT.self%initialized)THEN
     ALLOCATE(uloc%stitch_info)
     uloc%stitch_info%skip=.TRUE.
     !---Create local sub-matrices
+    !$omp parallel do
     DO i=1,self%nlocal
       CALL self%alocals(i)%setup(A_native,uloc,part=self%parts(i)%v)
       ALLOCATE(self%solvers(i)%s, source=pretmp)
@@ -1995,6 +2014,7 @@ IF(self%nlocal>1)THEN
   END IF
   IF(self%update_slice)THEN
     CALL A_native%update_slice
+    !$omp parallel do
     DO i=1,self%nlocal
       CALL self%alocals(i)%update_slice
     END DO
@@ -2157,14 +2177,15 @@ end subroutine bjprecond_setup_xml
 !------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine bjprecond_delete(self)
+subroutine bjprecond_delete(self,propogate)
 class(oft_bjprecond), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers
 IF(ASSOCIATED(self%solvers))THEN
   DO i=1,self%nlocal
-    CALL self%solvers(i)%s%delete
+    CALL self%solvers(i)%s%delete(propogate)
     DEALLOCATE(self%solvers(i)%s)
   END DO
   DEALLOCATE(self%solvers)

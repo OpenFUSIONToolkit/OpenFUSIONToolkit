@@ -32,7 +32,7 @@ IMAGE_PATH             = @CMAKE_CURRENT_SOURCE_DIR@/docs/images \
                          @CMAKE_CURRENT_SOURCE_DIR@/docs/generated/images \
                          @CMAKE_CURRENT_SOURCE_DIR@/../logos
 RECURSIVE              = YES
-EXCLUDE                =
+EXCLUDE                = @CMAKE_CURRENT_SOURCE_DIR@/base/oft_sort_c.cxx
 EXCLUDE_PATTERNS       =
 FILE_PATTERNS          = *.f90 \
                          *.F90 \

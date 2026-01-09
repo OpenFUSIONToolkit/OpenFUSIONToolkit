@@ -2982,8 +2982,9 @@ END SUBROUTINE bjprecond_apply
 !------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine bjprecond_delete(self)
+subroutine bjprecond_delete(self,propogate)
 class(oft_tw_hodlr_bjpre), intent(inout) :: self
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers
@@ -3123,8 +3124,9 @@ END SUBROUTINE rbjprecond_apply
 !------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
-subroutine rbjprecond_delete(self)
+subroutine rbjprecond_delete(self,propogate)
 class(oft_tw_hodlr_rbjpre), intent(inout) :: self
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers

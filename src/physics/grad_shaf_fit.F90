@@ -252,9 +252,16 @@ fit_F0 = .FALSE.
 IF(PRESENT(fitF0))fit_F0=fitF0
 fixed_centering = .FALSE.
 IF(PRESENT(fixedCentering))fixed_centering=fixedCentering
-IF(fitPnorm.AND.fitR0)CALL oft_abort('R0 or Pnorm fitting cannot be used together', &
+IF(fit_Pnorm.AND.fit_R0)CALL oft_abort('R0 or Pnorm fitting cannot be used together', &
 'fit_gs',__FILE__)
-IF(fitPnorm)gs%R0_target=-1.d0
+IF(fit_Pnorm.AND.gs%R0_target>0.d0)THEN
+  gs%R0_target=-1.d0
+  CALL oft_warn('P_norm adjustment requested, disabling R0 target')
+END IF
+IF(fit_Pnorm.AND.gs%pax_target>0.d0)THEN
+  gs%pax_target=-1.d0
+  CALL oft_warn('P_norm adjustment requested, disabling P_ax target')
+END IF
 !---Load constraints
 gs_active=>gs
 WRITE(*,*)
@@ -600,6 +607,7 @@ IF(.NOT.ASSOCIATED(psi_center))THEN
 END IF
 !---
 ALLOCATE(cof_tmp(n),err_tmp(m))
+jac_mat=0.d0
 !---
 IF(iflag==1)THEN
   feval_count=feval_count+1
@@ -1421,7 +1429,7 @@ CALL psi_eval%delete()
 CALL psi_geval%delete()
 btmp(1)= -gs%psiscale*gpsi(2)/self%r(1)
 IF(gs%mode==0)THEN
-  btmp(2)= gs%psiscale*gs%alam*(gs%I%f(psi(1))+gs%I%f_offset/gs%alam)/self%r(1)
+  btmp(2)= gs%psiscale*(gs%alam*gs%I%f(psi(1))+gs%I%f_offset)/self%r(1)
 ELSE
   btmp(2)=gs%psiscale*SQRT(gs%alam*gs%I%f(psi(1)) + gs%I%f_offset**2)/self%r(1)
 END IF
