@@ -98,7 +98,7 @@ type, extends(flux_func) :: spline_flux_func
   REAL(8) :: yp1 = 0.d0 !< Needs docs
   REAL(8) :: ypn = 0.d0 !< Needs docs
   TYPE(spline_type) :: func !< Needs docs
-  TYPE(spline_type) :: fun_loc(24) !< Needs docs
+  TYPE(spline_type), POINTER, DIMENSION(:) :: fun_loc => NULL() !< Needs docs
 contains
   !> Needs docs
   procedure :: f => spline_f
@@ -550,6 +550,7 @@ select type(self=>func)
   !---
   self%npsi=npsi
   self%ncofs=self%npsi
+  ALLOCATE(self%fun_loc(omp_get_max_threads()))
   CALL spline_alloc(self%func,self%npsi-1,1)
   DO i=1,omp_get_max_threads()
     CALL spline_alloc(self%fun_loc(i),self%npsi-1,1)
