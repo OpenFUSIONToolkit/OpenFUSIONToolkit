@@ -137,7 +137,6 @@ select type(self=>func)
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
     CALL spline_alloc(self%funcp,self%npsi,1)
-    ALLOCATE(self%fun_loc(omp_get_max_threads()))
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
@@ -452,7 +451,6 @@ select type(self=>func)
     !---
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
-    ALLOCATE(self%fun_loc(omp_get_max_threads()))
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
@@ -621,7 +619,6 @@ IF(ASSOCIATED(self%B0_prof))THEN
     DO i=1,omp_get_max_threads()
       CALL spline_dealloc(this%fun_loc(i))
     END DO
-    DEALLOCATE(this%fun_loc)
   END SELECT
 END IF
 NULLIFY(self%gs,self%mesh)
@@ -664,7 +661,6 @@ select type(self=>func)
     !---
     self%npsi=npsi
     CALL spline_alloc(self%func,self%npsi,1)
-    ALLOCATE(self%fun_loc(omp_get_max_threads()))
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
@@ -766,7 +762,6 @@ IF(ASSOCIATED(self%B0_prof))THEN
     DO i=1,omp_get_max_threads()
       CALL spline_dealloc(this%fun_loc(i))
     END DO
-    DEALLOCATE(this%fun_loc)
   END SELECT
 END IF
 NULLIFY(self%gs,self%mesh)
