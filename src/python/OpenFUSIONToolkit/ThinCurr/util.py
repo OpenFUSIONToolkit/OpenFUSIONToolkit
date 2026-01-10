@@ -4,11 +4,9 @@
 @date June 2025
 @ingroup doxy_oft_python
 '''
-import re
+from itertools import count
 import numpy as np
 from .sensor import Mirnov, save_sensors
-import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 from ..io import histfile
 
 class torus_fourier_sensor():
@@ -99,8 +97,8 @@ class torus_fourier_sensor():
                 raise ValueError('For customized plotting, please provide a single axis for plotting the surface with outward normal vectors.')
             line, = ax.plot(np.concatenate([self.radial_positions,self.radial_positions[:1]]),np.concatenate([self.axial_positions,self.axial_positions[:1]]))
             ax.quiver(self.radial_positions,self.axial_positions,outward_normals[:,0],outward_normals[:,1],color='red',scale=20)
-            ax.set_xlabel("Radial Position (R)")
-            ax.set_ylabel("Axial Position (Z)")
+            ax.set_xlabel("R (m)")
+            ax.set_ylabel("Z (m)")
             ax.set_ylim((-1.25*max(self.axial_positions),1.25*max(self.axial_positions)))
             ax.set_xlim((min(self.radial_positions)-0.1,max(self.radial_positions)+0.1))
             ax.set_title("Surface with Outward Normal Vectors")
@@ -311,27 +309,27 @@ class torus_fourier_sensor():
                 row_i = i-mmin
 
                 # Write line for dcosmn(i, j=nmin...nmax)
-                l = 0
+                count = 0
                 for j in range(nmin,nmax+1):
                     col_j = j-nmin
                     val_cos = dcosmn[row_i,col_j]/scale 
                     f.write(f"{val_cos:12.6f}")
-                    l = l+1
-                    if l == 25:
+                    count = count+1
+                    if count == 25:
                         f.write("\n")
-                        l = 0
+                        count = 0
                 f.write("\n")
 
                 # Write line for dsinmn(i, j=nmin...nmax)
-                l = 0
+                count = 0
                 for j in range(nmin,nmax+1):
                     col_j = j-nmin
                     val_sin = dsinmn[row_i, col_j]/scale
                     f.write(f"{val_sin:12.6f}")
-                    l = l+1
-                    if l == 25:
+                    count = count+1
+                    if count == 25:
                         f.write("\n")
-                        l = 0
+                        count = 0
                 f.write("\n")
     
     def plot_sensor_output(self,t,fig,ax):
@@ -344,7 +342,7 @@ class torus_fourier_sensor():
         @result cbar The colorbar of the contour plot
         '''
 
-        if hasattr(self,'hist_file') == False:
+        if not hasattr(self,'hist_file'):
             raise AttributeError("The hist file of magnetic sensor values during time evolution has to be provided using the function load_histfile")
         else:
             phi_grid, theta_grid = np.meshgrid(np.linspace(0,2*np.pi,self.nphi,endpoint=False),self.theta_list)
@@ -380,6 +378,8 @@ class torus_fourier_sensor():
         elif len(figs) != 2:
             raise ValueError('For customized plotting, maximumlly two figures are required.')
         
+        import matplotlib.pyplot as plt
+        from matplotlib.collections import LineCollection
         lc_list = []
         boundary_list = []
         cbar_list = []
@@ -453,7 +453,7 @@ class torus_fourier_sensor():
             ax.legend()
             ax.set_title(f"1D FFT Amplitude of Toroidal Mode at [t] = {t}")
             ax.set_xlabel(r"$\theta$ (radians)")
-            ax.set_ylabel(f"Mode amplitude (Tesla)")
+            ax.set_ylabel("Mode amplitude (Tesla)")
             ax.grid()
             ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
             return line_list, toroidal_harmonics
@@ -487,7 +487,7 @@ class torus_fourier_sensor():
             ax.legend()
             ax.set_title(f"1D FFT Amplitude of Poloidal Mode at [t] = {t}")
             ax.set_xlabel(r"$\phi$ (radians)")
-            ax.set_ylabel(f"Mode amplitude (Tesla)")
+            ax.set_ylabel("Mode amplitude (Tesla)")
             ax.grid()
             ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
             return line_list, poloidal_harmonics
@@ -527,10 +527,10 @@ class torus_fourier_sensor():
                 n_indices = np.where((n_modes_sorted == n))[0]
                 mode_amplitudes[i][t] = B_n_sorted[m_indices,n_indices].real
                 i+=1
-
+        
         line_list = []
         for j in range(mode_amplitudes.shape[0]):
-            line = plt.plot(t_array*dt*1e3,mode_amplitudes[j],label=f'{m_list[j]}/{n_list[j]}')
+            line = ax.plot(t_array*dt*1e3,mode_amplitudes[j],label=f'{m_list[j]}/{n_list[j]}')
             line_list.append(line)
         ax.set_ylabel('Mode amplitudes (Tesla)')
         ax.set_xlabel('Time (ms)')
@@ -577,15 +577,15 @@ class torus_fourier_sensor():
         if part == 'r':
             amplitudes = B_n_sorted[m_indices[0]:m_indices[1]+1,n_indices[0]:n_indices[1]+1].real
             cf = ax.contourf(m_grid_fft,n_grid_fft,amplitudes,levels=50,cmap="viridis")
-            cbar = fig.colorbar(cf,label=f"Mode real amplitude (Tesla)")
+            cbar = fig.colorbar(cf,label="Mode real amplitude (Tesla)")
         elif part == 'i':
             amplitudes = B_n_sorted[m_indices[0]:m_indices[1]+1,n_indices[0]:n_indices[1]+1].imag
             cf = ax.contourf(m_grid_fft,n_grid_fft,amplitudes,levels=50,cmap="viridis")
-            cbar = fig.colorbar(cf,label=f"Mode imaginary amplitude (Tesla)")
+            cbar = fig.colorbar(cf,label="Mode imaginary amplitude (Tesla)")
         elif part == 'a':
             amplitudes = abs(B_n_sorted[m_indices[0]:m_indices[1]+1,n_indices[0]:n_indices[1]+1])
             cf = ax.contourf(m_grid_fft,n_grid_fft,amplitudes,levels=50,cmap="viridis")
-            cbar = fig.colorbar(cf,label=f"Mode absolute amplitude (Tesla)")
+            cbar = fig.colorbar(cf,label="Mode absolute amplitude (Tesla)")
         cbar.ax.ticklabel_format(style='sci', scilimits=(-3, 3))
         return cf, cbar
 
@@ -617,7 +617,8 @@ class torus_fourier_sensor():
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
             B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
-        
+
+        import matplotlib.pyplot as plt
         if x_type == 'modes':
             B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
             cmap = plt.get_cmap('tab10')
@@ -633,10 +634,10 @@ class torus_fourier_sensor():
                     real_line_list.append(rline)
                     imag_line_list.append(iline)
                 ax.legend()
-                ax.set_title(f"2D FFT Amplitudes of Toroidal Modes at [t] = {t}",fontsize=20)
-                ax.set_xlabel(f"Poloidal Harmonics ($m$)")
+                ax.set_title(f"2D FFT Amplitudes of Toroidal Modes at [t] = {t}")
+                ax.set_xlabel(r"Poloidal Harmonics ($m$)")
                 ax.set_ylabel(f"Mode Amplitudes (Tesla)")
-                ax.set_xticks(range(x_mode_min,x_mode_max+1))
+                ax.set_xticks(range(x_mode_min,x_mode_max+1,2))
                 ax.grid()
                 ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
                 plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
@@ -653,10 +654,10 @@ class torus_fourier_sensor():
                     real_line_list.append(rline)
                     imag_line_list.append(iline)
                 ax.legend()
-                ax.set_title(f"2D FFT Amplitudes of Poloidal Modes at [t] = {t}",fontsize=20)
-                ax.set_xlabel(f"Toroidal Harmonics ($n$)")
-                ax.set_ylabel(f"Mode Amplitudes (Tesla)")
-                ax.set_xticks(range(x_mode_min,x_mode_max+1))
+                ax.set_title(f"2D FFT Amplitudes of Poloidal Modes at [t] = {t}")
+                ax.set_xlabel(r"Toroidal Harmonics ($n$)")
+                ax.set_ylabel("Mode Amplitudes (Tesla)")
+                ax.set_xticks(range(x_mode_min,x_mode_max+1,2))
                 ax.grid()
                 ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
                 plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
@@ -674,7 +675,7 @@ class torus_fourier_sensor():
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Toroidal Modes at [t] = {t}")
                 ax.set_xlabel(r"$\theta$ (radians)")
-                ax.set_ylabel(f"Mode Amplitudes (Tesla)")
+                ax.set_ylabel("Mode Amplitudes (Tesla)")
                 ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
                 plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
                 return real_line_list, imag_line_list
@@ -697,7 +698,7 @@ class torus_fourier_sensor():
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Poloidal Modes at [t] = {t}")
                 ax.set_xlabel(r"$\phi$ (radians)")
-                ax.set_ylabel(f"Mode Amplitudes (Tesla)")
+                ax.set_ylabel("Mode Amplitudes (Tesla)")
                 ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
                 plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
                 return real_line_list, imag_line_list
@@ -716,12 +717,12 @@ class torus_fourier_sensor():
             line = ax.plot(self.theta_list/2/np.pi, B_n[:,0])
             ax.set_title(rf"Magnetic Field on surface @ $\phi$=0 at [t] = {t}")
             ax.set_xlabel(r"$\theta$ (radians)")
-            ax.set_ylabel(f"Magnetic Field (Tesla)")
+            ax.set_ylabel("Magnetic Field (Tesla)")
         else:
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
             line = ax.plot(phi_list/2/np.pi, np.flip(B_n[0,:],axis=1))
             ax.set_title(rf"Magnetic Field on surface @ $\theta$=0 at [t] = {t}")
             ax.set_xlabel(r"$\phi$ (radians)")
-            ax.set_ylabel(f"Magnetic Field (Tesla)")
+            ax.set_ylabel("Magnetic Field (Tesla)")
         ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
         return line
