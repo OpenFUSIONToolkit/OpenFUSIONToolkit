@@ -123,7 +123,7 @@ jobs:
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install pytest numpy scipy h5py triangle
+        python -m pip install pytest numpy scipy h5py triangle matplotlib
     
     - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
@@ -132,7 +132,7 @@ jobs:
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install pytest numpy scipy h5py
+        python -m pip install pytest numpy scipy h5py matplotlib
     
     - name: Install Intel oneAPI
       if: ${{ matrix.config.cc == 'icx' }}
