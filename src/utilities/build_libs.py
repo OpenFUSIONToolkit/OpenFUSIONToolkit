@@ -1953,7 +1953,7 @@ class PETSC(package):
         else:
             options += ['--with-mpi-dir={MPI_ROOT}']
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
-            options.append('--FFLAGS="-fallow-argument-mismatch"')
+            options.append('--FFLAGS="-fallow-argument-mismatch -ffree-line-length-none"')
         options += [
             '--download-metis',
             '--download-parmetis',
