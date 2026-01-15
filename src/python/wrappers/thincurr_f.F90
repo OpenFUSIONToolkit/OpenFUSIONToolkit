@@ -98,6 +98,11 @@ ELSE
   !------------------------------------------------------------------------------
   ! Load model from file
   !------------------------------------------------------------------------------
+  INQUIRE(FILE=TRIM(filename),EXIST=success)
+  IF(.NOT.success)THEN
+    CALL copy_string('Mesh file does not exist or is not accesible',error_str)
+    RETURN
+  END IF
   ALLOCATE(tw_obj)
   ALLOCATE(oft_trimesh::tw_obj%mesh)
   CALL tw_obj%mesh%setup(-1,.FALSE.)
