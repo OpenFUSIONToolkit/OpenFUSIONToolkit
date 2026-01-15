@@ -568,6 +568,14 @@ def validate_mode(drive_exp,result_exp):
             print("  Expected = {0}".format(result_exp[i]))
             print("  Actual =   {0}".format(result_amps[i]))
             result_val = False
+
+    run_files = [f for f in os.listdir('.') if f.endswith('.rst') or f.endswith('.xmf')]
+    for file in run_files:
+        os.remove(file)
+        
+    save_files = [f for f in os.listdir('.') if f.startswith('mesh') or f.startswith('vector') or f.startswith('scalar') or f.startswith('dump.dat')]
+    for file in save_files:
+        os.remove(file)
     return result_val
 
 
