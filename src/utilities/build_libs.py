@@ -1636,6 +1636,8 @@ class SUPERLU_DIST(package):
     def build(self):
         #
         tmp_dict = self.config_dict.copy()
+        if 'MPI_CXX' not in self.config_dict:
+            error_exit('SuperLU-DIST requires an MPI C++ compiler')
         cmake_options = [
             "-DTPL_ENABLE_PARMETISLIB:BOOL=FALSE",
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT}",
@@ -1732,10 +1734,13 @@ class UMFPACK(package):
             AMD_CMAKE_options.append("-DCMAKE_EXE_LINKER_FLAGS={0}".format(self.config_dict['OMP_FLAGS']))
         if 'MACOS_SDK_PATH' in self.config_dict:
             AMD_CMAKE_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
-        config_CMAKE_options = AMD_CMAKE_options.copy() + [
-            "-DBLAS_ROOT:PATH={BLAS_ROOT}",
-            "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
-        ]
+        if 'BLAS_ROOT' in self.config_dict:
+            config_CMAKE_options = AMD_CMAKE_options.copy() + [
+                "-DBLAS_ROOT:PATH={BLAS_ROOT}",
+                "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
+            ]
+        else:
+            config_CMAKE_options = AMD_CMAKE_options.copy()
         UMFPACK_CMAKE_options = config_CMAKE_options.copy() + [
             "-DUMFPACK_USE_CHOLMOD:BOOL=OFF"
         ]
@@ -1993,6 +1998,8 @@ class PETSC(package):
             # elif config_dict['CC_VENDOR'] == 'intel':
             #     options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
         if need_cxx:
+            if 'MPI_CXX' not in self.config_dict:
+                error_exit('PETSc build as configured requires an MPI C++ compiler')
             options += ['--with-cxx={MPI_CXX}']
         else:
             options += ['--with-cxx=0']
@@ -2036,6 +2043,7 @@ group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=
 group.add_argument("--mpich_version", default=4, type=int, choices=(3,4), help="MPICH major version (default: 4)")
 group.add_argument("--build_openmpi", default=0, type=int, choices=(0,1), help="Build OpenMPI libraries?")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
+group.add_argument("--mpi_cxx", default=None, type=str, help="MPI C++ compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
 group.add_argument("--mpi_libs", default=None, type=str, help="MPI libraries")
@@ -2047,6 +2055,7 @@ group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wr
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
 group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
+group.add_argument("--hdf5_static", action="store_true", default=False, help="Build and link HDF5 statically?")
 #
 group = parser.add_argument_group("BLAS/LAPACK", "BLAS/LAPACK package options")
 group.add_argument("--oblas_threads", action="store_true", default=False, help="Build OpenBLAS with thread support (OpenMP)")
@@ -2071,6 +2080,7 @@ group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="B
 group = parser.add_argument_group("NETCDF", "NETCDF package options")
 group.add_argument("--build_netcdf", default=0, type=int, choices=(0,1), help="Build NETCDF library? (default: 0)")
 group.add_argument("--netcdf_wrapper", action="store_true", default=False, help="NETCDF included in compilers")
+group.add_argument("--netcdf_static", action="store_true", default=False, help="Build and link NETCDF statically?")
 #
 group = parser.add_argument_group("ARPACK", "ARPACK package options")
 group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="Build ARPACK library? (default: 0)")
@@ -2124,6 +2134,8 @@ use_mpi = False
 if (options.mpi_cc is not None) and (options.mpi_fc is not None):
     config_dict['MPI_CC'] = options.mpi_cc
     config_dict['MPI_FC'] = options.mpi_fc
+    if options.mpi_cxx is not None:
+        config_dict['MPI_CXX'] = options.mpi_cxx
     use_mpi = True
 else:
     if options.mpi_lib_dir is not None:
@@ -2166,6 +2178,8 @@ if use_mpi:
         packages.append(OpenMPI(mpi_force_headers))
     elif options.build_mpich:
         packages.append(MPICH(mpi_force_headers,options.mpich_version))
+    elif (options.mpi_cc is not None) and (options.mpi_fc is not None):
+        pass
     else:
         parser.exit(-1, 'Invalid MPI package')
 else:
@@ -2180,7 +2194,7 @@ if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     config_dict['HDF5_FC'] = options.hdf5_fc
     packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
 else:
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required,shared_libs=(not options.hdf5_static)))
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())
@@ -2192,7 +2206,7 @@ if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
 # Are we building NETCDF?
 if (options.build_netcdf == 1) or options.netcdf_wrapper:
-    packages.append(NETCDF(options.netcdf_wrapper))
+    packages.append(NETCDF(options.netcdf_wrapper,shared_libs=(not options.netcdf_static)))
 # Are we building PETSc?
 if (options.build_petsc == 1) or options.petsc_wrapper:
     packages.append(PETSC(debug=options.petsc_debug, with_superlu=options.petsc_superlu, with_superlu_dist=options.petsc_superlu_dist,
