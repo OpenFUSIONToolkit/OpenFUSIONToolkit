@@ -756,7 +756,7 @@ def test_torus_fourier_sensor(direct_flag):
     from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
     import xarray as xr
     R_0 = 1.0
-    ds = xr.open_dataset('torus_gpec_control_output_n1_nc.nc')
+    ds = xr.open_dataset("torus_gpec_control_output_n1_nc.nc")
     R_gpec=ds.R.to_dataframe().values[:,0][:-1]
     Z_gpec=ds.z.to_dataframe().values[:,0][:-1]
     delta_phi = ds.delta_phi.to_dataframe().values[:,0][:-1]
