@@ -4,7 +4,6 @@
 @date June 2025
 @ingroup doxy_oft_python
 '''
-from itertools import count
 import numpy as np
 from .sensor import Mirnov, save_sensors
 from ..io import histfile
@@ -636,7 +635,7 @@ class torus_fourier_sensor():
                 ax.legend()
                 ax.set_title(f"2D FFT Amplitudes of Toroidal Modes at [t] = {t}")
                 ax.set_xlabel(r"Poloidal Harmonics ($m$)")
-                ax.set_ylabel(f"Mode Amplitudes (Tesla)")
+                ax.set_ylabel("Mode Amplitudes (Tesla)")
                 ax.set_xticks(range(x_mode_min,x_mode_max+1,2))
                 ax.grid()
                 ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
