@@ -1966,7 +1966,11 @@ class PETSC(package):
         else:
             options += ['--with-shared-libraries=0']
         if self.with_openmp:
-            options += ['--with-openmp', '--with-openmp-kernels']
+            options += ['--with-openmp']
+            if ver_gt(self.version,"3.22"):
+                options += ['--with-openmp-kernels']
+            else:
+                print('Warning: OpenMP kernels requires PETSc 3.23+, OpenMP will only be used in third party libraries')
         need_cxx = False
         if self.with_superlu:
             # # Fix SDK issue on MacOS "Catalina" (10.15)
