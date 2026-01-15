@@ -29,7 +29,9 @@ USE petscmat
 #endif
 IMPLICIT NONE
 #include "local.h"
+#ifdef HAVE_PETSC
 #include "oft_petsc.h"
+#endif
 !------------------------------------------------------------------------------
 !> Create a new vector by combining a set of vectors.
 !!
