@@ -257,7 +257,8 @@ with h5py.File("{0}.{1}.h5".format(inprefix,str(1).zfill(padSize)),'r') as h5_fi
                             raise ValueError("Group not found in block {0}".format(i+1))
                         block_mesh = block_group.get(mesh_key,None)
                         if block_mesh is None:
-                            raise ValueError("Mesh not found in block {0}".format(i+1))
+                            continue
+                            # raise ValueError("Mesh not found in block {0}".format(i+1))
                         np = block_mesh['R'].shape[0]
                         nc = block_mesh['LC'].shape[0]
                         mesh=xdmf_mesh('{0:04d}'.format(i+1),inprefix,np,nc,int(0),'{0}/{1}'.format(group_key,mesh_key),'R','LC')

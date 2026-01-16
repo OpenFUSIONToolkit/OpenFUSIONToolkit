@@ -306,10 +306,10 @@ end function skip_comment_lines
 !> integer(i4) implementation of \ref oft_local::get_inverse_map
 !---------------------------------------------------------------------------------
 subroutine get_inverse_map_i4(map,n1,imap,n2)
-integer(i4), intent(inout) :: map(n1) !< Forward map [n1]
-integer(i4), intent(inout) :: imap(n2) !< Inverse map [n2]
 integer(i4), intent(in) :: n1 !< Length of forward map
 integer(i4), intent(in) :: n2 !< Length of inverse map (n2<=MAX(map))
+integer(i4), intent(inout) :: map(n1) !< Forward map [n1]
+integer(i4), intent(inout) :: imap(n2) !< Inverse map [n2]
 integer(i4) :: i
 ! if(size(imap)/=n2)call oft_abort('Invalid array size','get_inverse_map_i4',__FILE__)
 imap=0
@@ -322,10 +322,10 @@ end subroutine get_inverse_map_i4
 !> integer(i8) implementation of \ref oft_local::get_inverse_map
 !---------------------------------------------------------------------------------
 subroutine get_inverse_map_i8(map,n1,imap,n2)
-integer(i8), intent(inout) :: map(n1) !< Forward map [n1]
-integer(i4), intent(inout) :: imap(n2) !< Inverse map [n2]
 integer(i4), intent(in) :: n1 !< Length of forward map
 integer(i8), intent(in) :: n2 !< Length of inverse map (n2<=MAX(map))
+integer(i8), intent(inout) :: map(n1) !< Forward map [n1]
+integer(i4), intent(inout) :: imap(n2) !< Inverse map [n2]
 integer(i4) :: i
 ! if(size(imap)/=n2)call oft_abort('Invalid array size','get_inverse_map_i8',__FILE__)
 imap=0

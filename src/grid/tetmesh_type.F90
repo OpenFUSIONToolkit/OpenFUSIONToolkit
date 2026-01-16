@@ -59,6 +59,14 @@ CONTAINS
   PROCEDURE :: tessellate => tetmesh_tessellate
   PROCEDURE :: tessellated_sizes => tetmesh_tessellated_sizes
 END TYPE oft_tetmesh
+!---Encapsulation for external function call parameters
+TYPE, PRIVATE :: opt_targets
+  integer(i4) :: cell = 0
+  real(r8) :: pt(3) = [0.d0,0.d0,0.d0]
+  CLASS(oft_tetmesh), PRIVATE, POINTER :: mesh => NULL() !< Active mesh for high order find_cell
+END TYPE
+TYPE(opt_targets) :: active_targets !< Active target values/ptrs for external function calls
+!$omp threadprivate(active_targets)
 !---
 INTEGER(i4), PARAMETER :: tet_ed(2,6)=RESHAPE((/1,4, 2,4, 3,4, 2,3, 3,1, 1,2/),(/2,6/)) !< Tetrahedron edge list
 INTEGER(i4), PARAMETER :: tet_fc(3,4)=RESHAPE((/2,3,4,3,1,4,1,2,4,1,2,3/),(/3,4/)) !< Tetrahedron face list
@@ -68,10 +76,6 @@ INTEGER(i4), PARAMETER :: tri_ed(2,3)=RESHAPE((/3,2,1,3,2,1/),(/2,3/)) !< Triang
 INTEGER(i4), PRIVATE, PARAMETER :: ho_find_nsteps=100 !< Maximum number of steps during high order find_cell
 REAL(r8), PRIVATE, PARAMETER :: ho_find_du=1.d-6 !< Step size used for jacobian eval during high order find_cell
 REAL(r8), PRIVATE, PARAMETER :: ho_find_tol=1.d-6 !< Convergence tolerance for high order find_cell
-CLASS(oft_tetmesh), PRIVATE, POINTER :: active_mesh => NULL() !< Active mesh for high order find_cell
-INTEGER(i4), PRIVATE :: active_cell = 0 !< Active cell for high order find_cell
-REAL(r8), PRIVATE :: active_pt(3) = 0.d0 !< Active point for high order find_cell
-!$omp threadprivate(active_mesh,active_cell,active_pt)
 CONTAINS
 !------------------------------------------------------------------------------
 !> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)
@@ -410,9 +414,9 @@ epsfcn = ho_find_du
 nprint = 0
 ldfjac = nerr
 !---
-active_mesh=>self
-active_pt=pt
-active_cell=i
+active_targets%mesh=>self
+active_targets%pt=pt
+active_targets%cell=i
 uv=1.d0/4.d0
 !---
 call lmdif(tm_findcell_error,nerr,neq,uv,error, &
@@ -421,6 +425,7 @@ call lmdif(tm_findcell_error,nerr,neq,uv,error, &
 !IF(info>4)WRITE(*,*)'High-order find failed',i,info,nfev
 f(1:3)=uv; f(4)=1.d0-SUM(uv)
 end function tetmesh_phys2logho
+end subroutine tetmesh_phys2log
 !------------------------------------------------------------------------------
 !> Evalute the error between a logical point and the current active point
 !!
@@ -435,10 +440,9 @@ real(r8), intent(out) :: err(m) !< Error vector between current and desired poin
 integer(i4), intent(inout) :: iflag !< Unused flag
 real(r8) :: pt(3),f(4)
 f(1:3)=uv; f(4)=1.d0-SUM(uv)
-pt=tetmesh_log2phys(active_mesh,active_cell,f)
-err=active_pt-pt
+pt=tetmesh_log2phys(active_targets%mesh,active_targets%cell,f)
+err=active_targets%pt-pt
 end subroutine tm_findcell_error
-end subroutine tetmesh_phys2log
 !---------------------------------------------------------------------------------
 !> Compute the spatial jacobian matrix and its determinant for a given cell at a given logical position
 !---------------------------------------------------------------------------------
