@@ -568,14 +568,6 @@ def validate_mode(drive_exp,result_exp):
             print("  Expected = {0}".format(result_exp[i]))
             print("  Actual =   {0}".format(result_amps[i]))
             result_val = False
-
-    run_files = [f for f in os.listdir('.') if f.endswith('.rst') or f.endswith('.xmf')]
-    for file in run_files:
-        os.remove(file)
-        
-    save_files = [f for f in os.listdir('.') if f.startswith('mesh') or f.startswith('vector') or f.startswith('scalar') or f.startswith('dump.dat')]
-    for file in save_files:
-        os.remove(file)
     return result_val
 
 
@@ -601,6 +593,13 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
     if np.linalg.norm(abs(sigs_mnmodes_2D_Hamada-interface.fft2(interface.get_B_mesh(t),hamada_dphi=delta_phi)[0]),np.inf)>tol:
         print(f"FAILED: 2D Hamada Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
         result_val = False
+    run_files = [f for f in os.listdir('.') if f.endswith('.rst') or f.endswith('.xmf') or f.endswith('.loc') or f.endswith('.hist')]
+    for file in run_files:
+        os.remove(file)
+        
+    save_files = [f for f in os.listdir('.') if f.startswith('mesh') or f.startswith('vector') or f.startswith('scalar') or f.startswith('dump.dat')]
+    for file in save_files:
+        os.remove(file)
     return result_val
 
 #============================================================================
