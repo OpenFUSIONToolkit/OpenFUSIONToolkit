@@ -52,7 +52,7 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
         else:
             return True
     if errcode != 0:
-        if errcode == 143:
+        if (errcode == 143) or (errcode == 15):
             warnings.warn("WARNING: OFT exited with error code 143 (external SIGTERM)")
         else:
             print("FAILED: OFT exited with non-zero error code!")
