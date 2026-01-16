@@ -1853,7 +1853,7 @@ class ONURBS(package):
 
 class PETSC(package):
     def __init__(self, debug=False, with_openmp=False, with_superlu=False, with_superlu_dist=False, with_umfpack=False,
-                 with_mumps=False, version="3.24", comp_wrapper=False, shared_libs=None):
+                 with_mumps=False, version="3.23", comp_wrapper=False, shared_libs=None):
         self.name = "PETSC"
         self.display_name = "PETSc"
         self.version = version
@@ -2113,8 +2113,8 @@ group.add_argument("--petsc_superlu", default=0, type=int, choices=(0,1), help="
 group.add_argument("--petsc_superlu_dist", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU-DIST (default: 1)")
 group.add_argument("--petsc_mumps", default=0, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 0)")
 group.add_argument("--petsc_umfpack", default=1, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 1)")
-group.add_argument("--petsc_version", default="3.24", type=str,
-    help="Use different version of PETSc [3.20,3.21,3.22,3.23,2.24] (default: 3.24)")
+group.add_argument("--petsc_version", default="3.23", type=str,
+    help="Use different version of PETSc [3.20,3.21,3.22,3.23,2.24] (default: 3.23)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
 #
 options = parser.parse_args()
