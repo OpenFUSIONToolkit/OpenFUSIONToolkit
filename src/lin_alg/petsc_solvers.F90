@@ -32,15 +32,8 @@ USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, solver_delete
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, &
   oft_petsc_matrix, oft_petsc_matrix_cast
-#include "petsc/finclude/petscmat.h"
-#include "petsc/finclude/petscksp.h"
-#include "petsc/finclude/petscpc.h"
 USE petscmat
 USE petscksp
-USE petscpc
-#undef Vec
-#undef Mat
-#undef IS
 #if !defined(OFT_LU)
 #define OFT_LU 2
 #endif
@@ -53,6 +46,7 @@ USE petscpc
 #endif
 IMPLICIT NONE
 #include "local.h"
+#include "oft_petsc.h"
 !------------------------------------------------------------------------------
 !> PETSc factorization package information
 !------------------------------------------------------------------------------
@@ -252,7 +246,6 @@ CLASS(oft_petsc_precond), POINTER :: pre
 TYPE(tpc) :: pc
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
-self%solver=PETSC_NULL_KSP
 IF(.NOT.oft_petsc_matrix_cast(mat,self%A)) &
   CALL oft_abort('"A" is not a PETSc matrix object.','petsc_solver_setup',__FILE__)
 !---
@@ -276,7 +269,7 @@ ELSE
   self%dist=.TRUE.
 END IF
 CALL KSPSetOperators(self%solver,mat%M,pmat%M,ierr)
-CALL KSPSetInitialGuessNonzero(self%solver,.TRUE.,ierr) ! Default to non-zero guess
+CALL KSPSetInitialGuessNonzero(self%solver,PETSC_TRUE,ierr) ! Default to non-zero guess
 !---
 CALL KSPGetPC(self%solver,pc,ierr)
 CALL PCSetType(pc,PCNONE,ierr)
@@ -757,7 +750,6 @@ IF(.NOT.oft_petsc_vector_cast(gv,g))CALL oft_abort('"g" is not a PETSc vector ob
 self%cits=0
 !---
 IF(.NOT.self%initialized)THEN
-  self%solver=PETSC_NULL_KSP
   IF(.NOT.oft_petsc_matrix_cast(mat,self%A)) &
     CALL oft_abort('"A" is not a PETSc matrix object.','jacobi_solver_apply',__FILE__)
   !---
@@ -1141,7 +1133,6 @@ IF(.NOT.oft_petsc_vector_cast(uv,u))CALL oft_abort('"u" is not a PETSc vector ob
 IF(.NOT.oft_petsc_vector_cast(gv,g))CALL oft_abort('"g" is not a PETSc vector object.','pre_solver_apply',__FILE__)
 !---
 IF(.NOT.self%initialized)THEN
-  self%solver=PETSC_NULL_KSP
   IF(.NOT.oft_petsc_matrix_cast(mat,self%A)) &
     CALL oft_abort('"A" is not a PETSc matrix object.','pre_solver_apply',__FILE__)
   IF(mat%nr==mat%nrg.AND.mat%nc==mat%ncg)THEN
@@ -1252,7 +1243,8 @@ subroutine mgprecond_setup(self,pc,dist)
 CLASS(oft_petsc_mgprecond), INTENT(inout) :: self !< Solver object
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
 LOGICAL, INTENT(in) :: dist !< Flag for local vs distributed solve?
-TYPE(tksp) :: ksp,ksps(4)
+TYPE(tksp) :: ksp
+TYPE(tksp), POINTER :: ksps(:)
 TYPE(tpc) :: pc_local,sub_pc
 !---Local variables
 INTEGER(i4) :: i,j,n_local,ierr
@@ -1329,6 +1321,7 @@ DO i=1,self%nlevels
         !---
         CALL PCSetType(pc_local,PCASM,ierr)
         CALL PCSetUp(pc_local,ierr)
+        ALLOCATE(ksps(4))
         CALL PCASMGetSubKSP(pc_local,n_local,PETSC_NULL_INTEGER,ksps,ierr)
         DO j=1,n_local
           CALL KSPSetType(ksps(j),KSPPREONLY,ierr)
@@ -1337,6 +1330,7 @@ DO i=1,self%nlevels
           CALL set_solver_package(sub_pc,OFT_PETSC_LU,ierr)
         END DO
         ! CALL PCMGSetCyclesOnLevel(pc,i-1,1,ierr)
+        DEALLOCATE(ksps)
       CASE DEFAULT
         CALL oft_abort('Invalid smoother type.','mgprecond_setup',__FILE__)
     END SELECT
@@ -1354,7 +1348,7 @@ CLASS(oft_petsc_asprecond), INTENT(inout) :: self !< Solver object
 TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
 LOGICAL, INTENT(in) :: dist !< Flag for local vs distributed solve?
 TYPE(tpc) :: pc_local
-TYPE(tksp), ALLOCATABLE, DIMENSION(:) :: ksp
+TYPE(tksp), POINTER, DIMENSION(:) :: ksp
 TYPE(tis), ALLOCATABLE, DIMENSION(:) :: is_parts
 !---
 INTEGER(i4) :: i,ierr,n_local,loc_start,loc_end

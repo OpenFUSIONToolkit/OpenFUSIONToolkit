@@ -8,5 +8,5 @@ else
   GITBRANCH=unknown
   GITVERSION=unknown
 fi
-echo "#define GITBRANCH '${GITBRANCH}'"
-echo "#define GITVERSION '${GITVERSION}'"
+echo '#define GITBRANCH "'$GITBRANCH'"'
+echo '#define GITVERSION "'$GITVERSION'"'
