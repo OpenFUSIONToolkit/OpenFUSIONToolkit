@@ -75,12 +75,3 @@ def csv_read(file0, silent=True, rmv_lns=False, rmv_col=False, hdr_keys=False, s
     return csv_dict
 
 
-#Testing
-#==================================================================================
-#MAGX_dir = '/Users/istewart/Desktop/SPARC_Postdoc/MAGX_sensor_locations_03_10_23/'
-#MAGX_dict = csv_read(file0=MAGX_dir+'MAGX_EFIT_RZ.tsv', silent=True, rmv_lns=1, hdr_keys=False, delim='\t')
-
-#Run_path = '/Users/istewart/Desktop/EFIT_Work/efit-txcorp/sparc_efit/430221_FGSrun'+\
-#str(121)+'/FGSrun121'+'_analysis_ext.csv'
-#rundict = csv_read(file0=Run_path, silent=True, rmv_lns=0, hdr_keys=True)
-
