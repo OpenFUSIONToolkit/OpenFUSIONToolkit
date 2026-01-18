@@ -10,7 +10,6 @@ import h5py
 import xml.etree.ElementTree as ET
 import pyvista 
 from collections import OrderedDict
-from csv_reader import csv_read
 from . import jam_functions
 from . import filaments
 pyvista.set_jupyter_backend('static') # Comment to enable interactive plots

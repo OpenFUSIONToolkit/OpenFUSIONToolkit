@@ -5,7 +5,6 @@ import pandas as pd
 import os
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
-from csv_reader import csv_read
 from collections import OrderedDict
 
 # home_dir = os.path.expanduser("~")
