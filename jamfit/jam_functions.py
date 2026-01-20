@@ -151,45 +151,6 @@ def read_points_mag(file_path, sensor_names = None):
     return points
 # adds only polodial sensors currently, returns a sensor object as well as sensor arrays for plotting 
 
-## OLD FUNCTION - DELETE LATER 
-# def add_DIIID_sensors(total_sensors, flux_enable = False, mirnov_enable = True):
-#     sensors = [] 
-#     plot_sensors = [] 
-#     plot_sensors_flux = {}  
-#     orientations = [] 
-#     index = 0
-#     tor_angle = 322
-#     for sensor in (total_sensors):
-#         if sensor[0].startswith("P"):
-#             name, R, z = sensor
-#             if flux_enable: 
-#                 sensors.append(circular_flux_loop(R,z,name))
-#             theta = np.linspace(0.0,2.0*np.pi,180)
-#             x = np.array(R*np.cos(theta))
-#             y = np.array(R*np.sin(theta)) 
-#             z_plot = z*np.ones(len(y)) 
-#             plot_sensors_flux[name] = {"x": x, "y": y, "z": z_plot}
-#             index += 1
-#         elif sensor[0].startswith("M"):
-#             name, R, z, gamma = sensor
-#             position = np.array([R*np.cos(tor_angle*np.pi/180), R*np.sin(tor_angle*np.pi/180), z]) 
-#             nx = np.cos(gamma*np.pi/180) 
-#             ny = 0 
-#             nz = np.sin(gamma*np.pi/180)
-#             cosphi = np.cos(tor_angle*np.pi/180)
-#             sinphi = np.sin(tor_angle*np.pi/180) 
-#             #orientation = np.array([nx*cosphi - ny*sinphi, nx*sinphi - ny*cosphi, nz]) 
-
-#             orientation = np.array([nx*cosphi - ny*sinphi, nx*sinphi + ny*cosphi, nz]) 
-
-#             if mirnov_enable: 
-#                 sensors.append(Mirnov(position, orientation,name))
-#             plot_sensors.append(position) 
-#             orientations.append(orientation) 
-#             index +=1
-
-#     return sensors, np.array(plot_sensors), np.array(orientations), plot_sensors_flux
-
 def add_DIIID_sensors(magnetics_csv, all_sensors_dict): 
         """
         Reads a CSV of magnetic sensor locations and creates Mirnov and flux loop sensors.

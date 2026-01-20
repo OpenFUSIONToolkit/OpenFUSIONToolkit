@@ -1,4 +1,5 @@
 ## IMPORTING EXTERNAL LIBRARIES ##
+from tabnanny import verbose
 import time
 import numpy as np
 import sys
@@ -65,11 +66,12 @@ class Jamfit():
             print("No sensors have been set up yet. Mutual inductance matricies have not been computed.")
         print('Jamfit setup complete.')
 
-    def load_synthetic_data(self, time_array, num_fil_points, coil_current_array, nsteps, intial_r0, intial_z0, totalip, sigma_r, sigma_z, R, Z, num_eigs, verbose = False):
+    def load_synthetic_data(self, time_array, num_fil_points, coil_current_array, nsteps, intial_r0, intial_z0, totalip, sigma_r, sigma_z, R, Z, num_eigs = 50, verbose = False):
         #assuming that time_array is in milliseconds
         # setting up time parameters
         timeoffset = time_array[0]/1E3 # this needs to be in seconds 
-        dt = ((time_array[-1]/1000) - timeoffset)/nsteps # change in time for run_td
+        self.dt = ((time_array[-1]/1000) - timeoffset)/nsteps # change in time for run_td
+        self.nsteps = nsteps
         # setting up coils 
         coil_time = ((time_array/1E3) - timeoffset).reshape(-1, 1)  #time array with time offset to start at 0
         coil_curr = np.hstack([coil_time, coil_current_array])
@@ -81,16 +83,43 @@ class Jamfit():
         high_res_time, total_current_high_res = jam_functions.interpolate_total_current(plasma_curr, nsteps, verbose = verbose)
         plasma_curr = plasma_curr[:, 1:] #removing time column for thincurr run
 
-        final_coil_currs = np.hstack((coil_curr, plasma_curr)) #getting final coil currents with plasma currents added on for run_td 
+        self.final_coil_currs = np.hstack((coil_curr, plasma_curr)) #getting final coil currents with plasma currents added on for run_td 
         self.torus.run_td(dt,nsteps,status_freq=10,coil_currs=final_coil_currs,sensor_obj=self.sensor_obj) 
-
 
         self.eig_vals, self.eig_vecs = self.torus.get_eigs(num_eigs,False)
         self.torus.plot_td(nsteps,compute_B=True,sensor_obj=self.sensor_obj)
+        _, self.Bc = self.torus.compute_Bmat(cache_file='HODLR_B.save') #mb abstract to user input defined named file? 
+        hist_file = histfile('floops.hist') # hist file is storing the sensor signals and their response in time
         print(f'Synthetic time dependent run complete and {num_eigs} eigenvalues computed.')
 
 
-    def create_reduced(self, num_modes):
+    def create_reduced(self, num_modes, reduced_filename, verbose = False):
+        torus_first_reduced = self.torus.build_reduced_model(self.eig_vecs, filename = 'first_reduced_model_temp.h5', sensor_obj=self.sensor_obj) ##user input 
+        sensors_measurement, currents = torus_first_reduced.run_td(self.dt,self.nsteps,self.final_coil_currs, status_freq=10)
+        temp_curr = currents['curr']
+        max_weights = [abs(temp_curr[:,i]).max() for i in range(temp_curr.shape[1])]
+        top_modenum_indices = sorted(range(len(max_weights)), key=lambda i: max_weights[i], reverse=True)[:num_modes]
+        eig_inds = []
+        weight_amplitude = [] 
+        if verbose:
+            fig, ax = plt.subplots(1, 1)
+
+        for i in range(temp_curr.shape[1]):
+            if i in top_modenum_indices:
+                eig_inds.append(i)
+                weight_amplitude.append(max_weights[i])
+                if verbose: 
+                    ax.semilogy(currents['time'], abs(currents['curr'][:, i]), label=f'Mode {i}')
+                    print(f'Saved mode {i} has max weight {max_weights[i]}')
+            else:
+                if verbose: 
+                    ax.semilogy(currents['time'], abs(currents['curr'][:, i]), color='gray', alpha=0.3)
+        final_reduced_torus = self.torus.build_reduced_model(self.eig_vecs[eig_inds,:], filename = reduced_filename, compute_B=False, sensor_obj=self.sensor_obj)
+        print(f"Reduced model created with {num_modes} modes")
+        return final_reduced_torus
+
+
+
         
 
         # this creates the reduced thincurr object 
@@ -98,8 +127,12 @@ class Jamfit():
 
     def add_freq_eigenvalues(self, specific_fil_array): 
         from IPython.display import clear_output
+        freq_count = 0
+        if self.eig_vecs is None:
+            raise ValueError("Eigenvalues and eigenvectors have not been computed yet.")
+        eig_vecs_wfreq = np.copy(self.eig_vecs)
         for i in specific_fil_array:
-            target_fil = numecoils+numfcoils+i 
+            target_fil = i 
             Mcoil = self.torus.compute_Mcoil()
             driver = np.zeros((2,self.torus.nelems))
             driver[0,:] = Mcoil[target_fil,:]
@@ -107,7 +140,8 @@ class Jamfit():
             eig_vecs_wfreq = np.concatenate((eig_vecs_wfreq, result[:1,:]), axis = 0) 
             clear_output(wait=True)
             freq_count+=1 
-        return 
+        self.eig_vecs = eig_vecs_wfreq
+        return "computed frequency response eigenvalues"
     
 
     def plot_sensors(self, sensor_points_mirnov_array, sensor_points_flux, orientations):
