@@ -119,12 +119,6 @@ class Jamfit():
         return final_reduced_torus
 
 
-
-        
-
-        # this creates the reduced thincurr object 
-        print('working on it')
-
     def add_freq_eigenvalues(self, specific_fil_array): 
         from IPython.display import clear_output
         freq_count = 0
