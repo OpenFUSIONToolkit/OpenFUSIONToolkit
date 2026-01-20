@@ -44,6 +44,8 @@ def getcoilnames(xml):
         if name is not None: 
             namelist.append(name)
     return namelist
+
+
 # applies a gassuian distribution based on an inputed ip list and spreads it with a sigmas distrubtion and centers it at r0 and z0 
 # returns lisst of coil currents for filaments where the first index of every row is the time 
 def setup_synthetic_current(timepoints, ip_list, sigma_r, sigma_z, r0, z0, rmesh, zmesh):

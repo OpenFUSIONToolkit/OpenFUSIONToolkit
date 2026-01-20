@@ -16,7 +16,7 @@ from . import filaments
 pyvista.set_jupyter_backend('static') # Comment to enable interactive plots
 
 sys.path.insert(0, '/Applications/OpenFUSIONToolkit/python')
-from OpenFUSIONToolkit.ThinCurr import ThinCurr
+from OpenFUSIONToolkit.ThinCurr import ThinCurr, ThinCurr_reduced
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.ThinCurr.sensor import Mirnov, save_sensors, circular_flux_loop
 from OpenFUSIONToolkit.util import mu0
@@ -44,6 +44,7 @@ class Jamfit():
         self.xml_file = xml_file
         self.thincurr_meshfile = thincurr_meshfile
         self.tokamaker_meshfile = tokamaker_meshfile
+        self.reduced_created_flag = False 
 
     def set_xml(self, xml_file):
         self.xml_file = xml_file
@@ -84,10 +85,10 @@ class Jamfit():
         plasma_curr = plasma_curr[:, 1:] #removing time column for thincurr run
 
         self.final_coil_currs = np.hstack((coil_curr, plasma_curr)) #getting final coil currents with plasma currents added on for run_td 
-        self.torus.run_td(dt,nsteps,status_freq=10,coil_currs=final_coil_currs,sensor_obj=self.sensor_obj) 
+        self.torus.run_td(self.dt,self.nsteps,status_freq=10,coil_currs=self.final_coil_currs,sensor_obj=self.sensor_obj) 
 
         self.eig_vals, self.eig_vecs = self.torus.get_eigs(num_eigs,False)
-        self.torus.plot_td(nsteps,compute_B=True,sensor_obj=self.sensor_obj)
+        self.torus.plot_td(self.nsteps,compute_B=True,sensor_obj=self.sensor_obj)
         _, self.Bc = self.torus.compute_Bmat(cache_file='HODLR_B.save') #mb abstract to user input defined named file? 
         hist_file = histfile('floops.hist') # hist file is storing the sensor signals and their response in time
         print(f'Synthetic time dependent run complete and {num_eigs} eigenvalues computed.')
@@ -114,9 +115,10 @@ class Jamfit():
             else:
                 if verbose: 
                     ax.semilogy(currents['time'], abs(currents['curr'][:, i]), color='gray', alpha=0.3)
-        final_reduced_torus = self.torus.build_reduced_model(self.eig_vecs[eig_inds,:], filename = reduced_filename, compute_B=False, sensor_obj=self.sensor_obj)
+        self.reduced_torus = self.torus.build_reduced_model(self.eig_vecs[eig_inds,:], filename = reduced_filename, compute_B=False, sensor_obj=self.sensor_obj)
         print(f"Reduced model created with {num_modes} modes")
-        return final_reduced_torus
+        self.reduced_created_flag = True 
+        return self.reduced_torus
 
 
     def add_freq_eigenvalues(self, specific_fil_array): 
@@ -179,8 +181,15 @@ class Jamfit():
         p.add_mesh(arrows, cmap="turbo", scalar_bar_args={'title': "|J|", "vertical": True, "position_y":0.25, "position_x": 0.0})
         p.show()
 
+    def intialized_reduced_model(self, reduced_filename): 
+        self.torus_reduced = ThinCurr_reduced(reduced_filename) 
+        self.reduced_created_flag = True
+        return "Reduced model initialized from file."
 
-        
+    def run_reconstruction(self, PsiFull):
+        if not self.reduced_created_flag:
+            raise ValueError("Reduced model has not been created yet. Please create or intialize a reduced model before running reconstruction.")
+        return "working in progress"
 
 
 def solve_filaments_legacy(time, torus, PsiFull, total_current, num_coils, mag_time, ip_time, ip_weight, magnetics_weight, reg_factor_fil = 1.E-8, reg_factor_wall= 1.E-2):
