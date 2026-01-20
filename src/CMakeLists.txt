@@ -157,14 +157,8 @@ endif()
 if(OFT_BUILD_PYTHON)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
-# Use build runtime paths for install unless packaging
-if(OFT_PACKAGE_BUILD)
-  if(NOT APPLE)
-    set(CMAKE_INSTALL_RPATH $ORIGIN)
-  endif()
-else()
-  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-endif()
+# Always use build runtime paths for install (overriden by script when packaging)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 
 ########################
