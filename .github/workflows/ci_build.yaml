@@ -157,7 +157,6 @@ jobs:
         echo "ulimit -s unlimited" >> ${{ github.workspace }}/setup_env.sh
     
     - name: Check compilers
-      working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
         $CC --version
@@ -172,7 +171,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py', 'libs/compiler_id.txt') }}
+        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py', 'compiler_id.txt') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
