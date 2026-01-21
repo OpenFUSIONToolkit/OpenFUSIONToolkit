@@ -98,7 +98,7 @@ jobs:
               os: ubuntu-22.04,
               cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
               python: "python3",
-              mpi_build_flags: "--oblas_dynamic_arch --build_petsc=1 --petsc_version=3.20 --build_cmake=1"
+              mpi_build_flags: "--oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1"
             }
 
     steps:

@@ -23,9 +23,6 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr,
 #ifdef HAVE_PETSC
 USE petscvec
 USE petscmat
-#undef Mat
-#undef IS
-#undef Vec
 IMPLICIT NONE
 #include "local.h"
 private
@@ -36,7 +33,11 @@ type, public, extends(oft_vector) :: oft_petsc_vector
   TYPE(tvec) :: v !< PETSc vector object
   TYPE(tvec) :: vloc !< PETSc local vector object
   TYPE(tis) :: lis !< PETSc local to global mapping
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   TYPE(tvecscatter) :: get !< PETSc local to global scatter context
+#else
+  TYPE(tPetscSF) :: get !< PETSc local to global scatter context
+#endif
   LOGICAL :: loc_store = .FALSE. !< Flag indicating pending local->global sync
   LOGICAL :: loc_current = .FALSE. !< Flag indicating local/global vectors are consistent
 contains
@@ -117,7 +118,7 @@ end type oft_petsc_vector
 type, public, extends(oft_matrix) :: oft_petsc_matrix
   TYPE(tmat) :: M !< PETSc matrix object
   TYPE(tvec) :: Md !< PETSc matrix diagonal object (unused)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<21)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
   INTEGER(petsc_addr) :: r_lis !< PETSc Local to Global mapping for rows
   INTEGER(petsc_addr) :: c_lis !< PETSc Local to Global mapping for columns
 #else
@@ -315,11 +316,19 @@ IF(PRESENT(iblock))THEN
   !---
   nslice=self%map(iblock)%nslice
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(nslice))
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecGetArrayF90(self%v,x_array,ierr)
+#else
+  call VecGetArray(self%v,x_array,ierr)
+#endif
   DO i=1,nslice
     array(i)=x_array(self%map(iblock)%soffset+i)
   END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecRestoreArrayF90(self%v,x_array,ierr)
+#else
+  call VecRestoreArray(self%v,x_array,ierr)
+#endif
   !CALL VecScatterBegin(self%get,self%v,self%vloc,INSERT_VALUES,SCATTER_FORWARD)
   !CALL VecGetValues(self%v,nslice,self%map(iblock)%slice,array,ierr)
   !call VecGetArray(self%vloc,x_array,i_x,ierr)
@@ -330,7 +339,11 @@ ELSE
     nslice=nslice+self%map(i)%nslice
   END DO
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(nslice))
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecGetArrayF90(self%v,x_array,ierr)
+#else
+  call VecGetArray(self%v,x_array,ierr)
+#endif
   nslice=0
   do i=1,self%nblocks
     !CALL VecGetValues(self%v,self%map(i)%nslice, &
@@ -340,7 +353,11 @@ ELSE
     END DO
     nslice=nslice+self%map(i)%nslice
   end do
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecRestoreArrayF90(self%v,x_array,ierr)
+#else
+  call VecRestoreArray(self%v,x_array,ierr)
+#endif
 END IF
 DEBUG_STACK_POP
 end subroutine vec_get_slice
@@ -362,18 +379,30 @@ IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_restore_slice',__FILE__)
   !---
   nslice=self%map(iblock)%nslice
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecGetArrayF90(self%v,x_array,ierr)
+#else
+  call VecGetArray(self%v,x_array,ierr)
+#endif
   DO i=1,nslice
     x_array(self%map(iblock)%soffset+i)=array(i)
   END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecRestoreArrayF90(self%v,x_array,ierr)
+#else
+  call VecRestoreArray(self%v,x_array,ierr)
+#endif
 ELSE
   !---
   nslice=0
   DO i=1,self%nblocks
     nslice=nslice+self%map(i)%nslice
   END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecGetArrayF90(self%v,x_array,ierr)
+#else
+  call VecGetArray(self%v,x_array,ierr)
+#endif
   nslice=0
   do i=1,self%nblocks
     DO j=1,self%map(i)%nslice
@@ -381,7 +410,11 @@ ELSE
     END DO
     nslice=nslice+self%map(i)%nslice
   end do
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecRestoreArrayF90(self%v,x_array,ierr)
+#else
+  call VecRestoreArray(self%v,x_array,ierr)
+#endif
 END IF
 DEBUG_STACK_POP
 end subroutine vec_restore_slice
@@ -408,19 +441,35 @@ IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_get_local',__FILE__)
   !---
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%map(iblock)%n))
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecGetArrayF90(self%vloc,x_array,ierr)
+#else
+  call VecGetArray(self%vloc,x_array,ierr)
+#endif
   DO i=1,self%map(iblock)%n
    array(i)=x_array(self%map(iblock)%offset+i)
   END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecRestoreArrayF90(self%vloc,x_array,ierr)
+#else
+  call VecRestoreArray(self%vloc,x_array,ierr)
+#endif
 ELSE
   !---
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%n))
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecGetArrayF90(self%vloc,x_array,ierr)
+#else
+  call VecGetArray(self%vloc,x_array,ierr)
+#endif
   DO i=1,self%n
     array(i)=x_array(i)
   END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
   call VecRestoreArrayF90(self%vloc,x_array,ierr)
+#else
+  call VecRestoreArray(self%vloc,x_array,ierr)
+#endif
 END IF
 DEBUG_STACK_POP
 end subroutine vec_get_local
@@ -451,12 +500,20 @@ IF(PRESENT(iblock))THEN
   !inds=(/(self%map(iblock)%offset+i,i=1,self%map(iblock)%n)/)
   !CALL VecSetValues(self%vloc,self%map(iblock)%n,inds,array,ierr)
   IF(do_add)THEN
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
     call VecGetArrayF90(self%vloc,x_array,ierr)
+#else
+    call VecGetArray(self%vloc,x_array,ierr)
+#endif
     IF(.NOT.self%loc_store)x_array=0.d0
     DO i=1,self%map(iblock)%n
      x_array(self%map(iblock)%offset+i)=array(i)
     END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
     call VecRestoreArrayF90(self%vloc,x_array,ierr)
+#else
+    call VecRestoreArray(self%vloc,x_array,ierr)
+#endif
     !DEALLOCATE(x_array)
     IF(.NOT.do_wait)THEN
       CALL VecScatterBegin(self%get,self%vloc,self%v,ADD_VALUES,SCATTER_REVERSE,ierr)
@@ -466,7 +523,11 @@ IF(PRESENT(iblock))THEN
       self%loc_store=.TRUE.
     END IF
   ELSE
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
     call VecGetArrayF90(self%v,x_array,ierr)
+#else
+    call VecGetArray(self%v,x_array,ierr)
+#endif
     nslice=0
     DO k=1,iblock-1
       nslice=nslice+self%map(k)%nslice
@@ -475,7 +536,11 @@ IF(PRESENT(iblock))THEN
       j=self%map(iblock)%slice(i)
       x_array(nslice+i)=array(j)
     END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
     call VecRestoreArrayF90(self%v,x_array,ierr)
+#else
+    call VecRestoreArray(self%v,x_array,ierr)
+#endif
   END IF
 !  call VecRestoreArrayF90(self%vloc,x_array,ierr)
 !  CALL VecScatterBegin(self%get,self%vloc,self%v,insert_flag,SCATTER_REVERSE,ierr)
@@ -488,16 +553,28 @@ ELSE
   !CALL VecSetValues(self%vloc,self%n,inds,array,ierr)
   !call VecGetArrayF90(self%vloc,x_array,ierr)
   IF(do_add)THEN
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
     call VecGetArrayF90(self%vloc,x_array,ierr)
+#else
+    call VecGetArray(self%vloc,x_array,ierr)
+#endif
     x_array=0.d0
     DO i=1,self%n
       x_array(i)=array(i)
     END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
     call VecRestoreArrayF90(self%vloc,x_array,ierr)
+#else
+    call VecRestoreArray(self%vloc,x_array,ierr)
+#endif
     CALL VecScatterBegin(self%get,self%vloc,self%v,ADD_VALUES,SCATTER_REVERSE,ierr)
     CALL VecScatterEnd(self%get,self%vloc,self%v,ADD_VALUES,SCATTER_REVERSE,ierr)
   ELSE
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
     call VecGetArrayF90(self%v,x_array,ierr)
+#else
+    call VecGetArray(self%v,x_array,ierr)
+#endif
     nslice=0
     DO k=1,self%nblocks
       DO i=1,self%map(k)%nslice
@@ -506,7 +583,11 @@ ELSE
       END DO
       nslice=nslice+self%map(k)%nslice
     END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
     call VecRestoreArrayF90(self%v,x_array,ierr)
+#else
+    call VecRestoreArray(self%v,x_array,ierr)
+#endif
   END IF
 !  call VecRestoreArrayF90(self%vloc,x_array,ierr)
 !  CALL VecScatterBegin(self%get,self%vloc,self%v,insert_flag,SCATTER_REVERSE,ierr)

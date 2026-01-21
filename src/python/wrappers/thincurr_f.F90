@@ -155,6 +155,8 @@ ELSE
   ELSE
     tw_obj%mesh%reg=1
   END IF
+  i=MAXVAL(tw_obj%mesh%reg)
+  tw_obj%mesh%nreg=oft_mpi_max(i)
   !
   IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
     ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
