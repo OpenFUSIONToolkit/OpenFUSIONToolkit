@@ -159,12 +159,10 @@ jobs:
     - name: Check compilers
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        $CC --version
-        $CXX --version
-        $FC --version
         $CC --version | head -1 > compiler_id.txt
         $CXX --version | head -1 >> compiler_id.txt
         $FC --version | head -1 >> compiler_id.txt
+        cat compiler_id.txt
 
     - name: Cache external libraries
       id: cache-ext-libs
