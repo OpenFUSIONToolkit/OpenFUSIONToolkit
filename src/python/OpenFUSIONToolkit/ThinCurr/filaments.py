@@ -16,6 +16,24 @@ import inspect
 # XML utilities
 # ===============================
 def setup_filaments(resolution, fil_points_txt, xml_in, xml_out,  filename = None, tolerance = 1e-1, jsonfile = None, verbose = False, oft_env = None, tokamaker_meshfile = None): 
+    ''' ! Sets up the filament points in an existing oft xml file.
+    @param resolution : int, number of filaments in R and Z direction (resolution x
+    resolution grid)
+    @param fil_points_txt : string, path to temporary text file to store filament points
+    @param xml_in : string, path to input oft xml file
+    @param xml_out : string, path to output oft xml file with filaments added
+    @param filename : string (optional), path to text file containing filament points           
+    @param tolerance : float (optional), minimum distance from filament to boundary
+    @param jsonfile : string (optional), path to json file containing cross section polygon
+    @param verbose : bool (optional), if True, plot the filaments and limiter
+    @param oft_env : string (optional), path to OpenFUSIONToolkit environment for plotting
+    @param tokamaker_meshfile : string (optional), path to tokamaker mesh
+    @returns points : array of (r, z) filament points
+    @returns xml_out : string, path to output oft xml file with filaments added
+    @returns R : array of R filament points
+    @returns Z : array of Z filament points
+    '''
+    
     if jsonfile is None:
         raise ValueError("jsonfile must be provided to construct filaments")
     R, Z = construct_filaments_from_json(jsonfile, resolution, resolution, tol=tolerance)
@@ -58,6 +76,10 @@ def setup_filaments(resolution, fil_points_txt, xml_in, xml_out,  filename = Non
     return points, xml_out, R, Z
     
 def get_fil_points(file):
+    ''' ! Reads in a text file of filament points
+    @param file : string, path to text file
+    @returns points : list of (r, z) tuples
+    '''
     points = []
     with open(file, "r") as f:
         for line in f:
@@ -114,6 +136,13 @@ def point_to_segment_dist(px, py, x0, y0, x1, y1):
 # ===============================
 
 def construct_filaments(meshfile, jsonfile, rows, columns): # make sure the resolution matches the g file resolution
+    """ ! Constructs a grid of filaments inside a cross section polygon
+    @param meshfile : str, path to tokamaker .h5 mesh file
+    @param jsonfile : str, path to JSON file containing cross-section polygon under key 'limiter'. Can be made from tokamaker. 
+    @param rows : int, number of filaments in R direction
+    @param columns : int, number of filaments in Z direction
+    @returns R_filaments, Z_filaments : arrays of float
+    """
     R,Z = get_cross_section(meshfile, jsonfile) # grabs the cross section
     R_min, R_max = R.min(), R.max() # identifies the min and max r and z values (getting the size of the cross section) 
     Z_min, Z_max = Z.min(), Z.max() 
@@ -135,8 +164,7 @@ def construct_filaments(meshfile, jsonfile, rows, columns): # make sure the reso
 
 def construct_filaments_from_json(jsonfile, nR=10, nZ=10, tol=1e-1): 
     """ !   Path to JSON file containing cross-section polygon under key 'limiter'. Can be made from tokamaker. 
-    Generate a grid of (R,Z) points inside a cross-section polygon
-    and at least `tol` away from the boundary.
+    Generate a grid of (R,Z) points inside a cross-section polygon and at least `tol` away from the boundary.
     @param jsonfile : str
     @returns R_points, Z_points : arrays of float
     """
@@ -226,6 +254,10 @@ class Icoil:
             self.radius = radius
             self.Z = Z 
 
+
+# ===============================
+# Create XML function 
+# ===============================
 
 def create_xml(path, icoils, vcoils, resistivities): 
     '''! Function solves filament and wall currents over time 
