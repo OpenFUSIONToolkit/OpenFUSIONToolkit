@@ -113,10 +113,11 @@ jobs:
         coverage xml
     
     - name: Upload coverage report to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         files: libs/build_release/cleaned_coverage.txt,libs/build_release/tests/coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }}
+        report_type: coverage
         disable_search: true
         plugin: noop
         verbose: true

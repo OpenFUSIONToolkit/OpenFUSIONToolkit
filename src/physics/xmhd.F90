@@ -3979,7 +3979,7 @@ IF(ASSOCIATED(xmhd_lag_rop))THEN
   DO k=1,5
     tmp=0.d0
     vtmp=0.d0
-    !$omp simd reduction(+:tmp,vtmp)
+    !!$omp simd reduction(+:tmp,vtmp)
     DO jc=1,self%lag_rep%nce
       tmp = tmp + tloc%lf(jc,k)*xmhd_lag_rop(jc)
       vtmp = vtmp + tloc%lf(jc,k)*xmhd_lag_gop(:,jc)
@@ -3988,32 +3988,32 @@ IF(ASSOCIATED(xmhd_lag_rop))THEN
     dlf0(:,k)=vtmp
   END DO
   IF(xmhd_two_temp)THEN
-    !$omp simd reduction(+:Te,dTe)
+    !!$omp simd reduction(+:Te,dTe)
     DO jc=1,self%lag_rep%nce
       Te = Te + tloc%Te(jc)*xmhd_lag_rop(jc)
       dTe = dTe + tloc%Te(jc)*xmhd_lag_gop(:,jc)
     END DO
   END IF
   IF(n2_ind>0)THEN
-    !$omp simd reduction(+:N2,dN2)
+    !!$omp simd reduction(+:N2,dN2)
     DO jc=1,self%lag_rep%nce
       N2 = N2 + tloc%N2(jc)*xmhd_lag_rop(jc)
       dN2 = dN2 + tloc%N2(jc)*xmhd_lag_gop(:,jc)
     END DO
   END IF
   !---Reconstruct magnetic field
-  !$omp simd reduction(+:b0)
+  !!$omp simd reduction(+:b0)
   do jc=1,self%grad_rep%nce
     b0 = b0 + tloc%bgrad(jc)*xmhd_hgrad_rop(:,jc)
   end do
   !---Reconstruct magnetic field and current density
-  !$omp simd reduction(+:b0,j0)
+  !!$omp simd reduction(+:b0,j0)
   do jc=1,self%curl_rep%nce
     b0 = b0 + tloc%bcurl(jc)*xmhd_hcurl_rop(:,jc)
     j0 = j0 + tloc%bcurl(jc)*xmhd_hcurl_cop(:,jc)
   end do
   IF(j2_ind>0)THEN
-    !$omp simd reduction(+:J2,J2c)
+    !!$omp simd reduction(+:J2,J2c)
     do jc=1,self%curl_rep%nce
       J2 = J2 + tloc%J2(jc)*xmhd_hcurl_rop(:,jc)
       J2c = J2c + tloc%J2(jc)*xmhd_hcurl_cop(:,jc)
@@ -4027,7 +4027,7 @@ ELSE
   DO k=1,5
     tmp=0.d0
     vtmp=0.d0
-    !$omp simd reduction(+:tmp,vtmp)
+    !!$omp simd reduction(+:tmp,vtmp)
     DO jc=1,self%lag_rep%nce
       tmp = tmp + tloc%lf(jc,k)*lag_rop(jc)
       vtmp = vtmp + tloc%lf(jc,k)*lag_gop(:,jc)
@@ -4036,14 +4036,14 @@ ELSE
     dlf0(:,k)=vtmp
   END DO
   IF(xmhd_two_temp)THEN
-    !$omp simd reduction(+:Te,dTe)
+    !!$omp simd reduction(+:Te,dTe)
     DO jc=1,self%lag_rep%nce
       Te = Te + tloc%Te(jc)*lag_rop(jc)
       dTe = dTe + tloc%Te(jc)*lag_gop(:,jc)
     END DO
   END IF
   IF(n2_ind>0)THEN
-    !$omp simd reduction(+:N2,dN2)
+    !!$omp simd reduction(+:N2,dN2)
     DO jc=1,self%lag_rep%nce
       N2 = N2 + tloc%N2(jc)*lag_rop(jc)
       dN2 = dN2 + tloc%N2(jc)*lag_gop(:,jc)
@@ -4054,7 +4054,7 @@ ELSE
   ALLOCATE(hgrad_rop(3,self%grad_rep%nce))
   CALL oft_h1_geval_all(self%grad_rep,cell,f,hgrad_rop,gop)
   !---Reconstruct magnetic field
-  !$omp simd reduction(+:b0)
+  !!$omp simd reduction(+:b0)
   do jc=1,self%grad_rep%nce
     b0 = b0 + tloc%bgrad(jc)*hgrad_rop(:,jc)
   end do
@@ -4065,13 +4065,13 @@ ELSE
   CALL oft_hcurl_eval_all(self%curl_rep,cell,f,hcurl_rop,gop)
   CALL oft_hcurl_ceval_all(self%curl_rep,cell,f,hcurl_cop,cgop)
   !---Reconstruct magnetic field and current density
-  !$omp simd reduction(+:b0,j0)
+  !!$omp simd reduction(+:b0,j0)
   do jc=1,self%curl_rep%nce
     b0 = b0 + tloc%bcurl(jc)*hcurl_rop(:,jc)
     j0 = j0 + tloc%bcurl(jc)*hcurl_cop(:,jc)
   end do
   IF(j2_ind>0)THEN
-    !$omp simd reduction(+:J2,J2c)
+    !!$omp simd reduction(+:J2,J2c)
     do jc=1,self%curl_rep%nce
       J2 = J2 + tloc%J2(jc)*hcurl_rop(:,jc)
       J2c = J2c + tloc%J2(jc)*hcurl_cop(:,jc)
