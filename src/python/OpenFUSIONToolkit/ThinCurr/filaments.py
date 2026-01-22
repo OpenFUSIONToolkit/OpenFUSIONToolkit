@@ -2,6 +2,7 @@ import json
 import numpy
 import h5py
 from matplotlib.path import Path
+import matplotlib as plt
 import xml.etree.ElementTree as ET
 import sys
 import inspect
@@ -325,4 +326,54 @@ def create_xml(path, icoils, vcoils, resistivities):
             
 
 
-        
+# ===============================
+# Plasma filament utilities
+# =============================== 
+
+def setup_synthetic_current(timepoints, ip_list, sigma_r, sigma_z, r0, z0, rmesh, zmesh):
+    coil_curr = [] 
+    for i in range(len(timepoints)): 
+        gaussian_raw = numpy.exp(-((rmesh - r0[i])**2 / (2 * sigma_r**2) + (zmesh - z0[i])**2 / (2 * sigma_z**2)))
+        gaussian_values = ip_list[i]*(gaussian_raw/numpy.sum(gaussian_raw))
+        coil_curr.append(gaussian_values) 
+    coil_curr = numpy.array(coil_curr)             
+    time_column = numpy.array(timepoints).reshape(-1, 1)
+    coil_curr = numpy.hstack((time_column, coil_curr))
+    return coil_curr
+
+# returns the total sum of all filament currents given an inputed filament current array in time 
+def interpolate_total_current(coil_currs, nsteps, verbose = False):
+    from scipy.interpolate import interp1d
+    """! Interpolates total current from coil sensor data to a higher-resolution time grid.
+    @param coil_currs: np.ndarray, shape (ntimes, nsensors+1) irst column is time, remaining columns are sensor currents.
+    @param nsteps: int Number of high-resolution steps between the first and last time.
+    @returns high_res_time: np.ndarray
+    @returns total_current_high_res: np.ndarray
+    """
+    # Separate time and sensor currents
+    times = coil_currs[:, 0]
+    sensor_currents = coil_currs[:, 1:]
+
+    # Generate high-resolution time grid
+    high_res_time = numpy.linspace(times[0], times[-1], nsteps + 1)
+
+    # Interpolate each sensor's current to high-res time
+    interpolated_currents = numpy.array([
+        interp1d(times, sensor, kind='linear')(high_res_time)
+        for sensor in sensor_currents.T
+    ]).T  # shape: (nsteps+1, nsensors)
+
+    # Sum currents across sensors at each high-res time step
+    total_current_high_res = numpy.sum(interpolated_currents, axis=1)
+
+    # Plotting
+    if verbose:
+        plt.figure(figsize=(8, 5))
+        plt.scatter(times, numpy.sum(sensor_currents, axis=1), color='red', label='Original Data')
+        plt.plot(high_res_time, total_current_high_res, color='blue', label='Interpolated Total Current')
+        plt.xlabel('Time [s]')
+        plt.ylabel('Total Current [A]')
+        plt.title('Total Current vs Time with Higher Resolution')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
