@@ -4,23 +4,25 @@ set( OFT_PY_HELPER_MODS
   tokamaker_fit.py
 )
 foreach( file ${OFT_PY_HELPER_MODS} )
+  configure_file( ${file} ${CMAKE_BINARY_DIR}/python/${file} COPYONLY )
   install(FILES ${file} DESTINATION python COMPONENT app)
 endforeach()
 
-# Scripts
-install(PROGRAMS build_xdmf.py DESTINATION python COMPONENT app)
-set( OFT_PYTHON_BINS build_xdmf.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
-install(PROGRAMS build_xdmf-legacy.py DESTINATION python COMPONENT app)
-set( OFT_PYTHON_BINS build_xdmf-legacy.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
-install(PROGRAMS convert_hist.py DESTINATION python COMPONENT app)
-set( OFT_PYTHON_BINS convert_hist.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
-install(PROGRAMS convert_cubit.py DESTINATION python COMPONENT app)
-set( OFT_PYTHON_BINS convert_cubit.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
-install(PROGRAMS convert_gmsh.py DESTINATION python COMPONENT app)
-set( OFT_PYTHON_BINS convert_gmsh.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
-install(PROGRAMS scripts/plot_mug_hist.py DESTINATION python COMPONENT app)
-set( OFT_PYTHON_BINS plot_mug_hist.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
-install(PROGRAMS scripts/plot_tokamaker_psi.py DESTINATION python COMPONENT app)
-set( OFT_PYTHON_BINS plot_tokamaker_psi.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
-install(PROGRAMS scripts/ThinCurr_compute_holes.py DESTINATION python COMPONENT app)
-set( OFT_PYTHON_BINS ThinCurr_compute_holes.py ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
+# Python scripts
+set( OFT_PY_BINS
+  build_xdmf.py
+  build_xdmf-legacy.py
+  convert_hist.py
+  convert_cubit.py
+  convert_gmsh.py
+  scripts/plot_mug_hist.py
+  scripts/plot_tokamaker_psi.py
+  scripts/ThinCurr_compute_holes.py
+)
+
+foreach( path ${OFT_PY_BINS} )
+  install(PROGRAMS ${path} DESTINATION python COMPONENT app)
+  get_filename_component(file "${path}" NAME)
+  set( OFT_PYTHON_BINS ${file} ${OFT_PYTHON_BINS} CACHE INTERNAL "package_python_binaries" )
+  configure_file( ${path} ${CMAKE_BINARY_DIR}/python/${file} COPYONLY )
+endforeach()

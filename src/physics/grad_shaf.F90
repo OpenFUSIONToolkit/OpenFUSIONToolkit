@@ -4040,7 +4040,7 @@ smesh=>self%fe_rep%mesh
 ALLOCATE(ncuts(smesh%np))
 ncuts=0
 psi_min=1.d99; psi_max=-1.d99
-!$omp parallel do simd private(loc_vals) reduction(min:psi_min) reduction(max:psi_max)
+!$omp parallel do private(loc_vals) reduction(min:psi_min) reduction(max:psi_max)
 DO i=1,smesh%nc
   ! IF(smesh%reg(i)/=1)CYCLE
   IF(self%saddle_cmask(i))CYCLE
