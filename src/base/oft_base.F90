@@ -37,7 +37,6 @@ IMPLICIT NONE
 #include "mpif.h"
 #endif
 #include "local.h"
-#include "git_info.h"
 !---MPI Type Aliases
 #ifdef HAVE_MPI
 #ifdef OFT_MPI_F08
@@ -175,6 +174,11 @@ INTERFACE
 !------------------------------------------------------------------------------
   SUBROUTINE oft_set_signal_handlers()  BIND(C)
   END SUBROUTINE oft_set_signal_handlers
+!------------------------------------------------------------------------------
+!> Interface for printing git information in "oft_local.c"
+!------------------------------------------------------------------------------
+  SUBROUTINE oft_print_git() BIND(C)
+  END SUBROUTINE oft_print_git
 !------------------------------------------------------------------------------
 !> Prototype for abort callback to override usual abort process
 !------------------------------------------------------------------------------
@@ -319,8 +323,7 @@ END IF
 IF(oft_env%rank==0)THEN
   WRITE(*,'(A)')    '#----------------------------------------------'
   WRITE(*,'(A)')    'Open FUSION Toolkit Initialized'
-  WRITE(*,'(2A)')   'Development branch:   ',GITBRANCH
-  WRITE(*,'(2A)')   'Revision id:          ',GITVERSION
+  CALL oft_print_git()
   WRITE(*,'(2A)')   'Parallelization Info:'
 #ifdef HAVE_MPI
   WRITE(*,'(A,I4)') '  # of MPI tasks      = ',oft_env%nprocs

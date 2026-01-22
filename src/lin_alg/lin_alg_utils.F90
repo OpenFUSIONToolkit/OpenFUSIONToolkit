@@ -25,13 +25,13 @@ USE oft_native_la, ONLY: oft_native_vector, oft_native_cvector, &
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
   oft_petsc_matrix_cast
-#include "petsc/finclude/petscmat.h"
-#undef IS
-#undef Mat
-use petscmat
+USE petscmat
 #endif
 IMPLICIT NONE
 #include "local.h"
+#ifdef HAVE_PETSC
+#include "oft_petsc.h"
+#endif
 !------------------------------------------------------------------------------
 !> Create a new vector by combining a set of vectors.
 !!
@@ -1019,11 +1019,10 @@ TYPE(oft_petsc_matrix), INTENT(inout) :: this
 TYPE(tmat), ALLOCATABLE :: pmats(:,:)
 INTEGER(i4) :: i,j,ii,jj,ierr,m,n,offset,proc
 INTEGER(i4) :: mcomm,roffset,coffset,rgoffset,cgoffset,ncols,maxcols,rows(1),ncslice
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rstart,cstart,cols,coltmp
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rstart,cstart
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: goffsets,offsets,tmpoff
-REAL(r8), POINTER :: vals(:),varray(:,:)
-INTEGER(i4), POINTER :: int_tmp(:)
-REAL(r8), POINTER :: real_tmp(:)
+INTEGER(i4), POINTER :: int_tmp(:),cols(:),coltmp(:)
+REAL(r8), POINTER :: real_tmp(:),varray(:)
 mcomm=oft_env%COMM
 IF(this%nr==this%nrg)mcomm=PETSC_COMM_SELF
 CALL MatGetOwnershipRange(this%m,m,n,ierr)
@@ -1110,13 +1109,12 @@ DO i=1,nr
           maxcols=MAX(ncols,maxcols)
           CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
         END DO
-        ALLOCATE(varray(maxcols,1),cols(maxcols),coltmp(maxcols))
+        ALLOCATE(varray(maxcols),cols(maxcols),coltmp(maxcols))
         cols=0
-        vals=>varray(:,1)
         m=0
         DO ii=1,pmat%i_map(1)%nslice
           rows=ii-1
-          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,cols,vals,ierr)
+          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,cols,varray,ierr)
           proc=1
           DO jj=1,ncols
             DO WHILE(cols(jj)>=offsets(j,proc+1))
@@ -1125,11 +1123,13 @@ DO i=1,nr
             END DO
             coltmp(jj)=cols(jj)-offsets(j,proc)+goffsets(j,proc)
           END DO
-          CALL MatSetValues(this%M,1,rows+rgoffset,ncols, &
+          CALL MatSetValues(this%M,1_i4,rows+rgoffset,ncols, &
             coltmp,varray,ADD_VALUES,ierr)
-          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,cols,vals,ierr)
+          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,cols,varray,ierr)
         END DO
-        DEALLOCATE(varray,cols,coltmp)
+        IF(ASSOCIATED(varray))DEALLOCATE(varray)
+        IF(ASSOCIATED(cols))DEALLOCATE(cols)
+        DEALLOCATE(coltmp)
     END SELECT
     END IF
     cgoffset=cgoffset+cstart(j)

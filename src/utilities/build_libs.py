@@ -1852,24 +1852,25 @@ class ONURBS(package):
 
 
 class PETSC(package):
-    def __init__(self, debug=False, with_superlu=False, with_superlu_dist=False, with_umfpack=False, with_mumps=False, version=3.20,
-                 comp_wrapper=False, shared_libs=None):
+    def __init__(self, debug=False, with_openmp=False, with_superlu=False, with_superlu_dist=False, with_umfpack=False,
+                 with_mumps=False, version="3.23", comp_wrapper=False, shared_libs=None):
         self.name = "PETSC"
         self.display_name = "PETSc"
         self.version = version
-        if self.version == '3.18':
-            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.18.6/petsc-v3.18.6.tar.gz"
-        elif self.version == '3.19':
-            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.19.6/petsc-v3.19.6.tar.gz"
-        elif self.version == '3.20':
+        if self.version == '3.20':
             self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.20.6/petsc-v3.20.6.tar.gz"
         elif self.version == '3.21':
             self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.21.6/petsc-v3.21.6.tar.gz"
         elif self.version == '3.22':
             self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.22.5/petsc-v3.22.5.tar.gz"
+        elif self.version == '3.23':
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.23.7/petsc-v3.23.7.tar.gz"
+        elif self.version == '3.24':
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.24.3/petsc-v3.24.3.tar.gz"
         else:
-            error_exit('Invalid PETSc version requested (3.18 <= version <= 3.22)')
+            error_exit('Invalid PETSc version requested (3.20 <= version <= 3.24)')
         self.debug = debug
+        self.with_openmp = with_openmp
         self.with_superlu = with_superlu
         self.with_superlu_dist = with_superlu_dist
         self.with_umfpack = with_umfpack
@@ -1957,7 +1958,7 @@ class PETSC(package):
         else:
             options += ['--with-mpi-dir={MPI_ROOT}']
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
-            options.append('--FFLAGS="-fallow-argument-mismatch"')
+            options.append('--FFLAGS="-fallow-argument-mismatch -ffree-line-length-none"')
         options += [
             '--download-metis',
             '--download-parmetis',
@@ -1969,6 +1970,12 @@ class PETSC(package):
             options += ['--with-shared-libraries=1']
         else:
             options += ['--with-shared-libraries=0']
+        if self.with_openmp:
+            options += ['--with-openmp']
+            if ver_gt(self.version,"3.22"):
+                options += ['--with-openmp-kernels']
+            else:
+                print('Warning: OpenMP kernels requires PETSc 3.23+, OpenMP will only be used in third party libraries')
         need_cxx = False
         if self.with_superlu:
             # # Fix SDK issue on MacOS "Catalina" (10.15)
@@ -2101,12 +2108,13 @@ group.add_argument("--umfpack_wrapper", action="store_true", default=False, help
 group = parser.add_argument_group("PETSc", "PETSc package options")
 group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library? (default: 0)")
 group.add_argument("--petsc_debug", default=0, type=int, choices=(0,1), help="Build PETSc with debugging information (default: 0)")
+group.add_argument("--petsc_openmp", default=0, type=int, choices=(0,1), help="Build PETSc with OpenMP support (default: 0)")
 group.add_argument("--petsc_superlu", default=0, type=int, choices=(0,1), help="Build PETSc with SuperLU (default: 0)")
 group.add_argument("--petsc_superlu_dist", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU-DIST (default: 1)")
 group.add_argument("--petsc_mumps", default=0, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 0)")
 group.add_argument("--petsc_umfpack", default=1, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 1)")
-group.add_argument("--petsc_version", default="3.20", type=str,
-    help="Use different version of PETSc [3.18,3.19,3.20,3.21,3.22] (default: 3.20)")
+group.add_argument("--petsc_version", default="3.23", type=str,
+    help="Use different version of PETSc [3.20,3.21,3.22,3.23,2.24] (default: 3.23)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
 #
 options = parser.parse_args()
@@ -2209,9 +2217,9 @@ if (options.build_netcdf == 1) or options.netcdf_wrapper:
     packages.append(NETCDF(options.netcdf_wrapper,shared_libs=(not options.netcdf_static)))
 # Are we building PETSc?
 if (options.build_petsc == 1) or options.petsc_wrapper:
-    packages.append(PETSC(debug=options.petsc_debug, with_superlu=options.petsc_superlu, with_superlu_dist=options.petsc_superlu_dist,
-                          with_umfpack=options.petsc_umfpack, with_mumps=options.petsc_mumps,
-                          version=options.petsc_version, comp_wrapper=options.petsc_wrapper))
+    packages.append(PETSC(debug=options.petsc_debug, with_openmp=options.petsc_openmp, with_superlu=options.petsc_superlu,
+                          with_superlu_dist=options.petsc_superlu_dist, with_umfpack=options.petsc_umfpack,
+                          with_mumps=options.petsc_mumps, version=options.petsc_version, comp_wrapper=options.petsc_wrapper))
 else:
     packages.append(METIS(options.metis_wrapper))
     if (options.build_superlu == 1) or options.superlu_wrapper:

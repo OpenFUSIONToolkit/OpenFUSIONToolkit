@@ -34,6 +34,8 @@ def get_prereqs(filename):
 
 print('Copying required dynamic libraries')
 output, error, errcode = run_command('ldconfig -p')
+if errcode != 0:
+    print("WARNING: non-zero error code ({0}) reading ldconfig".format(errcode))
 ld_confoutput = output.splitlines()
 
 MKL_ROOT = None
@@ -147,4 +149,6 @@ if MKL_ROOT is not None:
 
 # Patch files with $ORIGIN runpath
 for filename in patch_files:
-    run_command("patchelf --set-rpath '$ORIGIN' {0}".format(filename))
+    _, _, errcode = run_command("patchelf --set-rpath '$ORIGIN' {0}".format(filename))
+    if errcode != 0:
+        print("WARNING: non-zero error code ({1}) patching {0}".format(filename, errcode))

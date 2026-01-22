@@ -3816,7 +3816,7 @@ psi_min=1.d99; psi_max=-1.d99
 !$omp parallel reduction(min:psi_min) reduction(max:psi_max)
 BLOCK
 real(r8) :: loc_vals(3)
-!$omp do simd
+!$omp do
 DO i=1,smesh%nc
   ! IF(smesh%reg(i)/=1)CYCLE
   IF(self%saddle_cmask(i))CYCLE
