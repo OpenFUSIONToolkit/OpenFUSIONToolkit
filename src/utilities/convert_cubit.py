@@ -67,7 +67,7 @@ element_type_map['TETRA'] = element_type_map['TETRA4']
 element_type_map['QUAD'] = element_type_map['QUAD4']
 element_type_map['HEX'] = element_type_map['HEX8']
 
-def read_mesh(filename):
+def read_mesh(filename, ignore_attrs):
     print()
     print("Reading mesh: {0}".format(filename))
     ncdf_file = netCDF4.Dataset(filename, "r")
@@ -88,6 +88,7 @@ def read_mesh(filename):
     node_sets = []
     side_sets = []
     block_types = []
+    block_attrs = []
     max_logical_dim = 0
     for varname, variable in ncdf_file.variables.items():
         if varname.startswith('connect'):
@@ -99,6 +100,14 @@ def read_mesh(filename):
                     block_types.append(block_type_info)
             lc_tmp = np.asarray(variable)
             lc.append(lc_tmp)
+            # Retrieve attributes if present
+            attr_name = 'attrib' + varname[7:]
+            if attr_name in ncdf_file.variables:
+                if np.min(ncdf_file.variables[attr_name],axis=0) != np.max(ncdf_file.variables[attr_name],axis=0):
+                    raise ValueError("Attributes must have the same value within a block.")
+                block_attrs.append(np.asarray(ncdf_file.variables[attr_name][0,:]))
+            else:
+                block_attrs.append(None)
         elif varname.startswith('node_ns'):
             node_sets.append(np.asarray(variable))
         elif varname.startswith('elem_ss'):
@@ -115,6 +124,7 @@ def read_mesh(filename):
         reg.append(nReg*np.ones((lc[i].shape[0],), dtype=np.int32))
     lc = [lc[i] for i in keep_inds]
     block_types = [block_types[i] for i in keep_inds]
+    block_attrs = [block_attrs[i] for i in keep_inds]
     lc = np.vstack(lc)
     reg = np.hstack(reg)
     mesh_order = 1
@@ -171,13 +181,31 @@ def read_mesh(filename):
     else:
         r_ho = np.zeros((0,r_new.shape[1]))
         ho_info = None
-    print("  Mesh type    = {0}".format(mesh_type))
-    print("  Dimension    = {0}".format(r_new.shape[1]))
-    print("  # of points  = {0} ({1})".format(r_new.shape[0],r_ho.shape[0]))
-    print("  # of cells   = {0}".format(lc_new.shape[0]))
-    print("  # of regions = {0}".format(nReg))
-    print("  # of nSets   = {0}".format(len(node_sets)))
-    print("  # of sSets   = {0}".format(len(side_sets)))
+    # Check attributes
+    if ignore_attrs:
+        block_attrs = []
+    else:
+        nattrs = 0
+        for block_attr in block_attrs:
+            if block_attr is not None:
+                nattrs = block_attr.shape[0]
+        for block_attr in block_attrs:
+            if block_attr is None:
+                if nattrs > 0:
+                    raise ValueError("Attributes specified for only some blocks.")
+            elif nattrs != block_attr.shape[0]:
+                raise ValueError("Attribute size must be the same on all blocks.")
+        block_attrs = [block_attr for block_attr in np.array(block_attrs).transpose()]
+    #
+    print("  Mesh type: {0}".format(mesh_type))
+    print("  Dimension: {0}D".format(r_new.shape[1]))
+    print("  # of points       = {0} ({1})".format(r_new.shape[0],r_ho.shape[0]))
+    print("  # of cells        = {0}".format(lc_new.shape[0]))
+    print("  # of regions      = {0}".format(nReg))
+    print("  # of nSets        = {0}".format(len(node_sets)))
+    print("  # of sSets        = {0}".format(len(side_sets)))
+    if len(block_attrs) > 0:
+        print("  # of attributes   = {0}".format(len(block_attrs)))
     np_total = r_new.shape[0]+r_ho.shape[0]
     if np_total > np_orig:
         raise ValueError("One or more points referenced by both linear and high-order nodes.")
@@ -186,30 +214,40 @@ def read_mesh(filename):
 Note: {0} points were not referenced by cells.
 This may be normal or could indicate an error""".format(np_total-np_orig))
     #
-    return r_new, lc_new, reg, node_sets, side_sets, ho_info
+    return r_new, lc_new, reg, node_sets, side_sets, ho_info, block_attrs
 
-def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, periodic_info=None):
+def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, block_attrs=None, periodic_info=None):
     print()
     print("Saving mesh: {0}".format(filename))
-    h5_file = h5py.File(filename, 'w')
-    h5_file.create_dataset('mesh/R', data=r, dtype='f8')
-    h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
-    h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
-    if ho_info is not None:
-        h5_file.create_dataset('mesh/ho_info/R', data=ho_info[0], dtype='f8')
-        h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
-        if ho_info[2] is not None:
-            h5_file.create_dataset('mesh/ho_info/LF', data=ho_info[2], dtype='i4')
-    if len(node_sets) > 0:
-        h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(node_sets),], dtype='i4')
-        for i, node_set in enumerate(node_sets):
-            h5_file.create_dataset('mesh/NODESET{0:04d}'.format(i+1), data=node_set, dtype='i4')
-    if len(side_sets) > 0:
-        h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(side_sets),], dtype='i4')
-        for i, side_set in enumerate(side_sets):
-            h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(i+1), data=side_set, dtype='i4')
-    if periodic_info is not None:
-        h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
+    with h5py.File(filename, 'w') as h5_file:
+        # Write out basic mesh information
+        h5_file.create_dataset('mesh/R', data=r, dtype='f8')
+        h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
+        h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
+        # Write out high-order mesh information (nodes and indexing information)
+        if ho_info is not None:
+            h5_file.create_dataset('mesh/ho_info/R', data=ho_info[0], dtype='f8')
+            h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
+            if ho_info[2] is not None:
+                h5_file.create_dataset('mesh/ho_info/LF', data=ho_info[2], dtype='i4')
+        # Write block attributes
+        if len(block_attrs) > 0:
+            h5_file.create_dataset('mesh/reg_attr/NUM_ATTR', data=[len(block_attrs),], dtype='i4')
+            for i, block_attr in enumerate(block_attrs):
+                h5_file.create_dataset('mesh/reg_attr/ATTR{0:04d}'.format(i+1), data=block_attr, dtype='f8')
+        # Write nodesets
+        if len(node_sets) > 0:
+            h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(node_sets),], dtype='i4')
+            for i, node_set in enumerate(node_sets):
+                h5_file.create_dataset('mesh/NODESET{0:04d}'.format(i+1), data=node_set, dtype='i4')
+        # Write sidesets (2D entity blocks)
+        if len(side_sets) > 0:
+            h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(side_sets),], dtype='i4')
+            for i, side_set in enumerate(side_sets):
+                h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(i+1), data=side_set, dtype='i4')
+        # Write flag for periodic nodes following mesh reflection
+        if periodic_info is not None:
+            h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
 
 
 parser = argparse.ArgumentParser()
@@ -217,13 +255,14 @@ parser.description = "Pre-processing script for mesh files"
 parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
 parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
 parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of perioidic nodeset")
+parser.add_argument("--ignore_attr", default=False, action="store_true", help="Ignore block attributes")
 options = parser.parse_args()
 
 out_file = options.out_file
 if out_file is None:
     out_file = os.path.splitext(options.in_file)[0] + ".h5"
 
-r, lc, reg, node_sets, side_sets, ho_info = read_mesh(options.in_file)
+r, lc, reg, node_sets, side_sets, ho_info, block_attrs = read_mesh(options.in_file, options.ignore_attr)
 
 periodic_info = None
 if options.periodic_nodeset is not None:
@@ -231,4 +270,4 @@ if options.periodic_nodeset is not None:
         raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
     periodic_info = node_sets.pop(options.periodic_nodeset-1)
 
-write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, periodic_info)
+write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, periodic_info)

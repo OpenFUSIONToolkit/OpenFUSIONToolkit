@@ -5,6 +5,14 @@ ADD_CUSTOM_COMMAND(
 )
 configure_file( local.h ${CMAKE_CURRENT_BINARY_DIR} @ONLY )
 
+if( OFT_PETSc_FOUND )
+  if( OFT_PETSc_VER_MINOR GREATER 22 )
+    configure_file( oft_petsc-dummy.h ${CMAKE_CURRENT_BINARY_DIR}/oft_petsc.h COPYONLY )
+  else()
+    configure_file( oft_petsc.h ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  endif()
+endif()
+
 if( OFT_DEBUG_STACK )
   ADD_CUSTOM_COMMAND(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/stack_defs.h always_rebuild
