@@ -16,9 +16,6 @@ This example contains NSTX-U geometry files, Python libraries, and Jupyter noteb
 ---
 
 ### Python Modules
-- **omfit_shape_generator.py**  
-  Routines for generating plasma shapes, compatible with OMFIT workflows.
-
 - **library_NSTXU_TM.py**  
   Tools and helper functions for NSTX-U tokamak modeling (coil definitions, equilibria utilities, etc.).
 
@@ -58,6 +55,7 @@ The Python libraries provide shared utilities used across the notebooks.
 ## Getting Started
 
 1. Ensure you have **Python 3.9+** and common scientific packages (`numpy`, `scipy`, `matplotlib`, `h5py`, etc.).
+    - To run **NSTXU_shape_generator.ipynb** you also need additional packages (see notebook header).
 2. Open the notebooks in **JupyterLab** or **VS Code**.
 3. Run `NSTXU_shape_control_simulator.ipynb`!
 
