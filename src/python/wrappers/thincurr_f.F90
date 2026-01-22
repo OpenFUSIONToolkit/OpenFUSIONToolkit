@@ -98,6 +98,11 @@ ELSE
   !------------------------------------------------------------------------------
   ! Load model from file
   !------------------------------------------------------------------------------
+  INQUIRE(FILE=TRIM(filename),EXIST=success)
+  IF(.NOT.success)THEN
+    CALL copy_string('Mesh file does not exist or is not accesible',error_str)
+    RETURN
+  END IF
   ALLOCATE(tw_obj)
   ALLOCATE(oft_trimesh::tw_obj%mesh)
   CALL tw_obj%mesh%setup(-1,.FALSE.)
@@ -150,6 +155,8 @@ ELSE
   ELSE
     tw_obj%mesh%reg=1
   END IF
+  i=MAXVAL(tw_obj%mesh%reg)
+  tw_obj%mesh%nreg=oft_mpi_max(i)
   !
   IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
     ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))

@@ -175,12 +175,16 @@ class histfile:
                 self._data[field] = []
         #
         while (self.offset+1 < len(self.content)):
-            # Look for end of line
-            tmp1 = struct.unpack_from("=c", self.content, offset=self.offset-4)
-            if tmp1[0] == eol_byte:
-                self.offset += 1
             # Read line
             head_val = struct.unpack_from("i", self.content, offset=self.offset)
+            if head_val[0] != self.line_length:
+                # Check for line break
+                tmp1 = struct.unpack_from("=c", self.content, offset=self.offset)
+                if tmp1[0] == eol_byte:
+                    self.offset += 1
+                    head_val = struct.unpack_from("i", self.content, offset=self.offset)
+            if (head_val[0] != self.line_length):
+                raise IOError('Bad line start size ({0})'.format(self.nlines+1))
             self.offset += pad_size
             tmp = struct.unpack_from("=" + self.line_fmt, self.content, offset=self.offset)
             self.offset += self.line_length
@@ -188,11 +192,11 @@ class histfile:
             self.offset += pad_size
             self.nlines += 1
             if stream_data:
-                if (head_val[0] != self.line_length) or (tail_val[0] != self.nfields):
-                    raise IOError('Bad data line ({0})'.format(self.nlines))
+                if tail_val[0] != self.nfields:
+                    raise IOError('Bad line tail count ({0})'.format(self.nlines))
             else:
-                if (head_val[0] != self.line_length) or (tail_val[0] != self.line_length):
-                    raise IOError('Bad data line ({0})'.format(self.nlines))
+                if tail_val[0] != self.nfields:
+                    raise IOError('Bad line tail count ({0})'.format(self.nlines))
             if self.nfields > 1:
                 k = 0
                 for (j, field) in enumerate(self.field_tags):
