@@ -44,12 +44,22 @@ jobs:
             mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
-            name: "Ubuntu 24.04 Intel",
+            name: "Ubuntu 24.04 Intel 2025.2",
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
             build_flags: "--use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT"
+            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            oneapi_ver: "-2025.2"
+          }
+        - {
+            name: "Ubuntu 24.04 Intel latest",
+            os: ubuntu-24.04,
+            cc: "icx", cxx: "icx", fc: "ifx",
+            python: "python3",
+            build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            oneapi_ver: ""
           }
         - {
             name: "macOS Sonoma GCC 13",
@@ -98,7 +108,7 @@ jobs:
               os: ubuntu-22.04,
               cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
               python: "python3",
-              mpi_build_flags: "--oblas_dynamic_arch --build_petsc=1 --petsc_version=3.20 --build_cmake=1"
+              mpi_build_flags: "--oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1"
             }
 
     steps:
@@ -141,7 +151,7 @@ jobs:
         wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
         echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
         sudo apt-get update -o Dir::Etc::sourcelist="sources.list.d/oneAPI.list" -o APT::Get::List-Cleanup="0"
-        sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp-2025.2 intel-oneapi-compiler-fortran-2025.2 intel-oneapi-mkl-devel-2025.2
+        sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp${{ matrix.config.oneapi_ver }} intel-oneapi-compiler-fortran${{ matrix.config.oneapi_ver }} intel-oneapi-mkl-devel${{ matrix.config.oneapi_ver }}
         echo "source /opt/intel/oneapi/compiler/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
         echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
         echo "ulimit -s unlimited" >> ${{ github.workspace }}/setup_env.sh
@@ -149,16 +159,17 @@ jobs:
     - name: Check compilers
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        $CC --version
-        $CXX --version
-        $FC --version
+        $CC --version | head -1 > compiler_id.txt
+        $CXX --version | head -1 >> compiler_id.txt
+        $FC --version | head -1 >> compiler_id.txt
+        cat compiler_id.txt
 
     - name: Cache external libraries
       id: cache-ext-libs
       uses: actions/cache@v4
       with:
         path: libs
-        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py', 'compiler_id.txt') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
@@ -237,7 +248,8 @@ jobs:
     
     - name: Upload test results to Codecov
       if: ${{ !cancelled() && (matrix.config.os == 'ubuntu-24.04') }}
-      uses: codecov/test-results-action@v1
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        report_type: test_results
         verbose: true
