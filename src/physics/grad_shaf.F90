@@ -5728,7 +5728,9 @@ IF(nnonaxi>0)THEN
 END IF
 !---Add inductance and resistance terms for Vcoils
 IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
+#if !defined(__INTEL_COMPILER)
   !$omp parallel do
+#endif
   DO i=1,self%ncoils
     IF(nnonaxi>0)THEN
       CALL dels_coil_part(self,mat,i,dt_in,bc,main_scale,nonaxi_vals)
