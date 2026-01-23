@@ -33,6 +33,6 @@ AdvancedWorkflows/
 │   └── README.md
 │
 └── Isoflux Controller/
-    ├── etc
-    ├── etc
+    ├── NSTXU_shape_control_simulator.ipynb
+    ├── NSTXU_shape_generator.ipynb
     └── README.md

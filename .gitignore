@@ -15,3 +15,7 @@
 .project
 .pydevproject
 .vscode
+
+# Workflow products
+src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/IODATA*
+src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/__pycache__*
