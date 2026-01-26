@@ -378,7 +378,7 @@ IF(vacuum)THEN
   vac_save=tMaker_obj%gs%has_plasma
   tMaker_obj%gs%has_plasma=.FALSE.
 END IF
-IF(ANY(tMaker_obj%gs%rcoils<0.d0))THEN
+IF(ANY(tMaker_obj%gs%rcoils>0.d0))THEN
   ntargets=tMaker_obj%gs%isoflux_ntargets+tMaker_obj%gs%flux_ntargets+tMaker_obj%gs%saddle_ntargets
   IF(ntargets>0)THEN
     CALL copy_string('Use of shape targets with Vcoils is not supported at this time',error_str)
