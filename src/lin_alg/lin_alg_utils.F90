@@ -79,10 +79,10 @@ CONTAINS
 !> Real implementation for \ref create_vector
 !---------------------------------------------------------------------------------
 SUBROUTINE create_vector_real(vec,stitch_info,maps,native)
-CLASS(oft_vector), POINTER, INTENT(inout) :: vec
-TYPE(seam_list), INTENT(inout) :: stitch_info(:)
-TYPE(map_list), INTENT(inout) :: maps(:)
-LOGICAL, OPTIONAL, INTENT(in) :: native
+CLASS(oft_vector), POINTER, INTENT(inout) :: vec !< Resulting vector
+TYPE(seam_list), INTENT(inout) :: stitch_info(:) !< Array of seam structures
+TYPE(map_list), INTENT(inout) :: maps(:) !< Mapping from sub-vectors into full vector
+LOGICAL, OPTIONAL, INTENT(in) :: native !< Force native representation?
 !---
 LOGICAL :: force_native
 INTEGER(i4) :: i,offset,soffset,nblocks
@@ -210,10 +210,10 @@ END SUBROUTINE create_vector_real
 !> Complex implementation for \ref create_vector
 !---------------------------------------------------------------------------------
 SUBROUTINE create_vector_comp(vec,stitch_info,maps,native)
-CLASS(oft_cvector), POINTER, INTENT(inout) :: vec
-TYPE(seam_list), INTENT(inout) :: stitch_info(:)
-TYPE(map_list), INTENT(inout) :: maps(:)
-LOGICAL, OPTIONAL, INTENT(in) :: native
+CLASS(oft_cvector), POINTER, INTENT(inout) :: vec !< Resulting vector
+TYPE(seam_list), INTENT(inout) :: stitch_info(:) !< Array of seam structures
+TYPE(map_list), INTENT(inout) :: maps(:) !< Mapping from sub-vectors into full vector
+LOGICAL, OPTIONAL, INTENT(in) :: native !< Force native representation?
 !---
 LOGICAL :: force_native
 INTEGER(i4) :: i,offset,soffset,nblocks
@@ -402,10 +402,10 @@ END SUBROUTINE condense_stitch
 !> Real implementation for \ref create_matrix
 !---------------------------------------------------------------------------------
 SUBROUTINE create_matrix_real(mat,ingraphs,row_vec,col_vec,native)
-CLASS(oft_matrix), POINTER, INTENT(inout) :: mat
-TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:)
-CLASS(oft_vector), POINTER, INTENT(in) :: row_vec
-CLASS(oft_vector), POINTER, INTENT(in) :: col_vec
+CLASS(oft_matrix), POINTER, INTENT(inout) :: mat !< Resulting matrix
+TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing matix blocks
+CLASS(oft_vector), POINTER, INTENT(in) :: row_vec !< Vector representing matrix rows
+CLASS(oft_vector), POINTER, INTENT(in) :: col_vec !< Vector representing matrix columns
 LOGICAL, OPTIONAL, INTENT(in) :: native
 LOGICAL :: force_native
 INTEGER(i4) :: i,j,ni,nj,offset,soffset
@@ -570,10 +570,10 @@ END SUBROUTINE create_matrix_real
 !> Real implementation for \ref create_matrix
 !---------------------------------------------------------------------------------
 SUBROUTINE create_matrix_comp(mat,ingraphs,row_vec,col_vec,native)
-CLASS(oft_cmatrix), POINTER, INTENT(inout) :: mat
-TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:)
-CLASS(oft_cvector), POINTER, INTENT(in) :: row_vec
-CLASS(oft_cvector), POINTER, INTENT(in) :: col_vec
+CLASS(oft_cmatrix), POINTER, INTENT(inout) :: mat !< Resulting matrix
+TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing matix blocks
+CLASS(oft_cvector), POINTER, INTENT(in) :: row_vec !< Vector representing matrix rows
+CLASS(oft_cvector), POINTER, INTENT(in) :: col_vec !< Vector representing matrix columns
 LOGICAL, OPTIONAL, INTENT(in) :: native
 LOGICAL :: force_native
 INTEGER(i4) :: i,j,ni,nj,offset,soffset
@@ -701,13 +701,13 @@ END IF
 END SUBROUTINE setup_native
 END SUBROUTINE create_matrix_comp
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Remove redundant column indices from a CSR graph
 !---------------------------------------------------------------------------------
 SUBROUTINE csr_remove_redundant(nr,kr,nnz,lc)
-INTEGER(4), INTENT(in) :: nr
-INTEGER(4), INTENT(inout) :: kr(nr+1)
-INTEGER(4), INTENT(inout) :: nnz
-INTEGER(4), POINTER, INTENT(inout) :: lc(:)
+INTEGER(4), INTENT(in) :: nr !< Number of rows
+INTEGER(4), INTENT(inout) :: kr(nr+1) !< Row pointer
+INTEGER(4), INTENT(inout) :: nnz !< Number of non-zero entries
+INTEGER(4), POINTER, INTENT(inout) :: lc(:) !< Column indices
 INTEGER(4) :: i,j,nremove,js
 INTEGER(4), POINTER :: lctmp(:)
 nremove=0
@@ -970,9 +970,9 @@ end subroutine graph_add_full_col
 !> Real implementation for \ref combine_matrices
 !---------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_real(mats,nr,nc,mat)
-TYPE(oft_matrix_ptr), INTENT(in) :: mats(:,:)
-INTEGER(i4), INTENT(in) :: nr
-INTEGER(i4), INTENT(in) :: nc
+TYPE(oft_matrix_ptr), INTENT(in) :: mats(:,:) !< Array of sub-matrices to combine
+INTEGER(i4), INTENT(in) :: nr !< Number of row sub-matrices
+INTEGER(i4), INTENT(in) :: nc !< Number of column sub-matrices
 CLASS(oft_matrix), POINTER, INTENT(inout) :: mat
 DEBUG_STACK_PUSH
 SELECT TYPE(this=>mat)
@@ -1145,9 +1145,9 @@ END SUBROUTINE combine_matrices_real
 !> Real implementation for \ref combine_matrices
 !---------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_comp(mats,nr,nc,mat)
-TYPE(oft_cmatrix_ptr), INTENT(in) :: mats(:,:)
-INTEGER(i4), INTENT(in) :: nr
-INTEGER(i4), INTENT(in) :: nc
+TYPE(oft_cmatrix_ptr), INTENT(in) :: mats(:,:) !< Array of matrices representing sub-matrices
+INTEGER(i4), INTENT(in) :: nr !< Number of row sub-matrices
+INTEGER(i4), INTENT(in) :: nc !< Number of column sub-matrices
 CLASS(oft_cmatrix), POINTER, INTENT(inout) :: mat
 DEBUG_STACK_PUSH
 SELECT TYPE(this=>mat)
@@ -1205,15 +1205,11 @@ DEBUG_STACK_POP
 END SUBROUTINE create_identity_graph
 !------------------------------------------------------------------------------
 !> Create a tri-diagonal graph for a given vector
-!!
-!! @param[in,out] outgraph Resulting graph
-!! @param[in] vec Vector representing matrix rows/columns
-!! @param[in] periodic Apply periodic BCs?
 !------------------------------------------------------------------------------
 SUBROUTINE create_tridiag_graph(outgraph,vec,periodic)
-TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph
-CLASS(oft_vector), POINTER, INTENT(in) :: vec
-LOGICAL, INTENT(in) :: periodic
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+CLASS(oft_vector), POINTER, INTENT(in) :: vec !< Vector representing matrix rows/columns
+LOGICAL, INTENT(in) :: periodic !< Apply periodic BCs?
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Setup graph
@@ -1252,15 +1248,11 @@ DEBUG_STACK_POP
 END SUBROUTINE create_tridiag_graph
 !------------------------------------------------------------------------------
 !> Create a dense graph for a given vector
-!!
-!! @param[in,out] outgraph Resulting graph
-!! @param[in] rvec Vector representing matrix rows
-!! @param[in] cvec Vector representing matrix columns (optional)
 !------------------------------------------------------------------------------
 SUBROUTINE create_dense_graph(outgraph,rvec,cvec)
-TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph
-CLASS(oft_vector), POINTER, INTENT(in) :: rvec
-CLASS(oft_vector), POINTER, OPTIONAL, INTENT(in) :: cvec
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+CLASS(oft_vector), POINTER, INTENT(in) :: rvec !< Vector representing matrix rows
+CLASS(oft_vector), POINTER, OPTIONAL, INTENT(in) :: cvec !< Vector representing matrix columns (optional)
 INTEGER(i4) :: i
 CLASS(oft_vector), POINTER :: vec2
 DEBUG_STACK_PUSH
