@@ -1,0 +1,12 @@
+<oft>
+  <tdiff>
+    <pre type="gmres">
+      <its>2</its>
+      <nrits>2</nrits>
+      <pre type="block_jacobi">
+        <nlocal>-1</nlocal>
+        <solver type="lu"></solver>
+      </pre>
+    </pre>
+  </tdiff>
+</oft>

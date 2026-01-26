@@ -1,0 +1,31 @@
+&runtime_options
+  ppn=1
+  debug=0
+/
+
+&mesh_options
+  meshname='test'
+  cad_type=0
+  nlevels=1
+  nbase=1
+  grid_order=2
+  fix_boundary=T
+/
+
+&native_mesh_options
+  filename="sphere_3d.h5"
+/
+
+&tdiff_options
+  order=2
+  ti0=1.0
+  te0=4.0
+  kappa_i=1.0
+  kappa_e=1.0
+  tau_eq=1.E-1
+  dt=1.E-3
+  nsteps=20
+  rst_freq=1
+  use_mfnk=F
+  pm=F
+/
