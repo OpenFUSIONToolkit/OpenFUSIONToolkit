@@ -217,7 +217,19 @@ def construct_filaments_from_json(jsonfile, nR=10, nZ=10, tol=1e-1):
 # ===============================
 
 class Vcoil:
-    def __init__(self, name, radius=None, Z = None, xyz = None, scale = None, resistivity_per_length = None, sens_mask = None, npoints = None, iscustom = False):
+    '''! Vcoil class for defining V-coils in OpenFUSIONToolkit'''
+    def __init__(self, name, R=None, Z = None, xyz = None, scale = None, resistivity_per_length = None, sens_mask = None, npoints = None, iscustom = False):
+        '''! Vcoil class for defining V-coils in OpenFUSIONToolkit
+        @param name : string, name of the coil
+        @param R : array of float, radial positions of coil points (for non-custom coils)
+        @param Z : array of float, vertical positions of coil points (for non-custom coils)
+        @param xyz : array of [x, y, z] positions of coil points (for custom coils)
+        @param scale : float, scaling factor for coil current
+        @param resistivity_per_length : float, resistivity per unit length of the coil (for custom coils)
+        @param sens_mask : array of int, sensitivity mask for coil points 
+        @param npoints : int, number of points in the coil (for custom coils)
+        @param iscustom : bool, True if custom coil defined by xyz points, False if defined by R,Z
+        '''
         self.name = name
         self.resistivity_per_length = resistivity_per_length
         self.sens_mask = sens_mask
@@ -227,17 +239,29 @@ class Vcoil:
         if iscustom: 
             if xyz is not None:
                 self.xyz = xyz
-                self.radius = radius 
+                self.R = R 
             else:
                 raise ValueError("Custom coil must have a valid xyz = [x, y, z]")
         else: 
             self.xyz = None 
-            self.radius = radius
+            self.R = R
             self.Z = Z
 
         
 class Icoil: 
-    def __init__(self, name, radius = None, Z=None, xyz = None, scale = None, resistivity_per_length = None, sens_mask = None, npoints = None, iscustom = False):
+    '''! Icoil class for defining I-coils in OpenFUSIONToolkit'''
+    def __init__(self, name, R = None, Z=None, xyz = None, scale = None, resistivity_per_length = None, sens_mask = None, npoints = None, iscustom = False):
+        '''! Icoil class for defining I-coils in OpenFUSIONToolkit
+        @param name : string, name of the coil
+        @param R : array of float, radial positions of coil points (for non-custom coils)
+        @param Z : array of float, vertical positions of coil points (for non-custom coils)
+        @param xyz : array of [x, y, z] positions of coil points (for custom coils)
+        @param scale : float, scaling factor for coil current
+        @param resistivity_per_length : float, resistivity per unit length of the coil (for custom coils)
+        @param sens_mask : array of int, sensitivity mask for coil points 
+        @param npoints : int, number of points in the coil (for custom coils)
+        @param iscustom : bool, True if custom coil defined by xyz points, False if defined by R,Z
+        '''
         self.name = name
         self.sens_mask = sens_mask
         self.scale = scale
@@ -247,12 +271,12 @@ class Icoil:
         if iscustom: 
             if xyz is not None :
                 self.xyz = xyz
-                self.radius = radius 
+                self.R = R 
             else:
                 raise ValueError("Custom coil must have a valid xyz = [x, y, z]")
         else: 
             self.xyz = None 
-            self.radius = radius
+            self.R = R
             self.Z = Z 
 
 
@@ -288,7 +312,7 @@ def create_xml(path, icoils, vcoils, resistivities):
                         coil_element.text = '{0:.6f}, {1:.6f}'.format(xyz[0], xyz[1], xyz[2])
                 else: 
                     coil_set = ET.SubElement(icoil_element, "coil_set", attrib = {"name" : i.name})
-                    for r_val, z_val in zip(i.radius, i.Z): 
+                    for r_val, z_val in zip(i.R, i.Z): 
                         coil_element = ET.SubElement(coil_set, "coil")
                         if i.scale is None:                 
                             coil_element.set("scale","1.0")
@@ -302,8 +326,8 @@ def create_xml(path, icoils, vcoils, resistivities):
         for v in vcoils: 
             if isinstance(v, Vcoil): 
                 if v.iscustom: 
-                    print(f'{v.name} and {v.radius} and {v.xyz} and {v.resistivity_per_length} and {v.sens_mask} and {v.npoints} and {v.scale}')
-                    coil_set = ET.SubElement(vcoil_element, "coil_set", attrib = {"name" : v.name, "radius" : str(v.radius), "res_per_len" : str(v.resistivity_per_length), "sens_mask" : str(v.sens_mask)})
+                    print(f'{v.name} and {v.R} and {v.xyz} and {v.resistivity_per_length} and {v.sens_mask} and {v.npoints} and {v.scale}')
+                    coil_set = ET.SubElement(vcoil_element, "coil_set", attrib = {"name" : v.name, "R" : str(v.R), "res_per_len" : str(v.resistivity_per_length), "sens_mask" : str(v.sens_mask)})
                     coil_element = ET.SubElement(coil_set, "coil", attrib={"npoints": str(v.npoints)})
                     text_lines = []
                     for xyz in v.xyz: 
@@ -311,7 +335,7 @@ def create_xml(path, icoils, vcoils, resistivities):
                     coil_element.text = "\n" + "\n".join(text_lines) + "\n"
                 else:
                     coil_set = ET.SubElement(vcoil_element, "coil_set", attrib = {"name" : v.name})
-                    for r_val, z_val in zip(v.radius, v.Z): 
+                    for r_val, z_val in zip(v.R, v.Z): 
                         coil_element = ET.SubElement(coil_set, "coil")
                         if v.scale is None:                 
                             coil_element.set("scale","1.0")
@@ -331,6 +355,17 @@ def create_xml(path, icoils, vcoils, resistivities):
 # =============================== 
 
 def setup_synthetic_current(timepoints, ip_list, sigma_r, sigma_z, r0, z0, rmesh, zmesh):
+    """! Sets up synthetic coil current data based on Gaussian distributions centered at (r0, z0) over time.
+    @param timepoints: list of float Time points.
+    @param ip_list: list of float Plasma current values at each time point.
+    @param sigma_r: float Standard deviation in the radial direction.
+    @param sigma_z: float Standard deviation in the vertical direction.
+    @param r0: list of float Radial center positions at each time point.
+    @param z0: list of float Vertical center positions at each time point.
+    @param rmesh: np.ndarray Radial mesh grid.
+    @param zmesh: np.ndarray Vertical mesh grid.
+    @returns coil_curr: np.ndarray Shape (ntimes, nsensors+1) First column is time, remaining columns are sensor currents.
+    """
     coil_curr = [] 
     for i in range(len(timepoints)): 
         gaussian_raw = numpy.exp(-((rmesh - r0[i])**2 / (2 * sigma_r**2) + (zmesh - z0[i])**2 / (2 * sigma_z**2)))
