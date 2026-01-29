@@ -50,16 +50,20 @@ REAL(r8) :: nu=1.E-12 !< Needs docs
 REAL(r8) :: gamma=1.d0
 REAL(r8) :: D_diff=1.E-12
 REAL(r8) :: den_scale=1.d19
-REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propogation
+REAL(r8) :: k_dir(3) = (/0.d0,1.d0,0.d0/) !< Direction of wave propogation
 REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
 REAL(r8) :: lam = 2.d0 !< Wavelength
 REAL(r8) :: v_sound = 2.d4
 REAL(r8) :: delta = 1.d-4 !< Relative size of perturbation (<<1)
+REAL(r8) :: lin_tol = 1.d-8
+REAL(r8) :: nl_tol = 1.d-5
 REAL(r8) :: v_delta
 LOGICAL :: pm=.FALSE.
+LOGICAL :: linear=.FALSE.
+LOGICAL :: cyl=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
 
-NAMELIST/xmhd_options/order,chi,eta,nu,gamma, D_diff, &
+NAMELIST/xmhd_options/order,linear, lin_tol, nl_tol,cyl, chi,eta,nu,gamma, D_diff, &
 dt,nsteps,rst_freq,use_mfnk,pm, n0, psi0, velx0,vely0,velz0, t0, by0, den_scale, bx0, bz0
 CALL oft_init
 !---Read in options
@@ -77,7 +81,7 @@ CALL mhd_sim%setup(mg_mesh,order)
 !---------------------------------------------------------------------------
 !---Generate mass matrix
 NULLIFY(u,v,mop,vec_vals) ! Ensure the matrix is unallocated (pointer is NULL)
-CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
+CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop) ! Construct mass matrix with "none" BC
 !---Setup linear solver
 CALL create_cg_solver(minv)
 minv%A=>mop ! Set matrix to be solved
@@ -121,17 +125,6 @@ CALL n_ic%restore_local(vec_vals)
 
 
 !---Project v_x initial condition onto scalar Lagrange basis
-! First save background constant density field (0 in this case)
-field_init%func=>const_init
-field_init%mesh=>mesh
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(0.d0)
-CALL u%get_local(vec_vals)
-CALL ML_oft_blagrange%vec_create(v_bg)
-CALL v_bg%restore_local(vec_vals)
-
 field_init%func=>velx_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -140,8 +133,6 @@ CALL u%scale(v_delta)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
 CALL mhd_sim%u%restore_local(vec_vals,2)
-CALL ML_oft_blagrange%vec_create(v_ic)
-CALL v_ic%restore_local(vec_vals)
 
 !---Project v_y initial condition onto scalar Lagrange basis
 field_init%func=>vely_sound
@@ -154,6 +145,17 @@ CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vy0')
 CALL mhd_sim%u%restore_local(vec_vals,3)
 
 !---Project v_z initial condition onto scalar Lagrange basis
+! First save background constant velocity field (0 in this case)
+field_init%func=>const_init
+field_init%mesh=>mesh
+CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL u%scale(0.d0)
+CALL u%get_local(vec_vals)
+CALL ML_oft_blagrange%vec_create(v_bg)
+CALL v_bg%restore_local(vec_vals)
+
 field_init%func=>velz_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -162,6 +164,9 @@ CALL u%scale(v_delta)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
 CALL mhd_sim%u%restore_local(vec_vals,4)
+CALL ML_oft_blagrange%vec_create(v_ic)
+CALL v_ic%restore_local(vec_vals)
+
 
 !---Project T initial condition onto scalar Lagrange basis
 ! First save background constant temperature field
@@ -227,6 +232,10 @@ mhd_sim%dt=dt
 mhd_sim%nsteps=nsteps
 mhd_sim%rst_freq=rst_freq
 mhd_sim%mfnk=use_mfnk
+mhd_sim%linear = linear
+mhd_sim%lin_tol = lin_tol
+mhd_sim%nl_tol = nl_tol
+mhd_sim%cyl_flag = cyl
 oft_env%pm=pm
 CALL mhd_sim%run_simulation()
 
@@ -244,7 +253,7 @@ verr_i=scal_energy_2d(mg_mesh%smesh,initial,order*2)
 err_field%dim=1
 err_field%a=>initial
 err_field%b=>final
-CALL mhd_sim%u%get_local(vec_vals,2)
+CALL mhd_sim%u%get_local(vec_vals,4)
 CALL tmp%restore_local(vec_vals) !this line is the problem
 full_f%u => tmp
 CALL full_f%setup(ML_oft_blagrange%current_level)
@@ -328,13 +337,13 @@ END SUBROUTINE velx_sound
 SUBROUTINE vely_sound(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = delta*k_dir(2)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+val = 0.d0
 END SUBROUTINE vely_sound
     
 SUBROUTINE velz_sound(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = delta*k_dir(3)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+val = delta*k_dir(2)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
 END SUBROUTINE velz_sound
     
 SUBROUTINE temp_sound(pt, val)

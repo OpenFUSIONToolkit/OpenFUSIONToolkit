@@ -182,7 +182,7 @@ call oft_blagrange%vec_create(uy)
 call oft_blagrange%vec_create(uz)
 call oft_blagrange%vec_create(v_lag)
 NULLIFY(lmop)
-call oft_blag_getmop(oft_blagrange,lmop,'none')
+call oft_blag_getmop(oft_blagrange,lmop)
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
@@ -475,7 +475,7 @@ call oft_blagrange%vec_create(uy)
 call oft_blagrange%vec_create(uz)
 call oft_blagrange%vec_create(v_lag)
 NULLIFY(lmop)
-call oft_blag_getmop(oft_blagrange,lmop,'none')
+call oft_blag_getmop(oft_blagrange,lmop)
 CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2

@@ -81,7 +81,7 @@ CALL mhd_sim%setup(mg_mesh,order)
 !---------------------------------------------------------------------------
 !---Generate mass matrix
 NULLIFY(u,v,mop,vec_vals) ! Ensure the matrix is unallocated (pointer is NULL)
-CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
+CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop) ! Construct mass matrix with "none" BC
 !---Setup linear solver
 CALL create_cg_solver(minv)
 minv%A=>mop ! Set matrix to be solved

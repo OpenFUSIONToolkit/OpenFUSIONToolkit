@@ -1,6 +1,3 @@
 add_subdirectory( slab_recon )
 add_subdirectory( Spheromak_tilt )
 add_subdirectory( Spheromak_heating )
-add_subdirectory( psi_test )
-add_subdirectory( sound_test )
-add_subdirectory( harris_sheet )
