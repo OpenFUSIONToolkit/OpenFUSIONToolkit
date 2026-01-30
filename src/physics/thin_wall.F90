@@ -2678,18 +2678,22 @@ IF(.NOT.ASSOCIATED(self%xml))THEN
   CALL oft_warn('No "thincurr" XML node, using "eta=mu0" for all regions')
   RETURN
 END IF
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
-!
+! Read resistivity values
 CALL xml_get_element(self%xml,"eta",eta_group,ierr)
-CALL xml_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
-IF(nread/=nreg_mesh)CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
-! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
-DO i=1,nreg_mesh
-  WRITE(*,'(A,I4,ES12.4)')oft_indent,i,self%Eta_reg(i)
-  self%Eta_reg(i)=self%Eta_reg(i)/mu0 ! Convert to magnetic units
-END DO
-! Load sensor mask
+IF(ASSOCIATED(eta_group))THEN
+  WRITE(*,*)
+  WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
+  CALL xml_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
+  IF(nread/=nreg_mesh)CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
+  ! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
+  DO i=1,nreg_mesh
+    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,self%Eta_reg(i)
+    self%Eta_reg(i)=self%Eta_reg(i)/mu0 ! Convert to magnetic units
+  END DO
+ELSE
+  CALL oft_warn('No "eta" XML node, using "eta=mu0" for all regions')
+END IF
+! Read sensor mask
 CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)
 IF(ierr==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'

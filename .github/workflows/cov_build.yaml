@@ -32,7 +32,7 @@ jobs:
         sudo apt-get -y install lcov
         python3 -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
-        python -m pip install pytest coverage numpy scipy h5py
+        python -m pip install pytest coverage numpy scipy h5py xarray matplotlib
 
     - name: Cache external libraries
       id: cache-ext-libs
@@ -58,7 +58,7 @@ jobs:
       working-directory: libs
       run: >
         python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=2
-        --build_mpich=1 --build_arpack=1 --build_petsc=1 --petsc_version=3.20
+        --build_mpich=1 --build_arpack=1 --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1
         --build_cmake=1 --oft_build_tests=1 --oft_build_coverage
 
     - name: Upload library failure log
@@ -67,11 +67,6 @@ jobs:
       with:
         name: Library failure log
         path: libs/build/build_error.log
-    
-    - name: Remove external build directory
-      shell: bash
-      working-directory: libs
-      run: rm -rf build
 
     - name: Configure OFT
       shell: bash
@@ -93,6 +88,13 @@ jobs:
         source ${{ github.workspace }}/oft_venv/bin/activate
         make test_cov
     
+    - name: Fixup cache
+      shell: bash
+      working-directory: libs
+      run: |
+        rm -rf build
+        rm -rf petsc*
+    
     - name: Generate coverage report (GCOV)
       shell: bash
       working-directory: libs/build_release
@@ -111,10 +113,11 @@ jobs:
         coverage xml
     
     - name: Upload coverage report to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         files: libs/build_release/cleaned_coverage.txt,libs/build_release/tests/coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }}
+        report_type: coverage
         disable_search: true
         plugin: noop
         verbose: true

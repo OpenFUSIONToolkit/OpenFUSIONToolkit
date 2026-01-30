@@ -298,6 +298,7 @@ class TokaMaker():
                     'sub_coils': []
                 }
                 nCoils += 1
+            coil_dict[key]['name'] = key
             self.coil_sets[coil_set]['sub_coils'].append(coil_dict[key])
             self.coil_sets[coil_set]['sub_coils'][-1]['name'] = key
             self.coil_sets[coil_set]['net_turns'] += coil_dict[key].get('nturns',1.0)

@@ -14,18 +14,12 @@ import tarfile
 import re
 import argparse
 import math
-try:
-    import urllib.request
-except ImportError:
-    import urllib2 as urllib
-    URLError = urllib.URLError
-    PY3K = False
-else:
-    from urllib.error import URLError
-    PY3K = True
+import http.client
+import urllib.request
+from urllib.error import URLError
 
 
-def error_exit(error_str, extra_info=None):
+def error_exit(error_str, extra_info=None, exception=None):
     # Exit build script with error
     print("\n\n============  BUILD FAILED!  ============")
     print("ERROR: {0}".format(error_str))
@@ -33,10 +27,12 @@ def error_exit(error_str, extra_info=None):
         for info in extra_info:
             print("INFO: {0}".format(info))
     print()
+    if exception is not None:
+        raise exception
     sys.exit(-1)
 
 
-def fetch_file(url, file):
+def fetch_file(url, file, headers={'User-Agent' : "Magic Browser"}):
     def format_bytes(size):
         if size <= 0:
             return "? MB"
@@ -53,70 +49,53 @@ def fetch_file(url, file):
         else:
             line = "    ({0}/{1})".format(format_bytes(curr_size), format_bytes(total_size))
             print(line, end="\r")
-        if not PY3K:
-            sys.stdout.flush()
         return len(line)
     # Download file from url
     original_url = url
     try:
-        if PY3K:
-            req = urllib.request.Request(url, headers={'User-Agent' : "Magic Browser"}) 
-            response = urllib.request.urlopen(req)
+        req = urllib.request.Request(url, headers=headers) 
+        response = urllib.request.urlopen(req)
+        resolved_url = response.geturl()
+        for _ in range(10): # Handle redirects
+            if resolved_url == url:
+                break
+            url = resolved_url
+            redirect_req = urllib.request.Request(resolved_url, headers=headers) 
+            response = urllib.request.urlopen(redirect_req)
             resolved_url = response.geturl()
-            for _ in range(10): # Handle redirects
-                if resolved_url == url:
-                    break
-                url = resolved_url
-                redirect_req = urllib.request.Request(resolved_url, headers={'User-Agent' : "Magic Browser"}) 
-                response = urllib.request.urlopen(redirect_req)
-                resolved_url = response.geturl()
-            try:
-                file_size = int(response.headers["content-length"])
-            except:
-                file_size = -1
-        else:
-            req = urllib.Request(url, headers={'User-Agent' : "Magic Browser"})
-            response = urllib.urlopen(req)
-            resolved_url = response.geturl()
-            for _ in range(10): # Handle redirects
-                if resolved_url == url:
-                    break
-                redirect_req = urllib.Request(resolved_url, headers={'User-Agent' : "Magic Browser"})
-                response = urllib.request.urlopen(redirect_req)
-                resolved_url = response.geturl()
-            try:
-                file_size = int(response.info().getheaders("Content-Length")[0])
-            except:
-                file_size = -1
-    except ValueError:
-        error_exit('Invalid download URL: "{0}"'.format(original_url))
-    except:
-        error_exit('Download failed for file: "{0}"'.format(original_url))
+        try:
+            file_size = int(response.headers["content-length"])
+        except:
+            file_size = -1
+    except ValueError as e:
+        error_exit('Invalid download URL: "{0}"'.format(original_url), exception=e)
+    except Exception as e:
+        error_exit('Download failed for file: "{0}"'.format(original_url), exception=e)
     else:
         line = "  Downloading: {0}".format(original_url)
         print(line)
         if fetch_progress:
             old_len = update_progress(0, file_size, 0)
-        else:
-            update_progress(file_size, file_size, 0, final_update=True)
-        blocksize = max(4096, file_size//100)
-        size = 0
-        full_buf = b""
-        while True:
-            buf1 = response.read(blocksize)
-            if not buf1:
-                break
-            full_buf += buf1
-            size += len(buf1)
-            if fetch_progress:
+            blocksize = max(4096, file_size//100)
+            size = 0
+            full_buf = b""
+            while True:
+                buf1 = response.read(blocksize)
+                if not buf1:
+                    break
+                full_buf += buf1
+                size += len(buf1)
                 old_len = update_progress(size, file_size, old_len)
-        with open(file, "wb") as handle:
-            handle.write(full_buf)
-        if fetch_progress:
             update_progress(size, file_size, old_len, final_update=True)
         else:
+            update_progress(file_size, file_size, 0, final_update=True)
+            full_buf = response.read()
+            size = len(full_buf)
             if file_size < 0:
                 update_progress(size, file_size, 0, final_update=True)
+        # Save to disk
+        with open(file, "wb") as handle:
+            handle.write(full_buf)
 
 
 def extract_archive(file):
@@ -124,8 +103,8 @@ def extract_archive(file):
     try:
         with tarfile.open(file, errorlevel=2) as tar:
             tar.extractall()
-    except:
-        error_exit('Extraction failed for file: "{0}"'.format(file))
+    except Exception as e:
+        error_exit('Extraction failed for file: "{0}"'.format(file), exception=e)
 
 
 def run_command(command, timeout=10, env_vars={}):
@@ -142,10 +121,7 @@ def run_command(command, timeout=10, env_vars={}):
         outs, _ = pid.communicate()
         print("WARNING: Command timeout")
     errcode = pid.poll()
-    if PY3K:
-        result = outs.decode("utf-8")
-    else:
-        result = outs
+    result = outs.decode("utf-8")
     return result, errcode
 
 
@@ -580,12 +556,21 @@ class package:
     def post_install(self, config_dict):
         return config_dict
 
-    def fetch(self, force=False):
+    def fetch(self, force=False, nretry=2):
         # Download library archive
         if self.skip:
             return
         if (not os.path.isfile(self.file)) or force:
-            fetch_file(self.url, self.file)
+            for i in range(nretry+1):
+                try:
+                    fetch_file(self.url, self.file)
+                except http.client.HTTPException:
+                    if i == nretry:
+                        raise
+                    else:
+                        print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
+                        continue
+                break
         else:
             print("  Using existing file: {0}".format(self.file))
         for args in self.extra_fetch + self.patch_files:
@@ -597,7 +582,16 @@ class package:
             else:
                 error_exit('Invalid "extra_fetch" or "patch_file" object!')
             if (not os.path.isfile(tmp_file)) or force:
-                fetch_file(url, tmp_file)
+                for i in range(nretry+1):
+                    try:
+                        fetch_file(url, tmp_file)
+                    except http.client.HTTPException:
+                        if i == nretry:
+                            raise
+                        else:
+                            print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
+                            continue
+                    break
             else:
                 print("  Using existing file: {0}".format(tmp_file))
 
@@ -793,7 +787,7 @@ class MPICH(package):
         if ver_major == 3:
             self.url = "https://www.mpich.org/static/downloads/3.3.2/mpich-3.3.2.tar.gz"
         elif ver_major == 4:
-            self.url = "https://www.mpich.org/static/downloads/4.2.3/mpich-4.2.3.tar.gz"
+            self.url = "https://github.com/pmodels/mpich/releases/download/v4.2.3/mpich-4.2.3.tar.gz"
         else:
             raise ValueError("Unknown MPICH version")
         self.build_timeout = 30
@@ -1642,6 +1636,8 @@ class SUPERLU_DIST(package):
     def build(self):
         #
         tmp_dict = self.config_dict.copy()
+        if 'MPI_CXX' not in self.config_dict:
+            error_exit('SuperLU-DIST requires an MPI C++ compiler')
         cmake_options = [
             "-DTPL_ENABLE_PARMETISLIB:BOOL=FALSE",
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_DIST_ROOT}",
@@ -1738,10 +1734,13 @@ class UMFPACK(package):
             AMD_CMAKE_options.append("-DCMAKE_EXE_LINKER_FLAGS={0}".format(self.config_dict['OMP_FLAGS']))
         if 'MACOS_SDK_PATH' in self.config_dict:
             AMD_CMAKE_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
-        config_CMAKE_options = AMD_CMAKE_options.copy() + [
-            "-DBLAS_ROOT:PATH={BLAS_ROOT}",
-            "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
-        ]
+        if 'BLAS_ROOT' in self.config_dict:
+            config_CMAKE_options = AMD_CMAKE_options.copy() + [
+                "-DBLAS_ROOT:PATH={BLAS_ROOT}",
+                "-DBLA_VENDOR:STRING={BLAS_VENDOR}"
+            ]
+        else:
+            config_CMAKE_options = AMD_CMAKE_options.copy()
         UMFPACK_CMAKE_options = config_CMAKE_options.copy() + [
             "-DUMFPACK_USE_CHOLMOD:BOOL=OFF"
         ]
@@ -1853,24 +1852,25 @@ class ONURBS(package):
 
 
 class PETSC(package):
-    def __init__(self, debug=False, with_superlu=False, with_superlu_dist=False, with_umfpack=False, with_mumps=False, version=3.20,
-                 comp_wrapper=False, shared_libs=None):
+    def __init__(self, debug=False, with_openmp=False, with_superlu=False, with_superlu_dist=False, with_umfpack=False,
+                 with_mumps=False, version="3.23", comp_wrapper=False, shared_libs=None):
         self.name = "PETSC"
         self.display_name = "PETSc"
         self.version = version
-        if self.version == '3.18':
-            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.18.6/petsc-v3.18.6.tar.gz"
-        elif self.version == '3.19':
-            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.19.6/petsc-v3.19.6.tar.gz"
-        elif self.version == '3.20':
+        if self.version == '3.20':
             self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.20.6/petsc-v3.20.6.tar.gz"
         elif self.version == '3.21':
             self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.21.6/petsc-v3.21.6.tar.gz"
         elif self.version == '3.22':
             self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.22.5/petsc-v3.22.5.tar.gz"
+        elif self.version == '3.23':
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.23.7/petsc-v3.23.7.tar.gz"
+        elif self.version == '3.24':
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.24.3/petsc-v3.24.3.tar.gz"
         else:
-            error_exit('Invalid PETSc version requested (3.18 <= version <= 3.22)')
+            error_exit('Invalid PETSc version requested (3.20 <= version <= 3.24)')
         self.debug = debug
+        self.with_openmp = with_openmp
         self.with_superlu = with_superlu
         self.with_superlu_dist = with_superlu_dist
         self.with_umfpack = with_umfpack
@@ -1958,7 +1958,7 @@ class PETSC(package):
         else:
             options += ['--with-mpi-dir={MPI_ROOT}']
         if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
-            options.append('--FFLAGS="-fallow-argument-mismatch"')
+            options.append('--FFLAGS="-fallow-argument-mismatch -ffree-line-length-none"')
         options += [
             '--download-metis',
             '--download-parmetis',
@@ -1970,6 +1970,12 @@ class PETSC(package):
             options += ['--with-shared-libraries=1']
         else:
             options += ['--with-shared-libraries=0']
+        if self.with_openmp:
+            options += ['--with-openmp']
+            if ver_gt(self.version,"3.22"):
+                options += ['--with-openmp-kernels']
+            else:
+                print('Warning: OpenMP kernels requires PETSc 3.23+, OpenMP will only be used in third party libraries')
         need_cxx = False
         if self.with_superlu:
             # # Fix SDK issue on MacOS "Catalina" (10.15)
@@ -1999,6 +2005,8 @@ class PETSC(package):
             # elif config_dict['CC_VENDOR'] == 'intel':
             #     options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
         if need_cxx:
+            if 'MPI_CXX' not in self.config_dict:
+                error_exit('PETSc build as configured requires an MPI C++ compiler')
             options += ['--with-cxx={MPI_CXX}']
         else:
             options += ['--with-cxx=0']
@@ -2042,6 +2050,7 @@ group.add_argument("--build_mpich", "--build_mpi", default=0, type=int, choices=
 group.add_argument("--mpich_version", default=4, type=int, choices=(3,4), help="MPICH major version (default: 4)")
 group.add_argument("--build_openmpi", default=0, type=int, choices=(0,1), help="Build OpenMPI libraries?")
 group.add_argument("--mpi_cc", default=None, type=str, help="MPI C compiler wrapper")
+group.add_argument("--mpi_cxx", default=None, type=str, help="MPI C++ compiler wrapper")
 group.add_argument("--mpi_fc", default=None, type=str, help="MPI FORTRAN compiler wrapper")
 group.add_argument("--mpi_lib_dir", default=None, type=str, help="MPI library directory")
 group.add_argument("--mpi_libs", default=None, type=str, help="MPI libraries")
@@ -2053,6 +2062,7 @@ group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wr
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
 group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
+group.add_argument("--hdf5_static", action="store_true", default=False, help="Build and link HDF5 statically?")
 #
 group = parser.add_argument_group("BLAS/LAPACK", "BLAS/LAPACK package options")
 group.add_argument("--oblas_threads", action="store_true", default=False, help="Build OpenBLAS with thread support (OpenMP)")
@@ -2077,6 +2087,7 @@ group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="B
 group = parser.add_argument_group("NETCDF", "NETCDF package options")
 group.add_argument("--build_netcdf", default=0, type=int, choices=(0,1), help="Build NETCDF library? (default: 0)")
 group.add_argument("--netcdf_wrapper", action="store_true", default=False, help="NETCDF included in compilers")
+group.add_argument("--netcdf_static", action="store_true", default=False, help="Build and link NETCDF statically?")
 #
 group = parser.add_argument_group("ARPACK", "ARPACK package options")
 group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="Build ARPACK library? (default: 0)")
@@ -2097,12 +2108,13 @@ group.add_argument("--umfpack_wrapper", action="store_true", default=False, help
 group = parser.add_argument_group("PETSc", "PETSc package options")
 group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library? (default: 0)")
 group.add_argument("--petsc_debug", default=0, type=int, choices=(0,1), help="Build PETSc with debugging information (default: 0)")
+group.add_argument("--petsc_openmp", default=0, type=int, choices=(0,1), help="Build PETSc with OpenMP support (default: 0)")
 group.add_argument("--petsc_superlu", default=0, type=int, choices=(0,1), help="Build PETSc with SuperLU (default: 0)")
 group.add_argument("--petsc_superlu_dist", default=1, type=int, choices=(0,1), help="Build PETSc with SuperLU-DIST (default: 1)")
 group.add_argument("--petsc_mumps", default=0, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 0)")
 group.add_argument("--petsc_umfpack", default=1, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 1)")
-group.add_argument("--petsc_version", default="3.20", type=str,
-    help="Use different version of PETSc [3.18,3.19,3.20,3.21,3.22] (default: 3.20)")
+group.add_argument("--petsc_version", default="3.23", type=str,
+    help="Use different version of PETSc [3.20,3.21,3.22,3.23,2.24] (default: 3.23)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
 #
 options = parser.parse_args()
@@ -2130,6 +2142,8 @@ use_mpi = False
 if (options.mpi_cc is not None) and (options.mpi_fc is not None):
     config_dict['MPI_CC'] = options.mpi_cc
     config_dict['MPI_FC'] = options.mpi_fc
+    if options.mpi_cxx is not None:
+        config_dict['MPI_CXX'] = options.mpi_cxx
     use_mpi = True
 else:
     if options.mpi_lib_dir is not None:
@@ -2172,6 +2186,8 @@ if use_mpi:
         packages.append(OpenMPI(mpi_force_headers))
     elif options.build_mpich:
         packages.append(MPICH(mpi_force_headers,options.mpich_version))
+    elif (options.mpi_cc is not None) and (options.mpi_fc is not None):
+        pass
     else:
         parser.exit(-1, 'Invalid MPI package')
 else:
@@ -2186,7 +2202,7 @@ if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     config_dict['HDF5_FC'] = options.hdf5_fc
     packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
 else:
-    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
+    packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required,shared_libs=(not options.hdf5_static)))
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())
@@ -2198,12 +2214,12 @@ if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
 # Are we building NETCDF?
 if (options.build_netcdf == 1) or options.netcdf_wrapper:
-    packages.append(NETCDF(options.netcdf_wrapper))
+    packages.append(NETCDF(options.netcdf_wrapper,shared_libs=(not options.netcdf_static)))
 # Are we building PETSc?
 if (options.build_petsc == 1) or options.petsc_wrapper:
-    packages.append(PETSC(debug=options.petsc_debug, with_superlu=options.petsc_superlu, with_superlu_dist=options.petsc_superlu_dist,
-                          with_umfpack=options.petsc_umfpack, with_mumps=options.petsc_mumps,
-                          version=options.petsc_version, comp_wrapper=options.petsc_wrapper))
+    packages.append(PETSC(debug=options.petsc_debug, with_openmp=options.petsc_openmp, with_superlu=options.petsc_superlu,
+                          with_superlu_dist=options.petsc_superlu_dist, with_umfpack=options.petsc_umfpack,
+                          with_mumps=options.petsc_mumps, version=options.petsc_version, comp_wrapper=options.petsc_wrapper))
 else:
     packages.append(METIS(options.metis_wrapper))
     if (options.build_superlu == 1) or options.superlu_wrapper:
