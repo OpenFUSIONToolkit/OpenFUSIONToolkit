@@ -13,7 +13,9 @@ import collections
 import ctypes
 import numpy
 from ._interface import *
-
+from scipy.signal import find_peaks, peak_widths
+from scipy.optimize import curve_fit, root_scalar
+from scipy.stats import skewnorm
 
 def tokamaker_default_settings(oft_env):
     '''! Initialize settings object with default values
@@ -1865,92 +1867,137 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
-
-def solve_with_bootstrap(self,
-                         ne,
-                         Te,
-                         ni,
-                         Ti,
-                         Zeff,
-                         Ip_target,
-                         inductive_jtor=None,
-                         Zis=[1.],
-                         scale_jBS=1.0,
-                         isolate_jBS=False,
-                         psi_pad=1e-3,
-                         max_iterations=6,
-                         iteration_plots=False,
-                         initialize_eq=False # do not use, likely can be removed
-                            ):
-    '''! Self-consistently compute bootstrap contribution from H-mode profiles. 
-    If l_i is set, match to a user specified internal inductance by scanning a 
-    parametrized FF' profile, and iterate solution until all functions of Psi converge. 
-    If inductive_jtor is set, solve for FF' using Grad-Shafranov equation and 
-    iterate solution until all functions of Psi converge. 
-
-    @note if using nis and Zis, dnis_dpsi must be specified in sauter_bootstrap() 
-    as a list of impurity gradients over Psi. See 
-    https://omfit.io/_modules/omfit_classes/utils_fusion.html for more 
-    detailed documentation
-
-    @note if initialize_eq=True, cubic polynomials will be fit to the core of all 
-    kinetic profiles in order to flatten the pedestal. This will initialize the G-S 
-    solution at an estimated L-mode pressure profile and using a generic current profile. 
-
-    @param ne Electron density profile, sampled over psi_norm
-    @param Te Electron temperature profile [eV], sampled over psi_norm
-    @param ni Ion density profile, sampled over psi_norm
-    @param Ti Ion temperature profile [eV], sampled over psi_norm
-    @param Zeff Effective Z profile, sampled over psi_norm
-    @param psi explicit sampling locations in normalized psi
-    @param Zis List of impurity profile atomic numbers; currently set to 1. 
-    @param nis NOT USED: list of impurity density profiles, currently ni = nis
-    @param inductive_jtor Inductive toroidal current, sampled over psi_norm
-    @param scale_jBS Factor by which to scale bootstrap current fraction
-    @param max_iterations Maximum number of H-mode mygs.solve() iterations
-    @param iteration_plots Plot iteration target and output j_tor profiles
-    @param initialize_eq Initialize equilibrium solve with flattened pedestal. 
-    '''
-    from scipy.signal import find_peaks, peak_widths
-    from scipy.optimize import curve_fit
-    from scipy.optimize import root_scalar
-    from scipy.stats import skewnorm
-
-    try:
-        from omfit_classes.utils_fusion import sauter_bootstrap
-    except:
-        raise ImportError('omfit_classes.utils_fusion not installed')
-
-    # Turn off solver iteration printout
-    #mygs.settings.pm = False
-    #mygs.update_settings()
-    
-    def jtor_from_GS(ffprime, pprime, R_avg, one_over_R_avg):
-        r'''! Convert from J_toroidal to FF' using Grad-Shafranov equation
-
-        @param jtor Toroidal current profile
-        @param R_avg Flux averaged R, calculated by TokaMaker
-        @param one_over_R_avg Flux averaged 1/R, calculated by TokaMaker
-        @param pprime dP/dPsi profile
+        
+    def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_width=0.03, tail_alpha=1.5):
+        r'''! Generates a parameterized bootstrap current profile with a tunable 'concave' fall-off
+        @param psi Normalized psi profile
+        @param amp Amplitude of edge skewed Gaussian spike
+        @param center Center location of edge skewed Gaussian spike
+        @param width Width of edge skewed Gaussian spike
+        @param offset Height of core flat profile
+        @param sk Skew parameter of Gaussian
+        @param y_sep Separatrix value of parameterized profile
+        @param blend_width Normalized psi profile
+        @param tail_alpha Controls the shape of the right-side fall-off.
+                      1.0 = Standard Cosine (smooth, rounded).
+                      >1.0 = Sharper peak, straighter/concave fall-off (closer to typical bootstrap).
         '''
-        jtor = ffprime * (one_over_R_avg / mu0) + R_avg * pprime
-
-        return jtor
+        def generate_baseline_prof(psi, amp, center, width, offset, sk, y_sep, blend_width, tail_alpha):
+            # --- 1. Find Exact Peak of Underlying Skew Gaussian ---
+            def raw_shape(x):
+                return skewnorm.pdf(x, sk, loc=center, scale=width)
     
-    def ffprime_from_jtor_pprime(jtor, pprime, R_avg, one_over_R_avg):
-        r'''! Convert from J_toroidal to FF' using Grad-Shafranov equation
-
-        @param jtor Toroidal current profile
-        @param R_avg Flux averaged R, calculated by TokaMaker
-        @param one_over_R_avg Flux averaged 1/R, calculated by TokaMaker
-        @param pprime dP/dPsi profile
-        '''
-        ffprime = 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
-        return ffprime
-
-    def analyze_bootstrap_edge_spike(psi_N, j_bootstrap):
+            # Fine grid scan for precision
+            x_grid = np.linspace(max(0, center - 3*width), min(1, center + 3*width), 10000)
+            y_grid = raw_shape(x_grid)
+            idx_peak = np.argmax(y_grid)
+            val_peak_raw = y_grid[idx_peak]
+            x_peak = x_grid[idx_peak]
+    
+            # --- 2. Calculate Internal Amplitude & Left Side ---
+    
+            # Smoothing factor for the blend
+            k_smooth = (amp / width) * (blend_width / 4.0) 
+            if k_smooth < 1e-5: k_smooth = 1e-5
+    
+            # Case A: Standard Spike (Amp > Offset)
+            if amp > offset:
+                # Solve for internal_amp to compensate for SoftMax boost
+                diff = amp - offset
+                if diff > 1e-10:
+                    argument = 1.0 - np.exp((offset - amp) / k_smooth)
+                    if argument <= 0: argument = 1e-16
+                    internal_amp = amp + k_smooth * np.log(argument)
+                else:
+                    internal_amp = amp 
+    
+                spike_profile = raw_shape(psi) / val_peak_raw * internal_amp
+                profile_left = k_smooth * np.logaddexp(offset / k_smooth, spike_profile / k_smooth)
+                stitch_height = amp
+    
+            # Case B: Dominant Offset
+            else:
+                profile_left = np.full_like(psi, offset)
+                stitch_height = offset
+    
+            # --- 3. Construct Right Side (Powered Cosine) ---
+            # Model: y = stitch_height * cos(omega * (x - x_peak)) ^ tail_alpha
+    
+            u = (psi - x_peak) / (1.0 - x_peak)
+            dist_to_edge = 1.0 - x_peak
+            if dist_to_edge < 1e-5: dist_to_edge = 1e-5
+    
+            # Determine omega to hit y_sep exactly
+            # y_sep = H * cos(w * L)^alpha  =>  (y_sep/H)^(1/alpha) = cos(w * L)
+    
+            # Safety: Base for power must be positive
+            # If y_sep > stitch_height, we use Cosh instead of Cos
+    
+            if y_sep < stitch_height:
+                # Cosine Decay
+                # Calculate target cosine value (inverse power)
+                target_cos = (y_sep / stitch_height) ** (1.0 / tail_alpha)
+                # Clip to valid domain for arccos [-1, 1]
+                target_cos = np.clip(target_cos, -1.0, 1.0)
+    
+                omega = np.arccos(target_cos) / dist_to_edge
+    
+                # Calculate profile
+                # We must protect the cosine argument so it doesn't go negative before power
+                # (though strictly defined, it stays in [0, pi/2] for this range)
+                arg = omega * (psi - x_peak)
+                base_cos = np.cos(arg)
+                # Ensure positive base for float power
+                base_cos = np.maximum(base_cos, 0) 
+    
+                profile_right = stitch_height * (base_cos ** tail_alpha)
+    
+            else:
+                # Cosh Rise (Rare)
+                target_cosh = (y_sep / stitch_height) ** (1.0 / tail_alpha)
+                omega = np.arccosh(target_cosh) / dist_to_edge
+                profile_right = stitch_height * (np.cosh(omega * (psi - x_peak)) ** tail_alpha)
+    
+            # --- 4. Stitching ---
+            temp_profile = np.where(psi <= x_peak, profile_left, profile_right)
+    
+            if y_sep >= 0:
+                temp_profile = np.maximum(temp_profile, 0)
+            return temp_profile
+        
+        def objective_function(alpha, psi, amp, center, width, offset, sk, y_sep, blend_width, tail_alpha):
+            r'''! Compute difference between integrated a*j_tor+j_spike profile and Ip_target
+    
+            @param alpha Scaling factor to solve for
+            @param jtor_prof Input j_inductive profile
+            @param spike_profile Isolated j_bootstrap spike (a Gaussian), 0.0 everywhere else
+            @param my_psi_N Local psi_N grid
+            @param my_Ip_target Ip target
+            '''
+            temp_profile = generate_baseline_prof(psi, amp, center, width, alpha*offset, sk, y_sep, blend_width, tail_alpha)
+            return temp_profile[0] - offset
+    
+        if offset == 0.0:
+            final_profile = generate_baseline_prof(psi, amp, center, width, -1e10, sk, y_sep, blend_width, tail_alpha)
+        else:
+            # Find scalar "alpha" that solves 
+            result = root_scalar(objective_function,
+                                 args=(psi, amp, center, width, offset, sk, y_sep, blend_width, tail_alpha),
+                                 bracket=[-1e+10, 10*amp],
+                                 method='brentq',
+                                 rtol=1e-6)
+    
+            # Extract the solution
+            a_optimal = result.root
+    
+            final_profile = generate_baseline_prof(psi, amp, center, width, a_optimal*offset, sk, y_sep, blend_width, tail_alpha)
+    
+        # find correct offset to match user input value
+        return final_profile
+    
+    def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         r'''! Analyze bootstrap edge spike location, width, and height
-
+    
         @param psi_N Normalized psi profile
         @param j_bootstrap Bootstrap current profile
         Returns:
@@ -1960,358 +2007,600 @@ def solve_with_bootstrap(self,
         edge_mask = psi_N >= 0.7
         psi_edge = psi_N[edge_mask]
         j_edge = j_bootstrap[edge_mask]
-
+    
         # Find peak in the edge region
         peaks, properties = find_peaks(j_edge, height=0.)#0.5*np.max(j_edge))
-        
+    
         if len(peaks) == 0:
             print("No clear peak found in the edge region")
             return None
-
+    
         # Choose peak closest to psi_N = 1 if multiple peaks exist
         peak_idx = peaks[np.argmax(psi_edge[peaks])]
         peak_psi = psi_edge[peak_idx]
         peak_height = j_edge[peak_idx]
-
+    
         # Calculate initial FWHM (full width at half maximum)
         widths = peak_widths(j_edge, [peak_idx], rel_height=0.5)
         left_idx, right_idx = int(widths[2][0]), int(widths[3][0])
-
+    
         # Convert to psi_N coordinates
         fwhm = psi_edge[right_idx] - psi_edge[left_idx]
-
-        def gaussian(x, amp, center, width, offset, sk):
-            skew = skewnorm.pdf(x, sk, center, width)
-            skew = skew/max(skew)
-            skew *= amp
-            skew += offset
-            return skew
-
+    
         # Get good range for fitting - wider than the spike to capture baseline
-        fit_range = max(0.15, 3*fwhm)  # At least 0.15 in psi_N or 3x FWHM
-        fit_mask = (psi_N >= peak_psi - fit_range) & (psi_N <= min(1.0, peak_psi + fit_range))
-
+        fit_range = max(0.15, 4*fwhm)  # At least 0.15 in psi_N or 3x FWHM
+    
+        # Find minimum of j_BS current in core/mantle region and use as values for flat core profile
+        masked_j_BS = j_bootstrap[(psi_N > 0.5) & (psi_N < peak_psi)] # minimum between psi_N = 0.5 and peak of j_BS
+        masked_psi_N = psi_N[(psi_N > 0.5) & (psi_N < peak_psi)]
+        lmin_j_BS = min(masked_j_BS)
+        lmin_arg = np.argmin(masked_j_BS)
+        fit_mask = (psi_N >= masked_psi_N[lmin_arg])
+        
+        # Splice j_BS profile edge spike onto flat profile with value set to min(j_BS)
+        masked_spike = np.ones_like(psi_N)*lmin_j_BS
+        masked_spike[fit_mask] = j_bootstrap[fit_mask]
+        
+        # Define the blend window to smooth out junction of flat core profile and edge j_BS spike
+        # Set the total width to be half the distance between splice location and peak
+        jBS_min_loc = masked_psi_N[lmin_arg]
+        dist_to_peak = peak_psi - jBS_min_loc
+        blend_width = 0.5 * dist_to_peak 
+    
+        x_start = jBS_min_loc - (blend_width / 2.0)
+        x_end   = jBS_min_loc + (blend_width / 2.0)
+    
+        # Find indices for the start and end of the window
+        idx_start = (np.abs(psi_N - x_start)).argmin()
+        idx_end   = (np.abs(psi_N - x_end)).argmin()
+    
+        # Validation to ensure indices are ordered and within bounds
+        idx_start = max(0, idx_start)
+        idx_end   = min(len(psi_N) - 2, idx_end) # -2 to safe-guard derivative calc later
+    
+        # Determine Boundary Conditions
+        # Left Boundary (Start): strictly flat, so slope is 0
+        y_start  = masked_spike[idx_start]
+        dy_start = 0.0  
+    
+        # Right Boundary (End): located on the peaked profile
+        # Estimate the slope (dy/dx) using a central difference at x_end
+        y_end  = masked_spike[idx_end]
+        dy_end = (masked_spike[idx_end + 1] - masked_spike[idx_end - 1]) / \
+                 (psi_N[idx_end + 1] - psi_N[idx_end - 1])
+    
+        # Generate Cubic Hermite Spline
+        # Extract the x-values in the window to interpolate over
+        x_window = psi_N[idx_start : idx_end + 1]
+    
+        # Normalized coordinate t (goes from 0 to 1 across the window)
+        t = (x_window - x_window[0]) / (x_window[-1] - x_window[0])
+    
+        # Hermite Basis Functions
+        h00 = 2*t**3 - 3*t**2 + 1           # Weight for Start Value
+        h10 = t**3 - 2*t**2 + t             # Weight for Start Slope
+        h01 = -2*t**3 + 3*t**2              # Weight for End Value
+        h11 = t**3 - t**2                   # Weight for End Slope
+    
+        # The physical length of the window (needed to scale the derivative terms)
+        dx_window = x_window[-1] - x_window[0]
+    
+        # Calculate the smooth patch
+        y_patch = (h00 * y_start) + \
+                  (h10 * dx_window * dy_start) + \
+                  (h01 * y_end) + \
+                  (h11 * dx_window * dy_end)
+    
+        # Apply the patch to the main masked j_BS profile
+        masked_spike[idx_start : idx_end + 1] = y_patch
+        
+        # Attempt to fit bootstrap parameterization to calculated profile (deprecated)
         # Initial parameter guess
-        # Estimate the background level from points away from the peak
-        background_mask = (psi_N >= 0.7) & (psi_N <= 0.75)
-        if np.sum(background_mask) > 5:
-            background_level = np.median(j_bootstrap[background_mask])
-        else:
-            background_level = np.min(j_edge)
-
         sigma_init = fwhm/2.355  # Convert FWHM to sigma
-        p0 = [peak_height - background_level, peak_psi, sigma_init, background_level, 1.0]
-
+        p0 = [peak_height, peak_psi, sigma_init, lmin_j_BS, 1.0, j_bootstrap[-1], 0.05]
+    
+        lower_bounds = [0.99*peak_height, # fix to measured spike height
+                        0.8*peak_psi, # don't fix to measured spike location
+                        0.0, # width
+                        0.99*lmin_j_BS,
+                        -50,
+                        0.0,
+                        0.001]
+        upper_bounds = [1.01*peak_height, # fix to measured spike height
+                        1.2*peak_psi, # don't fix to measured spike location
+                        0.33, # no spikes wider than 0.33 units of psi_N 
+                        1.01*lmin_j_BS,
+                        50, # sk
+                        2*j_bootstrap[-1],
+                        0.2]
+    
         # Perform the fit
-        popt, pcov = curve_fit(gaussian, psi_N[fit_mask], j_bootstrap[fit_mask], p0=p0, 
+        popt, pcov = curve_fit(parameterize_edge_jBS, psi_N[fit_mask], j_bootstrap[fit_mask], p0=p0,
+                               bounds=(lower_bounds, upper_bounds),
                               maxfev=10000)
-
-        amp, center, width, offset, sk = popt
-        perr = np.sqrt(np.diag(pcov))
-
-        spike_only = gaussian(psi_N, amp, center, width, offset, sk)
-
+    
+        amp, center, width, offset, sk, y_sep, blend_width = popt
+    
+        spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
+        
+        if diagnostic_plots:
+            plt.figure()
+            plt.plot(psi_N[fit_mask],j_bootstrap[fit_mask]/1e6,label='Input j_BS')
+            plt.plot(psi_N,spike_only/1e6,label='Fitted parameterization')
+            plt.plot(psi_N,masked_spike/1e6,label='Isolated')
+            plt.xlabel(r'$\hat \psi$')
+            plt.ylabel(r'$j_\phi$ [MA]')
+            plt.xlim(0.5,1.02)
+            plt.legend(loc='best')
+            plt.show()
+        
         results = {
             'sigma': width,                 # Gaussian width (sigma)
             'background': offset,           # background level
             'gaussian_params': popt,        # Raw parameters [amp, center, width, offset]
-            'spike_profile': spike_only,    # Array of spike component values
+            'parameterized_spike': spike_only,    # Array of spike component values
+            'masked_spike': masked_spike
         }
-
-        return results
-
-    def objective_function(alpha, jtor_prof, spike_profile, my_psi_N, my_Ip_target):
-        r'''! Compute difference between integrated a*j_tor+j_spike profile and Ip_target
-
-        @param alpha Scaling factor to solve for
-        @param jtor_prof Input j_inductive profile
-        @param spike_profile Isolated j_bootstrap spike (a Gaussian), 0.0 everywhere else
-        @param my_psi_N Local psi_N grid
-        @param my_Ip_target Ip target
-        '''
-        Ip_computed = self.flux_integral(my_psi_N, (alpha*jtor_prof)+spike_profile)
-        return Ip_computed - my_Ip_target
     
-    def profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,scale_jBS,Zis,include_jBS=True):
-
-        ### Get final remaining quantities for Sauter from TokaMaker
-        psi_tmp = psi
-        _,f,fp,_,_ = self.get_profiles(npsi=n_psi,psi_pad=psi_pad)
-        _,fc,r_avgs,_ = self.sauter_fc(psi=psi_tmp,npsi=n_psi,psi_pad=psi_pad)
-        ft = 1 - fc # Trapped particle fraction on each flux surface
-        eps = r_avgs[2] / r_avgs[0] # Inverse aspect ratio
-        _,qvals,ravgs,_,_,_ = self.get_q(psi=psi_tmp,npsi=n_psi)
-        R_avg = ravgs[0]
-        one_over_R_avg = ravgs[1]
+        return results
+    
+    def get_jphi_from_GS(ffprime, pprime, R_avg, one_over_R_avg):
+        r'''! Calculate j_phi profile from Grad-Shafranov equation
+        @param ffprime FF'(psi_N) profile
+        @param pprime P'(psi_N) profile
+        @param R_avg <R>(psi_N) profile
+        @param one_over_R_avg <1/R>(psi_N) profile
+        Returns:
+        j_phi(\psi_N) profile
+        '''
+        return ffprime * (one_over_R_avg / mu0) + R_avg * pprime
+    
+    def solve_jphi(self,n,psi_N,pressure,ffp_prof,pp_prof,j_inductive,spike_prof,Ip_target,n_psi,psi_pad,scale_j=1.0,diagnostic_plots=False):
+        r'''! Take input P' and j_phi profiles and solve equilibrium
+        @param n Iteration number
+        @param psi_N Normalized poloidal flux profile
+        @param pressure Plasma pressure profile [Pa]
+        @param ffp_prof FF' profile
+        @param pp_prof P' profile
+        @param j_inductive Inductive OR total toroidal current profile to be rescaled [A/m^2]
+        @param spike_prof Optional bootstrap current profile [A/m^2]
+        @param Ip_target Target Plasma Current [A]
+        @param n_psi Number of grid points in normalized poloidal flux
+        @param psi_pad Padding for flux surface calculations
+        @param scale_j0 Scale j_inductive profile without scaling spike_prof
+        @param diagnostic_plots Plot input and output j_phi profiles to check alignment
+        Returns:
+        j_phi(\psi_N) profile
+        '''
+    
+        matched_input_jphi = scale_j*j_inductive + spike_prof
+    
+        ffp_prof['type'] = 'jphi-linterp'
+        ffp_prof['y'] = matched_input_jphi
+    
+        self.set_targets(Ip=Ip_target, pax=pressure[0])
+        self.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
+    
+        # Solve Grad-Shafranov
+        self.solve()
+    
+        # Check Convergence
+        curr_psi, f, fp, p, pp = self.get_profiles(npsi=n_psi, psi_pad=psi_pad)
+        _, _, ravgs, _, _, _ = self.get_q(npsi=n_psi, psi_pad=psi_pad)
+    
+        tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs[0], ravgs[1])
+    
+        if diagnostic_plots:
+            plt.figure()
+            plt.plot(psi_N, matched_input_jphi/1e6, linestyle='--', label=r'Input $j_\phi$')
+            plt.plot(psi_N, tmp_jphi/1e6, label=r'Output $j_\phi$')
+            plt.title(f'Iteration {n}')#', Ip error: {Ip_err:.3f} %')
+            plt.legend()
+            plt.xlabel(r'$\hat \psi')
+            plt.xlabel(r'$j_\phi$ [MA]')
+            plt.grid(ls=':')
+            plt.show()
         
-        pprime = np.gradient(pressure) / (np.gradient(psi_tmp) * (self.psi_bounds[1]-self.psi_bounds[0]))
+        return tmp_jphi
+    
+    def find_optimal_scale(self, psi_N, pressure, ffp_prof, pp_prof, j_inductive,  
+                                Ip_target, psi_pad, spike_prof=None, find_j0=True, scale_j0=1.0, 
+                                tolerance=0.01, max_iter=5, diagnostic_plots=False):
+        """
+        Optimizes scale_j0 OR Ip_target to match either input and output current densities at the axis (index 0)
+        or the input and output Ip.
+        Uses the Secant Method to minimize equilibrium solves calls.
+    
+        @param psi_N Normalized poloidal flux profile
+        @param pressure Plasma pressure profile [Pa]
+        @param ffp_prof FF' profile
+        @param pp_prof P' profile
+        @param j_inductive Inductive OR total toroidal current profile to be rescaled [A/m^2]
+        @param Ip_target Target Plasma Current [A]
+        @param psi_pad Padding for flux surface calculations
+        @param spike_prof Optional bootstrap current profile, will NOT be rescaled. Can be set to None [A/m^2]
+        @param find_j0 Essential logic, will switch between either rescaling core j_phi profile or Ip_target
+        @param scale_j0 Only used if find_j0 = False and Ip_target is being rescaled. Useful if find_j0 = True has 
+        already been run to find the correct rescaling factor
+        @param tolerance Relative error tolerance of secant method search. Possible defaults: 1% for find_j0 = True,
+        0.1% for find_j0 = False
+        @param max_iter Maximum iterations of secant method
+        @param diagnostic_plots Plot input and output j_phi profiles to check alignment
+        """
         
-        if include_jBS:
-            ### Calculate flux derivatives for Sauter
-            dn_e_dpsi = np.gradient(ne) / (np.gradient(psi_tmp) * (self.psi_bounds[1]-self.psi_bounds[0]))
-            dT_e_dpsi = np.gradient(Te) / (np.gradient(psi_tmp) * (self.psi_bounds[1]-self.psi_bounds[0]))
-            dn_i_dpsi = np.gradient(ni) / (np.gradient(psi_tmp) * (self.psi_bounds[1]-self.psi_bounds[0]))
-            dT_i_dpsi = np.gradient(Ti) / (np.gradient(psi_tmp) * (self.psi_bounds[1]-self.psi_bounds[0]))
-
-            ### Solve for bootstrap current profile. See https://omfit.io/_modules/omfit_classes/utils_fusion.html for more detailed documentation 
-            j_BS_neo = sauter_bootstrap(
-                                    psi_N=psi_tmp,
-                                    Te=Te,
-                                    Ti=Ti,
-                                    ne=ne,
-                                    p=pressure,
-                                    nis=[ni,],
-                                    Zis=Zis,
-                                    Zeff=Zeff,
-                                    gEQDSKs=[None],
-                                    R0=0., # not used
-                                    device=None,
-                                    psi_N_efit=None,
-                                    psiraw=psi*(self.psi_bounds[1]-self.psi_bounds[0]) + self.psi_bounds[0],
-                                    R=R_avg,
-                                    eps=eps, 
-                                    q=qvals,
-                                    fT=ft,
-                                    I_psi=f,
-                                    nt=1,
-                                    version='neo_2021',
-                                    debug_plots=False,
-                                    return_units=True,
-                                    return_package=False,
-                                    charge_number_to_use_in_ion_collisionality='Koh',
-                                    charge_number_to_use_in_ion_lnLambda='Zavg',
-                                    dT_e_dpsi=dT_e_dpsi,
-                                    dT_i_dpsi=dT_i_dpsi,
-                                    dn_e_dpsi=dn_e_dpsi,
-                                    dnis_dpsi=[dn_i_dpsi,],
-                                    )[0]
-                
-            j_BS = j_BS_neo*(R_avg / f) ### Convert into [A/m^2]
-
-            if (inductive_jtor is not None):
-
-                inductive_jtor[-1] = 0. # Enforce 0.0 at edge
-
-                j_BS = np.nan_to_num(j_BS,nan=0.0)
-
-                if isolate_jBS:
-                    jBS_results = analyze_bootstrap_edge_spike(psi_norm, j_BS)
-                    spike_profile = jBS_results['spike_profile']*scale_jBS
-                    spike_profile[-1] = 0. # Enforce 0.0 at edge
-                else:   
-                    spike_profile = j_BS*scale_jBS
-                    spike_profile[-1] = 0. # Enforce 0.0 at edge
-                
-                # Find scalar "alpha" that solves integral(alpha*inductive_jtor + spike_profile) = Ip_target
-                result = root_scalar(objective_function,
-                                     args=(inductive_jtor, spike_profile, psi_tmp, Ip_target),
-                                     bracket=[0.0001*Ip_target, 10*Ip_target],
-                                     method='brentq',
-                                     rtol=1e-6)
-
-                # Extract the solution
-                a_optimal = result.root
-
-                matched_jtor_prof = (a_optimal * inductive_jtor)+spike_profile
-                
-                # Verify the solution
-                Ip_final = self.flux_integral(psi_tmp, matched_jtor_prof)
-                Ip_error = abs(Ip_final - Ip_target)
-                
-                if (Ip_error < 10.):
-                    print('Integrated j_tor match found')
-                else:
-                    print('WARNING: j_tor integration match failed~!')
-
-                ffprime = ffprime_from_jtor_pprime(matched_jtor_prof, pprime, R_avg, one_over_R_avg)
-
-            else:
-                print('Error: must specify j_tor profile function')
+        n_psi = len(psi_N)
+        
+        if spike_prof is None:
+            spike_prof = np.zeros_like(j_inductive)
+        
+        # We want: Input_J0 - Output_J0 ~ 0
+        def get_j0_error(scale_val, n):
+            print(f"\n--- Checking scale_j0 = {scale_val:.4f} ---")
             
+            tmp_jphi = solve_jphi(self, n, psi_N, pressure, ffp_prof, pp_prof, j_inductive, 
+                                          spike_prof, Ip_target, n_psi, psi_pad, scale_j=scale_val, 
+                                          diagnostic_plots=diagnostic_plots)
+            
+            # Input j_0 at this scale
+            input_j0 = scale_val * j_inductive[0] + spike_prof[0]
+            
+            # Output j_0 from solver
+            output_j0 = tmp_jphi[0]
+            
+            # Calculate residual (difference) and relative error
+            diff = input_j0 - output_j0
+            rel_err = abs(diff) / output_j0
+            
+            print(f"   Input j_0:  {input_j0:.4e}")
+            print(f"   Output j_0: {output_j0:.4e}")
+            print(f"   Mismatch:  {rel_err*100:.3f}%")
+            
+            return diff, rel_err, tmp_jphi
+        
+        # We want: Input_Ip - Output_Ip ~ 0
+        def get_Ip_error(scale_val, scale_j0, n):
+            print(f"\n--- Checking scale_Ip = {scale_val:.4f} ---")
+            
+            tmp_jphi = solve_jphi(self, n, psi_N, pressure, ffp_prof, pp_prof, j_inductive, 
+                                          spike_prof, Ip_target*scale_val, n_psi, psi_pad, scale_j=scale_j0, 
+                                          diagnostic_plots=diagnostic_plots)
+            
+        
+            eq_stats = self.get_stats(lcfs_pad=psi_pad)
+            output_Ip = eq_stats['Ip']
+            
+            # Calculate residual (difference) and relative error
+            diff = output_Ip - Ip_target
+            rel_err = abs(diff) / Ip_target
+            
+            print(f"   Input Ip target:  {Ip_target/1e6:.4e}")
+            print(f"   Trial Ip target:  {Ip_target*scale_val/1e6:.4e}")
+            print(f"   Output Ip: {output_Ip/1e6:.4e}")
+            print(f"   Mismatch:  {rel_err*100:.4f}%")
+            
+            return diff, rel_err, None
+    
+        # --- Step 1: Initial Guess (1.0) ---
+        p0 = 1.0
+        if find_j0:
+            err0, rel_err0, res_jphi = get_j0_error(p0, 0)
         else:
-            j_BS = np.zeros_like(pressure)
-            inductive_jtor[-1] = 0. # Enforce 0.0 at edge
-
-            # Find scalar "alpha" that solves integral(alpha*inductive_jtor) = Ip_target
-            result = root_scalar(objective_function,
-                                 args=(inductive_jtor, j_BS, psi_tmp, Ip_target),
-                                 bracket=[0.0001*Ip_target, 10*Ip_target],  # Provide a reasonable initial bracket 
-                                 method='brentq',    # Robust bracketing method
-                                 rtol=1e-6)          # Relative tolerance
-
-            a_optimal = result.root
-
-            matched_jtor_prof = a_optimal * inductive_jtor
+            err0, rel_err0, res_jphi = get_Ip_error(p0, scale_j0, 0)
+    
+        # Check if we got lucky immediately
+        if rel_err0 < tolerance:
+            return p0, res_jphi
+    
+        # --- Step 2: Second Guess (Directional) ---
+        # If Input < Output (err0 < 0), we need more current -> Try 1.2
+        # If Input > Output (err0 > 0), we have too much -> Try 0.8
+        
+        if find_j0:
+            if err0 < 0:
+                p1 = 1.2
+            else:
+                p1 = 0.8
+        else:   
+            if err0 < 0:
+                p1 = 1.1
+            else:
+                p1 = 0.9
+        
+        if find_j0:
+            err1, rel_err1, res_jphi = get_j0_error(p1, 1)
+        else:
+            err1, rel_err1, res_jphi = get_Ip_error(p1, scale_j0, 1)
+    
+        if rel_err1 < tolerance:
+            return p1, res_jphi
+    
+        # --- Step 3: Secant Method Loop ---
+        # Iterate to find the root where Input - Output = 0
+        for i in range(max_iter):
+            print(f"--- Optimization Iteration {i+1} ---")
             
-            # Verify the solution
-            Ip_final = self.flux_integral(psi_tmp, matched_jtor_prof)
-            Ip_error = abs(Ip_final - Ip_target)
-
-            ffprime = ffprime_from_jtor_pprime(matched_jtor_prof, pprime, R_avg, one_over_R_avg)
-        
-        ffp_prof = {
-            'type': 'linterp',
-            'x': psi_tmp,
-            'y': ffprime / ffprime[0]
-        }
-
-        pp_prof = {
-            'type': 'linterp',
-            'x': psi_tmp,
-            'y': pprime / pprime[0]
-        }
-
-        return pp_prof, ffp_prof, j_BS, matched_jtor_prof, psi_tmp
-
-    def flatten_pedestals(self,inductive_jtor,psi_norm,ne,Te,ni,Ti,kBoltz):
-
-        x_trimmed = psi_norm.tolist().copy()
-        ne_trimmed = ne.tolist().copy()
-        Te_trimmed = Te.tolist().copy()
-        ni_trimmed = ni.tolist().copy()
-        Ti_trimmed = Ti.tolist().copy()
-
-        ### Remove profile values from psi_norm ~0.5 to ~0.99, leaving single value at the edge
-        mid_index = int(len(x_trimmed)/2)
-        end_index = len(x_trimmed)-1
-        del x_trimmed[mid_index:end_index]
-        del ne_trimmed[mid_index:end_index]
-        del Te_trimmed[mid_index:end_index]
-        del ni_trimmed[mid_index:end_index]
-        del Ti_trimmed[mid_index:end_index]
-
-        ### Fit cubic polynomials through all core and one edge value
-        ne_model = np.poly1d(np.polyfit(x_trimmed, ne_trimmed, 3))
-        Te_model = np.poly1d(np.polyfit(x_trimmed, Te_trimmed, 3))
-        ni_model = np.poly1d(np.polyfit(x_trimmed, ni_trimmed, 3))
-        Ti_model = np.poly1d(np.polyfit(x_trimmed, Ti_trimmed, 3))
-
-        init_ne = ne_model(psi_norm)
-        init_Te = Te_model(psi_norm)
-        init_ni = ni_model(psi_norm)
-        init_Ti = Ti_model(psi_norm)
-        
-        init_pressure = (kBoltz * init_ne * init_Te) + (kBoltz * init_ni * init_Ti)
-        
-        plt.plot(init_pressure)
-        plt.title('init_pressure')
-        plt.show()
-        
-        return init_pressure,init_ne,init_ni,init_Te,init_Ti
-        
-    kBoltz = eC
-    pressure = (kBoltz * ne * Te) + (kBoltz * ni * Ti) # 1.6022e-19 * [m^-3] * [eV] = [Pa]
-
-    ### Reconstruct psi_norm and n_psi from pressure
-    psi_norm = np.linspace(0.,1.,len(pressure))
-    n_psi = len(pressure)
-        
-    ### Set new pax target
-    self.set_targets(Ip=Ip_target,pax=pressure[0])
-
-    ### Initialize equilibirum on L-mode-like P' and inductive j_tor profiles
-    if initialize_eq:
-        print('>>> Initializing equilibrium with pedestal removed')
-        init_pressure,init_ne,init_ni,init_Te,init_Ti = flatten_pedestals(self,inductive_jtor,psi_norm,ne,Te,ni,Ti,kBoltz)
-        init_pp_prof,init_ffp_prof,j_BS,_,psi_tmp = profile_iteration(self,init_pressure,init_ne,init_ni,init_Te,init_Ti,psi_norm,n_psi,Zeff,inductive_jtor,scale_jBS,Zis,include_jBS=False)
-
-        init_pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
-        init_ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
-
-        init_pp_prof['y'] = np.nan_to_num(init_pp_prof['y'])
-        init_ffp_prof['y'] = np.nan_to_num(init_ffp_prof['y'])
-
-        self.set_targets(Ip=Ip_target,pax=pressure[0])
-        self.set_profiles(ffp_prof=init_ffp_prof,pp_prof=init_pp_prof)
-        
-        flag = self.solve()
-        psi_init = self.get_psi(False)
-        
-        psi,f,fp,p,pp = self.get_profiles(psi=psi_tmp,npsi=n_psi,psi_pad=psi_pad)
-        _,qvals,ravgs,_,_,_ = self.get_q(psi=psi_tmp,npsi=n_psi,psi_pad=psi_pad)
-        R_avg = ravgs[0]
-        one_over_R_avg = ravgs[1]
-        l_mode_ffprime = f*fp
-        lmode_jtor = jtor_from_GS(l_mode_ffprime, pp, R_avg, one_over_R_avg)
-        print('calculated L-mode jtor')
-    else:
-        psi_init = self.get_psi(False)
-        psi,f,fp,p,pp = self.get_profiles(npsi=n_psi,psi_pad=psi_pad)
-        _,qvals,ravgs,_,_,_ = self.get_q(npsi=n_psi,psi_pad=psi_pad)
-        R_avg = ravgs[0]
-        one_over_R_avg = ravgs[1]
-        l_mode_ffprime = f*fp
-        lmode_jtor = jtor_from_GS(l_mode_ffprime, pp, R_avg, one_over_R_avg)
-        pass
-        
-    ### This block solves for the complete current profile using a user-specified inductive j_tor profile
-    if inductive_jtor is not None:
-        ### Specify original H-mode profiles, iterate on bootstrap contribution until reasonably converged
-        n = 0
-        print('>>> Iterating on H-mode equilibrium solution')
-        jtor_last = lmode_jtor
-        while n < max_iterations:
-            print('> Iteration '+str(n)+':')
-
-            # Need L-mode jtor
-            pp_prof, ffp_prof, j_BS, input_jtor, psi_tmp = profile_iteration(self,pressure,ne,ni,Te,Ti,psi_norm,n_psi,Zeff,inductive_jtor,scale_jBS,Zis)
-
-            pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
-            ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
-
-            pp_prof['y'] = np.nan_to_num(pp_prof['y']) # Check for any nan's
-            ffp_prof['y'] = np.nan_to_num(ffp_prof['y']) # Check for any nan's
-
-            #plt.plot(pp_prof['x'],pp_prof['y'])
-            #plt.title('Iteration input pprime')
-            #plt.show()
-            
-            #plt.plot(ffp_prof['x'],ffp_prof['y'])
-            #plt.title('Iteration input ffprime')
-            #plt.show()
-
-            ffp_prof['type'] = 'jphi-linterp'
-            ffp_prof['y'] = input_jtor #(input_jtor + jtor_last)/2.0
-            # jtor_last = ffp_prof['y']
-        
-            self.set_targets(Ip=Ip_target,pax=pressure[0])
-            self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
-
-            flag = self.solve()
-
-            n += 1
-            if (n > 4):
+            # Avoid division by zero
+            if abs(err1 - err0) < 1e-9:
+                print("Error difference too small, stopping.")
                 break
+    
+            # Secant formula: x_new = x1 - f(x1) * (x1 - x0) / (f(x1) - f(x0))
+            # This projects the line between (p0, err0) and (p1, err1) to zero.
+            p_new = p1 - err1 * (p1 - p0) / (err1 - err0)
+            
+            # Safety clamp: If the projection is wild (negative or huge), constrain it
+            # This acts as a loose bracket to prevent the solver from crashing
+            if p_new < 0.1: p_new = 0.1
+            if p_new > 5.0: p_new = 5.0
+            
+            # Execute Solver at new point
+            if find_j0:
+                err_new, rel_err_new, res_jphi = get_j0_error(p_new, i+2)
+            else:
+                err_new, rel_err_new, res_jphi = get_Ip_error(p_new, scale_j0, i+2)
+    
+            if rel_err_new < tolerance:
+                print(f"Converged! Optimal scale factor: {p_new:.4f}")
+                return p_new, res_jphi
+            
+            # Update points for next step (move window forward)
+            p0, err0 = p1, err1
+            p1, err1 = p_new, err_new
+    
+        print("Max iterations reached. Returning best last effort.")
+        return p1, res_jphi
+    
+    def solve_with_bootstrap(self,
+                             ne,
+                             Te,
+                             ni,
+                             Ti,
+                             Zeff,
+                             Ip_target,
+                             inductive_jphi=None,
+                             Zis=None,
+                             scale_jBS=1.0,
+                             isolate_edge_jBS=False,
+                             psi_pad=1e-3,
+                             iterations=3,
+                             diagnostic_plots=False,
+                             parameterize_jBS = False):
+        """
+        Self-consistently compute bootstrap contribution from H-mode profiles.
+        
+        If inductive_jphi is set, solve for FF' using Grad-Shafranov equation and 
+        iterate solution until all functions of Psi converge.
+    
+        @param ne Electron density profile [m^-3]
+        @param Te Electron temperature profile [eV]
+        @param ni Ion density profile [m^-3]
+        @param Ti Ion temperature profile [eV]
+        @param Zeff Effective Z profile
+        @param Ip_target Target Plasma Current [A]
+        @param inductive_jphi Inductive toroidal current profile
+        @param Zis List of impurity atomic numbers (default: [1.0])
+        @param scale_jBS Factor by which to scale bootstrap current fraction
+        @param isolate_edge_jBS If True, isolates edge spike in bootstrap current
+        @param psi_pad Padding for flux surface calculations
+        @param iterations Maximum number of solver iterations
+        @param diagnostic_plots Plot iteration target and output j_tor profiles
+        @param initialize_eq Initialize equilibrium solve with flattened pedestal
+        """
+        
+        try:
+            from omfit_classes.utils_fusion import sauter_bootstrap
+        except ImportError:
+            raise ImportError('omfit_classes.utils_fusion not installed')
+    
+        # --- Constants & Initialization ---
+        mu0 = 4e-7 * np.pi
+        EC = 1.6022e-19  # Elementary charge [C] / k_Boltzmann for eV
+        
+        # Handle mutable default argument
+        if Zis is None:
+            Zis = [1.]
+    
+        # Ensure inputs are arrays and prevent side-effects on input data
+        ne = np.asarray(ne)
+        Te = np.asarray(Te)
+        ni = np.asarray(ni)
+        Ti = np.asarray(Ti)
+        Zeff = np.asarray(Zeff)
+        
+        if inductive_jphi is not None:
+            inductive_jphi = np.asarray(inductive_jphi).copy()
+        
+        # Calculate Pressure [Pa]
+        # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
+        pressure = (EC * ne * Te) + (EC * ni * Ti)
+        
+        # Reconstruct normalized psi grid based on input pressure length
+        # Note: Assumes inputs are evenly sampled in psi_norm 0..1
+        n_psi = len(pressure)
+        psi_N = np.linspace(0., 1., n_psi)
+    
+        # --- Helper Functions ---
+        def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip):
+            """Objective function to match total Ip."""
+            j_total = (alpha * j_inductive) + j_spike
+            ip_computed = self.flux_integral(psi_N, j_total)
+            return ip_computed - target_ip
+    
+        def calculate_profiles_and_bootstrap(psi_N, include_jBS):
+            """
+            Main physics calculation:
+            1. Gets geometry from current equilibrium (self).
+            2. Calculates gradients.
+            3. Calls Sauter bootstrap model.
+            4. Scales inductive current to match Ip_target.
+            """
+            # Get geometry and flux functions
+            # Note: self.get_profiles returns (psi, f, fp, p, pp)
+            _, f, _, _, _ = self.get_profiles(npsi=n_psi, psi_pad=psi_pad)
+            _, fc, r_avgs, _ = self.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+            
+            # Geometry terms
+            ft = 1 - fc 
+            eps = r_avgs[2] / r_avgs[0]
+            _, qvals, ravgs_q, _, _, _ = self.get_q(npsi=n_psi, psi_pad=psi_pad)
+            R_avg = ravgs_q[0]
+            one_over_R_avg = ravgs_q[1]
+    
+            # Gradients (using raw psi for derivatives)
+            psi_range = self.psi_bounds[1] - self.psi_bounds[0]
+            d_psi = np.gradient(psi_N)
+            
+            # Avoid division by zero in gradients
+            d_psi_eff = d_psi * psi_range
+            d_psi_eff[d_psi_eff == 0] = 1e-9
+    
+            pprime_local = np.gradient(pressure) / d_psi_eff
+            
+            j_BS_final = np.zeros_like(pressure)
+            
+            if include_jBS:
+                dn_e_dpsi = np.gradient(ne) / d_psi_eff
+                dT_e_dpsi = np.gradient(Te) / d_psi_eff
+                dn_i_dpsi = np.gradient(ni) / d_psi_eff
+                dT_i_dpsi = np.gradient(Ti) / d_psi_eff
+    
+                j_BS_neo = sauter_bootstrap(
+                    psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, p=pressure,
+                    nis=[ni], Zis=Zis, Zeff=Zeff, gEQDSKs=[None],
+                    psiraw=psi_N * psi_range + self.psi_bounds[0],
+                    R=R_avg, eps=eps, q=qvals, fT=ft, I_psi=f,
+                    nt=1, version='neo_2021', debug_plots=False,
+                    return_units=True, return_package=False,
+                    charge_number_to_use_in_ion_collisionality='Koh',
+                    charge_number_to_use_in_ion_lnLambda='Zavg',
+                    dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
+                    dn_e_dpsi=dn_e_dpsi, dnis_dpsi=[dn_i_dpsi]
+                )[0]
                 
-            psi,f,fp,p,pp = self.get_profiles(psi=psi_tmp,npsi=n_psi,psi_pad=psi_pad)
-            _,qvals,ravgs,_,_,_ = self.get_q(psi=psi_tmp,npsi=n_psi,psi_pad=psi_pad)
-            R_avg = ravgs[0]
-            one_over_R_avg = ravgs[1]
-            tmp_ffprime = f*fp
-            tmp_jtor = jtor_from_GS(tmp_ffprime, pp, R_avg, one_over_R_avg)
-
-            Ip_tmp = self.flux_integral(psi, tmp_jtor)
-            Ip_error_tmp = abs(Ip_tmp - Ip_target)
-
-            print('Ip target: '+str(Ip_target/1e+6)+' [MA]')
-            print('Ip error: '+str(Ip_error_tmp/1e+6)+' [MA]')
-
-            if iteration_plots:
-                plt.plot(psi,tmp_jtor)
-                plt.plot(psi,input_jtor,linestyle='--')
-                plt.title('Iteration output j_tor, Ip error: '+str(round(Ip_error_tmp/1e+6,5))+' [MA]')
-                plt.show()
+                # Convert to A/m^2
+                j_BS_final = j_BS_neo * (R_avg / f)
+                j_BS_final = np.nan_to_num(j_BS_final, nan=0.0)
+    
+            # Scale Currents to match Ip
+            current_jphi_target = inductive_jphi if inductive_jphi is not None else np.zeros_like(pressure)
+    
+            spike_prof = np.zeros_like(j_BS_final)
             
-            # Need to interface with Chris about how to assess solve success
+            if include_jBS:
+                if isolate_edge_jBS:
+                    if parameterize_jBS:
+                        res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, diagnostic_plots=True)
+                        spike_prof = res['parameterized_spike'] * scale_jBS
+                    else:
+                        res = analyze_bootstrap_edge_spike(psi_N, j_BS_final)
+                        spike_prof = res['masked_spike'] * scale_jBS
+                else:
+                    spike_prof = j_BS_final * scale_jBS
             
-         #   elif n >= max_iterations:
-         #       raise TypeError('H-mode equilibrium solve did not converge')
+            # Solve for alpha: integral(alpha * j_ind + j_spike) = Ip_target
+            try:
+                sol = root_scalar(current_scaling_objective,
+                                  args=(current_jphi_target, spike_prof, psi_N, Ip_target),
+                                  bracket=[1e-4 * Ip_target, 10 * Ip_target],
+                                  method='brentq', rtol=1e-6)
+                alpha_opt = sol.root
+            except ValueError:
+                print("WARNING: Root scalar failed to bracket. Defaulting to alpha=1.0")
+                alpha_opt = 1.0
+    
+            matched_j_inductive = alpha_opt * current_jphi_target
+            matched_jphi = matched_j_inductive + spike_prof
+            
+            # Package results
+            pp_dict = {'type': 'linterp', 'x': psi_N, 'y': pprime_local / pprime_local[0]}
+            ffp_dict = {'type': 'jphi-linterp', 'x': psi_N, 'y': np.nan_to_num(matched_jphi)}
+            
+            return pp_dict, ffp_dict, j_BS_final, matched_jphi, matched_j_inductive, spike_prof
+    
+        # --- Main Execution Flow ---
+    
+        # 1. Set Targets
+        self.set_targets(Ip=Ip_target, pax=pressure[0])
+    
+        # 2. Get Initial Psi Map
+        # Ensure we have a valid equilibrium to start the bootstrap loop
+        psi_init, f_init, fp_init, p_init, pp_init = self.get_profiles(npsi=n_psi, psi_pad=psi_pad)
         
-        psi,f,fp,p,pp = self.get_profiles(psi=psi_tmp,npsi=n_psi,psi_pad=psi_pad)
-        _,qvals,ravgs,_,_,_ = self.get_q(psi=psi_tmp,npsi=n_psi,psi_pad=psi_pad)
-        R_avg = ravgs[0]
-        one_over_R_avg = ravgs[1]
-        ffprime = f*fp
-        final_jtor = jtor_from_GS(ffprime, pp, R_avg, one_over_R_avg)
+        # Calculate initial L-mode baseline
+        _, _, ravgs_init, _, _, _ = self.get_q(npsi=n_psi, psi_pad=psi_pad)
+        lmode_jphi = get_jphi_from_GS(f_init*fp_init, pp_init, ravgs_init[0], ravgs_init[1])
+    
+        # 3. Main Iteration Loop
+        final_jphi = lmode_jphi
+        j_bs_output = np.zeros_like(pressure)
         
-    return final_jtor, j_BS, input_jtor
+        if inductive_jphi is not None:
+            
+            print(f'\n >>> Matching input core j_phi with G-S solution')
+    
+            # Calculate new profiles
+            pp_prof, ffp_prof, j_bs_curr, matched_input_jphi, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
+                psi_N, include_jBS=True
+            )
+    
+            # Enforce P' edge condition
+            pp_prof['y'][-1] = 0.
+    
+            # Run through once for better profile convergence
+            tmp_jphi = solve_jphi(
+                self,-1,psi_N,pressure,ffp_prof,pp_prof,matched_j_inductive,spike_prof,
+                Ip_target,n_psi,psi_pad,scale_j=1.0,diagnostic_plots=diagnostic_plots)
+    
+            # Calculate new profiles
+            pp_prof, ffp_prof, j_bs_curr, matched_input_jphi, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
+                psi_N, include_jBS=True
+            )
+    
+            # Enforce P' edge condition
+            pp_prof['y'][-1] = 0.
+            
+            print(f'\n >>> Finding optimal j_phi scale factor')
+            # Find optimal jphi scale
+            final_scale_j0, final_jphi = find_optimal_scale(self,
+                psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive, 
+                Ip_target, psi_pad, spike_prof=spike_prof, find_j0=True, diagnostic_plots=diagnostic_plots
+            )
+          #  final_scale_j0 = 1.0
+            print(f'\n >>> Finding optimal Ip scale factor')
+            # Find optimal Ip_target scale
+            final_scale_Ip, _ = find_optimal_scale(self,
+                psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive, 
+                Ip_target, psi_pad, spike_prof=spike_prof, find_j0=False, scale_j0=final_scale_j0, 
+                tolerance=0.001, diagnostic_plots=diagnostic_plots
+            )
+            
+            print(f'\n >>> Iterating on H-mode equilibrium solution')
+    
+            for n in range(iterations):            
+                # Calculate new profiles
+                pp_prof, ffp_prof, j_bs_curr, matched_input_jphi, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
+                    psi_N, include_jBS=True
+                )
+    
+                # Enforce P' edge condition
+                pp_prof['y'][-1] = 0.
+                
+                new_Ip_target = Ip_target*final_scale_Ip
+                
+                eq_stats = self.get_stats(lcfs_pad=psi_pad)
+                output_Ip = eq_stats['Ip']
+    
+                tmp_jphi = solve_jphi(
+                    self,n,psi_N,pressure,ffp_prof,pp_prof,matched_j_inductive,spike_prof,
+                    Ip_target*final_scale_Ip,n_psi,psi_pad,scale_j=final_scale_j0,diagnostic_plots=diagnostic_plots)
+    
+    
+        else:
+            print("Error: inductive_jphi must be specified.")
+    
+        results = {'total_j_phi' : tmp_jphi,
+                   'j_BS' : j_bs_curr,
+                   'j_inductive' : matched_j_inductive,
+                   'isolated_j_BS' : spike_prof}
+        
+        return results
