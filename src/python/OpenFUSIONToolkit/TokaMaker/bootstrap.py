@@ -366,7 +366,7 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             plt.title(f'Iteration {n}')#', Ip error: {Ip_err:.3f} %')
             plt.legend()
             plt.xlabel(r'$\hat \psi')
-            plt.xlabel(r'$j_\phi$ [MA]')
+            plt.ylabel(r'$j_\phi$ [MA]')
             plt.grid(ls=':')
             plt.show()
             
