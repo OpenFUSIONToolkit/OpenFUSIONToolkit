@@ -200,8 +200,8 @@ class OFT_env():
     
     def write_oft_xml(xml_blocks, path):
         """! Write OFT XML file from a list of XML block objects.
-        @param xml_blocks: list of objects with build_XML methods
-        @param path: string, output path for XML file
+        @param xml_blocks list of objects with build_XML methods
+        @param path string, output path for XML file
         """
         oft_element = ET.Element("oft")
         xml_doc = ET.ElementTree(oft_element)
@@ -211,7 +211,6 @@ class OFT_env():
         xml_doc.write(path, encoding="utf-8", xml_declaration=True)
         print(f"XML file created at {path}")
 
-    
     def __del__(self):
         '''! Destroy environment and cleanup known temporary files'''
         if self.tempdir is not None:
