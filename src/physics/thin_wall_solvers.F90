@@ -610,13 +610,13 @@ END SUBROUTINE frequency_response
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tol,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
+SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tols,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self
 REAL(8), INTENT(in) :: dt
 INTEGER(4), INTENT(in) :: nsteps
 REAL(8), INTENT(inout) :: vec(:)
 LOGICAL, INTENT(in) :: direct
-REAL(8), INTENT(in) :: lin_tol
+REAL(8), INTENT(in) :: lin_tols(2)
 LOGICAL, INTENT(in) :: use_cn
 INTEGER(4), INTENT(in) :: nstatus
 INTEGER(4), INTENT(in) :: nplot
@@ -627,23 +627,25 @@ REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
 INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
-REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op,int_facs(2)
+REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op,int_facs(2),elapsed_time
 REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
-CLASS(oft_vector), POINTER :: u,g,up
+CLASS(oft_vector), POINTER :: u,g,up,du
 CLASS(oft_matrix), POINTER :: Lmat
 TYPE(oft_native_dense_matrix), TARGET :: Lmat_dense,Minv
 TYPE(oft_sum_matrix), TARGET :: fmat,bmat
 CLASS(oft_solver), POINTER :: linv
 TYPE(oft_tw_hodlr_rbjpre), TARGET :: linv_pre
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
+TYPE(oft_timer) :: solve_timer
 LOGICAL :: exists,volt_full
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name
 WRITE(*,*)
-WRITE(*,*)'Starting simulation'
+WRITE(*,'(A)')'Starting simulation'
+WRITE(*,'(2X,A)')'timestep    time           sol_norm     nits    solver time'
 !---Setup coil waveform
 IF(ASSOCIATED(curr_waveform))THEN
   ncols=SIZE(curr_waveform,DIM=2)
@@ -683,6 +685,7 @@ END IF
 !---
 CALL self%Uloc%new(u)
 CALL self%Uloc%new(up)
+CALL self%Uloc%new(du)
 CALL self%Uloc%new(g)
 !---Setup inductance matrix wrapper
 IF(PRESENT(hodlr_op))THEN
@@ -717,7 +720,8 @@ IF(.NOT.direct)THEN
   CALL create_cg_solver(linv)
   linv%A=>fmat
   linv%its=-2
-  linv%atol=lin_tol
+  linv%atol=lin_tols(1)
+  linv%rtol=lin_tols(2)
   IF(PRESENT(hodlr_op))THEN
     linv_pre%mf_obj=>hodlr_op
     linv_pre%Rmat=>self%Rmat
@@ -900,19 +904,22 @@ DO i=1,nsteps
     END DO
   END IF
   CALL g%restore_local(vals)
+  CALL solve_timer%tick()
   IF(direct)THEN
     CALL Minv%apply(g,u)
     nits=1
   ELSE
-    CALL up%add(-1.d0,1.d0,u)
-    CALL u%add(1.d0,1.d0,up)
+    CALL du%add(0.d0,1.d0,u)
+    CALL du%add(1.d0,-1.d0,up)
     CALL up%add(0.d0,1.d0,u)
+    CALL u%add(1.d0,1.d0,du)
     CALL linv%apply(u,g)
     nits=linv%cits
   END IF
+  elapsed_time=solve_timer%tock()
   uu=SQRT(u%dot(u))
   t=t+dt
-  IF(MOD(i,nstatus)==0)WRITE(*,*)'Timestep ',i,REAL(t,4),REAL(uu,4),nits
+  IF(MOD(i,nstatus)==0)WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
   IF(MOD(i,nplot)==0)THEN
     WRITE(pltnum,'(I4.4)')i
     CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
@@ -982,8 +989,9 @@ IF(sensors%njumpers+self%nholes>0)THEN
 END IF
 CALL u%delete()
 CALL up%delete()
+CALL du%delete()
 CALL g%delete()
-DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,g)
+DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,du,g)
 IF(direct)THEN
   DEALLOCATE(minv%m)
 ELSE

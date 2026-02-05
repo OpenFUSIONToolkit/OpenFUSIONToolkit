@@ -482,7 +482,7 @@ class ThinCurr():
         return result
     
     def run_td(self,dt,nsteps,coil_currs=None,coil_volts=None,full_volts=None,direct=False,
-               status_freq=10,plot_freq=10,sensor_obj=None,sensor_values=None,lin_tol=1.E-6,timestep_cn=True):
+               status_freq=10,plot_freq=10,sensor_obj=None,sensor_values=None,lin_tol=1.E-6,lin_rtol=1.E-4,timestep_cn=True):
         '''! Perform a time-domain simulation
 
         @param dt Time step for simulation
@@ -495,6 +495,7 @@ class ThinCurr():
         @param plot_freq Frequency to save plot files
         @param sensor_obj Sensor object to use
         @param lin_tol Tolerance for linear solver when `direct=False`
+        @param lin_rtol Relative tolerance for linear solver when `direct=False`
         @param timestep_cn Use Crank-Nicolson timestep?
         '''
         vec_ic = numpy.zeros((self.nelems,), dtype=numpy.float64)
@@ -537,11 +538,11 @@ class ThinCurr():
             coil_volts = numpy.ascontiguousarray(coil_volts.transpose(), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
-            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_bool(timestep_cn),
+            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
                                  c_int(status_freq),c_int(plot_freq),vec_ic,sensor_ptr,ncurr,coil_currs,nvolt,coil_volts,volts_full,
                                  sensor_values_ptr,self.Lmat_hodlr,error_string)
         else:
-            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_bool(timestep_cn),
+            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
                                  c_int(status_freq),c_int(plot_freq),vec_ic,sensor_ptr,ncurr,coil_currs,nvolt,coil_volts,volts_full,
                                  sensor_values_ptr,c_void_p(),error_string)
         if error_string.value != b'':
