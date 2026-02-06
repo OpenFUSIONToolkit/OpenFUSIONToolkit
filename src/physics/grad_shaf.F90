@@ -21,9 +21,11 @@ USE oft_gauss_quadrature, ONLY: set_quad_1d
 USE oft_tet_quadrature, ONLY: set_quad_2d
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell, cell_is_curved
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
+USE oft_stitching, ONLY: oft_seam, seam_list
 !---
-USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr
-USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr, oft_map, map_list
+USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks, create_dense_graph, create_vector, &
+create_local_stitch
 USE oft_solver_base, ONLY: oft_solver, oft_eigsolver, oft_solver_bc
 USE oft_solver_utils, ONLY: create_diag_pre, create_cg_solver
 USE oft_native_solvers, ONLY: oft_native_cg_eigsolver
@@ -217,6 +219,9 @@ TYPE :: gs_eq
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
+  REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL() !< Resistivity of each coil (negative for Icoils)
+  REAL(r8), POINTER, DIMENSION(:) :: coils_dt => NULL() !< Coil currents at start of step for quasi-static calculations
+  REAL(r8), POINTER, DIMENSION(:) :: coils_volt => NULL() !< Coil voltages for (valid for Vcoils only)
   REAL(r8), POINTER, DIMENSION(:,:) :: rlimiter_nds => NULL() !< Location of limiter nodes
   REAL(r8), POINTER, DIMENSION(:,:) :: limiter_pts => NULL() !< Location of non-node limiter points
   REAL(r8), POINTER, DIMENSION(:,:) :: bc_lmat => NULL() !< First part of free-boundary BC matrix
@@ -228,6 +233,7 @@ TYPE :: gs_eq
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Coil current bounds
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Number of turns for each coil in each region
   REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Coil mutual inductance matrix
+  REAL(r8), POINTER, DIMENSION(:,:) :: dist_coil => NULL() !< Current distribution for each coil (if defined)
   LOGICAL :: free = .FALSE. !< Computing free-boundary equilibrium?
   LOGICAL :: compute_chi = .FALSE. !< Compute toroidal field potential?
   LOGICAL :: plot_step = .TRUE. !< Save solver steps for plotting
@@ -247,10 +253,14 @@ TYPE :: gs_eq
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Meshed coil regions
   TYPE(cond_region), POINTER, DIMENSION(:) :: cond_regions => NULL() !< Meshed conducting regions
   TYPE(gs_region_info) :: region_info !< Region information for non-continuous conductors
+  TYPE(oft_seam), POINTER :: coil_stitch => NULL() !< Coil vector stitching information
+  TYPE(oft_map), POINTER :: coil_map => NULL() !< Coil vector map information
   CLASS(oft_vector), POINTER :: psi => NULL() !< Current \f$ \psi \f$ solution
   CLASS(oft_vector), POINTER :: chi => NULL() !< Toroidal field potential (if computed)
+  CLASS(oft_vector), POINTER :: coil_vec => NULL() !< Coil vector template
+  CLASS(oft_vector), POINTER :: aug_vec => NULL() !< Augmented space (psi + coils) vector template
   CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_coil => NULL() !< \f$ \psi \f$ for each coil
-  CLASS(oft_vector), POINTER :: psi_dt => NULL() !< Time-dependent contribution to \f$ \psi \f$ from eddy currents
+  CLASS(oft_vector), POINTER :: psi_dt => NULL() !< \f$ \psi \f$ at start of step for quasi-static calculations
   CLASS(oft_matrix), POINTER :: dels => NULL() !< \f$ \frac{1}{R} \Delta^* \f$ matrix
   CLASS(oft_matrix), POINTER :: dels_dt => NULL() !< LHS matrix with time dependence
   CLASS(oft_matrix), POINTER :: dels_full => NULL() !< \f$ \frac{1}{R} \Delta^* \f$ matrix with no BC
@@ -1108,6 +1118,8 @@ real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:)
 character(LEN=3) :: coil_tag
 character(LEN=2) :: cond_tag,eig_tag
+type(seam_list), pointer, dimension(:) :: stitch_tmp
+type(map_list), pointer, dimension(:) :: map_tmp
 CLASS(oft_bmesh), POINTER :: smesh
 smesh=>self%fe_rep%mesh
 !---Get Vector
@@ -1213,7 +1225,12 @@ ELSE
       self%coil_nturns(self%coil_regions(i)%id,:)/self%coil_regions(i)%area ! Normalize turns by coil area
   END DO
 END IF
-ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils+1,self%ncoils+1))
+ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils+1,self%ncoils+1),self%dist_coil(self%psi%n,self%ncoils))
+ALLOCATE(self%Rcoils(self%ncoils+1),self%coils_dt(self%ncoils+1),self%coils_volt(self%ncoils+1))
+self%dist_coil=1.d0
+self%Rcoils=-1.d0
+self%coils_dt=0.d0
+self%coils_volt=0.d0
 self%Lcoils=0.d0
 DO i=1,self%ncoils
   CALL self%psi%new(self%psi_coil(i)%f)
@@ -1228,7 +1245,11 @@ DO i=1,self%ncoils
   DO j=i,self%ncoils
     CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
     self%Lcoils(i,j)=self%Lcoils(i,j)
-    IF(j>i)self%Lcoils(j,i)=self%Lcoils(i,j)
+    IF(j>i)THEN ! Integral can be slightly different so compute both ways and average
+      CALL gs_coil_mutual(self,j,self%psi_coil(i)%f,self%Lcoils(j,i))
+      self%Lcoils(j,i)=(self%Lcoils(j,i)+self%Lcoils(i,j))/2.d0
+      self%Lcoils(i,j)=self%Lcoils(j,i)
+    END IF
   END DO
 END DO
 #ifdef OFT_TOKAMAKER_LEGACY
@@ -1252,6 +1273,24 @@ DEALLOCATE(tmp_vec2)
 #endif
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
+!---Create coil vector
+IF(self%ncoils>0)THEN
+  ALLOCATE(self%coil_stitch,self%coil_map)
+  CALL create_local_stitch(self%coil_stitch,self%coil_map,self%ncoils+1)
+  ALLOCATE(stitch_tmp(1),map_tmp(1))
+  stitch_tmp(1)%s=>self%coil_stitch
+  map_tmp(1)%m=>self%coil_map
+  CALL create_vector(self%coil_vec,stitch_tmp,map_tmp)
+  DEALLOCATE(stitch_tmp,map_tmp)
+  !---Create augmented vector
+  ALLOCATE(stitch_tmp(2),map_tmp(2))
+  stitch_tmp(1)%s=>self%psi%stitch_info
+  map_tmp(1)%m=>self%psi%map(1)
+  stitch_tmp(2)%s=>self%coil_stitch
+  map_tmp(2)%m=>self%coil_map
+  CALL create_vector(self%aug_vec,stitch_tmp,map_tmp)
+  DEALLOCATE(stitch_tmp,map_tmp)
+END IF
 contains
 !
 subroutine get_limiter()
@@ -1676,7 +1715,6 @@ DO j=1,self%fe_rep%mesh%nc
 end do
 deallocate(rhs_loc,j_lag,rop)
 !$omp end parallel
-! DEALLOCATE(cond_fac)
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
@@ -1690,7 +1728,7 @@ integer(4), intent(in) :: iCoil !< Coil index
 CLASS(oft_vector), intent(inout) :: b !< Resulting source field
 REAL(8), POINTER, DIMENSION(:), intent(in) :: curr_dist !< Relative current density
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns
+real(8) :: psitmp,goptmp(3,3),det,pt(3),v,t1,nturns,jphi
 real(8), allocatable :: rhs_loc(:),rop(:)
 integer(4) :: j,m,l,k
 integer(4), allocatable :: j_lag(:)
@@ -1701,7 +1739,7 @@ smesh=>self%fe_rep%mesh
 NULLIFY(btmp)
 CALL b%set(0.d0)
 CALL b%get_local(btmp)
-!$omp parallel private(j,rhs_loc,j_lag,goptmp,v,m,det,pt,psitmp,l,rop,nturns)
+!$omp parallel private(j,rhs_loc,j_lag,goptmp,v,m,det,pt,psitmp,l,rop,nturns,jphi)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
@@ -1714,12 +1752,14 @@ DO j=1,smesh%nc
   do m=1,self%fe_rep%quad%np
     call smesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
     det=v*self%fe_rep%quad%wts(m)
+    jphi=0.d0
     DO l=1,self%fe_rep%nce
-      CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l)) 
+      CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
+      jphi=jphi+rop(l)*curr_dist(j_lag(l))
     END DO
     !$omp simd
     do l=1,self%fe_rep%nce
-      rhs_loc(l)=rhs_loc(l)+rop(l)*det*curr_dist(j_lag(l))
+      rhs_loc(l)=rhs_loc(l)+rop(l)*det*jphi
     end do
   end do
   !---Get local to global DOF mapping
@@ -1802,19 +1842,28 @@ subroutine gs_wall_source(self,dpsi_dt,b)
 class(gs_eq), intent(inout) :: self !< G-S object
 CLASS(oft_vector), intent(inout) :: dpsi_dt !< \f$ \psi \f$ at start of step
 CLASS(oft_vector), intent(inout) :: b !< Resulting source field
-real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
+real(r8), pointer, dimension(:) :: btmp,btmp_coils
+real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1,nturns,cond_norm
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:),eta_reg(:),reg_source(:)
-real(8), pointer :: psi_vals(:)
-integer(4) :: j,m,l,k,kk,iCond
+real(8), pointer :: psi_vals(:),coil_vals(:)
+integer(4) :: j,m,l,k,kk,iCond,jc
 integer(4), allocatable :: j_lag(:)
 logical :: curved
+CLASS(oft_scalar_bfem), POINTER :: lag_rep
+lag_rep=>self%fe_rep
 ! t1=omp_get_wtime()
 !---
-NULLIFY(btmp,psi_vals)
+NULLIFY(btmp,btmp_coils,psi_vals,coil_vals)
 call b%set(0.d0)
-CALL b%get_local(btmp)
-CALL dpsi_dt%get_local(psi_vals)
+CALL b%get_local(btmp,1)
+CALL b%get_local(btmp_coils,2)
+CALL dpsi_dt%get_local(psi_vals,1)
+CALL dpsi_dt%get_local(coil_vals,2)
+! DO l=1,self%ncoils
+!   IF(self%Rcoils(l)<=0.d0)CYCLE
+!   btmp_coils(l)=DOT_PRODUCT(coil_vals(1:self%ncoils),self%Lcoils(1:self%ncoils,l))
+! END DO
+DEALLOCATE(coil_vals)
 !
 ALLOCATE(eta_reg(self%fe_rep%mesh%nreg),reg_source(self%fe_rep%mesh%nreg))
 reg_source=0.d0
@@ -1829,13 +1878,14 @@ IF(ASSOCIATED(self%region_info%nonaxi_vals))THEN
   END DO
 END IF
 !---
-!$omp parallel private(rhs_loc,j_lag,curved,goptmp,v,m,det,pt,psitmp,l,rop)
-allocate(rhs_loc(self%fe_rep%nce))
+!$omp parallel private(rhs_loc,j_lag,curved,goptmp,v,m,det,pt,psitmp,l,rop,nturns,cond_norm,jc)
+allocate(rhs_loc(self%fe_rep%nce+self%ncoils))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
 !$omp do schedule(static,1)
 DO j=1,self%fe_rep%mesh%nc
-  IF(eta_reg(self%fe_rep%mesh%reg(j))<0.d0)CYCLE
+  nturns = MAXVAL(ABS(self%coil_nturns(self%fe_rep%mesh%reg(j),:)))
+  IF(eta_reg(self%fe_rep%mesh%reg(j))<0.d0.AND.nturns<1.d-8)CYCLE
   call self%fe_rep%ncdofs(j,j_lag)
   rhs_loc=0.d0
   curved=cell_is_curved(self%fe_rep%mesh,j)
@@ -1848,6 +1898,18 @@ DO j=1,self%fe_rep%mesh%nc
       CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
       psitmp=psitmp+psi_vals(j_lag(l))*rop(l)
     END DO
+    DO l=1,self%ncoils
+      IF(self%Rcoils(l)<=0.d0)CYCLE
+      nturns = self%coil_nturns(self%fe_rep%mesh%reg(j),l)
+      IF(ABS(nturns)>1.d-8)THEN
+        cond_norm=0.d0
+        do jc=1,lag_rep%nce ! Loop over degrees of freedom
+          cond_norm = cond_norm + self%dist_coil(j_lag(jc),l)*rop(jc)
+        end do
+        rhs_loc(self%fe_rep%nce+l)=rhs_loc(self%fe_rep%nce+l)+mu0*2.d0*pi*psitmp*nturns*cond_norm*det
+      END IF
+    END DO
+    IF(eta_reg(self%fe_rep%mesh%reg(j))<0.d0)CYCLE
     psitmp=psitmp/eta_reg(self%fe_rep%mesh%reg(j))/(pt(1)+gs_epsilon)
     !$omp simd
     do l=1,self%fe_rep%nce
@@ -1860,11 +1922,17 @@ DO j=1,self%fe_rep%mesh%nc
     !$omp atomic
     btmp(m)=btmp(m)+rhs_loc(l)
   end do
+  do l=1,self%ncoils
+    IF(self%Rcoils(l)<=0.d0)CYCLE
+    !$omp atomic
+    btmp_coils(l) = btmp_coils(l) + rhs_loc(self%fe_rep%nce+l)
+  end do
 END DO
 deallocate(rhs_loc,j_lag,rop)
 !$omp end parallel
-CALL b%restore_local(btmp,add=.TRUE.)
-DEALLOCATE(btmp,psi_vals,eta_reg,reg_source)
+CALL b%restore_local(btmp,1,add=.TRUE.,wait=.TRUE.)
+CALL b%restore_local(btmp_coils,2,add=.TRUE.)
+DEALLOCATE(btmp,btmp_coils,psi_vals,eta_reg,reg_source)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_wall_source
 !------------------------------------------------------------------------------
@@ -2057,6 +2125,7 @@ integer(4) :: i,j,k,mind,nCon,io_unit,coffset,roffset
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta,gpsi(3),wt_max,wt_min
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:),wt_tmp(:)
+real(r8), allocatable :: err_mat_old(:,:),coil_rhs(:),coil_op_inv(:,:)
 logical :: pm_save
 !
 nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize
@@ -2165,6 +2234,66 @@ DO i=1,self%nregularize
   err_mat(roffset+i,self%ncoils+1)=self%coil_reg_mat(i,self%ncoils+1)
   rhs(roffset+i)=-self%coil_reg_targets(i)
 END DO
+! !---Convert appropriate terms to voltages
+! ! L*(I^1-I^0)/dt + R*I^1 = V
+! ! (L+dt*R)*I^1 = dt*V + L*I^0 - L*I_i^1
+! ! I^1 = (L+dt*R)^-1 * (dt*V + L*I^0 - L*I_i^1)
+! !
+! ! Vcoil RHS (for coil i)
+! ! ((L+dt*R)^-1 * (L*I^0))_i
+! ! Vcoil LHS (for coil i; sum over voltage coils j)
+! ! ((L+dt*R)^-1 * (dt*V_i))_j
+! ! Icoil LHS (for coil i; sum over voltage coils j)
+! ! ((L+dt*R)^-1 * (-L*I_i))_j
+! ! coil_rhs = MATMUL(coil_op_inv,MATMUL(Lcoil,I_last))
+! ! FOR i in vcoils: rhs(1:roffset) = rhs(1:roffset) + err_mat(1:roffset,i)*coil_rhs(i)
+! ! FOR i in vcoils: err_mat(1:roffset,i) = err_mat(1:roffset,i) + FOR j in vcoils: err_mat(1:roffset,j)*dt*coil_op_inv(j,i)
+! ! FOR i in icoils: err_mat(1:roffset,i) = err_mat(1:roffset,i) + FOR j in vcoils: err_mat(1:roffset,j)*DOT_PRODUCT(coil_op_inv(j,:),-Lcoil(:,i))
+! IF(ANY(self%Rcoils>0.d0))THEN
+!   ALLOCATE(coil_op_inv(self%ncoils,self%ncoils))
+!   coil_op_inv=0.d0
+!   DO i=1,self%ncoils
+!     IF(self%Rcoils(i)>0.d0)THEN
+!       DO j=i,self%ncoils
+!         IF(self%Rcoils(j)>0.d0)THEN
+!           coil_op_inv(i,j) = self%Lcoils(i,j)
+!           coil_op_inv(j,i) = self%Lcoils(i,j)
+!           IF(i==j)coil_op_inv(i,j) = coil_op_inv(i,j) + self%dt*self%Rcoils(i)
+!         END IF
+!       END DO
+!     ELSE
+!       coil_op_inv(i,i)=1.d0
+!     END IF
+!   END DO
+!   pm_save=oft_env%pm; oft_env%pm=.FALSE.
+!   CALL lapack_matinv(self%ncoils,coil_op_inv,ierr)
+!   oft_env%pm=pm_save
+!   !
+!   ALLOCATE(coil_rhs(self%ncoils+1),wt_tmp(self%ncoils))
+!   coil_rhs = 0.d0
+!   wt_tmp = self%coils_dt(1:self%ncoils)
+!   ! DO i=1,self%ncoils
+!   !   IF(self%Rcoils(i)<=0.d0)wt_tmp(i)=0.d0
+!   ! END DO
+!   coil_rhs(1:self%ncoils) = MATMUL(coil_op_inv,MATMUL(self%Lcoils(1:self%ncoils,1:self%ncoils),wt_tmp))
+!   !
+!   ALLOCATE(err_mat_old(nCon,self%ncoils+1))
+!   err_mat_old = err_mat
+!   DO i=1,self%ncoils
+!     IF(self%Rcoils(i)>0.d0)THEN
+!       err_mat(1:roffset,i)=0.d0
+!       rhs(1:roffset) = rhs(1:roffset) - err_mat_old(1:roffset,i)*coil_rhs(i)
+!       DO j=1,self%ncoils
+!         IF(self%Rcoils(j)>0.d0)err_mat(1:roffset,i) = err_mat(1:roffset,i) + err_mat_old(1:roffset,j)*self%dt*coil_op_inv(j,i)*mu0
+!       END DO
+!     ELSE
+!       ! DO j=1,self%ncoils
+!       !   IF(self%Rcoils(j)>0.d0)err_mat(1:roffset,i) = err_mat(1:roffset,i) - err_mat_old(1:roffset,j)*DOT_PRODUCT(coil_op_inv(j,:),self%Lcoils(1:self%ncoils,i))
+!       ! END DO
+!     END IF
+!   END DO
+!   DEALLOCATE(err_mat_old,coil_rhs,coil_op_inv,wt_tmp)
+! END IF
 !---Solve L-S system
 IF(ASSOCIATED(self%coil_bounds))THEN
 BLOCK
@@ -2187,7 +2316,24 @@ ELSE
 END IF
 !---Add coil/conductor fields to IC
 self%vcontrol_val=-currs(self%ncoils+1)
-self%coil_currs=-currs(1:self%ncoils)
+IF(self%dt>0.d0)THEN
+  ALLOCATE(coil_rhs(self%ncoils),wt_tmp(self%ncoils))
+  wt_tmp=(-currs(1:self%ncoils)-self%coils_dt(1:self%ncoils))/self%dt
+  coil_rhs = MATMUL(self%Lcoils(1:self%ncoils,1:self%ncoils),wt_tmp)
+  DO i=1,self%ncoils
+    IF(self%Rcoils(i)>0.d0)THEN
+      self%coils_volt(i)=coil_rhs(i)+self%Rcoils(i)*(-currs(i))
+      ! self%coils_volt(i)=-currs(i)
+    ELSE
+      self%coil_currs(i)=-currs(i)
+    END IF
+  END DO
+  DEALLOCATE(coil_rhs,wt_tmp)
+ELSE
+  DO i=1,self%ncoils
+    self%coil_currs(i)=-currs(i)
+  END DO
+END IF
 DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
 CALL psi_eval%delete
 CALL psi_geval%delete
@@ -2199,7 +2345,7 @@ subroutine gs_solve(self,ierr)
 class(gs_eq), intent(inout) :: self !< G-S object
 integer(4), optional, intent(out) :: ierr !< Error flag
 class(oft_vector), pointer :: rhs,rhs_bc,psip,psiin,psi_bc,psi_eddy,psi_dt
-class(oft_vector), pointer :: tmp_vec,psi_alam,psi_press,psi_vac,psi_vcont
+class(oft_vector), pointer :: tmp_vec,psi_alam,psi_press,psi_vac,psi_vcont,psi_aug,tmp_aug
 real(r8), pointer, DIMENSION(:) :: vals_tmp
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm,curr
@@ -2237,7 +2383,6 @@ CALL self%psi%new(psi_bc)
 CALL self%psi%new(psi_vac)
 CALL self%psi%new(psi_vcont)
 CALL self%psi%new(psi_eddy)
-CALL self%psi%new(psi_dt)
 CALL self%psi%new(psi_alam)
 CALL self%psi%new(psi_press)
 t0=omp_get_wtime()
@@ -2261,6 +2406,11 @@ IF(ASSOCIATED(self%P_ani))CALL self%P_ani%update(self)
 !---Get J_phi source term
 CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
 IF(self%dt>0.d0)THEN
+  CALL self%psi%new(psi_dt)
+  IF(self%ncoils>0)THEN
+    CALL self%aug_vec%new(psi_aug)
+    CALL self%aug_vec%new(tmp_aug)
+  END IF
   IF(self%dt/=self%dt_last)THEN
     CALL build_dels(self%dels_dt,self,"free",self%dt)
     self%dt_last=self%dt
@@ -2272,7 +2422,6 @@ END IF
 CALL psi_vac%set(0.d0)
 CALL psi_vac%add(1.d0,1.d0,psi_bc)
 DO j=1,self%ncoils
-  ! curr = self%coil_regions(j)%curr
   CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
 END DO
 !
@@ -2280,9 +2429,6 @@ CALL psi_eddy%set(0.d0)
 #ifdef OFT_TOKAMAKER_LEGACY
 DO j=1,self%ncond_regs
   DO k=1,self%cond_regions(j)%neigs
-    ! ii=self%cond_regions(j)%eig_map(k)
-    ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-    !   self%cond_regions(j)%psi_eig(k)%f)
     CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
       self%cond_regions(j)%psi_eig(k)%f)
   END DO
@@ -2292,7 +2438,6 @@ CALL psi_vac%add(1.d0,1.d0,psi_eddy)
 !
 CALL psi_vcont%set(0.d0)
 DO j=1,self%ncoils
-  ! curr = self%coil_regions(j)%vcont_gain
   CALL psi_vcont%add(1.d0,self%coil_vcont(j),self%psi_coil(j)%f)
 END DO
 !---Save input solution
@@ -2500,56 +2645,21 @@ DO i=1,self%maxits
     END IF
     CALL self%psi%add(1.d0,-1.d0,psi_eddy)
     CALL self%psi%add(1.d0,-1.d0,psi_bc)
-    !---Update vacuum field part
-    CALL psi_vac%set(0.d0)
-    CALL psi_vac%add(1.d0,1.d0,psi_bc)
-    DO j=1,self%ncoils
-      ! curr = self%coil_regions(j)%curr
-      CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
-    END DO
-    ! CALL psi_eddy%set(0.d0)
-    ! DO j=1,self%ncond_regs
-    !   DO k=1,self%cond_regions(j)%neigs
-    !     ! ii=self%cond_regions(j)%eig_map(k)
-    !     CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-    !       self%cond_regions(j)%psi_eig(k)%f)
-    !     CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-    !       self%cond_regions(j)%psi_eig(k)%f)
-    !   END DO
-    ! END DO
   END IF
+  !---Update vacuum field part
+  CALL psi_vac%set(0.d0)
+  CALL psi_vac%add(1.d0,1.d0,psi_bc)
+  DO j=1,self%ncoils
+    IF((self%Rcoils(j)<=0.d0).OR.(self%dt<0.d0))CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+  END DO
 
-  ! Fit wall eigenmodes if fluxes are available
-  ! IF(self%flux_ntargets>0)THEN
-  !   CALL self%psi%add(1.d0,1.d0,psi_vac)
-  !   CALL gs_fit_walleigs(self,ierr_loc)
-  !   IF(ierr_loc/=0)THEN
-  !     error_flag=-8
-  !     EXIT
-  !   END IF
-  !   CALL self%psi%add(1.d0,-1.d0,psi_vac)
-  !   !---Update vacuum field part
-  !   CALL psi_eddy%set(0.d0)
-  !   DO j=1,self%ncond_regs
-  !     DO k=1,self%cond_regions(j)%neigs
-  !       ! ii=self%cond_regions(j)%eig_map(k)
-  !       ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-  !       !   self%cond_regions(j)%psi_eig(k)%f)
-  !       CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-  !         self%cond_regions(j)%psi_eig(k)%f)
-  !     END DO
-  !   END DO
-  !   CALL psi_vac%add(1.d0,1.d0,psi_eddy)
-  ! ELSE IF(self%isoflux_ntargets>0)THEN
+  ! Add fixed wall eddy contributions
   IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
     !---Update vacuum field part
     CALL psi_eddy%set(0.d0)
 #ifdef OFT_TOKAMAKER_LEGACY
     DO j=1,self%ncond_regs
       DO k=1,self%cond_regions(j)%neigs
-        ! ii=self%cond_regions(j)%eig_map(k)
-        ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-        !   self%cond_regions(j)%psi_eig(k)%f)
         CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
           self%cond_regions(j)%psi_eig(k)%f)
       END DO
@@ -2566,12 +2676,69 @@ DO i=1,self%maxits
   IF(self%dt>0.d0)THEN
     CALL psi_dt%set(0.d0)
     CALL psi_dt%add(0.d0,-1.d0/self%dt,self%psi,1.d0/self%dt,self%psi_dt)
-    CALL gs_wall_source(self,psi_dt,tmp_vec)
-    CALL self%zerob_bc%apply(tmp_vec)
-    pm_save=oft_env%pm; oft_env%pm=.FALSE.
-    CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
-    oft_env%pm=pm_save
-    CALL psi_eddy%add(1.d0,1.d0,psi_dt)
+    IF(self%ncoils>0)THEN
+      !---Set Vcoil currents at previous step and remove associated flux
+      CALL psi_dt%get_local(vals_tmp)
+      IF(ANY(self%Rcoils>0.d0))THEN
+        DO j=1,self%ncoils
+          vals_tmp(j)=self%coils_dt(j)/self%dt
+          IF(self%Rcoils(j)<=0.d0)CALL psi_dt%add(1.d0,self%coil_currs(j)/self%dt,self%psi_coil(j)%f)
+        END DO
+        vals_tmp(self%ncoils+1)=(self%coils_dt(self%ncoils+1)-self%vcontrol_val)/self%dt
+      ELSE
+        vals_tmp=0.d0
+      END IF
+      CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+      CALL psi_dt%get_local(vals_tmp)
+      CALL psi_aug%restore_local(vals_tmp,1)
+      CALL gs_wall_source(self,psi_aug,tmp_aug)
+      !---Add voltages for Vcoils
+      CALL tmp_aug%get_local(vals_tmp,2)
+      IF(ANY(self%Rcoils>0.d0))THEN
+        DO j=1,self%ncoils
+          IF(self%Rcoils(j)>0.d0)THEN
+            vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+          ELSE
+            vals_tmp(j)=self%coil_currs(j)
+          END IF
+        END DO
+        vals_tmp(self%ncoils+1)=0.d0
+      ELSE
+        vals_tmp=0.d0
+      END IF
+      CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+      CALL self%zerob_bc%apply(tmp_aug)
+      !---Solve in augmented space (flux + coils)
+      CALL psi_aug%set(0.d0)
+      pm_save=oft_env%pm; oft_env%pm=.FALSE.
+      CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
+      oft_env%pm=pm_save
+      CALL psi_aug%get_local(vals_tmp,1)
+      CALL psi_dt%restore_local(vals_tmp)
+      CALL psi_eddy%add(1.d0,1.d0,psi_dt) ! Set eddy field before coils are added
+      CALL psi_aug%get_local(vals_tmp,2)
+      !---Update coil currents in solution for Vcoils
+      DO j=1,self%ncoils
+        IF(self%Rcoils(j)>0.d0)THEN
+          self%coil_currs(j)=vals_tmp(j)
+          CALL psi_dt%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+        END IF
+      END DO
+      IF(self%Rcoils(self%ncoils+1)>0.d0)THEN
+        self%vcontrol_val=vals_tmp(self%ncoils+1)
+        CALL psi_dt%add(1.d0,self%vcontrol_val,psi_vcont)
+      END IF
+    ELSE
+      CALL gs_wall_source(self,psi_dt,tmp_vec)
+      CALL self%zerob_bc%apply(tmp_vec)
+      !---Solve in augmented space (flux + coils)
+      CALL psi_dt%set(0.d0)
+      pm_save=oft_env%pm; oft_env%pm=.FALSE.
+      CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
+      oft_env%pm=pm_save
+      CALL psi_eddy%add(1.d0,1.d0,psi_dt)
+    END IF
+    !---Add flux to solution
     CALL psi_vac%add(1.d0,1.d0,psi_dt)
     CALL self%psi%add(1.d0,1.d0,psi_dt)
   END IF
@@ -2591,17 +2758,9 @@ DO i=1,self%maxits
     EXIT
   END IF
   !---Under-relax solution
-  ! IF(MOD(i,self%ninner)/=0.OR.(.NOT.self%free))
   CALL self%psi%add(1.d0-self%urf,self%urf,psip)
   !---Update flux scale for free and fixed boundary
-  ! CALL self%psi%add(1.d0,-1.d0,psi_vac)
-  ! CALL self%psi%add(1.d0,-self%vcontrol_val,psi_vcont)
-  ! CALL self%zerob_bc%apply(self%psi)
-  IF(self%free)THEN
-    ! CALL self%psi%add(1.d0,1.d0,psi_bc)
-    ! CALL self%psi%add(1.d0,1.d0,psi_vac)
-    ! CALL self%psi%add(1.d0,self%vcontrol_val,psi_vcont)
-  ELSE
+  IF(.NOT.self%free)THEN
     CALL self%psi%add(1.d0,-1.d0,psi_vac)
     CALL self%psi%add(1.d0,-self%vcontrol_val,psi_vcont)
     CALL self%zerob_bc%apply(self%psi)
@@ -2648,11 +2807,6 @@ DO i=1,self%maxits
     vals_tmp=vals_tmp*self%vcontrol_val
     CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vcont')
   END IF
-  ! !---Under-relax pressure in R0 control mode
-  ! IF(self%R0_target>0.d0.AND.MOD(i,self%ninner)==0)THEN
-  !   self%pnorm=(self%pnorm+pnormp)/2.d0
-  !   pnormp=self%pnorm
-  ! END IF
   !---Update vacuum field part
   CALL gs_source(self,self%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
   !---Compute error in NL function
@@ -2668,7 +2822,7 @@ DO i=1,self%maxits
     SQRT(nl_res),self%o_point(1),self%o_point(2),self%vcontrol_val/mu0
   !---Check if converged
   IF((self%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
-  IF(SQRT(nl_res)<self%nl_tol)EXIT !.AND.i>3*self%ninner)EXIT
+  IF(SQRT(nl_res)<self%nl_tol)EXIT
 end do
 IF(oft_env%pm)CALL oft_decrease_indent
 IF(i>self%maxits)error_flag=-1
@@ -2712,6 +2866,15 @@ CALL psi_press%delete
 DEALLOCATE(rhs,psip,psiin)
 DEALLOCATE(rhs_bc,psi_bc,psi_alam,psi_press,psi_vac,psi_vcont)
 DEALLOCATE(vals_tmp,psi_eddy)
+IF(self%dt>0.d0)THEN
+  CALL psi_dt%delete
+  IF(self%ncoils>0)THEN
+    CALL psi_aug%delete
+    CALL tmp_aug%delete
+    DEALLOCATE(psi_aug,tmp_aug)
+  END IF
+  DEALLOCATE(psi_dt)
+END IF
 !---
 IF(self%compute_chi)CALL self%get_chi
 self%ierr=error_flag
@@ -3020,9 +3183,10 @@ class(gs_eq), intent(inout) :: self !< G-S object
 class(oft_vector), intent(inout) :: psi_sol !< Input: BCs for \f$ \psi \f$, Output: solution
 CLASS(bfem_interp), optional, intent(inout) :: rhs_source !< Specified current source (optional)
 integer(4), optional, intent(out) :: ierr !< Error flag
-class(oft_vector), pointer :: rhs_bc,psi_bc,psi_eddy,psi_dt,tmp_vec,psi_vac,psi_vcont
+class(oft_vector), pointer :: rhs_bc,psi_bc,psi_eddy,psi_dt,tmp_vec,psi_vac,psi_vcont,psi_aug,tmp_aug
 integer(4) :: j,k,error_flag
 REAL(8) :: psimax
+real(r8), pointer, DIMENSION(:) :: vals_tmp
 logical :: pm_save
 !---
 ierr=0
@@ -3048,6 +3212,11 @@ IF(self%dt>0.d0)THEN
   self%lu_solver_dt%A=>self%dels_dt
   CALL self%psi%new(psi_dt)
   CALL self%psi%new(tmp_vec)
+  IF(self%ncoils>0)THEN
+    CALL self%aug_vec%new(psi_aug)
+    CALL self%aug_vec%new(tmp_aug)
+  END IF
+  ALLOCATE(vals_tmp(self%psi%n))
 ELSE
   IF(PRESENT(rhs_source))THEN
     CALL self%psi%new(psi_dt)
@@ -3058,7 +3227,7 @@ END IF
 CALL psi_vac%set(0.d0)
 DO j=1,self%ncoils
   ! curr = self%coil_regions(j)%curr
-  CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+  IF((self%Rcoils(j)<=0.d0).OR.(self%dt<0.d0))CALL psi_vac%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
 END DO
 CALL psi_eddy%set(0.d0)
 #ifdef OFT_TOKAMAKER_LEGACY
@@ -3068,7 +3237,7 @@ DO j=1,self%ncond_regs
     ! CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
     !   self%cond_regions(j)%psi_eig(k)%f)
     CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-    self%cond_regions(j)%psi_eig(k)%f)
+      self%cond_regions(j)%psi_eig(k)%f)
   END DO
 END DO
 #endif
@@ -3108,15 +3277,74 @@ CALL psi_sol%add(1.d0,self%vcontrol_val,psi_vcont)
 IF(self%dt>0.d0)THEN
   CALL tmp_vec%set(0.d0)
   CALL tmp_vec%add(0.d0,-1.d0/self%dt,psi_sol,1.d0/self%dt,self%psi_dt)
-  CALL gs_wall_source(self,tmp_vec,psi_dt)
-  IF(PRESENT(rhs_source))THEN
-    CALL gs_gen_source(self,rhs_source,tmp_vec)
-    CALL psi_dt%add(1.d0,1.d0,tmp_vec)
+  IF(self%ncoils>0)THEN
+    CALL tmp_vec%get_local(vals_tmp)
+    IF(ANY(self%Rcoils>0.d0))THEN
+      DO j=1,self%ncoils
+        vals_tmp(j)=self%coils_dt(j)/self%dt
+        IF(self%Rcoils(j)<=0.d0)CALL tmp_vec%add(1.d0,self%coil_currs(j)/self%dt,self%psi_coil(j)%f)
+      END DO
+      vals_tmp(self%ncoils+1)=(self%coils_dt(self%ncoils+1)-self%vcontrol_val)/self%dt
+    ELSE
+      vals_tmp=0.d0
+    END IF
+    CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+    CALL tmp_vec%get_local(vals_tmp)
+    CALL psi_aug%restore_local(vals_tmp,1)
+    CALL gs_wall_source(self,psi_aug,tmp_aug)
+    CALL tmp_aug%get_local(vals_tmp,2)
+    IF(ANY(self%Rcoils>0.d0))THEN
+      DO j=1,self%ncoils
+        IF(self%Rcoils(j)>0.d0)THEN
+          vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
+        ELSE
+          vals_tmp(j)=self%coil_currs(j)
+        END IF
+      END DO
+      vals_tmp(self%ncoils+1)=0.d0
+    ELSE
+      vals_tmp=0.d0
+    END IF
+    CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
+    IF(PRESENT(rhs_source))THEN
+      CALL gs_gen_source(self,rhs_source,tmp_vec)
+      CALL psi_aug%set(0.d0)
+      CALL tmp_vec%get_local(vals_tmp)
+      CALL psi_aug%restore_local(vals_tmp,1)
+      CALL tmp_aug%add(1.d0,1.d0,psi_aug)
+    END IF
+    CALL self%zerob_bc%apply(tmp_aug)
+    CALL psi_aug%set(0.d0)
+    pm_save=oft_env%pm; oft_env%pm=.FALSE.
+    CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
+    oft_env%pm=pm_save
+    CALL psi_aug%get_local(vals_tmp,1)
+    CALL tmp_vec%restore_local(vals_tmp)
+    CALL psi_aug%get_local(vals_tmp,2)
+    DO j=1,self%ncoils
+      IF(self%Rcoils(j)>0.d0)THEN
+        self%coil_currs(j)=vals_tmp(j)
+        CALL tmp_vec%add(1.d0,self%coil_currs(j),self%psi_coil(j)%f)
+      END IF
+    END DO
+    IF(self%Rcoils(self%ncoils+1)>0.d0)THEN
+      self%vcontrol_val=vals_tmp(self%ncoils+1)
+      CALL tmp_vec%add(1.d0,self%vcontrol_val,psi_vcont)
+    END IF
+  ELSE
+    CALL psi_dt%add(0.d0,1.d0,tmp_vec)
+    CALL gs_wall_source(self,psi_dt,tmp_vec)
+    IF(PRESENT(rhs_source))THEN
+      CALL gs_gen_source(self,rhs_source,psi_dt)
+      CALL tmp_vec%add(1.d0,1.d0,psi_dt)
+    END IF
+    CALL self%zerob_bc%apply(tmp_vec)
+    CALL psi_dt%set(0.d0)
+    pm_save=oft_env%pm; oft_env%pm=.FALSE.
+    CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
+    oft_env%pm=pm_save
+    CALL tmp_vec%add(0.d0,1.d0,psi_dt)
   END IF
-  CALL self%zerob_bc%apply(psi_dt)
-  pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  CALL self%lu_solver_dt%apply(tmp_vec,psi_dt)
-  oft_env%pm=pm_save
   CALL psi_sol%add(1.d0,1.d0,tmp_vec)
 ELSE
   IF(PRESENT(rhs_source))THEN
@@ -3137,12 +3365,23 @@ END IF
 CALL psi_vac%delete
 CALL psi_vcont%delete
 CALL psi_eddy%delete
+DEALLOCATE(psi_vac,psi_vcont,psi_eddy)
 IF(self%dt>0.d0)THEN
   CALL psi_dt%delete
   CALL tmp_vec%delete
-  DEALLOCATE(psi_dt,tmp_vec)
+  IF(self%ncoils>0)THEN
+    CALL psi_aug%delete
+    CALL tmp_aug%delete
+    DEALLOCATE(psi_aug,tmp_aug)
+  END IF
+  DEALLOCATE(psi_dt,tmp_vec,vals_tmp)
+ELSE
+  IF(PRESENT(rhs_source))THEN
+    CALL psi_dt%delete
+    CALL tmp_vec%delete
+    DEALLOCATE(psi_dt,tmp_vec)
+  END IF
 END IF
-DEALLOCATE(psi_vac,psi_vcont,psi_eddy)
 end subroutine gs_vac_solve
 !------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux definitions
@@ -5266,7 +5505,7 @@ character(LEN=*), intent(in) :: bc !< Boundary condition
 real(8), optional, intent(in) :: dt !< Timestep size for time-dependent version
 real(8), optional, intent(in) :: scale !< Global scale factor
 integer(i4) :: i,m,jr,jc
-integer(i4), allocatable :: j(:)
+integer(i4), allocatable :: j(:),j2(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time,pt(3),dt_in,main_scale
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),eta_reg(:)
 logical :: curved
@@ -5276,7 +5515,7 @@ real(r8), pointer, dimension(:) :: nonaxi_tmp
 real(r8), pointer, dimension(:,:) :: nonaxi_vals
 type(oft_1d_int), pointer, dimension(:) :: bc_nodes
 CLASS(oft_vector), POINTER :: oft_lag_vec
-TYPE(oft_graph_ptr) :: graphs(1,1)
+TYPE(oft_graph_ptr), pointer, dimension(:,:) :: graphs
 TYPE(oft_graph), TARGET :: graph1,graph2
 type(oft_timer) :: mytimer
 CLASS(oft_bmesh), POINTER :: smesh
@@ -5298,6 +5537,7 @@ IF(dt_in>0.d0)nnonaxi=self%region_info%nnonaxi
 !------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
   !---
+  CALL self%fe_rep%vec_create(oft_lag_vec)
   graph1%nr=self%fe_rep%ne
   graph1%nrg=self%fe_rep%global%ne
   graph1%nc=self%fe_rep%ne
@@ -5337,13 +5577,27 @@ IF(.NOT.ASSOCIATED(mat))THEN
     graph1%lc=>graph2%lc
     DEALLOCATE(dense_flag)
   END IF
-  !---Create matrix
+  !---Add coil blocks
+  IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
+    ALLOCATE(graphs(2,2))
+    ALLOCATE(graphs(2,1)%g,graphs(1,2)%g,graphs(2,2)%g)
+    CALL create_dense_graph(graphs(2,1)%g,self%coil_vec,oft_lag_vec)
+    CALL create_dense_graph(graphs(1,2)%g,oft_lag_vec,self%coil_vec)
+    CALL create_dense_graph(graphs(2,2)%g,self%coil_vec,self%coil_vec)
+  ELSE
+    ALLOCATE(graphs(1,1))
+  END IF
   graphs(1,1)%g=>graph1
-  CALL self%fe_rep%vec_create(oft_lag_vec)
-  CALL create_matrix(mat,graphs,oft_lag_vec,oft_lag_vec)
+  !---Create matrix
+  IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
+    CALL create_matrix(mat,graphs,self%aug_vec,self%aug_vec)
+  ELSE
+    CALL create_matrix(mat,graphs,oft_lag_vec,oft_lag_vec)
+  END IF
   CALL oft_lag_vec%delete
   DEALLOCATE(oft_lag_vec)
   NULLIFY(graphs(1,1)%g)
+  DEALLOCATE(graphs)
 ELSE
   CALL mat%zero
 END IF
@@ -5471,22 +5725,60 @@ IF(nnonaxi>0)THEN
         -nonaxi_vals(jc,self%region_info%reg_map(i))*dt_in/nonaxi_vals(self%region_info%block_max+1,self%region_info%reg_map(i))
     END DO
   END DO
-  DEALLOCATE(nonaxi_vals)
 END IF
+!---Add inductance and resistance terms for Vcoils
+IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
+#if !defined(__INTEL_COMPILER)
+  !$omp parallel do
+#endif
+  DO i=1,self%ncoils
+    IF(nnonaxi>0)THEN
+      CALL dels_coil_part(self,mat,i,dt_in,bc,main_scale,nonaxi_vals)
+    ELSE
+      CALL dels_coil_part(self,mat,i,dt_in,bc,main_scale)
+    END IF
+  END DO
+  !
+  ALLOCATE(j2(1))
+  DO i=1,self%ncoils+1
+    j=self%fe_rep%ne+i
+    IF(self%Rcoils(i)<=0.d0)THEN
+      CALL mat%zero_rows(1,j)
+      lop(1,1)=1.d0
+      CALL mat%add_values(j,j,lop,1,1)
+    ELSE
+      DO jc=1,self%ncoils
+        lop(1,1)=main_scale*self%Lcoils(i,jc)/dt_in
+        j2=self%fe_rep%ne+self%ncoils+1
+        CALL mat%add_values(j,j2,self%coil_vcont(jc)*lop,1,1) ! VSC contribution
+        IF(i==jc)lop(1,1)=lop(1,1)+main_scale*self%Rcoils(i)
+        j2=self%fe_rep%ne+jc
+        CALL mat%add_values(j,j2,lop,1,1)
+      END DO
+    END IF
+  END DO
+  DEALLOCATE(j2)
+END IF
+IF(nnonaxi>0)DEALLOCATE(nonaxi_vals)
 !---Set diagonal entries for dirichlet rows
 SELECT CASE(TRIM(bc))
-  CASE("zerob")
-    lop(1,1)=1.d0
-    DO i=1,self%fe_rep%nbe
-      IF(.NOT.self%fe_rep%linkage%leo(i))CYCLE
-      j=self%fe_rep%lbe(i)
-      call mat%add_values(j,j,lop,1,1)
-    END DO
-  CASE("free")
-    CALL set_bcmat(self,mat)
+CASE("zerob")
+  lop(1,1)=1.d0
+  DO i=1,self%fe_rep%nbe
+    IF(.NOT.self%fe_rep%linkage%leo(i))CYCLE
+    j=self%fe_rep%lbe(i)
+    call mat%add_values(j,j,lop,1,1)
+  END DO
+CASE("free")
+  CALL set_bcmat(self,mat)
 END SELECT
 DEALLOCATE(j,lop)
-CALL self%fe_rep%vec_create(oft_lag_vec)
+!---Assemble final matrix
+IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
+  CALL self%aug_vec%new(oft_lag_vec)
+ELSE
+  CALL self%fe_rep%vec_create(oft_lag_vec)
+END IF
 CALL mat%assemble(oft_lag_vec)
 CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec,eta_reg)
@@ -5496,6 +5788,127 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine build_dels
+!---------------------------------------------------------------------------
+!> Compute inductance between coil and given poloidal flux
+!---------------------------------------------------------------------------
+subroutine dels_coil_part(self,mat,iCoil,dt_in,bc,main_scale,nonaxi_vals)
+class(gs_eq), intent(inout) :: self !< G-S solver object
+class(oft_matrix), pointer, intent(inout) :: mat
+integer(4), intent(in) :: iCoil !< Coil index for mutual calculation
+real(8), intent(in) :: dt_in
+character(LEN=*), intent(in) :: bc
+real(8), intent(in) :: main_scale
+real(r8), optional, intent(in) :: nonaxi_vals(:,:)
+real(r8), pointer, dimension(:) :: btmp
+real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns,eta_wt,pt(3),coil_dist
+real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),row_tmp(:,:),col_tmp(:,:),eta_reg(:)
+integer(4) :: i,j,m,l,k,j2(1),jvsc(1)
+integer(4), allocatable :: j_lag(:)
+logical :: curved
+CLASS(oft_bmesh), POINTER :: smesh
+! t1=omp_get_wtime()
+!---
+smesh=>self%fe_rep%mesh
+NULLIFY(btmp)
+CALL self%psi_coil(iCoil)%f%get_local(btmp)
+j2=self%fe_rep%ne+iCoil
+jvsc=self%fe_rep%ne+self%ncoils+1
+!
+ALLOCATE(eta_reg(smesh%nreg))
+eta_reg=-1.d0
+IF(dt_in>0.d0)THEN
+  DO l=1,self%ncond_regs
+    j=self%cond_regions(l)%id
+    eta_reg(j)=self%cond_regions(l)%eta
+  END DO
+END IF
+!---
+!!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns) reduction(+:mutual)
+allocate(rop(self%fe_rep%nce),row_tmp(self%fe_rep%nce,1))
+allocate(j_lag(self%fe_rep%nce),col_tmp(1,self%fe_rep%nce))
+!!$omp do schedule(static,1)
+DO j=1,smesh%nc
+  nturns=self%coil_nturns(smesh%reg(j),iCoil)
+  eta_wt=0.d0
+  IF(eta_reg(smesh%reg(j))>0.d0)eta_wt=1.d0/(dt_in*eta_reg(smesh%reg(j)))
+  IF(ABS(nturns)<1.d-10.AND.(eta_reg(smesh%reg(j))<=0.d0))CYCLE
+  call self%fe_rep%ncdofs(j,j_lag)
+  curved=cell_is_curved(smesh,j)
+  row_tmp=0.d0
+  col_tmp=0.d0
+  do m=1,self%fe_rep%quad%np
+    if(curved.OR.(m==1))call smesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
+    det=v*self%fe_rep%quad%wts(m)
+    pt=smesh%log2phys(j,self%fe_rep%quad%pts(:,m))
+    psi_tmp=0.d0; coil_dist=0.d0
+    DO l=1,self%fe_rep%nce
+      CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
+      psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
+      coil_dist=coil_dist+self%dist_coil(j_lag(l),iCoil)*rop(l)
+    END DO
+    !
+    DO l=1,self%fe_rep%nce
+      col_tmp(1,l)=col_tmp(1,l)+mu0*2.d0*pi*rop(l)*nturns*coil_dist*det
+      row_tmp(l,1)=row_tmp(l,1)+eta_wt*rop(l)*psi_tmp*det/(pt(1)+gs_epsilon)
+    END DO
+  end do
+  !---Apply bc to local matrix
+  SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    DO l=1,self%fe_rep%nce
+      IF(self%fe_rep%be(j_lag(l)))row_tmp(l,1)=0.d0
+    END DO
+  CASE("free")
+    DO l=1,self%fe_rep%nce
+      IF(self%fe_rep%be(j_lag(l)))row_tmp(l,1)=0.d0
+    END DO
+  END SELECT
+  col_tmp=col_tmp*main_scale/dt_in
+  row_tmp=row_tmp*main_scale
+  !!$omp critical
+  call mat%add_values(j2,j_lag,col_tmp,1,self%fe_rep%nce)
+  call mat%add_values(j_lag,j2,row_tmp,self%fe_rep%nce,1)
+  !---VSC contributions
+  call mat%add_values(jvsc,j_lag,self%coil_vcont(iCoil)*col_tmp,1,self%fe_rep%nce)
+  call mat%add_values(j_lag,jvsc,self%coil_vcont(iCoil)*row_tmp,self%fe_rep%nce,1)
+  !!$omp end critical
+end do
+IF(PRESENT(nonaxi_vals))THEN
+  do i=1,self%fe_rep%mesh%nc
+    IF(self%region_info%reg_map(smesh%reg(i))==0)CYCLE
+    !---Get local to global DOF mapping
+    call self%fe_rep%ncdofs(i,j_lag)
+    !---Get local reconstructed operators
+    row_tmp(:,1)=0.d0
+    do m=1,self%fe_rep%quad%np ! Loop over quadrature points
+      call self%fe_rep%mesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
+      det=v*self%fe_rep%quad%wts(m)
+      do l=1,self%fe_rep%nce ! Loop over degrees of freedom
+        call oft_blag_eval(self%fe_rep,i,l,self%fe_rep%quad%pts(:,m),rop(l))
+        row_tmp(l,1)=row_tmp(l,1)+rop(l)*det
+      end do
+    end do
+    !---Add local values to global matrix
+    m=self%region_info%reg_map(smesh%reg(i))
+    row_tmp(:,1)=-row_tmp(:,1)/nonaxi_vals(self%region_info%block_max+1,m)
+    row_tmp(:,1)=row_tmp(:,1)*main_scale
+    col_tmp(1,1)=0.d0
+    do l=1,self%region_info%noaxi_nodes(m)%n
+      col_tmp(1,1)=col_tmp(1,1)+nonaxi_vals(l,m)*btmp(self%region_info%noaxi_nodes(m)%v(l))
+    end do
+    row_tmp(:,1)=row_tmp(:,1)*col_tmp(1,1)
+    call mat%atomic_add_values(j_lag,j2,row_tmp(:,1),self%fe_rep%nce,1)
+  end do
+END IF
+deallocate(j_lag,rop,row_tmp,col_tmp)
+!!$omp end parallel
+DEALLOCATE(btmp,eta_reg)
+end subroutine dels_coil_part
+!---------------------------------------------------------------------------
+!> Initialize Grad-Shafranov solution with the Taylor state
+!!
+!! @param[in,out] self G-S object
+!---------------------------------------------------------------------------
 !------------------------------------------------------------------------------
 !> Destroy internal storage and nullify references for Grad-Shafranov object
 !------------------------------------------------------------------------------
