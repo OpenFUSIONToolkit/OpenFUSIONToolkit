@@ -438,9 +438,7 @@ CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 INTEGER(i4), OPTIONAL, INTENT(in) :: axis !< Index of axis coordinate (optional)
 REAL(r8) :: tflux !< Toroidally averaged flux
-LOGICAL :: curved
-INTEGER(i4) :: i,m,raxis,ptind(2)
-REAL(r8) :: goptmp(3,4),vol,det,pt(3),bcc(3),rop(3)
+INTEGER(i4) :: i,raxis,ptind(2)
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---
@@ -452,7 +450,11 @@ IF(raxis==2)ptind(2)=3
 !---Set quadrature order
 CALL mesh%quad_rule(quad_order,quad)
 tflux=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad,raxis,ptind) private(curved) reduction(+:tflux)
+!$omp parallel reduction(+:tflux)
+BLOCK
+LOGICAL :: curved
+INTEGER(i4) :: m
+REAL(r8) :: goptmp(3,4),vol,pt(3),bcc(3)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -463,6 +465,8 @@ DO i=1,mesh%nc
     tflux = tflux + bcc(raxis)/SUM(pt(ptind)**2)*vol*quad%wts(m)
   END DO
 END DO
+END BLOCK
+!$omp end parallel
 !---Global reduction and cleanup
 tflux=oft_mpi_sum(tflux)/(2*pi)
 CALL quad%delete
@@ -476,15 +480,18 @@ CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u dV \f$
-LOGICAL :: curved
-INTEGER(i4) :: i,m
-REAL(r8) :: goptmp(3,4),vol,bcc(1)
+INTEGER(i4) :: i
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
+!$omp parallel reduction(+:energy)
+BLOCK
+LOGICAL :: curved
+INTEGER(i4) :: m
+REAL(r8) :: goptmp(3,4),vol,bcc(1)
+!$omp do
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -493,6 +500,8 @@ DO i=1,mesh%nc
     energy=energy+bcc(1)*vol*quad%wts(m)
   END DO
 END DO
+END BLOCK
+!$omp end parallel
 !---Global reduction and cleanup
 energy=oft_mpi_sum(energy)
 CALL quad%delete
@@ -506,15 +515,18 @@ CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u^2 dV \f$
-REAL(r8) :: goptmp(3,4),vol,bcc(1)
-INTEGER(i4) :: i,m
-LOGICAL :: curved
+INTEGER(i4) :: i
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
+!$omp parallel reduction(+:energy)
+BLOCK
+LOGICAL :: curved
+INTEGER(i4) :: m
+REAL(r8) :: goptmp(3,4),vol,bcc(1)
+!$omp do
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -523,6 +535,8 @@ DO i=1,mesh%nc
     energy = energy + (bcc(1)**2)*vol*quad%wts(m)
   END DO
 END DO
+END BLOCK
+!$omp end parallel
 !---Global reduction and cleanup
 energy=oft_mpi_sum(energy)
 CALL quad%delete
@@ -536,15 +550,18 @@ CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int \left| \textbf{u} \right|^2 dV \f$
-REAL(r8) :: goptmp(3,4),vol,bcc(3)
-INTEGER(i4) :: i,m
-LOGICAL :: curved
+INTEGER(i4) :: i
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
+!$omp parallel reduction(+:energy)
+BLOCK
+LOGICAL :: curved
+INTEGER(i4) :: m
+REAL(r8) :: goptmp(3,4),vol,bcc(3)
+!$omp do
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -553,6 +570,8 @@ DO i=1,mesh%nc
     energy = energy + SUM(bcc**2)*vol*quad%wts(m)
   END DO
 END DO
+END BLOCK
+!$omp end parallel
 !---Global reduction and cleanup
 energy=oft_mpi_sum(energy)
 CALL quad%delete
@@ -567,15 +586,18 @@ CLASS(fem_interp), INTENT(inout) :: field !< Input field \f$ (u) \f$
 CLASS(fem_interp), INTENT(inout) :: weight !< Weight field \f$ (\omega) \f$
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int \left( \omega * \left| \textbf{u} \right|^2 \right) dV \f$
-REAL(r8) :: goptmp(3,4),vol,bcc(3),wcc(1)
-INTEGER(i4) :: i,m
-LOGICAL :: curved
+INTEGER(i4) :: i
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do  default(firstprivate) shared(field,weight,quad) private(curved) reduction(+:energy)
+!$omp parallel reduction(+:energy)
+BLOCK
+LOGICAL :: curved
+INTEGER(i4) :: m
+REAL(r8) :: goptmp(3,4),vol,bcc(3),wcc(1)
+!$omp do
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -585,6 +607,8 @@ DO i=1,mesh%nc
     energy = energy + wcc(1)*SUM(bcc**2)*vol*quad%wts(m)
   END DO
 END DO
+END BLOCK
+!$omp end parallel
 !---Global reduction and cleanup
 energy=oft_mpi_sum(energy)
 CALL quad%delete
@@ -598,14 +622,17 @@ CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int u dS \f$
-INTEGER(i4) :: i,m,j,face,cell,ptmap(3)
-REAL(r8) :: vol,area,flog(4),etmp(1),sgop(3,3),vgop(3,4)
+INTEGER(i4) :: i
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%bmesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel reduction(+:energy)
+BLOCK
+INTEGER(i4) :: m,cell,ptmap(3)
+REAL(r8) :: vol,area,flog(4),etmp(1),sgop(3,3),vgop(3,4)
+!$omp do
 do i=1,mesh%bmesh%nc
   CALL mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
   !---Loop over quadrature points
@@ -618,6 +645,8 @@ do i=1,mesh%bmesh%nc
     energy = energy + etmp(1)*area*quad%wts(m)
   end do
 end do
+END BLOCK
+!$omp end parallel
 !---Global reduction and cleanup
 energy=oft_mpi_sum(energy)
 CALL quad%delete
@@ -632,14 +661,17 @@ CLASS(bfem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 INTEGER(i4), OPTIONAL, INTENT(in) :: reg_mask !< Region to integrate over
 REAL(r8) :: energy !< \f$ \int u dS \f$
-INTEGER(i4) :: i,m,cell
-REAL(r8) :: area,etmp(1),sgop(3,3)
+INTEGER(i4) :: i
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad,reg_mask) reduction(+:energy)
+!$omp parallel reduction(+:energy)
+BLOCK
+INTEGER(i4) :: m
+REAL(r8) :: area,etmp(1),sgop(3,3)
+!$omp do
 do i=1,mesh%nc
   IF(PRESENT(reg_mask))THEN
     IF(mesh%reg(i)/=reg_mask)CYCLE
@@ -651,6 +683,8 @@ do i=1,mesh%nc
     energy = energy + etmp(1)*area*quad%wts(m)
   end do
 end do
+END BLOCK
+!$omp end parallel
 !---Global reduction and cleanup
 energy=oft_mpi_sum(energy)
 CALL quad%delete
@@ -664,14 +698,17 @@ CLASS(oft_mesh), INTENT(inout) :: mesh
 CLASS(fem_interp), INTENT(inout) :: field !< Input field
 INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
 REAL(r8) :: energy !< \f$ \int \textbf{u} \cdot \textbf{dS} \f$
-INTEGER(i4) :: i,m,j,face,cell,ptmap(3)
-REAL(r8) :: vol,area,flog(4),norm(3),etmp(3),sgop(3,3),vgop(3,4)
+INTEGER(i4) :: i
 TYPE(oft_quad_type) :: quad
 DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%bmesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel reduction(+:energy)
+BLOCK
+INTEGER(i4) :: m,cell,ptmap(3)
+REAL(r8) :: vol,area,flog(4),norm(3),etmp(3),sgop(3,3),vgop(3,4)
+!$omp do
 do i=1,mesh%bmesh%nc
   CALL mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
   !---Loop over quadrature points
@@ -685,6 +722,8 @@ do i=1,mesh%bmesh%nc
     energy = energy + DOT_PRODUCT(etmp,norm)*area*quad%wts(m)
   end do
 end do
+END BLOCK
+!$omp end parallel
 !---Global reduction and cleanup
 energy=oft_mpi_sum(energy)
 CALL quad%delete
