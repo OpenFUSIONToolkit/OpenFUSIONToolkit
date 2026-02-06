@@ -120,7 +120,9 @@ TYPE :: tw_type
   INTEGER(i4), POINTER, DIMENSION(:) :: closures => NULL() !< List of closure vertices [nclosures]
   INTEGER(i4), POINTER, DIMENSION(:) :: kfh => NULL() !< Pointer to face-hole interaction list [mesh%nc+1]
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lfh => NULL() !< List of face-hole interactions [nfh]
-  REAL(r8), POINTER, DIMENSION(:) :: Eta_reg => NULL() !< Resistivity*thickness values for each region [nreg]
+  REAL(r8), POINTER, DIMENSION(:) :: Eta => NULL() !< Resistivity values for each region [nreg].
+  REAL(r8), POINTER, DIMENSION(:) :: Thickness => NULL() !< Thickness values for each region [nreg]. Units: meters
+  REAL(r8), POINTER, DIMENSION(:) :: Eta_reg => NULL() !< Surface resistivity (eta/thickness) values for each region, divided by mu0 [nreg].
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2dr => NULL() !< Element to driver (icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2coil => NULL() !< Element to coil (vcoils+icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2sen => NULL() !< Element to sensor coupling matrix
@@ -2742,27 +2744,66 @@ subroutine tw_load_eta(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
 !---XML solver fields
 integer(4) :: nshells,nreg_mesh,nread
-TYPE(xml_node), POINTER :: sens_node,eta_group,thincurr_group
+TYPE(xml_node), POINTER :: sens_node,eta_group,thincurr_group,thickness_group
 !---
 INTEGER(4) :: i,j,io_unit,ierr,id,cell
 REAL(8) :: location(2)
+LOGICAL :: has_eta,has_thickness
 nreg_mesh=MAXVAL(self%mesh%reg)
+IF (ASSOCIATED(self%Eta)) DEALLOCATE(self%Eta) ! Prevent allocation if already allocated, which can happen if this is called multiple times (e.g. for multiple modes)
+IF (ASSOCIATED(self%Thickness)) DEALLOCATE(self%Thickness) ! Prevent allocation if already allocated, which can happen if this is called multiple times (e.g. for multiple modes)
+IF (ASSOCIATED(self%Eta_reg)) DEALLOCATE(self%Eta_reg) ! Prevent allocation if already allocated, which can happen if this is called multiple times (e.g. for multiple modes)
+ALLOCATE(self%Eta(nreg_mesh))
+ALLOCATE(self%Thickness(nreg_mesh))
 ALLOCATE(self%Eta_reg(nreg_mesh))
-self%Eta_reg=-1.d0
+self%Thickness=1.d0 ! Placeholder, thickness = 1 [m]
+self%Eta=1.d0 ! Placeholder, bulk resistivity [Ohm m] = mu0
+self%Eta_reg=1.d0 ! Placeholder, surface resistivity [Ohm] = eta/thickness = mu0
 ALLOCATE(self%sens_mask(nreg_mesh))
 self%sens_mask=.FALSE.
+IF(.NOT.ASSOCIATED(self%xml))THEN
+  CALL oft_warn('No "thincurr" XML node. Ignore this warning if resistivity does not need to be specified.')
+  RETURN
+END IF
+has_eta=.FALSE.
+has_thickness=.FALSE.
 ! Read resistivity values
 CALL xml_get_element(self%xml,"eta",eta_group,ierr)
 IF(ASSOCIATED(eta_group))THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
-  CALL xml_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
+  CALL xml_extractDataContent(eta_group,self%Eta,num=nread,iostat=ierr)
   IF(nread/=nreg_mesh)CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
-  ! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
+  IF(ANY(self%Eta<=0.d0))CALL oft_abort('All "eta" values must be > 0','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
-    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,self%Eta_reg(i)
-    self%Eta_reg(i)=self%Eta_reg(i)/mu0 ! Convert to magnetic units
+    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,self%Eta(i)
   END DO
+  has_eta=.TRUE.
+ELSE
+  CALL oft_warn('No "eta" XML node.  Ignore this warning if resistivity does not need to be specified.')
+END IF
+! Read thickness values
+CALL xml_get_element(self%xml,"thickness",thickness_group,ierr)
+IF(ASSOCIATED(thickness_group))THEN
+  WRITE(*,'(2A)')oft_indent,'Loading region thickness:'
+  CALL xml_extractDataContent(thickness_group,self%Thickness,num=nread,iostat=ierr)
+  IF(nread/=nreg_mesh)CALL oft_abort('Thickness size mismatch','tw_load_eta',__FILE__)
+  IF(ANY(self%Thickness<=0.d0))CALL oft_abort('All "thickness" values must be > 0','tw_load_eta',__FILE__)
+  DO i=1,nreg_mesh
+    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,self%Thickness(i)
+  END DO
+  has_thickness=.TRUE.
+ELSE
+  CALL oft_warn('No "thickness" XML node.')
+END IF
+IF(has_eta.AND.has_thickness)THEN ! Bulk resistivity and thickness provided separately by user
+  self%Eta_reg=(self%Eta/self%Thickness)/mu0 ! Surface resistivity in magnetic units
+ELSEIF(has_eta.AND.(.NOT.has_thickness))THEN ! Only eta provided; assume eta already represents surface resistivity
+  CALL oft_warn('No "thickness" XML node. Assuming "eta" is surface resistivity (eta/thickness).')
+  self%Eta_reg=self%Eta/mu0 ! Surface resistivity in magnetic units
+ELSEIF((.NOT.has_eta).AND.has_thickness)THEN ! Only thickness provided; keep default eta and form eta/thickness
+  CALL oft_warn('Unexpected behavior: no "eta" found, but "thickness" provided. Using default eta with provided thickness.')
+  self%Eta_reg=(self%Eta/self%Thickness)/mu0 ! Surface resistivity in magnetic units
 END IF
 ! Read sensor mask
 CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)

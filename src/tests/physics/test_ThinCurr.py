@@ -122,7 +122,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -171,7 +171,7 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -200,7 +200,7 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()

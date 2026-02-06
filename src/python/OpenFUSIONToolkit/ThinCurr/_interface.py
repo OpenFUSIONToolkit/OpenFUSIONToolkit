@@ -82,6 +82,14 @@ thincurr_get_eta = ctypes_subroutine(oftpy_lib.thincurr_get_eta,
 thincurr_set_eta = ctypes_subroutine(oftpy_lib.thincurr_set_eta,
     [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
 
+# thincurr_get_thickness(tw_ptr,thickness_ptr,error_string)
+thincurr_get_thickness = ctypes_subroutine(oftpy_lib.thincurr_get_thickness,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
+
+# thincurr_set_thickness(tw_ptr,thickness_ptr,error_string)
+thincurr_set_thickness = ctypes_subroutine(oftpy_lib.thincurr_set_thickness,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
+
 # Compute current regularization matrix thincurr_curr_regmat(tw_ptr,Rmat,error_str)
 thincurr_curr_regmat = ctypes_subroutine(oftpy_lib.thincurr_curr_regmat,
     [c_void_p, ctypes_numpy_array(float64,2), c_char_p])

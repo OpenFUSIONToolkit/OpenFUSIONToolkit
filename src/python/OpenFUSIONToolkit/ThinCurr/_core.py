@@ -355,16 +355,63 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return eta_values
     
-    def set_eta_values(self,eta_values=None):
+    def set_eta_values(self,eta_values=None,thickness=None):
         '''! Set resistivity values for model (overrides those in XML if specified)
 
-        @param eta_values New resistivity values for model [nregs]
+        @param eta_values New resistivity values for model [nregs].
+        @param thickness New thickness values for model [nregs]. Units: m
         '''
+        if eta_values is None:
+            raise ValueError('"eta_values" cannot be None')
         if eta_values.shape[0] != self.nregs:
             raise IndexError('Incorrect shape of "eta_values", should be [nregs]')
+        if thickness is not None and thickness.shape[0] != self.nregs:
+            raise IndexError('Incorrect shape of "thickness", should be dimensions of [nregs] (or thickness should be None)')
+        if numpy.any(eta_values <= 0.0):
+            raise ValueError('All values in "eta_values" must be > 0')
+        if thickness is not None and numpy.any(thickness <= 0.0):
+            raise ValueError('All values in "thickness" must be > 0')
+
+        # 1) Set resistivity
         eta_values = numpy.ascontiguousarray(eta_values, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         thincurr_set_eta(self.tw_obj,eta_values,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+
+        # 2) Set thickness (if provided)
+        # TODO: Add test
+        if thickness is not None:
+            thickness = numpy.ascontiguousarray(thickness, dtype=numpy.float64)
+            error_string = self._oft_env.get_c_errorbuff()
+            thincurr_set_thickness(self.tw_obj,thickness,error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value.decode())
+
+    def get_thickness(self):
+        '''! Get thickness values for model
+
+        @returns `thickness` Thickness values for model [nregs]. Units: m
+        '''
+        thickness = numpy.zeros((self.nregs,), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_get_thickness(self.tw_obj,thickness,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+        return thickness
+
+    def set_thickness(self,thickness):
+        '''! Set thickness values for model (overrides those in XML if specified)
+
+        @param thickness New thickness values for model [nregs]. Units: m
+        '''
+        if thickness.shape[0] != self.nregs:
+            raise IndexError('Incorrect shape of "thickness", should be dimensions of [nregs]')
+        if numpy.any(thickness <= 0.0):
+            raise ValueError('All values in "thickness" must be > 0')
+        thickness = numpy.ascontiguousarray(thickness, dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_set_thickness(self.tw_obj,thickness,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
 

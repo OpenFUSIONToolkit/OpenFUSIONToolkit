@@ -685,14 +685,12 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
-INTEGER(4) :: nreg_mesh
 REAL(8), POINTER :: res_tmp(:)
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
-!
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
-res_tmp=tw_obj%Eta_reg*mu0
+res_tmp=tw_obj%Eta
 END SUBROUTINE thincurr_get_eta
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -707,10 +705,72 @@ REAL(8), POINTER :: res_tmp(:)
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
-!
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
-tw_obj%Eta_reg=res_tmp/mu0
+IF(ANY(res_tmp<=0.d0))THEN
+  CALL copy_string('All values in "eta" must be > 0',error_str)
+  RETURN
+END IF
+
+tw_obj%Eta=res_tmp
+! If thickness is set, update Eta_reg using thickness,
+! Otherwise assume Eta already represents surface resistivity and set Eta_reg=Eta/mu0.
+! Eta_reg can be updated later when thickness is set.
+IF (ASSOCIATED(tw_obj%Thickness)) THEN ! If thickness if set, use it to compute Eta_reg
+  IF(ANY(tw_obj%Thickness<=0.d0))THEN
+    CALL copy_string('All values in "thickness" must be > 0',error_str)
+    RETURN
+  END IF
+  tw_obj%Eta_reg=(tw_obj%Eta/tw_obj%Thickness)/mu0
+ELSE ! No thickness provided: treat Eta as surface resistivity
+  tw_obj%Eta_reg=tw_obj%Eta/mu0
+END IF
 END SUBROUTINE thincurr_set_eta
+!---------------------------------------------------------------------------------
+!> Return the thickness of the regions as an array of length nreg. If thickness is not set, return 0 for all regions.
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_get_thickness(tw_ptr,thickness_ptr,error_str)BIND(C,NAME="thincurr_get_thickness")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr ! ThickCurr object pointer
+TYPE(c_ptr), VALUE, INTENT(in) :: thickness_ptr ! Pointer to array to hold thickness values, should be of length nreg
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) ! Buffer to hold error message if any
+!
+REAL(8), POINTER :: thick_tmp(:) ! Temporary pointer to hold thickness values
+TYPE(tw_type), POINTER :: tw_obj ! Pointer to the ThinCurr object
+CALL copy_string('',error_str) ! Initialize error string to empty
+CALL c_f_pointer(tw_ptr, tw_obj) ! Associate the ThinCurr object pointer with a pointer
+CALL c_f_pointer(thickness_ptr, thick_tmp, [tw_obj%mesh%nreg]) ! Associate the thickness array pointer with a pointer of the correct size
+IF (ASSOCIATED(tw_obj%Thickness)) THEN
+  thick_tmp = tw_obj%Thickness ! If thickness is set, copy it to the output array
+ELSE
+  ! Warn that thickness is not set, returning 0 for all regions. This is the legacy behavior, but users should be aware that this may not be physically correct.
+  thick_tmp = 0.d0 ! If thickness is not set, return 0 for all regions
+END IF
+END SUBROUTINE thincurr_get_thickness
+!---------------------------------------------------------------------------------
+!> Set the thickness of the regions using an array of length nreg and recompute Eta_reg using the provided thickness value.
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_set_thickness(tw_ptr,thickness_ptr,error_str)BIND(C,NAME="thincurr_set_thickness")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: thickness_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+!
+REAL(8), POINTER :: thick_tmp(:)
+TYPE(tw_type), POINTER :: tw_obj
+CALL copy_string('',error_str)
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL c_f_pointer(thickness_ptr, thick_tmp, [tw_obj%mesh%nreg])
+IF(ANY(thick_tmp<=0.d0))THEN
+  CALL copy_string('All values in "thickness" must be > 0',error_str)
+  RETURN
+END IF
+tw_obj%Thickness=thick_tmp
+IF (ASSOCIATED(tw_obj%Eta)) THEN ! If Eta is allocated, we can compute Eta_reg using the new thickness values. Otherwise, we will compute Eta_reg when Eta is set.
+  IF(ANY(tw_obj%Eta<=0.d0))THEN
+    CALL copy_string('All values in "eta" must be > 0',error_str)
+    RETURN
+  END IF
+  tw_obj%Eta_reg=(tw_obj%Eta/tw_obj%Thickness)/mu0
+END IF
+END SUBROUTINE thincurr_set_thickness
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
