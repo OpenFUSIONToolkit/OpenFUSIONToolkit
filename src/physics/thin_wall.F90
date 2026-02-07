@@ -198,47 +198,34 @@ CALL oft_increase_indent
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 #ifdef HAVE_XML
 !---Load coils
-IF(.NOT.ASSOCIATED(self%xml))THEN
-  CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
-  IF(error_flag/=0)CALL oft_warn('Unable to find "thincurr" XML node')
-END IF
-WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
+IF(.NOT.ASSOCIATED(self%xml))CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
 CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
-IF(error_flag==0)CALL tw_load_coils(coil_element,self%n_vcoils,self%vcoils)
+IF(error_flag==0)THEN
+  WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
+  CALL tw_load_coils(coil_element,self%n_vcoils,self%vcoils)
+ELSE
+  WRITE(*,'(2A)')oft_indent,'No V(t) driver coils found'
+END IF
 DO i=1,self%n_vcoils
   IF(ANY(self%vcoils(i)%res_per_len<0.d0))CALL oft_abort("Invalid resistivity for passive coil", &
     "tw_setup", __FILE__)
   IF(ANY(self%vcoils(i)%radius<coil_min_rad))CALL oft_abort("Invalid radius for passive coil", &
     "tw_setup", __FILE__)
 END DO
-WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils'
 CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
-IF(error_flag==0)CALL tw_load_coils(coil_element,self%n_icoils,self%icoils)
+IF(error_flag==0)THEN
+  WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils'
+  CALL tw_load_coils(coil_element,self%n_icoils,self%icoils)
+ELSE
+  WRITE(*,'(2A)')oft_indent,'No I(t) driver coils found'
+END IF
 DO i=1,self%n_icoils
   DO j=1,self%icoils(i)%ncoils
     self%icoils(i)%radius(j)=MAX(coil_min_rad,self%icoils(i)%radius(j)) ! Remove dummy radius on Icoils
   END DO
 END DO
 #endif
-WRITE(*,*)
-! WRITE(*,'(2A)')oft_indent,'Thin-wall model loaded:'
-! WRITE(*,*)'  filename    = ',TRIM(meshfile)
-WRITE(*,'(2A,2I12)')oft_indent,'# of points    = ',self%mesh%np
-WRITE(*,'(2A,I12)')oft_indent,'# of edges     = ',self%mesh%ne
-WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
-WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
-WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',self%n_vcoils
-WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',self%nclosures
-IF(oft_debug_print(1))THEN
-  CALL oft_increase_indent
-  DO i=1,self%nclosures
-    WRITE(*,'(A,I8,3Es14.5)')oft_indent,self%closures(i),self%mesh%r(:,self%closures(i))
-  END DO
-  CALL oft_decrease_indent
-END IF
-WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',self%n_icoils
 !---Analyze mesh to construct holes
-WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Building holes'
 ALLOCATE(self%hmesh(self%nholes))
 ALLOCATE(self%kfh(self%mesh%nc+1))
@@ -412,6 +399,25 @@ SELECT TYPE(this=>self%Uloc_pts)
     this%stitch_info%nbe=0
     this%stitch_info%be=.FALSE.
 END SELECT
+!---Print summary
+WRITE(*,*)
+WRITE(*,'(2A)')oft_indent,'Setup complete:'
+CALL oft_increase_indent
+WRITE(*,'(2A,I12)')oft_indent,'# of points    = ',self%mesh%np
+WRITE(*,'(2A,I12)')oft_indent,'# of edges     = ',self%mesh%ne
+WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
+WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
+WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',self%nclosures
+IF(oft_debug_print(1))THEN
+  CALL oft_increase_indent
+  DO i=1,self%nclosures
+    WRITE(*,'(A,I8,3Es14.5)')oft_indent,self%closures(i),self%mesh%r(:,self%closures(i))
+  END DO
+  CALL oft_decrease_indent
+END IF
+WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',self%n_vcoils
+WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',self%n_icoils
+CALL oft_decrease_indent
 CALL oft_decrease_indent
 CONTAINS
 !---------------------------------------------------------------------------------
@@ -1663,6 +1669,10 @@ TYPE(oft_native_matrix), POINTER :: Rmat
 DEBUG_STACK_PUSH
 bmesh=>tw_obj%mesh
 WRITE(*,*)'Building resistivity matrix'
+IF(ALL(tw_obj%Eta_reg<0.d0))THEN
+  CALL oft_warn('Resistivity not set, using "eta=mu0" for all regions')
+  tw_obj%Eta_reg=1.d0
+END IF
 ALLOCATE(tw_obj%Rmat)
 Rmat=>tw_obj%Rmat
 Rmat%nr=tw_obj%nelems; Rmat%nrg=tw_obj%nelems
@@ -2671,13 +2681,9 @@ INTEGER(4) :: i,j,io_unit,ierr,id,cell
 REAL(8) :: location(2)
 nreg_mesh=MAXVAL(self%mesh%reg)
 ALLOCATE(self%Eta_reg(nreg_mesh))
-self%Eta_reg=1.d0
+self%Eta_reg=-1.d0
 ALLOCATE(self%sens_mask(nreg_mesh))
 self%sens_mask=.FALSE.
-IF(.NOT.ASSOCIATED(self%xml))THEN
-  CALL oft_warn('No "thincurr" XML node, using "eta=mu0" for all regions')
-  RETURN
-END IF
 ! Read resistivity values
 CALL xml_get_element(self%xml,"eta",eta_group,ierr)
 IF(ASSOCIATED(eta_group))THEN
@@ -2690,8 +2696,6 @@ IF(ASSOCIATED(eta_group))THEN
     WRITE(*,'(A,I4,ES12.4)')oft_indent,i,self%Eta_reg(i)
     self%Eta_reg(i)=self%Eta_reg(i)/mu0 ! Convert to magnetic units
   END DO
-ELSE
-  CALL oft_warn('No "eta" XML node, using "eta=mu0" for all regions')
 END IF
 ! Read sensor mask
 CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)
