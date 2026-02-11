@@ -143,7 +143,7 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
     # find correct offset to match user input value
     return final_profile
 
-def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
+def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, parameterize_jBS, diagnostic_plots=False):
     r'''! Analyze bootstrap edge spike location, width, and height
 
     @param psi_N Normalized psi profile
@@ -244,35 +244,46 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     # Apply the patch to the main masked j_BS profile
     masked_spike[idx_start : idx_end + 1] = y_patch
     
-    # Attempt to fit bootstrap parameterization to calculated profile (deprecated)
-    # Initial parameter guess
-    sigma_init = fwhm/2.355  # Convert FWHM to sigma
-    p0 = [peak_height, peak_psi, sigma_init, lmin_j_BS, 1.0, j_bootstrap[-1], 0.05]
+    if parameterize_jBS:
+        # Attempt to fit bootstrap parameterization to calculated profile (deprecated)
+        # Initial parameter guess
+        sigma_init = fwhm/2.355  # Convert FWHM to sigma
+        p0 = [peak_height, peak_psi, sigma_init, lmin_j_BS, 1.0, j_bootstrap[-1], 0.05]
 
-    lower_bounds = [0.99*peak_height, # fix to measured spike height
-                    0.8*peak_psi, # don't fix to measured spike location
-                    0.0, # width
-                    0.99*lmin_j_BS,
-                    -50,
-                    0.0,
-                    0.001]
-    upper_bounds = [1.01*peak_height, # fix to measured spike height
-                    1.2*peak_psi, # don't fix to measured spike location
-                    0.33, # no spikes wider than 0.33 units of psi_N 
-                    1.01*lmin_j_BS,
-                    50, # sk
-                    2*j_bootstrap[-1],
-                    0.2]
+        print(f'Fitted peak height = {peak_height:.3f}')
+        print(f'Fitted peak center in psi_N = {peak_psi:.3f}')
+        print(f'Fitted peak sigma = {sigma_init:.3f}')
+        print(f'Measured j_BS local min. = {lmin_j_BS:.3f}')
 
-    # Perform the fit
-    popt, pcov = curve_fit(parameterize_edge_jBS, psi_N[fit_mask], j_bootstrap[fit_mask], p0=p0,
-                            bounds=(lower_bounds, upper_bounds),
-                            maxfev=10000)
+        lower_bounds = [0.99*peak_height, # fix to measured spike height
+                        0.8*peak_psi, # don't fix to measured spike location
+                        0.0, # width
+                        0.99*lmin_j_BS,
+                        -50,
+                        0.0,
+                        0.001]
+        upper_bounds = [1.01*peak_height, # fix to measured spike height
+                        1.2*peak_psi, # don't fix to measured spike location
+                        0.33, # no spikes wider than 0.33 units of psi_N 
+                        1.01*lmin_j_BS,
+                        50, # sk
+                        2*j_bootstrap[-1],
+                        0.2]
 
-    amp, center, width, offset, sk, y_sep, blend_width = popt
+        # Perform the fit
+        popt, pcov = curve_fit(parameterize_edge_jBS, psi_N[fit_mask], j_bootstrap[fit_mask], p0=p0,
+                                bounds=(lower_bounds, upper_bounds),
+                                maxfev=10000)
 
-    spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
-    
+        amp, center, width, offset, sk, y_sep, blend_width = popt
+
+        spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
+    else:
+        spike_only = numpy.zeros_like(psi_N)
+        width = fwhm/2.355
+        offset = (jBS_min_loc,lmin_j_BS)
+        popt = None
+
     if diagnostic_plots:
         plt.figure()
         plt.plot(psi_N[fit_mask],j_bootstrap[fit_mask]/1e6,label='Input j_BS')
@@ -286,7 +297,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     
     results = {
         'sigma': width,                 # Gaussian width (sigma)
-        'background': offset,           # background level
+        'background': offset,           # Tuple of masked j_BS blend location OR parameterized offset level
         'gaussian_params': popt,        # Raw parameters [amp, center, width, offset]
         'parameterized_spike': spike_only,    # Array of spike component values
         'masked_spike': masked_spike
@@ -618,10 +629,10 @@ def solve_with_bootstrap(mygs,
         if include_jBS:
             if isolate_edge_jBS:
                 if parameterize_jBS:
-                    res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, diagnostic_plots=True)
+                    res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, parameterize_jBS, diagnostic_plots=True)
                     spike_prof = res['parameterized_spike'] * scale_jBS
                 else:
-                    res = analyze_bootstrap_edge_spike(psi_N, j_BS_final)
+                    res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, parameterize_jBS)
                     spike_prof = res['masked_spike'] * scale_jBS
             else:
                 spike_prof = j_BS_final * scale_jBS
