@@ -892,24 +892,6 @@ def solve_with_bootstrap(mygs,
             dn_i_dpsi = numpy.gradient(ni) / d_psi_eff
             dT_i_dpsi = numpy.gradient(Ti) / d_psi_eff
 
-            # Coulomb logarithm: NRL formulary
-            ln_le, ln_lii = calculate_ln_lambda(
-                Te, Ti, ne, ni, Zeff,
-                electron_lnLambda_model='NRL',   # more accurate than Sauter
-                ion_lnLambda_model='Zavg',       # consistent multi-species treatment
-            )
-
-            # Ion collisionality: Koh multi-species formula
-            Zdom = 1.0  # deuterium
-            Zavg = ne / ni
-            Zion = (Zdom**2 * Zavg * Zeff)**0.25
-            nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni 
-                        * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
-
-            # Electron collisionality
-            nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne 
-                        * Zeff * ln_le / (Te**2 * eps**1.5))
-
             if use_OMFIT_sauter:
                 j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation
                     psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, p=pressure,
@@ -924,6 +906,24 @@ def solve_with_bootstrap(mygs,
                     dn_e_dpsi=dn_e_dpsi, dnis_dpsi=[dn_i_dpsi]
                 )[0]
             else:
+                # Coulomb logarithm: NRL formulary
+                ln_le, ln_lii = calculate_ln_lambda(
+                    Te, Ti, ne, ni, Zeff,
+                    electron_lnLambda_model='NRL',   # more accurate than Sauter
+                    ion_lnLambda_model='Zavg',       # consistent multi-species treatment
+                )
+
+                # Ion collisionality: Koh multi-species formula
+                Zdom = 1.0  # deuterium
+                Zavg = ne / ni
+                Zion = (Zdom**2 * Zavg * Zeff)**0.25
+                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni 
+                            * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
+
+                # Electron collisionality
+                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne 
+                            * Zeff * ln_le / (Te**2 * eps**1.5))
+                
                 j_BS_neo, _ = redl_bootstrap( # native re-implementation of Redl 2021
                     psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
                     pe=EC*(ne*Te), pi=EC*(ni*Ti),
@@ -942,6 +942,8 @@ def solve_with_bootstrap(mygs,
             # Convert to A/m^2
             j_BS_final = j_BS_neo * (R_avg / f)
             j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
+
+            # to-do: project j_BS_parallel to j_phi more accurately?
 
         # Scale Currents to match Ip
         current_jphi_target = inductive_jphi if inductive_jphi is not None else numpy.zeros_like(pressure)
