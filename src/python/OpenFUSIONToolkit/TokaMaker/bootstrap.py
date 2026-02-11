@@ -14,18 +14,18 @@ from ._interface import *
 from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS
 
 def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_width=0.03, tail_alpha=1.5):
-    r'''! Generates a parameterized bootstrap current profile with a tunable 'concave' fall-off
-    @param psi Normalized psi profile
+    r'''! Generate parameterized edge bootstrap current profile with tunable concave fall-off
+
+    @param psi Normalized poloidal flux profile \f$\hat{\psi}\f$
     @param amp Amplitude of edge skewed Gaussian spike
     @param center Center location of edge skewed Gaussian spike
     @param width Width of edge skewed Gaussian spike
     @param offset Height of core flat profile
-    @param sk Skew parameter of Gaussian
-    @param y_sep Separatrix value of parameterized profile
-    @param blend_width Normalized psi profile
-    @param tail_alpha Controls the shape of the right-side fall-off.
-                    1.0 = Standard Cosine (smooth, rounded).
-                    >1.0 = Sharper peak, straighter/concave fall-off (closer to typical bootstrap).
+    @param sk Skewness parameter of Gaussian
+    @param y_sep Value at separatrix (\f$\hat{\psi}=1\f$) for profile
+    @param blend_width Blending width for smooth transition in \f$\hat{\psi}\f$
+    @param tail_alpha Controls right-side fall-off shape (1.0 = cosine, >1.0 = concave)
+    @result Parameterized bootstrap current profile as array over \f$\hat{\psi}\f$
     '''
     from scipy.optimize import root_scalar
     from scipy.stats import skewnorm
@@ -112,15 +112,21 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
         if y_sep >= 0:
             temp_profile = numpy.maximum(temp_profile, 0)
         return temp_profile
-    
+
     def objective_function(alpha, psi, amp, center, width, offset, sk, y_sep, blend_width, tail_alpha):
-        r'''! Compute difference between integrated a*j_tor+j_spike profile and Ip_target
+        r'''! Compute difference between integrated profile and \f$I_p^{target}\f$
 
         @param alpha Scaling factor to solve for
-        @param jtor_prof Input j_inductive profile
-        @param spike_profile Isolated j_bootstrap spike (a Gaussian), 0.0 everywhere else
-        @param my_psi_N Local psi_N grid
-        @param my_Ip_target Ip target
+        @param psi Normalized poloidal flux profile \f$\hat{\psi}\f$
+        @param amp Amplitude of edge spike
+        @param center Center of edge spike
+        @param width Width of edge spike
+        @param offset Core offset
+        @param sk Skewness parameter
+        @param y_sep Value at separatrix
+        @param blend_width Blending width
+        @param tail_alpha Right-side fall-off shape
+        @result Difference between computed and target offset
         '''
         temp_profile = generate_baseline_prof(psi, amp, center, width, alpha*offset, sk, y_sep, blend_width, tail_alpha)
         return temp_profile[0] - offset
@@ -143,13 +149,51 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
     # find correct offset to match user input value
     return final_profile
 
+def Hmode_profiles(edge=0.08, ped=0.4, core=2.5, rgrid=201, expin=1.5, expout=1.5, widthp=0.04, xphalf=None):
+    r'''! This function generates H-mode density and temperature profiles evenly
+    spaced in your favorite radial coordinate. Copied from https://omfit.io/_modules/omfit_classes/utils_fusion.html
+
+    @param edge Separatrix height (float)
+    @param ped Pedestal height (float)
+    @param core On-axis profile height (float)
+    @param rgrid Number of radial grid points (int)
+    @param expin Inner core exponent for H-mode pedestal profile (float)
+    @param expout Outer core exponent for H-mode pedestal profile (float)
+    @param widthp Width of pedestal (float)
+    @param xphalf Position of tanh (float, optional)
+    @result H-mode profile array over radial grid
+    '''
+
+    w_E1 = 0.5 * widthp  # width as defined in eped
+    if xphalf is None:
+        xphalf = 1.0 - w_E1
+
+    xped = xphalf - w_E1
+
+    pconst = 1.0 - numpy.tanh((1.0 - xphalf) / w_E1)
+    a_t = 2.0 * (ped - edge) / (1.0 + numpy.tanh(1.0) - pconst)
+
+    coretanh = 0.5 * a_t * (1.0 - numpy.tanh(-xphalf / w_E1) - pconst) + edge
+
+    xpsi = numpy.linspace(0, 1, rgrid)
+    ones = numpy.ones(rgrid)
+
+    val = 0.5 * a_t * (1.0 - numpy.tanh((xpsi - xphalf) / w_E1) - pconst) + edge * ones
+
+    xtoped = xpsi / xped
+    for i in range(0, rgrid):
+        if xtoped[i] ** expin < 1.0:
+            val[i] = val[i] + (core - coretanh) * (1.0 - xtoped[i] ** expin) ** expout
+
+    return val
+
 def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     r'''! Analyze bootstrap edge spike location, width, and height
 
-    @param psi_N Normalized psi profile
-    @param j_bootstrap Bootstrap current profile
-    Returns:
-    dict: Dictionary containing pedestal properties and spike model
+    @param psi_N Normalized poloidal flux profile \f$\hat{\psi}\f$
+    @param j_bootstrap Bootstrap current profile \f$j_{BS}(\hat{\psi})\f$
+    @param diagnostic_plots If True, plot diagnostic figures
+    @result Dictionary with spike properties and parameterized spike model
     '''
 
     from scipy.signal import find_peaks, peak_widths
@@ -295,11 +339,14 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     return results
 
 def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
-    r'''! Take input P' and j_phi profiles and solve equilibrium
-    @param ffp_prof j_phi profile, with 'type' set to 'jphi-linterp'
-    @param pp_prof P' profile
-    @param Ip_target Target Plasma Current [A]
-    @param pax_target Target pressure-on-axis [Pa]
+    r'''! Solve Grad-Shafranov equilibrium for given profiles
+
+    @param mygs Grad-Shafranov solver object
+    @param ffp_prof Toroidal current profile (\f$j_\phi(\hat{\psi})\f$), type 'jphi-linterp'
+    @param pp_prof Pressure gradient profile (\f{P'}\f$)
+    @param Ip_target Target plasma current \f$I_p\f$ [A]
+    @param pax_target Target on-axis pressure \f$p_{axis}\f$ [Pa]
+    @result None (updates equilibrium in-place)
     '''
 
     ffp_prof['type'] = 'jphi-linterp'
@@ -313,26 +360,23 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
 def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,  
                             Ip_target, psi_pad, spike_prof=None, find_j0=True, scale_j0=1.0, 
                             tolerance=0.01, max_iter=5, diagnostic_plots=False):
-    '''
-    Optimizes scale_j0 OR Ip_target to match either input and output current densities at the axis (index 0)
-    or the input and output Ip.
-    Uses the Secant Method to minimize equilibrium solves calls.
+    r'''! Optimize scaling to match input/output \f$j_0\f$ or \f$I_p\f$
 
-    @param psi_N Normalized poloidal flux profile
-    @param pressure Plasma pressure profile [Pa]
-    @param ffp_prof FF' profile
-    @param pp_prof P' profile
-    @param j_inductive Inductive OR total toroidal current profile to be rescaled [A/m^2]
-    @param Ip_target Target Plasma Current [A]
+    @param mygs Grad-Shafranov solver object
+    @param psi_N Normalized poloidal flux profile \f$\hat{\psi}\f$
+    @param pressure Plasma pressure profile \f$p(\hat{\psi})\f$ [Pa]
+    @param ffp_prof Toroidal current profile (\f$j_\phi(\hat{\psi})\f$)
+    @param pp_prof Pressure gradient profile (\f{P'}\f$)
+    @param j_inductive Inductive/total toroidal current profile \f$j_{ind}(\hat{\psi})\f$ [A/m^2]
+    @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param psi_pad Padding for flux surface calculations
-    @param spike_prof Optional bootstrap current profile, will NOT be rescaled. Can be set to None [A/m^2]
-    @param find_j0 Essential logic, will switch between either rescaling core j_phi profile or Ip_target
-    @param scale_j0 Only used if find_j0 = False and Ip_target is being rescaled. Useful if find_j0 = True has 
-    already been run to find the correct rescaling factor
-    @param tolerance Relative error tolerance of secant method search. Possible defaults: 1% for find_j0 = True,
-    0.1% for find_j0 = False
-    @param max_iter Maximum iterations of secant method
-    @param diagnostic_plots Plot input and output j_phi profiles to check alignment
+    @param spike_prof Optional bootstrap current profile \f$j_{BS}(\hat{\psi})\f$ [A/m^2]
+    @param find_j0 If True, rescale core \f$j_\phi\f$; else, rescale \f$I_p\f$
+    @param scale_j0 Used if find_j0=False; rescaling factor for \f$j_0\f$
+    @param tolerance Relative error tolerance for secant method
+    @param max_iter Maximum number of secant iterations
+    @param diagnostic_plots If True, plot input/output \f$j_\phi\f$
+    @result Tuple (optimal scale factor, output \f$j_\phi(\hat{\psi})\f$)
     '''
     import matplotlib.pyplot as plt
 
@@ -482,50 +526,305 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     print("Max iterations reached. Returning best last effort.")
     return p1, res_jphi
 
-def solve_with_bootstrap(mygs,
-                            ne,
-                            Te,
-                            ni,
-                            Ti,
-                            Zeff,
-                            Ip_target,
-                            inductive_jphi=None,
-                            Zis=None,
-                            scale_jBS=1.0,
-                            isolate_edge_jBS=False,
-                            psi_pad=1e-3,
-                            iterations=3,
-                            diagnostic_plots=False,
-                            parameterize_jBS = False):
-    '''
-    Self-consistently compute bootstrap contribution from H-mode profiles.
-    
-    If inductive_jphi is set, solve for FF' using Grad-Shafranov equation and 
-    iterate solution until all functions of Psi converge.
+def calculate_ln_lambda(Te, Ti, ne, ni, Zeff=1.0,
+                        electron_lnLambda_model='sauter',
+                        ion_lnLambda_model='unity'):
+    r'''! Calculate Coulomb logarithm for electrons and ions
 
-    @param ne Electron density profile [m^-3]
-    @param Te Electron temperature profile [eV]
-    @param ni Ion density profile [m^-3]
-    @param Ti Ion temperature profile [eV]
-    @param Zeff Effective Z profile
-    @param Ip_target Target Plasma Current [A]
-    @param inductive_jphi Inductive toroidal current profile
+    @param Te Electron temperature profile \f$T_e\f$ [eV]
+    @param Ti Ion temperature profile \f$T_i\f$ [eV]
+    @param ne Electron density profile \f$n_e\f$ [m$^{-3}$]
+    @param ni Ion density profile \f$n_i\f$ [m$^{-3}$]
+    @param Zeff Effective charge \f$Z_{eff}\f$
+    @param electron_lnLambda_model Model for electron Coulomb log ('sauter', 'NRL')
+    @param ion_lnLambda_model Model for ion Coulomb log ('unity', 'Zavg')
+    @result Tuple (\f$\ln\Lambda_e\f$, \f$\ln\Lambda_{ii}\f$)
+    '''
+    if electron_lnLambda_model == 'NRL':
+        ln_lambda_e = (23.5 
+                       - numpy.log(numpy.sqrt(ne / 1e6) * Te**(-5.0/4.0))
+                       - numpy.sqrt(1e-5 + (numpy.log(Te) - 2)**2 / 16.0))
+    else:
+        ln_lambda_e = 31.3 - numpy.log(numpy.sqrt(ne) / Te)
+
+    if ion_lnLambda_model == 'Zavg':
+        Z_lnLam = numpy.clip(ne / ni, 1.0, None)
+    else:
+        Z_lnLam = 1.0
+    ln_lambda_ii = 30.0 - numpy.log(Z_lnLam**3 * numpy.sqrt(ni) / Ti**1.5)
+
+    ln_lambda_e = numpy.maximum(ln_lambda_e, 10.0)
+    ln_lambda_ii = numpy.maximum(ln_lambda_ii, 10.0)
+    return ln_lambda_e, ln_lambda_ii
+
+
+def redl_bootstrap(
+    psi_N=None,
+    Te=None, Ti=None,
+    ne=None, ni=None,
+    pe=None, pi=None,
+    Zeff=None,
+    R=None, q=None, eps=None, fT=None, I_psi=None,
+    dT_e_dpsi=None, dT_i_dpsi=None,
+    dn_e_dpsi=None, dn_i_dpsi=None,
+    dp_dpsi=None,
+    ln_lambda_e=17.0, ln_lambda_ii=17.0,
+    # --- Legacy-matching toggles ---
+    use_legacy_L34=False,
+    use_sign_q=False,
+    ion_collisionality_model='Zeff',
+    formula_form='jB',
+    Zeff_override=None,          # ← add this back
+    nu_e_star_override=None,      # ← NEW
+    nu_i_star_override=None,      # ← NEW
+):
+    r'''! Bootstrap current via Redl et al., Phys. Plasmas 28, 022502 (2021)
+
+    @param psi_N Normalized poloidal flux profile \f$\hat{\psi}\f$
+    @param Te Electron temperature profile \f$T_e\f$ [eV]
+    @param Ti Ion temperature profile \f$T_i\f$ [eV]
+    @param ne Electron density profile \f$n_e\f$ [m$^{-3}$]
+    @param ni Ion density profile \f$n_i\f$ [m$^{-3}$]
+    @param pe Electron pressure profile \f$p_e\f$ [Pa]
+    @param pi Ion pressure profile \f$p_i\f$ [Pa]
+    @param Zeff Effective charge \f$Z_{eff}\f$
+    @param R Major radius \f$R\f$ [m]
+    @param q Safety factor \f$q\f$
+    @param eps Inverse aspect ratio \f$\epsilon\f$
+    @param fT Trapped particle fraction \f$f_T\f$
+    @param I_psi Toroidal current function \f$I(\psi)\f$
+    @param dT_e_dpsi Derivative of \f$T_e\f$ w.r.t. \f$\psi\f$
+    @param dT_i_dpsi Derivative of \f$T_i\f$ w.r.t. \f$\psi\f$
+    @param dn_e_dpsi Derivative of \f$n_e\f$ w.r.t. \f$\psi\f$
+    @param dn_i_dpsi Derivative of \f$n_i\f$ w.r.t. \f$\psi\f$
+    @param dp_dpsi Derivative of total pressure w.r.t. \f$\psi\f$
+    @param ln_lambda_e Electron Coulomb logarithm \f$\ln\Lambda_e\f$
+    @param ln_lambda_ii Ion Coulomb logarithm \f$\ln\Lambda_{ii}\f$
+    @param use_legacy_L34 Use legacy L34 formula (see Redl Eq. 19)
+    @param use_sign_q Multiply by sign of \f$q\f$
+    @param ion_collisionality_model Model for ion collisionality ('Zeff', 'Koh', 'unity')
+    @param formula_form Use 'jB' (default) or 'jboot1' equation
+    @param Zeff_override Override \f$Z_{eff}\f$ if set
+    @param nu_e_star_override Override electron collisionality if set
+    @param nu_i_star_override Override ion collisionality if set
+    @result Tuple (bootstrap current profile \f$j_{BS}(\hat{\psi})\f$, coefficient dictionary)
+    '''
+    
+    # Apply Zeff override if requested
+    if Zeff_override is not None:
+        Zeff = (numpy.full_like(Zeff, Zeff_override) 
+                if numpy.isscalar(Zeff_override) else Zeff_override)
+
+    inputs = [Te, Ti, ne, ni, pe, pi, Zeff, R, q, eps, fT, I_psi,
+              dT_e_dpsi, dT_i_dpsi, dn_e_dpsi]
+    if any(x is None for x in inputs):
+        raise ValueError("All primary inputs must be provided.")
+    if formula_form == 'jboot1' and dn_i_dpsi is None:
+        raise ValueError("dn_i_dpsi required for jboot1 form.")
+
+    EC = 1.602176634e-19
+    p_total = pe + pi
+    R_pe = pe / p_total
+        
+    # =====================================================================
+    # 1. Collisionality
+    # =====================================================================
+
+    if nu_e_star_override is not None:
+        nu_e_star = nu_e_star_override
+    else:
+        nu_e_star = (6.921e-18 * q * R * ne * Zeff * ln_lambda_e
+                     / (Te**2 * eps**1.5))
+
+    if nu_i_star_override is not None:
+        nu_i_star = nu_i_star_override
+    else:
+        if ion_collisionality_model == 'Koh':
+            nu_i_star = (4.90e-18 * q * R * ni * Zeff * ln_lambda_ii
+                         / (Ti**2 * eps**1.5))
+        elif ion_collisionality_model == 'unity':
+            nu_i_star = (4.90e-18 * q * R * ni * 1.0 * ln_lambda_ii
+                         / (Ti**2 * eps**1.5))
+        else:
+            nu_i_star = (4.90e-18 * q * R * ni * (Zeff**4) * ln_lambda_ii
+                         / (Ti**2 * eps**1.5))
+
+    # =====================================================================
+    # 2. L31 (Redl Eqs. 10-11)
+    # =====================================================================
+
+    ft_31_d1 = ((0.67 * (1 - 0.7 * fT) * numpy.sqrt(nu_e_star))
+                / (0.56 + 0.44 * Zeff))
+    ft_31_d2 = (((0.52 + 0.086 * numpy.sqrt(nu_e_star))
+                 * (1 + 0.87 * fT) * nu_e_star)
+                / (1 + 1.13 * numpy.sqrt(numpy.maximum(Zeff - 1, 0.0))))
+    X31 = fT / (1 + ft_31_d1 + ft_31_d2)
+
+    def F31_poly(X):
+        dZ = Zeff**1.2 - 0.71
+        return ((1 + 0.15 / dZ) * X
+                - (0.22 / dZ) * X**2
+                + (0.01 / dZ) * X**3
+                + (0.06 / dZ) * X**4)
+
+    L31 = F31_poly(X31)
+
+    # =====================================================================
+    # 2b. L34
+    # =====================================================================
+
+    if use_legacy_L34:
+        f33_d1 = (0.25 * (1 - 0.7 * fT) * numpy.sqrt(nu_e_star)
+                  * (1 + 0.45 * numpy.sqrt(numpy.maximum(Zeff - 1, 0.0))))
+        f33_d2 = ((0.61 * (1 - 0.41 * fT) * nu_e_star)
+                  / numpy.sqrt(Zeff))
+        f33teff = fT / (1 + f33_d1 + f33_d2)
+        L34 = F31_poly(f33teff)
+    else:
+        L34 = L31
+
+    # =====================================================================
+    # 3. L32 (Redl Eqs. 12-16)
+    # =====================================================================
+
+    dee_2 = ((0.23 * (1 - 0.96 * fT) * numpy.sqrt(nu_e_star))
+             / numpy.sqrt(Zeff))
+    dee_3 = ((0.13 * (1 - 0.38 * fT) * nu_e_star / (Zeff**2))
+             * (numpy.sqrt(1 + 2 * numpy.sqrt(numpy.maximum(Zeff - 1, 0.0)))
+                + fT**2 * numpy.sqrt(
+                    (0.075 + 0.25 * (Zeff - 1)**2) * nu_e_star)))
+    X32_ee = fT / (1 + dee_2 + dee_3)
+    F32_ee = (
+        (0.1 + 0.6 * Zeff)
+        / (Zeff * (0.77 + 0.63 * (1 + (Zeff - 1)**1.1)))
+        * (X32_ee - X32_ee**4)
+        + 0.7 / (1 + 0.2 * Zeff)
+        * (X32_ee**2 - X32_ee**4 - 1.2 * (X32_ee**3 - X32_ee**4))
+        + 1.3 / (1 + 0.5 * Zeff) * X32_ee**4)
+
+    dei_2 = ((0.87 * (1 + 0.39 * fT) * numpy.sqrt(nu_e_star))
+             / (1 + 2.95 * (Zeff - 1)**2))
+    dei_3 = (1.53 * (1 - 0.37 * fT) * nu_e_star
+             * (2 + 0.375 * (Zeff - 1)))
+    X32_ei = fT / (1 + dei_2 + dei_3)
+    F32_ei = (
+        -(0.4 + 1.93 * Zeff)
+        / (Zeff * (0.8 + 0.6 * Zeff))
+        * (X32_ei - X32_ei**4)
+        + 5.5 / (1.5 + 2 * Zeff)
+        * (X32_ei**2 - X32_ei**4 - 0.8 * (X32_ei**3 - X32_ei**4))
+        - 1.3 / (1 + 0.5 * Zeff) * X32_ei**4)
+
+    L32 = F32_ee + F32_ei
+
+    # =====================================================================
+    # 4. Alpha (Redl Eqs. 20-21)
+    # =====================================================================
+
+    alpha0 = (
+        -(0.62 + 0.055 * (Zeff - 1))
+        / (0.53 + 0.17 * (Zeff - 1))
+        * (1 - fT)
+        / (1 - (0.31 - 0.065 * (Zeff - 1)) * fT - 0.25 * fT**2))
+
+    alpha = (
+        ((alpha0 + 0.7 * Zeff * numpy.sqrt(fT) * numpy.sqrt(nu_i_star))
+         / (1 + 0.18 * numpy.sqrt(nu_i_star))
+         - 0.002 * nu_i_star**2 * fT**6)
+        / (1 + 0.004 * nu_i_star**2 * fT**6))
+
+    # =====================================================================
+    # 5. Assemble
+    # =====================================================================
+
+    if formula_form == 'jboot1':
+        if dp_dpsi is None:
+            dp_dpsi = (ne * dT_e_dpsi + Te * dn_e_dpsi
+                       + ni * dT_i_dpsi + Ti * dn_i_dpsi) * EC
+        bra1 = L31 * dp_dpsi / pe
+        bra2 = L32 * dT_e_dpsi / Te
+        bra3 = L34 * alpha * (1 - R_pe) / R_pe * dT_i_dpsi / Ti
+        j_bootstrap = -I_psi * pe * (bra1 + bra2 + bra3)
+        term_decomp = {
+            'bra1': -I_psi * pe * bra1,
+            'bra2': -I_psi * pe * bra2,
+            'bra3': -I_psi * pe * bra3,
+        }
+    else:
+        term_n = p_total * L31 * (1.0 / ne) * dn_e_dpsi
+        term_Te = pe * (L31 + L32) * (1.0 / Te) * dT_e_dpsi
+        term_Ti = pi * (L31 + L34 * alpha) * (1.0 / Ti) * dT_i_dpsi
+        j_bootstrap = -I_psi * (term_n + term_Te + term_Ti)
+        term_decomp = {
+            'term_n': -I_psi * term_n,
+            'term_Te': -I_psi * term_Te,
+            'term_Ti': -I_psi * term_Ti,
+        }
+
+    if use_sign_q:
+        j_bootstrap *= numpy.sign(q)
+        for k in term_decomp:
+            term_decomp[k] *= numpy.sign(q)
+    
+    coeffs = {
+        'L31': L31, 'L32': L32, 'L34': L34,
+        'alpha': alpha, 'alpha0': alpha0,
+        'nu_e_star': nu_e_star, 'nu_i_star': nu_i_star,
+        'Zeff_used': Zeff,
+        'R_pe': R_pe,
+        'formula_form': formula_form,
+        'F32_ee': F32_ee,
+        'F32_ei': F32_ei,
+    }
+    coeffs.update(term_decomp)
+
+    return j_bootstrap, coeffs
+
+def solve_with_bootstrap(mygs,
+                         ne,
+                         Te,
+                         ni,
+                         Ti,
+                         Zeff,
+                         Ip_target,
+                         inductive_jphi=None,
+                         Zis=None,
+                         scale_jBS=1.0,
+                         isolate_edge_jBS=False,
+                         psi_pad=1e-3,
+                         iterations=3,
+                         diagnostic_plots=False,
+                         parameterize_jBS = False,
+                         use_OMFIT_sauter = False):
+    r'''! Self-consistently compute bootstrap current from H-mode profiles
+
+    @param mygs Grad-Shafranov solver object
+    @param ne Electron density profile \f$n_e(\hat{\psi})\f$ [m$^{-3}$]
+    @param Te Electron temperature profile \f$T_e(\hat{\psi})\f$ [eV]
+    @param ni Ion density profile \f$n_i(\hat{\psi})\f$ [m$^{-3}$]
+    @param Ti Ion temperature profile \f$T_i(\hat{\psi})\f$ [eV]
+    @param Zeff Effective charge profile \f$Z_{eff}(\hat{\psi})\f$
+    @param Ip_target Target plasma current \f$I_p\f$ [A]
+    @param inductive_jphi Inductive toroidal current profile \f$j_{ind}(\hat{\psi})\f$
     @param Zis List of impurity atomic numbers (default: [1.0])
-    @param scale_jBS Factor by which to scale bootstrap current fraction
-    @param isolate_edge_jBS If True, isolates edge spike in bootstrap current
+    @param scale_jBS Scaling factor for bootstrap current
+    @param isolate_edge_jBS If True, isolate edge spike in bootstrap current
     @param psi_pad Padding for flux surface calculations
-    @param iterations Maximum number of solver iterations
-    @param diagnostic_plots Plot iteration target and output j_tor profiles
-    @param initialize_eq Initialize equilibrium solve with flattened pedestal
+    @param iterations Number of solver iterations
+    @param diagnostic_plots If True, plot diagnostic figures
+    @param parameterize_jBS If True, use parameterized edge spike
+    @param use_OMFIT_sauter If True, use OMFIT Sauter model
+    @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
     from scipy.optimize import root_scalar
     import matplotlib.pyplot as plt
 
-    try:
-        from omfit_classes.utils_fusion import sauter_bootstrap
-    except ImportError:
-        raise ImportError('omfit_classes.utils_fusion not installed')
-
+    if use_OMFIT_sauter:
+        try:
+            from omfit_classes.utils_fusion import sauter_bootstrap
+        except ImportError:
+            raise ImportError('omfit_classes.utils_fusion not installed')
+    
     EC = 1.602176634e-19
     
     # Handle mutable default argument
@@ -593,18 +892,52 @@ def solve_with_bootstrap(mygs,
             dn_i_dpsi = numpy.gradient(ni) / d_psi_eff
             dT_i_dpsi = numpy.gradient(Ti) / d_psi_eff
 
-            j_BS_neo = sauter_bootstrap(
-                psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, p=pressure,
-                nis=[ni], Zis=Zis, Zeff=Zeff, gEQDSKs=[None],
-                psiraw=psi_N * psi_range + mygs.psi_bounds[0],
-                R=R_avg, eps=eps, q=qvals, fT=ft, I_psi=f,
-                nt=1, version='neo_2021', debug_plots=False,
-                return_units=True, return_package=False,
-                charge_number_to_use_in_ion_collisionality='Koh',
-                charge_number_to_use_in_ion_lnLambda='Zavg',
-                dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
-                dn_e_dpsi=dn_e_dpsi, dnis_dpsi=[dn_i_dpsi]
-            )[0]
+            # Coulomb logarithm: NRL formulary
+            ln_le, ln_lii = calculate_ln_lambda(
+                Te, Ti, ne, ni, Zeff,
+                electron_lnLambda_model='NRL',   # more accurate than Sauter
+                ion_lnLambda_model='Zavg',       # consistent multi-species treatment
+            )
+
+            # Ion collisionality: Koh multi-species formula
+            Zdom = 1.0  # deuterium
+            Zavg = ne / ni
+            Zion = (Zdom**2 * Zavg * Zeff)**0.25
+            nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni 
+                        * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
+
+            # Electron collisionality
+            nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne 
+                        * Zeff * ln_le / (Te**2 * eps**1.5))
+
+            if use_OMFIT_sauter:
+                j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation
+                    psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, p=pressure,
+                    nis=[ni], Zis=Zis, Zeff=Zeff, gEQDSKs=[None],
+                    psiraw=psi_N * psi_range + mygs.psi_bounds[0],
+                    R=R_avg, eps=eps, q=qvals, fT=ft, I_psi=f,
+                    nt=1, version='neo_2021', debug_plots=False,
+                    return_units=True, return_package=False,
+                    charge_number_to_use_in_ion_collisionality='Koh',
+                    charge_number_to_use_in_ion_lnLambda='Zavg',
+                    dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
+                    dn_e_dpsi=dn_e_dpsi, dnis_dpsi=[dn_i_dpsi]
+                )[0]
+            else:
+                j_BS_neo, _ = redl_bootstrap( # native re-implementation of Redl 2021
+                    psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
+                    pe=EC*(ne*Te), pi=EC*(ni*Ti),
+                    Zeff=Zeff, R=R_avg, q=qvals, eps=eps, fT=ft, I_psi=f,
+                    dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
+                    dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
+                    ln_lambda_e=ln_le, ln_lambda_ii=ln_lii,
+                    # No Zeff_override — OMFIT preserves input Zeff
+                    nu_e_star_override=nu_e_star,
+                    nu_i_star_override=nu_i_star,
+                    use_legacy_L34=False, # L34 = L31 (correct Redl 2021)
+                    use_sign_q=True, # convention-dependent
+                    formula_form='jboot1', # no d(ln ne)=d(ln ni) assumption
+                )
             
             # Convert to A/m^2
             j_BS_final = j_BS_neo * (R_avg / f)
