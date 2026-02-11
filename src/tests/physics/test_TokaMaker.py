@@ -1051,44 +1051,30 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
     mp_q.put([eq_info])
     oftpy_dump_cov()
 
-
 # -----------------------------------------------------------------------
 # Expected values dictionary
-# NOTE: Run the test once with the assertion replaced by a print to capture
-#       actual values from your environment, then paste them here.
-#
-#   To calibrate, temporarily use:
-#       results = mp_run(run_ITER_bootstrap_case, (1.0, 2), timeout=300)
-#       import json; print(json.dumps(results[0], indent=2, default=str))
-#       assert results is not None
 # -----------------------------------------------------------------------
 ITER_bootstrap_eq_dict = {
-    # Standard equilibrium quantities (will differ from non-bootstrap ITER case)
-    'Ip': 15.6E6,             # Should still match target closely
-    'kappa': 1.87,            # Placeholder — calibrate after first run
-    'R_geo': 6.22,
-    'a_geo': 1.98,
-    'q_0': 0.82,
-    'q_95': 2.76,
-    'P_ax': 6.19E5,
-    # Bootstrap-specific quantities
-    'j_BS_max': 1.0E6,        # Placeholder [A/m^2] — calibrate
-    'j_BS_axis': 1.0E5,       # Placeholder [A/m^2] — calibrate
-    'jphi_axis': 1.0E6,       # Placeholder [A/m^2] — calibrate
-    'jphi_max': 2.0E6,        # Placeholder [A/m^2] — calibrate
-    'j_ind_axis': 1.0E6,      # Placeholder [A/m^2] — calibrate
-    'bs_fraction': 0.3,       # Placeholder — calibrate
+    'Ip': 15600817.585821694,
+    'kappa': 1.87554142781964,
+    'R_geo': 6.222376807932244,
+    'a_geo': 1.9817209643036526,
+    'q_0': 0.9951304914765554,
+    'q_95': 2.856235920791585,
+    'P_ax': 739971.7132708698,
+    'j_BS_max': 193963.2797949608,
+    'j_BS_axis': 7555.958566625245,
+    'jphi_axis': 1459409.3677809385,
+    'jphi_max': 1551188.1280449552,
+    'j_ind_axis': 1357487.1677957429,
+    'bs_fraction': 0.1575907471180497,
 }
-
 
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_bootstrap(order):
- ###   results = mp_run(run_ITER_bootstrap_case, (1.0, order), timeout=300)
- ###   assert validate_dict(results, ITER_bootstrap_eq_dict)
-    results = mp_run(run_ITER_bootstrap_case, (1.0, 2), timeout=300)
-    import json; print(json.dumps(results[0], indent=2, default=str))
-    assert results is not None
+    results = mp_run(run_ITER_bootstrap_case, (1.0, order), timeout=300)
+    assert validate_dict(results, ITER_bootstrap_eq_dict)
 
 # # Example of how to run single test without pytest
 # if __name__ == '__main__':
