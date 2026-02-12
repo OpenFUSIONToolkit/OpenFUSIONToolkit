@@ -956,7 +956,7 @@ def solve_with_bootstrap(mygs,
         if include_jBS:
             if isolate_edge_jBS:
                 if parameterize_jBS:
-                    res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, diagnostic_plots=True)
+                    res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, diagnostic_plots=diagnostic_plots)
                     spike_prof = res['parameterized_spike'] * scale_jBS
                 else:
                     res = analyze_bootstrap_edge_spike(psi_N, j_BS_final)
