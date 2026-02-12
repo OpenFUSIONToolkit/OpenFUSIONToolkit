@@ -715,13 +715,13 @@ class torus_fourier_sensor():
         if theta:
             line = ax.plot(self.theta_list/2/np.pi, B_n[:,0])
             ax.set_title(rf"Magnetic Field on surface @ $\phi$=0 at [t] = {t}")
-            ax.set_xlabel(r"$\theta$ (radians)")
+            ax.set_xlabel(r"$\theta_{norm}$")
             ax.set_ylabel("Magnetic Field (Tesla)")
         else:
             phi_list = np.linspace(0,2*np.pi,self.nphi,endpoint=False)
             line = ax.plot(phi_list/2/np.pi, np.flip(B_n[0,:],axis=1))
             ax.set_title(rf"Magnetic Field on surface @ $\theta$=0 at [t] = {t}")
-            ax.set_xlabel(r"$\phi$ (radians)")
+            ax.set_xlabel(r"$\phi_{norm}$")
             ax.set_ylabel("Magnetic Field (Tesla)")
         ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
         return line
