@@ -108,7 +108,9 @@ class TokaMaker():
         ## Coil set definitions, including sub-coils
         self.coil_sets = {}
         ## Virtual coils, if present (currently only `'#VSC'`)
-        self._virtual_coils = {'#VSC': -1}
+        self._virtual_coils = {'#VSC': {'id': -1 ,'facs': {}}}
+        ## Voltage coils dictionary. Currently only used for plotting on python side.
+        self._vcoils = {}
         ## Coil set names in order of id number
         self.coil_set_names = []
         ## Distribution coils, only (currently) saved for plotting utility
@@ -183,8 +185,9 @@ class TokaMaker():
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
+        self._vcoils = {}
         self.coil_sets = {}
-        self._virtual_coils = {}
+        self._virtual_coils = {'#VSC': {'id': -1 ,'facs': {}}}
         self._F0 = 0.0
         self._Ip_target=c_double(self._oft_env.float_disable_flag)
         self._Ip_ratio_target=c_double(self._oft_env.float_disable_flag)
@@ -454,6 +457,54 @@ class TokaMaker():
             return self._diverted[0]
         else:
             return None
+    
+    def coil_dict2vec(self,coil_dict,keep_virtual=False,default_value=0.0):
+        '''! Create coil vector from dictionary of values
+
+        @param coil_vec Input dictionary
+        @param keep_virtual Keep virtual coils in vector instead of mapping to component coils
+        @param default_value Fill value for unspecified entries
+        @returns `coil_dict` Ouput vector
+        '''
+        vector = default_value*numpy.ones((self.ncoils+len(self._virtual_coils),))
+        removal_vector = numpy.zeros((self.ncoils+len(self._virtual_coils),))
+        for coil_key, value in coil_dict.items():
+            if coil_key in self.coil_sets:
+                vector[self.coil_sets[coil_key]['id']] += value
+                removal_vector[self.coil_sets[coil_key]['id']] = default_value
+            elif coil_key in self._virtual_coils:
+                if keep_virtual:
+                    vector[self._virtual_coils[coil_key]['id']] += value
+                    removal_vector[self._virtual_coils[coil_key]['id']] = default_value
+                else:
+                    for map_key, map_val in self._virtual_coils[coil_key].get('facs',{}).items():
+                        vector[self.coil_sets[map_key]['id']] += map_val*value
+                        removal_vector[self.coil_sets[map_key]['id']] = default_value
+            else:
+                raise KeyError('Unknown coil "{0}"'.format(coil_key))
+        vector -= removal_vector
+        if keep_virtual:
+            return vector
+        else:
+            return vector[:self.ncoils]
+    
+    def coil_vec2dict(self,coil_vec,always_virtual=False):
+        '''! Create coil value dictionary of from vector values
+
+        @param coil_vec Input vector
+        @param always_virtual Always include virtual coils even if not present in vector
+        @returns `coil_dict` Ouput dictionary
+        '''
+        coil_dict = {}
+        for coil_key in self.coil_sets:
+            coil_dict[coil_key] = coil_vec[self.coil_sets[coil_key]['id']]
+        if coil_vec.shape[0] > self.ncoils:
+            for coil_key in self._virtual_coils:
+                coil_dict[coil_key] = coil_vec[self._virtual_coils[coil_key]['id']]
+        elif always_virtual:
+            for coil_key in self._virtual_coils:
+                coil_dict[coil_key] = 0.0
+        return coil_dict
         
     def abspsi_to_normalized(self,psi_in):
         r'''! Convert unnormalized \f$ \psi \f$ values to normalized \f$ \hat{\psi} \f$ values
@@ -520,7 +571,7 @@ class TokaMaker():
                     if key in self.coil_sets:
                         reg_mat[self.coil_sets[key]['id'],i] = value
                     elif key in self._virtual_coils:
-                        reg_mat[self._virtual_coils[key],i] = value
+                        reg_mat[self._virtual_coils[key]['id'],i] = value
                     else:
                         raise KeyError('Unknown coil "{0}"'.format(key))
         elif reg_mat is not None:
@@ -539,7 +590,7 @@ class TokaMaker():
         else:
             raise ValueError('Either "reg_terms" or "reg_mat" is required')
         # Ensure VSC is constrained
-        if (self._virtual_coils.get('#VSC',-1) < 0) and ((abs(reg_mat[-1,:])).max() < 1.E-8):
+        if (not self._virtual_coils.get('#VSC',{}).get('facs',{})) and ((abs(reg_mat[-1,:])).max() < 1.E-8):
             new_row = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
             new_row[-1] = 1.0
             reg_mat = numpy.hstack((reg_mat,new_row.reshape([self.ncoils+1,1])))
@@ -560,9 +611,9 @@ class TokaMaker():
         Can be used with or without regularization terms (see
         @ref TokaMaker.TokaMaker.set_coil_reg "set_coil_reg").
 
-        @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
+        @param coil_bounds Minimum and maximum allowable coil currents (dictionary of form `{coil_name: coil_bound[2]}`)
         '''
-        bounds_array = numpy.zeros((self.ncoils+1,2), dtype=numpy.float64)
+        bounds_array = numpy.zeros((self.ncoils+len(self._virtual_coils),2), dtype=numpy.float64)
         bounds_array[:,0] = -1.E98
         bounds_array[:,1] = 1.E98
         if coil_bounds is not None:
@@ -570,7 +621,7 @@ class TokaMaker():
                 if coil_key in self.coil_sets:
                     bounds_array[self.coil_sets[coil_key]['id'],:] = coil_bound
                 elif coil_key in self._virtual_coils:
-                    bounds_array[self._virtual_coils[coil_key],:] = coil_bound
+                    bounds_array[self._virtual_coils[coil_key]['id'],:] = coil_bound
                 else:
                     raise KeyError('Unknown coil "{0}"'.format(coil_key))
         error_string = self._oft_env.get_c_errorbuff()
@@ -583,13 +634,25 @@ class TokaMaker():
 
         @param coil_gains Gains for each coil (absolute scale is arbitrary)
         '''
-        gains_array = numpy.zeros((self.ncoils,), dtype=numpy.float64)
-        for coil_key, coil_gain in coil_gains.items():
-            gains_array[self.coil_sets[coil_key]['id']] = coil_gain
+        gains_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_gains), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_coil_vsc(self._tMaker_ptr,gains_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        self._virtual_coils['#VSC']['facs'] = coil_gains.copy()
+    
+    def set_vcoils(self,coil_resistivities):
+        '''! Set or unset one or more coils as Vcoils
+
+        @param coil_resistivities Resistivities for Vcoils [Ohms] (dictionary of form `{coil_name: coil_res}`)
+        '''
+        res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,keep_virtual=True,default_value=-1.0), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_vcoil(self._tMaker_ptr,res_array,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        #Merge dicts and overwrite with new values where necessary. Only used for plotting.
+        self._vcoils = self._vcoils | coil_resistivities
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
         r'''! Initialize \f$\psi\f$ using uniform current distributions
@@ -1058,7 +1121,7 @@ class TokaMaker():
         tokamaker_get_jtor(self._tMaker_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr/mu0
+        return curr
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
@@ -1093,17 +1156,26 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
     
-    def set_psi_dt(self,psi0,dt):
+    def set_psi_dt(self,psi0,dt,coil_currents=None,coil_voltages=None):
         '''! Set reference poloidal flux and time step for eddy currents in .solve()
 
         @param psi0 Reference poloidal flux at t-dt (unnormalized)
         @param dt Time since reference poloidal flux
+        @param coil_currents Currents for Vcoils [A] (dictionary of form `{coil_name: coil_curr}`, defaults to current solution)
+        @param coil_voltages Voltages for Vcoils [V] (dictionary of form `{coil_name: coil_volt}`)
         '''
         if psi0.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi0", should be [np]')
         psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
+        if coil_currents is None:
+            coil_currents, _ = self.get_coil_currents()
+        curr_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents,keep_virtual=True), dtype=numpy.float64)
+        if coil_voltages is not None:
+            volt_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages,keep_virtual=True), dtype=numpy.float64)
+        else:
+            volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_psi_dt(self._tMaker_ptr,psi0,c_double(dt),error_string)
+        tokamaker_set_psi_dt(self._tMaker_ptr,psi0,curr_array,volt_array,c_double(dt),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1142,10 +1214,7 @@ class TokaMaker():
         tokamaker_get_coil_currents(self._tMaker_ptr,currents,currents_reg,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        current_dict = {}
-        for coil_key, coil_set in self.coil_sets.items():
-            current_dict[coil_key] = currents[coil_set['id']]
-        return current_dict, currents_reg
+        return self.coil_vec2dict(currents), currents_reg
 
     def get_coil_Lmat(self):
         r'''! Get mutual inductance matrix between coils
@@ -1340,11 +1409,7 @@ class TokaMaker():
 
         @param currents Current in each coil [A]
         '''
-        current_array = numpy.zeros((self.ncoils,), dtype=numpy.float64)
-        if currents is not None:
-            for coil_key, coil_current in currents.items():
-                current_array[self.coil_sets[coil_key]['id']] = coil_current
-        #
+        current_array = numpy.ascontiguousarray(self.coil_dict2vec(currents), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_coil_currents(self._tMaker_ptr,current_array,error_string)
         if error_string.value != b'':
@@ -1619,6 +1684,16 @@ class TokaMaker():
                 if cell_centered:
                     mesh_currents[mask_tmp] = numpy.sum(curr[self.lc[mask_tmp,:]],axis=1)/3.0
                 mask = numpy.logical_or(mask,mask_tmp)
+                
+        # Treat vcoils as conductors when looking at induced currents
+        for coil_name, coil_obj in self.coil_sets.items():
+            if coil_name in self._vcoils.keys():
+                for sub_coil in coil_obj["sub_coils"]:
+                    mask_tmp = self.reg == sub_coil['reg_id']
+                    if cell_centered:
+                        mesh_currents[mask_tmp] = numpy.mean(curr[self.lc[mask_tmp]],axis=1)
+                    mask = numpy.logical_or(mask,mask_tmp)
+        
         if cell_centered:
             return mask, mesh_currents
         else:
@@ -1657,6 +1732,16 @@ class TokaMaker():
                 if cond_reg.get('noncontinuous',False):
                     mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
                 mask = numpy.logical_or(mask,mask_tmp)
+
+        # Treat vcoils as conductors when looking at induced currents
+        for coil_name, coil_obj in self.coil_sets.items():
+            if coil_name in self._vcoils.keys():
+                for sub_coil in coil_obj["sub_coils"]:
+                    mask_tmp = self.reg == sub_coil['reg_id']
+                    field_tmp = -dpsi_dt/self._vcoils[coil_name]
+                    mesh_currents[mask_tmp] = numpy.mean(field_tmp[self.lc[mask_tmp]],axis=1)
+                    mask = numpy.logical_or(mask,mask_tmp)
+
         return mask, mesh_currents
     
     def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
@@ -1683,6 +1768,9 @@ class TokaMaker():
             mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
         elif dpsi_dt is not None:
             mask, plot_field = self.get_conductor_source(dpsi_dt)
+        if mask.sum() == 0:
+            print("Warning: No conducting regions to plot")
+            return None
         if plot_field.shape[0] == self.nc:
             if symmap:
                 max_curr = abs(plot_field).max()
@@ -1850,7 +1938,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
     
-    def step_td(self,time,dt):
+    def step_td(self,time,dt,coil_currents=None,coil_voltages=None):
         '''! Compute eigenvalues for the time-dependent system
 
         @param time Growth rate enhancement point (should be approximately expected value)
@@ -1863,7 +1951,15 @@ class TokaMaker():
         lin_its = c_int()
         nretry = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_step_td(self._tMaker_ptr,ctypes.byref(time),ctypes.byref(dt),ctypes.byref(nl_its),ctypes.byref(lin_its),ctypes.byref(nretry),error_string)
+        if coil_currents is None:
+            coil_currents, _ = self.get_coil_currents()
+        coil_currents = numpy.ascontiguousarray(self.coil_dict2vec(coil_currents), dtype=numpy.float64)
+        if coil_voltages is None:
+            coil_voltages = numpy.zeros((self.ncoils,), dtype=numpy.float64)
+        else:
+            coil_voltages = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages), dtype=numpy.float64)
+        tokamaker_step_td(self._tMaker_ptr,coil_currents,coil_voltages,ctypes.byref(time),ctypes.byref(dt),
+                          ctypes.byref(nl_its),ctypes.byref(lin_its),ctypes.byref(nretry),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
