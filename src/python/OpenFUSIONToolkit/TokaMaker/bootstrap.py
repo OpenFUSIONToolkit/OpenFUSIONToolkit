@@ -1075,7 +1075,7 @@ def solve_with_bootstrap(mygs,
                 'j_BS' : j_bs_curr,
                 'j_inductive' : matched_j_inductive,
                 'isolated_j_BS' : spike_prof,
-                'j0_scale' : final_scale_j0,
-                'Ip_scale' : final_scale_Ip}
+                'scale_j0' : final_scale_j0,
+                'scale_Ip' : final_scale_Ip}
     
     return results
