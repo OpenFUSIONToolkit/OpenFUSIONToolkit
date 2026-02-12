@@ -325,7 +325,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         plt.plot(psi_N,spike_only/1e6,label='Fitted parameterization')
         plt.plot(psi_N,masked_spike/1e6,label='Isolated')
         plt.xlabel(r'$\hat \psi$')
-        plt.ylabel(r'$j_\phi$ [MA]')
+        plt.ylabel(r'$j_\phi$ [MA/m$^2$]')
         plt.xlim(0.5,1.02)
         plt.legend(loc='best')
         plt.show()
@@ -411,8 +411,8 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             plt.plot(psi_N, tmp_jphi/1e6, label=r'Output $j_\phi$')
             plt.title(f'Iteration {n}')#', Ip error: {Ip_err:.3f} %')
             plt.legend()
-            plt.xlabel(r'$\hat \psi')
-            plt.ylabel(r'$j_\phi$ [MA]')
+            plt.xlabel(r'$\hat \psi$')
+            plt.ylabel(r'$j_\phi$ [MA/m$^2$]')
             plt.grid(ls=':')
             plt.show()
             
@@ -968,7 +968,7 @@ def solve_with_bootstrap(mygs,
         try:
             sol = root_scalar(current_scaling_objective,
                                 args=(current_jphi_target, spike_prof, psi_N, Ip_target),
-                                bracket=[1e-4 * Ip_target, 10 * Ip_target],
+                                bracket=[1.0, 10. * Ip_target],
                                 method='brentq', rtol=1e-6)
             alpha_opt = sol.root
         except ValueError:
@@ -1064,12 +1064,12 @@ def solve_with_bootstrap(mygs,
                 plt.plot(psi_N, tmp_jphi/1e6, label=r'Output $j_\phi$')
                 plt.title(f'Iteration {n}')#', Ip error: {Ip_err:.3f} %')
                 plt.legend()
-                plt.xlabel(r'$\hat \psi')
-                plt.xlabel(r'$j_\phi$ [MA]')
+                plt.xlabel(r'$\hat \psi$')
+                plt.ylabel(r'$j_\phi$ [MA/m$^2$]')
                 plt.grid(ls=':')
                 plt.show()
     else:
-        print("Error: inductive_jphi must be specified.")
+        raise ValueError("inductive_jphi must be specified.")
 
     results = {'total_j_phi' : tmp_jphi,
                 'j_BS' : j_bs_curr,
