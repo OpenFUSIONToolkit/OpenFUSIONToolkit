@@ -46,7 +46,8 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
 
         # Smoothing factor for the blend
         k_smooth = (amp / width) * (blend_width / 4.0) 
-        if k_smooth < 1e-5: k_smooth = 1e-5
+        if k_smooth < 1e-5: 
+            k_smooth = 1e-5
 
         # Case A: Standard Spike (Amp > Offset)
         if amp > offset:
@@ -54,7 +55,8 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
             diff = amp - offset
             if diff > 1e-10:
                 argument = 1.0 - numpy.exp((offset - amp) / k_smooth)
-                if argument <= 0: argument = 1e-16
+                if argument <= 0: 
+                    argument = 1e-16
                 internal_amp = amp + k_smooth * numpy.log(argument)
             else:
                 internal_amp = amp 
@@ -71,9 +73,9 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
         # --- 3. Construct Right Side (Powered Cosine) ---
         # Model: y = stitch_height * cos(omega * (x - x_peak)) ^ tail_alpha
 
-        u = (psi - x_peak) / (1.0 - x_peak)
         dist_to_edge = 1.0 - x_peak
-        if dist_to_edge < 1e-5: dist_to_edge = 1e-5
+        if dist_to_edge < 1e-5: 
+            dist_to_edge = 1e-5
 
         # Determine omega to hit y_sep exactly
         # y_sep = H * cos(w * L)^alpha  =>  (y_sep/H)^(1/alpha) = cos(w * L)
@@ -506,8 +508,10 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         
         # Safety clamp: If the projection is wild (negative or huge), constrain it
         # This acts as a loose bracket to prevent the solver from crashing
-        if p_new < 0.1: p_new = 0.1
-        if p_new > 5.0: p_new = 5.0
+        if p_new < 0.1: 
+            p_new = 0.1
+        if p_new > 5.0: 
+            p_new = 5.0
         
         # Execute Solver at new point
         if find_j0:
@@ -872,7 +876,6 @@ def solve_with_bootstrap(mygs,
         eps = r_avgs[2] / r_avgs[0]
         _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
         R_avg = ravgs_q[0]
-        one_over_R_avg = ravgs_q[1]
 
         # Gradients (using raw psi for derivatives)
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
@@ -986,7 +989,7 @@ def solve_with_bootstrap(mygs,
 
     if inductive_jphi is not None:
         
-        print(f'\n >>> Matching input core j_phi with G-S solution')
+        print('\n >>> Matching input core j_phi with G-S solution')
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
@@ -1012,7 +1015,7 @@ def solve_with_bootstrap(mygs,
         # Enforce P' edge condition
         pp_prof['y'][-1] = 0.
         
-        print(f'\n >>> Finding optimal j_phi scale factor')
+        print('\n >>> Finding optimal j_phi scale factor')
         # Find optimal jphi scale
         final_scale_j0, final_jphi = find_optimal_scale(mygs,
             psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive, 
@@ -1020,7 +1023,7 @@ def solve_with_bootstrap(mygs,
             diagnostic_plots=diagnostic_plots
         )
         #  final_scale_j0 = 1.0
-        print(f'\n >>> Finding optimal Ip scale factor')
+        print('\n >>> Finding optimal Ip scale factor')
         # Find optimal Ip_target scale
         final_scale_Ip, _ = find_optimal_scale(mygs,
             psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive, 
@@ -1029,7 +1032,7 @@ def solve_with_bootstrap(mygs,
             tolerance=0.001, diagnostic_plots=diagnostic_plots
         )
         
-        print(f'\n >>> Iterating on H-mode equilibrium solution')
+        print('\n >>> Iterating on H-mode equilibrium solution')
 
         for n in range(iterations):            
             # Calculate new profiles
@@ -1071,6 +1074,8 @@ def solve_with_bootstrap(mygs,
     results = {'total_j_phi' : tmp_jphi,
                 'j_BS' : j_bs_curr,
                 'j_inductive' : matched_j_inductive,
-                'isolated_j_BS' : spike_prof}
+                'isolated_j_BS' : spike_prof,
+                'j0_scale' : final_scale_j0,
+                'Ip_scale' : final_scale_Ip}
     
     return results
