@@ -97,7 +97,7 @@ SELECT CASE(TRIM(profType))
     ALLOCATE(cofs(ncofs),yvals(ncofs))
     READ(io_unit,*)cofs
     READ(io_unit,*)yvals
-    CALL create_jphi_ff(F,ncofs,cofs,yvals)
+    CALL create_jphi_ff(F,ncofs,cofs,yvals,alpha)
     DEALLOCATE(cofs,yvals)
   CASE("idcd")
     READ(io_unit,*)ncofs
