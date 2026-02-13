@@ -5058,8 +5058,8 @@ class(oft_vector), pointer :: v,br,bt,bz,press
 real(r8), pointer :: vals_tmp(:)
 class(oft_solver), pointer :: solver
 type(gs_prof_interp) :: field
-integer(4) :: i,io_unit
-real(8), allocatable :: Fout(:,:)
+integer(4) :: i,io_unit, jr, coil_ind
+real(8), allocatable :: Fout(:,:), eta_reg(:)
 logical :: pm_save,write_legacy
 !---
 NULLIFY(vals_tmp)
@@ -5085,6 +5085,14 @@ field%mode=3
 CALL oft_blag_project(self%fe_rep,field,v)
 CALL press%set(0.d0)
 CALL solver%apply(press,v)
+!-- Region resistivities
+ALLOCATE(eta_reg(self%fe_rep%mesh%nreg))
+eta_reg = -1.d0
+DO i=1, self%ncond_regs
+  jr = self%cond_regions(i)%id
+  eta_reg(jr) = self%cond_regions(i)%eta
+END DO
+coil_ind = self%coil_regions(1)%id
 !---Output
 IF(PRESENT(filename))THEN
   IF(write_legacy)THEN
@@ -5111,6 +5119,10 @@ IF(PRESENT(filename))THEN
     CALL hdf5_create_group(filename,'mesh')
     CALL hdf5_write(self%fe_rep%mesh%r,filename,'mesh/R')
     CALL hdf5_write(self%fe_rep%mesh%lc,filename,'mesh/LC')
+    CALL hdf5_write(self%fe_rep%mesh%reg,filename,'mesh/REG')
+    CALL hdf5_create_group(filename,'region_info')
+    CALL hdf5_write(eta_reg, filename, 'region_info/ETA')
+    CALL hdf5_write(coil_ind, filename, 'region_info/COIL_IND')
     CALL hdf5_create_group(filename,'tokamaker')
     CALL hdf5_write(self%fe_rep%order,filename,'tokamaker/FE_ORDER')
     CALL br%get_local(vals_tmp)
