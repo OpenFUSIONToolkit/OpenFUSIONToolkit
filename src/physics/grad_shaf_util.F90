@@ -769,22 +769,20 @@ class(gs_eq), intent(inout) :: self !< G-S object
 real(8), intent(out) :: vloop !< loop voltage
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
-real(8) :: itor_loc !< local toroidal current in integration
-real(8) :: itor !< toroidal current
-real(8) :: j_NI_loc !< local non-inductive current in integration
-real(8) :: I_NI !< non-inductive F*F'
-real(8) :: eta_jsq !< eta*j_NI**2 
-real(8) :: goptmp(3,3) !< needs docs
-real(8) :: v !< volume
-real(8) :: pt(3) !< radial coordinate
-real(8) :: curr_cent(2) !< needs docs
-real(8) :: psitmp(1) !< magnetic flux coordinate
-real(8) :: gpsitmp(3) !< needs docs
+real(8) :: itor_loc ! local toroidal current in integration
+real(8) :: itor ! toroidal current
+real(8) :: I_NI ! non-inductive F*F'
+real(8) :: eta_jsq ! eta*j_NI**2 
+real(8) :: goptmp(3,3)
+real(8) :: v ! volume
+real(8) :: pt(3) ! radial coordinate
+real(8) :: psitmp(1) ! magnetic flux coordinate
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
 !---
 smesh=>self%mesh
 CALL self%eta%update(self) ! Make sure eta is up to date with current equilibrium
+CALL self%I_NI%update(self) ! Make sure I_NI is up to date with current equilibrium
 psi_eval%u=>self%psi
 CALL psi_eval%setup(self%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
@@ -806,17 +804,13 @@ do i=1,smesh%nc
     IF(gs_test_bounds(self,pt))THEN
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
-        j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + ((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
+          + self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset - I_NI)/(pt(1)+gs_epsilon))
       ELSE
-        j_NI_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
       END IF
-      eta_jsq = eta_jsq + self%eta%fp(psitmp(1))*(j_NI_loc**2)*v*self%fe_rep%quad%wts(m)*pt(1)
+      eta_jsq = eta_jsq + (itor_loc**2)*v*self%fe_rep%quad%wts(m)*pt(1)*self%eta%fp(psitmp(1))
       itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
     END IF
   end do
