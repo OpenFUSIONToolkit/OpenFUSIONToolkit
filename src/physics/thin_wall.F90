@@ -2318,7 +2318,7 @@ LOGICAL :: success
 INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims
 INTEGER(4), ALLOCATABLE :: dim_sizes(:)
 REAL(8) :: pts_tmp(2),res_per_len,radius,dl,theta
-CHARACTER(LEN=10) :: coil_ind
+CHARACTER(LEN=16) :: coil_ind
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
 TYPE(tw_coil_set), POINTER :: coil_tmp
 !---Count coil sets
