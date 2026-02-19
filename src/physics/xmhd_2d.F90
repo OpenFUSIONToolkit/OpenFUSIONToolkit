@@ -465,6 +465,10 @@ current_sim=>self
 !---------------------------------------------------------------------------
 ! Create solver fields
 !---------------------------------------------------------------------------
+IF(self%cyl_flag)CALL oft_abort( &
+        "Cylindrical mode not currently supported for linear solve","run_lin_simulation",__FILE__)
+
+
 call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)

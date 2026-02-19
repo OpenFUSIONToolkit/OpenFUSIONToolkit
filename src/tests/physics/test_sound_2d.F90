@@ -109,6 +109,7 @@ CALL u%get_local(vec_vals)
 vec_vals = vec_vals / den_scale
 CALL ML_oft_blagrange%vec_create(n_bg)
 CALL n_bg%restore_local(vec_vals)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,1)
 
 field_init%func=>dens_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
@@ -125,6 +126,14 @@ CALL n_ic%restore_local(vec_vals)
 
 
 !---Project v_x initial condition onto scalar Lagrange basis
+field_init%func=>const_init
+CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL u%scale(0.d0)
+CALL u%get_local(vec_vals)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,2)
+
 field_init%func=>velx_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -135,6 +144,14 @@ CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
 CALL mhd_sim%u%restore_local(vec_vals,2)
 
 !---Project v_y initial condition onto scalar Lagrange basis
+field_init%func=>const_init
+CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL u%scale(0.d0)
+CALL u%get_local(vec_vals)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,3)
+
 field_init%func=>vely_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -147,12 +164,12 @@ CALL mhd_sim%u%restore_local(vec_vals,3)
 !---Project v_z initial condition onto scalar Lagrange basis
 ! First save background constant velocity field (0 in this case)
 field_init%func=>const_init
-field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(0.d0)
 CALL u%get_local(vec_vals)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,4)
 CALL ML_oft_blagrange%vec_create(v_bg)
 CALL v_bg%restore_local(vec_vals)
 
@@ -178,6 +195,7 @@ CALL u%scale(t0)
 CALL u%get_local(vec_vals)
 CALL ML_oft_blagrange%vec_create(T_bg)
 CALL T_bg%restore_local(vec_vals)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,5)
 
 field_init%func=> temp_sound
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
@@ -195,12 +213,28 @@ field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
+CALL u%scale(0.d0)
+CALL u%get_local(vec_vals)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,6)
+
+field_init%func=>const_init
+CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
 CALL u%scale(psi0)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'psi0')
 CALL mhd_sim%u%restore_local(vec_vals,6)
 
 !---Project by initial condition onto scalar Lagrange basis
+field_init%func=>const_init
+CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL u%scale(0.d0)
+CALL u%get_local(vec_vals)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,7)
+
 field_init%func=>const_init
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -237,7 +271,12 @@ mhd_sim%lin_tol = lin_tol
 mhd_sim%nl_tol = nl_tol
 mhd_sim%cyl_flag = cyl
 oft_env%pm=pm
-CALL mhd_sim%run_simulation()
+
+IF (linear) THEN
+  CALL mhd_sim%run_lin_simulation()
+ELSE 
+  CALL mhd_sim%run_simulation()
+END IF
 
 CALL ML_oft_blagrange%vec_create(tmp)
 
