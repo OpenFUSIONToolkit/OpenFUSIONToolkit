@@ -44,15 +44,24 @@ find_path(PETSC_INCLUDE_DIR
   NAMES petsc.h
 )
 if( PETSC_INCLUDE_DIR )
+  # Determine PETSc version
   file(READ "${PETSC_INCLUDE_DIR}/petscversion.h" ver_file)
   string(REGEX MATCH "PETSC_VERSION_MAJOR[ ]*([0-9]+)" _ ${ver_file})
   set(PETSC_VER_MAJOR ${CMAKE_MATCH_1})
   string(REGEX MATCH "PETSC_VERSION_MINOR[ ]*([0-9]+)" _ ${ver_file})
   set(PETSC_VER_MINOR ${CMAKE_MATCH_1})
+  # Determine if PETSc was built with MPI Fortran 2008 support
+  file(READ "${PETSC_INCLUDE_DIR}/petscconf.h" conf_file)
+  string(FIND ${conf_file} "PETSC_USE_MPI_F08" mpi_f08_avail )
+  if( mpi_f08_avail EQUAL -1 )
+    set(OFT_PETSc_MPI_F08 FALSE)
+  else()
+    set(OFT_PETSc_MPI_F08 TRUE)
+  endif()
 endif()
 set(PETSC_LIBRARIES ${PETSC_LIBRARY})
 
-# SuperLU
+# Find SuperLU
 find_library(SUPERLU_LIBRARY
   NAMES superlu superlu_4.3
 )
@@ -69,7 +78,7 @@ if( SUPERLU_LIBRARY AND SUPERLU_INCLUDE_DIR )
   list(APPEND PETSC_LIBRARIES ${OFT_SUPERLU_LIBRARIES})
 endif()
 
-# SuperLU-DIST
+# Find SuperLU-DIST
 find_library(SUPERLU_DIST_LIBRARY
   NAMES superlu_dist superlu_dist_4.1 superlu_dist_3.3
 )

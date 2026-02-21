@@ -391,8 +391,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         if "MPI_FC" in mydict:
             cmake_lines.append("-DMPI_Fortran_COMPILER:PATH={0}".format(mydict["MPI_FC"]))
     if have_mpi:
-        if mydict.get("MPI_USE_HEADERS",False):
-            cmake_lines.append("-DOFT_MPI_HEADER:BOOL=TRUE")
+        cmake_lines.append("-DOFT_MPI_HEADER:BOOL={0}".format(bool_to_string(mydict.get("MPI_USE_HEADERS",False))))
     else:
         cmake_lines.append("-DOFT_USE_MPI:BOOL=FALSE")
     if "PETSC_ROOT" in mydict:
@@ -1853,7 +1852,7 @@ class ONURBS(package):
 
 class PETSC(package):
     def __init__(self, debug=False, with_openmp=False, with_superlu=False, with_superlu_dist=False, with_umfpack=False,
-                 with_mumps=False, version="3.23", comp_wrapper=False, shared_libs=None):
+                 with_mumps=False, version="3.23", comp_wrapper=False, shared_libs=None, mpi_f08=True):
         self.name = "PETSC"
         self.display_name = "PETSc"
         self.version = version
@@ -1877,6 +1876,7 @@ class PETSC(package):
         self.with_mumps = with_mumps
         self.comp_wrapper = comp_wrapper
         self.shared_libs = shared_libs
+        self.mpi_f08 = mpi_f08
 
     def detect_version(self):
         print("  Testing PETSc version")
@@ -1952,20 +1952,16 @@ class PETSC(package):
             error_exit('CMAKE >= 4.0 not presently supported with PETSc', ('Update or retry with "--build_cmake=1" to build a compatible version',))
         #
         def_lines = []
-        options = []
-        if 'MPI_CC' in self.config_dict:
-            options += ['--CC={MPI_CC}', '--FC={MPI_FC}']
-        else:
-            options += ['--with-mpi-dir={MPI_ROOT}']
-        if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
-            options.append('--FFLAGS="-fallow-argument-mismatch -ffree-line-length-none"')
-        options += [
+        options = [
             '--download-metis',
             '--download-parmetis',
             '--with-x=no',
             '--with-ssl=0',
-            '--with-cmake-exec={CMAKE}'
+            '--with-cmake-exec={CMAKE}',
+            '--with-cuda=0'
         ]
+        if self.mpi_f08:
+            options += ['--with-mpi-ftn-module=mpi_f08']
         if self.shared_libs:
             options += ['--with-shared-libraries=1']
         else:
@@ -1996,18 +1992,28 @@ class PETSC(package):
         else:
             options += ['--with-blas-lib={BLAS_LIB_PATH}', '--with-lapack-lib={LAPACK_LIB_PATH}']
         #
+        if 'MPI_CC' in self.config_dict:
+            options += ['--CC={MPI_CC}', '--FC={MPI_FC}']
+        else:
+            options += ['--with-mpi-dir={MPI_ROOT}']
+        if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
+            options.append('--FFLAGS="-fallow-argument-mismatch -ffree-line-length-none"')
         if self.debug:
             options += ['--with-debugging=yes']
         else:
             options += ['--with-debugging=no']
             if config_dict['CC_VENDOR'] == 'gnu':
                 options += ['--COPTFLAGS=-O2', '--FOPTFLAGS=-O2']
-            # elif config_dict['CC_VENDOR'] == 'intel':
-            #     options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
+            elif config_dict['CC_VENDOR'] == 'intel':
+                options += ['--COPTFLAGS=""', '--FOPTFLAGS=""']
         if need_cxx:
             if 'MPI_CXX' not in self.config_dict:
                 error_exit('PETSc build as configured requires an MPI C++ compiler')
             options += ['--with-cxx={MPI_CXX}']
+            if config_dict['CC_VENDOR'] == 'gnu':
+                options += ['--CXXOPTFLAGS=-O2']
+            elif config_dict['CC_VENDOR'] == 'intel':
+                options += ['--CXXOPTFLAGS=""']
         else:
             options += ['--with-cxx=0']
         build_lines = def_lines + [
@@ -2181,11 +2187,10 @@ else:
             packages.append(OpenBLAS(options.oblas_threads,options.oblas_dynamic_arch,options.oblas_no_avx))
 # MPI
 if use_mpi:
-    mpi_force_headers = options.mpi_use_headers or ((options.build_petsc == 1) or options.petsc_wrapper)
     if options.build_openmpi:
-        packages.append(OpenMPI(mpi_force_headers))
+        packages.append(OpenMPI(options.mpi_use_headers))
     elif options.build_mpich:
-        packages.append(MPICH(mpi_force_headers,options.mpich_version))
+        packages.append(MPICH(options.mpi_use_headers,options.mpich_version))
     elif (options.mpi_cc is not None) and (options.mpi_fc is not None):
         pass
     else:
@@ -2219,7 +2224,8 @@ if (options.build_netcdf == 1) or options.netcdf_wrapper:
 if (options.build_petsc == 1) or options.petsc_wrapper:
     packages.append(PETSC(debug=options.petsc_debug, with_openmp=options.petsc_openmp, with_superlu=options.petsc_superlu,
                           with_superlu_dist=options.petsc_superlu_dist, with_umfpack=options.petsc_umfpack,
-                          with_mumps=options.petsc_mumps, version=options.petsc_version, comp_wrapper=options.petsc_wrapper))
+                          with_mumps=options.petsc_mumps, version=options.petsc_version, comp_wrapper=options.petsc_wrapper,
+                          mpi_f08=(not options.mpi_use_headers)))
 else:
     packages.append(METIS(options.metis_wrapper))
     if (options.build_superlu == 1) or options.superlu_wrapper:

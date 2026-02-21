@@ -34,25 +34,35 @@ USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, &
   oft_petsc_matrix, oft_petsc_matrix_cast
 USE petscmat
 USE petscksp
-#if !defined(OFT_LU)
-#define OFT_LU 2
-#endif
-#if OFT_LU == 1
-#define OFT_PETSC_LU MATSOLVERSUPERLU
-#elif OFT_LU == 2
-#define OFT_PETSC_LU MATSOLVERSUPERLU_DIST
-#elif OFT_LU == 3
-#define OFT_PETSC_LU MATSOLVERMUMPS
-#endif
 IMPLICIT NONE
 #include "local.h"
 #include "oft_petsc.h"
+#if !defined(DEF_LU_PACK) && defined(HAVE_MUMPS)
+#define DEF_LU_PACK "mumps"
+#define PETSC_DEF_LU MATSOLVERMUMPS
+#endif
+#if !defined(DEF_LU_PACK) && defined(HAVE_SUPERLU)
+#define DEF_LU_PACK "super"
+#define PETSC_DEF_LU MATSOLVERSUPERLU
+#endif
+#if !defined(DEF_LU_PACK) && defined(HAVE_SUPERLU_DIST)
+#define DEF_LU_PACK "superd"
+#define PETSC_DEF_LU MATSOLVERSUPERLU_DIST
+#endif
+#if !defined(DEF_LU_PACK) && defined(HAVE_UMFPACK)
+#define DEF_LU_PACK "umfpack"
+#define PETSC_DEF_LU MATSOLVERUMFPACK
+#endif
+#if !defined(DEF_LU_PACK)
+#define DEF_LU_PACK "petsc"
+#define PETSC_DEF_LU MATSOLVERPETSC
+#endif
 !------------------------------------------------------------------------------
 !> PETSc factorization package information
 !------------------------------------------------------------------------------
 type :: oft_petsc_factordef
   CHARACTER(LEN=6) :: type = 'lu' !< Factor type
-  CHARACTER(LEN=6) :: package = 'superd' !< Factor package
+  CHARACTER(LEN=7) :: package = DEF_LU_PACK !< Factor package
 end type oft_petsc_factordef
 !------------------------------------------------------------------------------
 !> PETSc abstract preconditioner class
@@ -1233,7 +1243,7 @@ DEBUG_STACK_PUSH
 !---Basic preconditioner setup
 CALL PCSetType(pc,PCLU,ierr)
 !---Set solver package
-CALL set_solver_package(pc,OFT_PETSC_LU,ierr)
+CALL set_solver_package(pc,PETSC_DEF_LU,ierr)
 DEBUG_STACK_POP
 end subroutine luprecond_setup
 !---------------------------------------------------------------------------------
@@ -1293,7 +1303,7 @@ DO i=1,self%nlevels
     CALL KSPSetType(ksp,KSPGMRES,ierr)
     CALL KSPGetPC(ksp,pc_local,ierr)
     CALL PCSetType(pc_local,PCLU,ierr)
-    CALL set_solver_package(pc_local,OFT_PETSC_LU,ierr)
+    CALL set_solver_package(pc_local,PETSC_DEF_LU,ierr)
   ELSE
     SELECT CASE(TRIM(self%smooth_type))
       CASE("jacobi")
@@ -1327,7 +1337,7 @@ DO i=1,self%nlevels
           CALL KSPSetType(ksps(j),KSPPREONLY,ierr)
           CALL KSPGetPC(ksps(j),sub_pc,ierr)
           CALL PCSetType(sub_pc,PCLU,ierr)
-          CALL set_solver_package(sub_pc,OFT_PETSC_LU,ierr)
+          CALL set_solver_package(sub_pc,PETSC_DEF_LU,ierr)
         END DO
         ! CALL PCMGSetCyclesOnLevel(pc,i-1,1,ierr)
         DEALLOCATE(ksps)
@@ -1507,6 +1517,8 @@ IF(factor_req)THEN
       CALL set_solver_package(pc,MATSOLVERSUPERLU_DIST,ierr)
     CASE('mumps')
       CALL set_solver_package(pc,MATSOLVERMUMPS,ierr)
+    CASE('umfpack')
+      CALL set_solver_package(pc,MATSOLVERUMFPACK,ierr)
     CASE DEFAULT
       CALL oft_abort("Unknown solver package.","create_lu_pc",__FILE__)
   END SELECT

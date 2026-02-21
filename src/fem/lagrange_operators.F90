@@ -1273,7 +1273,7 @@ END IF
 !
 !------------------------------------------------------------------------------
 !---Operator integration loop
-!$omp parallel private(j,rop,det,mtmp,nn,mloc,curved,goptmp,m,u,vol,jc,jr,lcache)
+!$omp parallel private(j,rop,det,mtmp,nn,mloc,curved,goptmp,m,u,vol,jc,jr,jp,jn,lcache)
 allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce)) ! Reconstructed gradient operator
 allocate(lcache(lag_rep%nce,lag_rep%nce))
