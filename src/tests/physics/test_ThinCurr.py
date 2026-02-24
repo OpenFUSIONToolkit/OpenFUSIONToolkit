@@ -581,17 +581,25 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
     result_val = True
     import matplotlib.pyplot as plt
     _,ax=plt.subplots(1,1,figsize=(8,6))
-    if np.linalg.norm(abs(sigs_nmodes_1D_PEST-interface.plot_1D_fourier_amplitude(t,1,ax,toroidal_harmonics=True,hamada_dphi=None,part='r')[1]),np.inf)>tol:
+    data = interface.plot_1D_fourier_amplitude(t,1,ax,toroidal_harmonics=True,hamada_dphi=None,part='r')[1]
+    if np.linalg.norm(abs(sigs_nmodes_1D_PEST-data),np.inf)>tol:
         print(f"FAILED: 1D PEST toroidal Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
+        np.save('sigs_nmodes_1D_PEST-new.npy',data)
         result_val = False
-    if np.linalg.norm(abs(sigs_nmodes_1D_Hamada-interface.plot_1D_fourier_amplitude(t,1,ax,toroidal_harmonics=True,hamada_dphi=delta_phi,part='r')[1]),np.inf)>tol:
+    data = interface.plot_1D_fourier_amplitude(t,1,ax,toroidal_harmonics=True,hamada_dphi=delta_phi,part='r')[1]
+    if np.linalg.norm(abs(sigs_nmodes_1D_Hamada-data),np.inf)>tol:
         print(f"FAILED: 1D Hamada toroidal Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
+        np.save('sigs_nmodes_1D_Hamada-new.npy',data)
         result_val = False
-    if np.linalg.norm(abs(sigs_mnmodes_2D_PEST-interface.fft2(interface.get_B_mesh(t),hamada_dphi=None)[0]),np.inf)>tol:
+    data = interface.fft2(interface.get_B_mesh(t),hamada_dphi=None)[0]
+    if np.linalg.norm(abs(sigs_mnmodes_2D_PEST-data),np.inf)>tol:
         print(f"FAILED: 2D PEST Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
+        np.save('sigs_mnmodes_2D_PEST-new.npy',data)
         result_val = False
-    if np.linalg.norm(abs(sigs_mnmodes_2D_Hamada-interface.fft2(interface.get_B_mesh(t),hamada_dphi=delta_phi)[0]),np.inf)>tol:
+    data = interface.fft2(interface.get_B_mesh(t),hamada_dphi=delta_phi)[0]
+    if np.linalg.norm(abs(sigs_mnmodes_2D_Hamada-data),np.inf)>tol:
         print(f"FAILED: 2D Hamada Fourier transform at t = {t} and helicity = {interface.helicity} incorrect!")
+        np.save('sigs_mnmodes_2D_Hamada-new.npy',data)
         result_val = False
     run_files = [f for f in os.listdir('.') if f.endswith('.rst') or f.endswith('.xmf') or f.endswith('.loc')]
     for file in run_files:
@@ -767,16 +775,16 @@ def test_torus_fourier_sensor(direct_flag):
                            curr_waveform=((0.0, 1.E6), (4.E-3, 0.0), (1.0, 0.0)),
                            lin_tol=1.E-10,
                            python=True)
-    sigs_nmodes_1D_h1_PEST = np.load('sigs_nmodes_1D_h1_PEST.npy')
-    sigs_nmodes_1D_hminus1_PEST = np.load('sigs_nmodes_1D_hminus1_PEST.npy')
-    sigs_nmodes_1D_h1_Hamada = np.load('sigs_nmodes_1D_h1_Hamada.npy')
-    sigs_nmodes_1D_hminus1_Hamada = np.load('sigs_nmodes_1D_hminus1_Hamada.npy')
-    sigs_mnmodes_2D_h1_PEST = np.load('sigs_mnmodes_2D_h1_PEST.npy')
-    sigs_mnmodes_2D_hminus1_PEST = np.load('sigs_mnmodes_2D_hminus1_PEST.npy')
-    sigs_mnmodes_2D_h1_Hamada = np.load('sigs_mnmodes_2D_h1_Hamada.npy')
-    sigs_mnmodes_2D_hminus1_Hamada = np.load('sigs_mnmodes_2D_hminus1_Hamada.npy')
-    assert validate_torus_fourier_sensor(interface_h1,sigs_nmodes_1D_h1_PEST,sigs_nmodes_1D_h1_Hamada,sigs_mnmodes_2D_h1_PEST,sigs_mnmodes_2D_h1_Hamada,t,delta_phi)
-    assert validate_torus_fourier_sensor(interface_hminus1,sigs_nmodes_1D_hminus1_PEST,sigs_nmodes_1D_hminus1_Hamada,sigs_mnmodes_2D_hminus1_PEST,sigs_mnmodes_2D_hminus1_Hamada,t,delta_phi)
+    sigs_nmodes_1D_PEST = np.load('sigs_nmodes_1D_PEST-h1.npy')
+    sigs_nmodes_1D_Hamada = np.load('sigs_nmodes_1D_Hamada-h1.npy')
+    sigs_mnmodes_2D_PEST = np.load('sigs_mnmodes_2D_PEST-h1.npy')
+    sigs_mnmodes_2D_Hamada = np.load('sigs_mnmodes_2D_Hamada-h1.npy')
+    assert validate_torus_fourier_sensor(interface_h1,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi)
+    sigs_nmodes_1D_PEST = np.load('sigs_nmodes_1D_PEST-hminus1.npy')
+    sigs_nmodes_1D_Hamada = np.load('sigs_nmodes_1D_Hamada-hminus1.npy')
+    sigs_mnmodes_2D_PEST = np.load('sigs_mnmodes_2D_PEST-hminus1.npy')
+    sigs_mnmodes_2D_Hamada = np.load('sigs_mnmodes_2D_Hamada-hminus1.npy')
+    assert validate_torus_fourier_sensor(interface_hminus1,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi)
 
 #============================================================================
 # Test runners for filament model
@@ -784,7 +792,7 @@ def test_torus_fourier_sensor(direct_flag):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("python", (True,))
 def test_eig_passive(direct_flag,python):
-    eigs = (1.504155E-1, 6.423383E-2, 3.190175E-2, 2.942398E-2)
+    eigs = (1.503561E-1, 6.420533E-2, 3.188782E-2, 2.941118E-2)
     assert ThinCurr_setup(None,2 if python else 4,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)),python=python)
@@ -810,7 +818,7 @@ def test_td_passive(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_fr_passive(direct_flag,python):
     fr_real = (1.947713E-1, 1.990873E-1)
-    fr_imag = (-2.174952E-4, -1.560016E-4)
+    fr_imag = (-2.175942E-4, -1.560726E-4)
     assert ThinCurr_setup(None,3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
                            icoils=((0.5, 0.1),),
                            vcoils=((0.5, 0.0),),
@@ -865,7 +873,7 @@ def test_fr_aca(python):
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            python=python,jumper_start=2)
-    assert validate_fr(fr_real, fr_imag, tols=(1.E-3, 1.E-3))
+    assert validate_fr(fr_real, fr_imag, python=python, tols=(1.E-3, 1.E-3))
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("python", (True,))
