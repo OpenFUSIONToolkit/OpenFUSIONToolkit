@@ -363,6 +363,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
         "-DOFT_DEBUG_STACK:BOOL={0}".format(bool_to_string(enable_debug_stack)),
         "-DOFT_PROFILING:BOOL={0}".format(bool_to_string(enable_profiling)),
+        "-DOFT_TOKAMAKER_LEGACY:BOOL=FALSE",
+        "-DOFT_THINCURR_LEGACY:BOOL=FALSE",
         "-DCMAKE_C_COMPILER:FILEPATH={CC}",
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
         "-DCMAKE_Fortran_COMPILER:FILEPATH={FC}"

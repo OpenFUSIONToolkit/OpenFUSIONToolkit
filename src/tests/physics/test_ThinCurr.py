@@ -604,7 +604,7 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
 #============================================================================
 # Test runners for plate
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_eig_plate(direct_flag,python):
     eigs = (9.735667E-3, 6.532314E-3, 6.532201E-3, 5.251598E-3)
     assert ThinCurr_setup("tw_test-plate.h5",2 if python else 4,direct_flag,python=python)
@@ -613,7 +613,7 @@ def test_eig_plate(direct_flag,python):
         assert validate_model_red(eigs)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_plate(direct_flag,python):
     sigs_final = (4.E-3, 8.459371E-4, 7.130923E-4)
     assert ThinCurr_setup("tw_test-plate.h5",1,direct_flag,
@@ -624,7 +624,7 @@ def test_td_plate(direct_flag,python):
     assert validate_td(sigs_final)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_fr_plate(direct_flag,python):
     fr_real = (6.807649E-2, 7.207748E-2)
     fr_imag = (-3.011666E-3, -2.177010E-3)
@@ -635,7 +635,7 @@ def test_fr_plate(direct_flag,python):
     assert validate_fr(fr_real, fr_imag, python=python)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_plate_volt(direct_flag,python):
     sigs_final = (4.E-3, 4.580643E-4, 3.854292E-4)
     assert ThinCurr_setup("tw_test-plate.h5",1,direct_flag,
@@ -648,7 +648,7 @@ def test_td_plate_volt(direct_flag,python):
 #============================================================================
 # Test runners for cylinder
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_eig_cyl(direct_flag,python):
     eigs = (2.657195E-2, 1.248071E-2, 1.247103E-2, 1.200566E-2)
     assert ThinCurr_setup("tw_test-cyl.h5",2 if python else 4,direct_flag,python=python,jumper_start=2)
@@ -657,7 +657,7 @@ def test_eig_cyl(direct_flag,python):
         assert validate_model_red(eigs)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_cyl(direct_flag,python):
     sigs_final = (4.E-3, 7.254196E-4, 6.151460E-4)
     jumpers_final = (4.E-3, 5.445469E3, 5445.469)
@@ -669,7 +669,7 @@ def test_td_cyl(direct_flag,python):
     assert validate_td(sigs_final,jumpers_final)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_fr_cyl(direct_flag,python):
     fr_real = (6.118337E-2, 4.356188E-3)
     fr_imag = (-1.911861E-3, -2.283493E-3)
@@ -680,7 +680,7 @@ def test_fr_cyl(direct_flag,python):
     assert validate_fr(fr_real, fr_imag, python=python)
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_cyl_volt(direct_flag,python):
     sigs_final = (4.E-3, 1.504279E-4, 1.276624E-4)
     jumpers_final = (4.E-3, 1.1203960E3, 1120.396)
@@ -695,7 +695,7 @@ def test_td_cyl_volt(direct_flag,python):
 # Test runners for torus
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_eig_torus(direct_flag,python):
     eigs = (4.751344E-2, 2.564491E-2, 2.555695E-2, 2.285850E-2)
     assert ThinCurr_setup("tw_test-torus.h5",2 if python else 4,direct_flag,python=python)
@@ -705,7 +705,7 @@ def test_eig_torus(direct_flag,python):
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_torus(direct_flag,python):
     sigs_final = (4.E-3, 4.935683E-4, 3.729159E-5)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,
@@ -718,7 +718,7 @@ def test_td_torus(direct_flag,python):
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_fr_torus(direct_flag,python):
     fr_real = (-2.807955E-3, -1.196091E-4)
     fr_imag = (-1.869732E-3, -1.248642E-4)
@@ -728,16 +728,16 @@ def test_fr_torus(direct_flag,python):
                            python=python)
     assert validate_fr(fr_real, fr_imag, python=python)
 
-@pytest.mark.coverage
-def test_mode_torus():
-    drive_exp = (73.91361257364348, 48.430633246949554)
-    result_exp = (58.713811707231145, 41.5238351334917)
-    assert ThinCurr_setup("tw_test-torus.h5",5,False,freq=1.E3)
-    assert validate_mode(drive_exp,result_exp)
+# @pytest.mark.coverage
+# def test_mode_torus():
+#     drive_exp = (73.91361257364348, 48.430633246949554)
+#     result_exp = (58.713811707231145, 41.5238351334917)
+#     assert ThinCurr_setup("tw_test-torus.h5",5,False,freq=1.E3)
+#     assert validate_mode(drive_exp,result_exp)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_torus_volt(direct_flag,python):
     sigs_final = (4.E-3, 5.653338E-5, 4.035387E-6)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,
@@ -782,7 +782,7 @@ def test_torus_fourier_sensor(direct_flag):
 # Test runners for filament model
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_eig_passive(direct_flag,python):
     eigs = (1.504155E-1, 6.423383E-2, 3.190175E-2, 2.942398E-2)
     assert ThinCurr_setup(None,2 if python else 4,direct_flag,eta=1.E4,
@@ -794,7 +794,7 @@ def test_eig_passive(direct_flag,python):
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_passive(direct_flag,python):
    sigs_final = (4.E-3, 8.349309E-4, 8.364054E-4)
    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
@@ -807,7 +807,7 @@ def test_td_passive(direct_flag,python):
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_fr_passive(direct_flag,python):
     fr_real = (1.947713E-1, 1.990873E-1)
     fr_imag = (-2.174952E-4, -1.560016E-4)
@@ -820,7 +820,7 @@ def test_fr_passive(direct_flag,python):
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_passive_volt(direct_flag,python):
    sigs_final = (4.E-3, 4.379235E-4, 4.389248E-4)
    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
@@ -833,7 +833,7 @@ def test_td_passive_volt(direct_flag,python):
 #============================================================================
 # Test runners for large cylinder (w/ ACA+)
 @pytest.mark.coverage
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_eig_aca(python):
     eigs = (2.659575E-2, 1.254552E-2, 1.254536E-2, 1.208636E-2)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",2 if python else 4,'F',use_aca=True,python=python,jumper_start=2)
@@ -842,7 +842,7 @@ def test_eig_aca(python):
         assert validate_model_red(eigs)
 
 @pytest.mark.coverage
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_aca(python):
     eigs = (2.659575E-2, 1.254552E-2, 1.254536E-2, 1.208636E-2)
     sigs_final = (4.E-3, 7.280671E-4, 6.211245E-4)
@@ -857,7 +857,7 @@ def test_td_aca(python):
     assert validate_td(sigs_final,jumpers_final)
 
 @pytest.mark.coverage
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_fr_aca(python):
     fr_real = (5.888736E-2, 4.881440E-3)
     fr_imag = (-2.017045E-3, -2.313881E-3)
@@ -868,7 +868,7 @@ def test_fr_aca(python):
     assert validate_fr(fr_real, fr_imag, tols=(1.E-3, 1.E-3))
 
 @pytest.mark.coverage
-@pytest.mark.parametrize("python", (False, True))
+@pytest.mark.parametrize("python", (True,))
 def test_td_volt_aca(python):
     sigs_final = (4.E-3, 1.512679E-4, 1.291681E-4)
     jumpers_final = (4.E-3, 1.122550E3, 1122.550)
