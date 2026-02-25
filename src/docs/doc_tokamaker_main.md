@@ -46,6 +46,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 
 ### Other workflows/examples
  - \subpage doc_tMaker_ITER_ex5
+ - \subpage doc_tMaker_HBT_ex3
 
 \section doc_gs_main_mesh Building meshes using gs_Domain
 TokaMaker includes built-in meshing functionality through the \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain "gs_Domain" class,
