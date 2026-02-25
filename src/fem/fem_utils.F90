@@ -97,6 +97,16 @@ contains
   procedure :: interp => diff_interp_apply
 end type diff_interp
 !------------------------------------------------------------------------------
+!> Interpolator for difference between two 2d fields
+!------------------------------------------------------------------------------
+type, extends(bfem_interp) :: diff_interp_2d
+  class(bfem_interp), pointer :: a => NULL() !< Field 1
+  class(bfem_interp), pointer :: b => NULL() !< Field 2
+contains
+  !> Reconstruct field
+  procedure :: interp => diff_interp_apply_2d
+end type diff_interp_2d
+!------------------------------------------------------------------------------
 !> Interpolator for dot-product of two fields
 !------------------------------------------------------------------------------
 type, extends(fem_interp) :: dot_interp
@@ -167,6 +177,26 @@ val=aval-bval
 DEALLOCATE(aval,bval)
 DEBUG_STACK_POP
 end subroutine diff_interp_apply
+!------------------------------------------------------------------------------
+!> Reconstruct the difference between two 2d fields
+!------------------------------------------------------------------------------
+subroutine diff_interp_apply_2d(self,cell,f,gop,val)
+  class(diff_interp_2d), intent(inout) :: self
+  integer(i4), intent(in) :: cell !< Cell for interpolation
+  real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
+  real(r8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,4]
+  real(r8), intent(out) :: val(:) !< Reconstructed field at f [1]
+  real(r8), allocatable, dimension(:) :: aval,bval
+  DEBUG_STACK_PUSH
+  IF(self%dim<=0)CALL oft_abort("Field dimension must be specified.", &
+    "diff_interp_apply",__FILE__)
+  ALLOCATE(aval(self%dim),bval(self%dim))
+  CALL self%a%interp(cell,f,gop,aval)
+  CALL self%b%interp(cell,f,gop,bval)
+  val=aval-bval
+  DEALLOCATE(aval,bval)
+  DEBUG_STACK_POP
+  end subroutine diff_interp_apply_2d
 !------------------------------------------------------------------------------
 !> Reconstruct the dot-product of two fields
 !------------------------------------------------------------------------------
