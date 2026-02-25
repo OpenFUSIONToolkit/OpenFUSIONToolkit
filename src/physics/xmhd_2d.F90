@@ -552,6 +552,7 @@ self%mfun%by_bc=>self%by_bc
 
 ! Construct the linear advance matrix with equilibrium fields
 CALL build_approx_jacobian(self,self%u0)
+CALL self%jacobian%save('lin_ops.h5', 'jacobian')
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
@@ -622,7 +623,7 @@ DO i=1, self%nsteps
     WRITE(rst_char,104)self%rst_base+i
     READ(rst_char,104,IOSTAT=io_stat)rst_tmp
     IF((io_stat/=0).OR.(rst_tmp/=self%rst_base+i))CALL oft_abort("Step count exceeds format width", "run_simulation", __FILE__)
-    CALL self%rst_save(u, self%t, self%dt, 'xhmd2d_'//rst_char//'.rst', 'U')
+    CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
@@ -679,20 +680,14 @@ END SUBROUTINE run_lin_simulation
 !---------------------------------------------------------------------------
 !> Compute the mass matrix for RHS
 !---------------------------------------------------------------------------
-subroutine mfun_apply(self,a,b)
+SUBROUTINE mfun_apply(self,a,b)
 class(xmhd_2d_mfun), intent(inout) :: self !< mass function object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 type(oft_quad_type), pointer :: quad
-LOGICAL :: curved, cyl_flag
-INTEGER(i4) :: i,m,jr, k,l
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+LOGICAL :: cyl_flag
+INTEGER(i4) :: i, k,l
 REAL(r8) :: diag_vals(7), B_0(3), gamma
-REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-         dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp1(3), coords(3)
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
-                     psi_weights_loc, by_weights_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads,res_loc
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
                               n_res, psi_res, by_res, vtmp, velx_res, vely_res, velz_res
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
@@ -728,10 +723,17 @@ CALL b%get_local(psi_res, 6)
 CALL b%get_local(by_res, 7)
 diag_vals=0.d0
 
-!$omp parallel private(m,jr,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
-!$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp,tmp1) reduction(+:diag_vals)
-
+!$omp parallel reduction(+:diag_vals)
+BLOCK
+INTEGER(i4) :: m, jr
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+LOGICAL :: curved
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
+                     psi_weights_loc, by_weights_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads,res_loc
+REAL(r8) :: jac_det,int_factor, btmp(3), tmp1(3), coords(3)
+REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
+         dvel(3,3),div_vel,jac_mat(3,4)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
         psi_weights_loc(oft_blagrange%nce), by_weights_loc(oft_blagrange%nce),&
@@ -808,7 +810,6 @@ DO i=1,mesh%nc
         + basis_vals(jr)*psi*int_factor 
       res_loc(jr, 7) = res_loc(jr, 7) &
       + basis_vals(jr)*by*int_factor 
-      ! END IF 
     END DO
   END DO
     !---Add local values to full vector
@@ -832,6 +833,7 @@ END DO
 !---Cleanup thread-local storage
 DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
           vel_weights_loc, psi_weights_loc, by_weights_loc,cell_dofs,res_loc)
+END BLOCK
 !$omp end parallel
 IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%n_bc)
@@ -865,17 +867,11 @@ class(xmhd_2d_nlfun), intent(inout) :: self !< NL function object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 type(oft_quad_type), pointer :: quad
-LOGICAL :: curved, cyl_flag, linear
-INTEGER(i4) :: i,m,jr, k,l
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+LOGICAL :: cyl_flag, linear
+INTEGER(i4) :: i, k,l
 REAL(r8) :: k_boltz = elec_charge
 REAL(r8) :: m_i=proton_mass
 REAL(r8) :: chi, eta, nu, D_diff, gamma, diag_vals(7), B_0(3)
-REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-         dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp1(3), coords(3)
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
-                     psi_weights_loc, by_weights_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads,res_loc
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
                               n_res, psi_res, by_res, vtmp, velx_res, vely_res, velz_res
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
@@ -915,10 +911,16 @@ CALL b%get_local(psi_res, 6)
 CALL b%get_local(by_res, 7)
 diag_vals=0.d0
 
-!$omp parallel private(m,jr,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
-!$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp, tmp1) reduction(+:diag_vals)
-
+!$omp parallel reduction(+:diag_vals)
+BLOCK
+INTEGER(i4) :: m, jr
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+LOGICAL :: curved
+REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
+         dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp1(3), coords(3)
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
+                     psi_weights_loc, by_weights_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads, res_loc
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
         psi_weights_loc(oft_blagrange%nce), by_weights_loc(oft_blagrange%nce),&
@@ -1112,6 +1114,7 @@ END DO
 !---Cleanup thread-local storage
 DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
           vel_weights_loc, psi_weights_loc, by_weights_loc,cell_dofs,res_loc)
+END BLOCK
 !$omp end parallel
 IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%n_bc)
@@ -1133,30 +1136,22 @@ self%diag_vals=oft_mpi_sum(diag_vals,7)
 !---Cleanup remaining storage
 DEALLOCATE(n_res,velx_res,vely_res, velz_res, T_res, psi_res, by_res, &
         n_weights,vel_weights, T_weights, psi_weights, by_weights)
-end subroutine nlfun_apply
+END SUBROUTINE nlfun_apply
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
 subroutine build_approx_jacobian(self,a)
 class(oft_xmhd_2d_sim), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Solution for computing jacobian
-LOGICAL :: curved, cyl_flag, linear
-INTEGER(i4) :: i,m,jr,jc, k,l
-INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
+LOGICAL :: cyl_flag, linear
+INTEGER(i4) :: i, k,l
 REAL(r8) :: k_boltz=elec_charge
 REAL(r8) :: m_i = proton_mass
 REAL(r8) :: chi, eta, nu, D_diff, gamma, B_0(3), diag_vals(7)
-REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp2(3), tmp3(3), coords(3)
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
-                                    psi_weights_loc, by_weights_loc, res_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights, psi_weights, by_weights, vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
-type(oft_1d_int), allocatable, dimension(:) :: iloc
-class(oft_vector), pointer :: tmp
-type(oft_local_mat), allocatable, dimension(:,:) :: jac_loc
 integer(KIND=omp_lock_kind), allocatable, dimension(:) :: tlocks
+class(oft_vector), pointer :: tmp
 type(oft_quad_type), pointer :: quad
 quad=>oft_blagrange%quad
 CALL self%jacobian%zero
@@ -1195,10 +1190,18 @@ ALLOCATE(tlocks(self%fe_rep%nfields))
 DO i=1,self%fe_rep%nfields
   call omp_init_lock(tlocks(i))
 END DO
-!$omp parallel private(m,jr,jc,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
-!$omp n_weights_loc,vel_weights_loc, psi_weights_loc, by_weights_loc, btmp, &
-!$omp n, T, vel, by, psi,jac_loc,jac_mat,jac_det,int_factor,dn, dT, dvel, div_vel, dpsi, dby,iloc, &
-!$omp tmp2, tmp3) 
+!$omp parallel
+BLOCK
+LOGICAL :: curved
+INTEGER(i4) :: m, jr, jc
+INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
+REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
+dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp2(3), tmp3(3), coords(3)
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
+                                    psi_weights_loc, by_weights_loc, res_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
+TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: iloc
+type(oft_local_mat), allocatable, dimension(:,:) :: jac_loc
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),&
         T_weights_loc(oft_blagrange%nce), psi_weights_loc(oft_blagrange%nce),&
@@ -1619,6 +1622,7 @@ END DO
 CALL self%fe_rep%mat_destroy_local(jac_loc)
 DEALLOCATE(basis_vals,basis_grads,T_weights_loc,vel_weights_loc, &
           n_weights_loc, psi_weights_loc, by_weights_loc, cell_dofs,jac_loc,iloc)
+END BLOCK
 !$omp end parallel
 !--Destroy thread locks
 DO i=1,self%fe_rep%nfields
@@ -1799,7 +1803,6 @@ DO j=1, SIZE(cell_dofs)
   self%by_bc(cell_dofs(j)) = .TRUE. ! prevent by evolution in superconductor
 END DO
 end subroutine apply_supercond_bcs
-
 
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
