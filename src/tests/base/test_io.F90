@@ -126,7 +126,7 @@ SELECT CASE(test_id)
     !
     CALL vec_tmp%delete()
     DEALLOCATE(vec_tmp)
-  CASE(5) !< Test overwritting fields
+  CASE(5) !< Test overwriting fields
     CALL oft_lag_setup(mg_mesh,2,ML_oft_lagrange,minlev=-1)
     CALL ML_oft_lagrange%vec_create(vec_tmp)
     !
