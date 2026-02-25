@@ -13,6 +13,7 @@ oft_in_template = """
  ppn=1
  debug=0
  test_run=T
+ use_petsc={8}
 /
 
 &mesh_options
@@ -25,14 +26,18 @@ oft_in_template = """
 /
 
 &cube_options
- mesh_type={6}
- ni=16,16,0
+ mesh_type={9}
+ ni=2,4,0
  rscale=2.,2.,0.
- shift=-1.0,-1.0,0.
+ shift=1.0,-1.0,0.
  ref_per=T,T,F
 /
 
 &xmhd_options
+  linear={3}
+  lin_tol ={6}
+  nl_tol = 1.E-8
+  cyl=F
   order={2}
   n0=1E19,
   psi0=0.d0,
@@ -48,10 +53,10 @@ oft_in_template = """
   nu=1.E-8
   gamma=1.67
   D_diff=1.E0
-  dt={3}
-  nsteps={4}
+  dt={4}
+  nsteps={5}
   rst_freq=5
-  use_mfnk={5}
+  use_mfnk={7}
   pm=F
   den_scale=1.d19
   
@@ -66,23 +71,28 @@ oft_in_template = """
 """
 
 # Common setup function and process handling
-def alfven_2d_setup(nbase,nlevels,order,
-                 mf=False,hex_mesh=False):
+def alfven_2d_setup(nbase,nlevels,order,linear=False, 
+                 mf=False,petsc=False, hex_mesh=False):
     mesh_type=1
     if hex_mesh:
         mesh_type=2
-    dt='2.0E-7'
-    its='500'
-    tol='1.E-8'
+    dt='2.500E-8'
+    its='4000'
+    tol='1.E-12'
     mf_flag='F'
+    petsc_flag=('T' if petsc else 'F')
+    lin_flag=('T' if linear else 'F')
+    if (not linear) and mf:
+        tol='1.E-9'
+        mf_flag='T'
     nproc = 1
     if nbase != nlevels:
         nproc = 2
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, order,
-                                       dt, its, mf_flag,
+        fid.write(oft_in_template.format(nbase, nlevels, order,lin_flag,
+                                       dt, its, tol, mf_flag,petsc_flag,
                                     mesh_type))
     return run_OFT("./test_alfven_2d", nproc, 4000)
 
@@ -103,12 +113,17 @@ def validate_result(verr_exp,berr_exp,steps_exp=11,linear=False):
             retval = False
     return retval
 
+# #============================================================================
+# # Non-Linear test runners for NP=2
+# def test_nl_p2(petsc_flag=False):
+#     berr_exp = 5.3027098135759567E-003
+#     verr_exp = 1.1873721610050637E-002
+#     assert alfven_2d_setup(1,1,2)
+#     assert validate_result(verr_exp, berr_exp)
 #============================================================================
-# Non-Linear test runners for NP=2
-def test_nl(petsc_flag=False):
-    berr_exp = 1.0124295922938713E-002
-    verr_exp = 1.0126253495120578E-002
-    assert alfven_2d_setup(1,1,2)
+# Non-Linear test runners for NP=3
+def test_nl_p3(petsc_flag=False):
+    berr_exp = 1.6560625574643158E-003
+    verr_exp = 2.2167700412833043E-003
+    assert alfven_2d_setup(1,1,3)
     assert validate_result(verr_exp, berr_exp)
-
-

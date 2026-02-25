@@ -55,12 +55,16 @@ Real(r8) :: v_dir(3) = (/1.d0,0.d0,0.d0/) !<Direction of velocity perturbation
 REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
 REAL(r8) :: lam = 2.d0 !< Wavelength
 REAL(r8) :: v_alf = 1.d4 !< Alfven speed
-REAL(r8) :: v_delta = 1.d0 !< Relative size of perturbation (<<1)
+REAL(r8) :: v_delta = 10.d0 !< Relative size of perturbation (<<1)
 REAL(r8) :: B !<Background magnetic field magnitude
 REAL(r8) :: B_delta !<Perturbed magnetic field magnitude
+REAL(r8) :: lin_tol = 1.d-8
+REAL(r8) :: nl_tol = 1.d-5
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
-NAMELIST/xmhd_options/order,nsteps, rst_freq, dt, n0, psi0, velx0,&
+LOGICAL :: linear=.FALSE.
+LOGICAL :: cyl=.FALSE.
+NAMELIST/xmhd_options/linear, lin_tol, nl_tol, cyl, order,nsteps, rst_freq, dt, n0, psi0, velx0,&
 vely0,velz0, t0, by0, bx0, bz0,chi,eta,nu, D_diff, gamma, den_scale, use_mfnk,pm
 !------------------------------------------------------------------------------
 ! Initialize enviroment
