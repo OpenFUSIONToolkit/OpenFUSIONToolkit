@@ -595,14 +595,16 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
     
-    def plot_td(self,nsteps,compute_B=False,rebuild_sensors=False,plot_freq=10,sensor_obj=None,sensor_values=None):
-        '''! Perform a time-domain simulation
+    def plot_td(self,nsteps,compute_B=False,rebuild_sensors=False,plot_freq=10,sensor_obj=None,sensor_values=None,compute_J_vol=False):
+        '''! Generate plot files for a time domain simulation that has already been run.
 
         @param nsteps Number of steps to take
         @param compute_B Compute B-field on grid vertices
         @param rebuild_sensors Recompute sensor signals (overwriting if present)
         @param plot_freq Frequency to load plot files
         @param sensor_obj Sensor object to use
+        @param compute_J_vol Compute volumetric current density `J_vol = J/thickness`
+                    and save `thickness` to XDMF HDF5 output using model thickness values.
         '''
         sensor_ptr = c_void_p()
         if sensor_obj is not None:
@@ -618,10 +620,10 @@ class ThinCurr():
         error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
             thincurr_time_domain_plot(self.tw_obj,c_bool(compute_B),c_bool(rebuild_sensors),c_int(nsteps),c_int(plot_freq),sensor_ptr,
-                                      sensor_values,nsensor,self.Lmat_hodlr,error_string)
+                                      sensor_values,nsensor,c_bool(compute_J_vol),self.Lmat_hodlr,error_string)
         else:
             thincurr_time_domain_plot(self.tw_obj,c_bool(compute_B),c_bool(rebuild_sensors),c_int(nsteps),c_int(plot_freq),sensor_ptr,
-                                      sensor_values,nsensor,c_void_p(),error_string)
+                                      sensor_values,nsensor,c_bool(compute_J_vol),c_void_p(),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
 

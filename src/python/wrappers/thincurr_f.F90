@@ -1031,7 +1031,7 @@ END SUBROUTINE thincurr_time_domain
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot, &
-  sensor_ptr,sensor_vals_ptr,nsensor,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
+  sensor_ptr,sensor_vals_ptr,nsensor,compute_J_vol,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_B !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: rebuild_sensors !< Needs docs
@@ -1040,6 +1040,7 @@ INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsensor !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_J_vol !< Compute volumetric current density J_vol = J/thickness
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
@@ -1072,9 +1073,9 @@ END IF
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform,hodlr_op=hodlr_op)
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform,LOGICAL(compute_J_vol),hodlr_op=hodlr_op)
 ELSE
-  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform)
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform,LOGICAL(compute_J_vol))
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain_plot

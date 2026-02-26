@@ -1021,7 +1021,7 @@ END SUBROUTINE run_td_sim
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE plot_td_sim(self,nsteps,nplot,sensors,compute_B,rebuild_sensors,sensor_vals,hodlr_op)
+SUBROUTINE plot_td_sim(self,nsteps,nplot,sensors,compute_B,rebuild_sensors,sensor_vals,compute_J_vol,hodlr_op)
 TYPE(tw_type), INTENT(inout) :: self !< Needs Docs
 INTEGER(4), INTENT(in) :: nsteps !< Needs Docs
 INTEGER(4), INTENT(in) :: nplot !< Needs Docs
@@ -1029,12 +1029,13 @@ TYPE(tw_sensors), INTENT(in) :: sensors !< Needs Docs
 LOGICAL, INTENT(in) :: compute_B !< Needs Docs
 LOGICAL, INTENT(in) :: rebuild_sensors !< Needs Docs
 REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
+LOGICAL, INTENT(in) :: compute_J_vol !< Compute volumetric current density J_vol = J/thickness
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
-INTEGER(4) :: i,j,jj,k,ntimes_curr,ncols,itime,io_unit,face,ind1,ind2,int_inds(2)
+INTEGER(4) :: i,j,jj,k,ic,ntimes_curr,ncols,itime,io_unit,face,ind1,ind2,int_inds(2)
 REAL(8) :: uu,t,tmp,area,tmp2,val_prev,int_facs(2)
-REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_vec,senout,jumpout
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
+REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_vec,senout,jumpout,thickness_cell
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals,cc_vals_cell
 REAL(8), POINTER, DIMENSION(:) :: vals,vtmp
 CLASS(oft_vector), POINTER :: u,Bx,By,Bz
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
@@ -1112,6 +1113,26 @@ DO i=0,nsteps
   CALL self%xdmf%add_timestep(t)
   CALL u%get_local(vals)
   CALL tw_save_pfield(self,vals,'J')
+  !
+  IF(compute_J_vol)THEN
+    !---Compute per-cell thickness and volumetric current density J_vol = J/thickness
+    IF(.NOT.ALLOCATED(thickness_cell))ALLOCATE(thickness_cell(self%mesh%nc))
+    DO ic=1,self%mesh%nc
+      thickness_cell(ic)=self%Thickness(self%mesh%reg(ic))
+      IF(thickness_cell(ic)<=0.d0)THEN
+        CALL oft_abort('All thickness values must be > 0 when compute_J_vol is enabled', 'plot_td_sim', __FILE__)
+      END IF
+    END DO
+    !---Save thickness field
+    CALL self%mesh%save_cell_scalar(thickness_cell,self%xdmf,'thickness')
+    !---Compute and save J_vol
+    IF(.NOT.ALLOCATED(cc_vals_cell))ALLOCATE(cc_vals_cell(3,self%mesh%nc))
+    CALL tw_recon_curr(self,vals,cc_vals_cell)
+    DO ic=1,self%mesh%nc
+      cc_vals_cell(:,ic)=cc_vals_cell(:,ic)/(mu0*thickness_cell(ic))
+    END DO
+    CALL self%mesh%save_cell_vector(cc_vals_cell,self%xdmf,'J_vol')
+  END IF
   !
   IF(compute_B)THEN
     IF(PRESENT(hodlr_op))THEN
@@ -1212,6 +1233,8 @@ END IF
 CALL u%delete
 DEALLOCATE(u)
 DEALLOCATE(vals)
+IF(ALLOCATED(thickness_cell))DEALLOCATE(thickness_cell)
+IF(ALLOCATED(cc_vals_cell))DEALLOCATE(cc_vals_cell)
 IF(compute_B.AND.PRESENT(hodlr_op))THEN
   CALL Bx%delete()
   CALL By%delete()
