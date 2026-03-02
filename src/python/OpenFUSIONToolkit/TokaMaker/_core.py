@@ -640,7 +640,7 @@ class TokaMaker():
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param foffset Value of \f$F0=R0*B0\f$
-        @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations  in normalized Psi ['x']
+        @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
         '''
