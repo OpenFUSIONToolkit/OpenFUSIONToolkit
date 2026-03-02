@@ -638,13 +638,10 @@ class TokaMaker():
     def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
-        @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations 
-        in normalized Psi ['x']
+        @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param foffset Value of \f$F0=R0*B0\f$
-        @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations 
-        in normalized Psi ['x']
-        @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations 
-        in normalized Psi ['x']
+        @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations  in normalized Psi ['x']
+        @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
         '''
         delete_files = []
@@ -658,7 +655,6 @@ class TokaMaker():
             pp_file = self._oft_env.unique_tmpfile('tokamaker_p.prof')
             create_prof_file(self, pp_file, pp_prof, "P'")
             delete_files.append(pp_file)
-        eta_file = 'none'
         ffp_NI_file = 'none'
         if ffp_NI_prof is not None:
             ffp_NI_file = self._oft_env.unique_tmpfile('tokamaker_ffp_NI.prof')
@@ -666,7 +662,7 @@ class TokaMaker():
             delete_files.append(ffp_NI_file)
         if foffset is not None:
             self._F0 = foffset
-        self.load_profiles(ffp_file,foffset,pp_file,eta_file,ffp_NI_file)
+        self.load_profiles(f_file=ffp_file,foffset=foffset,p_file=pp_file,f_NI_file=ffp_NI_file)
         if not keep_files:
             for file in delete_files:
                 try:
@@ -682,14 +678,11 @@ class TokaMaker():
 
         @param eta_prof Values defining $\eta$ [:,2]
         '''
-        ffp_file = 'none'
-        pp_file = 'none'
         eta_file = 'none'
         if eta_prof is not None:
             eta_file = 'tokamaker_eta.prof'
-            create_prof_file(self, eta_file, eta_prof, "eta'")
-        ffp_NI_file = 'none'
-        self.load_profiles(ffp_file,None,pp_file,eta_file,ffp_NI_file)
+            create_prof_file(self, eta_file, eta_prof, "eta")
+        self.load_profiles(eta_file=eta_file)
 
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.
