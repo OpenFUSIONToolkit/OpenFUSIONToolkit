@@ -782,7 +782,7 @@ class(oft_bmesh), pointer :: smesh
 !---
 smesh=>self%mesh
 CALL self%eta%update(self) ! Make sure eta is up to date with current equilibrium
-CALL self%I_NI%update(self) ! Make sure I_NI is up to date with current equilibrium
+IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self) ! Make sure I_NI is up to date with current equilibrium
 psi_eval%u=>self%psi
 CALL psi_eval%setup(self%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
