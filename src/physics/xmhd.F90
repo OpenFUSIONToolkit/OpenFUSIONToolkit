@@ -5068,10 +5068,10 @@ DO i=1,10
   END DO
 END DO
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A,Es11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
-  WRITE(*,'(A,Es11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
-  WRITE(*,'(A,Es11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
-  WRITE(*,'(A,Es11.3)')'  Build  = ',matvec_time/REAL(10,8)
+  WRITE(*,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
+  WRITE(*,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
+  WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
+  WRITE(*,'(A,ES11.3)')'  Build  = ',matvec_time/REAL(10,8)
 END IF
 CALL oft_finalize()
 end subroutine xmhd_profile

@@ -49,10 +49,11 @@ end type mercier_flux_func
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(linterp_flux_func) :: jphi_flux_func
-  integer(4) :: ngeom = 50
-  real(8), pointer, dimension(:) :: jphi => NULL() !< Needs docs
+  integer(4) :: ngeom = 50 !< Number of points in psi for <R>, <1/R> evaluation
+  real(8) :: j0 = 0.d0 !< LCFS Jphi value
+  real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
 contains
-  !> Needs docs
+  !> Update F*F' profile from Jphi, P', and current equilibrium
   procedure :: update => jphi_update
 end type jphi_flux_func
 !------------------------------------------------------------------------------
@@ -323,11 +324,12 @@ end subroutine minterpinv_apply
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals)
+SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0)
 CLASS(flux_func), POINTER, INTENT(out) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 REAL(8), INTENT(in) :: yvals(npsi)
+REAL(8), INTENT(in) :: y0
 INTEGER(4) :: i,ierr
 ALLOCATE(jphi_flux_func::func)
 SELECT TYPE(self=>func)
@@ -341,6 +343,7 @@ SELECT TYPE(self=>func)
   ALLOCATE(self%y(self%npsi))
   ALLOCATE(self%jphi(self%npsi))
   !---
+  self%j0=y0
   self%y0=0.d0
   DO i=1,self%npsi
     self%x(i) = psivals(i)
@@ -349,12 +352,12 @@ SELECT TYPE(self=>func)
   END DO
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
   ierr=self%set_cofs(self%yp)
-  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%y0
+  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%j0
 END SELECT
 
 END SUBROUTINE create_jphi_ff
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Update F*F' profile from Jphi, P', and current equilibrium
 !------------------------------------------------------------------------------
 subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
@@ -368,9 +371,18 @@ IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_
 ! IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
-ALLOCATE(ravgs(self%ngeom,3),psi_q(self%ngeom),qtmp(self%ngeom))
-psi_q=[(REAL(i,8)/REAL(self%ngeom+1,8),i=1,self%ngeom)]
-CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
+ALLOCATE(ravgs(self%ngeom+1,3),psi_q(self%ngeom+1),qtmp(self%ngeom+1))
+IF(gseq%diverted)THEN
+  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
+  psi_q(1)=psi_q(2)
+  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
+  psi_q(1)=0.d0
+  ravgs(1,1)=gseq%lim_point(1)
+  ravgs(1,2)=1.d0/gseq%lim_point(1)
+ELSE
+  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
+  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
+END IF
 ! WRITE(*,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
 ! WRITE(*,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
 CALL spline_alloc(R_spline,self%ngeom-1,2)
@@ -394,6 +406,9 @@ IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
+CALL spline_eval(R_spline,0.d0,0)
+pprime=gseq%P%fp(gseq%plasma_bounds(1))
+self%y0 = 2.d0*(self%j0*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 DO i=1,self%npsi
   CALL spline_eval(R_spline,self%x(i),0)
   pprime=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
