@@ -238,7 +238,15 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         make test
         mv tests/OFT.junit.xml OFT.junit.xml
-    
+
+    - name: Test OFT examples
+      shell: bash
+      timeout-minutes: 20
+      working-directory: libs/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make test_examples
+
     - name: Fixup cache
       shell: bash
       working-directory: libs
