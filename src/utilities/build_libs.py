@@ -1818,6 +1818,43 @@ class FOX(package):
         self.run_build(build_lines, self.config_dict)
 
 
+class LIBXML2(package):
+    def __init__(self):
+        self.name = "libxml2"
+        self.url = "https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.15.2/libxml2-v2.15.2.tar.gz"
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        install_path = os.path.join(self.root_path, self.install_dir)
+        self.config_dict["LIBXML2_INCLUDE"] = os.path.join(install_path, "include")
+        self.config_dict["LIBXML2_LIBS"] = "-lxml2"
+        # Installation check files
+        self.install_chk_files = [os.path.join(self.config_dict['LIBXML2_LIB'], 'libxml2.a')]
+        #
+        return self.config_dict
+
+    def build(self):
+        build_lines = [
+            "rm -rf build",
+            "mkdir build",
+            "cd build",
+            "export CC={CC}"
+        ]
+        cmake_options = [
+            '-DCMAKE_INSTALL_PREFIX:PATH={LIBXML2_ROOT}',
+            '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+            '-DBUILD_SHARED_LIBS:BOOL=ON',
+            '-DBUILD_STATIC_LIBS:BOOL=OFF'
+        ]
+        build_lines += [
+            "cmake {0} ..".format(' '.join(cmake_options)),
+            "make -j{MAKE_THREADS}",
+            "make install"
+        ]
+        self.run_build(build_lines, self.config_dict)
+
+
 class ONURBS(package):
     def __init__(self):
         self.name = "ONURBS"
