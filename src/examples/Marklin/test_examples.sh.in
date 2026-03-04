@@ -7,14 +7,14 @@ run_test() {
   cd $1
   jupyter nbconvert --execute --to notebook --inplace $2 > tmp.log 2>&1
   if [ $? -ne 0 ]; then
-    echo "Example ThinCurr/$1/$2 failed."
+    echo "Example Marklin/$1/$2 failed."
     echo "" >> $log_path
-    echo "====== Begin ThinCurr/$1/$2 output ======" >> $log_path
+    echo "====== Begin Marklin/$1/$2 output ======" >> $log_path
     cat tmp.log >> $log_path
-    echo "======  End ThinCurr/$1/$2 output  ======" >> $log_path
+    echo "======  End Marklin/$1/$2 output  ======" >> $log_path
     echo "" >> $log_path
   else
-    echo "Example ThinCurr/$1/$2 ran successfully."
+    echo "Example Marklin/$1/$2 ran successfully."
   fi
   rm tmp.log
   cd $ROOT_PATH
