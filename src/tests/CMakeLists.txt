@@ -63,14 +63,18 @@ add_custom_command(
     POST_BUILD
 )
 # Add "full" testing command to Makefile
-add_custom_target(test_examples)
-add_custom_command(
-    TARGET  test_examples
-    POST_BUILD
-    COMMAND OFT_ROOTPATH=${CMAKE_BINARY_DIR} PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ./test_examples.sh
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/examples
-    POST_BUILD
-)
+if( OFT_BUILD_EXAMPLES OR OFT_BUILD_PYTHON )
+  add_custom_target(test_examples)
+  add_custom_command(
+      TARGET  test_examples
+      POST_BUILD
+      COMMAND OFT_ROOTPATH=${CMAKE_BINARY_DIR} PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ./test_examples.sh
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/examples
+      POST_BUILD
+  )
+else()
+  message( STATUS "Skipping 'test_examples' target: examples and Python bindings are disabled, no example tests will be available." )
+endif()
 # Add "full" testing command to Makefile
 if( OFT_COVERAGE )
   configure_file( .coveragerc ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
