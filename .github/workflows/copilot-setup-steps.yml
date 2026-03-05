@@ -1,0 +1,104 @@
+name: Copilot Setup Steps
+
+# Setup steps for GitHub Copilot agents to compile and test OFT.
+# Mirrors the Ubuntu 24.04 GCC + OpenMP configuration used in ci_build.yaml.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      CC: gcc-14
+      CXX: g++-14
+      FC: gfortran-14
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Get OS version
+      run: lsb_release -d
+
+    - name: Install prerequisites
+      # Creates setup_env.sh to activate the Python venv; all subsequent steps
+      # that need Python or the OFT install must source this file explicitly.
+      run: |
+        python3 -m venv ${{ github.workspace }}/oft_venv
+        echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
+        source ${{ github.workspace }}/setup_env.sh
+        python -m pip install pytest numpy scipy h5py triangle matplotlib xarray
+
+    - name: Check compilers
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        $CC --version | head -1 > compiler_id.txt
+        $CXX --version | head -1 >> compiler_id.txt
+        $FC --version | head -1 >> compiler_id.txt
+        cat compiler_id.txt
+
+    - name: Cache external libraries
+      id: cache-ext-libs
+      uses: actions/cache@v4
+      with:
+        path: libs
+        key: ubuntu-24.04-gcc-14-openmp-${{ hashFiles('src/utilities/build_libs.py', 'compiler_id.txt') }}
+
+    - name: Create build dir
+      if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
+      run: mkdir libs
+
+    - name: Build external libraries (OpenMP)
+      if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
+      shell: bash
+      timeout-minutes: 30
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1
+
+    - name: Upload library failure log
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: Library_failure_log-ubuntu-24.04_openmp
+        path: libs/build/build_error.log
+
+    - name: Configure OFT
+      shell: bash
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        bash config_cmake.sh
+
+    - name: Build OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make
+
+    - name: Install OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make install
+
+    - name: Test OFT
+      shell: bash
+      timeout-minutes: 90
+      working-directory: libs/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make test
+        mv tests/OFT.junit.xml OFT.junit.xml
+
+    - name: Fixup cache
+      shell: bash
+      working-directory: libs
+      run: |
+        rm -rf build
