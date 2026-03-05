@@ -164,6 +164,9 @@ jobs:
         $FC --version | head -1 >> compiler_id.txt
         cat compiler_id.txt
 
+    - name: Setup PyVista
+      uses: pyvista/setup-headless-display-action@v3
+
     - name: Cache external libraries
       id: cache-ext-libs
       uses: actions/cache@v4
