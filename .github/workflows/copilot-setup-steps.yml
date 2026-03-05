@@ -5,6 +5,12 @@ name: Copilot Setup Steps
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
 
 jobs:
   copilot-setup-steps:
@@ -87,15 +93,6 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
-
-    - name: Test OFT
-      shell: bash
-      timeout-minutes: 90
-      working-directory: libs/build_release
-      run: |
-        source ${{ github.workspace }}/setup_env.sh
-        make test
-        mv tests/OFT.junit.xml OFT.junit.xml
 
     - name: Fixup cache
       shell: bash
