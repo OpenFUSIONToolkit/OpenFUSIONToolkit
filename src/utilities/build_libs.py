@@ -354,6 +354,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DCMAKE_BUILD_TYPE={0}".format("Debug" if build_debug else "Release"),
         "-DCMAKE_INSTALL_PREFIX:PATH=$INSTALL_DIR",
         "-DOFT_BUILD_TESTS:BOOL={0}".format(bool_to_string(build_tests)),
+        "-DOFT_PY_KERNEL:STRING={0}".format(mydict.get('OFT_PY_KERNEL', 'python3')),
         "-DOFT_BUILD_EXAMPLES:BOOL={0}".format(bool_to_string(build_examples)),
         "-DOFT_BUILD_PYTHON:BOOL={0}".format(bool_to_string(build_python)),
         "-DOFT_BUILD_DOCS:BOOL={0}".format(bool_to_string(build_docs)),
@@ -2045,6 +2046,7 @@ group.add_argument("--oft_build_debug", default=0, type=int, choices=(0,1), help
 group.add_argument("--oft_build_python", default=1, type=int, choices=(0,1), help="Build OFT Python libraries? (default: 1)")
 group.add_argument("--oft_use_openmp", default=1, type=int, choices=(0,1), help="Build OFT with OpenMP support? (default: 1)")
 group.add_argument("--oft_build_tests", default=0, type=int, choices=(0,1), help="Build OFT tests? (default: 0)")
+group.add_argument("--oft_py_kernel", default="python3", type=str, help="Name of Jupyter kernel for testing Python examples (default: python3)")
 group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples? (default: 0)")
 group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help="Build OFT documentation (requires doxygen)? (default: 0)")
 group.add_argument("--oft_package", action="store_true", default=False, help="Perform a packaging build of OFT?")
@@ -2244,6 +2246,7 @@ for package in packages:
 #
 # print(config_dict)
 if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
+    config_dict['OFT_PY_KERNEL'] = options.oft_py_kernel
     build_cmake_script(config_dict,
         build_debug=(options.oft_build_debug == 1),
         use_openmp=(options.oft_use_openmp == 1),
