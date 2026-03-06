@@ -145,16 +145,9 @@ INTERFACE
 END INTERFACE
 #endif
 CONTAINS
-!===============================================================================
-! LIBXML2-backed DOM access routines
-!===============================================================================
 #ifdef HAVE_LIBXML2
 !---------------------------------------------------------------------------------
 !> Parse an XML file from a given file path.
-!!
-!! @param[in]  filepath  Path to the XML file
-!! @param[out] doc_ptr   C pointer to the parsed xmlDoc on success
-!! @param[out] ierr      Error flag (0 on success)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_load(filepath, doc_ptr, ierr)
 CHARACTER(LEN=*), INTENT(in) :: filepath !< Path to XML file
@@ -171,10 +164,6 @@ ierr = INT(oft_xml_load_file_c(c_filepath, doc_ptr), i4)
 END SUBROUTINE oft_xml_load
 !---------------------------------------------------------------------------------
 !> Retrieve a pointer to the root element of an XML document.
-!!
-!! @param[in]  doc_ptr   C pointer to xmlDoc (from \ref oft_xml_load)
-!! @param[out] root_ptr  C pointer to root xmlNode on success
-!! @param[out] ierr      Error flag (0 on success)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_get_root(doc_ptr, root_ptr, ierr)
 TYPE(c_ptr), INTENT(in) :: doc_ptr !< C pointer to xmlDoc
@@ -186,12 +175,6 @@ END SUBROUTINE oft_xml_get_root
 !---------------------------------------------------------------------------------
 !> Retrieve a pointer to the I-th xml node with a given name contained within
 !! a parent node (1-based index, defaults to 1).
-!!
-!! @param[in]  parent_ptr   C pointer to parent xmlNode
-!! @param[in]  name         Name of child element to find
-!! @param[out] element_ptr  C pointer to matching xmlNode on success
-!! @param[out] ierr         Error flag (0 on success)
-!! @param[in]  index        Optional 1-based index among matching children (default 1)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_get_element(parent_ptr, name, element_ptr, ierr, index)
 TYPE(c_ptr), INTENT(in) :: parent_ptr !< C pointer to parent xmlNode
@@ -219,12 +202,6 @@ END SUBROUTINE oft_xml_get_element
 !! @c c_ptr values (one per matching child).  Use @c c_f_pointer to obtain a
 !! Fortran array over this memory, and call \ref oft_xml_free_elements with
 !! @p elements_c when done.
-!!
-!! @param[in]  parent_ptr   C pointer to parent xmlNode
-!! @param[in]  name         Name of child elements to find
-!! @param[out] n            Number of matching children found
-!! @param[out] elements_c   Raw C pointer to heap-allocated array of c_ptr
-!! @param[out] ierr         Error flag (0 on success)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_get_all_elements(parent_ptr, name, n, elements_c, ierr)
 TYPE(c_ptr), INTENT(in) :: parent_ptr !< C pointer to parent xmlNode
@@ -246,10 +223,6 @@ IF (ierr == 0) n = INT(n_c, i4)
 END SUBROUTINE oft_xml_get_all_elements
 !---------------------------------------------------------------------------------
 !> Free the array of node pointers allocated by \ref oft_xml_get_all_elements.
-!!
-!! @param[inout] elements_c  Raw C pointer previously returned by
-!!                           \ref oft_xml_get_all_elements; set to c_null_ptr
-!!                           on return
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_free_elements(elements_c)
 TYPE(c_ptr), INTENT(inout) :: elements_c !< Raw C pointer to free
@@ -260,10 +233,6 @@ END IF
 END SUBROUTINE oft_xml_free_elements
 !---------------------------------------------------------------------------------
 !> Extract the string content from a given xml node into a Fortran string.
-!!
-!! @param[in]  node_ptr  C pointer to xmlNode
-!! @param[out] content   Fortran character variable to receive the content
-!! @param[out] ierr      Error flag (0 on success)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_get_content(node_ptr, content, ierr)
 TYPE(c_ptr), INTENT(in) :: node_ptr !< C pointer to xmlNode
@@ -281,11 +250,6 @@ END DO
 END SUBROUTINE oft_xml_get_content
 !---------------------------------------------------------------------------------
 !> Extract the string value of a given attribute on a given xml node.
-!!
-!! @param[in]  node_ptr   C pointer to xmlNode
-!! @param[in]  attr_name  Attribute name to retrieve
-!! @param[out] value      Fortran character variable to receive the attribute value
-!! @param[out] ierr       Error flag (0 on success)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_get_attr(node_ptr, attr_name, value, ierr)
 TYPE(c_ptr), INTENT(in) :: node_ptr !< C pointer to xmlNode
@@ -309,8 +273,6 @@ END DO
 END SUBROUTINE oft_xml_get_attr
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
-!!
-!! @param[inout] doc_ptr  C pointer to xmlDoc; set to c_null_ptr on return
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_free(doc_ptr)
 TYPE(c_ptr), INTENT(inout) :: doc_ptr !< C pointer to xmlDoc to free
@@ -320,18 +282,11 @@ IF (c_associated(doc_ptr)) THEN
 END IF
 END SUBROUTINE oft_xml_free
 #endif
-!===============================================================================
-! String parsing utilities (always available regardless of HAVE_LIBXML2)
-!===============================================================================
 !---------------------------------------------------------------------------------
 !> Parse a string into a single logical value.
 !!
 !! Accepted representations (case-insensitive): @c T, @c F, @c TRUE,
 !! @c FALSE, @c .TRUE., @c .FALSE., @c 1 (true), @c 0 (false).
-!!
-!! @param[in]  str   Input string
-!! @param[out] val   Parsed logical value
-!! @param[out] ierr  Error flag (0 on success)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_parse_logical(str, val, ierr)
 CHARACTER(LEN=*), INTENT(in) :: str !< Input string
@@ -361,11 +316,6 @@ END SUBROUTINE oft_xml_parse_logical
 !> Parse a comma-delimited string into an array of logical values.
 !!
 !! Each comma-separated token is parsed by \ref oft_xml_parse_logical.
-!!
-!! @param[in]  str   Input string (comma-delimited tokens)
-!! @param[out] vals  Array of parsed logical values
-!! @param[out] n     Number of values successfully parsed
-!! @param[out] ierr  Error flag (0 on success; <0 if array too small)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_parse_logical_array(str, vals, n, ierr)
 CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-delimited string
@@ -408,10 +358,6 @@ END DO
 END SUBROUTINE oft_xml_parse_logical_array
 !---------------------------------------------------------------------------------
 !> Parse a string into a single integer value.
-!!
-!! @param[in]  str   Input string
-!! @param[out] val   Parsed integer value
-!! @param[out] ierr  Error flag (0 on success)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_parse_int(str, val, ierr)
 CHARACTER(LEN=*), INTENT(in) :: str !< Input string
@@ -424,11 +370,6 @@ READ(tmp, *, IOSTAT=ierr) val
 END SUBROUTINE oft_xml_parse_int
 !---------------------------------------------------------------------------------
 !> Parse a comma-delimited string into an array of integer values.
-!!
-!! @param[in]  str   Input string (comma-delimited tokens)
-!! @param[out] vals  Array of parsed integer values
-!! @param[out] n     Number of values successfully parsed
-!! @param[out] ierr  Error flag (0 on success; <0 if array too small)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_parse_int_array(str, vals, n, ierr)
 CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-delimited string
@@ -470,10 +411,6 @@ END DO
 END SUBROUTINE oft_xml_parse_int_array
 !---------------------------------------------------------------------------------
 !> Parse a string into a single double-precision real value.
-!!
-!! @param[in]  str   Input string
-!! @param[out] val   Parsed real value
-!! @param[out] ierr  Error flag (0 on success)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_parse_real(str, val, ierr)
 CHARACTER(LEN=*), INTENT(in) :: str !< Input string
@@ -486,11 +423,6 @@ READ(tmp, *, IOSTAT=ierr) val
 END SUBROUTINE oft_xml_parse_real
 !---------------------------------------------------------------------------------
 !> Parse a comma-delimited string into an array of double-precision real values.
-!!
-!! @param[in]  str   Input string (comma-delimited tokens)
-!! @param[out] vals  Array of parsed real values
-!! @param[out] n     Number of values successfully parsed
-!! @param[out] ierr  Error flag (0 on success; <0 if array too small)
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_parse_real_array(str, vals, n, ierr)
 CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-delimited string
