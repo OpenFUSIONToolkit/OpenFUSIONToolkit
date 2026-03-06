@@ -3,6 +3,7 @@ import time
 import os
 import warnings
 import pytest
+import tempfile
 
 def run_command(command, cwd=None):
     pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
@@ -16,22 +17,36 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
             command = "mpirun --map-by :OVERSUBSCRIBE -np {0} {1}".format(nproc, command)
         else:
             pytest.skip("Not compiled with MPI")
-    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # Increase timeout if testing in debug configuration
-    if os.environ.get('OFT_DEBUG_TEST', 0):
-        timeout *= 4
-    # Wait for process to complete or timeout
-    timeout *= 10
-    while (pid.poll() is None) and (timeout > 0):
-        time.sleep(0.1)
-        timeout -= 1
-    if timeout <= 0:
-        pid.kill()
-    outs, errs = pid.communicate()
+
+    with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
+            pid = subprocess.Popen(
+                command,
+                shell=True,
+                stdout=out_file,
+                stderr=err_file
+            )
+
+            # Increase timeout if testing in debug configuration
+            if os.environ.get('OFT_DEBUG_TEST', 0):
+                timeout *= 4
+
+            timeout *= 10
+            while pid.poll() is None and timeout > 0:
+                time.sleep(0.1)
+                timeout -= 1
+
+            if timeout <= 0:
+                pid.kill()
+
+            pid.wait()  # Ensure process is done
+
+            # Read the outputs from temporary files
+            out_file.seek(0)
+            err_file.seek(0)
+            std_out = out_file.read().decode(errors='replace')
+            std_err = err_file.read().decode(errors='replace')
     errcode = pid.poll()
     #
-    std_out = outs.decode()
-    std_err = errs.decode()
     print("========== OFT STD OUTPUT ==========")
     print(std_out)
     print("========== OFT ERR OUTPUT ==========")

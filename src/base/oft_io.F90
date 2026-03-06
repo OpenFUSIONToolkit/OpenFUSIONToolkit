@@ -96,8 +96,10 @@ end type xdmf_plot_file
 INTERFACE hdf5_write
   MODULE PROCEDURE hdf5_write_scalar_r8
   MODULE PROCEDURE hdf5_write_scalar_i4
+  MODULE PROCEDURE hdf5_write_scalar_i8
   MODULE PROCEDURE hdf5_write_1d_r8
   MODULE PROCEDURE hdf5_write_1d_i4
+  MODULE PROCEDURE hdf5_write_1d_i8
   MODULE PROCEDURE hdf5_write_2d_r8
   MODULE PROCEDURE hdf5_write_2d_i4
   MODULE PROCEDURE hdf5_write_rst
@@ -790,6 +792,19 @@ CALL hdf5_write_1d_i4(tmpval,filename,path)
 DEBUG_STACK_POP
 end subroutine hdf5_write_scalar_i4
 !------------------------------------------------------------------------------
+!> integer(i8) scalar implementation of \ref oft_io::hdf5_write
+!------------------------------------------------------------------------------
+subroutine hdf5_write_scalar_i8(val,filename,path)
+integer(i8), intent(in) :: val !< Value to write to file
+character(LEN=*), intent(in) :: filename !< Path to file
+character(LEN=*), intent(in) :: path !< Variable path in file
+integer(i8) :: tmpval(1)
+DEBUG_STACK_PUSH
+tmpval(1)=val
+CALL hdf5_write_1d_i8(tmpval,filename,path)
+DEBUG_STACK_POP
+end subroutine hdf5_write_scalar_i8
+!------------------------------------------------------------------------------
 !> real(r8) 1D array implementation of \ref oft_io::hdf5_write
 !------------------------------------------------------------------------------
 subroutine hdf5_write_1d_r8(array,filename,path,single_prec)
@@ -871,6 +886,42 @@ call h5fclose_f(file_id, error)
 call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_write_1d_i4
+!------------------------------------------------------------------------------
+!> integer(i8) 1D array implementation of \ref oft_io::hdf5_write
+!------------------------------------------------------------------------------
+subroutine hdf5_write_1d_i8(array,filename,path)
+integer(i8), intent(in) :: array(:) !< Values to write to file
+character(LEN=*), intent(in) :: filename !< Path to file
+character(LEN=*), intent(in) :: path !< Variable path in file
+logical :: write_single
+integer(i4) :: error
+integer(i4), parameter :: one=1
+integer(HID_T) :: file_id,dspace_id,dset_id
+INTEGER(HSIZE_T), DIMENSION(1) :: dims
+DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
+!---Initialize HDF5 and open file
+call h5open_f(error)
+call h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
+IF(error/=0)CALL oft_abort('Error opening file','hdf5_write_1d_i8',__FILE__)
+!---Create dataset and perform write
+dims=SHAPE(array)
+call h5screate_simple_f(one,dims,dspace_id,error)
+call h5dcreate_f(file_id, "/"//TRIM(path), H5T_STD_I64LE, &
+  dspace_id, dset_id, error)
+call h5dwrite_f(dset_id, H5T_STD_I64LE, array, dims, error)
+!---Close dataset
+call h5dclose_f(dset_id, error)
+call h5sclose_f(dspace_id, error)
+!---Close file and HDF5
+call h5fclose_f(file_id, error)
+call h5close_f(error)
+DEBUG_STACK_POP
+end subroutine hdf5_write_1d_i8
 !------------------------------------------------------------------------------
 !> real(r8) 2D array implementation of \ref oft_io::hdf5_write
 !------------------------------------------------------------------------------
@@ -1111,7 +1162,7 @@ CALL hdf5_read_1d_i4(tmpval,filename,path,success)
 val=tmpval(1)
 end subroutine hdf5_read_scalar_i4
 !------------------------------------------------------------------------------
-!> real(r8) 1D array implementation of \ref oft_io::hdf5_write
+!> real(r8) 1D array implementation of \ref oft_io::hdf5_read
 !------------------------------------------------------------------------------
 subroutine hdf5_read_1d_r8(array,filename,path,success)
 real(r8), intent(inout) :: array(:) !< Values to read from file
@@ -1153,7 +1204,7 @@ RETURN
 IF(PRESENT(success))CALL h5eset_auto_f(one, error)
 end subroutine hdf5_read_1d_r8
 !------------------------------------------------------------------------------
-!> integer(i8) 1D array implementation of \ref oft_io::hdf5_write
+!> integer(i4) 1D array implementation of \ref oft_io::hdf5_read
 !------------------------------------------------------------------------------
 subroutine hdf5_read_1d_i4(array,filename,path,success)
 integer(i4), intent(inout) :: array(:) !< Values to read from file
