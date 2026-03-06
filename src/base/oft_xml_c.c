@@ -189,10 +189,8 @@ int oft_xml_get_attribute(const void* node_ptr, const char* attr_name,
  * doc_ptr: pointer to xmlDoc (from oft_xml_load_file), cast to void*
  */
 void oft_xml_free_doc(void* doc_ptr) {
-    if (doc_ptr != NULL) {
+    if (doc_ptr != NULL)
         xmlFreeDoc((xmlDoc*)doc_ptr);
-        xmlCleanupParser();
-    }
 }
 
 #endif /* HAVE_LIBXML2 */

@@ -378,7 +378,7 @@ LOGICAL :: val_tmp
 n = 0
 ierr = 0
 nmax = SIZE(vals)
-tmp = TRIM(str)
+tmp = ADJUSTL(TRIM(str))
 IF (INDEX(tmp, ',') == 0) THEN
   CALL oft_xml_parse_logical(ADJUSTL(tmp), val_tmp, parse_err)
   IF (parse_err /= 0) THEN
