@@ -281,6 +281,13 @@ if ( OFT_FoX_FOUND )
   set( EXT_LIBS ${OFT_FoX_LIBRARIES} ${EXT_LIBS} )
   add_definitions( -DHAVE_XML )
 endif()
+# LibXml2
+find_package( OFT_LibXml2 )
+if ( OFT_LibXml2_FOUND )
+  include_directories( ${OFT_LibXml2_INCLUDE_DIRS} )
+  set( EXT_LIBS ${OFT_LibXml2_LIBRARIES} ${EXT_LIBS} )
+  add_definitions( -DHAVE_LIBXML2 )
+endif()
 # OpenNURBS
 find_package( OFT_OpenNURBS )
 if ( OFT_OpenNURBS_FOUND )
