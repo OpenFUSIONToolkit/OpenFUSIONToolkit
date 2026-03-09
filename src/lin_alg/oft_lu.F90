@@ -39,6 +39,9 @@ IMPLICIT NONE
 #else
 #define DEF_ILU_PACK "native"
 #endif
+#if !defined(DEF_LU_PACK) && defined(HAVE_UMFPACK)
+#define DEF_LU_PACK "umfpack"
+#endif
 #if !defined(DEF_LU_PACK) && defined(HAVE_MUMPS)
 #define DEF_LU_PACK "mumps"
 #endif
@@ -47,9 +50,6 @@ IMPLICIT NONE
 #endif
 #if !defined(DEF_LU_PACK) && defined(HAVE_SUPERLU_DIST)
 #define DEF_LU_PACK "superd"
-#endif
-#if !defined(DEF_LU_PACK) && defined(HAVE_UMFPACK)
-#define DEF_LU_PACK "umfpack"
 #endif
 #if !defined(DEF_LU_PACK)
 #define DEF_LU_PACK "none"
@@ -222,7 +222,7 @@ INTERFACE
   INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind [n+1]
   REAL(c_double), DIMENSION(n), INTENT(inout) :: b !< Right hand side -> overwritten with solution [n]
   INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of vector `b` [n]
-  TYPE(c_ptr), INTENT(inout) :: grid_handle !< Pointer to SuperLU-DIST communication object
+  TYPE(c_ptr), VALUE, INTENT(in) :: grid_handle !< Pointer to SuperLU-DIST communication object
   TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to SuperLU-DIST internal data storage
   LOGICAL(c_bool), VALUE, INTENT(in) :: iter_refine !< Perform iterative refinement?
   INTEGER(c_int), VALUE, INTENT(in) :: col_perm !< Column permutation method (0 -> natural ordering,
@@ -734,9 +734,11 @@ SELECT CASE(TRIM(self%package))
     mode=4
     CALL oft_superlu_dist_dgssv(mode,self%A%nr,nrhs,nrhs,rvals,ivals,ivals, &
       rvals,ldb,self%superlu_struct%grid_handle,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
+    self%superlu_struct%f_factors=C_NULL_PTR
     mode=2
     nrhs=1
     CALL oft_superlu_dist_slugrid(mode,self%superlu_struct%comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
+    self%superlu_struct%grid_handle=C_NULL_PTR
     CALL MPI_COMM_FREE(self%superlu_struct%comm, ierr)
     DEALLOCATE(self%superlu_struct%csc_vals,self%superlu_struct%csc_map)
     DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
