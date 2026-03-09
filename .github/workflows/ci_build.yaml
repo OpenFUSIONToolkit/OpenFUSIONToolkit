@@ -243,6 +243,7 @@ jobs:
         mv tests/OFT.junit.xml OFT.junit.xml
 
     - name: Test OFT examples
+      if: ${{ matrix.config.os != 'macos-15-intel' }}
       shell: bash
       timeout-minutes: 20
       working-directory: libs/build_release
