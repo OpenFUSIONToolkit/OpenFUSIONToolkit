@@ -976,7 +976,7 @@ do i=1,self%nc ! loop over cells
     IF(oft_debug_print(2))WRITE(*,'(2A,I8,I8)')oft_indent,'Chunk oriented',i,COUNT(oriented)
   END IF
 enddo
-WRITE(*,*)'Orientation depth =',max_depth
+IF(oft_debug_print(1))WRITE(*,'(2A,I8)')oft_indent,'Orientation depth =',max_depth
 CALL oft_decrease_indent
 IF(COUNT(oriented)/=self%nc)CALL oft_abort("Orientation failed", &
   "sync_face_normals",__FILE__)

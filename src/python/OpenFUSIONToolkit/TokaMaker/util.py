@@ -359,3 +359,14 @@ def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
     for i in range(len(f_coil_names)):
         f_coil_dict[f_coil_names[i]] = [f_coil_vals[i], f_coil_weights[i]]
     return probes_dict, loops_dict, e_coil_dict, f_coil_dict, raw
+
+def get_jphi_from_GS(ffprime, pprime, R_avg, one_over_R_avg):
+    r'''! Calculate j_phi profile from Grad-Shafranov equation
+    @param ffprime FF'(psi_N) profile
+    @param pprime P'(psi_N) profile
+    @param R_avg <R>(psi_N) profile
+    @param one_over_R_avg <1/R>(psi_N) profile
+    Returns:
+    j_phi(\psi_N) profile
+    '''
+    return ffprime * (one_over_R_avg / mu0) + R_avg * pprime

@@ -4077,6 +4077,7 @@ DO i=1,smesh%np
     ELSE
       saddle_loc=smesh%r(1:2,i)
     END IF
+    WRITE(loc_str,'(2ES10.2)')saddle_loc
     ! IF(ALL(smesh%reg(smesh%lpc(smesh%kpc(i):smesh%kpc(i+1)-1))/=1))CYCLE
     IF(ncuts(i)==0)stype=1
     IF(ncuts(i)>3)stype=3
@@ -4100,9 +4101,12 @@ DO i=1,smesh%np
               o_psi = MAX(o_psi,saddle_psi)
               stypes(m)=1
             END IF
-            WRITE(loc_str,'(2ES10.2)')saddle_loc
             WRITE(loc_str2,'(2ES10.2)')unique_saddles(1:2,m)
-            CALL oft_warn("Candidate X-point and O-point converged to the same location "//loc_str//" "//loc_str2)
+            IF(stype==1)THEN
+              CALL oft_warn("Candidate O-point converged to an existing X-point location "//loc_str//" "//loc_str2)
+            ELSE
+              CALL oft_warn("Candidate X-point converged to the existing O-point location "//loc_str//" "//loc_str2)
+            ENDIF
           END IF
           EXIT
         END IF
