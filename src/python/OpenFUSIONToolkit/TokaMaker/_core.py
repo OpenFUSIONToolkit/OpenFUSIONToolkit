@@ -457,7 +457,7 @@ class TokaMaker():
         else:
             return None
     
-    def coil_dict2vec(self,coil_dict,keep_virtual=False,default_value=0.0):
+    def coil_dict2vec(self,coil_dict={},keep_virtual=False,default_value=0.0):
         '''! Create coil vector from dictionary of values
 
         @param coil_vec Input dictionary
@@ -494,6 +494,8 @@ class TokaMaker():
         @param always_virtual Always include virtual coils even if not present in vector
         @returns `coil_dict` Ouput dictionary
         '''
+        if (coil_vec.shape[0] != self.ncoils) and (coil_vec.shape[0] != self.ncoils+len(self._virtual_coils)):
+            raise ValueError('Input vector has incorrect length, should be {0} or {1}'.format(self.ncoils, self.ncoils+len(self._virtual_coils)))
         coil_dict = {}
         for coil_key in self.coil_sets:
             coil_dict[coil_key] = coil_vec[self.coil_sets[coil_key]['id']]
@@ -1396,7 +1398,7 @@ class TokaMaker():
                     break
             return self.x_points[:i,:], self.diverted
     
-    def set_coil_currents(self, currents=None):
+    def set_coil_currents(self, currents={}):
         '''! Set coil currents
 
         @param currents Current in each coil [A]
