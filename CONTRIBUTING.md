@@ -73,12 +73,18 @@ Thanks! :sunny: :heart:
 The Open FUSION Toolkit Team
 
 ## Contributors
+Anson Braun (@ansonbraun)\
 Daniel Burgess (@d-burg)\
+Samuel Freiberger (@samuel-frei)\
 Sophia Guizzo (@sguizzo)\
 Chris Hansen (@hansec)\
 Julia Kirby (@juliagoestoikea)\
+John Lhota (@john4255)\
 Francois Logak\
-Matthew Pharr (@matt-pharr)
+Oak Nelson (@nelsonand)\
+Matthew Pharr (@matt-pharr)\
+Benjy Smith (@benjysmith)\
+Thomas Wang (@ThomasWangAPAM)
 
 ### Contributors to predecessor codes
 Thomas Benedett\
