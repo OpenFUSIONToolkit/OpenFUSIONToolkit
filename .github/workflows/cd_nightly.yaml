@@ -135,6 +135,7 @@ jobs:
       run: mkdir libs
 
     - name: Build external (Nightly)
+      if: ${{ !inputs.release }}
       shell: bash
       working-directory: libs
       run: |
@@ -142,7 +143,7 @@ jobs:
         python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
 
     - name: Build external (Release)
-      if: ${{ inputs.tags }}
+      if: ${{ inputs.release }}
       shell: bash
       working-directory: libs
       run: |
