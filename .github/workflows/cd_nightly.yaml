@@ -5,6 +5,12 @@ on:
     branches:
       - main
       - cd_debug
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release build?'
+        required: false
+        type: boolean
   
 jobs:
   build:
@@ -128,12 +134,20 @@ jobs:
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       run: mkdir libs
 
-    - name: Build external
+    - name: Build external (Nightly)
       shell: bash
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
+
+    - name: Build external (Release)
+      if: ${{ inputs.tags }}
+      shell: bash
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_package_release --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
