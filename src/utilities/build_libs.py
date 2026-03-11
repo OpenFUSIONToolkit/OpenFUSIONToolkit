@@ -416,7 +416,9 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DBLA_VENDOR:STRING={0}".format(mydict["BLAS_VENDOR"]))
     if "ARPACK_ROOT" in mydict:
         cmake_lines.append("-DOFT_ARPACK_ROOT:PATH={0}".format(mydict["ARPACK_ROOT"]))
-    if "FOX_ROOT" in mydict:
+    if "LIBXML2_ROOT" in mydict:
+        cmake_lines.append("-DLIBXML2_ROOT:PATH={0}".format(mydict["LIBXML2_ROOT"]))
+    elif "FOX_ROOT" in mydict:
         cmake_lines.append("-DOFT_FoX_ROOT:PATH={0}".format(mydict["FOX_ROOT"]))
     if "ONURBS_ROOT" in mydict:
         cmake_lines.append("-DOFT_OpenNURBS_ROOT:PATH={0}".format(mydict["ONURBS_ROOT"]))
@@ -1819,9 +1821,10 @@ class FOX(package):
 
 
 class LIBXML2(package):
-    def __init__(self):
-        self.name = "libxml2"
+    def __init__(self, static_libs=False):
+        self.name = "LIBXML2"
         self.url = "https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.15.2/libxml2-v2.15.2.tar.gz"
+        self.static_libs = static_libs
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1830,7 +1833,10 @@ class LIBXML2(package):
         self.config_dict["LIBXML2_INCLUDE"] = os.path.join(install_path, "include")
         self.config_dict["LIBXML2_LIBS"] = "-lxml2"
         # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['LIBXML2_LIB'], 'libxml2.a')]
+        if self.static_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['LIBXML2_LIB'], 'libxml2.a')]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['LIBXML2_LIB'], 'libxml2'+self.config_dict['DYN_EXT'])]
         #
         return self.config_dict
 
@@ -1843,10 +1849,18 @@ class LIBXML2(package):
         ]
         cmake_options = [
             '-DCMAKE_INSTALL_PREFIX:PATH={LIBXML2_ROOT}',
-            '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-            '-DBUILD_SHARED_LIBS:BOOL=ON',
-            '-DBUILD_STATIC_LIBS:BOOL=OFF'
+            '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON'
         ]
+        if self.static_libs:
+            cmake_options += [
+                '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                '-DBUILD_STATIC_LIBS:BOOL=ON'
+            ]
+        else:
+            cmake_options += [
+                '-DBUILD_SHARED_LIBS:BOOL=ON',
+                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+            ]
         build_lines += [
             "cmake {0} ..".format(' '.join(cmake_options)),
             "make -j{MAKE_THREADS}",
@@ -2070,7 +2084,7 @@ parser = argparse.ArgumentParser()
 parser.description = "Third-party library build script for the Open FUSION Toolkit"
 parser.add_argument("--download_only", action="store_true", default=False, help="Only download packages")
 parser.add_argument("--setup_only", action="store_true", default=False, help="Download and setup build, but do not actually build")
-parser.add_argument("--nthread", default=1, type=int, help="Number of threads to use for make (default=1)")
+parser.add_argument("--nthread", "--nthreads", default=1, type=int, help="Number of threads to use for make (default=1)")
 parser.add_argument("--opt_flags", default=None, type=str, help="Compiler optimization flags")
 parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
 parser.add_argument("--macos_sdk_path", default=None, type=str, help="Path to macos SDK to use for building")
@@ -2125,8 +2139,10 @@ group.add_argument("--lapack_lib_path", default=None, type=str, help="Path to pr
 group = parser.add_argument_group("METIS", "METIS package options")
 group.add_argument("--metis_wrapper", action="store_true", default=False, help="METIS included in compilers")
 #
-group = parser.add_argument_group("FoX XML", "FoX XML package options")
-group.add_argument("--build_fox", default=1, type=int, choices=(0,1), help="Build Fox XML library? (default: 1)")
+group = parser.add_argument_group("XML", "XML package options")
+group.add_argument("--build_libxml2", default=1, type=int, choices=(0,1), help="Build Libxml2 library? (default: 1)")
+group.add_argument("--libxml2_static", action="store_true", default=False, help="Build and link Libxml2 statically?")
+group.add_argument("--build_fox", default=0, type=int, choices=(0,1), help="Build Fox XML library? (default: 1)")
 #
 group = parser.add_argument_group("OpenNURBS", "OpenNURBS package options")
 group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="Build OpenNURBS library? (default: 0)")
@@ -2169,6 +2185,10 @@ fetch_progress = options.no_dl_progress
 build_cmake_ver = None
 if options.build_cmake == 1:
     build_cmake_ver = CMAKE().version
+if (options.build_libxml2 == 1) and (options.build_fox == 1):
+    parser.exit(-1, '"--build_libxml2" and "--build_fox" cannot be specified together\n')
+elif (options.build_libxml2 == 0) and (options.build_fox == 0):
+    parser.exit(-1, 'One of "--build_libxml2" or "--build_fox" must be specified\n')
 config_dict = setup_build_env(build_cmake_ver=build_cmake_ver)
 config_dict['DOWN_ONLY'] = options.download_only
 config_dict['SETUP_ONLY'] = options.setup_only
@@ -2252,6 +2272,9 @@ else:
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())
+# Are we building LIBXML2?
+if options.build_libxml2 == 1:
+    packages.append(LIBXML2(options.libxml2_static))
 # Are we building FoX?
 if options.build_fox == 1:
     packages.append(FOX())

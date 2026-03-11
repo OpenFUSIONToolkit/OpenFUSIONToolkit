@@ -1,7 +1,7 @@
 ########################
 # Open FUSION Toolkit
 ########################
-cmake_minimum_required( VERSION 3.12 )
+cmake_minimum_required( VERSION 3.27 )
 project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
 set( OFT_VER_SUFFIX "-beta7" CACHE INTERNAL "Version suffix" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
@@ -275,12 +275,22 @@ if ( OFT_NETCDF_FOUND )
   set( EXT_LIBS ${OFT_NETCDF_LIBRARIES} ${EXT_LIBS} )
   add_definitions( -DHAVE_NCDF )
 endif()
-# FoX XML
-find_package( OFT_FoX )
-if ( OFT_FoX_FOUND )
-  include_directories( ${OFT_FoX_INCLUDE_DIRS} )
-  set( EXT_LIBS ${OFT_FoX_LIBRARIES} ${EXT_LIBS} )
+# Libxml2
+find_package( LibXml2 )
+if( LibXml2_FOUND )
+  include_directories( ${LIBXML2_INCLUDE_DIR} )
+  set( EXT_LIBS ${LIBXML2_LIBRARIES} ${EXT_LIBS} )
+  add_definitions( -DHAVE_LIBXML2 )
   add_definitions( -DHAVE_XML )
+else()
+  # FoX XML
+  find_package( OFT_FoX )
+  if ( OFT_FoX_FOUND )
+    include_directories( ${OFT_FoX_INCLUDE_DIRS} )
+    set( EXT_LIBS ${OFT_FoX_LIBRARIES} ${EXT_LIBS} )
+    add_definitions( -DHAVE_FOX )
+    add_definitions( -DHAVE_XML )
+  endif()
 endif()
 # OpenNURBS
 find_package( OFT_OpenNURBS )
