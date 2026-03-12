@@ -1,9 +1,0 @@
-# The fortran modules provided by this target.
-provides
- oft_base.mod
- oft_io.mod
- oft_local.mod
- oft_sort.mod
- oft_stitching.mod
- oft_xml.mod
- spline_mod.mod

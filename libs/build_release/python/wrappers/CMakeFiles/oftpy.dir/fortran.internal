@@ -1,6 +1,0 @@
-# The fortran modules provided by this target.
-provides
- marklin_f.mod
- oft_base_f.mod
- thincurr_f.mod
- tokamaker_f.mod

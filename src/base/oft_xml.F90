@@ -16,12 +16,16 @@
 !! routines (\ref oft_xml_parse_logical, \ref oft_xml_parse_int,
 !! \ref oft_xml_parse_real and their @c _array variants) are always available.
 !!
+!! The @c _array variants accept comma-and-newline-delimited strings, reading
+!! data into a flat array.  A 2-component @p shape (nrows, ncols) is returned,
+!! where commas delimit columns within a row and newlines delimit rows.
+!!
 !! Typical usage (with LIBXML2):
 !! @code{.f90}
 !! TYPE(c_ptr) :: doc, root, node
 !! TYPE(c_ptr) :: elements_c
 !! TYPE(c_ptr), POINTER :: elements(:)
-!! INTEGER(i4) :: n, ierr
+!! INTEGER(i4) :: arr_shape(2), ierr
 !! REAL(r8) :: vals(64)
 !! CHARACTER(LEN=256) :: content
 !!
@@ -29,7 +33,7 @@
 !! CALL oft_xml_get_root(doc, root, ierr)
 !! CALL oft_xml_get_element(root, "section", node, ierr)
 !! CALL oft_xml_get_content(node, content, ierr)
-!! CALL oft_xml_parse_real_array(content, vals, n, ierr)
+!! CALL oft_xml_parse_real_array(content, vals, arr_shape, ierr)
 !!
 !! CALL oft_xml_get_all_elements(root, "item", n, elements_c, ierr)
 !! CALL c_f_pointer(elements_c, elements, [n])
@@ -46,11 +50,55 @@
 !---------------------------------------------------------------------------------
 MODULE oft_xml
 USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_ptr, c_char, c_null_char, &
-  c_null_ptr, c_f_pointer, c_associated
+  c_null_ptr, c_f_pointer, c_associated, c_double
 USE oft_local, ONLY: i4, r8, string_to_upper
 IMPLICIT NONE
 !> Maximum length (in characters) for XML content and attribute value buffers
 INTEGER(i4), PARAMETER :: OFT_XML_SLEN = 2048
+!------------------------------------------------------------------------------
+! C-binding interfaces for string parsing functions in oft_xml_c.c
+!------------------------------------------------------------------------------
+INTERFACE
+!------------------------------------------------------------------------------
+!> Parse a comma-and-newline-delimited string into a flat array of 32-bit
+!! integers, returning a 2-component shape (nrows, ncols).
+!------------------------------------------------------------------------------
+  FUNCTION oft_xml_parse_int_array_c(str, arr, max_n, shape) &
+      BIND(C, NAME="oft_xml_parse_int_array_c") RESULT(ierr)
+    IMPORT c_int, c_char
+    CHARACTER(KIND=c_char), INTENT(in) :: str(*) !< Null-terminated input string
+    INTEGER(c_int), INTENT(out) :: arr(*) !< Output flat integer array
+    INTEGER(c_int), VALUE, INTENT(in) :: max_n !< Maximum number of elements
+    INTEGER(c_int), INTENT(out) :: shape(2) !< shape(1)=nrows, shape(2)=ncols
+    INTEGER(c_int) :: ierr !< 0 on success, nonzero on error
+  END FUNCTION oft_xml_parse_int_array_c
+!------------------------------------------------------------------------------
+!> Parse a comma-and-newline-delimited string into a flat array of doubles,
+!! returning a 2-component shape (nrows, ncols).
+!------------------------------------------------------------------------------
+  FUNCTION oft_xml_parse_real_array_c(str, arr, max_n, shape) &
+      BIND(C, NAME="oft_xml_parse_real_array_c") RESULT(ierr)
+    IMPORT c_int, c_char, c_double
+    CHARACTER(KIND=c_char), INTENT(in) :: str(*) !< Null-terminated input string
+    REAL(c_double), INTENT(out) :: arr(*) !< Output flat real array
+    INTEGER(c_int), VALUE, INTENT(in) :: max_n !< Maximum number of elements
+    INTEGER(c_int), INTENT(out) :: shape(2) !< shape(1)=nrows, shape(2)=ncols
+    INTEGER(c_int) :: ierr !< 0 on success, nonzero on error
+  END FUNCTION oft_xml_parse_real_array_c
+!------------------------------------------------------------------------------
+!> Parse a comma-and-newline-delimited string into a flat array of logical
+!! values encoded as integers (1=true, 0=false), returning a 2-component shape.
+!------------------------------------------------------------------------------
+  FUNCTION oft_xml_parse_logical_array_c(str, arr, max_n, shape) &
+      BIND(C, NAME="oft_xml_parse_logical_array_c") RESULT(ierr)
+    IMPORT c_int, c_char
+    CHARACTER(KIND=c_char), INTENT(in) :: str(*) !< Null-terminated input string
+    INTEGER(c_int), INTENT(out) :: arr(*) !< Output flat logical-as-int array
+    INTEGER(c_int), VALUE, INTENT(in) :: max_n !< Maximum number of elements
+    INTEGER(c_int), INTENT(out) :: shape(2) !< shape(1)=nrows, shape(2)=ncols
+    INTEGER(c_int) :: ierr !< 0 on success, nonzero on error
+  END FUNCTION oft_xml_parse_logical_array_c
+END INTERFACE
 #ifdef HAVE_LIBXML2
 !------------------------------------------------------------------------------
 ! C-binding interfaces for oft_xml_c.c
@@ -313,48 +361,38 @@ CASE DEFAULT
 END SELECT
 END SUBROUTINE oft_xml_parse_logical
 !---------------------------------------------------------------------------------
-!> Parse a comma-delimited string into an array of logical values.
+!> Parse a comma-and-newline-delimited string into a flat array of logical values.
 !!
-!! Each comma-separated token is parsed by \ref oft_xml_parse_logical.
+!! Commas separate columns; newlines separate rows.  The data is read into a
+!! flat array and the 2-component @p shape (nrows, ncols) is returned.
 !---------------------------------------------------------------------------------
-SUBROUTINE oft_xml_parse_logical_array(str, vals, n, ierr)
-CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-delimited string
-LOGICAL, INTENT(out) :: vals(:) !< Output logical array
-INTEGER(i4), INTENT(out) :: n !< Number of values parsed
-INTEGER(i4), INTENT(out) :: ierr !< Error flag
-CHARACTER(LEN=LEN(str)) :: tmp
-INTEGER(i4) :: nmax, start, i, parse_err
-LOGICAL :: val_tmp
-n = 0
+SUBROUTINE oft_xml_parse_logical_array(str, vals, shape, ierr)
+CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-and-newline-delimited string
+LOGICAL, INTENT(out) :: vals(:) !< Output flat logical array
+INTEGER(i4), INTENT(out) :: shape(2) !< shape(1)=nrows, shape(2)=ncols
+INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
+CHARACTER(KIND=c_char) :: c_str(LEN_TRIM(str)+1)
+INTEGER(c_int), ALLOCATABLE :: int_buf(:)
+INTEGER(c_int) :: shape_c(2)
+INTEGER(i4) :: i, ntotal
+shape = 0
 ierr = 0
-nmax = SIZE(vals)
-tmp = ADJUSTL(TRIM(str))
-IF (INDEX(tmp, ',') == 0) THEN
-  CALL oft_xml_parse_logical(ADJUSTL(tmp), val_tmp, parse_err)
-  IF (parse_err /= 0) THEN
-    ierr = parse_err
-    RETURN
-  END IF
-  n = 1
-  vals(1) = val_tmp
-  RETURN
-END IF
-start = 1
-DO i = 1, LEN_TRIM(tmp)+1
-  IF (i > LEN_TRIM(tmp) .OR. tmp(i:i) == ',') THEN
-    n = n + 1
-    IF (n > nmax) THEN
-      ierr = -1
-      RETURN
-    END IF
-    CALL oft_xml_parse_logical(ADJUSTL(tmp(start:i-1)), vals(n), parse_err)
-    IF (parse_err /= 0) THEN
-      ierr = parse_err
-      RETURN
-    END IF
-    start = i + 1
-  END IF
+DO i = 1, LEN_TRIM(str)
+  c_str(i) = str(i:i)
 END DO
+c_str(LEN_TRIM(str)+1) = c_null_char
+ALLOCATE(int_buf(SIZE(vals)))
+ierr = INT(oft_xml_parse_logical_array_c(c_str, int_buf, INT(SIZE(vals), c_int), &
+    shape_c), i4)
+IF (ierr == 0) THEN
+  shape(1) = INT(shape_c(1), i4)
+  shape(2) = INT(shape_c(2), i4)
+  ntotal = shape(1) * shape(2)
+  DO i = 1, ntotal
+    vals(i) = (int_buf(i) /= 0_c_int)
+  END DO
+END IF
+DEALLOCATE(int_buf)
 END SUBROUTINE oft_xml_parse_logical_array
 !---------------------------------------------------------------------------------
 !> Parse a string into a single integer value.
@@ -369,45 +407,30 @@ tmp = ADJUSTL(TRIM(str))
 READ(tmp, *, IOSTAT=ierr) val
 END SUBROUTINE oft_xml_parse_int
 !---------------------------------------------------------------------------------
-!> Parse a comma-delimited string into an array of integer values.
+!> Parse a comma-and-newline-delimited string into a flat array of 32-bit integers.
+!!
+!! Commas separate columns; newlines separate rows.  The data is read into a
+!! flat array and the 2-component @p shape (nrows, ncols) is returned.
 !---------------------------------------------------------------------------------
-SUBROUTINE oft_xml_parse_int_array(str, vals, n, ierr)
-CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-delimited string
-INTEGER(i4), INTENT(out) :: vals(:) !< Output integer array
-INTEGER(i4), INTENT(out) :: n !< Number of values parsed
-INTEGER(i4), INTENT(out) :: ierr !< Error flag
-CHARACTER(LEN=LEN(str)) :: tmp
-INTEGER(i4) :: nmax, start, i, parse_err
-n = 0
+SUBROUTINE oft_xml_parse_int_array(str, vals, shape, ierr)
+CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-and-newline-delimited string
+INTEGER(i4), INTENT(out) :: vals(:) !< Output flat integer array
+INTEGER(i4), INTENT(out) :: shape(2) !< shape(1)=nrows, shape(2)=ncols
+INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
+CHARACTER(KIND=c_char) :: c_str(LEN_TRIM(str)+1)
+INTEGER(c_int) :: shape_c(2)
+INTEGER(i4) :: i
+shape = 0
 ierr = 0
-nmax = SIZE(vals)
-IF (INDEX(TRIM(str), ',') == 0) THEN
-  tmp = ADJUSTL(TRIM(str))
-  READ(tmp, *, IOSTAT=parse_err) vals(1)
-  IF (parse_err /= 0) THEN
-    ierr = parse_err
-    RETURN
-  END IF
-  n = 1
-  RETURN
-END IF
-start = 1
-DO i = 1, LEN_TRIM(str)+1
-  IF (i > LEN_TRIM(str) .OR. str(i:i) == ',') THEN
-    n = n + 1
-    IF (n > nmax) THEN
-      ierr = -1
-      RETURN
-    END IF
-    tmp = ADJUSTL(str(start:i-1))
-    READ(tmp, *, IOSTAT=parse_err) vals(n)
-    IF (parse_err /= 0) THEN
-      ierr = parse_err
-      RETURN
-    END IF
-    start = i + 1
-  END IF
+DO i = 1, LEN_TRIM(str)
+  c_str(i) = str(i:i)
 END DO
+c_str(LEN_TRIM(str)+1) = c_null_char
+ierr = INT(oft_xml_parse_int_array_c(c_str, vals, INT(SIZE(vals), c_int), shape_c), i4)
+IF (ierr == 0) THEN
+  shape(1) = INT(shape_c(1), i4)
+  shape(2) = INT(shape_c(2), i4)
+END IF
 END SUBROUTINE oft_xml_parse_int_array
 !---------------------------------------------------------------------------------
 !> Parse a string into a single double-precision real value.
@@ -422,44 +445,30 @@ tmp = ADJUSTL(TRIM(str))
 READ(tmp, *, IOSTAT=ierr) val
 END SUBROUTINE oft_xml_parse_real
 !---------------------------------------------------------------------------------
-!> Parse a comma-delimited string into an array of double-precision real values.
+!> Parse a comma-and-newline-delimited string into a flat array of
+!! double-precision real values.
+!!
+!! Commas separate columns; newlines separate rows.  The data is read into a
+!! flat array and the 2-component @p shape (nrows, ncols) is returned.
 !---------------------------------------------------------------------------------
-SUBROUTINE oft_xml_parse_real_array(str, vals, n, ierr)
-CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-delimited string
-REAL(r8), INTENT(out) :: vals(:) !< Output real array
-INTEGER(i4), INTENT(out) :: n !< Number of values parsed
-INTEGER(i4), INTENT(out) :: ierr !< Error flag
-CHARACTER(LEN=LEN(str)) :: tmp
-INTEGER(i4) :: nmax, start, i, parse_err
-n = 0
+SUBROUTINE oft_xml_parse_real_array(str, vals, shape, ierr)
+CHARACTER(LEN=*), INTENT(in) :: str !< Input comma-and-newline-delimited string
+REAL(r8), INTENT(out) :: vals(:) !< Output flat real array
+INTEGER(i4), INTENT(out) :: shape(2) !< shape(1)=nrows, shape(2)=ncols
+INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
+CHARACTER(KIND=c_char) :: c_str(LEN_TRIM(str)+1)
+INTEGER(c_int) :: shape_c(2)
+INTEGER(i4) :: i
+shape = 0
 ierr = 0
-nmax = SIZE(vals)
-IF (INDEX(TRIM(str), ',') == 0) THEN
-  tmp = ADJUSTL(TRIM(str))
-  READ(tmp, *, IOSTAT=parse_err) vals(1)
-  IF (parse_err /= 0) THEN
-    ierr = parse_err
-    RETURN
-  END IF
-  n = 1
-  RETURN
-END IF
-start = 1
-DO i = 1, LEN_TRIM(str)+1
-  IF (i > LEN_TRIM(str) .OR. str(i:i) == ',') THEN
-    n = n + 1
-    IF (n > nmax) THEN
-      ierr = -1
-      RETURN
-    END IF
-    tmp = ADJUSTL(str(start:i-1))
-    READ(tmp, *, IOSTAT=parse_err) vals(n)
-    IF (parse_err /= 0) THEN
-      ierr = parse_err
-      RETURN
-    END IF
-    start = i + 1
-  END IF
+DO i = 1, LEN_TRIM(str)
+  c_str(i) = str(i:i)
 END DO
+c_str(LEN_TRIM(str)+1) = c_null_char
+ierr = INT(oft_xml_parse_real_array_c(c_str, vals, INT(SIZE(vals), c_int), shape_c), i4)
+IF (ierr == 0) THEN
+  shape(1) = INT(shape_c(1), i4)
+  shape(2) = INT(shape_c(2), i4)
+END IF
 END SUBROUTINE oft_xml_parse_real_array
 END MODULE oft_xml

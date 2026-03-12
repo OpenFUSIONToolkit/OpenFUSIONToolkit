@@ -1,1 +1,0 @@
-../python/convert_gmsh.py

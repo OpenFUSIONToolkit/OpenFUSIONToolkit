@@ -1,1 +1,0 @@
-../python/ThinCurr_compute_holes.py

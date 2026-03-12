@@ -1,1 +1,0 @@
-/usr/bin/gcc -fPIC -O2 -Werror=trampolines -Wl,-z,noexecstack -Wl,--dependency-file=CMakeFiles/oft_triangle.dir/link.d -shared -Wl,-soname,liboft_triangle.so -o ../bin/liboft_triangle.so CMakeFiles/oft_triangle.dir/triangle.c.o
