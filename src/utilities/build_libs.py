@@ -418,7 +418,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DOFT_ARPACK_ROOT:PATH={0}".format(mydict["ARPACK_ROOT"]))
     if "LIBXML2_ROOT" in mydict:
         cmake_lines.append("-DLIBXML2_ROOT:PATH={0}".format(mydict["LIBXML2_ROOT"]))
-    elif "FOX_ROOT" in mydict:
+    if "FOX_ROOT" in mydict:
         cmake_lines.append("-DOFT_FoX_ROOT:PATH={0}".format(mydict["FOX_ROOT"]))
     if "ONURBS_ROOT" in mydict:
         cmake_lines.append("-DOFT_OpenNURBS_ROOT:PATH={0}".format(mydict["ONURBS_ROOT"]))
@@ -2142,7 +2142,7 @@ group.add_argument("--metis_wrapper", action="store_true", default=False, help="
 group = parser.add_argument_group("XML", "XML package options")
 group.add_argument("--build_libxml2", default=1, type=int, choices=(0,1), help="Build Libxml2 library? (default: 1)")
 group.add_argument("--libxml2_static", action="store_true", default=False, help="Build and link Libxml2 statically?")
-group.add_argument("--build_fox", default=0, type=int, choices=(0,1), help="Build Fox XML library? (default: 1)")
+group.add_argument("--build_fox", default=1, type=int, choices=(0,1), help="Build Fox XML library? (default: 1)")
 #
 group = parser.add_argument_group("OpenNURBS", "OpenNURBS package options")
 group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="Build OpenNURBS library? (default: 0)")
@@ -2185,9 +2185,9 @@ fetch_progress = options.no_dl_progress
 build_cmake_ver = None
 if options.build_cmake == 1:
     build_cmake_ver = CMAKE().version
-if (options.build_libxml2 == 1) and (options.build_fox == 1):
-    parser.exit(-1, '"--build_libxml2" and "--build_fox" cannot be specified together\n')
-elif (options.build_libxml2 == 0) and (options.build_fox == 0):
+# if (options.build_libxml2 == 1) and (options.build_fox == 1):
+#     parser.exit(-1, '"--build_libxml2" and "--build_fox" cannot be specified together\n')
+if (options.build_libxml2 == 0) and (options.build_fox == 0):
     parser.exit(-1, 'One of "--build_libxml2" or "--build_fox" must be specified\n')
 config_dict = setup_build_env(build_cmake_ver=build_cmake_ver)
 config_dict['DOWN_ONLY'] = options.download_only
