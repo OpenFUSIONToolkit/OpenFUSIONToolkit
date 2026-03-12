@@ -18,4 +18,10 @@
 
 # Workflow products
 src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/IODATA*
-src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/__pycache__*
+src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/__pycache__
+
+# Build/environment artifacts
+/libs/
+/oft_venv/
+/compiler_id.txt
+/setup_env.sh
