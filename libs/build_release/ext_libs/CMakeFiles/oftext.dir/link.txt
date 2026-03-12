@@ -1,0 +1,2 @@
+/usr/bin/ar qc liboftext.a CMakeFiles/oftext.dir/dlsode.f.o CMakeFiles/oftext.dir/lmdif.f.o CMakeFiles/oftext.dir/bvls.f90.o CMakeFiles/oftext.dir/dqagse.f.o CMakeFiles/oftext.dir/dqelg.f.o CMakeFiles/oftext.dir/dqk21.f.o CMakeFiles/oftext.dir/dqpsrt.f.o
+/usr/bin/ranlib liboftext.a

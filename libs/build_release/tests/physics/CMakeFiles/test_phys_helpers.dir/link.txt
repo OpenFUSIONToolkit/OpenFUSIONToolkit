@@ -1,0 +1,2 @@
+/usr/bin/ar qc libtest_phys_helpers.a CMakeFiles/test_phys_helpers.dir/test_phys_helpers.F90.o
+/usr/bin/ranlib libtest_phys_helpers.a

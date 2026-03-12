@@ -1,0 +1,16 @@
+# SuiteSparse_config, Copyright (c) 2012-2023, Timothy A. Davis.
+# All Rights Reserved.
+# SPDX-License-Identifier: BSD-3-clause
+
+prefix=/home/runner/work/OpenFUSIONToolkit/OpenFUSIONToolkit/libs/UMFPACK-6_3_5
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include/suitesparse
+
+Name: SuiteSparseConfig
+URL: https://github.com/DrTimothyAldenDavis/SuiteSparse
+Description: Configuration for SuiteSparse
+Version: 7.10.1
+Libs: -L${libdir} -lsuitesparseconfig
+Libs.private:  -lm -lgomp -lpthread
+Cflags: -I${includedir}

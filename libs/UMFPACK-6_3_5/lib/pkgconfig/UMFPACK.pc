@@ -1,0 +1,17 @@
+# UMFPACK, Copyright (c) 1995-2024, Timothy A. Davis.
+# All Rights Reserved.
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+prefix=/home/runner/work/OpenFUSIONToolkit/OpenFUSIONToolkit/libs/UMFPACK-6_3_5
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include/suitesparse
+
+Name: UMFPACK
+URL: https://github.com/DrTimothyAldenDavis/SuiteSparse
+Description: Routines solving sparse linear systems via LU factorization in SuiteSparse
+Version: 6.3.5
+Requires.private: SuiteSparse_config AMD 
+Libs: -L${libdir} -lumfpack
+Libs.private:  -lm -lopenblas
+Cflags: -I${includedir}

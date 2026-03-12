@@ -1,0 +1,2 @@
+/usr/bin/ar qc liboftbase.a CMakeFiles/oftbase.dir/oft_local_c.c.o CMakeFiles/oftbase.dir/oft_xml_c.c.o CMakeFiles/oftbase.dir/oft_sort_c.cxx.o CMakeFiles/oftbase.dir/spline.f.o CMakeFiles/oftbase.dir/oft_local.F90.o CMakeFiles/oftbase.dir/oft_base.F90.o CMakeFiles/oftbase.dir/oft_sort.F90.o CMakeFiles/oftbase.dir/oft_io.F90.o CMakeFiles/oftbase.dir/oft_stitching.F90.o CMakeFiles/oftbase.dir/oft_xml.F90.o
+/usr/bin/ranlib liboftbase.a

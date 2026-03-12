@@ -1,0 +1,27 @@
+# The fortran modules provided by this target.
+provides
+ bezier_cad.mod
+ multigrid.mod
+ multigrid_build.mod
+ nurbs_cad.mod
+ oft_gauss_quadrature.mod
+ oft_hexmesh_type.mod
+ oft_lag_poly.mod
+ oft_mesh_cube.mod
+ oft_mesh_cubit.mod
+ oft_mesh_global.mod
+ oft_mesh_global_util.mod
+ oft_mesh_gmsh.mod
+ oft_mesh_local.mod
+ oft_mesh_local_util.mod
+ oft_mesh_native.mod
+ oft_mesh_sphere.mod
+ oft_mesh_t3d.mod
+ oft_mesh_type.mod
+ oft_quadmesh_type.mod
+ oft_quadrature.mod
+ oft_tet_quadrature.mod
+ oft_tetmesh_type.mod
+ oft_trimesh_type.mod
+ tetmesh_tessellation.mod
+ trimesh_tessellation.mod

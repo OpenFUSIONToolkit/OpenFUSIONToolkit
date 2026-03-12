@@ -1,0 +1,12 @@
+prefix=/home/runner/work/OpenFUSIONToolkit/OpenFUSIONToolkit/libs/arpack-ng-3_9_1
+exec_prefix=${prefix}
+libdir=/home/runner/work/OpenFUSIONToolkit/OpenFUSIONToolkit/libs/arpack-ng-3_9_1/lib
+includedir=/home/runner/work/OpenFUSIONToolkit/OpenFUSIONToolkit/libs/arpack-ng-3_9_1/include/arpack
+
+Name: arpack
+Description: Collection of Fortran77 subroutines designed to solve large scale eigenvalue problems
+Version: 3.9.1
+URL: https://github.com/opencollab/arpack-ng/
+Libs: -L${libdir} -larpack
+Libs.private: -lopenblas
+Cflags: -I${includedir}

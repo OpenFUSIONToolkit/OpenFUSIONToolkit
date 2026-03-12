@@ -1,0 +1,48 @@
+#!/bin/bash
+
+log_path=$1
+ROOT_PATH=$(pwd)
+
+run_test() {
+  cd $1
+  jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=python3 $2 > tmp.log 2>&1
+  if [ $? -ne 0 ]; then
+    echo "Example TokaMaker/$1/$2 failed."
+    echo "" >> $log_path
+    echo "====== Begin TokaMaker/$1/$2 output ======" >> $log_path
+    cat tmp.log >> $log_path
+    echo "======  End TokaMaker/$1/$2 output  ======" >> $log_path
+    echo "" >> $log_path
+  else
+    echo "Example TokaMaker/$1/$2 ran successfully."
+  fi
+  rm tmp.log
+  cd $ROOT_PATH
+}
+
+# Fixed boundary cases
+run_test fixed_boundary fixed_boundary_ex1.ipynb
+run_test fixed_boundary fixed_boundary_ex2.ipynb
+
+# CUTE cases
+run_test CUTE CUTE_mesh_ex.ipynb
+run_test CUTE CUTE_VDE_ex.ipynb
+
+# HBT cases
+run_test HBT HBT_mesh_ex.ipynb
+run_test HBT HBT_eq_ex.ipynb
+
+# ITER cases
+run_test ITER ITER_mesh_ex.ipynb
+run_test ITER ITER_baseline_ex.ipynb
+run_test ITER ITER_disruption_forces.ipynb
+run_test ITER ITER_reconstruction_ex.ipynb
+run_test ITER ITER_Hmode_ex.ipynb
+
+# LTX cases
+run_test LTX LTX_mesh_ex.ipynb
+run_test LTX LTX_eq_ex.ipynb
+
+# Advanced workflow cases
+run_test AdvancedWorkflows/Pulse_Design CUTE_pulse_ex.ipynb 
+# run_test AdvancedWorkflows/IsofluxController NSTXU_shape_control_simulator.ipynb 
