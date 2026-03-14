@@ -44,7 +44,7 @@ TYPE(oft_blag_zerob), TARGET :: blag_zerob ! setting boundary vals to zero
 !---Mass matrix solver
 TYPE(poss_scalar_bfield) :: field_init
 CLASS(oft_solver), POINTER :: minv => NULL()
-CLASS(oft_matrix), POINTER :: mop => NULL()
+CLASS(oft_matrix), POINTER :: mop => NULL(), mop_bc => NULL()
 CLASS(oft_vector), POINTER :: u,v
 !!\subsection doc_mug2d_recon_ex_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
@@ -103,10 +103,12 @@ blag_zerob%ML_lag_rep=>ML_oft_blagrange
 !---------------------------------------------------------------------------
 !---Generate mass matrix
 NULLIFY(u, v,mop,vec_vals) ! Ensure the matrix is unallocated (pointer is NULL)
-CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
+CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop) ! Construct mass matrix with "none" BC
+CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop_bc, ML_oft_blagrange%current_level%global%gbe) ! Construct mass matrix with "none" BC
 !---Setup linear solver
 CALL create_cg_solver(minv)
 minv%A=>mop ! Set matrix to be solved
+CALL mop_bc%save('mass_mat.h5', 'massmat')
 minv%its=-2 ! Set convergence type (in this case "full" CG convergence)
 CALL create_diag_pre(minv%pre) ! Setup Preconditioner
 !---Create fields for solver

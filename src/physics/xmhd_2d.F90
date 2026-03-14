@@ -552,7 +552,7 @@ self%mfun%by_bc=>self%by_bc
 
 ! Construct the linear advance matrix with equilibrium fields
 CALL build_approx_jacobian(self,self%u0)
-CALL self%jacobian%save('lin_ops.h5', 'jacobian')
+CALL self%jacobian%save('lin_ops.h5', 'jacobian', bc_flags=[self%n_bc,self%velx_bc,self%vely_bc,self%velz_bc,self%T_bc,self%psi_bc,self%by_bc])
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
@@ -1475,10 +1475,10 @@ DO i=1,mesh%nc
         ELSE
           IF (linear) THEN
             jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
-            + self%dt*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel, dT)/(n*(gamma-1))&
-            + self%dt*basis_vals(jr)*basis_vals(jc)*k_boltz*T*div_vel/n &
-            - self%dt*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:, jr), dT)/n &
-            - self%dt*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)/(n**2) 
+            + self%dt*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel, dT)*int_factor/(n*(gamma-1))&
+            + self%dt*basis_vals(jr)*basis_vals(jc)*k_boltz*T*div_vel*int_factor/n &
+            - self%dt*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:, jr), dT)*int_factor/n &
+            - self%dt*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor/(n**2) 
           ELSE
             jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
             - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*int_factor/n & ! grad(delta_n) 
@@ -1723,11 +1723,11 @@ CALL self%fe_rep%vec_create(self%u)
 CALL self%fe_rep%vec_create(self%u0)
 ! Boundary condition flag-setting
 ! ALLOCATE(cell_dofs(oft_blagrange%nce))
-ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.FALSE.
+! ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.FALSE.
 ! ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.TRUE.
 ! ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
 ! ALLOCATE(self%velz_bc(oft_blagrange%ne)); self%velz_bc=.TRUE.
-ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.FALSE.
+! ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.FALSE.
 ! ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.FALSE.
 ! ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.FALSE.
 
@@ -1804,6 +1804,77 @@ DO j=1, SIZE(cell_dofs)
 END DO
 end subroutine apply_supercond_bcs
 
+!---------------------------------------------------------------------------
+!> Plot the current solution state using XDMF/HDF5 output
+!---------------------------------------------------------------------------
+! subroutine plot(self)
+! class(oft_xmhd_2d_sim), intent(inout) :: self
+! class(multigrid_mesh), pointer :: mg_mesh
+! class(mesh), pointer :: mesh
+! class(oft_blagrange), pointer :: oft_blagrange
+! class(oft_vector), pointer :: grad_psi%u,ux,uy,uz,v_lag
+! class(oft_matrix), pointer :: lmop
+! real(r8), pointer :: plot_vals(:),plot_vec(:,:)
+! !---Solver objects
+! CLASS(oft_solver), POINTER :: lminv => NULL()
+! class(oft_vector), pointer :: u,v,up
+! !---------------------------------------------------------------------------
+! ! Create solver fields
+! !---------------------------------------------------------------------------
+! call self%fe_rep%vec_create(u)
+! call self%fe_rep%vec_create(up)
+! call self%fe_rep%vec_create(v)
+! !---
+! call oft_blagrange%vec_create(grad_psi%u)
+! call oft_blagrange%vec_create(ux)
+! call oft_blagrange%vec_create(uy)
+! call oft_blagrange%vec_create(uz)
+! call oft_blagrange%vec_create(v_lag)
+! NULLIFY(lmop)
+! call oft_blag_getmop(oft_blagrange,lmop)
+! CALL create_cg_solver(lminv)
+! lminv%A=>lmop
+! lminv%its=-2
+! CALL create_diag_pre(lminv%pre)
+
+! ALLOCATE(plot_vec(3,v_lag%n))
+! CALL self%xdmf_plot%add_timestep(self%t)
+! CALL self%u%get_local(plot_vals,1)
+! plot_vals = plot_vals*self%den_scale
+! CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
+! CALL self%u%get_local(plot_vals,2)
+! plot_vec(1,:)=plot_vals
+! CALL self%u%get_local(plot_vals,3)
+! plot_vec(3,:)=plot_vals
+! CALL self%u%get_local(plot_vals,4)
+! plot_vec(2,:)=plot_vals
+! CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
+! CALL self%u%get_local(plot_vals,5)
+! CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
+! CALL self%u%get_local(plot_vals,6)
+! CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
+! CALL grad_psi%u%restore_local(plot_vals)
+
+! !------------------------------------------------------------------------------
+! ! Project magnetic field and plot
+! !------------------------------------------------------------------------------
+! CALL grad_psi%setup(oft_blagrange)
+! CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
+! CALL v_lag%set(0.d0)
+! CALL lminv%apply(v_lag,ux)
+! CALL ux%add(0.d0,1.d0,v_lag)
+! CALL v_lag%set(0.d0)
+! CALL lminv%apply(v_lag,uy)
+! CALL uy%add(0.d0,1.d0,v_lag)
+! !
+! CALL uy%get_local(plot_vals)
+! plot_vec(1,:)=-plot_vals
+! CALL self%u%get_local(plot_vals,7)
+! plot_vec(2,:)=plot_vals
+! CALL ux%get_local(plot_vals)
+! plot_vec(3,:)=plot_vals
+! CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
+! end subroutine plot
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
 !---------------------------------------------------------------------------

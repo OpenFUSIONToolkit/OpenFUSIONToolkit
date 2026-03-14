@@ -597,6 +597,8 @@ contains
   procedure(mat_zero), deferred :: zero
   !> Zero all elements in a given row
   procedure(mat_zero_rows), deferred :: zero_rows
+  !> Save matrix elements in CSR form
+  procedure :: save => matrix_save
   !> Delete matrix
   procedure :: delete => matrix_delete
 end type oft_matrix
@@ -949,6 +951,19 @@ subroutine matrix_delete(self)
 class(oft_matrix), intent(inout) :: self
 call oft_warn('Finalizing general real matrix, this may indicate an error.')
 end subroutine matrix_delete
+!---------------------------------------------------------------------------------
+!> Save matrix
+!!
+!! @note This subroutine is a dummy routine used to specify the interface
+!! of the member function and catch errors in uninitialized matrices.
+!---------------------------------------------------------------------------------
+subroutine matrix_save(self, filename, path, bc_flags)
+class(oft_matrix), intent(inout) :: self
+character(LEN=*), intent(in) :: filename !< Name of restart file
+character(LEN=*), intent(in) :: path !< Path to store solution vector in file
+logical, intent(in), optional, dimension(:) :: bc_flags
+call oft_abort('No matrix save implemented for this matrix type', 'matrix_save', __FILE__)
+end subroutine matrix_save
 !---------------------------------------------------------------------------------
 !> Compute matrix vector product
 !!
