@@ -3147,7 +3147,7 @@ CALL native_vector_slice_push(outvec,global_le,rst_info)
 CALL hdf5_write(rst_info,filename,path)
 IF(self%n_vcoils>0)THEN
   allocate(pcoil_vals(self%n_vcoils))
-  pcoil_vals=outvec%v(self%np_active+self%nholes:self%nelems)
+  pcoil_vals=outvec%v(self%np_active+self%nholes+1:self%nelems)
   CALL hdf5_write(pcoil_vals,filename,path//"_Vcoils")
   deallocate(pcoil_vals)
 END IF
