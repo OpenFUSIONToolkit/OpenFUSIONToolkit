@@ -1725,11 +1725,11 @@ CALL self%fe_rep%vec_create(self%u0)
 ! ALLOCATE(cell_dofs(oft_blagrange%nce))
 ! ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.FALSE.
 ! ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.TRUE.
-! ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
+ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
 ! ALLOCATE(self%velz_bc(oft_blagrange%ne)); self%velz_bc=.TRUE.
 ! ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.FALSE.
 ! ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.FALSE.
-! ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.FALSE.
+ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.TRUE.
 
 !---Set any BCs that are not yet set
 IF(.NOT.ASSOCIATED(self%n_bc))self%n_bc=>oft_blagrange%global%gbe
