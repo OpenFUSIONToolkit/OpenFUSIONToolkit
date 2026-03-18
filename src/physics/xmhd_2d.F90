@@ -1771,117 +1771,95 @@ END IF
 DEBUG_STACK_POP
 end subroutine rst_save
 
-subroutine apply_mhd_bcs(self,cell_ind, cell_dofs)
-class(oft_xmhd_2d_sim), intent(inout) :: self
-integer(i4) , intent(in) :: cell_ind
-INTEGER(i4), POINTER, DIMENSION(:), intent(inout) :: cell_dofs
-end subroutine apply_mhd_bcs
-
-subroutine apply_cond_bcs(self,cell_ind, cell_dofs)
-class(oft_xmhd_2d_sim), intent(inout) :: self
-INTEGER(i4) , intent(in) :: cell_ind
-INTEGER(i4), POINTER, DIMENSION(:), intent(inout) :: cell_dofs
-INTEGER(i4) :: j
-call oft_blagrange%ncdofs(cell_ind,cell_dofs) ! Get global index of local DOFs
-DO j=1, SIZE(cell_dofs)
-  self%n_bc(cell_dofs(j)) = .TRUE. ! prevent density evolution in solid conductor
-  self%velx_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in solid conductor
-  self%vely_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in solid conductor
-  self%velz_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in solid conductor
-  self%T_bc(cell_dofs(j)) = .TRUE. ! prevent temperature evolution in solid conductor
-  !self%psi_bc(cell_dofs(j)) = .TRUE. ! prevent psi evolution in superconductor
-  !self%by_bc(cell_dofs(j)) = .TRUE. ! prevent by evolution in superconductor
-END DO
-end subroutine apply_cond_bcs
-
-subroutine apply_supercond_bcs(self,cell_ind, cell_dofs)
-class(oft_xmhd_2d_sim), intent(inout) :: self
-INTEGER(i4) , intent(in) :: cell_ind
-INTEGER(i4), POINTER, DIMENSION(:), intent(inout) :: cell_dofs
-INTEGER(i4) :: j
-call oft_blagrange%ncdofs(cell_ind,cell_dofs) ! Get global index of local DOFs
-DO j=1, SIZE(cell_dofs)
-  self%n_bc(cell_dofs(j)) = .TRUE. ! prevent density evolution in superconductor
-  self%velx_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in superconductor
-  self%vely_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in superconductor
-  self%velz_bc(cell_dofs(j)) = .TRUE. ! prevent velocity evolution in superconductor
-  self%T_bc(cell_dofs(j)) = .TRUE. ! prevent temperature evolution in superconductor
-  self%psi_bc(cell_dofs(j)) = .TRUE. ! prevent psi evolution in superconductor
-  self%by_bc(cell_dofs(j)) = .TRUE. ! prevent by evolution in superconductor
-END DO
-end subroutine apply_supercond_bcs
-
 !---------------------------------------------------------------------------
 !> Plot the current solution state using XDMF/HDF5 output
+!! Runtime options are set in the main input file using the group `xmhd_plot_options`.
+!! **Option group:** `xmhd_plot_options`
+!! |  Option    |  Description  | Type [dim] |
+!! |------------|---------------|------------|
+!! | `rst_start=0`      | First restart file to read | int |
+!! | `rst_end=2000`     | Last restart file to read | int |
+!------------------------------------------------------------------------------
 !---------------------------------------------------------------------------
-! subroutine plot(self)
-! class(oft_xmhd_2d_sim), intent(inout) :: self
-! class(multigrid_mesh), pointer :: mg_mesh
-! class(mesh), pointer :: mesh
-! class(oft_blagrange), pointer :: oft_blagrange
-! class(oft_vector), pointer :: grad_psi%u,ux,uy,uz,v_lag
-! class(oft_matrix), pointer :: lmop
-! real(r8), pointer :: plot_vals(:),plot_vec(:,:)
-! !---Solver objects
-! CLASS(oft_solver), POINTER :: lminv => NULL()
-! class(oft_vector), pointer :: u,v,up
-! !---------------------------------------------------------------------------
-! ! Create solver fields
-! !---------------------------------------------------------------------------
-! call self%fe_rep%vec_create(u)
-! call self%fe_rep%vec_create(up)
-! call self%fe_rep%vec_create(v)
-! !---
-! call oft_blagrange%vec_create(grad_psi%u)
-! call oft_blagrange%vec_create(ux)
-! call oft_blagrange%vec_create(uy)
-! call oft_blagrange%vec_create(uz)
-! call oft_blagrange%vec_create(v_lag)
-! NULLIFY(lmop)
-! call oft_blag_getmop(oft_blagrange,lmop)
-! CALL create_cg_solver(lminv)
-! lminv%A=>lmop
-! lminv%its=-2
-! CALL create_diag_pre(lminv%pre)
+subroutine xmhd_2d_plot(self)
+class(oft_xmhd_2d_sim), intent(inout) :: self
+class(oft_vector), pointer :: ux,uy,uz,v_lag
+type(oft_lag_bginterp) :: grad_psi
+class(oft_matrix), pointer :: lmop => NULL()
+real(r8), pointer :: plot_vals(:),plot_vec(:,:)
+!---Solver objects
+CLASS(oft_solver), POINTER :: lminv => NULL()
+class(oft_vector), pointer :: u,v,up
+INTEGER(i4) :: rst_start=0
+INTEGER(i4) :: rst_end=2000
+namelist/xmhd_plot_options/rst_start,rst_end
+!---------------------------------------------------------------------------
+! Read plotting options
+!---------------------------------------------------------------------------
+open(NEWUNIT=io_unit,FILE=oft_env%ifile)
+read(io_unit,xmhd_plot_options,IOSTAT=ierr)
+close(io_unit)
+!---------------------------------------------------------------------------
+! Create solver fields
+!---------------------------------------------------------------------------
+call self%fe_rep%vec_create(u)
+call self%fe_rep%vec_create(up)
+call self%fe_rep%vec_create(v)
+!---
+call oft_blagrange%vec_create(grad_psi%u)
+call oft_blagrange%vec_create(ux)
+call oft_blagrange%vec_create(uy)
+call oft_blagrange%vec_create(uz)
+call oft_blagrange%vec_create(v_lag)
+NULLIFY(lmop)
+call oft_blag_getmop(oft_blagrange,lmop)
+CALL create_cg_solver(lminv)
+lminv%A=>lmop
+lminv%its=-2
+CALL create_diag_pre(lminv%pre)
+!---------------------------------------------------------------------------
+! Loop through rst files
+!---------------------------------------------------------------------------
 
-! ALLOCATE(plot_vec(3,v_lag%n))
-! CALL self%xdmf_plot%add_timestep(self%t)
-! CALL self%u%get_local(plot_vals,1)
-! plot_vals = plot_vals*self%den_scale
-! CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
-! CALL self%u%get_local(plot_vals,2)
-! plot_vec(1,:)=plot_vals
-! CALL self%u%get_local(plot_vals,3)
-! plot_vec(3,:)=plot_vals
-! CALL self%u%get_local(plot_vals,4)
-! plot_vec(2,:)=plot_vals
-! CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
-! CALL self%u%get_local(plot_vals,5)
-! CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
-! CALL self%u%get_local(plot_vals,6)
-! CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
-! CALL grad_psi%u%restore_local(plot_vals)
 
-! !------------------------------------------------------------------------------
-! ! Project magnetic field and plot
-! !------------------------------------------------------------------------------
-! CALL grad_psi%setup(oft_blagrange)
-! CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
-! CALL v_lag%set(0.d0)
-! CALL lminv%apply(v_lag,ux)
-! CALL ux%add(0.d0,1.d0,v_lag)
-! CALL v_lag%set(0.d0)
-! CALL lminv%apply(v_lag,uy)
-! CALL uy%add(0.d0,1.d0,v_lag)
-! !
-! CALL uy%get_local(plot_vals)
-! plot_vec(1,:)=-plot_vals
-! CALL self%u%get_local(plot_vals,7)
-! plot_vec(2,:)=plot_vals
-! CALL ux%get_local(plot_vals)
-! plot_vec(3,:)=plot_vals
-! CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
-! end subroutine plot
+ALLOCATE(plot_vec(3,v_lag%n))
+CALL self%xdmf_plot%add_timestep(self%t)
+CALL self%u%get_local(plot_vals,1)
+plot_vals = plot_vals*self%den_scale
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
+CALL self%u%get_local(plot_vals,2)
+plot_vec(1,:)=plot_vals
+CALL self%u%get_local(plot_vals,3)
+plot_vec(3,:)=plot_vals
+CALL self%u%get_local(plot_vals,4)
+plot_vec(2,:)=plot_vals
+CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
+CALL self%u%get_local(plot_vals,5)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
+CALL self%u%get_local(plot_vals,6)
+CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
+CALL grad_psi%u%restore_local(plot_vals)
+
+!------------------------------------------------------------------------------
+! Project magnetic field and plot
+!------------------------------------------------------------------------------
+CALL grad_psi%setup(oft_blagrange)
+CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
+CALL v_lag%set(0.d0)
+CALL lminv%apply(v_lag,ux)
+CALL ux%add(0.d0,1.d0,v_lag)
+CALL v_lag%set(0.d0)
+CALL lminv%apply(v_lag,uy)
+CALL uy%add(0.d0,1.d0,v_lag)
+!
+CALL uy%get_local(plot_vals)
+plot_vec(1,:)=-plot_vals
+CALL self%u%get_local(plot_vals,7)
+plot_vec(2,:)=plot_vals
+CALL ux%get_local(plot_vals)
+plot_vec(3,:)=plot_vals
+CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
+end subroutine xmhd_2d_plot
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
 !---------------------------------------------------------------------------
