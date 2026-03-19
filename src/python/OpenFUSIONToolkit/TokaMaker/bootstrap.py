@@ -482,11 +482,11 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             p1 = 1.2
         else:
             p1 = 0.8
-    else:   
+    else:
         if err0 < 0:
-            p1 = 1.1
+            p1 = 1.01
         else:
-            p1 = 0.9
+            p1 = 0.99
     
     if find_j0:
         err1, rel_err1, res_jphi = get_j0_error(p1, 1)
