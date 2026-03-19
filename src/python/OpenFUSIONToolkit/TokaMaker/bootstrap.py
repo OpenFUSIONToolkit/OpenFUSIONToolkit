@@ -293,21 +293,35 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     # Attempt to fit bootstrap parameterization to calculated profile (deprecated)
     # Initial parameter guess
     sigma_init = fwhm/2.355  # Convert FWHM to sigma
-    p0 = [peak_height, peak_psi, sigma_init, lmin_j_BS, 1.0, j_bootstrap[-1], 0.05]
+    p0 = [peak_height, peak_psi, sigma_init, lmin_j_BS, 1.0,
+          max(0.0, j_bootstrap[-1]), 0.05]
 
-    lower_bounds = [0.99*peak_height, # fix to measured spike height
-                    0.8*peak_psi, # don't fix to measured spike location
-                    0.0, # width
-                    0.99*lmin_j_BS,
-                    -50,
-                    0.0,
-                    0.001]
-    upper_bounds = [1.01*peak_height, # fix to measured spike height
-                    1.2*peak_psi, # don't fix to measured spike location
-                    0.33, # no spikes wider than 0.33 units of psi_N 
-                    1.01*lmin_j_BS,
-                    50, # sk
-                    2*j_bootstrap[-1],
+    # Guard against degenerate bounds when peak_height, lmin_j_BS,
+    # or j_bootstrap[-1] are near zero or negative (common for low-
+    # pedestal L-mode-like profiles in an LH transition scan).
+    _eps = max(1e-6, 1e-3 * abs(peak_height)) if peak_height != 0 else 1e-6
+    amp_lo = min(0.99 * peak_height, peak_height - _eps)
+    amp_hi = max(1.01 * peak_height, peak_height + _eps)
+
+    _eps_off = max(1e-6, 1e-3 * abs(lmin_j_BS)) if lmin_j_BS != 0 else 1e-6
+    off_lo = min(0.99 * lmin_j_BS, lmin_j_BS - _eps_off)
+    off_hi = max(1.01 * lmin_j_BS, lmin_j_BS + _eps_off)
+
+    ysep_hi = max(2 * abs(j_bootstrap[-1]), abs(j_bootstrap[-1]) + 1e-6, 1e-6)
+
+    lower_bounds = [amp_lo,
+                    0.8*peak_psi,
+                    0.0,       # width
+                    off_lo,
+                    -50,       # sk
+                    0.0,       # y_sep
+                    0.001]     # blend_width
+    upper_bounds = [amp_hi,
+                    1.2*peak_psi,
+                    0.33,
+                    off_hi,
+                    50,        # sk
+                    ysep_hi,
                     0.2]
 
     # Perform the fit
