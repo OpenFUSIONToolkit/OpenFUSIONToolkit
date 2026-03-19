@@ -807,7 +807,8 @@ def solve_with_bootstrap(mygs,
                          iterations=3,
                          diagnostic_plots=False,
                          parameterize_jBS = False,
-                         use_OMFIT_sauter = False):
+                         use_OMFIT_sauter = False,
+                         verbose = True):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
@@ -980,7 +981,8 @@ def solve_with_bootstrap(mygs,
                                 method='brentq', rtol=1e-6)
             alpha_opt = sol.root
         except ValueError:
-            print("WARNING: Root scalar failed to bracket. Defaulting to alpha=1.0")
+            if verbose:
+                print("WARNING: Root scalar failed to bracket. Defaulting to alpha=1.0")
             alpha_opt = 1.0
 
         matched_j_inductive = alpha_opt * current_jphi_target
@@ -997,7 +999,8 @@ def solve_with_bootstrap(mygs,
 
     if inductive_jphi is not None:
         
-        print('\n >>> Matching input core j_phi with G-S solution')
+        if verbose:
+            print('\n >>> Matching input core j_phi with G-S solution')
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
@@ -1023,24 +1026,26 @@ def solve_with_bootstrap(mygs,
         # Enforce P' edge condition
         pp_prof['y'][-1] = 0.
         
-        print('\n >>> Finding optimal j_phi scale factor')
+        if verbose:
+            print('\n >>> Finding optimal j_phi scale factor')
         # Find optimal jphi scale
         final_scale_j0, final_jphi = find_optimal_scale(mygs,
-            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive, 
-            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=True, 
-            diagnostic_plots=diagnostic_plots
+            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
+            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=True,
+            diagnostic_plots=diagnostic_plots, verbose=verbose
         )
-        #  final_scale_j0 = 1.0
-        print('\n >>> Finding optimal Ip scale factor')
+        if verbose:
+            print('\n >>> Finding optimal Ip scale factor')
         # Find optimal Ip_target scale
         final_scale_Ip, _ = find_optimal_scale(mygs,
-            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive, 
-            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=False, 
-            scale_j0=final_scale_j0, 
-            tolerance=0.001, diagnostic_plots=diagnostic_plots
+            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
+            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=False,
+            scale_j0=final_scale_j0,
+            tolerance=0.001, diagnostic_plots=diagnostic_plots, verbose=verbose
         )
         
-        print('\n >>> Iterating on H-mode equilibrium solution')
+        if verbose:
+            print('\n >>> Iterating on H-mode equilibrium solution')
 
         for n in range(iterations):            
             # Calculate new profiles
