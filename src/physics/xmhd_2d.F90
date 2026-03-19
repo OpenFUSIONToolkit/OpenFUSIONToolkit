@@ -6,6 +6,9 @@
 !> Solve time-dependent MHD equations with lagrange basis
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
+#if !defined(XMHD_RST_LEN)
+#define XMHD_RST_LEN 5
+#endif
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_field_exist, oft_bin_file, xdmf_plot_file
@@ -140,6 +143,7 @@ CLASS(multigrid_mesh), POINTER :: mg_mesh => NULL()
 CLASS(oft_bmesh), POINTER, PUBLIC :: mesh => NULL()
 TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_blagrange
 CLASS(oft_scalar_bfem), POINTER :: oft_blagrange => NULL()
+PUBLIC xmhd_2d_plot
 CONTAINS
 subroutine run_simulation(self)
 class(oft_xmhd_2d_sim), target, intent(inout) :: self
@@ -153,11 +157,6 @@ TYPE(oft_bin_file) :: hist_file
 integer(i4) :: hist_i4(3)
 real(4) :: hist_r4(9)
 !---
-CLASS(oft_matrix), POINTER :: lmop => NULL()
-CLASS(oft_solver), POINTER :: lminv => NULL()
-class(oft_vector), pointer :: ux,uy,uz,v_lag
-type(oft_lag_bginterp) :: grad_psi
-TYPE(poss_scalar_bfield) :: field_init
 !---Extrapolation fields
 integer(i4), parameter :: maxextrap=2
 integer(i4) :: nextrap
@@ -176,17 +175,6 @@ call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)
 !---
-call oft_blagrange%vec_create(grad_psi%u)
-call oft_blagrange%vec_create(ux)
-call oft_blagrange%vec_create(uy)
-call oft_blagrange%vec_create(uz)
-call oft_blagrange%vec_create(v_lag)
-NULLIFY(lmop)
-call oft_blag_getmop(oft_blagrange,lmop)
-CALL create_cg_solver(lminv)
-lminv%A=>lmop
-lminv%its=-2
-CALL create_diag_pre(lminv%pre)
 
 ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
 DO i=1,maxextrap
@@ -201,43 +189,6 @@ CALL u%add(0.d0,1.d0,self%u)
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
-NULLIFY(plot_vals)
-ALLOCATE(plot_vec(3,v_lag%n))
-CALL self%xdmf_plot%add_timestep(self%t)
-CALL self%u%get_local(plot_vals,1)
-plot_vals = plot_vals*self%den_scale
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
-CALL self%u%get_local(plot_vals,2)
-plot_vec(1,:)=plot_vals
-CALL self%u%get_local(plot_vals,3)
-plot_vec(3,:)=plot_vals
-CALL self%u%get_local(plot_vals,4)
-plot_vec(2,:)=plot_vals
-CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
-CALL self%u%get_local(plot_vals,5)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
-CALL self%u%get_local(plot_vals,6)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
-CALL grad_psi%u%restore_local(plot_vals)
-!------------------------------------------------------------------------------
-! Project magnetic field and plot
-!------------------------------------------------------------------------------
-CALL grad_psi%setup(oft_blagrange)
-CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,ux)
-CALL ux%add(0.d0,1.d0,v_lag)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,uy)
-CALL uy%add(0.d0,1.d0,v_lag)
-!
-CALL uy%get_local(plot_vals)
-plot_vec(1,:)=-plot_vals
-CALL self%u%get_local(plot_vals,7)
-plot_vec(2,:)=plot_vals
-CALL ux%get_local(plot_vals)
-plot_vec(3,:)=plot_vals
-CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
 !---------------------------------------------------------------------------
 ! Setup non-linear solver
 !---------------------------------------------------------------------------
@@ -370,51 +321,13 @@ DO i=1,self%nsteps
     WRITE(rst_char,104)self%rst_base+i
     READ(rst_char,104,IOSTAT=io_stat)rst_tmp
     IF((io_stat/=0).OR.(rst_tmp/=self%rst_base+i))CALL oft_abort("Step count exceeds format width", "run_simulation", __FILE__)
-    CALL self%rst_save(u, self%t, self%dt, 'xhmd2d_'//rst_char//'.rst', 'U')
+    CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
       WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
       CALL hist_file%flush
     END IF
     !---
-    CALL self%xdmf_plot%add_timestep(self%t)
-    CALL self%u%get_local(plot_vals,1)
-    plot_vals = plot_vals*self%den_scale
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
-    CALL self%u%get_local(plot_vals,2)
-    plot_vec(1,:)=plot_vals
-    CALL self%u%get_local(plot_vals,3)
-    plot_vec(3,:)=plot_vals
-    CALL self%u%get_local(plot_vals,4)
-    plot_vec(2,:)=plot_vals
-    CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
-    CALL self%u%get_local(plot_vals,5)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
-    CALL self%u%get_local(plot_vals,6)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
-    CALL grad_psi%u%restore_local(plot_vals)
-    !------------------------------------------------------------------------------
-    ! Project magnetic field and plot
-    !------------------------------------------------------------------------------
-    CALL grad_psi%setup(oft_blagrange)
-    CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
-    CALL v_lag%set(0.d0)
-    CALL lminv%apply(v_lag,ux)
-    CALL ux%add(0.d0,1.d0,v_lag)
-    CALL v_lag%set(0.d0)
-    CALL lminv%apply(v_lag,uy)
-    CALL uy%add(0.d0,1.d0,v_lag)
-    !
-    CALL uy%get_local(plot_vals)
-    plot_vec(1,:)=-plot_vals
-    CALL self%u%get_local(plot_vals,7)
-    plot_vec(2,:)=plot_vals
-    CALL ux%get_local(plot_vals)
-    plot_vec(3,:)=plot_vals
-    plot_vec(1,:) = plot_vec(1,:)
-    plot_vec(2,:) = plot_vec(2,:)
-    plot_vec(3,:) = plot_vec(3,:)
-    CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
   END IF
   ! IF(nksolver%lits<4)THEN
   !   self%dt=self%dt*2.d0
@@ -446,11 +359,6 @@ TYPE(oft_bin_file) :: hist_file
 INTEGER(i4) :: hist_i4(1)
 REAL(4) :: hist_r4(9)
 !---
-CLASS(oft_matrix), POINTER :: lmop => NULL()
-CLASS(oft_solver), POINTER :: lminv => NULL()
-class(oft_vector), POINTER :: ux,uy,uz,v_lag
-type(oft_lag_bginterp) :: grad_psi
-TYPE(poss_scalar_bfield) :: field_init
 !---Extrapolation fields
 integer(i4), parameter :: maxextrap=2
 integer(i4) :: nextrap
@@ -473,17 +381,6 @@ call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)
 !---
-call oft_blagrange%vec_create(grad_psi%u)
-call oft_blagrange%vec_create(ux)
-call oft_blagrange%vec_create(uy)
-call oft_blagrange%vec_create(uz)
-call oft_blagrange%vec_create(v_lag)
-NULLIFY(lmop)
-call oft_blag_getmop(oft_blagrange,lmop)
-CALL create_cg_solver(lminv)
-lminv%A=>lmop
-lminv%its=-2
-CALL create_diag_pre(lminv%pre)
 
 ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
 DO i=1,maxextrap
@@ -498,44 +395,6 @@ CALL u%add(0.d0,1.d0,self%u)
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U0')
-NULLIFY(plot_vals)
-ALLOCATE(plot_vec(3,v_lag%n))
-CALL self%xdmf_plot%add_timestep(self%t)
-CALL self%u%get_local(plot_vals,1)
-plot_vals = plot_vals*self%den_scale
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
-CALL self%u%get_local(plot_vals,2)
-plot_vec(1,:)=plot_vals
-CALL self%u%get_local(plot_vals,3)
-plot_vec(3,:)=plot_vals
-CALL self%u%get_local(plot_vals,4)
-plot_vec(2,:)=plot_vals
-CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
-CALL self%u%get_local(plot_vals,5)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
-CALL self%u%get_local(plot_vals,6)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
-CALL grad_psi%u%restore_local(plot_vals)
-
-!------------------------------------------------------------------------------
-! Project magnetic field and plot
-!------------------------------------------------------------------------------
-CALL grad_psi%setup(oft_blagrange)
-CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,ux)
-CALL ux%add(0.d0,1.d0,v_lag)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,uy)
-CALL uy%add(0.d0,1.d0,v_lag)
-!
-CALL uy%get_local(plot_vals)
-plot_vec(1,:)=-plot_vals
-CALL self%u%get_local(plot_vals,7)
-plot_vec(2,:)=plot_vals
-CALL ux%get_local(plot_vals)
-plot_vec(3,:)=plot_vals
-CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
 
 ALLOCATE(self%mfun)
 self%mfun%B_0=self%B_0
@@ -630,44 +489,6 @@ DO i=1, self%nsteps
       CALL hist_file%flush
     END IF
     !---
-    CALL self%xdmf_plot%add_timestep(self%t)
-    CALL self%u%get_local(plot_vals,1)
-    plot_vals = plot_vals*self%den_scale
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
-    CALL self%u%get_local(plot_vals,2)
-    plot_vec(1,:)=plot_vals
-    CALL self%u%get_local(plot_vals,3)
-    plot_vec(3,:)=plot_vals
-    CALL self%u%get_local(plot_vals,4)
-    plot_vec(2,:)=plot_vals
-    CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
-    CALL self%u%get_local(plot_vals,5)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
-    CALL self%u%get_local(plot_vals,6)
-    CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
-    CALL grad_psi%u%restore_local(plot_vals)
-    !------------------------------------------------------------------------------
-    ! Project magnetic field and plot
-    !------------------------------------------------------------------------------
-    CALL grad_psi%setup(oft_blagrange)
-    CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
-    CALL v_lag%set(0.d0)
-    CALL lminv%apply(v_lag,ux)
-    CALL ux%add(0.d0,1.d0,v_lag)
-    CALL v_lag%set(0.d0)
-    CALL lminv%apply(v_lag,uy)
-    CALL uy%add(0.d0,1.d0,v_lag)
-    !
-    CALL uy%get_local(plot_vals)
-    plot_vec(1,:)=-plot_vals
-    CALL self%u%get_local(plot_vals,7)
-    plot_vec(2,:)=plot_vals
-    CALL ux%get_local(plot_vals)
-    plot_vec(3,:)=plot_vals
-    plot_vec(1,:) = plot_vec(1,:)
-    plot_vec(2,:) = plot_vec(2,:)
-    plot_vec(3,:) = plot_vec(3,:)
-    CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
   END IF
 END DO
 CALL hist_file%close()
@@ -675,7 +496,7 @@ CALL solver%delete()
 CALL u%delete()
 CALL up%delete()
 CALL v%delete()
-DEALLOCATE(u,up,v,plot_vals)
+DEALLOCATE(u,up,v)
 END SUBROUTINE run_lin_simulation
 !---------------------------------------------------------------------------
 !> Compute the mass matrix for RHS
@@ -1701,8 +1522,6 @@ END IF
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
 CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
 IF(.NOT.oft_2D_lagrange_cast(oft_blagrange,ML_oft_blagrange%current_level))CALL oft_abort("Invalid lagrange FE object","setup",__FILE__)
-CALL self%xdmf_plot%setup("xmhd_2d")
-CALL mesh%setup_io(self%xdmf_plot,order)
 
 !---Build composite FE definition for solution field
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
@@ -1791,7 +1610,13 @@ real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 CLASS(oft_solver), POINTER :: lminv => NULL()
 class(oft_vector), pointer :: u,v,up
 INTEGER(i4) :: rst_start=0
-INTEGER(i4) :: rst_end=2000
+INTEGER(i4) :: rst_end=3
+INTEGER(i4) :: rst_cur, rst_tmp, ierr, io_stat, io_unit
+CHARACTER(LEN=OFT_PATH_SLEN) :: file_tmp
+LOGICAL :: rst_exist
+real(r8) :: t
+TYPE(xdmf_plot_file) :: xdmf_plot
+character(LEN=XMHD_RST_LEN) :: rst_char
 namelist/xmhd_plot_options/rst_start,rst_end
 !---------------------------------------------------------------------------
 ! Read plotting options
@@ -1817,48 +1642,68 @@ CALL create_cg_solver(lminv)
 lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre)
+ALLOCATE(plot_vec(3,v_lag%n))
+NULLIFY(plot_vals)
+CALL grad_psi%setup(oft_blagrange)
+
+CALL xdmf_plot%setup("xmhd_2d")
+CALL mesh%setup_io(xdmf_plot,oft_blagrange%order)
 !---------------------------------------------------------------------------
 ! Loop through rst files
 !---------------------------------------------------------------------------
+100 FORMAT (I XMHD_RST_LEN.XMHD_RST_LEN)
+rst_cur = rst_start
+DO
+  IF(rst_cur > rst_end) EXIT
+  ! Determine file name
+  WRITE(rst_char,100)rst_cur
+  READ(rst_char,100,IOSTAT=io_stat)rst_tmp
+  IF((io_stat/=0).OR.(rst_tmp/=rst_cur))CALL oft_abort("Step count exceeds format width", "xmhd_plot", __FILE__)
+  file_tmp='xmhd2d_'//rst_char//'.rst'
+  !Read file
+  rst_exist=oft_file_exist(TRIM(file_tmp))
+  CALL oft_mpi_barrier(ierr)
+  IF(.NOT.rst_exist)THEN
+    CALL oft_abort('Restart file does not exist.','xmhd_plot',__FILE__)
+  ELSE
+    CALL hdf5_read(t,file_tmp,'t')
+    CALL self%rst_load(u,file_tmp, 'U')
+  END IF
+  !Plot data
+  CALL xdmf_plot%add_timestep(t)
+  CALL u%get_local(plot_vals,1)
+  plot_vals = plot_vals*self%den_scale
+  CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'n')
+  CALL u%get_local(plot_vals,2)
+  plot_vec(1,:)=plot_vals
+  CALL u%get_local(plot_vals,3)
+  plot_vec(3,:)=plot_vals
+  CALL u%get_local(plot_vals,4)
+  plot_vec(2,:)=plot_vals
+  CALL mesh%save_vertex_vector(plot_vec,xdmf_plot,'V')
+  CALL u%get_local(plot_vals,5)
+  CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'T')
+  CALL u%get_local(plot_vals,6)
+  CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'psi')
+  CALL grad_psi%u%restore_local(plot_vals)
+  CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
+  CALL v_lag%set(0.d0)
+  CALL lminv%apply(v_lag,ux)
+  CALL ux%add(0.d0,1.d0,v_lag)
+  CALL v_lag%set(0.d0)
+  CALL lminv%apply(v_lag,uy)
+  CALL uy%add(0.d0,1.d0,v_lag)
+  CALL uy%get_local(plot_vals)
+  plot_vec(1,:)=-plot_vals
+  CALL u%get_local(plot_vals,7)
+  plot_vec(2,:)=plot_vals
+  CALL ux%get_local(plot_vals)
+  plot_vec(3,:)=plot_vals
+  CALL mesh%save_vertex_vector(plot_vec,xdmf_plot,'B')
 
-
-ALLOCATE(plot_vec(3,v_lag%n))
-CALL self%xdmf_plot%add_timestep(self%t)
-CALL self%u%get_local(plot_vals,1)
-plot_vals = plot_vals*self%den_scale
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'n')
-CALL self%u%get_local(plot_vals,2)
-plot_vec(1,:)=plot_vals
-CALL self%u%get_local(plot_vals,3)
-plot_vec(3,:)=plot_vals
-CALL self%u%get_local(plot_vals,4)
-plot_vec(2,:)=plot_vals
-CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'V')
-CALL self%u%get_local(plot_vals,5)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'T')
-CALL self%u%get_local(plot_vals,6)
-CALL mesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'psi')
-CALL grad_psi%u%restore_local(plot_vals)
-
-!------------------------------------------------------------------------------
-! Project magnetic field and plot
-!------------------------------------------------------------------------------
-CALL grad_psi%setup(oft_blagrange)
-CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,ux)
-CALL ux%add(0.d0,1.d0,v_lag)
-CALL v_lag%set(0.d0)
-CALL lminv%apply(v_lag,uy)
-CALL uy%add(0.d0,1.d0,v_lag)
-!
-CALL uy%get_local(plot_vals)
-plot_vec(1,:)=-plot_vals
-CALL self%u%get_local(plot_vals,7)
-plot_vec(2,:)=plot_vals
-CALL ux%get_local(plot_vals)
-plot_vec(3,:)=plot_vals
-CALL mesh%save_vertex_vector(plot_vec,self%xdmf_plot,'B')
+  !Move to next file
+  rst_cur = rst_cur + self%rst_freq
+END DO
 end subroutine xmhd_2d_plot
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
