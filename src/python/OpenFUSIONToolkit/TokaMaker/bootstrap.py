@@ -359,9 +359,9 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
     # Solve Grad-Shafranov
     mygs.solve()
     
-def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,  
-                            Ip_target, psi_pad, spike_prof=None, find_j0=True, scale_j0=1.0, 
-                            tolerance=0.01, max_iter=5, diagnostic_plots=False):
+def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
+                            Ip_target, psi_pad, spike_prof=None, find_j0=True, scale_j0=1.0,
+                            tolerance=0.01, max_iter=5, diagnostic_plots=False, verbose=True):
     r'''! Optimize scaling to match input/output \f$j_0\f$ or \f$I_p\f$
 
     @param mygs Grad-Shafranov solver object
@@ -389,7 +389,8 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     
     # We want: Input_J0 - Output_J0 ~ 0
     def get_j0_error(scale_val, n):
-        print(f"\n--- Checking scale_j0 = {scale_val:.4f} ---")
+        if verbose:
+            print(f"\n--- Checking scale_j0 = {scale_val:.4f} ---")
         
         matched_input_jphi = scale_val*j_inductive + spike_prof
         ffp_prof['type'] = 'jphi-linterp'
@@ -426,15 +427,17 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         diff = input_j0 - output_j0
         rel_err = abs(diff) / output_j0
         
-        print(f"   Input j_0:  {input_j0:.4e}")
-        print(f"   Output j_0: {output_j0:.4e}")
-        print(f"   Mismatch:  {rel_err*100:.3f}%")
+        if verbose:
+            print(f"   Input j_0:  {input_j0:.4e}")
+            print(f"   Output j_0: {output_j0:.4e}")
+            print(f"   Mismatch:  {rel_err*100:.3f}%")
         
         return diff, rel_err, tmp_jphi
     
     # We want: Input_Ip - Output_Ip ~ 0
     def get_Ip_error(scale_val, scale_j0, n):
-        print(f"\n--- Checking scale_Ip = {scale_val:.4f} ---")
+        if verbose:
+            print(f"\n--- Checking scale_Ip = {scale_val:.4f} ---")
         
         ffp_prof['type'] = 'jphi-linterp'
         ffp_prof['y'] = scale_j0*j_inductive + spike_prof
@@ -451,10 +454,11 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         diff = output_Ip - Ip_target
         rel_err = abs(diff) / Ip_target
         
-        print(f"   Input Ip target:  {Ip_target/1e6:.4e}")
-        print(f"   Trial Ip target:  {Ip_target*scale_val/1e6:.4e}")
-        print(f"   Output Ip: {output_Ip/1e6:.4e}")
-        print(f"   Mismatch:  {rel_err*100:.4f}%")
+        if verbose:
+            print(f"   Input Ip target:  {Ip_target/1e6:.4e}")
+            print(f"   Trial Ip target:  {Ip_target*scale_val/1e6:.4e}")
+            print(f"   Output Ip: {output_Ip/1e6:.4e}")
+            print(f"   Mismatch:  {rel_err*100:.4f}%")
         
         return diff, rel_err, None
 
@@ -495,11 +499,13 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     # --- Step 3: Secant Method Loop ---
     # Iterate to find the root where Input - Output = 0
     for i in range(max_iter):
-        print(f"--- Optimization Iteration {i+1} ---")
+        if verbose:
+            print(f"--- Optimization Iteration {i+1} ---")
         
         # Avoid division by zero
         if abs(err1 - err0) < 1e-9:
-            print("Error difference too small, stopping.")
+            if verbose:
+                print("Error difference too small, stopping.")
             break
 
         # Secant formula: x_new = x1 - f(x1) * (x1 - x0) / (f(x1) - f(x0))
@@ -520,14 +526,16 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             err_new, rel_err_new, res_jphi = get_Ip_error(p_new, scale_j0, i+2)
 
         if rel_err_new < tolerance:
-            print(f"Converged! Optimal scale factor: {p_new:.4f}")
+            if verbose:
+                print(f"Converged! Optimal scale factor: {p_new:.4f}")
             return p_new, res_jphi
         
         # Update points for next step (move window forward)
         p0, err0 = p1, err1
         p1, err1 = p_new, err_new
 
-    print("Max iterations reached. Returning best last effort.")
+    if verbose:
+        print("Max iterations reached. Returning best last effort.")
     return p1, res_jphi
 
 def calculate_ln_lambda(Te, Ti, ne, ni, Zeff=1.0,
