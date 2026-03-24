@@ -3,7 +3,7 @@
 ########################
 cmake_minimum_required( VERSION 3.12 )
 project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
-set( OFT_VER_SUFFIX "-beta6" CACHE INTERNAL "Version suffix" )
+set( OFT_VER_SUFFIX "-beta7" CACHE INTERNAL "Version suffix" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
 
 option(OFT_BUILD_TESTS "Build tests?" OFF)
@@ -23,6 +23,7 @@ option(OFT_COVERAGE "Build with code coverage information?" OFF)
 option(OFT_EXECSTACK "Allow executable stack in shared libraries/executables?" OFF)
 option(OFT_TOKAMAKER_LEGACY "Build legacy TokaMaker executables?" OFF)
 option(OFT_THINCURR_LEGACY "Build legacy ThinCurr executables?" OFF)
+option(OFT_PY_KERNEL "Python kernel name to use for testing examples" "python3")
 set(OFT_MPI_PLEN "4" CACHE STRING "Size of strings for MPI processor index")
 set(OFT_PATH_SLEN "200" CACHE STRING "Size of path strings")
 set(OFT_ERROR_SLEN "200" CACHE STRING "Size of error strings")

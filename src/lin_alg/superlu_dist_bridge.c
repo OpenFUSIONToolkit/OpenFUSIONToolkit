@@ -50,10 +50,17 @@ oft_superlu_dist_slugrid_c(int iopt, int *slu_comm, int nprow, int npcol,
 		*grid_handle = grid;
 		*info = 0;
 	} else if ( iopt == 2 ) {
+
+		if ( !*grid_handle ) {
+			*info = -2;
+			return;
+		}
+
 		/* Locate and free the process grid. */
 		grid = *grid_handle;
 		superlu_gridexit(grid);
 		SUPERLU_FREE(grid);
+		*grid_handle = NULL;
 		*info = 0;
 	} else {
 		printf("Invalid iopt=%d passed to oft_superlu_dist_slugrid_c()\n", iopt);
@@ -75,7 +82,7 @@ typedef struct {
 void
 oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 				double *values, int_t *colind, int_t *rowptr,
-				double *b, int ldb, gridinfo_t **grid_handle,
+				double *b, int ldb, gridinfo_t *grid,
 				factors_dist_t **f_factors, int perm_spec, bool iter_refine, int *info)
 /*
  * Purpose
@@ -132,11 +139,9 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 	ScalePermstruct_t *ScalePermstruct;
 	LUstruct_t *LUstruct;
 #endif
-	gridinfo_t *grid;
 	factors_dist_t *LUfactors;
 
 	/* Locate the process grid. */
-	grid = *grid_handle;
 	if ( iopt == 1 || iopt == 3 ) { /* LU decomposition */
 		if ( !*f_factors ) {
             /*
@@ -147,7 +152,6 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
             *   permc_spec = 3: approximate minimum degree column ordering
             */
             // if ( *perm_spec >= 0 ) options.ColPerm = *perm_spec;
-            /* */
 #if (SUPERLU_DIST_MAJOR_VERSION > 6) || ((SUPERLU_DIST_MAJOR_VERSION == 6) && (SUPERLU_DIST_MINOR_VERSION > 2))
 			ScalePermstruct = (dScalePermstruct_t *) SUPERLU_MALLOC(sizeof(dScalePermstruct_t));
 			dScalePermstructInit(n, n, ScalePermstruct);
@@ -240,6 +244,11 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 
 	} else if ( iopt == 2 ) { /* Triangular solve */
 
+		if ( !*f_factors ) {
+			*info = -2;
+			return;
+		}
+
 		/* Extract the LU factors in the factors handle */
 		LUfactors = *f_factors;
 		ScalePermstruct = LUfactors->ScalePermstruct;
@@ -278,6 +287,11 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 
 	} else if ( iopt == 4 ) { /* Free storage */
 
+		if ( !*f_factors ) {
+			*info = -2;
+			return;
+		}
+
 		/* Free the LU factors in the factors handle */
 		LUfactors = *f_factors;
 		A = LUfactors->A;
@@ -294,9 +308,10 @@ oft_superlu_dist_dgssv_c(int iopt, int_t n, int_t nnz, int nrhs,
 		SUPERLU_FREE(LUfactors->ScalePermstruct);
 		SUPERLU_FREE(LUfactors->LUstruct);
 		SUPERLU_FREE(LUfactors);
+		*f_factors = NULL;
 
 	} else {
-		fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dist_dgsisx_c()\n",iopt);
+		fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dist_dgssv_c()\n",iopt);
 		*info = -1;
 	}
 }

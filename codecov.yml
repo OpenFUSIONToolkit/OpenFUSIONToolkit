@@ -17,3 +17,4 @@ github_checks:
 # Skip bundled 3rd party libraries
 ignore:
   - "src/ext_libs"
+  - "libs/build"

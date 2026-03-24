@@ -10,13 +10,6 @@ flowing in thin conducting structures (2D sheets in 3D geometry)
 
 \f[ \mathrm{L} \frac{\partial I}{\partial t} + \mathrm{R} I = V. \f]
 
-ThinCurr is used through four driver programs:
-
- - \ref thincurr_td for time-dependent runs
- - \ref thincurr_eig for eigenvalue calculations (\f$ \mathrm{L} \frac{\partial I}{\partial t} = \lambda \mathrm{R} I \f$)
- - \ref thincurr_fr for frequency-response (frequency-domain) runs (\f$ i \omega \mathrm{L} I + \mathrm{R} I = V \f$)
- - \ref thincurr_from_mode to convert plasma mode structures to a current potential source
-
 \section doc_tw_main_ex ThinCurr Examples
 The following examples illustrate usage of ThinCurr to perform calculations using the thin-wall model.
 
@@ -32,7 +25,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
 
-**Command line interface**
+**Command line interface (deprecated)**
  - \subpage doc_thincurr_ex1
  - \subpage doc_thincurr_ex2
  - \subpage doc_thincurr_ex3
