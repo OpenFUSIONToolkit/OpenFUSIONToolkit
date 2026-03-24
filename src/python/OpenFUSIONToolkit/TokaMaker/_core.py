@@ -23,7 +23,6 @@ def tokamaker_default_settings(oft_env):
     settings = tokamaker_settings_struct()
     settings.pm = True
     settings.free_boundary = True
-    settings.has_plasma = True
     settings.limited_only = False
     settings.dipole_mode = False
     settings.mirror_mode = False

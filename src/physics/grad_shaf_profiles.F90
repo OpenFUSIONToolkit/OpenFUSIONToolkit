@@ -14,7 +14,7 @@
 module oft_gs_profiles
 USE oft_base
 USE spline_mod
-USE oft_gs, ONLY: flux_func, gs_factory, oft_indent, oft_increase_indent, &
+USE oft_gs, ONLY: flux_func, gs_equil, oft_indent, oft_increase_indent, &
   oft_decrease_indent
 implicit none
 !------------------------------------------------------------------------------
@@ -204,6 +204,7 @@ class(zero_flux_func), intent(inout) :: self
 class(flux_func), pointer, intent(inout) :: new
 ALLOCATE(zero_flux_func::new)
 new%plasma_bounds=self%plasma_bounds
+new%ncofs=0
 end subroutine zero_copy
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -228,7 +229,7 @@ end function zero_fp
 !------------------------------------------------------------------------------
 subroutine zero_update(self,gseq)
 class(zero_flux_func), intent(inout) :: self
-class(gs_factory), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 end subroutine zero_update
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -310,7 +311,7 @@ end function flat_fp
 !------------------------------------------------------------------------------
 subroutine flat_update(self,gseq)
 class(flat_flux_func), intent(inout) :: self
-class(gs_factory), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine flat_update
 !------------------------------------------------------------------------------
@@ -386,7 +387,7 @@ end subroutine flat_cofs_get
 ! !------------------------------------------------------------------------------
 ! subroutine linear_update(self,gseq)
 ! class(linear_flux_func), intent(inout) :: self
-! class(gs_factory), intent(inout) :: gseq
+! class(gs_equil), intent(inout) :: gseq
 ! self%plasma_bounds=gseq%plasma_bounds
 ! end subroutine linear_update
 ! !------------------------------------------------------------------------------
@@ -454,14 +455,17 @@ END SUBROUTINE create_poly_ff
 subroutine poly_copy(self,new)
 class(poly_flux_func), intent(inout) :: self
 class(flux_func), pointer, intent(inout) :: new
-ALLOCATE(poly_flux_func::new)
-new%plasma_bounds=self%plasma_bounds
-new%deg=self%deg
-new%ncofs=self%ncofs
-new%zero_grad=self%zero_grad
-new%c0=self%c0
-ALLOCATE(new%cofs(new%ncofs))
-new%cofs=self%cofs
+ALLOCATE(new, MOLD=self)
+SELECT TYPE(new)
+  CLASS IS(poly_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%deg=self%deg
+    new%ncofs=self%ncofs
+    new%zero_grad=self%zero_grad
+    new%c0=self%c0
+    ALLOCATE(new%cofs(new%ncofs))
+    new%cofs=self%cofs
+END SELECT
 end subroutine poly_copy
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -543,7 +547,7 @@ end function poly_fp
 !------------------------------------------------------------------------------
 subroutine poly_update(self,gseq)
 class(poly_flux_func), intent(inout) :: self
-class(gs_factory), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine poly_update
 !------------------------------------------------------------------------------
@@ -640,22 +644,26 @@ END SUBROUTINE create_spline_ff
 subroutine spline_func_copy(self,new)
 class(spline_flux_func), intent(inout) :: self
 class(flux_func), pointer, intent(inout) :: new
-ALLOCATE(spline_flux_func::new)
-new%plasma_bounds=self%plasma_bounds
-new%npsi=self%npsi
-new%ncofs=self%ncofs
-new%xmin=self%xmin
-new%xmax=self%xmax
-new%f1=self%f1
-new%fn=self%fn
-new%yp1=self%yp1
-new%ypn=self%ypn
-CALL spline_copy(self%func,new%func)
-ALLOCATE(self%fun_loc(omp_get_max_threads()))
-DO i=1,omp_get_max_threads()
-  CALL spline_alloc(new%fun_loc(i),self%npsi-1,1)
-  CALL spline_copy(new%func,new%fun_loc(i))
-END DO
+integer(i4) :: i
+ALLOCATE(new, MOLD=self)
+SELECT TYPE(new)
+  CLASS IS(spline_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%npsi=self%npsi
+    new%ncofs=self%ncofs
+    new%xmin=self%xmin
+    new%xmax=self%xmax
+    new%f1=self%f1
+    new%fn=self%fn
+    new%yp1=self%yp1
+    new%ypn=self%ypn
+    CALL spline_copy(self%func,new%func)
+    ALLOCATE(new%fun_loc(omp_get_max_threads()))
+    DO i=1,omp_get_max_threads()
+      CALL spline_alloc(new%fun_loc(i),self%npsi-1,1)
+      CALL spline_copy(new%func,new%fun_loc(i))
+    END DO
+END SELECT
 end subroutine spline_func_copy
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -694,7 +702,7 @@ end function spline_fp
 !------------------------------------------------------------------------------
 subroutine spline_update(self,gseq)
 class(spline_flux_func), intent(inout) :: self
-class(gs_factory), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 REAL(8) :: yp1,f0
 INTEGER(4) :: i
 self%plasma_bounds=gseq%plasma_bounds
@@ -805,15 +813,18 @@ END SUBROUTINE create_linterp_ff
 subroutine linterp_copy(self,new)
 class(linterp_flux_func), intent(inout) :: self
 class(flux_func), pointer, intent(inout) :: new
-ALLOCATE(linterp_flux_func::new)
-new%plasma_bounds=self%plasma_bounds
-new%npsi=self%npsi
-new%ncofs=self%ncofs
-new%y0=self%y0
-ALLOCATE(new%x(new%npsi),new%yp(new%npsi),new%y(new%npsi))
-new%x=self%x
-new%yp=self%yp
-new%y=self%y
+ALLOCATE(new, MOLD=self)
+SELECT TYPE(new)
+  CLASS IS(linterp_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%npsi=self%npsi
+    new%ncofs=self%ncofs
+    new%y0=self%y0
+    ALLOCATE(new%x(new%npsi),new%yp(new%npsi),new%y(new%npsi))
+    new%x=self%x
+    new%yp=self%yp
+    new%y=self%y
+END SELECT
 end subroutine linterp_copy
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -912,7 +923,7 @@ end function linterp_fpp
 !------------------------------------------------------------------------------
 subroutine linterp_update(self,gseq)
 class(linterp_flux_func), intent(inout) :: self
-class(gs_factory), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine linterp_update
 !------------------------------------------------------------------------------
@@ -1011,7 +1022,7 @@ end subroutine linterp_cofs_get
 ! !------------------------------------------------------------------------------
 ! subroutine twolam_update(self,gseq)
 ! class(twolam_flux_func), intent(inout) :: self
-! class(gs_factory), intent(inout) :: gseq
+! class(gs_equil), intent(inout) :: gseq
 ! self%plasma_bounds=gseq%plasma_bounds
 ! end subroutine twolam_update
 ! !------------------------------------------------------------------------------
@@ -1087,7 +1098,7 @@ end subroutine linterp_cofs_get
 ! !------------------------------------------------------------------------------
 ! subroutine stepslant_update(self,gseq)
 ! class(stepslant_flux_func), intent(inout) :: self
-! class(gs_factory), intent(inout) :: gseq
+! class(gs_equil), intent(inout) :: gseq
 ! self%plasma_bounds=gseq%plasma_bounds
 ! end subroutine stepslant_update
 ! !------------------------------------------------------------------------------
@@ -1136,9 +1147,12 @@ subroutine wesson_copy(self,new)
 class(wesson_flux_func), intent(inout) :: self
 class(flux_func), pointer, intent(inout) :: new
 ALLOCATE(wesson_flux_func::new)
-new%plasma_bounds=self%plasma_bounds
-new%ncofs=self%ncofs
-new%gamma=self%gamma
+SELECT TYPE(new)
+  TYPE IS(wesson_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%ncofs=self%ncofs
+    new%gamma=self%gamma
+END SELECT
 end subroutine wesson_copy
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -1185,7 +1199,7 @@ end function wesson_fp
 !------------------------------------------------------------------------------
 subroutine wesson_update(self,gseq)
 class(wesson_flux_func), intent(inout) :: self
-class(gs_factory), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 self%plasma_bounds=gseq%plasma_bounds
 end subroutine wesson_update
 !------------------------------------------------------------------------------
