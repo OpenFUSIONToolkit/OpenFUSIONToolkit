@@ -466,7 +466,10 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         
         # Calculate residual (difference) and relative error
         diff = output_Ip - Ip_target
-        rel_err = abs(diff) / Ip_target
+        # Use magnitude of Ip_target and guard against zero to avoid sign/zero issues
+        eps = numpy.finfo(float).eps
+        denom = max(abs(Ip_target), eps)
+        rel_err = abs(diff) / denom
         
         if verbose:
             print(f"   Input Ip target:  {Ip_target/1e6:.4e}")
