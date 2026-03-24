@@ -34,7 +34,7 @@ USE oft_lag_basis, ONLY: oft_blag_geval, oft_blag_eval, oft_blag_npos, &
   oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_epsilon, flux_func, gs_eq, gs_update_bounds, &
+USE oft_gs, ONLY: gs_epsilon, flux_func, gs_factory, gs_update_bounds, &
     gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, build_dels
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
@@ -55,7 +55,7 @@ type, extends(oft_noop_matrix) :: oft_tmaker_td_mfop
     real(8), pointer, dimension(:) :: curr_reg => NULL() !< Coil current by region
     CLASS(flux_func), POINTER :: F => NULL() !< Flux function for \f$ F*F' \f$ term
     CLASS(flux_func), POINTER :: P => NULL() !< Flux function for \f$ P' \f$ term
-    TYPE(gs_eq), POINTER :: gs_eq => NULL() !< Equilibrium object
+    TYPE(gs_factory), POINTER :: gs_eq => NULL() !< Equilibrium object
     CLASS(oft_matrix), POINTER :: vac_op => NULL() !< Vacuum time-advance operator
 contains
     !> Setup operator, allocating internal storage
@@ -129,7 +129,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 subroutine setup_gs_td(self,eq_in,dt,lin_tol,nl_tol,pre_plasma)
 class(oft_tmaker_td), intent(inout) :: self !< NL operator object
-TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in !< Needs Docs
+TYPE(gs_factory), TARGET, INTENT(inout) :: eq_in !< Needs Docs
 REAL(8), INTENT(in) :: dt !< Needs Docs
 REAL(8), INTENT(in) :: lin_tol !< Needs Docs
 REAL(8), INTENT(in) :: nl_tol !< Needs Docs
@@ -334,7 +334,7 @@ end subroutine step_gs_td
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine eig_gs_td(eq_in,neigs,eigs,eig_vecs,omega,include_bounds,eta_plasma)
-TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
+TYPE(gs_factory), TARGET, INTENT(inout) :: eq_in
 INTEGER(4), INTENT(in) :: neigs
 REAL(r8), INTENT(out) :: eigs(:,:),eig_vecs(:,:)
 REAL(r8), INTENT(in) :: omega
@@ -491,7 +491,7 @@ end subroutine apply_rhs
 !------------------------------------------------------------------------------
 subroutine setup_mfop(self,eq_in)
 class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
-TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
+TYPE(gs_factory), TARGET, INTENT(inout) :: eq_in
 INTEGER(4) :: i,j,k
 DEBUG_STACK_PUSH
 self%gs_eq=>eq_in

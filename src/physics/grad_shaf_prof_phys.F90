@@ -18,11 +18,11 @@ USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
-use oft_gs, only: gs_eq, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
+use oft_gs, only: gs_factory, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use oft_gs_profiles, only: spline_flux_func, linterp_flux_func
+use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, spline_func_copy
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -43,7 +43,10 @@ type, extends(spline_flux_func) :: mercier_flux_func
   integer(4) :: ntheta = 128
   TYPE(spline_type) :: funcp
 contains
-    procedure :: update => mercier_update
+  !> Needs docs
+  procedure :: copy => mercier_copy
+  !> Needs docs
+  procedure :: update => mercier_update
 end type mercier_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -53,6 +56,8 @@ type, extends(linterp_flux_func) :: jphi_flux_func
   real(8) :: j0 = 0.d0 !< LCFS Jphi value
   real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
 contains
+  !> Needs docs
+  procedure :: copy => jphi_copy
   !> Update F*F' profile from Jphi, P', and current equilibrium
   procedure :: update => jphi_update
 end type jphi_flux_func
@@ -72,7 +77,10 @@ end type minbinv_interp
 type, extends(spline_flux_func) :: dipole_b0_flux_func
   real(r8) :: psi_pad = 1.d-1
 contains
-    procedure :: update => dipole_b0_update
+  !> Needs docs
+  procedure :: copy => dipole_b0_copy
+  !> Needs docs
+  procedure :: update => dipole_b0_update
 end type dipole_b0_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -99,7 +107,10 @@ end type dipole_ani_press
 type, extends(spline_flux_func) :: mirror_b0_flux_func
   real(r8) :: z_midplane = 0.d0 !< Z location of mirror midplane
 contains
-    procedure :: update => mirror_b0_update
+  !> Needs docs
+  procedure :: copy => mirror_b0_copy
+  !> Needs docs
+  procedure :: update => mirror_b0_update
 end type mirror_b0_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -110,7 +121,7 @@ type, extends(gs_ani_press) :: mirror_ani_slosh
   REAL(r8) :: zthroat = 0.d0 !< Mirror peak field location
   TYPE(oft_lag_brinterp), POINTER :: psi_eval => NULL() !< Needs docs
   TYPE(oft_lag_bginterp), POINTER :: psi_geval => NULL() !< Needs docs
-  TYPE(gs_eq), POINTER :: gs => NULL()
+  TYPE(gs_factory), POINTER :: gs => NULL()
   CLASS(flux_func), POINTER :: B0_prof => NULL() !< Mirror minimum B profile
 contains
   !> Needs docs
@@ -147,9 +158,22 @@ END SUBROUTINE create_mercier_ff
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine mercier_copy(self,new)
+class(mercier_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+ALLOCATE(mercier_flux_func::new)
+CALL spline_func_copy(self,new)
+new%rs = self%rs
+new%ntheta = self%ntheta
+CALL spline_alloc(new%funcp,new%npsi,1)
+CALL spline_copy(self%funcp,new%funcp)
+end subroutine mercier_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine mercier_update(self,gseq)
 class(mercier_flux_func), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_factory), intent(inout) :: gseq
 type(mercierinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: I,Ip,q,qp,vp,vpp,s,a,b,pp,gop(3,3),psi_surf(1),vol,rmax
@@ -357,11 +381,24 @@ END SELECT
 
 END SUBROUTINE create_jphi_ff
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_copy(self,new)
+class(jphi_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+ALLOCATE(jphi_flux_func::new)
+CALL spline_func_copy(self,new)
+new%geom = self%geom
+new%j0 = self%j0
+ALLOCATE(new%jphi(new%npsi))
+new%jphi = self%jphi
+end subroutine jphi_copy
+!------------------------------------------------------------------------------
 !> Update F*F' profile from Jphi, P', and current equilibrium
 !------------------------------------------------------------------------------
 subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_factory), intent(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: jphi_norm,pscale,pprime
 REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),psi_q(:)
@@ -425,7 +462,7 @@ end subroutine jphi_update
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
-class(gs_eq), INTENT(inout) :: self !< Pointer to TokaMaker object
+class(gs_factory), INTENT(inout) :: self !< Pointer to TokaMaker object
 REAL(r8), INTENT(in) :: psi_tmp(:) !< Needs docs
 REAL(r8), INTENT(in) :: field_tmp(:) !< Needs docs
 INTEGER(i4), INTENT(in) :: nvals
@@ -476,9 +513,19 @@ END SUBROUTINE create_dipole_b0_prof
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine dipole_b0_copy(self,new)
+class(dipole_b0_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+ALLOCATE(dipole_b0_flux_func::new)
+CALL spline_func_copy(self,new)
+new%psi_pad = self%psi_pad
+end subroutine dipole_b0_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine dipole_b0_update(self,gseq)
 class(dipole_b0_flux_func), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_factory), intent(inout) :: gseq
 type(minbinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: I,Ip,q,qp,vp,vpp,s,a,b,pp,gop(3,3),psi_surf(1),vol,rmax
@@ -646,7 +693,7 @@ end subroutine dipole_ani_delete
 !------------------------------------------------------------------------------
 subroutine dipole_ani_update(self,gseq)
 class(dipole_ani_press), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_factory), intent(inout) :: gseq
 CALL self%B0_prof%update(gseq)
 end subroutine dipole_ani_update
 !------------------------------------------------------------------------------
@@ -688,9 +735,19 @@ END SUBROUTINE create_mirror_b0_prof
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine mirror_b0_copy(self,new)
+class(mirror_b0_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+ALLOCATE(mirror_b0_flux_func::new)
+CALL spline_func_copy(self,new)
+new%z_midplane = self%z_midplane
+end subroutine mirror_b0_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine mirror_b0_update(self,gseq)
 class(mirror_b0_flux_func), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_factory), intent(inout) :: gseq
 type(minbinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
 type(oft_lag_bginterp) :: psi_gint
@@ -754,7 +811,7 @@ end subroutine mirror_b0_update
 !------------------------------------------------------------------------------
 subroutine mirror_slosh_setup(self,gs)
 class(mirror_ani_slosh), intent(inout) :: self
-class(gs_eq), target, intent(inout) :: gs
+class(gs_factory), target, intent(inout) :: gs
 self%gs=>gs
 self%mesh=>gs%mesh
 ALLOCATE(self%psi_eval,self%psi_geval)
@@ -791,7 +848,7 @@ end subroutine mirror_slosh_delete
 !------------------------------------------------------------------------------
 subroutine mirror_slosh_update(self,gseq)
 class(mirror_ani_slosh), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_factory), intent(inout) :: gseq
 CALL self%B0_prof%update(gseq)
 end subroutine mirror_slosh_update
 !------------------------------------------------------------------------------

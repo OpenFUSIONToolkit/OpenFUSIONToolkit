@@ -24,7 +24,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
   oft_blag_vproject
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
-USE oft_gs, ONLY: gs_eq, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
+USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon
 #ifdef OFT_TOKAMAKER_LEGACY
 use oft_gs, only: gs_get_cond_source, gs_get_cond_weights, gs_set_cond_weights
@@ -46,7 +46,7 @@ contains
   procedure :: interp => sauter_apply
 end type sauter_interp
 !
-CLASS(gs_eq), POINTER :: gs_fit => NULL()
+CLASS(gs_factory), POINTER :: gs_fit => NULL()
 CLASS(flux_func), POINTER :: ff_fit => NULL()
 REAL(8), POINTER, DIMENSION(:,:) :: tmpprof => NULL()
 CONTAINS
@@ -189,7 +189,7 @@ END SUBROUTINE gs_profile_save
 !> Save data to legacy TokaMaker G-S file
 !------------------------------------------------------------------------------
 SUBROUTINE gs_save(self,filename,mpsi_sample)
-class(gs_eq), target, intent(inout) :: self !< G-S object
+class(gs_factory), target, intent(inout) :: self !< G-S object
 character(LEN=*), intent(in) :: filename !< Filename for restart file
 INTEGER(4), OPTIONAL, intent(in) :: mpsi_sample !< Number of flux (radial) sampling points (optional)
 integer(4) :: i,j,m,np_plot
@@ -368,7 +368,7 @@ END SUBROUTINE gs_save
 !> Load data from legacy TokaMaker G-S file
 !------------------------------------------------------------------------------
 SUBROUTINE gs_load(self,filename)
-class(gs_eq), target, intent(inout) :: self !< G-S object
+class(gs_factory), target, intent(inout) :: self !< G-S object
 character(LEN=*), intent(in) :: filename !< Filename for restart file
 integer(4) :: i,m
 real(8) :: x1,x2,tmpval,tmp_version
@@ -462,7 +462,7 @@ end subroutine cond_fit_error
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine cond_fit(self,tmpin)
-class(gs_eq), target, intent(inout) :: self !< G-S object
+class(gs_factory), target, intent(inout) :: self !< G-S object
 real(8), target, intent(in) :: tmpin(:,:) !< Needs docs
 real(8), allocatable :: wttmp(:),contmp(:)
 !---MINPACK variables
@@ -578,7 +578,7 @@ end subroutine fit_ff
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE gs_analyze(self)
-class(gs_eq), intent(inout) :: self
+class(gs_factory), intent(inout) :: self
 integer(4) :: i,io_unit
 integer(4), parameter :: npsi = 50
 real(8) :: Itor,centroid(2),vol,pvol,dflux,tflux,pmax,curr,bp_vol,li
@@ -678,7 +678,7 @@ END SUBROUTINE gs_analyze
 !> Compute various global quantities for Grad-Shafranov equilibrium
 !------------------------------------------------------------------------------
 subroutine gs_comp_globals(self,itor,centroid,vol,pvol,dflux,tflux,bp_vol)
-class(gs_eq), intent(inout) :: self !< G-S object
+class(gs_factory), intent(inout) :: self !< G-S object
 real(8), intent(out) :: itor !< Toroidal current
 real(8), intent(out) :: centroid(2) !< Current centroid [2]
 real(8), intent(out) :: vol !< Plasma volume
@@ -765,7 +765,7 @@ end subroutine gs_comp_globals
 !> Compute plasma loop voltage
 !------------------------------------------------------------------------------
 subroutine gs_calc_vloop(self,vloop)
-class(gs_eq), intent(inout) :: self !< G-S object
+class(gs_factory), intent(inout) :: self !< G-S object
 real(8), intent(out) :: vloop !< loop voltage
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
@@ -827,7 +827,7 @@ end subroutine gs_calc_vloop
 !> Needs docs
 !---------------------------------------------------------------------------
 subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
-class(gs_eq), intent(inout) :: gseq !< G-S object
+class(gs_factory), intent(inout) :: gseq !< G-S object
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: npsi !< Number of points in flux coordinate
 integer(4), intent(in) :: ntheta !< Number of points in poloidal coordinate
@@ -1061,7 +1061,7 @@ end subroutine gs_save_ifile
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
 subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,cocos,error_str)
-class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
+class(gs_factory), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
 integer(4), intent(in) :: nz !< Number of vertical points for flux grid
@@ -1440,7 +1440,7 @@ end subroutine sauter_apply
 !> Compute factors required for Sauter bootstrap formula
 !------------------------------------------------------------------------------
 subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs)
-class(gs_eq), intent(inout) :: gseq !< G-S object
+class(gs_factory), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux sample points
 real(8), intent(in) :: psi_q(nr) !< Location of flux sample points
 real(8), intent(out) :: fc(nr) !< Trapped particle fraction \f$ f_c \f$

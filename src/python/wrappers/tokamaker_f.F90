@@ -25,7 +25,7 @@ USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
 USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
+USE oft_gs, ONLY: gs_factory, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
@@ -85,7 +85,7 @@ TYPE :: tokamaker_instance
   REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Needs docs
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Mesh container
   TYPE(oft_ml_fem_type), POINTER :: ML_oft_blagrange => NULL() !< Finite element container
-  TYPE(gs_eq), POINTER :: gs => NULL() !< G-S object
+  TYPE(gs_factory), POINTER :: gs => NULL() !< G-S object
   TYPE(oft_tmaker_td), POINTER :: gs_td => NULL() !< Time-dependent G-S object
 END TYPE tokamaker_instance
 CONTAINS
@@ -1007,12 +1007,12 @@ CLASS(oft_vector), POINTER :: tmp1,tmp2,tmp3
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(imode==1)THEN
   ALLOCATE(b_interp_obj)
-  b_interp_obj%gs=>tMaker_obj%gs
+  b_interp_obj%equil=>tMaker_obj%gs
   CALL b_interp_obj%setup(tMaker_obj%gs)
   int_obj=C_LOC(b_interp_obj)
 ELSEIF(imode>=2.AND.imode<=4)THEN
   ALLOCATE(prof_interp_obj)
-  prof_interp_obj%gs=>tMaker_obj%gs
+  prof_interp_obj%equil=>tMaker_obj%gs
   prof_interp_obj%mode=imode-1
   CALL prof_interp_obj%setup(tMaker_obj%gs)
   int_obj=C_LOC(prof_interp_obj)

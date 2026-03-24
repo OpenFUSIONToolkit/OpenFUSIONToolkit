@@ -21,7 +21,7 @@ use oft_lu, only: lapack_matinv
 !---
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 use oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
-use oft_gs, only: gs_eq, gs_dflux, gs_itor_nl, gs_psi2r, &
+use oft_gs, only: gs_factory, gs_dflux, gs_itor_nl, gs_psi2r, &
   gs_err_reason, gs_test_bounds, gs_get_qprof, gs_epsilon
 #ifdef OFT_TOKAMAKER_LEGACY
 use oft_gs, only: gs_get_cond_weights, gs_set_cond_weights, gs_get_cond_scales
@@ -179,7 +179,7 @@ TYPE :: fit_constraint_ptr
   CLASS(fit_constraint), POINTER :: con => NULL() !< Constraint object
 END TYPE fit_constraint_ptr
 !---
-TYPE(gs_eq), POINTER, PUBLIC :: gs_active => NULL() !< Needs docs
+TYPE(gs_factory), POINTER, PUBLIC :: gs_active => NULL() !< Needs docs
 REAL(8), ALLOCATABLE :: cofs_best(:) !< Needs docs
 REAL(8) :: chi_best = 1.d99 !< Needs docs
 REAL(8) :: alam_best = 1.d99 !< Needs docs
@@ -213,7 +213,7 @@ CONTAINS
 !> Needs Docs
 !---------------------------------------------------------------------------------
 SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
-TYPE(gs_eq), TARGET, INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), TARGET, INTENT(inout) :: gs !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitI !< Needs docs
@@ -1230,7 +1230,7 @@ END SUBROUTINE fit_load
 !---------------------------------------------------------------------------------
 FUNCTION fit_dummy_error(self,gs) RESULT(err)
 CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 CALL oft_abort('No constraint type specified.','fit_dummy_error',__FILE__)
 err=0.d0
@@ -1240,7 +1240,7 @@ END FUNCTION fit_dummy_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_dummy_eval(self,gs) RESULT(val)
 CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 CALL oft_abort('No constraint type specified.','fit_dummy_eval',__FILE__)
 val=0.d0
@@ -1250,7 +1250,7 @@ END FUNCTION fit_dummy_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_dummy_nax_corr(self,gs) RESULT(val)
 CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 val = 0.d0
 IF(ASSOCIATED(self%nax_corr))val = DOT_PRODUCT(self%nax_corr,gs%cond_weights)
@@ -1274,7 +1274,7 @@ END FUNCTION fit_dummy_parallel
 !---------------------------------------------------------------------------------
 FUNCTION fit_coil_error(self,gs) RESULT(err)
 CLASS(coil_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 err = (gs%coil_currs(self%coil)/mu0 - self%val)*self%wt
 END FUNCTION fit_coil_error
@@ -1283,7 +1283,7 @@ END FUNCTION fit_coil_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_coil_eval(self,gs) RESULT(val)
 CLASS(coil_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 val = gs%coil_currs(self%coil)/mu0
 END FUNCTION fit_coil_eval
@@ -1292,7 +1292,7 @@ END FUNCTION fit_coil_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_vcont_error(self,gs) RESULT(err)
 CLASS(vcont_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 err = (gs%vcontrol_val - self%val)*self%wt
 END FUNCTION fit_vcont_error
@@ -1301,7 +1301,7 @@ END FUNCTION fit_vcont_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_vcont_eval(self,gs) RESULT(val)
 CLASS(vcont_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 val = gs%vcontrol_val
 END FUNCTION fit_vcont_eval
@@ -1310,7 +1310,7 @@ END FUNCTION fit_vcont_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_q_error(self,gs) RESULT(err)
 CLASS(q_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: qval
 qval = self%eval(gs)
@@ -1322,7 +1322,7 @@ END FUNCTION fit_q_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_q_eval(self,gs) RESULT(val)
 CLASS(q_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 INTEGER(4) :: j
 INTEGER(4), PARAMETER :: npsi=30
@@ -1380,7 +1380,7 @@ END FUNCTION fit_q_parallel
 !---------------------------------------------------------------------------------
 FUNCTION fit_field_error(self,gs) RESULT(err)
 CLASS(field_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 err = self%eval(gs)
 IF(ASSOCIATED(self%nax_corr))err=err+DOT_PRODUCT(self%nax_corr,gs%cond_weights)
@@ -1391,7 +1391,7 @@ END FUNCTION fit_field_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_field_eval(self,gs) RESULT(val)
 CLASS(field_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 TYPE(oft_lag_brinterp) :: psi_eval
 TYPE(oft_lag_bginterp) :: psi_geval
@@ -1452,7 +1452,7 @@ END SUBROUTINE fit_field_setup_comp
 !---------------------------------------------------------------------------------
 FUNCTION fit_flux_error(self,gs) RESULT(err)
 CLASS(flux_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: psitmp
 psitmp = self%eval(gs)
@@ -1463,7 +1463,7 @@ END FUNCTION fit_flux_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_flux_eval(self,gs) RESULT(val)
 CLASS(flux_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
@@ -1502,7 +1502,7 @@ END FUNCTION fit_flux_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_saddle_error(self,gs) RESULT(err)
 CLASS(saddle_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 err = self%eval(gs)
 IF(ASSOCIATED(self%nax_corr))err=err+DOT_PRODUCT(self%nax_corr,gs%cond_weights)
@@ -1513,7 +1513,7 @@ END FUNCTION fit_saddle_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_saddle_eval(self,gs) RESULT(val)
 CLASS(saddle_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),psi(1,2)
@@ -1568,7 +1568,7 @@ END SUBROUTINE fit_saddle_setup_comp
 !---------------------------------------------------------------------------------
 FUNCTION fit_itor_error(self,gs) RESULT(err)
 CLASS(itor_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: itor
 itor = self%eval(gs)
@@ -1579,7 +1579,7 @@ END FUNCTION fit_itor_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_itor_eval(self,gs) RESULT(val)
 CLASS(itor_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 REAL(8) :: itor
 CALL gs_itor_nl(gs,itor)
@@ -1598,7 +1598,7 @@ END FUNCTION fit_itor_parallel
 !---------------------------------------------------------------------------------
 FUNCTION fit_dflux_error(self,gs) RESULT(err)
 CLASS(dflux_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: dflux
 dflux=self%eval(gs)
@@ -1609,7 +1609,7 @@ END FUNCTION fit_dflux_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_dflux_eval(self,gs) RESULT(val)
 CLASS(dflux_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 val=gs_dflux(gs)
 END FUNCTION fit_dflux_eval
@@ -1618,7 +1618,7 @@ END FUNCTION fit_dflux_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_press_error(self,gs) RESULT(err)
 CLASS(press_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: press,psi(1),goptmp(3,4)
 TYPE(oft_lag_brinterp) :: psi_eval
@@ -1648,7 +1648,7 @@ END FUNCTION fit_press_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_press_eval(self,gs) RESULT(val)
 CLASS(press_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_factory), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff

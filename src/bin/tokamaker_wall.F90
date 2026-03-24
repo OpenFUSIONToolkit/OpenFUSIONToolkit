@@ -11,7 +11,7 @@
 !------------------------------------------------------------------------------
 MODULE exp_geom
 USE oft_base
-USE oft_gs, ONLY: gs_eq
+USE oft_gs, ONLY: gs_factory
 IMPLICIT NONE
 PRIVATE
 INTEGER(4) :: ltx_vv_reg = 6
@@ -22,7 +22,7 @@ CONTAINS
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE exp_setup(gs)
-CLASS(gs_eq), INTENT(inout) :: gs
+CLASS(gs_factory), INTENT(inout) :: gs
 INTEGER(4) :: ierr
 CALL ltx_setup(gs,ierr)
 END SUBROUTINE exp_setup
@@ -30,7 +30,7 @@ END SUBROUTINE exp_setup
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE ltx_setup(gs,ierr)
-CLASS(gs_eq), INTENT(inout) :: gs
+CLASS(gs_factory), INTENT(inout) :: gs
 INTEGER(4), INTENT(out) :: ierr
 INTEGER(4) :: io_unit
 NAMELIST/ltx_options/ltx_vv_reg,ltx_vv_amp
@@ -769,14 +769,14 @@ USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_la_base, ONLY: oft_vector
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE oft_gs_profiles, ONLY: zero_flux_func
-USE oft_gs, ONLY: gs_eq, gs_setup_walls, gs_cond_source, gs_vacuum_solve
+USE oft_gs, ONLY: gs_factory, gs_setup_walls, gs_cond_source, gs_vacuum_solve
 USE oft_gs_fit, ONLY: fit_load, fit_constraint_ptr, gs_active
 USE nonax_wall, ONLY: nonax_rescouple, nonax_indcouple, nonax_eigs, decay_eigenmodes
 USE exp_geom, ONLY: exp_setup
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4) :: i,ierr,io_unit
-TYPE(gs_eq) :: mygs
+TYPE(gs_factory) :: mygs
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_oft_vlagrange
@@ -896,7 +896,7 @@ CONTAINS
 !> Needs Docs
 !------------------------------------------------------------------------------
 subroutine compute_eddy(self)
-type(gs_eq), target, intent(inout) :: self
+type(gs_factory), target, intent(inout) :: self
 TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: conlist => NULL()
 INTEGER(4) :: ncons
 INTEGER(4) :: i,j,k,l,istart,nsensor
