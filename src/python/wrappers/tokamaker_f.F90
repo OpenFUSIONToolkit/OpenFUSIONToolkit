@@ -47,7 +47,6 @@ IMPLICIT NONE
 TYPE, BIND(C) :: tokamaker_settings_type
   LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: free_boundary = .FALSE. !< Needs docs
-  ! LOGICAL(KIND=c_bool) :: has_plasma = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: limited_only = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: dipole_mode = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: mirror_mode = .FALSE. !< Needs docs
@@ -106,11 +105,34 @@ IF(.NOT.c_associated(mesh_ptr))THEN
 END IF
 ALLOCATE(tMaker_obj)
 ALLOCATE(tMaker_obj%device,tMaker_obj%gs_td,tMaker_obj%ML_oft_blagrange)
-! ALLOCATE(tMaker_obj%gs_equil)
-! tMaker_obj%gs_equil%device=>tMaker_obj%device
 tMaker_ptr=C_LOC(tMaker_obj)
 CALL c_f_pointer(mesh_ptr,tMaker_obj%ml_mesh)
 END SUBROUTINE tokamaker_alloc
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_equil_copy(tMaker_ptr,old_equil_ptr,new_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_copy")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: old_equil_ptr !< Pointer to old equilibrium object
+TYPE(c_ptr), INTENT(out) :: new_equil_ptr !< Pointer to new equilibrium object
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+TYPE(gs_equil), POINTER :: old_equil,new_equil
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+ALLOCATE(new_equil)
+IF(.NOT.c_associated(old_equil_ptr))THEN
+  new_equil%mode=tMaker_obj%mode
+  CALL new_equil%new(tMaker_obj%device)
+ELSE
+  IF(.NOT.tokamaker_equil_ccast(old_equil_ptr,old_equil,error_str))THEN
+    DEALLOCATE(new_equil)
+    RETURN
+  END IF
+  CALL new_equil%copy(old_equil)
+END IF
+tMaker_obj%gs_equil=>new_equil
+new_equil_ptr=C_LOC(new_equil)
+END SUBROUTINE tokamaker_equil_copy
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
@@ -129,6 +151,24 @@ END IF
 CALL c_f_pointer(tMaker_cptr,tMaker_obj)
 success=.TRUE.
 END FUNCTION tokamaker_ccast
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+FUNCTION tokamaker_equil_ccast(tMaker_equil_cptr,tMaker_equil_obj,error_str) RESULT(success)
+TYPE(c_ptr), INTENT(in) :: tMaker_equil_cptr !< C pointer to TokaMaker equilibrium object
+TYPE(gs_equil), POINTER, INTENT(out) :: tMaker_equil_obj
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+!---Clear error flag
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.c_associated(tMaker_equil_cptr))THEN
+  IF(PRESENT(error_str))CALL copy_string('TokaMaker equilibrium object not associated',error_str)
+  success=.FALSE.
+  RETURN
+END IF
+CALL c_f_pointer(tMaker_equil_cptr,tMaker_equil_obj)
+success=.TRUE.
+END FUNCTION tokamaker_equil_ccast
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
@@ -242,10 +282,6 @@ IF(ASSOCIATED(tMaker_obj%device))THEN
   CALL tMaker_obj%device%delete()
   DEALLOCATE(tMaker_obj%device)
 END IF
-IF(ASSOCIATED(tMaker_obj%gs_equil))THEN
-  CALL tMaker_obj%gs_equil%delete()
-  DEALLOCATE(tMaker_obj%gs_equil)
-END IF
 IF(ASSOCIATED(tMaker_obj%ML_oft_blagrange))THEN
   CALL tMaker_obj%ML_oft_blagrange%current_level%delete()
 END IF
@@ -255,6 +291,17 @@ IF(ASSOCIATED(tMaker_obj%ml_mesh))THEN
 END IF
 DEALLOCATE(tMaker_obj)
 END SUBROUTINE tokamaker_destroy
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_equil_destroy(tMaker_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_destroy")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL tMaker_equil_obj%delete()
+DEALLOCATE(tMaker_equil_obj)
+END SUBROUTINE tokamaker_equil_destroy
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
@@ -308,9 +355,9 @@ tMaker_obj%device%full_domain=full_domain
 CALL gs_setup_walls(tMaker_obj%device)
 CALL tMaker_obj%device%load_limiters
 CALL tMaker_obj%device%init()
-ALLOCATE(tMaker_obj%gs_equil)
-tMaker_obj%gs_equil%mode=tMaker_obj%mode
-CALL tMaker_obj%gs_equil%new(tMaker_obj%device)
+! ALLOCATE(tMaker_obj%gs_equil)
+! tMaker_obj%gs_equil%mode=tMaker_obj%mode
+! CALL tMaker_obj%gs_equil%new(tMaker_obj%device)
 ! IF(tMaker_obj%gs%dipole_mode)THEN
 !   tMaker_obj%gs%dipole_a=0.d0
 !   CALL create_dipole_b0_prof(tMaker_obj%gs%dipole_B0,64)

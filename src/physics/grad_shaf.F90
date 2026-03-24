@@ -157,53 +157,27 @@ end type gs_ani_press
 TYPE :: gs_factory
   INTEGER(i4) :: ierr = 0 !< Error flag from most recent solve
   INTEGER(i4) :: maxits = 30 !< Maximum number of iterations for nonlinear solve
-  ! INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
   INTEGER(i4) :: nR0_ramp = 6 !< Number of iterations for R0 ramp if R0 target is used
-  ! INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
   INTEGER(i4) :: ncoils = 0 !< Number of coils in device
   INTEGER(i4) :: ncoils_ext = 0 !< Number of external (non-meshed) coils in device
   INTEGER(i4) :: ncoil_regs = 0 !< Number of meshed coil regions in device
-  ! INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
   INTEGER(i4) :: nlimiter_pts = 0 !< Number of non-node limiter points
   INTEGER(i4) :: nlimiter_nds = 0 !< Number of grid nodes used as limiter points
   INTEGER(i4) :: ninner_limiter_nds = 0 !< Needs docs
   INTEGER(i4) :: ncond_regs = 0 !< Number of conducting regions
   INTEGER(i4) :: ncond_eigs = 0 !< Number of total fixed-shape current modes for conducting regions
   INTEGER(i4) :: bc_nrhs = 0 !< Number of terms in free-boundary BC
-  ! INTEGER(i4) :: isoflux_ntargets = 0 !< Number of isoflux target locations
-  ! INTEGER(i4) :: saddle_ntargets = 0 !< Number of saddle target locations
-  ! INTEGER(i4) :: flux_ntargets = 0 !< Number of \f$ \psi \f$ target locations
   INTEGER(i4) :: nlim_con = 0 !< Number of node points in limiter contour list
   INTEGER(i4) :: lim_nloops = 0 !< Number of limiter loops
   REAL(r8) :: rmin = 0.d0 !< Minimum radial coordinate in model
   REAL(r8) :: rmax = 0.d0 !< Maximum radial coordinate in model
   REAL(r8) :: urf = .2d0 !< Under-relaxation factor for Picard iteration
-  ! REAL(r8) :: psiscale = 1.d0 !< Solution scale factor for homogeneous equilibria
-  ! REAL(r8) :: psimax = 1.d0 !< Maximum \f$ \psi \f$ value for homogeneous equilibria
-  ! REAL(r8) :: alam = 1.d0 !< Scale factor for F*F' or F' profile (see mode)
-  ! REAL(r8) :: pnorm = 1.d0 !< Scale factor for P' profile
-  ! REAL(r8) :: dipole_a = 0.d0 !< Anisotropy exponent for dipole pressure profiles
-  ! REAL(r8) :: mirror_n = -1.d0 !< Anisotropy exponent for mirror pressure profiles
-  ! REAL(r8) :: mirror_bturn = 0.d0 !< Turning point for mirror pressure profiles
-  ! REAL(r8) :: mirror_zthroat = 0.d0 !< Mirror peak field point
   REAL(r8) :: dt = -1.d0 !< Timestep size for time-dependent and quasi-static solves
   REAL(r8) :: dt_last = -1.d0 !< Timestep size for current LHS matrix
-  ! REAL(r8) :: Itor_target = -1.d0 !< Toroidal current target
-  ! REAL(r8) :: estore_target = -1.d0 !< Stored energy target
-  ! REAL(r8) :: pax_target = -1.d0 !< On-axis pressure target
-  ! REAL(r8) :: Ip_ratio_target = -1.d99 !< Ip ratio target
-  ! REAL(r8) :: R0_target = -1.d0 !< Magnetic axis radial target
-  ! REAL(r8) :: V0_target = -1.d99 !< Magnetic axis vertical target
   REAL(r8) :: nl_tol = 1.d-8 !< Tolerance for nonlinear solve
-  ! REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Boundaing \f$ \psi \f$ values on [LCFS, axis]
   REAL(r8) :: spatial_bounds(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99],[2,2]) !< Maximum R,Z extents of plasma
   REAL(r8) :: lim_zmax = 1.d99 !< Vertical position cutoff for limiter points
   REAL(r8) :: lim_area = -1.d0 !< Area inside the limiter
-  ! REAL(r8) :: o_point(2) = [-1.d0,1.d99] !< Location of magnetic axis
-  ! REAL(r8) :: lim_point(2) = [-1.d0,1.d99] !< Location of limiting point or active X-point
-  ! REAL(r8) :: x_points(2,max_xpoints) = 0.d0 !< Location of tracked X-points
-  ! REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Vectors point from X-points to O-point
-  ! REAL(r8) :: vcontrol_val = 0.d0 !< Amplitude of virtual VSC "current"
   REAL(r8) :: timing(4) = 0.d0 !< Timing for each phase of solve
   REAL(r8) :: isoflux_grad_wt_lim = -1.d0 !< Limit for isoflux inverse gradient weighting (negative to disable)
   LOGICAL, POINTER, DIMENSION(:) :: axis_flag => NULL() !< FE boundary flag for on-axis nodes
@@ -216,17 +190,11 @@ TYPE :: gs_factory
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL() !< Limiter contour list (contains all limiters)
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each 
   REAL(r8), POINTER, DIMENSION(:) :: cond_weights => NULL() !< Needs docs
-  ! REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
-  ! REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
   REAL(r8), POINTER, DIMENSION(:,:) :: rlimiter_nds => NULL() !< Location of limiter nodes
   REAL(r8), POINTER, DIMENSION(:,:) :: limiter_pts => NULL() !< Location of non-node limiter points
   REAL(r8), POINTER, DIMENSION(:,:) :: bc_lmat => NULL() !< First part of free-boundary BC matrix
   REAL(r8), POINTER, DIMENSION(:,:) :: bc_bmat => NULL() !< Second part of free-boundary BC matrix
-  ! REAL(r8), POINTER, DIMENSION(:,:) :: isoflux_targets => NULL() !< Isoflux target locations
-  ! REAL(r8), POINTER, DIMENSION(:,:) :: saddle_targets => NULL() !< Saddle target locations
-  ! REAL(r8), POINTER, DIMENSION(:,:) :: flux_targets => NULL() !< Flux target locations and values
-  ! REAL(r8), POINTER, DIMENSION(:,:) :: coil_reg_mat => NULL() !< Coil regularization terms
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Coil current bounds
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Number of turns for each coil in each region
   REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Coil mutual inductance matrix
@@ -234,8 +202,6 @@ TYPE :: gs_factory
   LOGICAL :: compute_chi = .FALSE. !< Compute toroidal field potential?
   LOGICAL :: plot_step = .TRUE. !< Save solver steps for plotting
   LOGICAL :: plot_final = .TRUE. !< Save solver result for plotting
-  ! LOGICAL :: diverted = .FALSE. !< Equilibrium is diverted?
-  ! LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
   LOGICAL :: full_domain = .FALSE. !< Solve across full domain (for Solov'ev test cases)
   LOGICAL :: dipole_mode = .FALSE. !< Include modifications for Dipole geometry
   LOGICAL :: mirror_mode = .FALSE. !< Include modifications for Mirror/FRC geometry
@@ -249,8 +215,6 @@ TYPE :: gs_factory
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Meshed coil regions
   TYPE(cond_region), POINTER, DIMENSION(:) :: cond_regions => NULL() !< Meshed conducting regions
   TYPE(gs_region_info) :: region_info !< Region information for non-continuous conductors
-  ! CLASS(oft_vector), POINTER :: psi => NULL() !< Current \f$ \psi \f$ solution
-  ! CLASS(oft_vector), POINTER :: chi => NULL() !< Toroidal field potential (if computed)
   CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_coil => NULL() !< \f$ \psi \f$ for each coil
   CLASS(oft_vector), POINTER :: psi_dt => NULL() !< Time-dependent contribution to \f$ \psi \f$ from eddy currents
   CLASS(oft_matrix), POINTER :: dels => NULL() !< \f$ \frac{1}{R} \Delta^* \f$ matrix
@@ -259,11 +223,6 @@ TYPE :: gs_factory
   CLASS(oft_matrix), POINTER :: mrop => NULL() !< 1/R-scaled Lagrange FE mass matrix
   CLASS(oft_matrix), POINTER :: mop => NULL() !< Lagrange FE mass matrix
   CLASS(oft_matrix), POINTER :: mop_axis => NULL() !< Lagrange FE mass matrix with Dirichlet BCs on axis
-  ! CLASS(flux_func), POINTER :: I => NULL() !< F*F' flux function
-  ! CLASS(flux_func), POINTER :: P => NULL() !< Pressure flux function
-  ! CLASS(gs_ani_press), POINTER :: P_ani => NULL() !< Anisotropic flux interpolator
-  ! CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
-  ! CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
   CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
   TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL() !< Multi-level Lagrange FE representation (only top level used)
@@ -3587,6 +3546,7 @@ deallocate(rhs_loc,j_lag)
 !$omp end parallel
 CALL rhs%restore_local(vals_tmp,add=.TRUE.)
 call device%zerob_bc%apply(rhs)
+IF(.NOT.ASSOCIATED(self%chi))CALL self%psi%new(self%chi)
 call solver%apply(self%chi,rhs)
 !---
 call rhs%delete

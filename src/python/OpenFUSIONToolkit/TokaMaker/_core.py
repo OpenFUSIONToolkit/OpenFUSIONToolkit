@@ -91,8 +91,10 @@ class TokaMaker():
         '''
         # Create OFT execution environment
         self._oft_env = OFT_env
-        ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_eq "gs_eq")
-        self._tMaker_ptr = c_void_p()
+        ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_factory "gs_factory")
+        self._tMaker_device_ptr = c_void_p()
+        ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_equil "gs_equil")
+        self._tMaker_equil_ptr = c_void_p()
         ## Internal mesh object
         self._mesh_ptr = c_void_p()
         ## General settings object
@@ -166,16 +168,21 @@ class TokaMaker():
 
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
-        if not self._tMaker_ptr:
+        if not self._tMaker_device_ptr:
             return # Nothing to do
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_destroy(self._tMaker_ptr,error_string)
+        tokamaker_destroy(self._tMaker_device_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        if self._tMaker_equil_ptr:
+            tokamaker_equil_destroy(self._tMaker_equil_ptr,error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
         self.nregs = -1
         self.np = -1
         # Reset defaults
-        self._tMaker_ptr = c_void_p()
+        self._tMaker_device_ptr = c_void_p()
+        self._tMaker_equil_ptr = c_void_p()
         self._mesh_ptr = c_void_p()
         self.settings = tokamaker_default_settings(self._oft_env)
         self._cond_dict = {}
@@ -250,7 +257,7 @@ class TokaMaker():
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_alloc(ctypes.byref(self._tMaker_ptr),self._mesh_ptr,error_string)
+        tokamaker_alloc(ctypes.byref(self._tMaker_device_ptr),self._mesh_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self.update_settings()
@@ -315,7 +322,7 @@ class TokaMaker():
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
         cstring = self._oft_env.path2c('none')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup_regions(self._tMaker_ptr,cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils,error_string)
+        tokamaker_setup_regions(self._tMaker_device_ptr,cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -331,7 +338,12 @@ class TokaMaker():
         #
         ncoils = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(self._tMaker_ptr,order,full_domain,ctypes.byref(ncoils),error_string)
+        tokamaker_setup(self._tMaker_device_ptr,order,full_domain,ctypes.byref(ncoils),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        # Create equilibirum object
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_equil_copy(self._tMaker_device_ptr,c_void_p(None),ctypes.byref(self._tMaker_equil_ptr),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         ## Number of coils in mesh
@@ -351,7 +363,7 @@ class TokaMaker():
         alam_loc = c_double_ptr()
         pnorm_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_refs(self._tMaker_ptr,ctypes.byref(o_loc),ctypes.byref(lim_loc),ctypes.byref(x_loc),ctypes.byref(div_flag_loc),
+        tokamaker_get_refs(self._tMaker_device_ptr,ctypes.byref(o_loc),ctypes.byref(lim_loc),ctypes.byref(x_loc),ctypes.byref(div_flag_loc),
                     ctypes.byref(bounds_loc),ctypes.byref(alam_loc),ctypes.byref(pnorm_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
@@ -379,7 +391,7 @@ class TokaMaker():
         nloops = c_int()
         loop_ptr = c_int_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_limiter(self._tMaker_ptr,ctypes.byref(npts),ctypes.byref(r_loc),ctypes.byref(nloops),ctypes.byref(loop_ptr),error_string)
+        tokamaker_get_limiter(self._tMaker_device_ptr,ctypes.byref(npts),ctypes.byref(r_loc),ctypes.byref(nloops),ctypes.byref(loop_ptr),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         loop_ptr = numpy.ctypeslib.as_array(loop_ptr,shape=(nloops.value+1,))
@@ -399,7 +411,7 @@ class TokaMaker():
         lc_loc = c_int_ptr()
         reg_loc = c_int_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_mesh(self._tMaker_ptr,ctypes.byref(np_loc),ctypes.byref(r_loc),ctypes.byref(nc_loc),ctypes.byref(lc_loc),ctypes.byref(reg_loc),error_string)
+        tokamaker_get_mesh(self._tMaker_device_ptr,ctypes.byref(np_loc),ctypes.byref(r_loc),ctypes.byref(nc_loc),ctypes.byref(lc_loc),ctypes.byref(reg_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         ## Number of points in mesh
@@ -548,7 +560,7 @@ class TokaMaker():
         reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
         reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_regmat(self._tMaker_ptr,nregularize,reg_mat,reg_targets,reg_weights,error_string)
+        tokamaker_set_coil_regmat(self._tMaker_device_ptr,nregularize,reg_mat,reg_targets,reg_weights,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -572,7 +584,7 @@ class TokaMaker():
                 else:
                     raise KeyError('Unknown coil "{0}"'.format(coil_key))
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_bounds(self._tMaker_ptr,bounds_array,error_string)
+        tokamaker_set_coil_bounds(self._tMaker_device_ptr,bounds_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -585,7 +597,7 @@ class TokaMaker():
         for coil_key, coil_gain in coil_gains.items():
             gains_array[self.coil_sets[coil_key]['id']] = coil_gain
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_vsc(self._tMaker_ptr,gains_array,error_string)
+        tokamaker_set_coil_vsc(self._tMaker_device_ptr,gains_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -610,7 +622,7 @@ class TokaMaker():
             curr_source = numpy.ascontiguousarray(curr_source, dtype=numpy.float64)
             curr_ptr = curr_source.ctypes.data_as(c_double_ptr)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_init_psi(self._tMaker_ptr,c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,error_string)
+        tokamaker_init_psi(self._tMaker_device_ptr,c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,error_string)
         if error_string.value != b'':
             raise ValueError("Error in initialization: {0}".format(error_string.value.decode()))
 
@@ -630,7 +642,7 @@ class TokaMaker():
         eta_file_c = self._oft_env.path2c(eta_file)
         f_NI_file_c = self._oft_env.path2c(f_NI_file)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_load_profiles(self._tMaker_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
+        tokamaker_load_profiles(self._tMaker_device_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -689,7 +701,7 @@ class TokaMaker():
         @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
         '''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),error_string)
+        tokamaker_solve(self._tMaker_device_ptr,c_bool(vacuum),error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
     
@@ -715,7 +727,7 @@ class TokaMaker():
             rhs_source = numpy.ascontiguousarray(rhs_source, dtype=numpy.float64)
             rhs_ptr = rhs_source.ctypes.data_as(c_double_ptr)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_vac_solve(self._tMaker_ptr,psi,rhs_ptr,error_string)
+        tokamaker_vac_solve(self._tMaker_device_ptr,psi,rhs_ptr,error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         return psi
@@ -875,7 +887,7 @@ class TokaMaker():
         '''
         if isoflux is None:
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_isoflux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,1)),numpy.zeros((1,)),0,grad_wt_lim,error_string)
+            tokamaker_set_isoflux(self._tMaker_device_ptr,numpy.zeros((1,1)),numpy.zeros((1,1)),numpy.zeros((1,)),0,grad_wt_lim,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._isoflux_targets = None
@@ -897,7 +909,7 @@ class TokaMaker():
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             ref_points = numpy.ascontiguousarray(ref_points, dtype=numpy.float64)
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_isoflux(self._tMaker_ptr,isoflux,ref_points,weights,isoflux.shape[0],grad_wt_lim,error_string)
+            tokamaker_set_isoflux(self._tMaker_device_ptr,isoflux,ref_points,weights,isoflux.shape[0],grad_wt_lim,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._isoflux_targets = isoflux.copy()
@@ -911,7 +923,7 @@ class TokaMaker():
         '''
         if locations is None:
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_flux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,-1.0,error_string)
+            tokamaker_set_flux(self._tMaker_device_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,-1.0,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._flux_targets = None
@@ -926,7 +938,7 @@ class TokaMaker():
             targets = numpy.ascontiguousarray(targets, dtype=numpy.float64)
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_flux(self._tMaker_ptr,locations,targets,weights,locations.shape[0],-1.0,error_string)
+            tokamaker_set_flux(self._tMaker_device_ptr,locations,targets,weights,locations.shape[0],-1.0,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._flux_targets = (locations.copy(), targets.copy())
@@ -939,7 +951,7 @@ class TokaMaker():
         '''
         if saddles is None:
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_saddles(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),0,error_string)
+            tokamaker_set_saddles(self._tMaker_device_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),0,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._saddle_targets = None
@@ -951,7 +963,7 @@ class TokaMaker():
             saddles = numpy.ascontiguousarray(saddles, dtype=numpy.float64)
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_saddles(self._tMaker_ptr,saddles,weights,saddles.shape[0],error_string)
+            tokamaker_set_saddles(self._tMaker_device_ptr,saddles,weights,saddles.shape[0],error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._saddle_targets = saddles.copy()
@@ -1001,7 +1013,7 @@ class TokaMaker():
         if V0 is not None:
             self._V0_target.value=V0
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_targets(self._tMaker_ptr,self._Ip_target,self._Ip_ratio_target,self._pax_target,self._estore_target,self._R0_target,self._V0_target,error_string)
+        tokamaker_set_targets(self._tMaker_device_ptr,self._Ip_target,self._Ip_ratio_target,self._pax_target,self._estore_target,self._R0_target,self._V0_target,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1034,7 +1046,7 @@ class TokaMaker():
         '''
         curr = numpy.copy(psi)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_dels_curr(self._tMaker_ptr,curr,error_string)
+        tokamaker_get_dels_curr(self._tMaker_device_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr/mu0
@@ -1046,7 +1058,7 @@ class TokaMaker():
         '''
         curr = numpy.zeros((self.np,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_jtor(self._tMaker_ptr,curr,error_string)
+        tokamaker_get_jtor(self._tMaker_device_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr/mu0
@@ -1061,7 +1073,7 @@ class TokaMaker():
         psi_lim = c_double()
         psi_max = c_double()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_psi(self._tMaker_ptr,psi,ctypes.byref(psi_lim),ctypes.byref(psi_max),error_string)
+        tokamaker_get_psi(self._tMaker_device_ptr,psi,ctypes.byref(psi_lim),ctypes.byref(psi_max),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if normalized:
@@ -1080,7 +1092,7 @@ class TokaMaker():
             raise IndexError('Incorrect shape of "psi", should be [np]')
         psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_psi(self._tMaker_ptr,psi,c_bool(update_bounds),error_string)
+        tokamaker_set_psi(self._tMaker_device_ptr,psi,c_bool(update_bounds),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1094,7 +1106,7 @@ class TokaMaker():
             raise IndexError('Incorrect shape of "psi0", should be [np]')
         psi0 = numpy.ascontiguousarray(psi0, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_psi_dt(self._tMaker_ptr,psi0,c_double(dt),error_string)
+        tokamaker_set_psi_dt(self._tMaker_device_ptr,psi0,c_double(dt),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1112,7 +1124,7 @@ class TokaMaker():
         #
         int_obj = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_field_eval(self._tMaker_ptr,imode,ctypes.byref(int_obj),error_string)
+        tokamaker_get_field_eval(self._tMaker_device_ptr,imode,ctypes.byref(int_obj),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         field_dim = 1
@@ -1120,7 +1132,7 @@ class TokaMaker():
             field_dim = 3
         elif imode >= 5:
             field_dim = 2
-        return TokaMaker_field_interpolator(self._tMaker_ptr,int_obj,imode,field_dim)
+        return TokaMaker_field_interpolator(self._tMaker_device_ptr,int_obj,imode,field_dim)
     
     def get_coil_currents(self):
         '''! Get currents in each coil [A] and coil region [A-turns]
@@ -1130,7 +1142,7 @@ class TokaMaker():
         currents = numpy.zeros((self.ncoils,),dtype=numpy.float64)
         currents_reg = numpy.zeros((self.nregs,),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_coil_currents(self._tMaker_ptr,currents,currents_reg,error_string)
+        tokamaker_get_coil_currents(self._tMaker_device_ptr,currents,currents_reg,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         current_dict = {}
@@ -1148,7 +1160,7 @@ class TokaMaker():
         '''
         Lmat = numpy.zeros((self.ncoils+1,self.ncoils+1),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_coil_Lmat(self._tMaker_ptr,Lmat,error_string)
+        tokamaker_get_coil_Lmat(self._tMaker_device_ptr,Lmat,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return Lmat
@@ -1164,7 +1176,7 @@ class TokaMaker():
         npoints = c_int()
         points_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_trace_surf(self._tMaker_ptr,c_double(psi),ctypes.byref(points_loc),ctypes.byref(npoints),error_string)
+        tokamaker_trace_surf(self._tMaker_device_ptr,c_double(psi),ctypes.byref(points_loc),ctypes.byref(npoints),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if npoints.value > 0:
@@ -1200,7 +1212,7 @@ class TokaMaker():
         rbounds = numpy.zeros((2,2),dtype=numpy.float64)
         zbounds = numpy.zeros((2,2),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_q(self._tMaker_ptr,psi.shape[0],psi,qvals,ravgs,ctypes.byref(dl),rbounds,zbounds,error_string)
+        tokamaker_get_q(self._tMaker_device_ptr,psi.shape[0],psi,qvals,ravgs,ctypes.byref(dl),rbounds,zbounds,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if self.psi_convention == 0:
@@ -1235,7 +1247,7 @@ class TokaMaker():
         r_avgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
         modb_avgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_sauter_fc(self._tMaker_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,error_string)
+        tokamaker_sauter_fc(self._tMaker_device_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if self.psi_convention == 0:
@@ -1257,7 +1269,7 @@ class TokaMaker():
         tflux = c_double()
         Bp_vol = c_double()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_globals(self._tMaker_ptr,ctypes.byref(Ip),centroid,ctypes.byref(vol),ctypes.byref(pvol),
+        tokamaker_get_globals(self._tMaker_device_ptr,ctypes.byref(Ip),centroid,ctypes.byref(vol),ctypes.byref(pvol),
             ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Bp_vol),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
@@ -1271,7 +1283,7 @@ class TokaMaker():
         V_loop = c_double()
         #
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_gs_calc_vloop(self._tMaker_ptr,ctypes.byref(V_loop),error_string)
+        tokamaker_gs_calc_vloop(self._tMaker_device_ptr,ctypes.byref(V_loop),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         #
@@ -1304,7 +1316,7 @@ class TokaMaker():
         pp = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         #
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_profs(self._tMaker_ptr,psi.shape[0],psi,f,fp,p,pp,error_string)
+        tokamaker_get_profs(self._tMaker_device_ptr,psi.shape[0],psi,f,fp,p,pp,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         #
@@ -1337,14 +1349,14 @@ class TokaMaker():
                 current_array[self.coil_sets[coil_key]['id']] = coil_current
         #
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_currents(self._tMaker_ptr,current_array,error_string)
+        tokamaker_set_coil_currents(self._tMaker_device_ptr,current_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
     def update_settings(self):
         '''! Update settings after changes to values in python'''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_settings(self._tMaker_ptr,ctypes.byref(self.settings),error_string)
+        tokamaker_set_settings(self._tMaker_device_ptr,ctypes.byref(self.settings),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1357,7 +1369,7 @@ class TokaMaker():
         error_string = self._oft_env.get_c_errorbuff()
         if a_exp is None:
             a_exp = -1.0
-        tokamaker_set_dipole_a(self._tMaker_ptr,a_exp,error_string)
+        tokamaker_set_dipole_a(self._tMaker_device_ptr,a_exp,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         
@@ -1376,7 +1388,7 @@ class TokaMaker():
             n_exp = -1.0
             b_turn = -1.0
             z_throat = -1.0
-        tokamaker_set_mirror_slosh(self._tMaker_ptr,n_exp,b_turn,z_throat,error_string)
+        tokamaker_set_mirror_slosh(self._tMaker_device_ptr,n_exp,b_turn,z_throat,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1391,7 +1403,7 @@ class TokaMaker():
         field = numpy.ascontiguousarray(field, dtype=numpy.float64)
         #
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_area_int(self._tMaker_ptr,field,c_int(reg_mask),ctypes.byref(result),error_string)
+        tokamaker_area_int(self._tMaker_device_ptr,field,c_int(reg_mask),ctypes.byref(result),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return result.value
@@ -1413,7 +1425,7 @@ class TokaMaker():
         field_vals = numpy.ascontiguousarray(field_vals, dtype=numpy.float64)
         #
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_flux_int(self._tMaker_ptr,psi_vals,field_vals,c_int(psi_vals.shape[0]),ctypes.byref(result),error_string)
+        tokamaker_flux_int(self._tMaker_device_ptr,psi_vals,field_vals,c_int(psi_vals.shape[0]),ctypes.byref(result),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return result.value
@@ -1704,7 +1716,7 @@ class TokaMaker():
         pts_loc = c_double_ptr()
         flux_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_vfixed(self._tMaker_ptr,ctypes.byref(npts),ctypes.byref(pts_loc),ctypes.byref(flux_loc),error_string)
+        tokamaker_get_vfixed(self._tMaker_device_ptr,ctypes.byref(npts),ctypes.byref(pts_loc),ctypes.byref(flux_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return numpy.ctypeslib.as_array(pts_loc,shape=(npts.value, 2)), \
@@ -1744,7 +1756,7 @@ class TokaMaker():
         if cocos not in [2, 7]:
             raise Exception('Unsupported COCOS version. Only supported versions are 2 or 7.')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_eqdsk(self._tMaker_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,cocos,error_string)
+        tokamaker_save_eqdsk(self._tMaker_device_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,cocos,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1761,7 +1773,7 @@ class TokaMaker():
         '''
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_ifile(self._tMaker_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,error_string)
+        tokamaker_save_ifile(self._tMaker_device_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1772,7 +1784,7 @@ class TokaMaker():
         '''
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_mug(self._tMaker_ptr,cfilename,error_string)
+        tokamaker_save_mug(self._tMaker_device_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -1790,7 +1802,7 @@ class TokaMaker():
         self.dist_coils[iCoil] = curr_dist
         curr_dist = numpy.ascontiguousarray(curr_dist, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_current_dist(self._tMaker_ptr,c_int(iCoil+1),curr_dist,error_string)
+        tokamaker_set_coil_current_dist(self._tMaker_device_ptr,c_int(iCoil+1),curr_dist,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -1804,7 +1816,7 @@ class TokaMaker():
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_eig_wall(self._tMaker_ptr,c_int(neigs),eig_vals,eig_vecs,pm,error_string)
+        tokamaker_eig_wall(self._tMaker_device_ptr,c_int(neigs),eig_vals,eig_vecs,pm,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return eig_vals, eig_vecs
@@ -1823,7 +1835,7 @@ class TokaMaker():
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         damp_coeff = abs(omega)*damping_scale
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_eig_td(self._tMaker_ptr,c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
+        tokamaker_eig_td(self._tMaker_device_ptr,c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return eig_vals, eig_vecs
@@ -1837,7 +1849,7 @@ class TokaMaker():
         @param pre_plasma Use plasma contributions in preconditioner (default: False)
         '''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup_td(self._tMaker_ptr,c_double(dt),c_double(lin_tol),c_double(nl_tol),c_bool(pre_plasma),error_string)
+        tokamaker_setup_td(self._tMaker_device_ptr,c_double(dt),c_double(lin_tol),c_double(nl_tol),c_bool(pre_plasma),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1854,7 +1866,7 @@ class TokaMaker():
         lin_its = c_int()
         nretry = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_step_td(self._tMaker_ptr,ctypes.byref(time),ctypes.byref(dt),ctypes.byref(nl_its),ctypes.byref(lin_its),ctypes.byref(nretry),error_string)
+        tokamaker_step_td(self._tMaker_device_ptr,ctypes.byref(time),ctypes.byref(dt),ctypes.byref(nl_its),ctypes.byref(lin_its),ctypes.byref(nretry),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
