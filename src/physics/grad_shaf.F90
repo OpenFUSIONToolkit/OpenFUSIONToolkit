@@ -1234,7 +1234,7 @@ ELSE
       self%coil_nturns(self%coil_regions(i)%id,:)/self%coil_regions(i)%area ! Normalize turns by coil area
   END DO
 END IF
-ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils+1,self%ncoils+1))
+ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils,self%ncoils))
 self%Lcoils=0.d0
 DO i=1,self%ncoils
   CALL self%fe_rep%vec_create(self%psi_coil(i)%f)
