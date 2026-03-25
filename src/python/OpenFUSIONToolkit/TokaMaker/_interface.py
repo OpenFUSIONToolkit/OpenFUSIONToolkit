@@ -17,7 +17,6 @@ class tokamaker_settings_struct(c_struct):
 
      - `pm` Print 'performance' information (eg. iteration count) during run?
      - `free_boundary` Perform free-boundary calculation?
-     - `has_plasma` Include plasma effects in calculation, vacuum otherwise?
      - `limited_only` Do not search for X-points when determining LCFS?
      - `maxits` Maximum NL iteration count for G-S solver
      - `mode` Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
@@ -29,7 +28,6 @@ class tokamaker_settings_struct(c_struct):
     '''
     _fields_ = [("pm", c_bool),
                 ("free_boundary", c_bool),
-                ("has_plasma", c_bool),
                 ("limited_only", c_bool),
                 ("dipole_mode", c_bool),
                 ("mirror_mode", c_bool),
@@ -135,9 +133,9 @@ tokamaker_get_coil_currents = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_cur
 tokamaker_get_plasma_Lmat = ctypes_subroutine(oftpy_lib.tokamaker_get_plasma_Lmat,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
-# tokamaker_get_refs(tMaker_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm,error_str)
+# tokamaker_get_refs(tMaker_equil_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm,has_plasma,error_str)
 tokamaker_get_refs = ctypes_subroutine(oftpy_lib.tokamaker_get_refs,
-    [c_void_p, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_bool_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr,  c_double_ptr_ptr, c_char_p])
+    [c_void_p, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_bool_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr,  c_double_ptr_ptr, c_bool_ptr_ptr, c_char_p])
 
 # tokamaker_trace_surf(tMaker_ptr,psi_surf,points,npoints,error_str)
 tokamaker_trace_surf = ctypes_subroutine(oftpy_lib.tokamaker_trace_surf,

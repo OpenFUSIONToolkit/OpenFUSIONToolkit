@@ -655,6 +655,7 @@ class TokaMaker():
         '''! Solve G-S equation with specified constraints, profiles, etc.
         
         @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
+        @result Equilibrium object
         '''
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),error_string)
@@ -672,6 +673,7 @@ class TokaMaker():
         
         @param psi Boundary values for vacuum solve
         @param rhs_source Current source (optional)
+        @result Equilibrium object
         '''
         if psi is None:
             psi = numpy.zeros((self.np,),dtype=numpy.float64)
@@ -689,7 +691,12 @@ class TokaMaker():
         tokamaker_vac_solve(self._tMaker_ptr,psi,rhs_ptr,error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
-        return psi
+        equil_save = self._tMaker_equil
+        equil_out = TokaMaker_equil(source_eq=equil_save,skip_targets=True,skip_constraints=True)
+        self._tMaker_equil = equil_out
+        self.set_psi(psi)
+        self._tMaker_equil = equil_save
+        return equil_out
 
     def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
@@ -732,6 +739,21 @@ class TokaMaker():
         @param grad_wt_lim Limit on gradient-based weighting (negative to disable)
         @param ref_points Reference points for each isoflux point [:,2] (default: `isoflux[0,:]` is used for all points)
         '''
+        self.set_isoflux_constraints(isoflux,weights,grad_wt_lim,ref_points)
+    
+    def set_isoflux_constraints(self,isoflux,weights=None,grad_wt_lim=-1.0,ref_points=None):
+        r'''! Set isoflux constraint points (all points lie on a flux surface)
+
+        To constraint points more uniformly in space additional weighting based on
+        the gradient of $\psi$ at each point can also be included by setting
+        `grad_wt_lim>0`. When set the actual weight will be
+        $w_i * min(grad_wt_lim,|\nabla \psi|_{max} / |\nabla \psi|_i)$
+
+        @param isoflux List of points defining constraints [:,2]
+        @param weights Weight to be applied to each constraint point [:] (default: 1)
+        @param grad_wt_lim Limit on gradient-based weighting (negative to disable)
+        @param ref_points Reference points for each isoflux point [:,2] (default: `isoflux[0,:]` is used for all points)
+        '''
         if isoflux is None:
             error_string = self._oft_env.get_c_errorbuff()
             tokamaker_set_isoflux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,1)),numpy.zeros((1,)),0,grad_wt_lim,error_string)
@@ -761,7 +783,16 @@ class TokaMaker():
                 raise Exception(error_string.value)
             self._tMaker_equil._isoflux_targets = isoflux.copy()
     
-    def set_flux(self,locations,targets,weights=None): #,grad_wt_lim=-1.0):
+    def set_flux(self,locations,targets,weights=None):
+        r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$
+
+        @param locations List of points defining constraints [:,2]
+        @param targets Target \f$ \psi \f$ value at each point [:]
+        @param weights Weight to be applied to each constraint point [:] (default: 1)
+        '''
+        self.set_psi_constraints(locations,targets,weights)
+    
+    def set_psi_constraints(self,locations,targets,weights=None):
         r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$
 
         @param locations List of points defining constraints [:,2]
@@ -773,7 +804,7 @@ class TokaMaker():
             tokamaker_set_flux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,-1.0,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
-            self._tMaker_equil._flux_targets = None
+            self._tMaker_equil._psi_targets = None
         else:
             if targets.shape[0] != locations.shape[0]:
                 raise ValueError('Shape of "targets" does not match first dimension of "locations"')
@@ -788,9 +819,17 @@ class TokaMaker():
             tokamaker_set_flux(self._tMaker_ptr,locations,targets,weights,locations.shape[0],-1.0,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
-            self._tMaker_equil._flux_targets = (locations.copy(), targets.copy())
+            self._tMaker_equil._psi_targets = (locations.copy(), targets.copy())
     
     def set_saddles(self,saddles,weights=None):
+        '''! Set saddle constraint points (poloidal field should vanish at each point)
+
+        @param saddles List of points defining constraints [:,2]
+        @param weights Weight to be applied to each constraint point [:] (default: 1)
+        '''
+        self.set_saddles_constraints(saddles,weights)
+
+    def set_saddles_constraints(self,saddles,weights=None):
         '''! Set saddle constraint points (poloidal field should vanish at each point)
 
         @param saddles List of points defining constraints [:,2]
@@ -815,52 +854,66 @@ class TokaMaker():
                 raise Exception(error_string.value)
             self._tMaker_equil._saddle_targets = saddles.copy()
     
-    def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,retain_previous=False):
+    def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,Z0=None,retain_previous=False):
         r'''! Set global target values
 
         @note Values that are not specified are reset to their defaults on each call unless `retain_previous=True`.
 
-        @param alam Scale factor for \f$F*F'\f$ term (disabled if `Ip` is set)
-        @param pnorm Scale factor for \f$P'\f$ term (disabled if `pax`, `estore`, or `R0` are set)
-        @param Ip Target plasma current [A] (disabled if `OFT_env.float_disable_flag`)
-        @param Ip_ratio Amplitude of net plasma current contribution from FF' compared to P' (disabled if `OFT_env.float_disable_flag`)
-        @param pax Target axis pressure [Pa] (disabled if `OFT_env.float_disable_flag` or if `estore` is set)
-        @param estore Target sotred energy [J] (disabled if `OFT_env.float_disable_flag`)
-        @param R0 Target major radius for magnetic axis (disabled if `OFT_env.float_disable_flag` or if `pax` or `estore` are set)
-        @param V0 Target vertical position for magnetic axis (disabled if `OFT_env.float_disable_flag`)
+        @param Ip Target plasma current [A]
+        @param Ip_ratio Amplitude of net plasma current contribution from FF' compared to P'
+        @param pax Target axis pressure [Pa]
+        @param estore Target sotred energy [J]
+        @param R0 Target major radius for magnetic axis
+        @param V0 Target vertical position for magnetic axis
+        @param Z0 Target vertical position for magnetic axis
         @param retain_previous Keep previously set targets unless explicitly updated? (default: False)
         '''
+        def float_to_c(value):
+            if value is None:
+                return c_double(self._oft_env.float_disable_flag)
+            else:
+                return c_double(value)
         # Reset all targets unless specified
         if not retain_previous:
-            self._tMaker_equil._Ip_target.value = self._oft_env.float_disable_flag
-            self._tMaker_equil._estore_target.value = self._oft_env.float_disable_flag
-            self._tMaker_equil._pax_target.value = self._oft_env.float_disable_flag
-            self._tMaker_equil._Ip_ratio_target.value = self._oft_env.float_disable_flag
-            self._tMaker_equil._R0_target.value = self._oft_env.float_disable_flag
-            self._tMaker_equil._V0_target.value = self._oft_env.float_disable_flag
+            self._tMaker_equil._Ip_target = None
+            self._tMaker_equil._estored_target = None
+            self._tMaker_equil._pax_target = None
+            self._tMaker_equil._Ip_ratio_target = None
+            self._tMaker_equil._R0_target = None
+            self._tMaker_equil._Z0_target = None
         # Set new targets
         if Ip is not None:
             if (Ip <= 0.0) and (not self._oft_env.float_is_disabled(Ip)):
                 raise ValueError("`Ip_target` must be positive or set to `OFT_env.float_disable_flag` to disable")
-            self._tMaker_equil._Ip_target.value=Ip
+            self._tMaker_equil._Ip_target = copy.copy(Ip)
         if estore is not None:
             if (estore <= 0.0) and (not self._oft_env.float_is_disabled(estore)):
                 raise ValueError("`estore` must be positive or set to `OFT_env.float_disable_flag` to disable")
-            self._tMaker_equil._estore_target.value=estore
+            self._tMaker_equil._estored_target = copy.copy(estore)
         if pax is not None:
             if (pax <= 0.0) and (not self._oft_env.float_is_disabled(pax)):
                 raise ValueError("`pax` must be positive or set to `OFT_env.float_disable_flag` to disable")
-            self._tMaker_equil._pax_target.value=pax
+            self._tMaker_equil._pax_target = copy.copy(pax)
         if Ip_ratio is not None:
-            self._tMaker_equil._Ip_ratio_target.value=Ip_ratio
+            self._tMaker_equil._Ip_ratio_target = copy.copy(Ip_ratio)
         if R0 is not None:
             if (R0 <= 0.0) and (not self._oft_env.float_is_disabled(R0)):
                 raise ValueError("`R0` must be positive or set to `OFT_env.float_disable_flag` to disable")
-            self._tMaker_equil._R0_target.value=R0
+            self._tMaker_equil._R0_target = copy.copy(R0)
         if V0 is not None:
-            self._tMaker_equil._V0_target.value=V0
+            Z0 = V0
+        if Z0 is not None:
+            self._tMaker_equil._Z0_target = copy.copy(Z0)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_targets(self._tMaker_ptr,self._tMaker_equil._Ip_target,self._tMaker_equil._Ip_ratio_target,self._tMaker_equil._pax_target,self._tMaker_equil._estore_target,self._tMaker_equil._R0_target,self._tMaker_equil._V0_target,error_string)
+        tokamaker_set_targets(self._tMaker_ptr,
+                              float_to_c(self._tMaker_equil._Ip_target),
+                              float_to_c(self._tMaker_equil._Ip_ratio_target),
+                              float_to_c(self._tMaker_equil._pax_target),
+                              float_to_c(self._tMaker_equil._estored_target),
+                              float_to_c(self._tMaker_equil._R0_target),
+                              float_to_c(self._tMaker_equil._Z0_target),
+                              error_string
+        )
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -871,18 +924,19 @@ class TokaMaker():
         '''
         # Get targets
         target_dict = {}
-        if (not self._oft_env.float_is_disabled(self._tMaker_equil._Ip_target.value)):
-            target_dict['Ip'] = self._tMaker_equil._Ip_target.value
-        if (not self._oft_env.float_is_disabled(self._tMaker_equil._estore_target.value)):
-            target_dict['estore'] = self._tMaker_equil._estore_target.value
-        if (not self._oft_env.float_is_disabled(self._tMaker_equil._pax_target.value)):
-            target_dict['pax'] = self._tMaker_equil._pax_target.value
-        if (not self._oft_env.float_is_disabled(self._tMaker_equil._Ip_ratio_target.value)):
-            target_dict['Ip_ratio'] = self._tMaker_equil._Ip_ratio_target.value
-        if (not self._oft_env.float_is_disabled(self._tMaker_equil._R0_target.value)):
-            target_dict['R0'] = self._tMaker_equil._R0_target.value
-        if (not self._oft_env.float_is_disabled(self._tMaker_equil._V0_target.value)):
-            target_dict['V0'] = self._tMaker_equil._V0_target.value
+        if self._tMaker_equil.Ip_target is not None:
+            target_dict['Ip'] = self._tMaker_equil.Ip_target
+        if self._tMaker_equil.Estored_target is not None:
+            target_dict['estore'] = self._tMaker_equil.Estored_target
+        if self._tMaker_equil.Pax_target is not None:
+            target_dict['pax'] = self._tMaker_equil.Pax_target
+        if self._tMaker_equil.Ip_ratio_target is not None:
+            target_dict['Ip_ratio'] = self._tMaker_equil.Ip_ratio_target
+        if self._tMaker_equil.R0_target is not None:
+            target_dict['R0'] = self._tMaker_equil.R0_target
+        if self._tMaker_equil.Z0_target is not None:
+            target_dict['V0'] = self._tMaker_equil.Z0_target
+            target_dict['Z0'] = self._tMaker_equil.Z0_target
         return target_dict
 
     def get_delstar_curr(self,psi):
@@ -1443,11 +1497,11 @@ class TokaMaker():
         if equilibrium is None:
             equilibrium = self._tMaker_equil
         # Plot isoflux constraints
-        if (isoflux_color is not None) and (equilibrium._isoflux_targets is not None):
-            ax.plot(equilibrium._isoflux_targets[:,0],equilibrium._isoflux_targets[:,1],color=isoflux_color,marker=isoflux_marker,linestyle='none')
+        if (isoflux_color is not None) and (equilibrium.Isoflux_targets is not None):
+            ax.plot(equilibrium.Isoflux_targets[:,0],equilibrium.Isoflux_targets[:,1],color=isoflux_color,marker=isoflux_marker,linestyle='none')
         # Plot saddle constraints
-        if (saddle_color is not None) and (equilibrium._saddle_targets is not None):
-            ax.plot(equilibrium._saddle_targets[:,0],equilibrium._saddle_targets[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
+        if (saddle_color is not None) and (equilibrium.Saddle_targets is not None):
+            ax.plot(equilibrium.Saddle_targets[:,0],equilibrium.Saddle_targets[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
 
     def get_vfixed(self):
         '''! Get required vacuum flux values to balance fixed boundary equilibrium
@@ -1588,11 +1642,13 @@ class TokaMaker():
 
 class TokaMaker_equil():
     '''! TokaMaker G-S solver class'''
-    def __init__(self,TokaMaker_obj=None,source_eq=None):
+    def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False):
         '''! Initialize TokaMaker object
 
         @param TokaMaker_obj TokaMaker object (See @ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "TokaMaker")
         @param source_eq Existing equilibrium object to copy
+        @param skip_targets When copying from `source_eq`, skip copying target values
+        @param skip_constraints When copying from `source_eq`, skip copying constraint values
         '''
         if source_eq is None:
             source_ptr = c_void_p(None)
@@ -1610,37 +1666,39 @@ class TokaMaker_equil():
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_equil "gs_equil")
         self._tMaker_equil_ptr = c_void_p()
         if source_eq is None:
-            ## Vacuum F value
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.F0 "F0" property)
             self._F0 = copy.copy(self._tMaker._F0)
-            ## Plasma current target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-            self._Ip_target=c_double(self._oft_env.float_disable_flag)
-            ## Plasma current target ratio I_p(FF') / I_p(P') (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-            self._Ip_ratio_target=c_double(self._oft_env.float_disable_flag)
-            ## Axis pressure target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-            self._pax_target=c_double(self._oft_env.float_disable_flag)
-            ## Stored energy target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-            self._estore_target=c_double(self._oft_env.float_disable_flag)
-            ## R0 target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-            self._R0_target=c_double(self._oft_env.float_disable_flag)
-            ## V0 target value (use @ref TokaMaker.TokaMaker.set_targets "set_targets")
-            self._V0_target=c_double(self._oft_env.float_disable_flag)
-            ## Isoflux constraint points (use @ref TokaMaker.TokaMaker.set_isoflux "set_isoflux")
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Ip_target "Ip_target" property)
+            self._Ip_target = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Ip_ratio_target "Ip_ratio_target" property)
+            self._Ip_ratio_target = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Pax_target "Pax_target" property)
+            self._pax_target = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Estored_target "Estored_target" property)
+            self._estored_target = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.R0_target "R0_target" property)
+            self._R0_target = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Z0_target "Z0_target" property)
+            self._Z0_target = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Isoflux_targets "Isoflux_targets" property)
             self._isoflux_targets = None
-            ## Flux constraint points (use @ref TokaMaker.TokaMaker.set_isoflux "set_flux")
-            self._flux_targets = None
-            ## Saddle constraint points (use @ref TokaMaker.TokaMaker.set_saddles "set_saddles")
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Psi_targets "Psi_targets" property)
+            self._psi_targets = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Saddle_targets "Saddle_targets" property)
             self._saddle_targets = None
         else:
             self._F0 = copy.copy(source_eq._F0)
-            self._Ip_target = source_eq._Ip_target
-            self._Ip_ratio_target = source_eq._Ip_ratio_target
-            self._pax_target = source_eq._pax_target
-            self._estore_target = source_eq._estore_target
-            self._R0_target = source_eq._R0_target
-            self._V0_target = source_eq._V0_target
-            self._isoflux_targets = source_eq._isoflux_targets.copy() if source_eq._isoflux_targets is not None else None
-            self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
-            self._flux_targets = (source_eq._flux_targets[0].copy(), source_eq._flux_targets[1].copy()) if source_eq._flux_targets is not None else None
+            if not skip_targets:
+                self._Ip_target = source_eq._Ip_target
+                self._Ip_ratio_target = source_eq._Ip_ratio_target
+                self._pax_target = source_eq._pax_target
+                self._estored_target = source_eq._estored_target
+                self._R0_target = source_eq._R0_target
+                self._Z0_target = source_eq._Z0_target
+            if not skip_constraints:
+                self._isoflux_targets = source_eq._isoflux_targets.copy() if source_eq._isoflux_targets is not None else None
+                self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
+            self._psi_targets = (source_eq._psi_targets[0].copy(), source_eq._psi_targets[1].copy()) if source_eq._psi_targets is not None else None
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
@@ -1660,9 +1718,10 @@ class TokaMaker_equil():
         bounds_loc = c_double_ptr()
         alam_loc = c_double_ptr()
         pnorm_loc = c_double_ptr()
+        has_plasma_loc = c_bool_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_refs(self._tMaker._tMaker_ptr,ctypes.byref(o_loc),ctypes.byref(lim_loc),ctypes.byref(x_loc),ctypes.byref(div_flag_loc),
-                    ctypes.byref(bounds_loc),ctypes.byref(alam_loc),ctypes.byref(pnorm_loc),error_string)
+        tokamaker_get_refs(self._tMaker_equil_ptr,ctypes.byref(o_loc),ctypes.byref(lim_loc),ctypes.byref(x_loc),ctypes.byref(div_flag_loc),
+                    ctypes.byref(bounds_loc),ctypes.byref(alam_loc),ctypes.byref(pnorm_loc),ctypes.byref(has_plasma_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         ## F*F' normalization value [1] (use @ref TokaMaker.TokaMaker.alam "alam" property)
@@ -1679,18 +1738,28 @@ class TokaMaker_equil():
         self._diverted = numpy.ctypeslib.as_array(div_flag_loc,shape=(1,))
         ## Bounding values for \f$\psi\f$ (\f$\psi_a\f$,\f$\psi_0\f$) [2]
         self._psi_bounds = numpy.ctypeslib.as_array(bounds_loc,shape=(2,))
+        ## Bounding values for \f$\psi\f$ (\f$\psi_a\f$,\f$\psi_0\f$) [2]
+        self._has_plasma = numpy.ctypeslib.as_array(has_plasma_loc,shape=(1,))
 
-        if source_eq is None:
-            ## F*F' normalization value
-            self.alam = 0.1
-            ## P' normalization value
-            self.pnorm = 0.1
-            default_prof={
-                'type': 'linterp',
-                'x': numpy.array([0.0,0.8,1.0]),
-                'y': numpy.array([2.0,1.0,0.0])
-            }
-            self._tMaker.set_profiles(ffp_prof=default_prof, pp_prof=default_prof)
+        if self.Vacuum:
+            self.alam = 0.0
+            self.pnorm = 0.0
+            self._o_point[:] = [-1.0, 0.0]
+            self._lim_point[:] = [-1.0, 0.0]
+            for i in range(self._x_points.shape[0]):
+                self._x_points[i,:] = [-1.0, 0.0]
+            self._diverted[0] = False
+            self._psi_bounds[:] = [-1.E99, 1.E99]
+        else:
+            if source_eq is None:
+                self.alam = 0.1
+                self.pnorm = 0.1
+                default_prof={
+                    'type': 'linterp',
+                    'x': numpy.array([0.0,1.0]),
+                    'y': numpy.array([1.0,0.0])
+                }
+                self._tMaker.set_profiles(ffp_prof=default_prof, pp_prof=default_prof)
     
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
@@ -1740,6 +1809,63 @@ class TokaMaker_equil():
     def psi_bounds(self):
         r'''! Bounding values for \f$\psi\f$ (\f$\psi_a\f$,\f$\psi_0\f$) [2]'''
         return self._psi_bounds
+
+    @property
+    def Vacuum(self):
+        r'''! Equilibrium is vacuum (no plasma contributions)?'''
+        return not self._has_plasma[0]
+
+    @property
+    def F0(self):
+        r'''! Vacuum \f$ F = B_t(R_0) * R_0 \f$'''
+        return self._F0
+
+    @property
+    def Ip_target(self):
+        r'''! Plasma current target'''
+        return self._Ip_target
+    
+    @property
+    def Ip_ratio_target(self):
+        r'''! Plasma current ratio I_p(FF') / I_p(P') target'''
+        return self._Ip_ratio_target
+
+    @property
+    def Pax_target(self):
+        r'''! Axis pressure target'''
+        return self._pax_target
+    
+    @property
+    def Estored_target(self):
+        r'''! Stored energy target'''
+        return self._estored_target
+    
+    @property
+    def R0_target(self):
+        r'''! Magnetic axis radial position target'''
+        return self._R0_target.value
+    
+    @property
+    def Z0_target(self):
+        r'''! Magnetic axis vertical position target'''
+        return self._Z0_target.value
+    
+    @property
+    def Isoflux_targets(self):
+        r'''! Isoflux constraint points'''
+        return self._isoflux_targets
+
+    @property
+    def Psi_targets(self):
+        r'''! Flux constraint points and target values'''
+        if self._psi_targets is None:
+            return None, None
+        return self._psi_targets[0], self._psi_targets[1]
+
+    @property
+    def Saddle_targets(self):
+        r'''! Saddle constraint points'''
+        return self._saddle_targets
 
     def abspsi_to_normalized(self,psi_in):
         r'''! Convert unnormalized \f$ \psi \f$ values to normalized \f$ \hat{\psi} \f$ values

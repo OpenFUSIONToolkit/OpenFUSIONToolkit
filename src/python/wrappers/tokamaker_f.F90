@@ -902,8 +902,8 @@ END SUBROUTINE tokamaker_get_plasma_Lmat
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_refs(tMaker_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm,error_str) BIND(C,NAME="tokamaker_get_refs")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_refs(tMaker_equil_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm,has_plasma,error_str) BIND(C,NAME="tokamaker_get_refs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 TYPE(c_ptr), INTENT(out) :: o_point !< Needs docs
 TYPE(c_ptr), INTENT(out) :: lim_point !< Needs docs
 TYPE(c_ptr), INTENT(out) :: x_points !< Needs docs
@@ -911,16 +911,18 @@ TYPE(c_ptr), INTENT(out) :: diverted !< Needs docs
 TYPE(c_ptr), INTENT(out) :: plasma_bounds !< Needs docs
 TYPE(c_ptr), INTENT(out) :: alam !< Needs docs
 TYPE(c_ptr), INTENT(out) :: pnorm !< Needs docs
+TYPE(c_ptr), INTENT(out) :: has_plasma !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-o_point=c_loc(tMaker_obj%gs_equil%o_point)
-lim_point=c_loc(tMaker_obj%gs_equil%lim_point)
-x_points=c_loc(tMaker_obj%gs_equil%x_points)
-diverted=c_loc(tMaker_obj%gs_equil%diverted)
-plasma_bounds=c_loc(tMaker_obj%gs_equil%plasma_bounds)
-alam=c_loc(tMaker_obj%gs_equil%alam)
-pnorm=c_loc(tMaker_obj%gs_equil%pnorm)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+o_point=c_loc(tMaker_equil_obj%o_point)
+lim_point=c_loc(tMaker_equil_obj%lim_point)
+x_points=c_loc(tMaker_equil_obj%x_points)
+diverted=c_loc(tMaker_equil_obj%diverted)
+plasma_bounds=c_loc(tMaker_equil_obj%plasma_bounds)
+alam=c_loc(tMaker_equil_obj%alam)
+pnorm=c_loc(tMaker_equil_obj%pnorm)
+has_plasma=c_loc(tMaker_equil_obj%has_plasma)
 END SUBROUTINE tokamaker_get_refs
 !---------------------------------------------------------------------------------
 !> Needs docs
