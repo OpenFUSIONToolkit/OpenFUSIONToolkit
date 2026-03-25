@@ -356,36 +356,34 @@ class TokaMaker():
         ## Mesh regions [nc] 
         self.reg = numpy.ctypeslib.as_array(reg_loc,shape=(self.nc,))
 
-    ## @cond
-    def eq_deprecated_warning(self):
-        warn('Equilibrium access on through the TokaMaker object is deprecated and will be removed in a future release.', DeprecationWarning, stacklevel=3)
+    # def eq_deprecated_warning(self):
+    #     warn('Equilibrium access on through the TokaMaker object is deprecated and will be removed in a future release.', DeprecationWarning, stacklevel=3)
 
     @property
     def alam(self):
         r'''F*F' normalization value'''
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.alam
     
+    ## @cond
     @alam.setter
     def alam(self,value):
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.alam = value
+    ## @endcond
     
     @property
     def pnorm(self):
         r'''Pressure normalization value'''
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.pnorm
     
+    ## @cond
     @pnorm.setter
     def pnorm(self,value):
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.pnorm = value
@@ -394,7 +392,6 @@ class TokaMaker():
     @property
     def diverted(self):
         r'''! Diverted flag (limited if `False`)'''
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.diverted
@@ -402,7 +399,6 @@ class TokaMaker():
     @property
     def o_point(self):
         r'''! Location of O-point (magnetic axis) [2]'''
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.o_point
@@ -410,7 +406,6 @@ class TokaMaker():
     @property
     def lim_point(self):
         r'''! Limiting point (limter or active X-point) [2]'''
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.lim_point
@@ -418,7 +413,6 @@ class TokaMaker():
     @property
     def psi_bounds(self):
         r'''! Bounding values for \f$\psi\f$ (\f$\psi_a\f$,\f$\psi_0\f$) [2]'''
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.psi_bounds
@@ -429,7 +423,6 @@ class TokaMaker():
         @param psi_in Input \f$ \psi \f$ values
         @returns Normalized \f$ \hat{\psi} \f$ values
         '''
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.abspsi_to_normalized(psi_in)
@@ -440,7 +433,6 @@ class TokaMaker():
         @param psi_in Input \f$ \hat{\psi} \f$ values
         @returns Unnormalized \f$ \psi \f$ values
         '''
-        self.eq_deprecated_warning()
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.psinorm_to_absolute(psi_in)
@@ -759,7 +751,7 @@ class TokaMaker():
             tokamaker_set_isoflux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,1)),numpy.zeros((1,)),0,grad_wt_lim,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
-            self._tMaker_equil._isoflux_targets = None
+            self._tMaker_equil._isoflux_constraints = None
         else:
             if ref_points is None:
                 ref_points = numpy.zeros((isoflux.shape[0]-1,2), dtype=numpy.float64)
@@ -781,7 +773,7 @@ class TokaMaker():
             tokamaker_set_isoflux(self._tMaker_ptr,isoflux,ref_points,weights,isoflux.shape[0],grad_wt_lim,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
-            self._tMaker_equil._isoflux_targets = isoflux.copy()
+            self._tMaker_equil._isoflux_constraints = isoflux.copy()
     
     def set_flux(self,locations,targets,weights=None):
         r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$
@@ -804,7 +796,7 @@ class TokaMaker():
             tokamaker_set_flux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,-1.0,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
-            self._tMaker_equil._psi_targets = None
+            self._tMaker_equil._psi_constraints = None
         else:
             if targets.shape[0] != locations.shape[0]:
                 raise ValueError('Shape of "targets" does not match first dimension of "locations"')
@@ -819,7 +811,7 @@ class TokaMaker():
             tokamaker_set_flux(self._tMaker_ptr,locations,targets,weights,locations.shape[0],-1.0,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
-            self._tMaker_equil._psi_targets = (locations.copy(), targets.copy())
+            self._tMaker_equil._psi_constraints = (locations.copy(), targets.copy())
     
     def set_saddles(self,saddles,weights=None):
         '''! Set saddle constraint points (poloidal field should vanish at each point)
@@ -957,6 +949,17 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_jtor_plasma()
+
+    def copy_eq(self,skip_targets=False,skip_constraints=False):
+        '''! Create a copy of the current equilibrium object
+        
+        @param skip_targets When copying, skip copying target values
+        @param skip_constraints When copying, skip copying constraint values
+        @result New `TokaMaker_equil` object with copied values
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return TokaMaker_equil(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
@@ -1186,12 +1189,13 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.compute_flux_integral(psi_vals,field_vals)
 
-    def plot_machine(self,fig,ax,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
+    def plot_machine(self,fig,ax,equilibrium=None,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
                      coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',colorbar=None):
         '''! Plot machine geometry
 
         @param fig Figure to add to
         @param ax Axis to add to
+        @param equilibrium Equilibrium object (if None, current equilibrium is used)
         @param vacuum_color Color to shade vacuum region (None to disable)
         @param cond_color Color for conducting regions (None to disable)
         @param limiter_color Color for limiter contour (None to disable)
@@ -1203,6 +1207,9 @@ class TokaMaker():
         @param colorbar Colorbar instance to overwrite (None to add)
         @result Colorbar instance for coil colors or None
         '''
+        # Get equilibrium object if not set
+        if equilibrium is None:
+            equilibrium = self._tMaker_equil
         mask_vals = numpy.ones((self.np,))
         if self.settings.mirror_mode:
             r_plot = self.r[:,1]
@@ -1217,7 +1224,7 @@ class TokaMaker():
                 ax.tricontourf(r_plot, z_plot, self.lc[mask,:], mask_vals, colors=vacuum_color)
         # Shade coils
         if coil_colormap is not None:
-            _, region_currents = self.get_coil_currents()
+            _, region_currents = equilibrium.get_coil_currents()
             mesh_currents = numpy.zeros((self.lc.shape[0],))
             if self.ncoils >0:
                 mesh_currents = region_currents[self.reg-1]
@@ -1260,141 +1267,6 @@ class TokaMaker():
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
         return colorbar
-
-    def plot_constraints(self,fig,ax,isoflux_color='tab:red',isoflux_marker='+',saddle_color='tab:green',saddle_marker='x'):
-        '''! Plot geometry constraints
-
-        @param fig Figure to add to
-        @param ax Axis to add to
-        @param isoflux_color Color of isoflux points (None to disable)
-        @param saddle_color Color of saddle points (None to disable)
-        '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.plot_constraints(fig,ax,isoflux_color,isoflux_marker,saddle_color,saddle_marker)
-
-    def plot_psi(self,fig,ax,psi=None,normalized=True,
-                 plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,plasma_linestyles=None,
-                 vacuum_color='darkgray',vacuum_nlevels=8,vacuum_levels=None,vacuum_colormap=None,vacuum_linestyles=None,
-                 xpoint_color='k',xpoint_marker='x',xpoint_inactive_alpha=0.5,opoint_color='k',opoint_marker='*'):
-        r'''! Plot contours of \f$\hat{\psi}\f$
-
-        @param fig Figure to add to
-        @param ax Axis to add to
-        @param psi Flux values to plot (otherwise `self.get_psi()` is called)
-        @param normalized Retreive normalized flux, or assume normalized psi if passed as argument
-        @param plasma_color Color for plasma contours
-        @param plasma_nlevels Number of plasma contours
-        @param plasma_levels Explicit levels for plasma contours
-        @param plasma_colormap Colormap for plasma contours (cannot be specified with `plasma_color`)
-        @param plasma_linestyles Linestyle for plasma contours
-        @param vacuum_color Color for vacuum contours
-        @param vacuum_nlevels Number of vacuum contours
-        @param vacuum_levels Explicit levels for vacuum contours (cannot be specified with `vacuum_color`)
-        @param vacuum_colormap Colormap for vacuum contours
-        @param vacuum_linestyles Linestyle for vacuum contours
-        @param xpoint_color Color for X-point markers (None to disable)
-        @param xpoint_marker Marker style for X-points
-        @param xpoint_inactive_alpha Alpha value for inactive X-points
-        @param opoint_color Color for O-point markers (None to disable)
-        @param opoint_marker Marker style for O-points
-        '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.plot_psi(fig,ax,psi,normalized,
-            plasma_color,plasma_nlevels,plasma_levels,plasma_colormap,plasma_linestyles,
-            vacuum_color,vacuum_nlevels,vacuum_levels,vacuum_colormap,vacuum_linestyles,
-            xpoint_color,xpoint_marker,xpoint_inactive_alpha,opoint_color,opoint_marker)
-    
-    def get_conductor_currents(self,psi,cell_centered=False):
-        r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$
-
-        @param psi Psi corresponding to field with conductor currents (eg. from time-dependent simulation)
-        @param cell_centered Get currents at cell centers
-        '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.calc_conductor_currents(psi,cell_centered)
-    
-    def get_conductor_source(self,dpsi_dt):
-        r'''! Get toroidal current density in conducting regions for a \f$ d \psi / dt \f$ source
-
-        @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
-        '''
-        # Apply 1/R scale (avoiding divide by zero)
-        curr = dpsi_dt.copy()
-        curr[self.r[:,0]>0.0] /= self.r[self.r[:,0]>0.0,0]
-        # Compute cell areas
-        have_noncontinuous = False
-        for _, cond_reg in self._cond_dict.items():
-            if 'noncontinuous' in cond_reg:
-                have_noncontinuous = True
-                break
-        if have_noncontinuous:
-            area = numpy.zeros((self.lc.shape[0],))
-            for i in range(self.nc):
-                v1 = self.r[self.lc[i,1],:]-self.r[self.lc[i,0],:]
-                v2 = self.r[self.lc[i,2],:]-self.r[self.lc[i,0],:]
-                area[i] = numpy.linalg.norm(numpy.cross(v1,v2))/2.0
-        #
-        mesh_currents = numpy.zeros((self.lc.shape[0],))
-        # Loop over conducting regions and get mask/fields
-        mask = numpy.zeros((self.lc.shape[0],), dtype=numpy.int32)
-        for _, cond_reg in self._cond_dict.items():
-            eta = cond_reg.get('eta',-1.0)
-            if eta > 0:
-                mask_tmp = (self.reg == cond_reg['reg_id'])
-                field_tmp = -curr/eta
-                mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
-                if cond_reg.get('noncontinuous',False):
-                    mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
-                mask = numpy.logical_or(mask,mask_tmp)
-        return mask, mesh_currents
-    
-    def plot_eddy(self,fig,ax,psi=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
-        r'''! Plot contours of \f$\hat{\psi}\f$
-
-        @param fig Figure to add to
-        @param ax Axis to add to
-        @param psi Psi corresponding to eddy currents (eg. from time-dependent simulation)
-        @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
-        @param nlevels Number contour lines used for shading (with "psi" only)
-        @param colormap Colormap to use for shadings
-        @param clabel Label for colorbar (None to disable colorbar)
-        @result Colorbar object
-        '''
-        if self.settings.mirror_mode:
-            r_plot = self.r[:,1]
-            z_plot = self.r[:,0]
-        else:
-            r_plot = self.r[:,0]
-            z_plot = self.r[:,1]
-        if psi is not None:
-            if dpsi_dt is not None:
-                raise ValueError('Only one of "psi" or "dpsi_dt" can be specified')
-            mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
-        elif dpsi_dt is not None:
-            mask, plot_field = self.get_conductor_source(dpsi_dt)
-        if plot_field.shape[0] == self.nc:
-            if symmap:
-                max_curr = abs(plot_field).max()
-                clf = ax.tripcolor(r_plot,z_plot,self.lc[mask,:],plot_field[mask],cmap=colormap,vmin=-max_curr,vmax=max_curr)
-            else:
-                clf = ax.tripcolor(r_plot,z_plot,self.lc[mask],plot_field[mask],cmap=colormap)
-        else:
-            if symmap:
-                max_curr = abs(plot_field[self.lc[mask,:]]).max(axis=None)
-                clf = ax.tricontourf(r_plot,z_plot,self.lc[mask],plot_field,nlevels,cmap=colormap,vmin=-max_curr,vmax=max_curr)
-            else:
-                clf = ax.tricontourf(r_plot,z_plot,self.lc[mask],plot_field,nlevels,cmap=colormap)
-        if clabel is not None:
-            cb = fig.colorbar(clf,ax=ax)
-            cb.set_label(clabel)
-        else:
-            cb = None
-        # Make 1:1 aspect ratio
-        ax.set_aspect('equal','box')
-        return cb
     
     def plot_psi(self,fig,ax,equilibrium=None,psi=None,normalized=True,
         plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,plasma_linestyles=None,
@@ -1497,11 +1369,113 @@ class TokaMaker():
         if equilibrium is None:
             equilibrium = self._tMaker_equil
         # Plot isoflux constraints
-        if (isoflux_color is not None) and (equilibrium.Isoflux_targets is not None):
-            ax.plot(equilibrium.Isoflux_targets[:,0],equilibrium.Isoflux_targets[:,1],color=isoflux_color,marker=isoflux_marker,linestyle='none')
+        if (isoflux_color is not None) and (equilibrium.Isoflux_constraints is not None):
+            ax.plot(equilibrium.Isoflux_constraints[:,0],equilibrium.Isoflux_constraints[:,1],color=isoflux_color,marker=isoflux_marker,linestyle='none')
         # Plot saddle constraints
-        if (saddle_color is not None) and (equilibrium.Saddle_targets is not None):
-            ax.plot(equilibrium.Saddle_targets[:,0],equilibrium.Saddle_targets[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
+        if (saddle_color is not None) and (equilibrium.Saddle_constraints is not None):
+            ax.plot(equilibrium.Saddle_constraints[:,0],equilibrium.Saddle_constraints[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
+    
+    def plot_eddy(self,fig,ax,psi=None,equilibrium=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
+        r'''! Plot contours of \f$\hat{\psi}\f$
+
+        @param fig Figure to add to
+        @param ax Axis to add to
+        @param psi Psi corresponding to eddy currents (eg. from time-dependent simulation)
+        @param equilibrium Equilibrium object (if `equilibrium=None`, `psi=None` and `dpsi_dt=None`, current equilibrium is used)
+        @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
+        @param nlevels Number contour lines used for shading (with "psi" only)
+        @param colormap Colormap to use for shadings
+        @param clabel Label for colorbar (None to disable colorbar)
+        @result Colorbar object
+        '''
+        if self.settings.mirror_mode:
+            r_plot = self.r[:,1]
+            z_plot = self.r[:,0]
+        else:
+            r_plot = self.r[:,0]
+            z_plot = self.r[:,1]
+        # Get equilibrium object if not set
+        if dpsi_dt is not None:
+            if (psi is not None) or (equilibrium is not None):
+                raise ValueError('Only one of "psi", "equilibrium" or "dpsi_dt" can be specified')
+            mask, plot_field = self.get_conductor_source(dpsi_dt)
+        else:
+            if psi is None:
+                if equilibrium is None:
+                    equilibrium = self._tMaker_equil
+                psi = equilibrium.get_psi(False)
+            else:
+                if equilibrium is not None:
+                    raise ValueError('Only one of "psi", "equilibrium" or "dpsi_dt" can be specified')
+        if psi is not None:
+            mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
+        elif dpsi_dt is not None:
+            mask, plot_field = self.get_conductor_source(dpsi_dt)
+        if plot_field.shape[0] == self.nc:
+            if symmap:
+                max_curr = abs(plot_field).max()
+                clf = ax.tripcolor(r_plot,z_plot,self.lc[mask,:],plot_field[mask],cmap=colormap,vmin=-max_curr,vmax=max_curr)
+            else:
+                clf = ax.tripcolor(r_plot,z_plot,self.lc[mask],plot_field[mask],cmap=colormap)
+        else:
+            if symmap:
+                max_curr = abs(plot_field[self.lc[mask,:]]).max(axis=None)
+                clf = ax.tricontourf(r_plot,z_plot,self.lc[mask],plot_field,nlevels,cmap=colormap,vmin=-max_curr,vmax=max_curr)
+            else:
+                clf = ax.tricontourf(r_plot,z_plot,self.lc[mask],plot_field,nlevels,cmap=colormap)
+        if clabel is not None:
+            cb = fig.colorbar(clf,ax=ax)
+            cb.set_label(clabel)
+        else:
+            cb = None
+        # Make 1:1 aspect ratio
+        ax.set_aspect('equal','box')
+        return cb
+    
+    def get_conductor_currents(self,psi,cell_centered=False):
+        r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$
+
+        @param psi Psi corresponding to field with conductor currents (eg. from time-dependent simulation)
+        @param cell_centered Get currents at cell centers
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.calc_conductor_currents(psi,cell_centered)
+    
+    def get_conductor_source(self,dpsi_dt):
+        r'''! Get toroidal current density in conducting regions for a \f$ d \psi / dt \f$ source
+
+        @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
+        '''
+        # Apply 1/R scale (avoiding divide by zero)
+        curr = dpsi_dt.copy()
+        curr[self.r[:,0]>0.0] /= self.r[self.r[:,0]>0.0,0]
+        # Compute cell areas
+        have_noncontinuous = False
+        for _, cond_reg in self._cond_dict.items():
+            if 'noncontinuous' in cond_reg:
+                have_noncontinuous = True
+                break
+        if have_noncontinuous:
+            area = numpy.zeros((self.lc.shape[0],))
+            for i in range(self.nc):
+                v1 = self.r[self.lc[i,1],:]-self.r[self.lc[i,0],:]
+                v2 = self.r[self.lc[i,2],:]-self.r[self.lc[i,0],:]
+                area[i] = numpy.linalg.norm(numpy.cross(v1,v2))/2.0
+        #
+        mesh_currents = numpy.zeros((self.lc.shape[0],))
+        # Loop over conducting regions and get mask/fields
+        mask = numpy.zeros((self.lc.shape[0],), dtype=numpy.int32)
+        for _, cond_reg in self._cond_dict.items():
+            eta = cond_reg.get('eta',-1.0)
+            if eta > 0:
+                mask_tmp = (self.reg == cond_reg['reg_id'])
+                field_tmp = -curr/eta
+                mesh_currents[mask_tmp] = numpy.sum(field_tmp[self.lc[mask_tmp,:]],axis=1)/3.0
+                if cond_reg.get('noncontinuous',False):
+                    mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
+                mask = numpy.logical_or(mask,mask_tmp)
+        return mask, mesh_currents
 
     def get_vfixed(self):
         '''! Get required vacuum flux values to balance fixed boundary equilibrium
@@ -1510,7 +1484,7 @@ class TokaMaker():
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.cacl_vfixed()
+        return self._tMaker_equil.calc_vfixed()
 
     def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None,truncate_eq=True,limiter_file='',lcfs_pressure=0.0, cocos=7):
         r'''! Save current equilibrium to gEQDSK format
@@ -1680,11 +1654,11 @@ class TokaMaker_equil():
             self._R0_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equil.Z0_target "Z0_target" property)
             self._Z0_target = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Isoflux_targets "Isoflux_targets" property)
-            self._isoflux_targets = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Psi_targets "Psi_targets" property)
-            self._psi_targets = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Saddle_targets "Saddle_targets" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Isoflux_constraints "Isoflux_constraints" property)
+            self._isoflux_constraints = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Psi_constraints "Psi_constraints" property)
+            self._psi_constraints = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Saddle_constraints "Saddle_constraints" property)
             self._saddle_targets = None
         else:
             self._F0 = copy.copy(source_eq._F0)
@@ -1696,9 +1670,9 @@ class TokaMaker_equil():
                 self._R0_target = source_eq._R0_target
                 self._Z0_target = source_eq._Z0_target
             if not skip_constraints:
-                self._isoflux_targets = source_eq._isoflux_targets.copy() if source_eq._isoflux_targets is not None else None
+                self._isoflux_constraints = source_eq._isoflux_constraints.copy() if source_eq._isoflux_constraints is not None else None
                 self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
-            self._psi_targets = (source_eq._psi_targets[0].copy(), source_eq._psi_targets[1].copy()) if source_eq._psi_targets is not None else None
+            self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
@@ -1851,19 +1825,19 @@ class TokaMaker_equil():
         return self._Z0_target.value
     
     @property
-    def Isoflux_targets(self):
+    def Isoflux_constraints(self):
         r'''! Isoflux constraint points'''
-        return self._isoflux_targets
+        return self._isoflux_constraints
 
     @property
-    def Psi_targets(self):
+    def Psi_constraints(self):
         r'''! Flux constraint points and target values'''
-        if self._psi_targets is None:
+        if self._psi_constraints is None:
             return None, None
-        return self._psi_targets[0], self._psi_targets[1]
+        return self._psi_constraints[0], self._psi_constraints[1]
 
     @property
-    def Saddle_targets(self):
+    def Saddle_constraints(self):
         r'''! Saddle constraint points'''
         return self._saddle_targets
 
@@ -2274,7 +2248,7 @@ class TokaMaker_equil():
             raise Exception(error_string.value)
         return curr/mu0
     
-    def calc_delstar_curr(self):
+    def calc_jtor_plasma(self):
         r'''! Get plasma toroidal current density for current equilibrium
  
         @result \f$ J_{\phi} \f$ by evalutating RHS source terms

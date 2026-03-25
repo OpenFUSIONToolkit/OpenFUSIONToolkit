@@ -521,15 +521,15 @@ class reconstruction():
         @result Error flag
         ''' 
         # Check for possibly conflicting constraints
-        if self._tMaker_obj._tMaker_equil._isoflux_targets is not None:
-            oft_warning('Removing conflicting isoflux targets from equilibrium object via `.set_isoflux(None)`')
-            self._tMaker_obj.set_isoflux(None)
-        if self._tMaker_obj._tMaker_equil._flux_targets is not None:
-            oft_warning('Removing conflicting flux targets from equilibrium object via `.set_flux(None,None)`')
-            self._tMaker_obj.set_flux(None,None)
-        if self._tMaker_obj._tMaker_equil._saddle_targets is not None:
-            oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddles(None)`')
-            self._tMaker_obj.set_saddles(None)
+        if self._tMaker_obj._tMaker_equil.Isoflux_constraints is not None:
+            oft_warning('Removing conflicting isoflux constraints from equilibrium object via `.set_isoflux_constraints(None)`')
+            self._tMaker_obj.set_isoflux_constraints(None)
+        if self._tMaker_obj._tMaker_equil.Psi_constraints is not None:
+            oft_warning('Removing conflicting Psi constraints from equilibrium object via `.set_psi_constraints(None,None)`')
+            self._tMaker_obj.set_psi_constraints(None,None)
+        if self._tMaker_obj._tMaker_equil.Saddle_constraints is not None:
+            oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddle_constraints(None)`')
+            self._tMaker_obj.set_saddle_constraints(None)
         # Modify input file
         self.write_fit_in()
         self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['linearized_fit'] = 'T' if linearized_fit else 'F'
