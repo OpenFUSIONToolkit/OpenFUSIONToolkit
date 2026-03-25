@@ -293,21 +293,35 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     # Attempt to fit bootstrap parameterization to calculated profile (deprecated)
     # Initial parameter guess
     sigma_init = fwhm/2.355  # Convert FWHM to sigma
-    p0 = [peak_height, peak_psi, sigma_init, lmin_j_BS, 1.0, j_bootstrap[-1], 0.05]
+    p0 = [peak_height, peak_psi, sigma_init, lmin_j_BS, 1.0,
+          max(0.0, j_bootstrap[-1]), 0.05]
 
-    lower_bounds = [0.99*peak_height, # fix to measured spike height
-                    0.8*peak_psi, # don't fix to measured spike location
-                    0.0, # width
-                    0.99*lmin_j_BS,
-                    -50,
-                    0.0,
-                    0.001]
-    upper_bounds = [1.01*peak_height, # fix to measured spike height
-                    1.2*peak_psi, # don't fix to measured spike location
-                    0.33, # no spikes wider than 0.33 units of psi_N 
-                    1.01*lmin_j_BS,
-                    50, # sk
-                    2*j_bootstrap[-1],
+    # Guard against degenerate bounds when peak_height, lmin_j_BS,
+    # or j_bootstrap[-1] are near zero or negative (common for low-
+    # pedestal L-mode-like profiles in an LH transition scan).
+    _eps = max(1e-6, 1e-3 * abs(peak_height)) if peak_height != 0 else 1e-6
+    amp_lo = min(0.99 * peak_height, peak_height - _eps)
+    amp_hi = max(1.01 * peak_height, peak_height + _eps)
+
+    _eps_off = max(1e-6, 1e-3 * abs(lmin_j_BS)) if lmin_j_BS != 0 else 1e-6
+    off_lo = min(0.99 * lmin_j_BS, lmin_j_BS - _eps_off)
+    off_hi = max(1.01 * lmin_j_BS, lmin_j_BS + _eps_off)
+
+    ysep_hi = max(2 * abs(j_bootstrap[-1]), abs(j_bootstrap[-1]) + 1e-6, 1e-6)
+
+    lower_bounds = [amp_lo,
+                    0.8*peak_psi,
+                    0.0,       # width
+                    off_lo,
+                    -50,       # sk
+                    0.0,       # y_sep
+                    0.001]     # blend_width
+    upper_bounds = [amp_hi,
+                    1.2*peak_psi,
+                    0.33,
+                    off_hi,
+                    50,        # sk
+                    ysep_hi,
                     0.2]
 
     # Perform the fit
@@ -359,9 +373,9 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
     # Solve Grad-Shafranov
     mygs.solve()
     
-def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,  
-                            Ip_target, psi_pad, spike_prof=None, find_j0=True, scale_j0=1.0, 
-                            tolerance=0.01, max_iter=5, diagnostic_plots=False):
+def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
+                            Ip_target, psi_pad, spike_prof=None, find_j0=True, scale_j0=1.0,
+                            tolerance=0.01, max_iter=5, diagnostic_plots=False, verbose=True):
     r'''! Optimize scaling to match input/output \f$j_0\f$ or \f$I_p\f$
 
     @param mygs Grad-Shafranov solver object
@@ -389,7 +403,8 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     
     # We want: Input_J0 - Output_J0 ~ 0
     def get_j0_error(scale_val, n):
-        print(f"\n--- Checking scale_j0 = {scale_val:.4f} ---")
+        if verbose:
+            print(f"\n--- Checking scale_j0 = {scale_val:.4f} ---")
         
         matched_input_jphi = scale_val*j_inductive + spike_prof
         ffp_prof['type'] = 'jphi-linterp'
@@ -426,15 +441,17 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         diff = input_j0 - output_j0
         rel_err = abs(diff) / output_j0
         
-        print(f"   Input j_0:  {input_j0:.4e}")
-        print(f"   Output j_0: {output_j0:.4e}")
-        print(f"   Mismatch:  {rel_err*100:.3f}%")
+        if verbose:
+            print(f"   Input j_0:  {input_j0:.4e}")
+            print(f"   Output j_0: {output_j0:.4e}")
+            print(f"   Mismatch:  {rel_err*100:.3f}%")
         
         return diff, rel_err, tmp_jphi
     
     # We want: Input_Ip - Output_Ip ~ 0
     def get_Ip_error(scale_val, scale_j0, n):
-        print(f"\n--- Checking scale_Ip = {scale_val:.4f} ---")
+        if verbose:
+            print(f"\n--- Checking scale_Ip = {scale_val:.4f} ---")
         
         ffp_prof['type'] = 'jphi-linterp'
         ffp_prof['y'] = scale_j0*j_inductive + spike_prof
@@ -449,12 +466,16 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         
         # Calculate residual (difference) and relative error
         diff = output_Ip - Ip_target
-        rel_err = abs(diff) / Ip_target
+        # Use magnitude of Ip_target and guard against zero to avoid sign/zero issues
+        eps = numpy.finfo(float).eps
+        denom = max(abs(Ip_target), eps)
+        rel_err = abs(diff) / denom
         
-        print(f"   Input Ip target:  {Ip_target/1e6:.4e}")
-        print(f"   Trial Ip target:  {Ip_target*scale_val/1e6:.4e}")
-        print(f"   Output Ip: {output_Ip/1e6:.4e}")
-        print(f"   Mismatch:  {rel_err*100:.4f}%")
+        if verbose:
+            print(f"   Input Ip target:  {Ip_target/1e6:.4e}")
+            print(f"   Trial Ip target:  {Ip_target*scale_val/1e6:.4e}")
+            print(f"   Output Ip: {output_Ip/1e6:.4e}")
+            print(f"   Mismatch:  {rel_err*100:.4f}%")
         
         return diff, rel_err, None
 
@@ -478,11 +499,11 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             p1 = 1.2
         else:
             p1 = 0.8
-    else:   
+    else:
         if err0 < 0:
-            p1 = 1.1
+            p1 = 1.01
         else:
-            p1 = 0.9
+            p1 = 0.99
     
     if find_j0:
         err1, rel_err1, res_jphi = get_j0_error(p1, 1)
@@ -495,11 +516,13 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     # --- Step 3: Secant Method Loop ---
     # Iterate to find the root where Input - Output = 0
     for i in range(max_iter):
-        print(f"--- Optimization Iteration {i+1} ---")
+        if verbose:
+            print(f"--- Optimization Iteration {i+1} ---")
         
         # Avoid division by zero
         if abs(err1 - err0) < 1e-9:
-            print("Error difference too small, stopping.")
+            if verbose:
+                print("Error difference too small, stopping.")
             break
 
         # Secant formula: x_new = x1 - f(x1) * (x1 - x0) / (f(x1) - f(x0))
@@ -520,14 +543,16 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             err_new, rel_err_new, res_jphi = get_Ip_error(p_new, scale_j0, i+2)
 
         if rel_err_new < tolerance:
-            print(f"Converged! Optimal scale factor: {p_new:.4f}")
+            if verbose:
+                print(f"Converged! Optimal scale factor: {p_new:.4f}")
             return p_new, res_jphi
         
         # Update points for next step (move window forward)
         p0, err0 = p1, err1
         p1, err1 = p_new, err_new
 
-    print("Max iterations reached. Returning best last effort.")
+    if verbose:
+        print("Max iterations reached. Returning best last effort.")
     return p1, res_jphi
 
 def calculate_ln_lambda(Te, Ti, ne, ni, Zeff=1.0,
@@ -799,7 +824,8 @@ def solve_with_bootstrap(mygs,
                          iterations=3,
                          diagnostic_plots=False,
                          parameterize_jBS = False,
-                         use_OMFIT_sauter = False):
+                         use_OMFIT_sauter = False,
+                         verbose = True):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
@@ -972,7 +998,8 @@ def solve_with_bootstrap(mygs,
                                 method='brentq', rtol=1e-6)
             alpha_opt = sol.root
         except ValueError:
-            print("WARNING: Root scalar failed to bracket. Defaulting to alpha=1.0")
+            if verbose:
+                print("WARNING: Root scalar failed to bracket. Defaulting to alpha=1.0")
             alpha_opt = 1.0
 
         matched_j_inductive = alpha_opt * current_jphi_target
@@ -989,7 +1016,8 @@ def solve_with_bootstrap(mygs,
 
     if inductive_jphi is not None:
         
-        print('\n >>> Matching input core j_phi with G-S solution')
+        if verbose:
+            print('\n >>> Matching input core j_phi with G-S solution')
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
@@ -1015,24 +1043,26 @@ def solve_with_bootstrap(mygs,
         # Enforce P' edge condition
         pp_prof['y'][-1] = 0.
         
-        print('\n >>> Finding optimal j_phi scale factor')
+        if verbose:
+            print('\n >>> Finding optimal j_phi scale factor')
         # Find optimal jphi scale
         final_scale_j0, final_jphi = find_optimal_scale(mygs,
-            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive, 
-            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=True, 
-            diagnostic_plots=diagnostic_plots
+            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
+            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=True,
+            diagnostic_plots=diagnostic_plots, verbose=verbose
         )
-        #  final_scale_j0 = 1.0
-        print('\n >>> Finding optimal Ip scale factor')
+        if verbose:
+            print('\n >>> Finding optimal Ip scale factor')
         # Find optimal Ip_target scale
         final_scale_Ip, _ = find_optimal_scale(mygs,
-            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive, 
-            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=False, 
-            scale_j0=final_scale_j0, 
-            tolerance=0.001, diagnostic_plots=diagnostic_plots
+            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
+            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=False,
+            scale_j0=final_scale_j0,
+            tolerance=0.001, diagnostic_plots=diagnostic_plots, verbose=verbose
         )
         
-        print('\n >>> Iterating on H-mode equilibrium solution')
+        if verbose:
+            print('\n >>> Iterating on H-mode equilibrium solution')
 
         for n in range(iterations):            
             # Calculate new profiles
