@@ -3,7 +3,7 @@
 !---------------------------------------------------------------------------
 !> @file xmhd_2d.F90
 !
-!> Solve time-dependent MHD equations with lagrange basis
+!> Solve time-dependent MHD equations in 2D with lagrange basis set
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
 #if !defined(XMHD_RST_LEN)
@@ -40,19 +40,19 @@ IMPLICIT NONE
 PRIVATE
 
 TYPE, extends(oft_noop_matrix) :: xmhd_2d_nlfun
-  REAL(r8) :: dt = -1.d0 !< Time step
-  REAL(r8) :: chi !< Needs docs
-  REAL(r8) :: nu !< Needs docs
-  REAL(r8) :: gamma
-  REAL(r8) :: D_diff
-  REAL(r8) :: k_boltz=elec_charge
-  REAL(r8) :: m_i=proton_mass
-  REAL(r8) :: den_scale = 1.d19 !< Needs docs
-  REAL(r8) :: diag_vals(7) = 0.d0 !< Needs docs
-  REAL (r8) :: B_0(3) = 0.d0
-  REAL(r8) :: eta
+  REAL(r8) :: dt = -1.d0 !< time step
+  REAL(r8) :: chi !< thermal diffusivity
+  REAL(r8) :: nu !< viscosity
+  REAL(r8) :: gamma !< adiabatic index
+  REAL(r8) :: D_diff !< diffusivity
+  REAL(r8) :: k_boltz=elec_charge !< Boltzmann constant (use elec_charge for T in eV)
+  REAL(r8) :: m_i=proton_mass !< ion mass
+  REAL(r8) :: den_scale = 1.d19 !< scale factor used to normalize density
+  REAL(r8) :: diag_vals(7) = 0.d0 !< diagnostic values
+  REAL (r8) :: B_0(3) = 0.d0 !< background, static magnetic field
+  REAL(r8) :: eta !< electrical resistivity
 
-  LOGICAL :: cyl_flag=.FALSE.
+  LOGICAL :: cyl_flag=.FALSE. !< use cylindrical coordinates
 
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
@@ -69,13 +69,13 @@ END TYPE xmhd_2d_nlfun
 TYPE, extends(oft_noop_matrix) :: xmhd_2d_mfun
   LOGICAL :: cyl_flag=.FALSE.
   REAL (r8) :: B_0(3) = 0.d0
-  REAL (r8) :: den_scale = 1.d19 !< Needs docs
-  REAL (r8) :: diag_vals(7) = 0.d0 !< Needs docs
-  REAL (r8) :: gamma
+  REAL (r8) :: den_scale = 1.d19 !< scale factor used to normalize density
+  REAL (r8) :: diag_vals(7) = 0.d0 !< diagnostic values
+  REAL (r8) :: gamma !< adiabatic index
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: T_bc => NULL() !< T BC flag
-  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
-  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vel BC flag
-  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velz_bc => NULL() !< vel BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< velx BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vely BC flag
+  LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velz_bc => NULL() !< velz BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: by_bc => NULL() !< by BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: psi_bc => NULL() !< psi BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
@@ -88,25 +88,24 @@ END TYPE xmhd_2d_mfun
 !------------------------------------------------------------------------------
 TYPE, public :: oft_xmhd_2d_sim
   LOGICAL :: mfnk = .FALSE. !< Use matrix free method?
-  LOGICAL :: cyl_flag = .FALSE. !Use cylindrical coordinates version
+  LOGICAL :: cyl_flag = .FALSE. !Use cylindrical coordinates
   LOGICAL :: linear = .FALSE. !Run sim. in linear mode
-  INTEGER(i4) :: nsteps = -1 !< Needs docs
-  INTEGER(i4) :: rst_base = 0 !< Needs docs
-  INTEGER(i4) :: rst_freq = 10 !< Needs docs
-  REAL(r8) :: dt = -1.d0 !< Needs docs
-  REAL(r8) :: t = 0.d0 !< Needs docs
-  ! Edited to reflect new fields
-  REAL(r8) :: chi = -1.d0 !< Needs docs
-  REAL(r8) :: nu = -1.d0 !< Needs docs
-  REAL(r8) :: gamma = -1.d0 !< Needs docs
-  REAL(r8) :: D_diff = -1.d0 !< Needs docs
-  REAL(r8) :: k_boltz = elec_charge !< Needs docs
-  REAL(r8) :: den_scale = 1.d19 !< Needs docs
-  REAL(r8) :: m_i=proton_mass
+  INTEGER(i4) :: nsteps = -1 !< # of timesteps
+  INTEGER(i4) :: rst_base = 0 !< starting index of restart files
+  INTEGER(i4) :: rst_freq = 10 !< frequency to generate restart files
+  REAL(r8) :: dt = -1.d0 !< timestep
+  REAL(r8) :: t = 0.d0 !< current time
+  REAL(r8) :: chi = -1.d0 !< thermal diffusivity
+  REAL(r8) :: nu = -1.d0 !< viscosity
+  REAL(r8) :: gamma = -1.d0 !< adiabatic index
+  REAL(r8) :: D_diff = -1.d0 !< diffusivity
+  REAL(r8) :: k_boltz = elec_charge !< Boltzmann constant (use elec_charge for T in eV)
+  REAL(r8) :: den_scale = 1.d19 !< scale factor used to normalize density
+  REAL(r8) :: m_i=proton_mass !< proton mass
   REAL(r8) :: lin_tol = 1.d-8 !< absolute tolerance for linear solver
-  REAL(r8) :: nl_tol = 1.d-5 !< Needs docs
-  REAL (r8) :: B_0(3) = 0.d0
-  REAL(r8) :: eta
+  REAL(r8) :: nl_tol = 1.d-5 !< absolute tolerance for nonlinear solver
+  REAL (r8) :: B_0(3) = 0.d0 !< background, static magnetic field
+  REAL(r8) :: eta !< electrical resistivity
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< n BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: velx_bc => NULL() !< vel BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: vely_bc => NULL() !< vel BC flag
@@ -117,12 +116,12 @@ TYPE, public :: oft_xmhd_2d_sim
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: jacobian_block_mask => NULL() !< Matrix block mask
   TYPE(oft_fem_comp_type), POINTER :: fe_rep => NULL() !< Finite element representation for solution field
   TYPE(xdmf_plot_file) :: xdmf_plot
-  CLASS(oft_vector), POINTER :: u => NULL() !< Needs docs
-  CLASS(oft_vector), POINTER :: u0 => NULL() !< Needs docs
-  CLASS(oft_matrix), POINTER :: jacobian => NULL() !< Needs docs
+  CLASS(oft_vector), POINTER :: u => NULL() !< current solution vector
+  CLASS(oft_vector), POINTER :: u0 => NULL() !< equilibrium solution vector (used for linearization if linear = True)
+  CLASS(oft_matrix), POINTER :: jacobian => NULL() !< approximate jacobian matrix
   TYPE(oft_mf_matrix), POINTER :: mf_mat => NULL() !< Matrix free operator
-  TYPE(xmhd_2d_nlfun), POINTER :: nlfun => NULL() !< Needs docs
-  TYPE(xmhd_2d_mfun), POINTER :: mfun => NULL() !< Needs docs
+  TYPE(xmhd_2d_nlfun), POINTER :: nlfun => NULL() !< Nonlinear function
+  TYPE(xmhd_2d_mfun), POINTER :: mfun => NULL() !< mass matrix function
   TYPE(xml_node), POINTER :: xml_root => NULL() !< XML root element
   TYPE(xml_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
   contains
@@ -190,7 +189,7 @@ CALL u%add(0.d0,1.d0,self%u)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
 !---------------------------------------------------------------------------
-! Setup non-linear solver
+! Set parameters of nonlinear function
 !---------------------------------------------------------------------------
 ALLOCATE(self%nlfun)
 self%nlfun%cyl_flag = self%cyl_flag
@@ -209,11 +208,11 @@ self%nlfun%velz_bc=>self%velz_bc
 self%nlfun%T_bc=>self%T_bc
 self%nlfun%psi_bc=>self%psi_bc
 self%nlfun%by_bc=>self%by_bc
-!---
-CALL build_approx_jacobian(self,u)
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
+CALL build_approx_jacobian(self,u)
+
 IF(self%mfnk)THEN
   ALLOCATE(self%mf_mat)
   CALL up%set(1.d0)
@@ -283,7 +282,7 @@ DO i=1,self%nsteps
   by_avg = self%nlfun%diag_vals(7)
   self%nlfun%dt=self%dt
   npre = npre + 1
-  IF((.NOT.self%mfnk).OR.MOD(npre,4)==0)THEN
+  IF((.NOT.self%mfnk).OR.MOD(npre,1)==0)THEN
     CALL update_jacobian(u)
     CALL solver%pre%update(.TRUE.)
   END IF
@@ -329,13 +328,6 @@ DO i=1,self%nsteps
     END IF
     !---
   END IF
-  ! IF(nksolver%lits<4)THEN
-  !   self%dt=self%dt*2.d0
-  !   npre=-1
-  ! ELSE IF(nksolver%lits>100)THEN
-  !   self%dt=self%dt/2.d0
-  !   npre=-1
-  ! END IF
 END DO
 CALL hist_file%close()
 CALL nksolver%delete()
@@ -343,7 +335,7 @@ CALL solver%delete()
 CALL u%delete()
 CALL up%delete()
 CALL v%delete()
-DEALLOCATE(u,up,v,plot_vals)
+DEALLOCATE(u,up,v)
 end subroutine run_simulation
 !---------------------------------------------------------------------------
 !> Run 2D MHD simulation in linear mode
@@ -411,7 +403,6 @@ self%mfun%by_bc=>self%by_bc
 
 ! Construct the linear advance matrix with equilibrium fields
 CALL build_approx_jacobian(self,self%u0)
-CALL self%jacobian%save('lin_ops.h5', 'jacobian', bc_flags=[self%n_bc,self%velx_bc,self%vely_bc,self%velz_bc,self%T_bc,self%psi_bc,self%by_bc])
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
@@ -505,8 +496,8 @@ SUBROUTINE mfun_apply(self,a,b)
 class(xmhd_2d_mfun), intent(inout) :: self !< mass function object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
-type(oft_quad_type), pointer :: quad
-LOGICAL :: cyl_flag
+type(oft_quad_type), pointer :: quad 
+LOGICAL :: cyl_flag 
 INTEGER(i4) :: i
 REAL(r8) :: diag_vals(7), B_0(3), gamma
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights, T_res, &
@@ -515,6 +506,7 @@ REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
 quad=>oft_blagrange%quad
 NULLIFY(n_weights, vel_weights, T_weights, psi_weights, by_weights, &
 n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res)
+
 !---Get weights from solution vector
 ALLOCATE(vel_weights(3,oft_blagrange%ne))
 CALL a%get_local(n_weights,1)
@@ -528,7 +520,7 @@ CALL a%get_local(T_weights,5)
 CALL a%get_local(psi_weights,6)
 CALL a%get_local(by_weights,7)
 
-!>Needs docs
+!>--Set constant values
 B_0 = self%B_0
 cyl_flag = self%cyl_flag
 gamma = self%gamma
@@ -572,7 +564,6 @@ DO i=1,mesh%nc
   T_weights_loc = T_weights(cell_dofs)
   psi_weights_loc = psi_weights(cell_dofs)
   by_weights_loc = by_weights(cell_dofs)
-
   !---------------------------------------------------------------------------
   ! Quadrature Loop
   !---------------------------------------------------------------------------
@@ -599,12 +590,9 @@ DO i=1,mesh%nc
       T = T + T_weights_loc(jr)*basis_vals(jr)
       psi = psi + psi_weights_loc(jr)*basis_vals(jr)
       by = by + by_weights_loc(jr)*basis_vals(jr)
-      ! Note this is actually $(\nabla u)^T = jac(\vec(u))$
-      ! Choosing this convention to make index contractions
-      ! more consistent with Fortran convention
       dn = dn + n_weights_loc(jr)*basis_grads(:,jr)
-      !Note: in cylindrical coordinates, dvel is not the actual gradient of velocity
-      ! but the gradient of each component in a matrix
+      !Note: in cylindrical coordinates, dvel is not the actual gradient of the velocity vector,
+      ! but the gradient of each component, in a matrix
       dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
       dvel(:, 2) = 0.d0
       dvel(:, 3) = dvel(:, 3) + vel_weights_loc(:, jr)*basis_grads(3, jr)
@@ -701,6 +689,7 @@ REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
 quad=>oft_blagrange%quad
 NULLIFY(n_weights, vel_weights, T_weights, psi_weights, by_weights, &
 n_res, velx_res, vely_res, velz_res, T_res, psi_res, by_res)
+
 !---Get weights from solution vector
 ALLOCATE(vel_weights(3,oft_blagrange%ne))
 CALL a%get_local(n_weights,1)
@@ -713,13 +702,14 @@ CALL a%get_local(vtmp, 4)
 CALL a%get_local(T_weights,5)
 CALL a%get_local(psi_weights,6)
 CALL a%get_local(by_weights,7)
-!---
-chi = self%chi !< Needs docs
+
+!--- Set constant values
+chi = self%chi 
 m_i = self%m_i
-eta = self%eta !< Needs docs
-nu = self%nu !< Needs docs
-gamma = self%gamma !< Needs docs
-D_diff = self%D_diff !< Needs docs
+eta = self%eta 
+nu = self%nu 
+gamma = self%gamma 
+D_diff = self%D_diff 
 B_0 = self%B_0
 cyl_flag = self%cyl_flag
 
@@ -786,12 +776,9 @@ DO i=1,mesh%nc
       T = T + T_weights_loc(jr)*basis_vals(jr)
       psi = psi + psi_weights_loc(jr)*basis_vals(jr)
       by = by + by_weights_loc(jr)*basis_vals(jr)
-      ! Note this is actually $(\nabla u)^T = jac(\vec(u))$
-      ! Choosing this convention to make index contractions
-      ! more consistent with Fortran convention
       dn = dn + n_weights_loc(jr)*basis_grads(:,jr)
-      !Note: in cylindrical coordinates, dvel is not the actual gradient of velocity
-      ! but the gradient of each component in a matrix
+      !Note: in cylindrical coordinates, dvel is not the actual gradient of the velocity vector,
+      ! but the gradient of each component, in a matrix
       dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
       dvel(:, 2) = 0.d0
       dvel(:, 3) = dvel(:, 3) + vel_weights_loc(:, jr)*basis_grads(3, jr)
@@ -844,7 +831,6 @@ DO i=1,mesh%nc
         + self%dt*basis_vals(jr)*(btmp(2)**2-btmp(1)**2-btmp(3)**2)*int_factor/(2.d0*mu0*m_i*n) &
         + self%dt*basis_vals(jr)*nu*vel(1)*int_factor/(m_i*n*(coords(1)+gs_epsilon))  &
         - self%dt*basis_vals(jr)*vel(2)**2*int_factor
-    
         res_loc(jr,3) = res_loc(jr,3) &
         - self%dt*basis_vals(jr)*btmp(1)*btmp(2)*int_factor/(mu0*m_i*n) & !!nonzero 
         + self%dt*basis_vals(jr)*nu*vel(2)*int_factor/(m_i*n*(coords(1)+gs_epsilon)) &
@@ -881,7 +867,7 @@ DO i=1,mesh%nc
           + self%dt*chi*DOT_PRODUCT(dT, basis_grads(:,jr))*int_factor &
           - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(dn, dT)*int_factor/n 
       END IF
-      !---PSI
+      !---Psi
       tmp1 = cross_product(B_0,vel)
       IF(cyl_flag) THEN
         res_loc(jr, 6) = res_loc(jr, 6) &
@@ -963,7 +949,7 @@ DEALLOCATE(n_res,velx_res,vely_res, velz_res, T_res, psi_res, by_res, &
         n_weights,vel_weights, T_weights, psi_weights, by_weights)
 END SUBROUTINE nlfun_apply
 !---------------------------------------------------------------------------
-!> Needs docs
+!> Compute the approximate Jacobian matrix for the nonlinear function being solved
 !---------------------------------------------------------------------------
 subroutine build_approx_jacobian(self,a)
 class(oft_xmhd_2d_sim), intent(inout) :: self
@@ -995,21 +981,16 @@ CALL a%get_local(T_weights,5)
 CALL a%get_local(psi_weights,6)
 CALL a%get_local(by_weights,7)
 !---
-chi = self%chi !< Needs docs
+chi = self%chi 
 m_i = self%m_i
-eta = self%eta !< Needs docs
-nu = self%nu !< Needs docs
-gamma = self%gamma !< Needs docs
-D_diff = self%D_diff !< Needs docs
+eta = self%eta 
+nu = self%nu 
+gamma = self%gamma 
+D_diff = self%D_diff
 B_0 = self%B_0
 cyl_flag = self%cyl_flag
 linear = self%linear
-!cyl_flag = .TRUE.
-! IF(self%tau_eq>0.d0)THEN
-!   tau_eq_inv=1.d0/self%tau_eq
-! ELSE
-!   tau_eq_inv=1.d0
-! END IF
+
 !--Setup thread locks
 ALLOCATE(tlocks(self%fe_rep%nfields))
 DO i=1,self%fe_rep%nfields
@@ -1078,9 +1059,6 @@ DO i=1,mesh%nc
       psi = psi + psi_weights_loc(jr)*basis_vals(jr)
       by = by + by_weights_loc(jr)*basis_vals(jr)
       dn = dn + n_weights_loc(jr)*basis_grads(:,jr)
-      ! Note this is actually $(\nabla u)^T = jac(\vec(u))$
-      ! Choosing this convention to make index contractions
-      ! more consistent with Fortran convention
       dvel(:, 1) = dvel(:, 1) + vel_weights_loc(:, jr)*basis_grads(1, jr)
       dvel(:, 2) = 0.d0
       dvel(:, 3) = dvel(:, 3) + vel_weights_loc(:, jr)*basis_grads(3, jr)
@@ -1474,7 +1452,7 @@ DEALLOCATE(tmp,n_weights,vel_weights, T_weights, &
 end subroutine build_approx_jacobian
 
 !---------------------------------------------------------------------------
-!> Update Jacobian matrices on all levels with new fields
+!> Update matrix-free Jacobian on all levels with new solution
 !---------------------------------------------------------------------------
 subroutine mfnk_update(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current field
@@ -1547,15 +1525,6 @@ self%fe_rep%field_tags(7)='by'
 !---Create solution vector
 CALL self%fe_rep%vec_create(self%u)
 CALL self%fe_rep%vec_create(self%u0)
-! Boundary condition flag-setting
-! ALLOCATE(cell_dofs(oft_blagrange%nce))
-! ALLOCATE(self%n_bc(oft_blagrange%ne)); self%n_bc=.FALSE.
-! ALLOCATE(self%velx_bc(oft_blagrange%ne)); self%velx_bc=.TRUE.
-ALLOCATE(self%vely_bc(oft_blagrange%ne)); self%vely_bc=.TRUE.
-! ALLOCATE(self%velz_bc(oft_blagrange%ne)); self%velz_bc=.TRUE.
-! ALLOCATE(self%T_bc(oft_blagrange%ne)); self%T_bc=.FALSE.
-! ALLOCATE(self%psi_bc(oft_blagrange%ne)); self%psi_bc=.FALSE.
-ALLOCATE(self%by_bc(oft_blagrange%ne)); self%by_bc=.TRUE.
 
 !---Set any BCs that are not yet set
 IF(.NOT.ASSOCIATED(self%n_bc))self%n_bc=>oft_blagrange%global%gbe
@@ -1609,8 +1578,8 @@ real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 !---Solver objects
 CLASS(oft_solver), POINTER :: lminv => NULL()
 class(oft_vector), pointer :: u,v,up
-INTEGER(i4) :: rst_start=0
-INTEGER(i4) :: rst_end=3
+INTEGER(i4):: rst_start=0
+INTEGER(i4):: rst_end=2000
 INTEGER(i4) :: rst_cur, rst_tmp, ierr, io_stat, io_unit
 CHARACTER(LEN=OFT_PATH_SLEN) :: file_tmp
 LOGICAL :: rst_exist
@@ -1664,7 +1633,7 @@ DO
   rst_exist=oft_file_exist(TRIM(file_tmp))
   CALL oft_mpi_barrier(ierr)
   IF(.NOT.rst_exist)THEN
-    CALL oft_abort('Restart file does not exist.','xmhd_plot',__FILE__)
+    EXIT !CALL oft_abort('Restart file does not exist.','xmhd_plot',__FILE__)
   ELSE
     CALL hdf5_read(t,file_tmp,'t')
     CALL self%rst_load(u,file_tmp, 'U')
@@ -1704,6 +1673,7 @@ DO
   !Move to next file
   rst_cur = rst_cur + self%rst_freq
 END DO
+DEALLOCATE(u,up,v, plot_vals, plot_vec)
 end subroutine xmhd_2d_plot
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file

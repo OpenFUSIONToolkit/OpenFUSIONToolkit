@@ -55,7 +55,7 @@ Real(r8) :: v_dir(3) = (/1.d0,0.d0,0.d0/) !<Direction of velocity perturbation
 REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
 REAL(r8) :: lam = 2.d0 !< Wavelength
 REAL(r8) :: v_alf = 1.d4 !< Alfven speed
-REAL(r8) :: v_delta = 10.d0 !< Relative size of perturbation (<<1)
+REAL(r8) :: v_delta = 100.d0 !< Relative size of perturbation (<<1)
 REAL(r8) :: B !<Background magnetic field magnitude
 REAL(r8) :: B_delta !<Perturbed magnetic field magnitude
 REAL(r8) :: lin_tol = 1.d-8
@@ -107,19 +107,33 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(n0)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'n0')
+! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'n0')
 mhd_sim%den_scale = den_scale
 vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,1)
 
 !---Project v_x initial condition onto scalar Lagrange basis
+CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL u%scale(0.d0)
+CALL u%get_local(vec_vals)
+IF (linear) THEN
+    CALL mhd_sim%u0%restore_local(vec_vals,2)
+    CALL mhd_sim%u0%restore_local(vec_vals,3)
+    CALL mhd_sim%u0%restore_local(vec_vals,4)
+    CALL mhd_sim%u0%restore_local(vec_vals,6)
+    CALL mhd_sim%u0%restore_local(vec_vals,7)
+END IF
+
 field_init%func=>velx_alf
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(v_delta)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
+! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
 CALL mhd_sim%u%restore_local(vec_vals,2)
 CALL ML_oft_blagrange%vec_create(vx_ic)
 CALL vx_ic%restore_local(vec_vals)
@@ -131,7 +145,7 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(v_delta)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vy0')
+! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vy0')
 CALL mhd_sim%u%restore_local(vec_vals,3)
 
 !---Project v_z initial condition onto scalar Lagrange basis
@@ -141,7 +155,7 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(v_delta)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
+! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
 CALL mhd_sim%u%restore_local(vec_vals,4)
 
 !---Project T initial condition onto scalar Lagrange basis
@@ -151,8 +165,9 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(t0)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'T0')
+! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'T0')
 CALL mhd_sim%u%restore_local(vec_vals,5)
+IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,5)
 
 !---Project psi initial condition onto scalar Lagrange basis
 field_init%func=>psi_alf
@@ -161,7 +176,7 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(B_delta)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'psi0')
+! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'psi0')
 CALL mhd_sim%u%restore_local(vec_vals,6)
 CALL ML_oft_blagrange%vec_create(psi_ic)
 CALL psi_ic%restore_local(vec_vals)
@@ -173,7 +188,7 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(by0)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'by0')
+! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'by0')
 CALL mhd_sim%u%restore_local(vec_vals,7)
 
 !---Cleanup objects used for projection
@@ -200,8 +215,13 @@ mhd_sim%dt=dt
 mhd_sim%nsteps=nsteps
 mhd_sim%rst_freq=rst_freq
 mhd_sim%mfnk=use_mfnk
+mhd_sim%linear = linear
 oft_env%pm=pm
-CALL mhd_sim%run_simulation()
+IF (linear) THEN
+  CALL mhd_sim%run_lin_simulation()
+ELSE 
+  CALL mhd_sim%run_simulation()
+END IF
 
 CALL ML_oft_blagrange%vec_create(tmp)
 !---Compare vx waveform

@@ -121,7 +121,6 @@ CALL minv%apply(u,v)
 ! CALL blag_zerob%apply(u)
 CALL u%scale(n0)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'n0')
 vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
 
@@ -133,7 +132,6 @@ CALL minv%apply(u,v)
 CALL u%scale(velx0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
 CALL mhd_sim%u%restore_local(vec_vals,2)
 
 !---Project v_y initial condition onto scalar Lagrange basis
@@ -143,7 +141,6 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(vely0)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vy0')
 CALL mhd_sim%u%restore_local(vec_vals,3)
 
 !---Project v_z initial condition onto scalar Lagrange basis
@@ -154,7 +151,6 @@ CALL minv%apply(u,v)
 CALL u%scale(velz0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
 CALL mhd_sim%u%restore_local(vec_vals,4)
 
 !---Project T initial condition onto scalar Lagrange basis
@@ -165,7 +161,6 @@ CALL minv%apply(u,v)
 CALL u%scale(t0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'T0')
 CALL mhd_sim%u%restore_local(vec_vals,5)
 
 !---Project psi initial condition onto scalar Lagrange basis
@@ -176,7 +171,6 @@ CALL minv%apply(u,v)
 ! CALL blag_zerob%apply(u)
 CALL u%scale(psi0)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'psi0')
 CALL mhd_sim%u%restore_local(vec_vals,6)
 
 !---Project by initial condition onto scalar Lagrange basis
@@ -187,7 +181,6 @@ CALL minv%apply(u,v)
 CALL u%scale(by0)
 ! CALL blag_zerob%apply(u)
 CALL u%get_local(vec_vals)
-CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'by0')
 CALL mhd_sim%u%restore_local(vec_vals,7)
 
 !---Cleanup objects used for projection
@@ -216,6 +209,8 @@ mhd_sim%rst_freq=rst_freq
 mhd_sim%mfnk=use_mfnk
 oft_env%pm=pm
 CALL mhd_sim%run_simulation()
+
+CALL xmhd_2d_plot(mhd_sim)
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
