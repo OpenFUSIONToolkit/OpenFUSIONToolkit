@@ -1,4 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file tokamaker_f.F90
 !
 !> Fortran part of Python wrapper for Grad-Shafranov functionality
@@ -6,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date May 2023
 !! @ingroup doxy_oft_python
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE tokamaker_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
   c_f_pointer, c_bool, c_null_ptr, c_associated
@@ -677,19 +681,19 @@ END SUBROUTINE tokamaker_get_limiter
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_psi(tMaker_ptr,psi_vals,psi_lim,psi_max,error_str) BIND(C,NAME="tokamaker_get_psi")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_psi(tMaker_equil_ptr,psi_vals,psi_lim,psi_max,error_str) BIND(C,NAME="tokamaker_get_psi")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
 REAL(c_double), INTENT(out) :: psi_lim !< Needs docs
 REAL(c_double), INTENT(out) :: psi_max !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs_equil%psi%n])
-CALL tMaker_obj%gs_equil%psi%get_local(vals_tmp)
-psi_lim = tMaker_obj%gs_equil%plasma_bounds(1)
-psi_max = tMaker_obj%gs_equil%plasma_bounds(2)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_equil_obj%psi%n])
+CALL tMaker_equil_obj%psi%get_local(vals_tmp)
+psi_lim = tMaker_equil_obj%plasma_bounds(1)
+psi_max = tMaker_equil_obj%plasma_bounds(2)
 END SUBROUTINE tokamaker_get_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -835,26 +839,26 @@ END SUBROUTINE tokamaker_flux_int
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_coil_currents(tMaker_ptr,currents,reg_currents,error_str) BIND(C,NAME="tokamaker_get_coil_currents")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_coil_currents(tMaker_equil_ptr,currents,reg_currents,error_str) BIND(C,NAME="tokamaker_get_coil_currents")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,j
 REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,coil_regs
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(reg_currents, coil_regs, [tMaker_obj%device%mesh%nreg])
-CALL c_f_pointer(currents, vals_tmp, [tMaker_obj%device%ncoils])
-vals_tmp=(tMaker_obj%gs_equil%coil_currs + tMaker_obj%device%coil_vcont*tMaker_obj%gs_equil%vcontrol_val)/mu0
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL c_f_pointer(reg_currents, coil_regs, [tMaker_equil_obj%device%mesh%nreg])
+CALL c_f_pointer(currents, vals_tmp, [tMaker_equil_obj%device%ncoils])
+vals_tmp=(tMaker_equil_obj%coil_currs + tMaker_equil_obj%device%coil_vcont*tMaker_equil_obj%vcontrol_val)/mu0
 coil_regs = 0.d0
-DO j=1,tMaker_obj%device%ncoil_regs
-  DO i=1,tMaker_obj%device%ncoils
-    coil_regs(tMaker_obj%device%coil_regions(j)%id) = coil_regs(tMaker_obj%device%coil_regions(j)%id) &
-      + vals_tmp(i)*tMaker_obj%device%coil_nturns(tMaker_obj%device%coil_regions(j)%id,i)
+DO j=1,tMaker_equil_obj%device%ncoil_regs
+  DO i=1,tMaker_equil_obj%device%ncoils
+    coil_regs(tMaker_equil_obj%device%coil_regions(j)%id) = coil_regs(tMaker_equil_obj%device%coil_regions(j)%id) &
+      + vals_tmp(i)*tMaker_equil_obj%device%coil_nturns(tMaker_equil_obj%device%coil_regions(j)%id,i)
   END DO
-  coil_regs(tMaker_obj%device%coil_regions(j)%id) = coil_regs(tMaker_obj%device%coil_regions(j)%id)*tMaker_obj%device%coil_regions(j)%area
+  coil_regs(tMaker_equil_obj%device%coil_regions(j)%id) = coil_regs(tMaker_equil_obj%device%coil_regions(j)%id)*tMaker_equil_obj%device%coil_regions(j)%area
 END DO
 END SUBROUTINE tokamaker_get_coil_currents
 !---------------------------------------------------------------------------------
@@ -942,8 +946,8 @@ END SUBROUTINE tokamaker_trace_surf
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_q(tMaker_ptr,npsi,psi_q,qvals,ravgs,dl,rbounds,zbounds,error_str) BIND(C,NAME="tokamaker_get_q")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_q(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,dl,rbounds,zbounds,error_str) BIND(C,NAME="tokamaker_get_q")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 REAL(c_double), INTENT(in) :: psi_q(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: qvals(npsi) !< Needs docs
@@ -952,12 +956,12 @@ REAL(c_double), INTENT(inout) :: dl !< Needs docs
 REAL(c_double), INTENT(out) :: rbounds(2,2) !< Needs docs
 REAL(c_double), INTENT(out) :: zbounds(2,2) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 IF(dl>0.d0)THEN
-  CALL gs_get_qprof(tMaker_obj%gs_equil,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
+  CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
 ELSE
-  CALL gs_get_qprof(tMaker_obj%gs_equil,npsi,psi_q,qvals,ravgs=ravgs)
+  CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,ravgs=ravgs)
   dl = -1.d0
   rbounds = 0.d0
   zbounds = 0.d0
@@ -981,8 +985,8 @@ END SUBROUTINE tokamaker_sauter_fc
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_globals(tMaker_ptr,Itor,centroid,vol,pvol,dflux,tflux,bp_vol,error_str) BIND(C,NAME="tokamaker_get_globals")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_globals(tMaker_equil_ptr,Itor,centroid,vol,pvol,dflux,tflux,bp_vol,error_str) BIND(C,NAME="tokamaker_get_globals")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker object
 REAL(c_double), INTENT(out) :: Itor !< Needs docs
 REAL(c_double), INTENT(out) :: centroid(2) !< Needs docs
 REAL(c_double), INTENT(out) :: vol !< Needs docs
@@ -991,9 +995,9 @@ REAL(c_double), INTENT(out) :: dflux !< Needs docs
 REAL(c_double), INTENT(out) :: tflux !< Needs docs
 REAL(c_double), INTENT(out) :: bp_vol !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL gs_comp_globals(tMaker_obj%gs_equil,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL gs_comp_globals(tMaker_equil_obj,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
 Itor=Itor/mu0
 vol=vol*2.d0*pi
 pvol=pvol*2.d0*pi/mu0
@@ -1016,8 +1020,8 @@ END SUBROUTINE tokamaker_gs_calc_vloop
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_profs(tMaker_ptr,npsi,psi_in,f,fp,p,pp,error_str) BIND(C,NAME="tokamaker_get_profs")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_profs(tMaker_equil_ptr,npsi,psi_in,f,fp,p,pp,error_str) BIND(C,NAME="tokamaker_get_profs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 REAL(c_double), INTENT(in) :: psi_in(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: f(npsi) !< Needs docs
@@ -1027,23 +1031,23 @@ REAL(c_double), INTENT(out) :: pp(npsi) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
 REAL(8) :: x1,x2,r
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 x1=0.d0; x2=1.d0
-IF(tMaker_obj%gs_equil%plasma_bounds(1)>-1.d98)THEN
-  x1=tMaker_obj%gs_equil%plasma_bounds(1); x2=tMaker_obj%gs_equil%plasma_bounds(2)
+IF(tMaker_equil_obj%plasma_bounds(1)>-1.d98)THEN
+  x1=tMaker_equil_obj%plasma_bounds(1); x2=tMaker_equil_obj%plasma_bounds(2)
 END IF
 DO i=1,npsi
   r=psi_in(i)*(x2-x1) + x1
-  IF(tMaker_obj%gs_equil%mode==0)THEN
-    fp(i)=tMaker_obj%gs_equil%alam*tMaker_obj%gs_equil%I%fp(r)
-    f(i)=tMaker_obj%gs_equil%psiscale*tMaker_obj%gs_equil%alam*tMaker_obj%gs_equil%I%f(r) + tMaker_obj%gs_equil%I%f_offset
+  IF(tMaker_equil_obj%mode==0)THEN
+    fp(i)=tMaker_equil_obj%alam*tMaker_equil_obj%I%fp(r)
+    f(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%alam*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset
   ELSE
-    f(i)=SQRT(tMaker_obj%gs_equil%psiscale*tMaker_obj%gs_equil%alam*tMaker_obj%gs_equil%I%f(r) + tMaker_obj%gs_equil%I%f_offset**2)
-    fp(i)=tMaker_obj%gs_equil%alam*tMaker_obj%gs_equil%I%fp(r)/(2.d0*f(i))
+    f(i)=SQRT(tMaker_equil_obj%psiscale*tMaker_equil_obj%alam*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset**2)
+    fp(i)=tMaker_equil_obj%alam*tMaker_equil_obj%I%fp(r)/(2.d0*f(i))
   END IF
-  pp(i)=tMaker_obj%gs_equil%psiscale*tMaker_obj%gs_equil%pnorm*tMaker_obj%gs_equil%P%fp(r)
-  p(i)=tMaker_obj%gs_equil%psiscale*tMaker_obj%gs_equil%psiscale*tMaker_obj%gs_equil%pnorm*tMaker_obj%gs_equil%P%f(r)
+  pp(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%pnorm*tMaker_equil_obj%P%fp(r)
+  p(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%psiscale*tMaker_equil_obj%pnorm*tMaker_equil_obj%P%f(r)
 END DO
 END SUBROUTINE tokamaker_get_profs
 !---------------------------------------------------------------------------------
@@ -1485,8 +1489,8 @@ END SUBROUTINE tokamaker_set_coil_vsc
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,cocos,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_save_eqdsk(tMaker_equil_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,cocos,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nr !< Needs docs
@@ -1503,16 +1507,16 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 CHARACTER(LEN=40) :: run_info_f
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp,lim_file
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(run_info,run_info_f)
 CALL copy_string_rev(filename,filename_tmp)
 CALL copy_string_rev(lim_filename,lim_file)
 IF(rcentr>0.d0)THEN
-  CALL gs_save_eqdsk(tMaker_obj%gs_equil,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
+  CALL gs_save_eqdsk(tMaker_equil_obj,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
     rcentr_in=rcentr,trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,cocos=cocos,error_str=error_flag)
 ELSE
-  CALL gs_save_eqdsk(tMaker_obj%gs_equil,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
+  CALL gs_save_eqdsk(tMaker_equil_obj,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
     trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,cocos=cocos,error_str=error_flag)
 END IF
 CALL copy_string(TRIM(error_flag),error_str)
@@ -1520,8 +1524,8 @@ END SUBROUTINE tokamaker_save_eqdsk
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_ifile(tMaker_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str) BIND(C,NAME="tokamaker_save_ifile")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str) BIND(C,NAME="tokamaker_save_ifile")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ntheta !< Needs docs
@@ -1532,26 +1536,26 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: single_prec !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(filename,filename_tmp)
-CALL gs_save_ifile(tMaker_obj%gs_equil,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=lcfs_press, &
+CALL gs_save_ifile(tMaker_equil_obj,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=lcfs_press, &
   pack_lcfs=LOGICAL(pack_lcfs),single_prec=LOGICAL(single_prec),error_str=error_flag)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_ifile
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_mug(tMaker_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_mug")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_save_mug(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_mug")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(filename,filename_tmp)
-CALL gs_save_mug(tMaker_obj%gs_equil,filename_tmp)
+CALL gs_save_mug(tMaker_equil_obj,filename_tmp)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_mug
 !---------------------------------------------------------------------------

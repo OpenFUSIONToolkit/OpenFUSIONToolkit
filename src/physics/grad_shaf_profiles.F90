@@ -204,6 +204,7 @@ class(zero_flux_func), intent(inout) :: self
 class(flux_func), pointer, intent(inout) :: new
 ALLOCATE(zero_flux_func::new)
 new%plasma_bounds=self%plasma_bounds
+new%f_offset=self%f_offset
 new%ncofs=0
 end subroutine zero_copy
 !------------------------------------------------------------------------------
@@ -266,6 +267,7 @@ class(flat_flux_func), intent(inout) :: self
 class(flux_func), pointer, intent(inout) :: new
 ALLOCATE(flat_flux_func::new)
 new%plasma_bounds=self%plasma_bounds
+new%f_offset=self%f_offset
 new%ncofs=0
 end subroutine flat_copy
 !------------------------------------------------------------------------------
@@ -459,6 +461,7 @@ ALLOCATE(new, MOLD=self)
 SELECT TYPE(new)
   CLASS IS(poly_flux_func)
     new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
     new%deg=self%deg
     new%ncofs=self%ncofs
     new%zero_grad=self%zero_grad
@@ -649,6 +652,7 @@ ALLOCATE(new, MOLD=self)
 SELECT TYPE(new)
   CLASS IS(spline_flux_func)
     new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
     new%npsi=self%npsi
     new%ncofs=self%ncofs
     new%xmin=self%xmin
@@ -817,6 +821,7 @@ ALLOCATE(new, MOLD=self)
 SELECT TYPE(new)
   CLASS IS(linterp_flux_func)
     new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
     new%npsi=self%npsi
     new%ncofs=self%ncofs
     new%y0=self%y0
@@ -1150,6 +1155,7 @@ ALLOCATE(wesson_flux_func::new)
 SELECT TYPE(new)
   TYPE IS(wesson_flux_func)
     new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
     new%ncofs=self%ncofs
     new%gamma=self%gamma
 END SELECT

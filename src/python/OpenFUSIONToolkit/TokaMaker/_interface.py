@@ -107,7 +107,7 @@ tokamaker_get_mesh = ctypes_subroutine(oftpy_lib.tokamaker_get_mesh,
 tokamaker_get_limiter = ctypes_subroutine(oftpy_lib.tokamaker_get_limiter,
     [c_void_p, c_int_ptr, c_double_ptr_ptr, c_int_ptr, c_int_ptr_ptr, c_char_p])
 
-# tokamaker_get_psi(tMaker_ptr,psi_vals,psi_lim,psi_max,error_str)
+# tokamaker_get_psi(tMaker_equil_ptr,psi_vals,psi_lim,psi_max,error_str)
 tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_char_p])
 
@@ -127,7 +127,7 @@ tokamaker_area_int = ctypes_subroutine(oftpy_lib.tokamaker_area_int,
 tokamaker_flux_int = ctypes_subroutine(oftpy_lib.tokamaker_flux_int,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_int, c_double_ptr, c_char_p])
 
-# tokamaker_get_coil_currents(tMaker_ptr,currents,reg_currents,error_str)
+# tokamaker_get_coil_currents(tMaker_equil_ptr,currents,reg_currents,error_str)
 tokamaker_get_coil_currents = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_currents,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p])
 
@@ -143,7 +143,7 @@ tokamaker_get_refs = ctypes_subroutine(oftpy_lib.tokamaker_get_refs,
 tokamaker_trace_surf = ctypes_subroutine(oftpy_lib.tokamaker_trace_surf,
     [c_void_p, c_double, c_double_ptr_ptr, c_int_ptr, c_char_p])
 
-# tokamaker_get_q(tMaker_ptr,npsi,psi_q,qvals,ravgs,dl,rbounds,zbounds,error_str)
+# tokamaker_get_q(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,dl,rbounds,zbounds,error_str)
 tokamaker_get_q = ctypes_subroutine(oftpy_lib.tokamaker_get_q,
     [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
      c_double_ptr, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_char_p])
@@ -153,7 +153,7 @@ tokamaker_sauter_fc = ctypes_subroutine(oftpy_lib.tokamaker_sauter_fc,
     [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
      ctypes_numpy_array(numpy.float64,2), c_char_p])
 
-# tokamaker_get_globals(tMaker_ptr,Itor,centroid,vol,pvol,dflux,tflux,bp_vol,error_str)
+# tokamaker_get_globals(tMaker_equil_ptr,Itor,centroid,vol,pvol,dflux,tflux,bp_vol,error_str)
 tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals,
     [c_void_p, c_double_ptr, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr, c_double_ptr, c_char_p])
 
@@ -161,7 +161,7 @@ tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals,
 tokamaker_gs_calc_vloop = ctypes_subroutine(oftpy_lib.tokamaker_gs_calc_vloop,
     [c_void_p, c_double_ptr, c_char_p])
 
-# tokamaker_get_profs(tMaker_ptr,npsi,psi_in,f,fp,p,pp,error_str)
+# tokamaker_get_profs(tMaker_equil_ptr,npsi,psi_in,f,fp,p,pp,error_str)
 tokamaker_get_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_profs,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), 
      ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p])
@@ -230,16 +230,16 @@ tokamaker_set_coil_bounds = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_bound
 tokamaker_set_coil_vsc = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_vsc,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
-# tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str)
+# tokamaker_save_eqdsk(tMaker_equil_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,error_str)
 tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk,
     [c_void_p, c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p,
      c_double, c_double, c_bool, c_char_p, c_double, c_int, c_char_p])
 
-# tokamaker_save_ifile(tMaker_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
+# tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
 tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
     [c_void_p, c_char_p, c_int, c_int, c_double, c_double, c_bool, c_bool, c_char_p])
 
-# tokamaker_save_mug(tMaker_ptr,filename,error_str)
+# tokamaker_save_mug(tMaker_equil_ptr,filename,error_str)
 tokamaker_save_mug = ctypes_subroutine(oftpy_lib.tokamaker_save_mug,
     [c_void_p, c_char_p, c_char_p])
 

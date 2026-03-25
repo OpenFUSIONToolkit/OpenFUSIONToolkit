@@ -1350,9 +1350,7 @@ end subroutine create_eq_from_factory
 subroutine copy_eq(self,source)
 class(gs_equil), intent(inout) :: self !< G-S equilibrium object
 class(gs_equil), intent(in) :: source !< Source G-S equilibrium object
-type(gs_factory), pointer :: device
 self%device=>source%device
-device => self%device
 ALLOCATE(self%coil_currs,SOURCE=source%coil_currs)
 !
 self%isoflux_ntargets=source%isoflux_ntargets
@@ -1370,8 +1368,10 @@ END IF
 !
 CALL source%psi%new(self%psi)
 CALL self%psi%add(0.d0,1.d0,source%psi)
-! CALL source%chi%new(self%chi)
-! CALL self%chi%add(0.d0,1.d0,source%chi)
+IF(ASSOCIATED(source%chi))THEN
+  CALL source%chi%new(self%chi)
+  CALL self%chi%add(0.d0,1.d0,source%chi)
+END IF
 CALL source%I%copy(self%I)
 CALL source%P%copy(self%P)
 IF(ASSOCIATED(source%P_ani))THEN

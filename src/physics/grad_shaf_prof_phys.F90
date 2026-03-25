@@ -164,6 +164,8 @@ class(flux_func), pointer, intent(inout) :: new
 CALL spline_func_copy(self,new)
 SELECT TYPE(new)
   CLASS IS(mercier_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
     new%rs = self%rs
     new%ntheta = self%ntheta
     CALL spline_alloc(new%funcp,new%npsi,1)
@@ -391,6 +393,8 @@ class(flux_func), pointer, intent(inout) :: new
 CALL linterp_copy(self,new)
 SELECT TYPE(new)
   CLASS IS(jphi_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
     new%ngeom = self%ngeom
     new%j0 = self%j0
     ALLOCATE(new%jphi, SOURCE=self%jphi)
@@ -522,6 +526,8 @@ class(flux_func), pointer, intent(inout) :: new
 CALL spline_func_copy(self,new)
 SELECT TYPE(new)
   TYPE IS(dipole_b0_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
     new%psi_pad = self%psi_pad
 END SELECT
 end subroutine dipole_b0_copy
@@ -746,6 +752,8 @@ class(flux_func), pointer, intent(inout) :: new
 CALL spline_func_copy(self,new)
 SELECT TYPE(new)
   TYPE IS(mirror_b0_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
     new%z_midplane = self%z_midplane
 END SELECT
 end subroutine mirror_b0_copy

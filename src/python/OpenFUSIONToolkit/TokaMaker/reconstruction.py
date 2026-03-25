@@ -519,15 +519,15 @@ class reconstruction():
         @param xtol Stopping condition: termination occurs when the relative error between two consecutive iterates is at most `xtol`
         @param gtol Stopping condition: termination occurs when the cosine of the angle between fvec and any column of the jacobian is at most `gtol` in absolute value
         @result Error flag
-        '''
+        ''' 
         # Check for possibly conflicting constraints
-        if self._tMaker_obj._isoflux_targets is not None:
+        if self._tMaker_obj._tMaker_equil._isoflux_targets is not None:
             oft_warning('Removing conflicting isoflux targets from equilibrium object via `.set_isoflux(None)`')
             self._tMaker_obj.set_isoflux(None)
-        if self._tMaker_obj._flux_targets is not None:
+        if self._tMaker_obj._tMaker_equil._flux_targets is not None:
             oft_warning('Removing conflicting flux targets from equilibrium object via `.set_flux(None,None)`')
             self._tMaker_obj.set_flux(None,None)
-        if self._tMaker_obj._saddle_targets is not None:
+        if self._tMaker_obj._tMaker_equil._saddle_targets is not None:
             oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddles(None)`')
             self._tMaker_obj.set_saddles(None)
         # Modify input file
