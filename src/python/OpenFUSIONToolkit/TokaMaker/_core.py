@@ -11,6 +11,7 @@
 '''
 import collections
 import ctypes
+from os import walk
 import numpy
 from ._interface import *
 
@@ -1808,7 +1809,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_coil_current_dist(self,coil_name,curr_dist):
+    def set_coil_current_dist(self,coil_name,curr_dist,normalize=False):
         '''! Overwrite coil with non-uniform current distribution.
 
         @param coil_name Name of coil to modify
@@ -1822,7 +1823,7 @@ class TokaMaker():
         self.dist_coils[iCoil] = curr_dist
         curr_dist = numpy.ascontiguousarray(curr_dist, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_current_dist(self._tMaker_ptr,c_int(iCoil+1),curr_dist,error_string)
+        tokamaker_set_coil_current_dist(self._tMaker_ptr,c_int(iCoil+1),curr_dist,c_bool(normalize),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 

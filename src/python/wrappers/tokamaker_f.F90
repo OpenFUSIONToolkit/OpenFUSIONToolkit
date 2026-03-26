@@ -1453,10 +1453,11 @@ END SUBROUTINE tokamaker_save_mug
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
+SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,normalize,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 INTEGER(c_int), VALUE, INTENT(in) :: iCoil
 TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
+LOGICAL(c_bool), VALUE, INTENT(in) :: normalize
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
@@ -1470,6 +1471,9 @@ NULLIFY(tmp_vec)
 call tMaker_obj%gs%psi%new(tmp_vec)
 
 CALL gs_coil_source_distributed(tMaker_obj%gs,iCoil,tmp_vec,vals_tmp)
+IF (normalize) THEN
+  CALL tmp_vec%scale(1.0/tmp_vec%sum())
+END IF
 
 CALL tMaker_obj%gs%zerob_bc%apply(tmp_vec)
 CALL gs_vacuum_solve(tMaker_obj%gs,tMaker_obj%gs%psi_coil(iCoil)%f,tmp_vec)
