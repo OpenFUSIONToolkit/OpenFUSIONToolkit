@@ -315,7 +315,7 @@ class TokaMaker():
         self.ncoils = ncoils.value
         self.Lcoils = numpy.ctypeslib.as_array(Lmat_loc,shape=(self.ncoils,self.ncoils))
         # Create equilibirum object
-        self._tMaker_equil = TokaMaker_equil(self)
+        self._tMaker_equil = TokaMaker_equilibrium(self)
         # Get limiter contour
         npts = c_int()
         r_loc = c_double_ptr()
@@ -654,7 +654,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         equil_out = self._tMaker_equil
-        self._tMaker_equil = TokaMaker_equil(source_eq=equil_out)
+        self._tMaker_equil = TokaMaker_equilibrium(source_eq=equil_out)
         return equil_out
     
     def vac_solve(self,psi=None,rhs_source=None):
@@ -684,7 +684,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         equil_save = self._tMaker_equil
-        equil_out = TokaMaker_equil(source_eq=equil_save,skip_targets=True,skip_constraints=True)
+        equil_out = TokaMaker_equilibrium(source_eq=equil_save,skip_targets=True,skip_constraints=True)
         self._tMaker_equil = equil_out
         self.set_psi(psi)
         self._tMaker_equil = equil_save
@@ -955,11 +955,11 @@ class TokaMaker():
         
         @param skip_targets When copying, skip copying target values
         @param skip_constraints When copying, skip copying constraint values
-        @result New `TokaMaker_equil` object with copied values
+        @result New `TokaMaker_equilibrium` object with copied values
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return TokaMaker_equil(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
+        return TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
@@ -1614,7 +1614,7 @@ class TokaMaker():
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
 
-class TokaMaker_equil():
+class TokaMaker_equilibrium():
     '''! TokaMaker G-S solver class'''
     def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False):
         '''! Initialize TokaMaker object
@@ -1640,25 +1640,25 @@ class TokaMaker_equil():
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_equil "gs_equil")
         self._tMaker_equil_ptr = c_void_p()
         if source_eq is None:
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.F0 "F0" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.F0 "F0" property)
             self._F0 = copy.copy(self._tMaker._F0)
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Ip_target "Ip_target" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Ip_target "Ip_target" property)
             self._Ip_target = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Ip_ratio_target "Ip_ratio_target" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Ip_ratio_target "Ip_ratio_target" property)
             self._Ip_ratio_target = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Pax_target "Pax_target" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Pax_target "Pax_target" property)
             self._pax_target = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Estored_target "Estored_target" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Estored_target "Estored_target" property)
             self._estored_target = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.R0_target "R0_target" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.R0_target "R0_target" property)
             self._R0_target = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Z0_target "Z0_target" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Z0_target "Z0_target" property)
             self._Z0_target = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Isoflux_constraints "Isoflux_constraints" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Isoflux_constraints "Isoflux_constraints" property)
             self._isoflux_constraints = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Psi_constraints "Psi_constraints" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Psi_constraints "Psi_constraints" property)
             self._psi_constraints = None
-            ## Internal value (use @ref TokaMaker.TokaMaker_equil.Saddle_constraints "Saddle_constraints" property)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Saddle_constraints "Saddle_constraints" property)
             self._saddle_targets = None
         else:
             self._F0 = copy.copy(source_eq._F0)
