@@ -360,8 +360,10 @@ class TokaMaker():
         ## Mesh regions [nc] 
         self.reg = numpy.ctypeslib.as_array(reg_loc,shape=(self.nc,))
 
-    # def eq_deprecated_warning(self):
-    #     warn('Equilibrium access on through the TokaMaker object is deprecated and will be removed in a future release.', DeprecationWarning, stacklevel=3)
+    @property
+    def c_ptr(self):
+        r'''C pointer to Fortran-side TokaMaker object'''
+        return self._tMaker_ptr
 
     @property
     def alam(self):
@@ -701,6 +703,11 @@ class TokaMaker():
         @param grad_wt_lim Limit on gradient-based weighting (negative to disable)
         @param ref_points Reference points for each isoflux point [:,2] (default: `isoflux[0,:]` is used for all points)
         '''
+        warn(
+            "`set_isoflux()` is deprecated, use `set_isoflux_constraints()` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.set_isoflux_constraints(isoflux,weights,grad_wt_lim,ref_points)
     
     def set_isoflux_constraints(self,isoflux,weights=None,grad_wt_lim=-1.0,ref_points=None):
@@ -746,19 +753,33 @@ class TokaMaker():
             self._tMaker_equil._isoflux_constraints = isoflux.copy()
     
     def set_flux(self,locations,targets,weights=None):
-        r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$
+        r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$ [Wb/rad]
 
         @param locations List of points defining constraints [:,2]
-        @param targets Target \f$ \psi \f$ value at each point [:]
+        @param targets Target \f$ \psi \f$ value in Wb/rad at each point [:]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         '''
+        warn(
+            "`set_flux()` is deprecated, use `set_psi_constraints()` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.set_psi_constraints(locations,targets,weights)
-    
-    def set_psi_constraints(self,locations,targets,weights=None):
-        r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$
+
+    def set_flux_constraints(self,locations,targets,weights=None):
+        r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$ [Wb]
 
         @param locations List of points defining constraints [:,2]
-        @param targets Target \f$ \psi \f$ value at each point [:]
+        @param targets Target \f$ \psi \f$ value in Wb at each point [:]
+        @param weights Weight to be applied to each constraint point [:] (default: 1)
+        '''
+        self.set_psi_constraints(locations,targets/(2.0*numpy.pi),weights)
+    
+    def set_psi_constraints(self,locations,targets,weights=None):
+        r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$ [Wb/rad]
+
+        @param locations List of points defining constraints [:,2]
+        @param targets Target \f$ \psi \f$ value in Wb/rad at each point [:]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         '''
         if locations is None:
@@ -789,6 +810,11 @@ class TokaMaker():
         @param saddles List of points defining constraints [:,2]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         '''
+        warn(
+            "`set_saddles()` is deprecated, use `set_saddles_constraints()` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.set_saddles_constraints(saddles,weights)
 
     def set_saddles_constraints(self,saddles,weights=None):
@@ -907,11 +933,36 @@ class TokaMaker():
         @param psi \f$ \psi \f$ corresponding to desired current density
         @result \f$ J_{\phi} = \textrm{M}^{-1} \Delta^{*} \psi \f$
         '''
+        warn(
+            "`get_delstar_curr()` is deprecated, use `calc_delstar_curr()` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.calc_delstar_curr(psi)
+    
+    def calc_delstar_curr(self,psi):
+        r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
+ 
+        @param psi \f$ \psi \f$ corresponding to desired current density
+        @result \f$ J_{\phi} = \textrm{M}^{-1} \Delta^{*} \psi \f$
+        '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.calc_delstar_curr(psi)
     
     def get_jtor_plasma(self):
+        r'''! Get plasma toroidal current density for current equilibrium
+ 
+        @result \f$ J_{\phi} \f$ by evalutating RHS source terms
+        '''
+        warn(
+            "`get_jtor_plasma()` is deprecated, use `calc_jtor_plasma()` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.calc_jtor_plasma()
+    
+    def calc_jtor_plasma(self):
         r'''! Get plasma toroidal current density for current equilibrium
  
         @result \f$ J_{\phi} \f$ by evalutating RHS source terms
@@ -1140,11 +1191,44 @@ class TokaMaker():
         @param reg_mask ID of region for integration (negative for whole mesh)
         @result \f$ \int f dA \f$
         '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.compute_area_integral(field,reg_mask)
+        warn(
+            "`area_integral()` is deprecated, use `compute_area_integral()` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.compute_area_integral(field,reg_mask)
+    
+    def compute_area_integral(self,field,reg_mask=-1):
+        r'''! Compute area integral of field over a specified region
+
+        @param field Field to integrate [np,]
+        @param reg_mask ID of region for integration (negative for whole mesh)
+        @result \f$ \int f dA \f$
+        '''
+        result = c_double(0.0)
+        field = numpy.ascontiguousarray(field, dtype=numpy.float64)
+        #
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_area_int(self._tMaker_ptr,field,c_int(reg_mask),ctypes.byref(result),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        return result.value
     
     def flux_integral(self,psi_vals,field_vals):
+        r'''! Compute area integral of flux function over the plasma
+
+        @param psi_vals \f$ \hat{\psi} \f$ values defining flux function [:]
+        @param field_vals Flux function values at each \f$ \hat{\psi} \f$ value [:]
+        @result \f$ \int f dA \f$
+        '''
+        warn(
+            "`flux_integral()` is deprecated, use `compute_flux_integral()` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.compute_flux_integral(psi_vals,field_vals)
+    
+    def compute_flux_integral(self,psi_vals,field_vals):
         r'''! Compute area integral of flux function over the plasma
 
         @param psi_vals \f$ \hat{\psi} \f$ values defining flux function [:]
@@ -1161,17 +1245,17 @@ class TokaMaker():
 
         @param fig Figure to add to
         @param ax Axis to add to
-        @param equilibrium Equilibrium object (if None, current equilibrium is used)
-        @param vacuum_color Color to shade vacuum region (None to disable)
-        @param cond_color Color for conducting regions (None to disable)
-        @param limiter_color Color for limiter contour (None to disable)
-        @param coil_color Color for coil regions (None to disable)
+        @param equilibrium Equilibrium object (if `None`, current equilibrium is used)
+        @param vacuum_color Color to shade vacuum region (`None` to disable)
+        @param cond_color Color for conducting regions (`None` to disable)
+        @param limiter_color Color for limiter contour (`None` to disable)
+        @param coil_color Color for coil regions (`None` to disable)
         @param coil_colormap Colormap for coil current values
         @param coil_symmap Make coil current colorscale symmetric
         @param coil_scale Scale for coil currents when plotting
-        @param coil_clabel Label for coil current colorbar (None to disable colorbar)
-        @param colorbar Colorbar instance to overwrite (None to add)
-        @result Colorbar instance for coil colors or None
+        @param coil_clabel Label for coil current colorbar (`None` to disable colorbar)
+        @param colorbar Colorbar instance to overwrite (`None` to add)
+        @result Colorbar instance for coil colors or `None`
         '''
         # Get equilibrium object if not set
         if equilibrium is None:
@@ -1242,7 +1326,7 @@ class TokaMaker():
 
         @param fig Figure to add to
         @param ax Axis to add to
-        @param equilibrium Equilibrium object (if None, current equilibrium is used)
+        @param equilibrium Equilibrium object (if `None`, current equilibrium is used)
         @param psi Flux values to plot (otherwise `equilibrium.get_psi()` is called)
         @param normalized Retreive normalized flux, or assume normalized psi if passed as argument
         @param plasma_color Color for plasma contours
@@ -1255,10 +1339,10 @@ class TokaMaker():
         @param vacuum_levels Explicit levels for vacuum contours (cannot be specified with `vacuum_color`)
         @param vacuum_colormap Colormap for vacuum contours
         @param vacuum_linestyles Linestyle for vacuum contours
-        @param xpoint_color Color for X-point markers (None to disable)
+        @param xpoint_color Color for X-point markers (`None` to disable)
         @param xpoint_marker Marker style for X-points
         @param xpoint_inactive_alpha Alpha value for inactive X-points
-        @param opoint_color Color for O-point markers (None to disable)
+        @param opoint_color Color for O-point markers (`None` to disable)
         @param opoint_marker Marker style for O-points
         '''
         if self.settings.mirror_mode:
@@ -1327,9 +1411,9 @@ class TokaMaker():
 
         @param fig Figure to add to
         @param ax Axis to add to
-        @param equilibrium Equilibrium object (if None, current equilibrium is used)
-        @param isoflux_color Color of isoflux points (None to disable)
-        @param saddle_color Color of saddle points (None to disable)
+        @param equilibrium Equilibrium object (if `None`, current equilibrium is used)
+        @param isoflux_color Color of isoflux points (`None` to disable)
+        @param saddle_color Color of saddle points (`None` to disable)
         '''
         # Get equilibrium object if not set
         if equilibrium is None:
@@ -1351,7 +1435,7 @@ class TokaMaker():
         @param dpsi_dt dPsi/dt source eddy currents (eg. from linear stability)
         @param nlevels Number contour lines used for shading (with "psi" only)
         @param colormap Colormap to use for shadings
-        @param clabel Label for colorbar (None to disable colorbar)
+        @param clabel Label for colorbar (`None` to disable colorbar)
         @result Colorbar object
         '''
         if self.settings.mirror_mode:
@@ -1466,7 +1550,7 @@ class TokaMaker():
         @param truncate_eq Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
         @param limiter_file File containing limiter contour to use instead of TokaMaker limiter
         @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
-        @param cocos COCOS version. (Only 2 or 7 supported. COCOS=7 is the default.)
+        @param cocos COCOS version. (Only 2 or 7 supported. `cocos=7` is the default.)
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -1598,13 +1682,13 @@ class TokaMaker_equilibrium():
             if TokaMaker_obj is not None:
                 raise ValueError('"TokaMaker_obj" and "source_eq" cannot be provided together')
             TokaMaker_obj = source_eq._tMaker
-            source_ptr = source_eq._tMaker_equil_ptr
+            source_ptr = source_eq._equil_ptr
         ## Reference to parent TokaMaker object
         self._tMaker = TokaMaker_obj
         ## Reference to OpenFUSIONToolkit environment (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         self._oft_env = self._tMaker._oft_env
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_equil "gs_equil")
-        self._tMaker_equil_ptr = c_void_p()
+        self._equil_ptr = c_void_p()
         if source_eq is None:
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.F0 "F0" property)
             self._F0 = copy.copy(self._tMaker._F0)
@@ -1646,7 +1730,7 @@ class TokaMaker_equilibrium():
 
         # Create equilibirum object
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_equil_copy(self._tMaker._tMaker_ptr,source_ptr,ctypes.byref(self._tMaker_equil_ptr),error_string)
+        tokamaker_equil_copy(self._tMaker.c_ptr,source_ptr,ctypes.byref(self._equil_ptr),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         
@@ -1660,7 +1744,7 @@ class TokaMaker_equilibrium():
         pnorm_loc = c_double_ptr()
         has_plasma_loc = c_bool_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_refs(self._tMaker_equil_ptr,ctypes.byref(o_loc),ctypes.byref(lim_loc),ctypes.byref(x_loc),ctypes.byref(div_flag_loc),
+        tokamaker_get_refs(self._equil_ptr,ctypes.byref(o_loc),ctypes.byref(lim_loc),ctypes.byref(x_loc),ctypes.byref(div_flag_loc),
                     ctypes.byref(bounds_loc),ctypes.byref(alam_loc),ctypes.byref(pnorm_loc),ctypes.byref(has_plasma_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
@@ -1703,17 +1787,17 @@ class TokaMaker_equilibrium():
     
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
-        if not self._tMaker_equil_ptr:
+        if not self._equil_ptr:
             return # Nothing to do
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_equil_destroy(self._tMaker_equil_ptr,error_string)
+        tokamaker_equil_destroy(self._equil_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         
     @property
     def c_ptr(self):
         r'''C pointer to Fortran-side equilibrium object'''
-        return self._tMaker_equil_ptr
+        return self._equil_ptr
     
     ## @cond
     @property
@@ -1911,7 +1995,7 @@ class TokaMaker_equilibrium():
         psi_lim = c_double()
         psi_max = c_double()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_psi(self._tMaker_equil_ptr,psi,ctypes.byref(psi_lim),ctypes.byref(psi_max),error_string)
+        tokamaker_get_psi(self._equil_ptr,psi,ctypes.byref(psi_lim),ctypes.byref(psi_max),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if normalized:
@@ -1942,7 +2026,7 @@ class TokaMaker_equilibrium():
         currents = numpy.zeros((self._tMaker.ncoils,),dtype=numpy.float64)
         currents_reg = numpy.zeros((self._tMaker.nregs,),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_coil_currents(self._tMaker_equil_ptr,currents,currents_reg,error_string)
+        tokamaker_get_coil_currents(self._equil_ptr,currents,currents_reg,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         current_dict = {}
@@ -1964,7 +2048,7 @@ class TokaMaker_equilibrium():
         tflux = c_double()
         Bp_vol = c_double()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_globals(self._tMaker_equil_ptr,ctypes.byref(Ip),centroid,ctypes.byref(vol),ctypes.byref(pvol),
+        tokamaker_get_globals(self._equil_ptr,ctypes.byref(Ip),centroid,ctypes.byref(vol),ctypes.byref(pvol),
             ctypes.byref(dflux),ctypes.byref(tflux),ctypes.byref(Bp_vol),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
@@ -1994,7 +2078,7 @@ class TokaMaker_equilibrium():
         pp = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         #
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_profs(self._tMaker_equil_ptr,psi.shape[0],psi,f,fp,p,pp,error_string)
+        tokamaker_get_profs(self._equil_ptr,psi.shape[0],psi,f,fp,p,pp,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         #
@@ -2031,7 +2115,7 @@ class TokaMaker_equilibrium():
         rbounds = numpy.zeros((2,2),dtype=numpy.float64)
         zbounds = numpy.zeros((2,2),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_q(self._tMaker_equil_ptr,psi.shape[0],psi,qvals,ravgs,ctypes.byref(dl),rbounds,zbounds,error_string)
+        tokamaker_get_q(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,ctypes.byref(dl),rbounds,zbounds,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if self.psi_convention == 0:
@@ -2056,7 +2140,7 @@ class TokaMaker_equilibrium():
         npoints = c_int()
         points_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_trace_surf(self._tMaker_equil_ptr,c_double(psi),ctypes.byref(points_loc),ctypes.byref(npoints),error_string)
+        tokamaker_trace_surf(self._equil_ptr,c_double(psi),ctypes.byref(points_loc),ctypes.byref(npoints),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if npoints.value > 0:
@@ -2091,7 +2175,7 @@ class TokaMaker_equilibrium():
         #
         int_obj = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_field_eval(self._tMaker_equil_ptr,imode,ctypes.byref(int_obj),error_string)
+        tokamaker_get_field_eval(self._equil_ptr,imode,ctypes.byref(int_obj),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         field_dim = 1
@@ -2099,7 +2183,7 @@ class TokaMaker_equilibrium():
             field_dim = 3
         elif imode >= 5:
             field_dim = 2
-        return TokaMaker_field_interpolator(self._tMaker_equil_ptr,int_obj,imode,field_dim)
+        return TokaMaker_field_interpolator(self._equil_ptr,int_obj,imode,field_dim)
 
     def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
@@ -2249,7 +2333,7 @@ class TokaMaker_equilibrium():
         V_loop = c_double()
         #
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_gs_calc_vloop(self._tMaker_equil_ptr,ctypes.byref(V_loop),error_string)
+        tokamaker_gs_calc_vloop(self._equil_ptr,ctypes.byref(V_loop),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         #
@@ -2279,7 +2363,7 @@ class TokaMaker_equilibrium():
         r_avgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
         modb_avgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_sauter_fc(self._tMaker_equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,error_string)
+        tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if self.psi_convention == 0:
@@ -2295,7 +2379,7 @@ class TokaMaker_equilibrium():
         '''
         curr = numpy.copy(psi)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_dels_curr(self._tMaker_equil_ptr,curr,error_string)
+        tokamaker_get_dels_curr(self._equil_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr/mu0
@@ -2307,7 +2391,7 @@ class TokaMaker_equilibrium():
         '''
         curr = numpy.zeros((self._tMaker.np,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_jtor(self._tMaker_equil_ptr,curr,error_string)
+        tokamaker_get_jtor(self._equil_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr/mu0
@@ -2344,7 +2428,7 @@ class TokaMaker_equilibrium():
         pts_loc = c_double_ptr()
         flux_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_vfixed(self._tMaker_equil_ptr,ctypes.byref(npts),ctypes.byref(pts_loc),ctypes.byref(flux_loc),error_string)
+        tokamaker_get_vfixed(self._equil_ptr,ctypes.byref(npts),ctypes.byref(pts_loc),ctypes.byref(flux_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return numpy.ctypeslib.as_array(pts_loc,shape=(npts.value, 2)), \
@@ -2360,7 +2444,7 @@ class TokaMaker_equilibrium():
         '''
         Lmat = numpy.zeros((self._tMaker.ncoils+1,),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_plasma_Lmat(self._tMaker_equil_ptr,Lmat,error_string)
+        tokamaker_get_plasma_Lmat(self._equil_ptr,Lmat,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return Lmat[-1], Lmat[:-1]
@@ -2372,14 +2456,7 @@ class TokaMaker_equilibrium():
         @param reg_mask ID of region for integration (negative for whole mesh)
         @result \f$ \int f dA \f$
         '''
-        result = c_double(0.0)
-        field = numpy.ascontiguousarray(field, dtype=numpy.float64)
-        #
-        error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_area_int(self._tMaker_equil_ptr,field,c_int(reg_mask),ctypes.byref(result),error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
-        return result.value
+        return self._tMaker.compute_area_integral(field,reg_mask)
     
     def compute_flux_integral(self,psi_vals,field_vals):
         r'''! Compute area integral of field over a specified region
@@ -2398,7 +2475,7 @@ class TokaMaker_equilibrium():
         field_vals = numpy.ascontiguousarray(field_vals, dtype=numpy.float64)
         #
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_flux_int(self._tMaker_equil_ptr,psi_vals,field_vals,c_int(psi_vals.shape[0]),ctypes.byref(result),error_string)
+        tokamaker_flux_int(self._equil_ptr,psi_vals,field_vals,c_int(psi_vals.shape[0]),ctypes.byref(result),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return result.value
@@ -2437,7 +2514,7 @@ class TokaMaker_equilibrium():
         if cocos not in [2, 7]:
             raise Exception('Unsupported COCOS version. Only supported versions are 2 or 7.')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_eqdsk(self._tMaker_equil_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,cocos,error_string)
+        tokamaker_save_eqdsk(self._equil_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,cocos,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -2454,7 +2531,7 @@ class TokaMaker_equilibrium():
         '''
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_ifile(self._tMaker_equil_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,error_string)
+        tokamaker_save_ifile(self._equil_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -2465,6 +2542,6 @@ class TokaMaker_equilibrium():
         '''
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_mug(self._tMaker_equil_ptr,cfilename,error_string)
+        tokamaker_save_mug(self._equil_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)

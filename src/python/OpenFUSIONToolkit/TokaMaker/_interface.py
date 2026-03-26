@@ -121,7 +121,7 @@ tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
 tokamaker_get_jtor = ctypes_subroutine(oftpy_lib.tokamaker_get_jtor,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
-# tokamaker_area_int(tMaker_equil_ptr,vec_vals,reg_ind,result,error_str)
+# tokamaker_area_int(tMaker_ptr,vec_vals,reg_ind,result,error_str)
 tokamaker_area_int = ctypes_subroutine(oftpy_lib.tokamaker_area_int,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_int, c_double_ptr, c_char_p])
 

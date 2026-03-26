@@ -784,8 +784,8 @@ END SUBROUTINE tokamaker_get_jtor
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_area_int(tMaker_equil_ptr,vec_vals,reg_ind,result,error_str) BIND(C,NAME="tokamaker_area_int")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_area_int(tMaker_ptr,vec_vals,reg_ind,result,error_str) BIND(C,NAME="tokamaker_area_int")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: vec_vals !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: reg_ind !< Needs docs
 REAL(c_double), INTENT(out) :: result !< Needs docs
@@ -795,17 +795,17 @@ real(8) :: goptmp(3,3),v,pt(3),valtmp(1)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 CLASS(oft_vector), POINTER :: u
 TYPE(oft_lag_brinterp) :: field
-TYPE(gs_equil), POINTER :: tMaker_equil_obj
-IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 NULLIFY(field%u)
-CALL tMaker_equil_obj%psi%new(field%u)
-CALL c_f_pointer(vec_vals, vals_tmp, [tMaker_equil_obj%psi%n])
+CALL tMaker_obj%device%fe_rep%vec_create(field%u)
+CALL c_f_pointer(vec_vals, vals_tmp, [field%u%n])
 CALL field%u%restore_local(vals_tmp)
-CALL field%setup(tMaker_equil_obj%device%fe_rep)
+CALL field%setup(tMaker_obj%device%fe_rep)
 IF(reg_ind>0)THEN
-  result = bscal_surf_int(tMaker_equil_obj%device%mesh,field,tMaker_equil_obj%device%fe_rep%quad%order,reg_ind)
+  result = bscal_surf_int(tMaker_obj%device%mesh,field,tMaker_obj%device%fe_rep%quad%order,reg_ind)
 ELSE
-  result = bscal_surf_int(tMaker_equil_obj%device%mesh,field,tMaker_equil_obj%device%fe_rep%quad%order)
+  result = bscal_surf_int(tMaker_obj%device%mesh,field,tMaker_obj%device%fe_rep%quad%order)
 END IF
 CALL field%u%delete
 DEALLOCATE(field%u)
