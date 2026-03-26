@@ -147,7 +147,10 @@ end type oft_gs_zerob
 !> Specify anisotpric pressure scaling from a flux function
 !------------------------------------------------------------------------------
 type, abstract, extends(bfem_interp) :: gs_ani_press
+  TYPE(gs_equil), POINTER :: gs => NULL() !< Equilibrium object
 contains
+  !> Copy object
+  PROCEDURE(ani_press_copy), DEFERRED :: copy
   !> Needs docs
   procedure(ani_press_update), deferred :: update
 end type gs_ani_press
@@ -388,7 +391,7 @@ abstract interface
   !> Needs Docs
   !------------------------------------------------------------------------------
   subroutine flux_func_copy(self,new)
-    import flux_func, r8
+    import flux_func
     class(flux_func), intent(inout) :: self
     class(flux_func), pointer, intent(inout) :: new
   end subroutine flux_func_copy
@@ -426,6 +429,15 @@ abstract interface
     class(flux_func), intent(inout) :: self
     real(r8), intent(out) :: c(:)
   end subroutine flux_cofs_get
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine ani_press_copy(self,new,new_gs)
+    import gs_ani_press, gs_equil
+    class(gs_ani_press), intent(inout) :: self
+    class(gs_ani_press), pointer, intent(inout) :: new
+    class(gs_equil), target, intent(inout) :: new_gs
+  end subroutine ani_press_copy
   !------------------------------------------------------------------------------
   !> Needs Docs
   !------------------------------------------------------------------------------
@@ -1374,10 +1386,6 @@ IF(ASSOCIATED(source%chi))THEN
 END IF
 CALL source%I%copy(self%I)
 CALL source%P%copy(self%P)
-IF(ASSOCIATED(source%P_ani))THEN
-  ALLOCATE(self%P_ani, MOLD=source%P_ani)
-  ! TODO: Need to copy values and perform setup
-END IF
 IF(ASSOCIATED(source%I_NI))CALL source%I_NI%copy(self%I_NI)
 IF(ASSOCIATED(source%eta))CALL source%eta%copy(self%eta)
 self%diverted=source%diverted
@@ -1404,6 +1412,8 @@ self%lim_point=source%lim_point
 self%x_points=source%x_points
 self%x_vecs=source%x_vecs
 self%vcontrol_val=source%vcontrol_val
+!---Things that need equilibrium fully setup to copy
+IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
 end subroutine copy_eq
 !------------------------------------------------------------------------------
 !> Initialize \f$ \psi \f$

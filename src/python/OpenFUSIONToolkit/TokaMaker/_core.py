@@ -316,6 +316,10 @@ class TokaMaker():
         self.Lcoils = numpy.ctypeslib.as_array(Lmat_loc,shape=(self.ncoils,self.ncoils))
         # Create equilibirum object
         self._tMaker_equil = TokaMaker_equilibrium(self)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_equil_set(self._tMaker_ptr,self._tMaker_equil.c_ptr,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
         # Get limiter contour
         npts = c_int()
         r_loc = c_double_ptr()
@@ -585,16 +589,9 @@ class TokaMaker():
         @param eta_file File containing $\eta$ definition
         @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
         '''
-        if foffset is not None:
-            self._F0 = foffset
-        f_file_c = self._oft_env.path2c(f_file)
-        p_file_c = self._oft_env.path2c(p_file)
-        eta_file_c = self._oft_env.path2c(eta_file)
-        f_NI_file_c = self._oft_env.path2c(f_NI_file)
-        error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_load_profiles(self._tMaker_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.load_profiles(f_file,foffset,p_file,eta_file,f_NI_file)
 
     def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
@@ -605,29 +602,9 @@ class TokaMaker():
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
         '''
-        delete_files = []
-        ffp_file = 'none'
-        if ffp_prof is not None:
-            ffp_file = self._oft_env.unique_tmpfile('tokamaker_f.prof')
-            create_prof_file(self, ffp_file, ffp_prof, "F*F'")
-            delete_files.append(ffp_file)
-        pp_file = 'none'
-        if pp_prof is not None:
-            pp_file = self._oft_env.unique_tmpfile('tokamaker_p.prof')
-            create_prof_file(self, pp_file, pp_prof, "P'")
-            delete_files.append(pp_file)
-        ffp_NI_file = 'none'
-        if ffp_NI_prof is not None:
-            ffp_NI_file = self._oft_env.unique_tmpfile('tokamaker_ffp_NI.prof')
-            create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
-            delete_files.append(ffp_NI_file)
-        self.load_profiles(f_file=ffp_file,foffset=foffset,p_file=pp_file,f_NI_file=ffp_NI_file)
-        if not keep_files:
-            for file in delete_files:
-                try:
-                    os.remove(file)
-                except:
-                    print('Warning: unable to delete temporary file "{0}"'.format(file))
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
@@ -637,11 +614,9 @@ class TokaMaker():
 
         @param eta_prof Values defining $\eta$ [:,2]
         '''
-        eta_file = 'none'
-        if eta_prof is not None:
-            eta_file = 'tokamaker_eta.prof'
-            create_prof_file(self, eta_file, eta_prof, "eta")
-        self.load_profiles(eta_file=eta_file)
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_resistivity(eta_prof)
 
     def solve(self, vacuum=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.
@@ -653,9 +628,7 @@ class TokaMaker():
         tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
-        equil_out = self._tMaker_equil
-        self._tMaker_equil = TokaMaker_equilibrium(source_eq=equil_out)
-        return equil_out
+        return self.copy_eq()
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
@@ -683,11 +656,8 @@ class TokaMaker():
         tokamaker_vac_solve(self._tMaker_ptr,psi,rhs_ptr,error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
-        equil_save = self._tMaker_equil
-        equil_out = TokaMaker_equilibrium(source_eq=equil_save,skip_targets=True,skip_constraints=True)
-        self._tMaker_equil = equil_out
-        self.set_psi(psi)
-        self._tMaker_equil = equil_save
+        equil_out = self.copy_eq(skip_targets=True,skip_constraints=True)
+        equil_out.set_psi(psi)
         return equil_out
 
     def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
@@ -948,7 +918,7 @@ class TokaMaker():
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.get_jtor_plasma()
+        return self._tMaker_equil.calc_jtor_plasma()
 
     def copy_eq(self,skip_targets=False,skip_constraints=False):
         '''! Create a copy of the current equilibrium object
@@ -977,13 +947,9 @@ class TokaMaker():
         @param psi Poloidal flux values (should not be normalized!)
         @param update_bounds Update plasma bounds by determining new limiting points
         '''
-        if psi.shape[0] != self.np:
-            raise IndexError('Incorrect shape of "psi", should be [np]')
-        psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
-        error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_psi(self._tMaker_ptr,psi,c_bool(update_bounds),error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_psi(psi,update_bounds)
     
     def set_psi_dt(self,psi0,dt):
         '''! Set reference poloidal flux and time step for eddy currents in .solve()
@@ -1733,7 +1699,7 @@ class TokaMaker_equilibrium():
                     'x': numpy.array([0.0,1.0]),
                     'y': numpy.array([1.0,0.0])
                 }
-                self._tMaker.set_profiles(ffp_prof=default_prof, pp_prof=default_prof)
+                self.set_profiles(ffp_prof=default_prof, pp_prof=default_prof)
     
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
@@ -1743,6 +1709,11 @@ class TokaMaker_equilibrium():
         tokamaker_equil_destroy(self._tMaker_equil_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        
+    @property
+    def c_ptr(self):
+        r'''C pointer to Fortran-side equilibrium object'''
+        return self._tMaker_equil_ptr
     
     ## @cond
     @property
@@ -1840,6 +1811,73 @@ class TokaMaker_equilibrium():
     def Saddle_constraints(self):
         r'''! Saddle constraint points'''
         return self._saddle_targets
+    
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
+        r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
+
+        @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
+        @param foffset Value of \f$F0=R0*B0\f$
+        @param p_file File containing \f$P'\f$ definition
+        @param eta_file File containing $\eta$ definition
+        @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
+        '''
+        if foffset is not None:
+            self._F0 = foffset
+        f_file_c = self._oft_env.path2c(f_file)
+        p_file_c = self._oft_env.path2c(p_file)
+        eta_file_c = self._oft_env.path2c(eta_file)
+        f_NI_file_c = self._oft_env.path2c(f_NI_file)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_load_profiles(self.c_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
+        r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
+
+        @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations in normalized Psi ['x']
+        @param foffset Value of \f$F0=R0*B0\f$
+        @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations in normalized Psi ['x']
+        @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
+        '''
+        delete_files = []
+        ffp_file = 'none'
+        if ffp_prof is not None:
+            ffp_file = self._oft_env.unique_tmpfile('tokamaker_f.prof')
+            create_prof_file(self, ffp_file, ffp_prof, "F*F'")
+            delete_files.append(ffp_file)
+        pp_file = 'none'
+        if pp_prof is not None:
+            pp_file = self._oft_env.unique_tmpfile('tokamaker_p.prof')
+            create_prof_file(self, pp_file, pp_prof, "P'")
+            delete_files.append(pp_file)
+        ffp_NI_file = 'none'
+        if ffp_NI_prof is not None:
+            ffp_NI_file = self._oft_env.unique_tmpfile('tokamaker_ffp_NI.prof')
+            create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
+            delete_files.append(ffp_NI_file)
+        self.load_profiles(f_file=ffp_file,foffset=foffset,p_file=pp_file,f_NI_file=ffp_NI_file)
+        if not keep_files:
+            for file in delete_files:
+                try:
+                    os.remove(file)
+                except:
+                    print('Warning: unable to delete temporary file "{0}"'.format(file))
+    
+    def set_resistivity(self, eta_prof=None):
+        r'''! Set flux function profile $\eta$ using a piecewise linear definition
+
+        Arrays should have the form array[i,:] = (\f$\hat{\psi}_i\f$, \f$f(\hat{\psi}_i)\f$) and span
+        \f$\hat{\psi}_i = [0,1]\f$.
+
+        @param eta_prof Values defining $\eta$ [:,2]
+        '''
+        eta_file = 'none'
+        if eta_prof is not None:
+            eta_file = 'tokamaker_eta.prof'
+            create_prof_file(self, eta_file, eta_prof, "eta")
+        self.load_profiles(eta_file=eta_file)
 
     def abspsi_to_normalized(self,psi_in):
         r'''! Convert unnormalized \f$ \psi \f$ values to normalized \f$ \hat{\psi} \f$ values
@@ -1881,6 +1919,20 @@ class TokaMaker_equilibrium():
             if self.psi_convention == 0:
                 psi = 1.0 - psi
         return psi
+    
+    def set_psi(self,psi,update_bounds=False):
+        '''! Set poloidal flux values on node points
+
+        @param psi Poloidal flux values (should not be normalized!)
+        @param update_bounds Update plasma bounds by determining new limiting points
+        '''
+        if psi.shape[0] != self._tMaker.np:
+            raise IndexError('Incorrect shape of "psi", should be [np]')
+        psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_psi(self.c_ptr,psi,c_bool(update_bounds),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
     
     def get_coil_currents(self):
         '''! Get currents in each coil [A] and coil region [A-turns]
@@ -2253,7 +2305,7 @@ class TokaMaker_equilibrium():
  
         @result \f$ J_{\phi} \f$ by evalutating RHS source terms
         '''
-        curr = numpy.zeros((self.np,), dtype=numpy.float64)
+        curr = numpy.zeros((self._tMaker.np,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_jtor(self._tMaker_equil_ptr,curr,error_string)
         if error_string.value != b'':

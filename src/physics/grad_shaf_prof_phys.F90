@@ -89,9 +89,10 @@ type, extends(gs_ani_press) :: dipole_ani_press
   REAL(r8) :: a_exp = 0.d0 !< Anisotropy exponent for mirror pressure profiles
   TYPE(oft_lag_brinterp), POINTER :: psi_eval => NULL() !< Needs docs
   TYPE(oft_lag_bginterp), POINTER :: psi_geval => NULL() !< Needs docs
-  TYPE(gs_equil), POINTER :: gs => NULL()
   CLASS(flux_func), POINTER :: B0_prof => NULL() !< Dipole minimum B profile
 contains
+  !> Needs docs
+  procedure :: copy => dipole_ani_copy
   !> Needs docs
   procedure :: setup => dipole_ani_setup
   !> Needs docs
@@ -121,9 +122,10 @@ type, extends(gs_ani_press) :: mirror_ani_slosh
   REAL(r8) :: zthroat = 0.d0 !< Mirror peak field location
   TYPE(oft_lag_brinterp), POINTER :: psi_eval => NULL() !< Needs docs
   TYPE(oft_lag_bginterp), POINTER :: psi_geval => NULL() !< Needs docs
-  TYPE(gs_equil), POINTER :: gs => NULL()
   CLASS(flux_func), POINTER :: B0_prof => NULL() !< Mirror minimum B profile
 contains
+  !> Needs docs
+  procedure :: copy => mirror_slosh_copy
   !> Needs docs
   procedure :: setup => mirror_slosh_setup
   !> Needs docs
@@ -528,7 +530,7 @@ SELECT TYPE(new)
   TYPE IS(dipole_b0_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
-    new%psi_pad = self%psi_pad
+    new%psi_pad=self%psi_pad
 END SELECT
 end subroutine dipole_b0_copy
 !------------------------------------------------------------------------------
@@ -662,6 +664,25 @@ val(2)=pt(1)*SQRT((self%rho**2+val(1)**2)/SUM(grad**2))
 self%minB=min(self%minB,SQRT((grad(1)/pt(1))**2+(grad(2)/pt(1))**2))
 deallocate(j)
 end subroutine minbinv_apply
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_ani_copy(self,new,new_gs)
+class(dipole_ani_press), intent(inout) :: self
+class(gs_ani_press), pointer, intent(inout) :: new
+class(gs_equil), target, intent(inout) :: new_gs
+ALLOCATE(new, MOLD=self)
+SELECT TYPE(new)
+  CLASS IS(dipole_ani_press)
+    new%a_exp = self%a_exp
+    IF(ASSOCIATED(self%psi_eval))THEN
+      CALL new%setup(new_gs)
+      CALL new%update(new_gs)
+    END IF
+  CLASS DEFAULT
+    CALL oft_abort('Allocation produced wrong type','dipole_ani_copy',__FILE__)
+END SELECT
+end subroutine dipole_ani_copy
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -821,6 +842,25 @@ IF(oft_debug_print(2))CALL oft_decrease_indent
 CALL psi_int%delete()
 CALL psi_gint%delete()
 end subroutine mirror_b0_update
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_slosh_copy(self,new,new_gs)
+class(mirror_ani_slosh), intent(inout) :: self
+class(gs_ani_press), pointer, intent(inout) :: new
+class(gs_equil), target, intent(inout) :: new_gs
+ALLOCATE(new, MOLD=self)
+SELECT TYPE(new)
+  CLASS IS(mirror_ani_slosh)
+    new%n_exp = self%n_exp
+    new%bturn = self%bturn
+    new%zthroat = self%zthroat
+    IF(ASSOCIATED(self%psi_eval))THEN
+      CALL new%setup(new_gs)
+      CALL new%update(new_gs)
+    END IF
+END SELECT
+end subroutine mirror_slosh_copy
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

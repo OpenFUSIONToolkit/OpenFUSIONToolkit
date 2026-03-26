@@ -134,9 +134,21 @@ ELSE
   END IF
   CALL new_equil%copy(old_equil)
 END IF
-tMaker_obj%gs_equil=>new_equil
 new_equil_ptr=C_LOC(new_equil)
 END SUBROUTINE tokamaker_equil_copy
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_equil_set(tMaker_ptr,new_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_set")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: new_equil_ptr !< Pointer to old equilibrium object
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+TYPE(gs_equil), POINTER :: new_equil
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_equil_ccast(new_equil_ptr,new_equil,error_str))RETURN
+tMaker_obj%gs_equil=>new_equil
+END SUBROUTINE tokamaker_equil_set
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
@@ -373,8 +385,8 @@ END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_load_profiles(tMaker_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str) BIND(C,NAME="tokamaker_load_profiles")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_load_profiles(tMaker_equil_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str) BIND(C,NAME="tokamaker_load_profiles")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 CHARACTER(KIND=c_char), INTENT(in) :: f_file(OFT_PATH_SLEN) !< F*F' prof.in file
 CHARACTER(KIND=c_char), INTENT(in) :: p_file(OFT_PATH_SLEN) !< P' prof.in file
 REAL(c_double), VALUE, INTENT(in) :: f_offset !< Vacuum F_0 value (must be > -1E98 to update)
@@ -383,24 +395,24 @@ CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive 
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 CLASS(flux_func), POINTER :: prof_tmp
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(f_file,tmp_str)
 IF(TRIM(tmp_str)/='none')THEN
   CALL gs_profile_load(tmp_str,prof_tmp)
-  IF(ASSOCIATED(tMaker_obj%gs_equil%I))THEN
-    prof_tmp%f_offset=tMaker_obj%gs_equil%I%f_offset ! Persist F0 with profile changes
-    CALL prof_tmp%update(tMaker_obj%gs_equil)        ! Initialize new profile with current EQ
+  IF(ASSOCIATED(tMaker_equil_obj%I))THEN
+    prof_tmp%f_offset=tMaker_equil_obj%I%f_offset ! Persist F0 with profile changes
+    CALL prof_tmp%update(tMaker_equil_obj)        ! Initialize new profile with current EQ
   END IF
-  tMaker_obj%gs_equil%I=>prof_tmp
+  tMaker_equil_obj%I=>prof_tmp
 END IF
-IF(f_offset>-1.d98)tMaker_obj%gs_equil%I%f_offset=f_offset
+IF(f_offset>-1.d98)tMaker_equil_obj%I%f_offset=f_offset
 CALL copy_string_rev(p_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs_equil%P)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%P)
 CALL copy_string_rev(eta_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs_equil%eta)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%eta)
 CALL copy_string_rev(f_NI_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs_equil%I_NI)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%I_NI)
 END SUBROUTINE tokamaker_load_profiles
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -1189,17 +1201,17 @@ END SUBROUTINE tokamaker_apply_field_eval
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi(tMaker_ptr,psi_vals,update_bounds,error_str) BIND(C,NAME="tokamaker_set_psi")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_set_psi(tMaker_equil_ptr,psi_vals,update_bounds,error_str) BIND(C,NAME="tokamaker_set_psi")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: update_bounds !< Update bounds by determining new limiting points
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs_equil%psi%n])
-CALL tMaker_obj%gs_equil%psi%restore_local(vals_tmp)
-IF(update_bounds)CALL gs_update_bounds(tMaker_obj%gs_equil)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_equil_obj%psi%n])
+CALL tMaker_equil_obj%psi%restore_local(vals_tmp)
+IF(update_bounds)CALL gs_update_bounds(tMaker_equil_obj)
 END SUBROUTINE tokamaker_set_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
